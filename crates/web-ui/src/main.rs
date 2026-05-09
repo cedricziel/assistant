@@ -9,6 +9,7 @@ pub mod install;
 mod oauth;
 mod openapi;
 pub(crate) mod push;
+pub mod sw_version;
 
 use std::collections::HashMap;
 use std::ffi::OsString;

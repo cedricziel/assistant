@@ -110,7 +110,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         return AppRoutes.loading;
       }
 
-      final hasContext = activeContextAsync.value != null;
+      final activeContext = activeContextAsync.value;
+      final hasContext = activeContext != null;
+      // A context whose secure-storage entries failed to decrypt is
+      // treated as unauthenticated for routing purposes (but the metadata
+      // is NOT deleted — re-login refreshes credentials in place).
+      final hasUsableContext =
+          hasContext && !activeContext.credentialsCorrupted;
       final onContextSwitcher = matchedPath == AppRoutes.contexts;
       final onSetup = matchedPath == AppRoutes.setup;
       final onLogin = matchedPath == AppRoutes.login;
@@ -120,17 +126,25 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (onLoading) {
         final pending = pendingRedirect;
         pendingRedirect = null;
-        final fallback = hasContext ? AppRoutes.chat : AppRoutes.login;
-        return hasContext && pending != null ? pending : fallback;
+        final loginFallback = (hasContext && activeContext.credentialsCorrupted)
+            ? '${AppRoutes.login}?reason=session-ended'
+            : AppRoutes.login;
+        final fallback = hasUsableContext ? AppRoutes.chat : loginFallback;
+        return hasUsableContext && pending != null ? pending : fallback;
       }
 
-      // If no active context and not already on an auth screen, redirect.
-      if (!hasContext && !onLogin && !onContextSwitcher && !onSetup) {
+      // No usable context AND not already on an auth screen → /login.
+      // For corrupted contexts, append `?reason=session-ended` so the
+      // login screen can surface an explanatory banner.
+      if (!hasUsableContext && !onLogin && !onContextSwitcher && !onSetup) {
+        if (hasContext && activeContext.credentialsCorrupted) {
+          return '${AppRoutes.login}?reason=session-ended';
+        }
         return AppRoutes.login;
       }
 
       // Already authenticated — redirect away from login/setup screens.
-      if (hasContext && (onLogin || onSetup)) {
+      if (hasUsableContext && (onLogin || onSetup)) {
         return AppRoutes.chat;
       }
 

@@ -27,6 +27,7 @@ class AssistantContext {
     this.oauthCredentials,
     this.authMode = AuthMode.legacyToken,
     required this.createdAt,
+    this.credentialsCorrupted = false,
   });
 
   final String id;
@@ -49,6 +50,12 @@ class AssistantContext {
   final AuthMode authMode;
 
   final DateTime createdAt;
+
+  /// In-memory flag set by [ContextRepository.loadContexts] when secure-storage
+  /// reads for this context's credentials throw — typically because
+  /// `flutter_secure_storage`'s IndexedDB key has been wiped on web.
+  /// Never serialised; surface for the router redirect + login banner only.
+  final bool credentialsCorrupted;
 
   /// The bearer token to use for API requests — picks the right one based
   /// on [authMode].
@@ -94,6 +101,7 @@ class AssistantContext {
     bool clearOAuthCredentials = false,
     AuthMode? authMode,
     DateTime? createdAt,
+    bool? credentialsCorrupted,
   }) {
     return AssistantContext(
       id: id ?? this.id,
@@ -105,6 +113,7 @@ class AssistantContext {
           : (oauthCredentials ?? this.oauthCredentials),
       authMode: authMode ?? this.authMode,
       createdAt: createdAt ?? this.createdAt,
+      credentialsCorrupted: credentialsCorrupted ?? this.credentialsCorrupted,
     );
   }
 

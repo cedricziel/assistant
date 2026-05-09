@@ -139,3 +139,16 @@ final activeContextProvider =
 final hasActiveContextProvider = Provider<bool>((ref) {
   return ref.watch(activeContextProvider).value != null;
 });
+
+/// Synchronous convenience provider — `true` when an active context is set
+/// AND its credentials are intact (`!credentialsCorrupted`).
+///
+/// The router uses this for the redirect-to-login decision so that a context
+/// whose secure-storage entries failed to decrypt (common on web after the
+/// IndexedDB crypto key is wiped) is treated as unauthenticated. The context
+/// metadata is NOT cleared — re-login refreshes credentials in place via
+/// `upsertContextByUrl`.
+final hasUsableActiveContextProvider = Provider<bool>((ref) {
+  final ctx = ref.watch(activeContextProvider).value;
+  return ctx != null && !ctx.credentialsCorrupted;
+});

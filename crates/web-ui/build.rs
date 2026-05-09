@@ -164,14 +164,18 @@ fn dir_has_newer(dir: &Path, than: std::time::SystemTime) -> bool {
 /// Read the `version:` field from `pubspec.yaml` and substitute the
 /// `__APP_VERSION__` placeholder in the built `sw.js`.
 ///
-/// This causes the browser to detect a new service worker script on every
+/// Causes the browser to detect a new service worker script on every
 /// version bump rather than waiting for its 24-hour byte-diff check.
+///
+/// Idempotent: re-runs on an already-injected file are silent. The build
+/// FAILS if `sw.js` exists but contains neither the placeholder nor an
+/// existing version comment — that would mean someone removed the
+/// load-bearing marker and the SW would ship un-versioned.
 fn inject_sw_version(app_dir: &Path, web_out: &Path) {
     let pubspec = match std::fs::read_to_string(app_dir.join("pubspec.yaml")) {
         Ok(s) => s,
         Err(e) => {
-            println!("cargo:warning=Could not read pubspec.yaml for sw.js version injection: {e}");
-            return;
+            panic!("Could not read pubspec.yaml for sw.js version injection: {e}");
         }
     };
 
@@ -180,35 +184,37 @@ fn inject_sw_version(app_dir: &Path, web_out: &Path) {
         let line = line.trim();
         line.strip_prefix("version:").map(|v| {
             let v = v.trim();
-            // Drop the `+<build-number>` suffix if present.
             v.split('+').next().unwrap_or(v).trim().to_owned()
         })
     }) else {
-        println!(
-            "cargo:warning=Could not parse `version:` from pubspec.yaml — skipping sw.js version injection"
+        panic!(
+            "Could not parse `version:` from pubspec.yaml — sw.js version injection cannot proceed"
         );
-        return;
     };
 
     let sw_path = web_out.join("sw.js");
     let sw_src = match std::fs::read_to_string(&sw_path) {
         Ok(s) => s,
         Err(e) => {
-            println!("cargo:warning=Could not read built sw.js for version injection: {e}");
-            return;
+            panic!("Could not read built sw.js for version injection: {e}");
         }
     };
 
-    let injected = sw_src.replace("__APP_VERSION__", &version);
-    if injected == sw_src {
-        println!(
-            "cargo:warning=sw.js does not contain __APP_VERSION__ placeholder — version injection skipped"
-        );
-        return;
-    }
-    if let Err(e) = std::fs::write(&sw_path, injected) {
-        println!("cargo:warning=Could not write sw.js after version injection: {e}");
-    } else {
-        println!("cargo:warning=sw.js version injected: {version}");
+    match sw_version::inject_sw_version(&sw_src, &version) {
+        Ok(injected) if injected == sw_src => {
+            // Idempotent re-run; nothing to do.
+        }
+        Ok(injected) => {
+            if let Err(e) = std::fs::write(&sw_path, injected) {
+                panic!("Could not write sw.js after version injection: {e}");
+            }
+            println!("cargo:warning=sw.js version injected: {version}");
+        }
+        Err(e) => {
+            panic!("{e}");
+        }
     }
 }
+
+#[path = "src/sw_version.rs"]
+mod sw_version;
