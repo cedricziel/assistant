@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:dio/dio.dart';
 
+import 'auth_interceptor.dart';
 import 'models/server_capabilities.dart';
 import 'models/stream_event.dart';
 
@@ -30,7 +31,12 @@ class ApiAuthException implements Exception {
 
 /// Configured client bundle: generated API instances + SSE streaming helper.
 class ApiClient {
-  ApiClient({required String baseUrl, required String token}) : _token = token {
+  ApiClient({
+    required String baseUrl,
+    required String token,
+    RefreshTokensCallback? refreshTokens,
+    OnAuthExpiredCallback? onAuthExpired,
+  }) : _token = token {
     _dio = Dio(
       BaseOptions(
         baseUrl: baseUrl,
@@ -38,6 +44,15 @@ class ApiClient {
         receiveTimeout: const Duration(minutes: 10),
       ),
     );
+
+    if (refreshTokens != null && onAuthExpired != null) {
+      final interceptor = AuthRecoveryInterceptor(
+        dio: _dio,
+        refreshTokens: refreshTokens,
+        onAuthExpired: onAuthExpired,
+      );
+      _dio.interceptors.add(interceptor);
+    }
 
     _generatedApi = AssistantApi(dio: _dio, basePathOverride: baseUrl);
     _generatedApi.setBearerAuth('bearer_token', token);

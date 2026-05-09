@@ -66,7 +66,15 @@ final spaceSelectionProvider =
 class OrgsNotifier extends AsyncNotifier<List<OrgSummary>> {
   @override
   Future<List<OrgSummary>> build() async {
-    final api = ref.watch(apiClientProvider);
+    // Wait for the connection to settle before deciding "loading" vs "empty".
+    // While `serverProfileProvider` is in `AsyncLoading`, this await keeps the
+    // notifier in loading state too (so the UI shows a spinner, not the empty
+    // card). Only after the profile resolves do we either return [] (no
+    // active context) or hit the API.
+    final connection = await ref.watch(serverProfileProvider.future);
+    if (connection.profile == null) return [];
+
+    final api = ref.read(apiClientProvider);
     if (api == null) return [];
 
     final response = await api.orgs.listOrgs();
@@ -84,9 +92,14 @@ final orgsProvider = AsyncNotifierProvider<OrgsNotifier, List<OrgSummary>>(
 class SpacesNotifier extends AsyncNotifier<List<SpaceSummary>> {
   @override
   Future<List<SpaceSummary>> build() async {
-    final api = ref.watch(apiClientProvider);
+    // Same loading-vs-empty distinction as OrgsNotifier: stay in AsyncLoading
+    // while the connection is settling.
+    final connection = await ref.watch(serverProfileProvider.future);
     final selection = ref.watch(spaceSelectionProvider);
-    if (api == null || selection.orgId == null) return [];
+    if (connection.profile == null || selection.orgId == null) return [];
+
+    final api = ref.read(apiClientProvider);
+    if (api == null) return [];
 
     final response = await api.spaces.listSpaces(orgId: selection.orgId!);
     return response.data?.toList() ?? [];

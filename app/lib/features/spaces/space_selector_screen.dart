@@ -149,11 +149,16 @@ class _SpaceList extends ConsumerWidget {
           );
         }
 
-        // If only one space, auto-select and navigate.
-        if (spaces.length == 1) {
+        final selection = ref.watch(spaceSelectionProvider);
+
+        // First-time auto-select on a single-space org: pick it for the user
+        // and bounce to /chat. Only fires when nothing is selected yet —
+        // revisits with `spaceId` already set fall through to the list below
+        // so the user is never stuck on an indefinite spinner.
+        if (spaces.length == 1 && selection.spaceId == null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            final current = ref.read(spaceSelectionProvider);
-            if (current.spaceId == null) {
+            // Re-check inside the callback in case state changed in between.
+            if (ref.read(spaceSelectionProvider).spaceId == null) {
               ref
                   .read(spaceSelectionProvider.notifier)
                   .selectSpace(
@@ -170,7 +175,13 @@ class _SpaceList extends ConsumerWidget {
           children: [
             for (final space in spaces)
               Card(
+                color: space.id == selection.spaceId
+                    ? Theme.of(context).colorScheme.primaryContainer
+                    : null,
                 child: ListTile(
+                  leading: space.id == selection.spaceId
+                      ? const Icon(Icons.check)
+                      : null,
                   title: Text(space.name),
                   subtitle: Text(space.slug),
                   trailing: const Icon(Icons.chevron_right),
