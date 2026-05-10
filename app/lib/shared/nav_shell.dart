@@ -306,6 +306,20 @@ class _NavShellState extends ConsumerState<NavShell> {
                       context.go(_settingsDestination.path);
                     },
                   ),
+                  ListTile(
+                    key: const Key('material-more-logout'),
+                    leading: const Icon(Icons.logout),
+                    title: const Text('Log out'),
+                    onTap: () async {
+                      Navigator.of(sheetContext).pop();
+                      await performLogout(
+                        ProviderScope.containerOf(context, listen: false),
+                      );
+                      if (context.mounted) {
+                        context.go(AppRoutes.login);
+                      }
+                    },
+                  ),
                   const SizedBox(height: 8),
                 ],
               ),
@@ -363,6 +377,20 @@ class _NavShellState extends ConsumerState<NavShell> {
                 context.go(_settingsDestination.path);
               },
               child: Text(_settingsDestination.label),
+            ),
+            CupertinoActionSheetAction(
+              key: const Key('cupertino-more-logout'),
+              isDestructiveAction: true,
+              onPressed: () async {
+                Navigator.of(popupContext).pop();
+                await performLogout(
+                  ProviderScope.containerOf(context, listen: false),
+                );
+                if (context.mounted) {
+                  context.go(AppRoutes.login);
+                }
+              },
+              child: const Text('Log out'),
             ),
           ],
           cancelButton: CupertinoActionSheetAction(
@@ -488,6 +516,33 @@ class _NavShellState extends ConsumerState<NavShell> {
                         semanticLabel: collapsed
                             ? 'Expand sidebar'
                             : 'Collapse sidebar',
+                      ),
+                    ),
+                  ),
+                ),
+                // Logout button overlaid at bottom-leading corner of the
+                // Cupertino sidebar — mirrors the Material sidebar slot.
+                Positioned(
+                  left: 4,
+                  bottom: 4,
+                  child: SafeArea(
+                    child: CupertinoButton(
+                      key: const Key('cupertino-logout'),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      onPressed: () async {
+                        await performLogout(
+                          ProviderScope.containerOf(context, listen: false),
+                        );
+                        if (context.mounted) {
+                          context.go(AppRoutes.login);
+                        }
+                      },
+                      child: const Tooltip(
+                        message: 'Log out',
+                        child: Icon(
+                          CupertinoIcons.square_arrow_right,
+                          semanticLabel: 'Log out',
+                        ),
                       ),
                     ),
                   ),
