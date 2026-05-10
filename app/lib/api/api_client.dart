@@ -5,12 +5,16 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'auth_interceptor.dart';
+import 'event_source_stream.dart';
+import 'event_source_stream_stub.dart'
+    if (dart.library.js_interop) 'event_source_stream_web.dart'
+    as event_source;
 import 'models/server_capabilities.dart';
 import 'models/stream_event.dart';
 
@@ -269,7 +273,41 @@ class ApiClient {
   ///
   /// Yields [ConversationSnapshotEvent] first (full list), then
   /// [ConversationUpsertedEvent] and [ConversationDeletedEvent] deltas.
-  Stream<ConversationListEvent> streamConversations({String? agentId}) async* {
+  ///
+  /// On web, uses the browser's native `EventSource` API (because dio's
+  /// browser adapter buffers stream responses until the connection closes,
+  /// which never happens for SSE — see `web-sse-eventsource` change). On
+  /// native, uses the existing dio stream path.
+  Stream<ConversationListEvent> streamConversations({String? agentId}) {
+    if (kIsWeb) {
+      return _streamConversationsViaEventSource(agentId: agentId);
+    }
+    return _streamConversationsViaDio(agentId: agentId);
+  }
+
+  Stream<ConversationListEvent> _streamConversationsViaEventSource({
+    String? agentId,
+  }) {
+    final base = _dio.options.baseUrl;
+    final qp = <String, String>{
+      'access_token': _token,
+      // ignore: use_null_aware_elements — value is nullable, key is not.
+      if (agentId != null) 'agent_id': agentId,
+    };
+    final query = qp.entries
+        .map(
+          (e) =>
+              '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}',
+        )
+        .join('&');
+    final url = '$base/api/conversations/stream?$query';
+    final adapter = event_source.openEventSourceAdapter(url: url);
+    return openConversationListStream(adapter: adapter);
+  }
+
+  Stream<ConversationListEvent> _streamConversationsViaDio({
+    String? agentId,
+  }) async* {
     final queryParams = <String, dynamic>{};
     if (agentId != null) queryParams['agent_id'] = agentId;
 
