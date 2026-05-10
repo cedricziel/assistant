@@ -91,18 +91,30 @@ impl FromRequestParts<AuthState> for AuthExtractor {
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 
+        // Fallback: extract `?access_token=<jwt>` from the URL query string.
+        // SSE endpoints consumed by the browser's `EventSource` API cannot send
+        // custom request headers, so we accept the JWT in the query string for
+        // those callers. The header path always takes precedence when both are
+        // present.
+        let query_token = parts.uri.query().and_then(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .find(|(k, _)| k == "access_token")
+                .map(|(_, v)| v.into_owned())
+        });
+
         let state = state.clone();
 
         async move {
-            let token = match &auth_header {
-                Some(h) if h.starts_with("Bearer ") => Some(&h[7..]),
+            let header_token = match &auth_header {
+                Some(h) if h.starts_with("Bearer ") => Some(h[7..].to_string()),
                 _ => None,
             };
 
-            let token = match token {
+            let token = match header_token.or(query_token) {
                 Some(t) => t,
                 None => return Err(AuthError::MissingCredentials),
             };
+            let token = token.as_str();
 
             // 1. Try JWT validation.
             if let Ok(ctx) = state.jwt_manager.validate_to_context(token) {
@@ -275,6 +287,64 @@ mod tests {
         AuthExtractor::from_request_parts(&mut parts, state)
             .await
             .map(|e| e.0)
+    }
+
+    async fn extract_from_query(state: &AuthState, uri: &str) -> Result<AuthContext, AuthError> {
+        let req = Request::builder().uri(uri).body(()).unwrap();
+        let (mut parts, _body) = req.into_parts();
+
+        AuthExtractor::from_request_parts(&mut parts, state)
+            .await
+            .map(|e| e.0)
+    }
+
+    #[tokio::test]
+    async fn extract_jwt_from_query_param() {
+        let (state, jwt_sign) = test_auth_state();
+        let ctx = make_member_context();
+        let token = jwt_sign.sign(&ctx, "acme", "Bob").unwrap();
+
+        let result = extract_from_query(
+            &state,
+            &format!("/api/conversations/stream?access_token={token}"),
+        )
+        .await;
+        assert!(result.is_ok(), "expected ok, got {result:?}");
+        let extracted = result.unwrap();
+        assert_eq!(extracted.user_id, UserId::from("bob"));
+        assert_eq!(extracted.org_id, OrgId::from("acme"));
+    }
+
+    #[tokio::test]
+    async fn invalid_jwt_in_query_param_rejected() {
+        let (state, _jwt_sign) = test_auth_state();
+        let result = extract_from_query(
+            &state,
+            "/api/conversations/stream?access_token=not-a-real-jwt",
+        )
+        .await;
+        assert!(matches!(result, Err(AuthError::InvalidCredentials(_))));
+    }
+
+    #[tokio::test]
+    async fn header_takes_precedence_over_query_param() {
+        let (state, jwt_sign) = test_auth_state();
+
+        // Bob signs a token; build a request that passes Bob's token in the
+        // header but a garbage token in the query param. The header path
+        // must win — successful auth as Bob.
+        let bob_ctx = make_member_context();
+        let bob_token = jwt_sign.sign(&bob_ctx, "acme", "Bob").unwrap();
+
+        let req = Request::builder()
+            .uri("/api/conversations/stream?access_token=garbage")
+            .header("authorization", format!("Bearer {bob_token}"))
+            .body(())
+            .unwrap();
+        let (mut parts, _body) = req.into_parts();
+        let result = AuthExtractor::from_request_parts(&mut parts, &state).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().0.user_id, UserId::from("bob"));
     }
 
     #[tokio::test]
