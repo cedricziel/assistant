@@ -72,6 +72,13 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1:8080")]
     listen: String,
 
+    /// Public URL the server is reachable at, used as the OAuth issuer and
+    /// in the A2A agent card. Behind a reverse proxy (e.g. Pangolin), set
+    /// this to the proxy's external URL so OAuth metadata advertises
+    /// reachable endpoints. Falls back to `http://{listen}` when unset.
+    #[arg(long, env = "ASSISTANT_PUBLIC_URL")]
+    public_url: Option<String>,
+
     /// Path to the SQLite database (defaults to ~/.assistant/assistant.db)
     #[arg(long)]
     db_path: Option<PathBuf>,
@@ -578,7 +585,13 @@ async fn run_with_args(args: Args) -> Result<()> {
     let agents_api_store = agent_store.clone();
 
     // -- A2A protocol state --
-    let base_url = format!("http://{}", args.listen);
+    //
+    // `base_url` is the public-facing origin used in OAuth metadata
+    // (`/.well-known/oauth-authorization-server`) and in the A2A agent
+    // card. When deployed behind a reverse proxy (Pangolin etc.), the
+    // bind address (`args.listen`) is not reachable from clients —
+    // `--public-url` / `ASSISTANT_PUBLIC_URL` overrides it.
+    let base_url = resolve_base_url(args.public_url.as_deref(), &args.listen);
 
     // Resolve the agent card from the store, falling back to a built-in default.
     let mut agent_card = match agent_store.get_default().await {
@@ -1122,3 +1135,65 @@ fn harden_agent_card(card: &mut assistant_a2a_json_schema::agent_card::AgentCard
 
     info!("Auto-hardened agent card with Bearer auth security scheme");
 }
+
+/// Resolve the public-facing base URL used in OAuth metadata + the A2A
+/// agent card. Returns `--public-url` (with trailing slash stripped) when
+/// set, else falls back to `http://{listen}`.
+///
+/// Behind a reverse proxy (Pangolin, Cloudflare, nginx), the bind address
+/// is not reachable from clients — operators MUST set `--public-url` /
+/// `ASSISTANT_PUBLIC_URL` so OAuth metadata advertises endpoints clients
+/// can actually reach.
+fn resolve_base_url(public_url: Option<&str>, listen: &str) -> String {
+    public_url
+        .map(|s| s.trim_end_matches('/').to_owned())
+        .unwrap_or_else(|| format!("http://{}", listen))
+}
+
+#[cfg(test)]
+mod base_url_tests {
+    use super::resolve_base_url;
+
+    #[test]
+    fn falls_back_to_listen_when_public_url_unset() {
+        assert_eq!(
+            resolve_base_url(None, "127.0.0.1:8080"),
+            "http://127.0.0.1:8080"
+        );
+        assert_eq!(
+            resolve_base_url(None, "0.0.0.0:8080"),
+            "http://0.0.0.0:8080"
+        );
+    }
+
+    #[test]
+    fn uses_public_url_when_set() {
+        assert_eq!(
+            resolve_base_url(Some("https://assistant.58lab.org"), "0.0.0.0:8080"),
+            "https://assistant.58lab.org"
+        );
+    }
+
+    #[test]
+    fn strips_trailing_slash_from_public_url() {
+        assert_eq!(
+            resolve_base_url(Some("https://example.com/"), "0.0.0.0:8080"),
+            "https://example.com"
+        );
+        // Multiple trailing slashes also stripped.
+        assert_eq!(
+            resolve_base_url(Some("https://example.com///"), "0.0.0.0:8080"),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn preserves_subpath_in_public_url() {
+        // Trailing slash on a path segment is stripped, but the path itself stays.
+        assert_eq!(
+            resolve_base_url(Some("https://example.com/api"), "0.0.0.0:8080"),
+            "https://example.com/api"
+        );
+    }
+}
+
