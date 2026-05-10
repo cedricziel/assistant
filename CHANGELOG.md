@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.151](https://github.com/cedricziel/assistant/compare/v0.1.150...v0.1.151) (2026-05-10)
+
+
+### Bug Fixes
+
+* **app:** login form Tab traversal + password manager autofill ([#695](https://github.com/cedricziel/assistant/issues/695)) ([589aa99](https://github.com/cedricziel/assistant/commit/589aa99661fc455984b4292a0d1209b439563a10))
+* **packaging:** detect legacy units via wants/ symlinks during migration ([#700](https://github.com/cedricziel/assistant/issues/700)) ([719f29f](https://github.com/cedricziel/assistant/commit/719f29f077479fb4393b4f99cbf45d9de7878963))
+
 ## [0.1.150](https://github.com/cedricziel/assistant/compare/v0.1.149...v0.1.150) (2026-05-10)
 
 
