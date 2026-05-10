@@ -29,11 +29,24 @@ class SpaceSelectorScreen extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  selection.orgId == null
-                      ? 'Select organization'
-                      : 'Select space',
-                  style: Theme.of(context).textTheme.headlineMedium,
+                // Heading row + close affordance.
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        selection.orgId == null
+                            ? 'Select organization'
+                            : 'Select space',
+                        style: Theme.of(context).textTheme.headlineMedium,
+                      ),
+                    ),
+                    IconButton(
+                      key: const Key('space-selector-close'),
+                      tooltip: 'Close',
+                      icon: const Icon(Icons.close),
+                      onPressed: () => GoRouter.of(context).go(AppRoutes.chat),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -49,16 +62,29 @@ class SpaceSelectorScreen extends ConsumerWidget {
 
                 // Step 2: Space selection.
                 if (selection.orgId != null) ...[
-                  // Back button to change org.
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () {
-                        ref.read(spaceSelectionProvider.notifier).clear();
-                      },
-                      icon: const Icon(Icons.arrow_back, size: 18),
-                      label: const Text('Change organization'),
-                    ),
+                  // "Change organization" — only useful when there's more than
+                  // one org. Hidden in single-org deploys (the trigger of the
+                  // pre-fix dead-end loop).
+                  Consumer(
+                    builder: (ctx, ref2, _) {
+                      final orgsAsync = ref2.watch(orgsProvider);
+                      final hasMultipleOrgs =
+                          orgsAsync.value != null &&
+                          orgsAsync.value!.length > 1;
+                      if (!hasMultipleOrgs) {
+                        return const SizedBox.shrink();
+                      }
+                      return Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () {
+                            ref2.read(spaceSelectionProvider.notifier).clear();
+                          },
+                          icon: const Icon(Icons.arrow_back, size: 18),
+                          label: const Text('Change organization'),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 16),
                   _SpaceList(),
