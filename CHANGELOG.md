@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.148](https://github.com/cedricziel/assistant/compare/v0.1.147...v0.1.148) (2026-05-10)
+
+
+### Features
+
+* **app:** expose logout on native (rename performWebLogout → performLogout) ([#689](https://github.com/cedricziel/assistant/issues/689)) ([e1456d9](https://github.com/cedricziel/assistant/commit/e1456d930eb29d50094849aafa115758361aec23))
+* **app:** use EventSource for SSE on web (conversation list) ([#692](https://github.com/cedricziel/assistant/issues/692)) ([3d74042](https://github.com/cedricziel/assistant/commit/3d740420e928bfc68ba307788c7ddbc1387551c6))
+
+
+### Bug Fixes
+
+* **app:** close affordance + hide change-org for single-org users ([#690](https://github.com/cedricziel/assistant/issues/690)) ([ed35cae](https://github.com/cedricziel/assistant/commit/ed35cae430b29ff67d47e4bf7baf6ac57431438d))
+
 ## [0.1.147](https://github.com/cedricziel/assistant/compare/v0.1.146...v0.1.147) (2026-05-09)
 
 
