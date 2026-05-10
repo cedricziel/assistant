@@ -34,7 +34,7 @@ Future<ContextRepository> _makeRepo() async {
 
 void main() {
   test(
-    'performWebLogout clears space selection AND deactivates context',
+    'performLogout clears space selection AND deactivates context',
     () async {
       final repo = await _makeRepo();
       await repo.setActiveContextId('ctx-1');
@@ -53,7 +53,7 @@ void main() {
       expect(container.read(spaceSelectionProvider).spaceId, 'sp-1');
       expect(repo.getActiveContextId(), 'ctx-1');
 
-      await performWebLogout(container);
+      await performLogout(container);
 
       expect(container.read(spaceSelectionProvider).orgId, isNull);
       expect(container.read(spaceSelectionProvider).spaceId, isNull);
@@ -61,7 +61,7 @@ void main() {
     },
   );
 
-  test('performWebLogout is idempotent on already-empty state', () async {
+  test('performLogout is idempotent on already-empty state', () async {
     final repo = await _makeRepo();
 
     final container = ProviderContainer(
@@ -69,8 +69,8 @@ void main() {
     );
     addTearDown(container.dispose);
 
-    await performWebLogout(container);
-    await performWebLogout(container);
+    await performLogout(container);
+    await performLogout(container);
 
     expect(container.read(spaceSelectionProvider).orgId, isNull);
     expect(repo.getActiveContextId(), isNull);
