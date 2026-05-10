@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.149](https://github.com/cedricziel/assistant/compare/v0.1.148...v0.1.149) (2026-05-10)
+
+
+### Bug Fixes
+
+* **app:** logout button missing on macOS / iOS Cupertino paths ([#693](https://github.com/cedricziel/assistant/issues/693)) ([d2681db](https://github.com/cedricziel/assistant/commit/d2681db3171a07f64b3b49c3af6ea8a8fcae8fba))
+
 ## [0.1.148](https://github.com/cedricziel/assistant/compare/v0.1.147...v0.1.148) (2026-05-10)
 
 
