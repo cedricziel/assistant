@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.150](https://github.com/cedricziel/assistant/compare/v0.1.149...v0.1.150) (2026-05-10)
+
+
+### Features
+
+* **packaging:** single orchestrator unit + ASSISTANT_INTERFACES env ([#697](https://github.com/cedricziel/assistant/issues/697)) ([164896c](https://github.com/cedricziel/assistant/commit/164896c0782749fe8a09b1347ac5df296d2db908))
+* **web-ui:** --public-url for OAuth issuer + agent card ([#696](https://github.com/cedricziel/assistant/issues/696)) ([626ea24](https://github.com/cedricziel/assistant/commit/626ea24b1d6cfc4c46f864941c62ce48259898af))
+
 ## [0.1.149](https://github.com/cedricziel/assistant/compare/v0.1.148...v0.1.149) (2026-05-10)
 
 

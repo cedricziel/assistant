@@ -1,6 +1,6 @@
 [package]
 name = "assistant-backup"
-version = "0.1.149"
+version = "0.1.150"
 edition.workspace = true
 license.workspace = true
 description = "Backup and restore for the assistant installation"
