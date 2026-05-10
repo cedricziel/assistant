@@ -649,17 +649,16 @@ class _NavShellState extends ConsumerState<NavShell> {
                           collapsed: collapsed,
                           onTap: () => context.go(_contextsDestination.path),
                         ),
-                      if (kIsWeb)
-                        _LogoutButton(
-                          onLogout: () async {
-                            await performWebLogout(
-                              ProviderScope.containerOf(context, listen: false),
-                            );
-                            if (context.mounted) {
-                              context.go(AppRoutes.login);
-                            }
-                          },
-                        ),
+                      _LogoutButton(
+                        onLogout: () async {
+                          await performLogout(
+                            ProviderScope.containerOf(context, listen: false),
+                          );
+                          if (context.mounted) {
+                            context.go(AppRoutes.login);
+                          }
+                        },
+                      ),
                       _MaterialSidebarItem(
                         icon: _settingsDestination.icon,
                         selectedIcon: _settingsDestination.selectedIcon,

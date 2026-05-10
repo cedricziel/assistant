@@ -299,13 +299,12 @@ void main() {
       );
     });
 
-    // 5.4 — non-web: contexts button present, logout button absent.
+    // 5.8 — every platform: Contexts AND Logout button visible.
     //
     // kIsWeb is a compile-time constant; in tests it is always false (non-web).
-    // The web path (5.3 — logout present, contexts absent) requires a web
-    // build and is verified by manual testing or a dedicated web integration
-    // test run.
-    testWidgets('5.8 non-web desktop shows Contexts and no Logout button', (
+    // Pre-#688 the logout button was gated `if (kIsWeb)` and therefore absent
+    // on native — that gate is now gone. Both Contexts and Logout coexist.
+    testWidgets('5.8 desktop shows both Contexts and Logout button', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(1024, 768);
@@ -319,14 +318,14 @@ void main() {
       expect(
         find.text('Contexts'),
         findsOneWidget,
-        reason: 'Non-web: Contexts switcher should be present',
+        reason: 'Contexts switcher should be present',
       );
 
-      // Logout button must NOT appear on non-web.
+      // Logout button must now appear on every platform.
       expect(
         find.byTooltip('Log out'),
-        findsNothing,
-        reason: 'Non-web: Logout button should be absent',
+        findsOneWidget,
+        reason: 'Logout button should be present on every platform',
       );
     });
   });
