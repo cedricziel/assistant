@@ -48,23 +48,19 @@ class OAuthLoginNotifier extends Notifier<OAuthLoginState> {
     required String email,
     required String password,
   }) async {
-    state = const OAuthLoginLoading(message: 'Checking server...');
+    state = const OAuthLoginLoading(message: 'Registering client...');
 
     try {
       final service = OAuthService(serverUrl: serverUrl);
 
-      // 1. Verify server supports OAuth2.
-      final hasOAuth = await service.supportsOAuth();
-      if (!hasOAuth) {
-        state = const OAuthLoginError(
-          'This server does not support OAuth2 authentication. '
-          'Use the legacy token login instead.',
-        );
-        return;
-      }
+      // We don't pre-check the well-known metadata endpoint: in deployments
+      // behind a reverse-proxy auth layer (e.g. Pangolin), unauthenticated
+      // GETs to `/.well-known/oauth-authorization-server` may be redirected
+      // to the proxy's login page, making the metadata probe a false-negative.
+      // Instead we attempt registration → if the server doesn't support
+      // OAuth2, registration fails with a server error and we surface that.
 
-      // 2. Register a dynamic client.
-      state = const OAuthLoginLoading(message: 'Registering client...');
+      // Register a dynamic client.
       final redirectUri = _redirectUri(serverUrl);
       final clientId = await service.registerClient(
         clientName: 'Assistant Flutter App',
