@@ -32,29 +32,25 @@ contents:
     dst: /etc/assistant/config.toml.example
     type: config|noreplace
 
-  # systemd user unit files — enable per-user with:
-  #   systemctl --user enable --now assistant-slack
-  #   systemctl --user enable --now assistant-mattermost
-  #   systemctl --user enable --now assistant-matrix
+  # systemd user unit files. Two long-lived processes per host:
+  #
+  #   1. assistant-orchestrator — single orchestrator (scheduler + bus +
+  #      interface adapters). Configure which adapters to load via
+  #      ~/.config/assistant/orchestrator.env (ASSISTANT_INTERFACES=slack,matrix).
+  #      The single-process design avoids the scheduler race that occurs when
+  #      multiple orchestrators each tick the same scheduled_tasks table.
+  #
+  #   2. assistant-web-ui — HTTP API server (no scheduler).
+  #
+  # Enable per-user with:
+  #   systemctl --user enable --now assistant-orchestrator
   #   systemctl --user enable --now assistant-web-ui
-  #   systemctl --user enable --now assistant-nextcloud
-  - src: packaging/systemd/user/assistant-slack.service
-    dst: /usr/lib/systemd/user/assistant-slack.service
-    file_info:
-      mode: 0644
-
-  - src: packaging/systemd/user/assistant-mattermost.service
-    dst: /usr/lib/systemd/user/assistant-mattermost.service
-    file_info:
-      mode: 0644
-
-  - src: packaging/systemd/user/assistant-matrix.service
-    dst: /usr/lib/systemd/user/assistant-matrix.service
-    file_info:
-      mode: 0644
-
-  - src: packaging/systemd/user/assistant-nextcloud.service
-    dst: /usr/lib/systemd/user/assistant-nextcloud.service
+  #
+  # Upgrades from package versions that shipped per-interface units
+  # (assistant-slack.service, assistant-matrix.service, …) are migrated
+  # automatically by packaging/scripts/postinstall.sh.
+  - src: packaging/systemd/user/assistant-orchestrator.service
+    dst: /usr/lib/systemd/user/assistant-orchestrator.service
     file_info:
       mode: 0644
 

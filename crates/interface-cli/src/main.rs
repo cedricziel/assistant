@@ -220,7 +220,9 @@ enum OrchestratorCommand {
     /// Start orchestrator runtime.
     Run {
         /// Optional comma-separated interface list (slack,mattermost,matrix,nextcloud,signal).
-        #[arg(long)]
+        /// Falls back to the `ASSISTANT_INTERFACES` env var when unset, so the
+        /// shipped systemd unit can configure interfaces via an env file.
+        #[arg(long, env = "ASSISTANT_INTERFACES")]
         interfaces: Option<String>,
         /// Run without interactive REPL.
         #[arg(long)]
