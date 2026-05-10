@@ -17,10 +17,30 @@ migrate_user_to_orchestrator() {
     user_id="$1"
     sysctl="systemctl --user -M ${user_id}@.host"
 
-    # Detect which legacy units were enabled.
+    # Resolve home early — also needed for the symlink-fallback detection below.
+    user_home=$(getent passwd "$user_id" | cut -d: -f6)
+
+    # Detect which legacy units were enabled. Two probes, in order:
+    #   1. `is-enabled` — works while the unit file is still present.
+    #   2. Symlink presence under ~/.config/systemd/user/default.target.wants/
+    #      — required when dpkg has already removed the legacy unit files
+    #      from /usr/lib/systemd/user/ before postinstall runs (the common
+    #      upgrade path). `is-enabled` then returns "not-found" instead of
+    #      "enabled", so we fall back to inspecting the wants/ directory
+    #      directly. The dangling symlinks are also cleaned up below.
     interfaces=""
+    wants_dir=""
+    if [ -n "$user_home" ]; then
+        wants_dir="${user_home}/.config/systemd/user/default.target.wants"
+    fi
     for iface in slack mattermost matrix nextcloud; do
+        enabled=0
         if $sysctl is-enabled "assistant-${iface}.service" 2>/dev/null | grep -q enabled; then
+            enabled=1
+        elif [ -n "$wants_dir" ] && [ -L "${wants_dir}/assistant-${iface}.service" ]; then
+            enabled=1
+        fi
+        if [ "$enabled" = "1" ]; then
             interfaces="${interfaces:+${interfaces},}${iface}"
         fi
     done
@@ -35,8 +55,7 @@ migrate_user_to_orchestrator() {
         return
     fi
 
-    # Resolve the user's home directory.
-    user_home=$(getent passwd "$user_id" | cut -d: -f6)
+    # Bail if we couldn't resolve the home directory (already attempted above).
     if [ -z "$user_home" ]; then
         return
     fi
@@ -58,9 +77,17 @@ INNER_EOF
     fi
 
     # Stop + disable the legacy units, then enable + start the new one.
+    # `disable` is a no-op once the unit file is gone, so also remove any
+    # dangling symlinks under default.target.wants/ that systemd would
+    # otherwise keep complaining about as "not-found".
     for iface in slack mattermost matrix nextcloud; do
-        $sysctl disable --now "assistant-${iface}.service" 2>/dev/null || true
+        $sysctl stop "assistant-${iface}.service" 2>/dev/null || true
+        $sysctl disable "assistant-${iface}.service" 2>/dev/null || true
+        if [ -n "$wants_dir" ] && [ -L "${wants_dir}/assistant-${iface}.service" ]; then
+            rm -f "${wants_dir}/assistant-${iface}.service"
+        fi
     done
+    $sysctl reset-failed 2>/dev/null || true
     $sysctl daemon-reload 2>/dev/null || true
     $sysctl enable --now assistant-orchestrator.service 2>/dev/null || true
 }
