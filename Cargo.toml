@@ -74,11 +74,11 @@ rustls = { version = "0.23", features = ["ring"] }
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = { version = "0.31", features = ["trace", "logs", "metrics"] }
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-json", "reqwest-client", "trace", "logs", "metrics"] }
-opentelemetry_sdk = { version = "0.31", default-features = false, features = ["trace", "logs", "metrics", "rt-tokio"] }
-opentelemetry-appender-tracing = "0.31"
-opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
+opentelemetry = { version = "0.32", features = ["trace", "logs", "metrics"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-json", "reqwest-client", "trace", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "logs", "metrics", "rt-tokio"] }
+opentelemetry-appender-tracing = "0.32"
+opentelemetry-semantic-conventions = { version = "0.32", features = ["semconv_experimental"] }
 # CLI / config
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
