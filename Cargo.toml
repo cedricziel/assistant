@@ -150,7 +150,7 @@ testcontainers-modules = { version = "0.15", features = ["nats"] }
 wiremock = "0.6"
 tempfile = "3"
 # Cross-platform process inspection (used by `assistant migrate finalize`).
-sysinfo = { version = "0.38", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # LRU cache (bounded conversation map in ChannelRunner)
 lru = "0.18"
 # WebSocket client (used by Slack, Mattermost, Matrix, Signal adapters)
