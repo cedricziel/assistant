@@ -17,7 +17,8 @@ use rmcp::model::Tool;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use assistant_core::{McpServerEntry, McpTransportConfig, McpTrustLevel, ToolHandler};
+use assistant_core::ToolHandler;
+use assistant_core::types::skills_mcp::{McpServerEntry, McpTransportConfig, McpTrustLevel};
 
 use crate::bridge::{self, McpToolHandler};
 use crate::client::McpClient;
