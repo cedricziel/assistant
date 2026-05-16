@@ -59,6 +59,8 @@ rustls = { workspace = true }
 sqlx = { workspace = true }
 # Process detection for `assistant migrate finalize`
 sysinfo = { workspace = true }
+# Unified diff rendering for `/review` skill refinement display.
+similar = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

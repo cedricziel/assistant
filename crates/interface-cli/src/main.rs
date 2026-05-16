@@ -4,6 +4,7 @@ mod cmd_doctor;
 mod cmd_login;
 mod cmd_migrate;
 mod credentials;
+mod skill_diff;
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write as IoWrite};
@@ -664,12 +665,30 @@ async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Result<
         return Ok(());
     }
 
+    let use_colour = std::io::IsTerminal::is_terminal(&std::io::stdout());
+
     println!("\nPending skill refinement proposals:\n");
     for r in &pending {
         println!(
-            "  id:     {}\n  skill:  {}\n  reason: {}\n",
+            "  id:     {}\n  skill:  {}\n  reason: {}",
             r.id, r.target_skill, r.rationale
         );
+
+        // Read current SKILL.md from disk so the reviewer can see exactly
+        // what the acceptance would change (#7).
+        let skill_def = registry.get(&r.target_skill).await;
+        let current_skill_md = match &skill_def {
+            Some(def) => std::fs::read_to_string(def.dir.join("SKILL.md")).unwrap_or_default(),
+            None => String::new(),
+        };
+
+        println!("  diff:");
+        let diff =
+            skill_diff::render_unified_diff(&current_skill_md, &r.proposed_skill_md, use_colour);
+        for line in diff.lines() {
+            println!("    {line}");
+        }
+        println!();
     }
 
     println!("Commands: accept <id>  |  reject <id> [note]  |  done");
