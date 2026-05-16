@@ -9,7 +9,9 @@ import 'dart:convert';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:fresh_dio/fresh_dio.dart';
 
+import '../features/auth/oauth_credentials.dart';
 import 'auth_interceptor.dart';
 import 'event_source_stream.dart';
 import 'event_source_stream_stub.dart'
@@ -38,12 +40,76 @@ class ApiAuthException implements Exception {
 
 /// Configured client bundle: generated API instances + SSE streaming helper.
 class ApiClient {
+  /// Legacy / static-bearer constructor.
+  ///
+  /// Used for API-key contexts (`ask_live_...`) and during password-mode
+  /// onboarding where the bearer never changes during the session.
   ApiClient({
     required String baseUrl,
     required String token,
     RefreshTokensCallback? refreshTokens,
     OnAuthExpiredCallback? onAuthExpired,
-  }) : _token = token {
+  }) : _staticToken = token,
+       _tokenStorage = null {
+    _setupDio(baseUrl: baseUrl);
+
+    if (refreshTokens != null && onAuthExpired != null) {
+      final interceptor = AuthRecoveryInterceptor(
+        dio: _dio,
+        refreshTokens: refreshTokens,
+        onAuthExpired: onAuthExpired,
+      );
+      _dio.interceptors.add(interceptor);
+    }
+
+    _generatedApi.setBearerAuth('bearer_token', token);
+  }
+
+  /// OAuth2 constructor: installs `fresh_dio` so the bearer is fetched from
+  /// [tokenStorage] on every request, refreshed proactively when expired, and
+  /// retried-once reactively on a 401. [onAuthExpired] fires when refresh
+  /// throws [RevokeTokenException] (or fresh_dio otherwise transitions to
+  /// `unauthenticated`), so the wiring layer can deactivate the context and
+  /// the router can redirect to `/login`.
+  ApiClient.oauth2({
+    required String baseUrl,
+    required TokenStorage<OAuthCredentials> tokenStorage,
+    required Future<OAuthCredentials> Function(
+      OAuthCredentials? token,
+      Dio client,
+    )
+    refreshToken,
+    required OnAuthExpiredCallback onAuthExpired,
+  }) : _staticToken = null,
+       _tokenStorage = tokenStorage {
+    _setupDio(baseUrl: baseUrl);
+
+    // fresh_dio uses a separate Dio for refresh + reactive-401 retry. Passing
+    // the main `_dio` would trip its no-self-recursion assertion. We give it a
+    // dedicated client with the same baseUrl + native adapter, but NO Fresh
+    // interceptor of its own.
+    _refreshDio = Dio(BaseOptions(baseUrl: baseUrl));
+    native_http_adapter.installNativeHttpAdapter(_refreshDio!);
+
+    final fresh = Fresh<OAuthCredentials>(
+      tokenStorage: tokenStorage,
+      httpClient: _refreshDio,
+      tokenHeader: (creds) => {'Authorization': 'Bearer ${creds.bearerToken}'},
+      shouldRefreshBeforeRequest: (_, creds) =>
+          creds != null && creds.isExpired(),
+      refreshToken: refreshToken,
+    );
+    _dio.interceptors.add(fresh);
+
+    _authStatusSub = fresh.authenticationStatus.listen((status) {
+      if (status == AuthenticationStatus.unauthenticated) {
+        onAuthExpired();
+      }
+    });
+  }
+
+  /// Shared Dio + generated-API setup used by both constructors.
+  void _setupDio({required String baseUrl}) {
     _dio = Dio(
       BaseOptions(
         baseUrl: baseUrl,
@@ -67,22 +133,50 @@ class ApiClient {
     // dart:io is available.
     native_http_adapter.installNativeHttpAdapter(_dio);
 
-    if (refreshTokens != null && onAuthExpired != null) {
-      final interceptor = AuthRecoveryInterceptor(
-        dio: _dio,
-        refreshTokens: refreshTokens,
-        onAuthExpired: onAuthExpired,
-      );
-      _dio.interceptors.add(interceptor);
-    }
-
     _generatedApi = AssistantApi(dio: _dio, basePathOverride: baseUrl);
-    _generatedApi.setBearerAuth('bearer_token', token);
   }
 
-  final String _token;
+  /// Static bearer for legacy/API-key contexts; `null` on the OAuth path.
+  final String? _staticToken;
+
+  /// Token storage for the OAuth path; `null` on the legacy path. Used by SSE
+  /// methods to read the current bearer (so they pick up refreshed tokens
+  /// without rebuilding the client).
+  final TokenStorage<OAuthCredentials>? _tokenStorage;
+
+  StreamSubscription<AuthenticationStatus>? _authStatusSub;
+
   late final Dio _dio;
   late final AssistantApi _generatedApi;
+
+  /// Secondary Dio used by fresh_dio for token refresh and reactive 401
+  /// retries. Kept separate from `_dio` to avoid fresh_dio's self-recursion
+  /// assertion (an interceptor must not be installed on its own httpClient).
+  Dio? _refreshDio;
+
+  @visibleForTesting
+  Dio get dioForTesting => _dio;
+
+  /// The Dio fresh_dio uses for refresh + retry. Tests inject the same
+  /// HttpClientAdapter on both so retries see the mocked responses.
+  @visibleForTesting
+  Dio? get refreshDioForTesting => _refreshDio;
+
+  /// Disposes the auth-status subscription. Call when the active context
+  /// changes; safe to call multiple times.
+  void close() {
+    _authStatusSub?.cancel();
+    _authStatusSub = null;
+  }
+
+  /// Returns the bearer the SSE methods should send. Reads from token storage
+  /// on the OAuth path so refreshes are picked up automatically; falls back to
+  /// the static bearer otherwise.
+  Future<String> _currentBearer() async {
+    if (_staticToken != null) return _staticToken;
+    final creds = await _tokenStorage?.read();
+    return creds?.bearerToken ?? '';
+  }
 
   ConversationsApi get conversations => _generatedApi.getConversationsApi();
   AttachmentsApi get attachments => _generatedApi.getAttachmentsApi();
@@ -119,6 +213,7 @@ class ApiClient {
     if (attachmentIds != null && attachmentIds.isNotEmpty) {
       body['attachment_ids'] = attachmentIds;
     }
+    final bearer = await _currentBearer();
     final Response<ResponseBody> response;
     try {
       response = await _dio.post<ResponseBody>(
@@ -129,7 +224,7 @@ class ApiClient {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'text/event-stream',
-            'Authorization': 'Bearer $_token',
+            'Authorization': 'Bearer $bearer',
           },
         ),
       );
@@ -158,6 +253,7 @@ class ApiClient {
     String runId, {
     int since = 0,
   }) async* {
+    final bearer = await _currentBearer();
     final Response<ResponseBody> response;
     try {
       response = await _dio.get<ResponseBody>(
@@ -167,7 +263,7 @@ class ApiClient {
           responseType: ResponseType.stream,
           headers: {
             'Accept': 'text/event-stream',
-            'Authorization': 'Bearer $_token',
+            'Authorization': 'Bearer $bearer',
           },
         ),
       );
@@ -220,6 +316,7 @@ class ApiClient {
       ),
     });
 
+    final bearer = await _currentBearer();
     final Response<ResponseBody> response;
     try {
       response = await _dio.post<ResponseBody>(
@@ -229,7 +326,7 @@ class ApiClient {
           responseType: ResponseType.stream,
           headers: {
             'Accept': 'text/event-stream',
-            'Authorization': 'Bearer $_token',
+            'Authorization': 'Bearer $bearer',
           },
         ),
       );
@@ -246,11 +343,12 @@ class ApiClient {
     String messageId,
   ) async {
     try {
+      final bearer = await _currentBearer();
       final response = await _dio.get<List<int>>(
         '/api/messages/$messageId/audio',
         options: Options(
           responseType: ResponseType.bytes,
-          headers: {'Authorization': 'Bearer $_token'},
+          headers: {'Authorization': 'Bearer $bearer'},
         ),
       );
       if (response.statusCode == 200 && response.data != null) {
@@ -268,11 +366,12 @@ class ApiClient {
     String audioId,
   ) async {
     try {
+      final bearer = await _currentBearer();
       final response = await _dio.get<List<int>>(
         '/api/audio/$audioId',
         options: Options(
           responseType: ResponseType.bytes,
-          headers: {'Authorization': 'Bearer $_token'},
+          headers: {'Authorization': 'Bearer $bearer'},
         ),
       );
       if (response.statusCode == 200 && response.data != null) {
@@ -305,10 +404,11 @@ class ApiClient {
 
   Stream<ConversationListEvent> _streamConversationsViaEventSource({
     String? agentId,
-  }) {
+  }) async* {
     final base = _dio.options.baseUrl;
+    final bearer = await _currentBearer();
     final qp = <String, String>{
-      'access_token': _token,
+      'access_token': bearer,
       // ignore: use_null_aware_elements — value is nullable, key is not.
       if (agentId != null) 'agent_id': agentId,
     };
@@ -320,7 +420,7 @@ class ApiClient {
         .join('&');
     final url = '$base/api/conversations/stream?$query';
     final adapter = event_source.openEventSourceAdapter(url: url);
-    return openConversationListStream(adapter: adapter);
+    yield* openConversationListStream(adapter: adapter);
   }
 
   Stream<ConversationListEvent> _streamConversationsViaDio({
@@ -329,6 +429,7 @@ class ApiClient {
     final queryParams = <String, dynamic>{};
     if (agentId != null) queryParams['agent_id'] = agentId;
 
+    final bearer = await _currentBearer();
     final Response<ResponseBody> response;
     try {
       response = await _dio.get<ResponseBody>(
@@ -338,7 +439,7 @@ class ApiClient {
           responseType: ResponseType.stream,
           headers: {
             'Accept': 'text/event-stream',
-            'Authorization': 'Bearer $_token',
+            'Authorization': 'Bearer $bearer',
           },
         ),
       );
