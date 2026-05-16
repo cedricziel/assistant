@@ -39,9 +39,9 @@ use tokio::sync::RwLock;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use assistant_core::types::storage::BusConfig;
 use assistant_core::{
-    BusConfig, BusMessage, ClaimFilter, MAX_TURN_REDELIVERIES, MessageBus, MessageStatus,
-    PublishRequest,
+    BusMessage, ClaimFilter, MAX_TURN_REDELIVERIES, MessageBus, MessageStatus, PublishRequest,
 };
 
 // -- Header keys ------------------------------------------------------------

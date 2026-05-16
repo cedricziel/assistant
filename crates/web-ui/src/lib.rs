@@ -20,8 +20,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use assistant_core::LlmProvider;
+use assistant_core::types::storage::BusKind;
 use assistant_core::{
-    BusKind, Interface, LlmProviderKind, MessageBus, OtelExporter, apply_agent_context,
+    Interface, LlmProviderKind, MessageBus, OtelExporter, apply_agent_context,
     default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
@@ -481,7 +482,6 @@ async fn run_with_args(args: Args) -> Result<()> {
     let bus: Arc<dyn MessageBus> = {
         #[cfg(feature = "nats")]
         {
-            use assistant_core::BusKind;
             if config.bus.kind == BusKind::Nats {
                 tracing::info!("Using NATS message bus");
                 Arc::new(
@@ -495,7 +495,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         }
         #[cfg(not(feature = "nats"))]
         {
-            use assistant_core::BusKind;
             if config.bus.kind == BusKind::Nats {
                 anyhow::bail!(
                     "[bus] kind = \"nats\" configured but this binary was built without the `nats` feature"
