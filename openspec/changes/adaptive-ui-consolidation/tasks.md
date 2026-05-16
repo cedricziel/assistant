@@ -30,6 +30,13 @@
 
 - [ ] 2.1.1 ~~Remove the vestigial `package:flutter/material.dart` import from `app/lib/shared/error_screen.dart`~~ **Deferred.** Original inventory was wrong: the file legitimately uses `Material()` widget (background colour), `Theme.of(context)`, `Icons.error_outline`, and `ExpansionTile`. It's a special-case bootstrap widget rendered via `ErrorWidget.builder` before the app's normal widget tree may be available. Decision: add `app/lib/shared/error_screen.dart` to the Phase 4 lint allowlist as a known exception. Migration to `AdaptiveScaffold` + `AdaptiveIcon` is possible but requires a small visual change (AppBar on Material path) and is out of scope here.
 
+## 2b. Phase 2.0 — Façade barrel re-export shim (1 PR, see Decision 8)
+
+- [x] 2b.1 Create `app/lib/shared/platform/widgets.dart` barrel that re-exports `flutter/widgets.dart` (everything), a curated subset of `flutter/material.dart` via `show` clause, `CupertinoIcons` from `flutter/cupertino.dart`, and all `adaptive_*.dart` wrappers + `platform.dart`. Excluded from material's show list: any widget with an Adaptive wrapper (Scaffold, AppBar, ListTile, etc.) and Colors (already gated).
+- [x] 2b.2 Write a widget/compile test that imports only the barrel and verifies the curated widgets are reachable. Catches accidental show-list regressions.
+- [x] 2b.3 Update `traces_screen.dart` (migrated in PR #793) to import the barrel instead of `flutter/material.dart` directly — barrel surfaced 3 more uses to fix: `Scaffold` → `AdaptiveScaffold`, `Colors.green` → `colorScheme.tertiary` (the success token), `FilledButton` → `AdaptiveButton.filled`. The barrel's `show` list correctly forced all three through the façade.
+- [ ] 2b.5 Add a "How to add a façade wrapper" section to `app/lib/shared/platform/README.md` (create if absent) explaining the ratchet: every new Adaptive wrapper drops one re-export from the barrel. Defer to Phase 4.
+
 ## 3. Phase 2.2 — Sliver-nav list screens (9 stacked PRs, one per screen)
 
 - [x] 3.1 `traces_screen.dart`: replace inline `if (isAppleTouch) CupertinoSliverNavigationBar` with `AdaptiveSliverNavBar`; drop `package:flutter/cupertino.dart` import; existing tests stay green. Unified both platform paths into a single CustomScrollView with the wrapper. Material visual change: SliverAppBar.large (collapsing) replaces fixed AppBar, and the explicit `IconButton(arrow_back) → /chat` is dropped (top-level nav screen — sidebar/tab bar already provides home access; matches the existing iOS path which had no back button).

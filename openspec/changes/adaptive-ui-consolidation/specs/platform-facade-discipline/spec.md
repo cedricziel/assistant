@@ -41,6 +41,36 @@ The repository SHALL include a `custom_lint` rule that fires on any `import 'pac
 - **THEN** running `make lint-flutter` against the codebase SHALL pass with zero violations
 - **THEN** no file outside the allowlist SHALL import `package:flutter/cupertino.dart` or `package:flutter/material.dart`
 
+### Requirement: Material widgets are accessed via the façade barrel re-export
+
+Feature code SHALL import `package:assistant_app/shared/platform/widgets.dart` (the barrel file) rather than `package:flutter/material.dart` directly. The barrel re-exports a **curated subset** of `flutter/material.dart`, all of `flutter/widgets.dart`, all adaptive wrappers, and `CupertinoIcons` (constants only) from `flutter/cupertino.dart`. The Phase 4 lint rule SHALL forbid direct `flutter/material.dart` imports outside the allowlist, with the barrel as the sole exception.
+
+The barrel's `show` list SHALL exclude any widget for which a corresponding `Adaptive*` wrapper exists: `Scaffold`, `AppBar`, `ListTile`, `SwitchListTile`, `Switch`, `TextField`, `Slider`, `SnackBar`, `AlertDialog`, `FilledButton`, `TextButton`. The barrel SHALL also exclude `Colors` (already gated by `check_no_raw_colors.sh`). Adding new entries to the `show` list is a deliberate, reviewable change.
+
+#### Scenario: Feature code imports the barrel
+
+- **WHEN** a feature file needs `Card`, `IconButton`, or `Icons.refresh`
+- **THEN** the file SHALL import `package:assistant_app/shared/platform/widgets.dart`
+- **THEN** the file SHALL NOT import `package:flutter/material.dart` directly
+
+#### Scenario: A new wrapper lands and its re-export is removed
+
+- **WHEN** a new `Adaptive*` wrapper is added in the façade (e.g. `AdaptiveIconButton`)
+- **THEN** the corresponding raw widget (`IconButton`) SHALL be removed from the barrel's `show` list in the same PR
+- **THEN** any feature code still using the raw widget SHALL be migrated to the wrapper in the same PR or marked for follow-up
+
+#### Scenario: CupertinoIcons is reachable without importing cupertino.dart
+
+- **WHEN** a feature file calls `AdaptiveIcon(cupertino: CupertinoIcons.refresh, material: Icons.refresh)`
+- **THEN** the file SHALL be able to reference `CupertinoIcons.refresh` via the barrel re-export
+- **THEN** the file SHALL NOT need to import `package:flutter/cupertino.dart`
+
+#### Scenario: Cupertino widget classes are NOT re-exported
+
+- **WHEN** a developer tries to use `CupertinoSwitch`, `CupertinoTextField`, or any other Cupertino widget class in feature code via the barrel
+- **THEN** the symbol SHALL NOT be available (the barrel only re-exports `CupertinoIcons` from cupertino.dart, not widget classes)
+- **THEN** the developer SHALL be forced to use the corresponding `Adaptive*` wrapper
+
 ### Requirement: adaptive_platform_ui dependency is confined to the façade
 
 The `adaptive_platform_ui` package SHALL be imported only from files under `app/lib/shared/platform/`. No feature screen or shared widget outside the façade SHALL import `package:adaptive_platform_ui/...`.

@@ -104,6 +104,32 @@ Phase 4 adds a `custom_lint` rule that bans `import 'package:flutter/cupertino.d
 - Code review discipline only. Rejected: 30+ active OpenSpec changes touch the Flutter app; relying on reviewers to spot direct imports is brittle.
 - A shell-script grep gate in `make lint-flutter`. Rejected: works but produces worse diagnostics; `custom_lint` integrates with the IDE and `flutter analyze`.
 
+### Decision 8: Material ban implemented via re-export shim (Option C)
+
+Feature code is genuinely Material-heavy: 299 `Icons.*` references, 233 `Theme.of(context)` reads, 78 `IconButton`, 28 `Card`, 22 `Divider`, plus `InkWell`, `FloatingActionButton`, `Tooltip` — many of which have no meaningful iOS equivalent. Building Adaptive wrappers for every one of them would invent fake adaptivity for Material-only concepts (a `Card` is just a visual surface trick; iOS has no equivalent). Banning `flutter/material.dart` directly in features and rebuilding all of these would be weeks of mostly-cosmetic work for no rendering improvement.
+
+Instead, we enforce the import boundary while keeping Material widgets where they belong: add `app/lib/shared/platform/widgets.dart` as a barrel file that re-exports a **curated subset** of `flutter/material.dart` (plus all `flutter/widgets.dart` neutral widgets, plus all adaptive wrappers, plus `CupertinoIcons` from `flutter/cupertino.dart`). Feature code imports the barrel and gets one stable surface; the Phase 4 lint bans direct `flutter/material.dart` and `flutter/cupertino.dart` imports outside the façade.
+
+The `show` list in the barrel is the **discipline boundary** — adding a widget to it is a deliberate act. As Adaptive wrappers grow, re-exports are removed (e.g. when `AdaptiveIconButton` lands, `IconButton` drops out of the barrel). The boundary moves; the lint never weakens.
+
+**Why:**
+
+- Gives the lint enforcement immediately, before the migration sweep finishes.
+- Avoids inventing Cupertino variants of Material-only concepts (`Card`, `InkWell`, `FAB`).
+- Single import surface for feature code (`import 'package:assistant_app/shared/platform/widgets.dart';`) — also re-exports the adaptive wrappers so feature files need only one import.
+- Iterative ratchet: every Adaptive wrapper added in Phase 3 or later removes one re-export. Visibility into "how much Material is leaking" is one grep through the barrel's `show` list.
+- `CupertinoIcons` lives in `flutter/cupertino.dart` but is just a constants class, not a widget. Re-exporting it from the barrel lets feature code reference it for `AdaptiveIcon(cupertino: CupertinoIcons.refresh, material: Icons.refresh)` without importing `cupertino.dart` directly.
+
+**Alternatives considered:**
+
+- **Option A — full façade pass.** Build ~20 more wrappers (`AdaptiveCard`, `AdaptiveInkWell`, `AdaptiveIconButton`, …) plus an `AppTheme.of(context)` shim. Migrate ~700 call sites. Rejected: weeks of work, much of it inventing iOS variants of Material-only concepts.
+- **Option B — `flutter/widgets.dart` baseline.** Feature code imports only the neutral widgets layer; everything styled comes through the façade. Rejected: even bigger scope than A (need to reimplement `Card`, `InkWell`, theme machinery from scratch).
+- **Option D — theme-only ban.** Narrow the lint to `Theme.of(context).colorScheme.*` access. Rejected: doesn't address widget-level fragmentation (the original problem statement was "13 screens mix Material + Cupertino directly").
+
+**Show-list scope:**
+
+Initial barrel re-exports include: `Card`, `InkWell`, `Material` (widget), `Icons` (constants), `CupertinoIcons` (constants, from cupertino.dart), `Theme`, `ThemeData`, `ColorScheme`, `TextTheme`, `Brightness`, `IconButton`, `FloatingActionButton`, `Tooltip`, `Divider`, `CircularProgressIndicator`, `MaterialPageRoute`, `ScaffoldMessenger`, `Drawer`, `TabBar`, `Tab`, `PopupMenuButton`, `PopupMenuItem`, `OutlinedButton`. Notably **NOT** re-exported (force migration to wrappers): `Scaffold`, `AppBar`, `ListTile`, `SwitchListTile`, `Switch`, `TextField`, `Slider`, `SnackBar`, `AlertDialog`, `FilledButton`, `TextButton`. Also **NOT** re-exported (already gated): `Colors`.
+
 ## Risks / Trade-offs
 
 - **Package v0.1.x solo publisher abandons.** → Mitigation: exact pin, confinement to wrapper internals, swap-back to Flutter Cupertino is a localised change in `lib/shared/platform/`. Source is MIT-licensed and small enough to vendor if needed.
