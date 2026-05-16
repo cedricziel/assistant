@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/connectivity_provider.dart';
 import '../features/chat/chat_provider.dart';
@@ -14,7 +15,9 @@ import '../features/spaces/space_provider.dart';
 import '../features/updater/update_banner.dart';
 import '../router/app_router.dart';
 import 'auth_actions.dart';
+import 'edge_swipe_sidebar_toggle.dart';
 import 'platform/platform.dart';
+import 'sidebar_toggle_button.dart';
 import 'space_switcher.dart';
 
 /// Breakpoint above which the navigation rail is shown instead of bottom nav.
@@ -25,16 +28,39 @@ const double _kSidebarExpandedWidth = 240.0;
 const double _kSidebarCollapsedWidth = 72.0;
 const Duration _kSidebarAnimDuration = Duration(milliseconds: 200);
 
-/// Whether the navigation sidebar is collapsed to icon-only mode on wide screens.
-class SidebarCollapsedNotifier extends Notifier<bool> {
-  @override
-  bool build() => false;
+/// SharedPreferences key for [SidebarCollapsedNotifier].
+const String kSidebarCollapsedPrefsKey = 'assistant.sidebarCollapsed';
 
-  void toggle() => state = !state;
+/// Whether the navigation sidebar is collapsed to icon-only mode on wide
+/// screens. Persists across app launches via [SharedPreferences] under
+/// [kSidebarCollapsedPrefsKey].
+class SidebarCollapsedNotifier extends AsyncNotifier<bool> {
+  @override
+  Future<bool> build() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(kSidebarCollapsedPrefsKey) ?? false;
+    } catch (e, st) {
+      debugPrint('SidebarCollapsedNotifier read failed: $e\n$st');
+      return false;
+    }
+  }
+
+  Future<void> toggle() async {
+    final current = state.value ?? false;
+    final next = !current;
+    state = AsyncData(next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(kSidebarCollapsedPrefsKey, next);
+    } catch (e, st) {
+      debugPrint('SidebarCollapsedNotifier write failed: $e\n$st');
+    }
+  }
 }
 
 final sidebarCollapsedProvider =
-    NotifierProvider<SidebarCollapsedNotifier, bool>(
+    AsyncNotifierProvider<SidebarCollapsedNotifier, bool>(
       SidebarCollapsedNotifier.new,
     );
 
@@ -451,7 +477,7 @@ class _NavShellState extends ConsumerState<NavShell> {
     // Apple touch: CupertinoTabBar (compact) or sidebar (wide).
     if (isAppleTouch) {
       if (isWide) {
-        final collapsed = ref.watch(sidebarCollapsedProvider);
+        final collapsed = ref.watch(sidebarCollapsedProvider).value ?? false;
         final appleSelected = _appleSidebarSelectedIndex(context);
         return Scaffold(
           body: SafeArea(
@@ -495,9 +521,11 @@ class _NavShellState extends ConsumerState<NavShell> {
                       ),
                     ),
                     Expanded(
-                      child: AgentEventListener(
-                        child: _OfflineBanner(
-                          child: UpdateBannerWrapper(child: child),
+                      child: EdgeSwipeSidebarToggle(
+                        child: AgentEventListener(
+                          child: _OfflineBanner(
+                            child: UpdateBannerWrapper(child: child),
+                          ),
                         ),
                       ),
                     ),
@@ -586,7 +614,7 @@ class _NavShellState extends ConsumerState<NavShell> {
     }
 
     if (isWide) {
-      final collapsed = ref.watch(sidebarCollapsedProvider);
+      final collapsed = ref.watch(sidebarCollapsedProvider).value ?? false;
       final location = GoRouterState.of(context).uri.toString();
       final selected = _materialSidebarSelectedIndex(context);
 
@@ -737,9 +765,23 @@ class _NavShellState extends ConsumerState<NavShell> {
               ),
               const VerticalDivider(width: 1, thickness: 1),
               Expanded(
-                child: AgentEventListener(
-                  child: _OfflineBanner(
-                    child: UpdateBannerWrapper(child: child),
+                child: EdgeSwipeSidebarToggle(
+                  child: Stack(
+                    children: [
+                      AgentEventListener(
+                        child: _OfflineBanner(
+                          child: UpdateBannerWrapper(child: child),
+                        ),
+                      ),
+                      // Top-leading toggle overlay so the collapse affordance
+                      // is visible outside the sidebar rail (iPad landscape /
+                      // web tablet users).
+                      Positioned(
+                        top: 4,
+                        left: 4,
+                        child: SafeArea(child: const SidebarToggleButton()),
+                      ),
+                    ],
                   ),
                 ),
               ),

@@ -28,12 +28,12 @@
 
 ### Requirement: Sidebar exposes a top-leading toggle on Material wide layouts
 
-On the Material wide branch of `NavShell` (web/macOS, viewport >= 768 dp), the shell SHALL render an unconditional toggle affordance in the **main content area's top-leading corner**, in addition to the existing toggle inside the sidebar. The button SHALL show `Icons.menu` when collapsed and `Icons.menu_open` when expanded with a tooltip reading `"Expand sidebar"` / `"Collapse sidebar"`.
+On the Material wide branch of `NavShell` (web/macOS, viewport >= 768 dp), the shell SHALL render an unconditional toggle affordance in the **main content area's top-leading corner**, in addition to the existing toggle inside the sidebar. The button SHALL show `Icons.menu` when collapsed and `Icons.menu_open` when expanded with a tooltip reading `"Show navigation"` / `"Hide navigation"` so it can be uniquely targeted in widget tests without colliding with the in-sidebar `"Expand sidebar"` / `"Collapse sidebar"` tooltip.
 
 #### Scenario: iPad-landscape viewport shows the top-leading toggle
 
 - **GIVEN** the app is rendered at 1180×820 (iPad landscape) on the web platform
-- **THEN** an `IconButton` with semantic label `"Collapse sidebar"` SHALL be visible at the top-leading corner of the main content area (outside the sidebar)
+- **THEN** an `IconButton` with tooltip `"Hide navigation"` SHALL be visible at the top-leading corner of the main content area (outside the sidebar)
 
 #### Scenario: Tapping the top-leading toggle collapses the sidebar
 
@@ -43,7 +43,7 @@ On the Material wide branch of `NavShell` (web/macOS, viewport >= 768 dp), the s
 #### Scenario: Toggle remains visible while collapsed
 
 - **GIVEN** the sidebar is collapsed
-- **THEN** the top-leading toggle SHALL still be visible AND its tooltip SHALL be `"Expand sidebar"`
+- **THEN** the top-leading toggle SHALL still be visible AND its tooltip SHALL be `"Show navigation"`
 
 ### Requirement: Swipe-from-left-edge toggles the sidebar on touch input
 
