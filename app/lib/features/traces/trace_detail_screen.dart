@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
+import '../../shared/theme/assistant_spacing.dart';
 import 'span_classifier.dart';
 import 'tool_call_span_card.dart';
 import 'traces_provider.dart';
@@ -66,12 +67,12 @@ class _TraceDetailBody extends StatelessWidget {
     final totalMs = detail.durationMs;
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AssistantSpacing.lg),
       children: [
         // Header card
         Card(
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AssistantSpacing.lg),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -187,9 +188,9 @@ class _SpanCardState extends State<_SpanCard> {
       margin: const EdgeInsets.only(bottom: 6),
       child: InkWell(
         onTap: hasAttrs ? () => setState(() => _expanded = !_expanded) : null,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AssistantRadius.md),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(AssistantSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

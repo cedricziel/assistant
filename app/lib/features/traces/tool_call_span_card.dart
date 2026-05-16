@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter/material.dart';
 
+import '../../shared/theme/assistant_spacing.dart';
 import 'span_classifier.dart';
 
 /// Dedicated card for tool-call spans in the trace detail view (#265).
@@ -88,10 +89,10 @@ class _ToolCallSpanCardState extends State<ToolCallSpanCard> {
   Widget _paneBody(String text, ThemeData theme, {Color? colour}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(AssistantSpacing.sm),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AssistantRadius.sm),
       ),
       child: SelectableText(
         text,
@@ -150,12 +151,12 @@ class _ToolCallSpanCardState extends State<ToolCallSpanCard> {
     final visuals = _statusVisuals(scheme);
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 6),
+      margin: const EdgeInsets.only(bottom: AssistantSpacing.xs),
       child: InkWell(
         onTap: () => setState(() => _expanded = !_expanded),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AssistantRadius.md),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(AssistantSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

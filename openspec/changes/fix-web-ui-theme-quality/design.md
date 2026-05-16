@@ -46,13 +46,15 @@ Three intentional accent roles (success, info, warning) are derived from `tertia
 
 **Why:** Lets us match accent colours to semantic meaning (success-tertiary, warning-amber) rather than whatever the seed algorithm produces. Keeps Material 3's surface tint generation since that part works well.
 
-### D2: Typography — Inter + JetBrains Mono, vendored
+### D2: Typography — Inter + JetBrains Mono via `google_fonts`
 
-**Choice:** Vendor two open-licence fonts under `app/assets/fonts/`: Inter (UI) and JetBrains Mono (code / monospace). Declare them in `pubspec.yaml`. Build a `TextTheme` from `Typography.material2021()` with Inter as the default and JetBrains Mono on `bodySmall.copyWith(fontFamily: 'JetBrainsMono')` exposed via `AssistantTypography.mono`.
+**Choice:** Use the `google_fonts` package to apply Inter (UI) and JetBrains Mono (code / monospace). `AssistantTypography.material()` returns a `TextTheme` built with `GoogleFonts.interTextTheme()`, and `AssistantTypography.mono` exposes `GoogleFonts.jetBrainsMono(...)` for inline code, trace attribute keys, and log lines.
 
-**Why:** No network-loaded fonts (PWA / offline correctness). Both fonts have permissive licences (OFL). Inter is the de-facto modern UI font; JetBrains Mono renders code well at all sizes.
+**Why:** Avoids vendoring ~600 KB of font binaries in the repo while still using the same two intentional families the design system targets. The Flutter web app already requires network connectivity to talk to the assistant server, so a one-time font fetch on first load (cached by the service worker thereafter) is an acceptable trade-off.
 
-**Alternative considered:** Google Fonts package — rejected because it does a runtime fetch on first use; that breaks offline-first.
+**Alternative considered:** Vendor `.ttf` files under `app/assets/fonts/` and declare them in `pubspec.yaml`. Keeps the app fully offline-capable for typography but inflates the repo with binary assets that change rarely. Documented as a future option if offline-first PWA usage becomes a hard requirement.
+
+**Offline behaviour:** `google_fonts` caches downloaded fonts via `path_provider` on native and `localStorage` on web. The service worker also caches them as part of the application bundle once fetched. After the first paint, the app renders identically with no network dependency for typography.
 
 ### D3: Spacing tokens — multiplicative, 4 dp base
 

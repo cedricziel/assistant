@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 
+import '../theme/assistant_theme.dart';
 import 'platform.dart';
 
 /// Root application widget that renders [CupertinoApp.router] on Apple
@@ -30,19 +31,13 @@ class AdaptiveApp extends StatelessWidget {
   final GlobalKey<ScaffoldMessengerState>? scaffoldMessengerKey;
   final String title;
 
-  static const _seedColor = Color(0xFF1A73E8);
-
   @override
   Widget build(BuildContext context) {
     if (isAppleTouch) {
       final brightness = MediaQuery.platformBrightnessOf(context);
-      final materialTheme = ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _seedColor,
-          brightness: brightness,
-        ),
-        useMaterial3: true,
-      );
+      final materialTheme = brightness == Brightness.dark
+          ? assistantDarkTheme()
+          : assistantLightTheme();
 
       return CupertinoApp.router(
         title: title,
@@ -71,17 +66,8 @@ class AdaptiveApp extends StatelessWidget {
     return MaterialApp.router(
       title: title,
       scaffoldMessengerKey: scaffoldMessengerKey,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: _seedColor),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _seedColor,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: assistantLightTheme(),
+      darkTheme: assistantDarkTheme(),
       routerConfig: routerConfig,
       debugShowCheckedModeBanner: false,
     );

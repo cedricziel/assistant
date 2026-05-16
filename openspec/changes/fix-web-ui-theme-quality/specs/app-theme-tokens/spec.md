@@ -45,24 +45,23 @@ The Flutter app SHALL expose all design tokens from `app/lib/shared/theme/`, wit
 
 ### Requirement: Typography uses Inter for UI and JetBrains Mono for code
 
-`assistant_typography.dart` SHALL build a `TextTheme` whose default `fontFamily` is `"Inter"` and whose `bodySmall.copyWith(fontFamily: 'JetBrainsMono')` (exposed as `AssistantTypography.mono`) is used by code surfaces (inline code in chat, attribute keys in trace cards, log lines).
-
-Inter and JetBrains Mono fonts SHALL be vendored under `app/assets/fonts/` and declared in `pubspec.yaml`. The app SHALL NOT load fonts at runtime via network requests.
+`assistant_typography.dart` SHALL build a `TextTheme` rooted in Inter for all UI text and expose `AssistantTypography.mono` (a `TextStyle` using JetBrains Mono) for code surfaces (inline code in chat, attribute keys in trace cards, log lines). Both families SHALL be loaded via the `google_fonts` package, which fetches them on first use and caches subsequent loads.
 
 #### Scenario: Default text theme uses Inter
 
 - **WHEN** the light theme is active
-- **THEN** `Theme.of(context).textTheme.bodyLarge!.fontFamily` SHALL equal `"Inter"`
+- **THEN** `Theme.of(context).textTheme.bodyLarge!.fontFamily` SHALL start with `"Inter"` (the package suffixes the cached family name, e.g. `Inter_regular`)
 
 #### Scenario: Inline code uses JetBrains Mono
 
 - **WHEN** an inline-code text style is needed
-- **THEN** `AssistantTypography.mono.fontFamily` SHALL equal `"JetBrainsMono"`
+- **THEN** `AssistantTypography.mono.fontFamily` SHALL start with `"JetBrainsMono"`
 
-#### Scenario: No runtime font fetch
+#### Scenario: Fonts are cached after first fetch
 
-- **WHEN** the app boots offline
-- **THEN** all rendered text SHALL use the vendored fonts AND SHALL NOT issue any HTTP request for font assets
+- **GIVEN** `google_fonts` has fetched Inter and JetBrains Mono once
+- **WHEN** the app is reloaded
+- **THEN** the fonts SHALL render from cache without an additional network request
 
 ### Requirement: Spacing, radius, and elevation tokens replace magic numbers
 
