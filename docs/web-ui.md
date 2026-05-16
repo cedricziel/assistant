@@ -19,6 +19,24 @@ The Flutter web app loads at <http://127.0.0.1:8080>. In single-token mode,
 enter the server URL and token. In multi-user mode, the app uses OAuth2
 Authorization Code + PKCE to authenticate.
 
+## Navigation sidebar
+
+On viewports >= 768 dp wide, the app renders a navigation sidebar with all
+destinations. Two affordances toggle the collapsed state:
+
+- A top-leading **Hide navigation / Show navigation** icon button rendered as
+  an overlay on the main content area. Discoverable on iPad landscape and
+  desktop browser windows.
+- A smaller toggle inside the sidebar itself (right-aligned at the top of the
+  rail).
+
+On touch input devices (iPad PWA, iOS / Android), a horizontal swipe starting
+from the left 20 logical pixels of the viewport toggles the sidebar — drag
+right to expand, left to collapse. Mouse drags are ignored.
+
+Collapse state persists across reloads under the `SharedPreferences` key
+`assistant.sidebarCollapsed` (localStorage on web).
+
 ## CLI options
 
 | Flag                 | Env var                     | Default                     | Description                                               |

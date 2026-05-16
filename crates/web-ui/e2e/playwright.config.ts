@@ -62,6 +62,13 @@ export default defineConfig({
       },
     },
     {
+      name: "ipad-landscape-chrome",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1180, height: 820 },
+      },
+    },
+    {
       name: "mobile-chrome",
       use: {
         ...devices["Pixel 7"],
