@@ -1309,13 +1309,27 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       ),
     );
 
+    // Arm the same initial-stall watchdog used by the text path. The voice
+    // SSE response carries TranscriptEvent + token/status events; any event
+    // counts as progress. Until the first event arrives, a quiet interval
+    // of [_initialStallTimeout] triggers a fallback to a direct
+    // conversation fetch (iOS Dio buffering safety net).
+    var sawProgress = false;
+    final source = api
+        .sendVoiceMessage(conversationId, audioBytes, mimeType)
+        .timeout(
+          _initialStallTimeout,
+          onTimeout: (sink) {
+            if (sawProgress) return;
+            unawaited(_recoverStalledStream(conversationId, userMsgId));
+            sink.close();
+          },
+        );
+
     try {
-      await for (final event in api.sendVoiceMessage(
-        conversationId,
-        audioBytes,
-        mimeType,
-      )) {
+      await for (final event in source) {
         if (_cancelled) break;
+        sawProgress = true;
         final chatState = state.value ?? const ChatState();
 
         if (event is TranscriptEvent) {
