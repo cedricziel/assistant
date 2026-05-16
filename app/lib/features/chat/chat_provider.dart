@@ -580,16 +580,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     return statusMessage;
   }
 
-  /// Map a [ToolResultEvent.status] string to a [ToolCallStatus] value.
-  static ToolCallStatus _parseToolStatus(String status) {
-    return switch (status) {
-      'ok' => ToolCallStatus.ok,
-      'error' => ToolCallStatus.error,
-      'denied' => ToolCallStatus.denied,
-      _ => ToolCallStatus.ok,
-    };
-  }
-
   /// Mark all currently-active timeline entries (thinking, subagent) as
   /// complete. Called when a new timeline entry starts, so the previous one
   /// auto-collapses.
@@ -658,7 +648,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Resolve the pending tool-call timeline entry for [event] and update state.
   /// Called from both [_streamMessage] and [_streamVoiceMessage].
   void _onToolResultEvent(ChatState chatState, ToolResultEvent event) {
-    final resolvedStatus = _parseToolStatus(event.status);
+    final resolvedStatus = _parseToolStatusString(event.status);
     final msgs = List<ChatMessage>.from(chatState.messages);
 
     // Match by toolCallId when available (stable), fall back to tool name.
@@ -854,7 +844,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       msgs[idx].subagentToolCalls.add(
         ToolCallRecord(
           toolName: event.toolName,
-          status: _parseToolStatus(event.status),
+          status: _parseToolStatusString(event.status),
           arguments: event.arguments,
           result: event.result,
         ),
@@ -945,48 +935,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         id: conversationId,
       );
       final detail = response.data!;
-      final messages = <ChatMessage>[];
-      for (final m in detail.messages) {
-        // Convert persisted tool calls into separate timeline entries so
-        // they render identically to the streaming path.
-        final toolCalls = m.toolCalls?.toList() ?? <dynamic>[];
-        for (final tc in toolCalls) {
-          messages.add(
-            ChatMessage(
-              id: 'toolcall-${tc.name}-${m.id}',
-              role: 'assistant',
-              content: '',
-              timelineType: TimelineEntryType.toolCall,
-              toolCalls: [
-                ToolCallRecord(
-                  toolName: tc.name,
-                  status: _parseToolStatus(tc.status),
-                  arguments: tc.arguments?.asMap.cast<String, dynamic>(),
-                  result: tc.result,
-                ),
-              ],
-            ),
-          );
-        }
-        messages.add(
-          ChatMessage(
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            ttsAvailable: m.ttsAvailable,
-            attachments: m.attachments
-                ?.map(
-                  (a) => ChatAttachment(
-                    id: a.id,
-                    filename: a.filename,
-                    mimeType: a.mimeType,
-                    url: a.url,
-                  ),
-                )
-                .toList(),
-          ),
-        );
-      }
+      final messages = chatMessagesFromHistory(detail.messages);
 
       state = AsyncData(
         ChatState(conversationId: conversationId, messages: messages),
@@ -1883,3 +1832,81 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 final chatProvider = AsyncNotifierProvider.autoDispose<ChatNotifier, ChatState>(
   ChatNotifier.new,
 );
+
+ToolCallStatus _parseToolStatusString(String status) {
+  return switch (status) {
+    'ok' => ToolCallStatus.ok,
+    'error' => ToolCallStatus.error,
+    'denied' => ToolCallStatus.denied,
+    _ => ToolCallStatus.ok,
+  };
+}
+
+/// Map a list of persisted [MessageSummary] history rows into the flat
+/// [ChatMessage] list the UI renders.
+///
+/// Each persisted assistant row may carry tool calls. The OpenAI-style wire
+/// format stores each tool invocation as its own assistant message with
+/// `content == ""` and a single entry in `tool_calls` — this is required so
+/// the subsequent `tool` role row can reference it via `tool_call_id`.
+///
+/// We split such a row into a standalone [TimelineEntryType.toolCall] chip
+/// entry and *skip* the underlying empty message bubble: the chip already
+/// fully represents that ReAct step. Without the skip, every tool-only turn
+/// renders as an empty grey pill next to its chip.
+///
+/// Rows that carry user-visible content (or attachments) are always preserved
+/// as a [TimelineEntryType.message] entry, even if they also have tool calls.
+List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
+  final messages = <ChatMessage>[];
+  for (final m in source) {
+    final toolCalls = m.toolCalls?.toList() ?? const [];
+    for (final tc in toolCalls) {
+      messages.add(
+        ChatMessage(
+          id: 'toolcall-${tc.name}-${m.id}',
+          role: 'assistant',
+          content: '',
+          timelineType: TimelineEntryType.toolCall,
+          toolCalls: [
+            ToolCallRecord(
+              toolName: tc.name,
+              status: _parseToolStatusString(tc.status),
+              arguments: tc.arguments?.asMap.cast<String, dynamic>(),
+              result: tc.result,
+            ),
+          ],
+        ),
+      );
+    }
+
+    final attachments = m.attachments;
+    final hasAttachments = attachments != null && attachments.isNotEmpty;
+    final isAssistantToolOnly =
+        m.role == 'assistant' &&
+        m.content.isEmpty &&
+        toolCalls.isNotEmpty &&
+        !hasAttachments;
+    if (isAssistantToolOnly) continue;
+
+    messages.add(
+      ChatMessage(
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        ttsAvailable: m.ttsAvailable,
+        attachments: attachments
+            ?.map(
+              (a) => ChatAttachment(
+                id: a.id,
+                filename: a.filename,
+                mimeType: a.mimeType,
+                url: a.url,
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+  return messages;
+}
