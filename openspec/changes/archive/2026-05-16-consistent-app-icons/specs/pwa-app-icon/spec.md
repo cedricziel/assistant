@@ -1,21 +1,4 @@
-## Purpose
-
-The `pwa-app-icon` capability ensures the web and PWA install of the Flutter app present brand-consistent, high-fidelity icons across browser tabs, Apple touch contexts, and Android home-screen masks. It owns the source-of-truth files (`app/icon_source.png`, `app/icon_source_maskable.png`), the regeneration workflow (`make icons`), and the runtime artifacts under `app/web/` (favicons at multiple sizes, standard and maskable PWA icons, and the manifest's brand colors).
-## Requirements
-### Requirement: PWA icons use the app icon
-
-The system SHALL provide PWA icon files at `app/web/icons/Icon-192.png` and `app/web/icons/Icon-512.png` that are derived from `app/icon_source.png` (the canonical brand source), replacing the default Flutter template icons.
-
-#### Scenario: PWA icon files are not the default Flutter template
-
-- **WHEN** the web build artifacts are inspected
-- **THEN** `app/web/icons/Icon-192.png` and `app/web/icons/Icon-512.png` SHALL contain the app's actual icon, not the Flutter default blue logo
-
-#### Scenario: Standard PWA icons are reproducible from the canonical source
-
-- **WHEN** a developer runs `make icons` against the unchanged `app/icon_source.png`
-- **THEN** `app/web/icons/Icon-192.png` and `app/web/icons/Icon-512.png` SHALL be regenerated deterministically
-- **AND** re-running `make icons` SHALL produce no diff in git
+## MODIFIED Requirements
 
 ### Requirement: Favicon uses the app icon
 
@@ -38,6 +21,21 @@ The system SHALL provide `app/web/favicon.png` (16×16, the default legacy fallb
 - **WHEN** the web app is loaded in a modern browser (Chrome, Firefox, Safari, Edge) on any DPI
 - **THEN** the browser tab SHALL display the brand icon at sufficient resolution to be recognizable as the same logo shown on the macOS dock and iOS home screen
 
+### Requirement: PWA icons use the app icon
+
+The system SHALL provide PWA icon files at `app/web/icons/Icon-192.png` and `app/web/icons/Icon-512.png` that are derived from `app/icon_source.png` (the canonical brand source), replacing the default Flutter template icons.
+
+#### Scenario: PWA icon files are not the default Flutter template
+
+- **WHEN** the web build artifacts are inspected
+- **THEN** `app/web/icons/Icon-192.png` and `app/web/icons/Icon-512.png` SHALL contain the app's actual icon, not the Flutter default blue logo
+
+#### Scenario: Standard PWA icons are reproducible from the canonical source
+
+- **WHEN** a developer runs `make icons` against the unchanged `app/icon_source.png`
+- **THEN** `app/web/icons/Icon-192.png` and `app/web/icons/Icon-512.png` SHALL be regenerated deterministically
+- **AND** re-running `make icons` SHALL produce no diff in git
+
 ### Requirement: PWA manifest uses brand colors
 
 The system SHALL set `background_color` and `theme_color` in `app/web/manifest.json` to the app's brand palette instead of Flutter's default `#0175C2`.
@@ -51,6 +49,8 @@ The system SHALL set `background_color` and `theme_color` in `app/web/manifest.j
 
 - **WHEN** the PWA is open in a supporting browser (e.g. Chrome on Android)
 - **THEN** the browser toolbar SHALL display the app's theme color
+
+## ADDED Requirements
 
 ### Requirement: Maskable PWA icons fill the safe zone with opaque background
 
@@ -105,4 +105,3 @@ The system SHALL provide a `make icons` target (in the repository root `Makefile
 - **GIVEN** `app/icon_source.png` has been replaced with new brand artwork
 - **WHEN** the developer runs `make icons`
 - **THEN** `app/web/favicon.png`, `app/web/favicon-32.png`, `app/web/icons/Icon-192.png`, and `app/web/icons/Icon-512.png` SHALL be updated on disk to reflect the new source
-
