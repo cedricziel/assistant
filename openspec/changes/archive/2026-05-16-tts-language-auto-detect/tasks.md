@@ -4,7 +4,7 @@
 
 - [x] Change `DEFAULT_MODEL` in `crates/transcription/src/deepgram_tts.rs` from `"aura-2-en-us"` to `"aura-2-thalia-en"`
 - [x] Update existing unit test `synthesize_returns_audio_bytes_on_success` to reflect new default
-- [ ] Deploy and verify TTS works on schorschvm
+- [x] Deploy and verify TTS works on schorschvm
 
 ### Phase 2: Language auto-detection
 

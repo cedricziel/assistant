@@ -79,4 +79,4 @@
 - [x] 10.2 Wire `SkillStatsProvider` creation in CLI/webui startup based on exporter config
 - [x] 10.3 Verify `make lint` and `make format` pass
 - [x] 10.4 Run full `make test` — ensure no regressions
-- [ ] 10.5 Manual smoke test: enable learning, run a multi-tool conversation, verify skill is auto-created
+- [x] 10.5 Manual smoke test: enable learning, run a multi-tool conversation, verify skill is auto-created
