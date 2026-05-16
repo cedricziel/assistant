@@ -12,7 +12,7 @@ use super::adapter::MatrixAdapter;
 use super::client::MatrixClient;
 use super::config::MatrixConfigExt;
 
-pub use assistant_core::MatrixConfig;
+pub use assistant_core::types::channels::MatrixConfig;
 
 /// Matrix interface runner.
 pub struct MatrixInterface {
@@ -102,7 +102,7 @@ impl InterfaceRunner for MatrixInterface {
 
 #[cfg(test)]
 mod tests {
-    use assistant_core::MatrixConfig;
+    use assistant_core::types::channels::MatrixConfig;
 
     #[test]
     fn allowlist_room_empty_accepts_all() {

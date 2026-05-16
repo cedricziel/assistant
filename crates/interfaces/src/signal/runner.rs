@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::SignalConfig;
+use assistant_core::types::channels::SignalConfig;
 use assistant_runtime::{ChannelRunner, InterfaceRunner, Orchestrator};
 use assistant_transcription::TranscriptionProvider;
 use async_trait::async_trait;
@@ -65,7 +65,7 @@ impl InterfaceRunner for SignalInterface {
 
 #[cfg(test)]
 mod tests {
-    use assistant_core::SignalConfig;
+    use assistant_core::types::channels::SignalConfig;
 
     #[test]
     fn allowlist_logic_empty_accepts_all() {

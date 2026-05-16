@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::SlackConfig;
+use assistant_core::types::channels::SlackConfig;
 use assistant_runtime::{ChannelRunner, InterfaceRunner, Orchestrator};
 use assistant_storage::StorageLayer;
 use assistant_transcription::TranscriptionProvider;

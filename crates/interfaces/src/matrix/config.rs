@@ -4,7 +4,7 @@
 //! in [`AssistantConfig`][assistant_core::AssistantConfig].  This module
 //! re-exports it and adds runtime helpers that depend on env vars.
 
-pub use assistant_core::MatrixConfig;
+pub use assistant_core::types::channels::MatrixConfig;
 
 /// Extension methods for [`MatrixConfig`] that resolve values from env vars.
 #[allow(dead_code)]

@@ -5,7 +5,7 @@
 //! re-exports it and adds runtime helpers (e.g. `resolved_api_url`) that
 //! resolve defaults and environment-variable overrides.
 
-pub use assistant_core::SignalConfig;
+pub use assistant_core::types::channels::SignalConfig;
 
 /// Extension methods for [`SignalConfig`].
 pub trait SignalConfigExt {

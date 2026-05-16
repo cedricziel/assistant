@@ -5,7 +5,7 @@
 //! re-exports it and adds runtime helpers that depend on the `dirs` crate,
 //! which is not a dependency of `assistant-core`.
 
-pub use assistant_core::MattermostConfig;
+pub use assistant_core::types::channels::MattermostConfig;
 
 /// Extension methods for [`MattermostConfig`] that require the `dirs` crate.
 pub trait MattermostConfigExt {
