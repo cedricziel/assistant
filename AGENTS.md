@@ -199,10 +199,11 @@ them to `deny` at the crate level via a manual replay of the workspace
 lint block in their `Cargo.toml` (`[lints.clippy]` + `[lints.rust]`).
 Currently ratcheted to `deny`:
 
-- `assistant-auth`, `assistant-backup`, `assistant-core`,
-  `assistant-interfaces`, `assistant-llm-provider`, `assistant-mcp-client`,
-  `assistant-mcp-server`, `assistant-runtime`, `assistant-storage`,
-  `assistant-tool-executor`, `assistant-web-ui`, `assistant-workflow-http`.
+- `assistant-a2a-json-schema`, `assistant-auth`, `assistant-backup`,
+  `assistant-core`, `assistant-interfaces`, `assistant-llm-provider`,
+  `assistant-mcp-client`, `assistant-mcp-server`, `assistant-runtime`,
+  `assistant-storage`, `assistant-tool-executor`, `assistant-web-ui`,
+  `assistant-workflow-http`.
 
 The remaining crates still inherit the workspace `warn` default. Promoting
 a crate from `warn` to `deny` is a self-contained follow-up PR: clean the
