@@ -46,12 +46,18 @@ When `launchUrl` returns `false` (or throws), the handler SHALL show a snackbar 
 - **WHEN** `onTap` runs
 - **THEN** the exception SHALL be caught AND a snackbar `"Could not open link"` SHALL be shown AND the error SHALL be logged via `debugPrint`
 
-### Requirement: Handler is unit-testable without plugins
+### Requirement: Scheme/launch logic is unit-testable without plugins
 
-The `MarkdownLinkHandler` SHALL accept an injectable launcher function so unit tests can run on the Dart VM without binding `url_launcher` platform channels.
+The `MarkdownLinkHandler` SHALL accept an injectable launcher function so the scheme allow-list and launch invocation can be verified on the Dart VM without binding `url_launcher` platform channels. The snackbar feedback requirements above are a separate concern, exercised via `WidgetTester` against a wrapping `MaterialApp + Scaffold` rather than via VM unit tests.
 
 #### Scenario: Test injects a fake launcher
 
 - **GIVEN** a `MarkdownLinkHandler` constructed with a fake launcher recording its arguments
 - **WHEN** `onTap("https://example.com")` is invoked
 - **THEN** the fake SHALL record one call to `Uri.parse('https://example.com')` with `LaunchMode.externalApplication`
+
+#### Scenario: Handler is robust to a missing ScaffoldMessenger
+
+- **GIVEN** the handler is invoked inside a tree without a `ScaffoldMessenger` ancestor (e.g. a bare-VM test)
+- **WHEN** a snackbar would otherwise be shown
+- **THEN** the handler SHALL skip the snackbar without throwing AND the launch/decision behaviour SHALL be unchanged

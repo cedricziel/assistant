@@ -47,7 +47,7 @@ On the Material wide branch of `NavShell` (web/macOS, viewport >= 768 dp), the s
 
 ### Requirement: Swipe-from-left-edge toggles the sidebar on touch input
 
-On touch input devices (`defaultTargetPlatform` is `iOS` or `android`, or pointerKind is `touch` on web), a horizontal drag originating in the left 20 logical pixels of the viewport SHALL toggle `sidebarCollapsedProvider` when the drag exceeds 40 logical pixels in either direction.
+On touch input devices (`PointerDeviceKind.touch`), a horizontal drag originating in the left 20 logical pixels of the viewport SHALL toggle `sidebarCollapsedProvider` when the drag exceeds 40 logical pixels in either direction within a single continuous gesture (no time cap — slow drags also qualify; the `within 250 ms` reading in the scenarios below is illustrative of a typical swipe, not a normative constraint). The toggle SHALL fire at most once per gesture so a long drag does not flip the state repeatedly.
 
 #### Scenario: Drag right from left edge expands the sidebar
 

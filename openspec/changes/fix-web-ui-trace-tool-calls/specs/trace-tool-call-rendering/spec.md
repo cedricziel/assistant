@@ -25,12 +25,12 @@ The trace detail screen SHALL detect tool-call spans and render them with a `_To
 
 The `_ToolCallSpanCard` header SHALL display a status icon and a coloured pill matching `attributes['tool_status']`:
 
-| `tool_status`     | Icon                 | Colour                                                        |
-| ----------------- | -------------------- | ------------------------------------------------------------- |
-| `ok`              | `Icons.check_circle` | `colorScheme.tertiary`                                        |
-| `error`           | `Icons.error`        | `colorScheme.error`                                           |
-| `denied`          | `Icons.block`        | `colorScheme.error.withAlpha(0xCC)` or theme-equivalent amber |
-| missing / unknown | `Icons.help_outline` | `colorScheme.onSurfaceVariant`                                |
+| `tool_status`     | Icon                 | Colour                                                    |
+| ----------------- | -------------------- | --------------------------------------------------------- |
+| `ok`              | `Icons.check_circle` | `colorScheme.tertiary`                                    |
+| `error`           | `Icons.error`        | `colorScheme.error`                                       |
+| `denied`          | `Icons.block`        | Amber via `AssistantColors.warning` (`Color(0xFFB45309)`) |
+| missing / unknown | `Icons.help_outline` | `colorScheme.onSurfaceVariant`                            |
 
 The icon and pill SHALL be visible without expanding the card.
 

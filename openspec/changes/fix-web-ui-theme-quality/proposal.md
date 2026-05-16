@@ -13,7 +13,7 @@ This is the kind of polish that compounds: every other UI change after this land
 
 - Define an explicit `AssistantTheme` module in `app/lib/shared/theme/` that exports light + dark `ThemeData` built from:
   - A small, named seed palette (primary, secondary, tertiary) rather than a single seed colour, so accents are intentional rather than algorithmically derived.
-  - A typography ramp that pairs Inter (or Geist) for UI with JetBrains Mono for code blocks and trace attributes.
+  - A typography ramp that pairs Inter for UI with JetBrains Mono for code blocks and trace attributes.
   - Centralised spacing / radius / elevation tokens (`AssistantSpacing`, `AssistantRadius`) replacing magic numbers in the screens.
 - Replace inline `Color(0x...)` / hard-coded `EdgeInsets.all(16)` usages in the highest-traffic screens (chat, sidebar, traces, logs) with token references. Other screens stay on the new theme defaults for now.
 - Audit dark-mode contrast on the chat bubble, inline code, sidebar selection state, and trace status pills. Fix the four worst offenders identified in the audit.

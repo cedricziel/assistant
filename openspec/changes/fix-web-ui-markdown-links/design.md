@@ -10,7 +10,7 @@ The chat bubble renderer is in `chat_screen.dart` (around line 774). It instanti
 
 - Tapping `[text](url)` opens the URL.
 - One handler, used by both the streaming and finalised `SmoothMarkdown` blocks.
-- The handler is unit-testable without a `WidgetTester` — pure function with an injectable launcher.
+- The URL decision/launch path is unit-testable on the Dart VM via an injectable launcher (no `url_launcher` platform channel binding needed). UI feedback (snackbar) belongs to the widget layer and is covered by widget tests instead.
 - Unsupported / dangerous schemes are rejected loudly (snackbar) rather than silently.
 
 **Non-goals**
@@ -39,7 +39,12 @@ class MarkdownLinkHandler {
 typedef UrlLauncher = Future<bool> Function(Uri uri, {LaunchMode mode});
 ```
 
-Why a class and not a free function: the helper needs a `BuildContext` for the snackbar fallback. Injecting the launcher keeps the unit test free of plugin platform channels.
+**Decision split — pure scheme/launch logic vs. UI feedback:**
+
+- The scheme allow-list + `_launcher` invocation is the _contract_ of the handler. It is fully testable on the Dart VM by injecting a recording `UrlLauncher` — no `WidgetTester`, no `BuildContext`.
+- Snackbar rendering happens via `ScaffoldMessenger.maybeOf(context)` inside the same class for ergonomic call-site usage (callers don't have to thread a callback through). Tests that exercise the snackbar path use a `WidgetTester` wrapping a `MaterialApp + Scaffold` so `ScaffoldMessenger` is available. The handler is robust to a missing messenger (no-op), so the launch path can be tested in isolation when feedback rendering isn't of interest.
+
+This split keeps both halves verifiable: the launch contract via cheap VM tests, the snackbar feedback via widget tests. The two test styles live side-by-side in `markdown_link_handler_test.dart`.
 
 ### D2: Scheme allow-list
 
