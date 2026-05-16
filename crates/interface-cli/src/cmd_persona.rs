@@ -7,7 +7,8 @@ use anyhow::Result;
 use assistant_core::{default_workspace_dir, validate_agent_id};
 use assistant_storage::{PersonaSkillAccessStore, PersonaStore, StorageLayer};
 
-use crate::{PersonaCommand, home_agent_root};
+use crate::args::PersonaCommand;
+use crate::home_agent_root;
 
 pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
     let storage = StorageLayer::new(db_path).await?;

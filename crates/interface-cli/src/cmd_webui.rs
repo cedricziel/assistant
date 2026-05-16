@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::WebUiCommand;
+use crate::args::WebUiCommand;
 
 pub async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
     let args = match command {

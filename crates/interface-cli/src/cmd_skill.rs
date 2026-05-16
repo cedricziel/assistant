@@ -9,7 +9,7 @@ use assistant_core::types::agent::AssistantConfig;
 use assistant_skills::SkillSource;
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 
-use crate::SkillCommand;
+use crate::args::SkillCommand;
 
 pub async fn cmd_skill(
     db_path: &Path,
