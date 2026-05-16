@@ -18,6 +18,7 @@ dependencies:
   flutter_secure_storage: ^10.2.0
   http: ^1.6.0
   dio: ^5.9.2
+  fresh_dio: ^0.6.0
   native_dio_adapter: ^1.5.1
   uuid: ^4.5.3
   collection: ^1.19.1
@@ -59,8 +60,8 @@ flutter_launcher_icons:
   web:
     generate: true
     image_path: icon_source.png
-    background_color: '#080C1A'
-    theme_color: '#080C1A'
+    background_color: "#080C1A"
+    theme_color: "#080C1A"
 flutter:
   uses-material-design: true
   assets:
