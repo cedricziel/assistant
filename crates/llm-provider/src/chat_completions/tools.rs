@@ -11,15 +11,19 @@ use serde_json::Value;
 use assistant_core::{LlmResponseMeta, ToolCallItem, ToolSpec};
 
 /// Convert a [`ToolSpec`] to an `async-openai` `ChatCompletionTool`.
-pub fn tool_spec_to_chat(tool: &ToolSpec) -> ChatCompletionTool {
+///
+/// Returns an error if the `FunctionObject` builder fails (in practice this
+/// only happens when a required field is missing, which our deterministic
+/// construction below cannot trigger — but we propagate rather than panic).
+pub fn tool_spec_to_chat(tool: &ToolSpec) -> anyhow::Result<ChatCompletionTool> {
     let function = FunctionObjectArgs::default()
         .name(&tool.name)
         .description(&tool.description)
         .parameters(tool.normalized_params_schema())
         .build()
-        .expect("FunctionObject build should not fail");
+        .map_err(|e| anyhow::anyhow!("Failed to build OpenAI FunctionObject: {e}"))?;
 
-    ChatCompletionTool { function }
+    Ok(ChatCompletionTool { function })
 }
 
 /// Extract response metadata from a Chat Completions response.

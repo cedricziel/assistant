@@ -105,8 +105,8 @@ impl ChatCompletionsProvider {
         let (messages, _pending) = build_chat_messages(system_prompt, history);
         let openai_tools: Vec<ChatCompletionTools> = tools
             .iter()
-            .map(|t| ChatCompletionTools::Function(tool_spec_to_chat(t)))
-            .collect();
+            .map(|t| tool_spec_to_chat(t).map(ChatCompletionTools::Function))
+            .collect::<anyhow::Result<_>>()?;
 
         let mut builder = CreateChatCompletionRequestArgs::default();
         builder
@@ -178,8 +178,8 @@ impl ChatCompletionsProvider {
         let (messages, _pending) = build_chat_messages(system_prompt, history);
         let openai_tools: Vec<ChatCompletionTools> = tools
             .iter()
-            .map(|t| ChatCompletionTools::Function(tool_spec_to_chat(t)))
-            .collect();
+            .map(|t| tool_spec_to_chat(t).map(ChatCompletionTools::Function))
+            .collect::<anyhow::Result<_>>()?;
 
         let mut builder = CreateChatCompletionRequestArgs::default();
         builder

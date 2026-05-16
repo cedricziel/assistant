@@ -148,9 +148,9 @@ impl OAuthManager {
 
     async fn perform_pkce_login(&self) -> anyhow::Result<OAuthTokens> {
         // 1. Generate PKCE verifier + challenge.
-        let verifier = generate_code_verifier();
+        let verifier = generate_code_verifier()?;
         let challenge = compute_code_challenge(&verifier);
-        let state = generate_random_string(32);
+        let state = generate_random_string(32)?;
 
         // 2. Build authorization URL.
         let auth_url = format!(
@@ -294,7 +294,7 @@ impl OAuthManager {
 // ── PKCE helpers ──────────────────────────────────────────────────────────────
 
 /// Generate a random code verifier (43–128 characters, base64url-safe).
-fn generate_code_verifier() -> String {
+fn generate_code_verifier() -> anyhow::Result<String> {
     generate_random_string(64)
 }
 
@@ -305,10 +305,10 @@ fn compute_code_challenge(verifier: &str) -> String {
 }
 
 /// Generate a random base64url-encoded string of the given byte length.
-fn generate_random_string(byte_len: usize) -> String {
+fn generate_random_string(byte_len: usize) -> anyhow::Result<String> {
     let mut buf = vec![0u8; byte_len];
-    getrandom::fill(&mut buf).expect("getrandom should not fail");
-    URL_SAFE_NO_PAD.encode(&buf)
+    getrandom::fill(&mut buf).map_err(|e| anyhow::anyhow!("getrandom failed: {e}"))?;
+    Ok(URL_SAFE_NO_PAD.encode(&buf))
 }
 
 /// Percent-encode a value for use in a URL query string.
@@ -425,8 +425,8 @@ mod tests {
 
     #[test]
     fn random_strings_are_unique() {
-        let a = generate_random_string(32);
-        let b = generate_random_string(32);
+        let a = generate_random_string(32).unwrap();
+        let b = generate_random_string(32).unwrap();
         assert_ne!(a, b);
     }
 
