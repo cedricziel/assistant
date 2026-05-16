@@ -205,7 +205,7 @@ Currently ratcheted to `deny`:
   `assistant-runtime`, `assistant-skills`, `assistant-storage`,
   `assistant-tool-executor`, `assistant-transcription`, `assistant-web-ui`,
   `assistant-workflow`, `assistant-workflow-http`,
-  `opentelemetry-exporter-iceberg`.
+  `opentelemetry-exporter-iceberg`, `opentelemetry-exporter-sqlite`.
 
 The remaining crates still inherit the workspace `warn` default. Promoting
 a crate from `warn` to `deny` is a self-contained follow-up PR: clean the
