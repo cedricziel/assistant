@@ -554,26 +554,16 @@ async fn run_with_args(args: Args) -> Result<()> {
         );
     }
 
-    // 5. Spawn the turn-processing worker (scoped to Web interface only,
-    //    so it doesn't steal turns from Slack/Mattermost workers sharing
-    //    the same SQLite database).
-    let worker_orch = orchestrator.clone();
-    tokio::spawn(async move {
-        worker_orch
-            .run_worker_filtered("web-worker", Some("Web"))
-            .await;
-    });
-
-    // 5a. Spawn the title-generator worker. Consumes `turn.result` from the
-    //     shared bus so that conversations from every interface — Web, Slack,
-    //     Matrix, CLI, MCP, scheduler — eventually receive a meaningful title.
-    let _title_worker = assistant_runtime::spawn_title_generator_worker(
-        orchestrator.bus().clone(),
-        storage.clone(),
-        llm.clone(),
-        config.titling.clone(),
-        selected_agent.clone(),
-    );
+    // The web-ui binary intentionally does NOT spawn its own turn-processing
+    // worker pool or title-generator. Both are owned by the orchestrator
+    // service (`assistant orchestrator run --no-repl`), which has a
+    // `Web`-filtered worker that consumes the turns this process publishes.
+    // Running them in both processes would cause two consumers to race for
+    // every claim — one wins, the other floods the journal with
+    // `claim failed` warnings every second.
+    //
+    // Operators MUST run an orchestrator service alongside the web-ui.
+    // See docs/web-ui.md.
 
     // 6. Spawn workflow run processor (loop guardrails + action executors).
     let turn_client = Arc::new(OrchestratorTurnClient {
