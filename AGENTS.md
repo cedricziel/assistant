@@ -116,7 +116,7 @@ GitHub Actions runs `flutter analyze --fatal-infos` and `flutter test` on every 
 
 ## Workspace Structure
 
-Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
+Multiple crates under `crates/`, one root crate. Edition 2024, resolver 2.
 
 | Crate (package name)             | Path                                    | Purpose                                                                                                                                         |
 | -------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
