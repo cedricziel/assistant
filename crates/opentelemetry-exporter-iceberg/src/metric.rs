@@ -8,7 +8,7 @@ use arrow_array::{
     ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
 };
 use arrow_schema::Schema as ArrowSchema;
-use assistant_core::IcebergConfig;
+use assistant_core::types::observability::IcebergConfig;
 use iceberg::spec::DataFileFormat;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::writer::IcebergWriter;
