@@ -170,7 +170,17 @@ pub async fn send_message(
         .update_status(&task.id, TaskState::TaskStateCompleted, Some(agent_msg))
         .await;
 
-    let final_task = state.task_store.get_task(&task.id).await.unwrap();
+    let Some(final_task) = state.task_store.get_task(&task.id).await else {
+        // We just created and updated the task on the previous lines; the
+        // store dropping it between the update and the get would only happen
+        // under a concurrent eviction race that the in-memory store does not
+        // perform. Treat as a 500 rather than panicking the worker.
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "task disappeared after creation"})),
+        )
+            .into_response();
+    };
 
     let resp = SendMessageResponse {
         task: Some(final_task),

@@ -7,11 +7,6 @@
 //! - `logs.rs`: log entry retrieval
 //! - `skills.rs`: skill discovery per persona
 
-#![cfg_attr(
-    not(test),
-    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
-)]
-
 pub mod account;
 pub mod agents;
 pub mod analytics;

@@ -71,15 +71,17 @@ uuid = { workspace = true }
 jsonwebtoken = { workspace = true }
 serde_json = { workspace = true }
 
-# TODO(workspace-lint-policy): ratchet by removing the allow overrides below
-# once non-test unwrap/expect/panic calls are gone from this crate. The
-# workspace baseline (root Cargo.toml [workspace.lints]) is `warn`; we cannot
-# combine `workspace = true` with overrides, so this crate manually replays
-# the relevant lints. See openspec/changes/workspace-lint-policy/.
+# Panic-free contract: all non-test code in this crate (and its sub-modules)
+# propagates errors via `Result<_, anyhow::Error>` or returns an HTTP error
+# response. The build script (`build.rs`) is exempt via its own per-file
+# `#![allow(...)]` block since panicking is the correct error signal for a
+# failed compile-time prerequisite. Cargo forbids combining `workspace = true`
+# with per-crate overrides, so this manually replays the workspace baseline
+# plus the deny ratchet. See openspec/changes/workspace-lint-policy/.
 [lints.clippy]
-unwrap_used = "allow"
-expect_used = "allow"
-panic = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
 unimplemented = "warn"
 todo = "warn"
 
