@@ -191,15 +191,6 @@ argon2 = { version = "0.5", features = ["std"] }
 rand = "0.10"
 # Constant-time comparison (API key verification)
 subtle = "2"
-# Internal crates
-opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
-opentelemetry-exporter-iceberg = { path = "crates/opentelemetry-exporter-iceberg" }
-core = { path = "crates/core", package = "assistant-core" }
-auth = { path = "crates/auth", package = "assistant-auth" }
-skills = { path = "crates/skills" }
-storage = { path = "crates/storage" }
-runtime = { path = "crates/runtime" }
-tool-executor = { path = "crates/tool-executor" }
 
 # Text diffing for `/review` skill refinement display.
 similar = "2.6"
