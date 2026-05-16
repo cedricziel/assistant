@@ -20,6 +20,9 @@ pub struct AuthorizeQuery {
     pub redirect_uri: Option<String>,
     pub state: Option<String>,
     pub code_challenge: Option<String>,
+    /// Accepted per RFC 7636 §4.3 for forward-compatibility. We only support
+    /// `S256` and assume it implicitly; the value is not yet validated.
+    #[allow(dead_code)]
     pub code_challenge_method: Option<String>,
     pub scope: Option<String>,
 }

@@ -329,12 +329,19 @@ pub async fn get_task(
 }
 
 /// Query parameters for `GET /tasks/{id}`.
+///
+/// `history_length` and `tenant` are accepted per the A2A protocol spec
+/// for forward-compatibility but not yet plumbed through the in-memory
+/// `TaskStore`. Kept on the struct so the OpenAPI surface matches the
+/// protocol; remove the `#[allow(dead_code)]` once they're wired up.
 #[derive(Debug, Default, serde::Deserialize, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct GetTaskQuery {
     /// Max number of recent messages to include in history.
+    #[allow(dead_code)]
     pub history_length: Option<i32>,
     /// Optional tenant ID.
+    #[allow(dead_code)]
     pub tenant: Option<String>,
 }
 
