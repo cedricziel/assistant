@@ -192,7 +192,16 @@ impl NatsMessageBus {
     /// [`MAX_DELIVER`], we delete the stale consumer and re-create it with
     /// the current config. At most one reconciliation pass per call.
     async fn consumer_for(&self, worker_id: &str, topic: &str) -> Result<Consumer<pull::Config>> {
-        let name = format!("{}-{}", worker_id, topic.replace('.', "-"));
+        // NATS JetStream consumer names accept only `[A-Za-z0-9_-]`. Any other
+        // character (e.g. `.` or `/`) makes `get_or_create_consumer` fail
+        // every call, silently flooding the journal — see the title-generator
+        // `claim failed` spam regression. Sanitize both inputs defensively so
+        // a future caller can't reintroduce the bug.
+        let name = format!(
+            "{}-{}",
+            sanitize_consumer_segment(worker_id),
+            sanitize_consumer_segment(topic),
+        );
         let cfg = pull::Config {
             durable_name: Some(name.clone()),
             filter_subject: format!("bus.{topic}"),
@@ -229,6 +238,23 @@ impl NatsMessageBus {
             .await
             .map_err(|e| anyhow::anyhow!("failed to recreate NATS consumer {name}: {e}"))
     }
+}
+
+/// Replace every character outside `[A-Za-z0-9_-]` with `-`. JetStream
+/// rejects consumer names containing any other character; passing an
+/// unsanitized `worker_id` or `topic` (e.g. `title-generator/<agent>` or
+/// `turn.result`) makes `get_or_create_consumer` fail every call.
+fn sanitize_consumer_segment(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn resolve_nats_url_with<F>(config: &BusConfig, get_env: F) -> String
@@ -623,6 +649,58 @@ mod tests {
     use super::*;
 
     // -- Unit tests (no Docker) ---------------------------------------------
+
+    #[test]
+    fn sanitize_consumer_segment_passes_safe_characters_through() {
+        assert_eq!(sanitize_consumer_segment("main-worker"), "main-worker");
+        assert_eq!(sanitize_consumer_segment("slack_worker"), "slack_worker");
+        assert_eq!(
+            sanitize_consumer_segment("title-generator-default"),
+            "title-generator-default"
+        );
+        assert_eq!(sanitize_consumer_segment("abc123"), "abc123");
+    }
+
+    #[test]
+    fn sanitize_consumer_segment_replaces_slashes() {
+        // Regression: the title-generator's original worker_id was
+        // `title-generator/<agent>`, which JetStream rejected every call.
+        assert_eq!(
+            sanitize_consumer_segment("title-generator/default"),
+            "title-generator-default"
+        );
+    }
+
+    #[test]
+    fn sanitize_consumer_segment_replaces_dots() {
+        // `topic.replace('.', "-")` used to be inline; sanitization now
+        // covers dots too (and anything else NATS would reject).
+        assert_eq!(sanitize_consumer_segment("turn.result"), "turn-result");
+        assert_eq!(sanitize_consumer_segment("a.b.c.d"), "a-b-c-d");
+    }
+
+    #[test]
+    fn sanitize_consumer_segment_replaces_arbitrary_specials() {
+        assert_eq!(
+            sanitize_consumer_segment("foo bar baz"),
+            "foo-bar-baz",
+            "spaces must become dashes"
+        );
+        assert_eq!(
+            sanitize_consumer_segment("hello@world"),
+            "hello-world",
+            "@ is not allowed"
+        );
+        // Non-ASCII characters get replaced; consumer names are ASCII only.
+        assert_eq!(sanitize_consumer_segment("team-α"), "team--");
+    }
+
+    #[test]
+    fn sanitize_consumer_segment_idempotent() {
+        let s = "title-generator-team-1";
+        assert_eq!(sanitize_consumer_segment(s), s);
+        assert_eq!(sanitize_consumer_segment(&sanitize_consumer_segment(s)), s);
+    }
 
     #[test]
     fn test_matches_filter_empty() {
