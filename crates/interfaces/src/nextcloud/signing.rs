@@ -30,17 +30,18 @@ pub fn verify_signature(secret: &str, random: &str, body: &[u8], signature: &str
 /// and `signature` is the HMAC-SHA256 of `random + body` using the secret.
 pub fn sign_request(secret: &str, body: &str) -> Result<(String, String)> {
     let random = generate_random().context("failed to generate random bytes for HMAC signing")?;
-    let signature = compute_signature(secret, &random, body.as_bytes());
+    let signature = compute_signature(secret, &random, body.as_bytes())
+        .context("failed to compute HMAC signature")?;
     Ok((random, signature))
 }
 
 /// Compute the HMAC-SHA256 signature of `random + body` with the given secret.
-fn compute_signature(secret: &str, random: &str, body: &[u8]) -> String {
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+fn compute_signature(secret: &str, random: &str, body: &[u8]) -> Result<String> {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .map_err(|e| anyhow::anyhow!("invalid HMAC key length: {e}"))?;
     mac.update(random.as_bytes());
     mac.update(body);
-    hex::encode(mac.finalize().into_bytes())
+    Ok(hex::encode(mac.finalize().into_bytes()))
 }
 
 /// Generate a 64-character hex random string.
