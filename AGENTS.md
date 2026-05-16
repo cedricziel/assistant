@@ -194,15 +194,20 @@ The workspace declares its baseline lint set in the root `Cargo.toml`
   workspace lints must be replayed manually.
 
 **Panic-free contract.** `clippy::unwrap_used`, `clippy::expect_used`, and
-`clippy::panic` are `warn` at the workspace baseline. The following crates
-ratchet them to `deny` at the crate level:
+`clippy::panic` are `warn` at the workspace baseline. Most crates ratchet
+them to `deny` at the crate level via a manual replay of the workspace
+lint block in their `Cargo.toml` (`[lints.clippy]` + `[lints.rust]`).
+Currently ratcheted to `deny`:
 
-- `assistant-storage` — enforced via `crates/storage/Cargo.toml [lints.clippy]`.
+- `assistant-auth`, `assistant-backup`, `assistant-core`,
+  `assistant-interfaces`, `assistant-llm-provider`, `assistant-mcp-client`,
+  `assistant-mcp-server`, `assistant-runtime`, `assistant-storage`,
+  `assistant-tool-executor`, `assistant-web-ui`, `assistant-workflow-http`.
 
-All other crates currently `allow` the panic-free lints with a
-`TODO(workspace-lint-policy)` comment recording the ratchet target. Promoting
-a crate from `allow` to `deny` is a self-contained follow-up PR: clean the
-unwraps, flip the lint level, run `make lint && make test`.
+The remaining crates still inherit the workspace `warn` default. Promoting
+a crate from `warn` to `deny` is a self-contained follow-up PR: clean the
+unwraps in production code, replace `[lints]\nworkspace = true` with the
+manual replay block, run `make lint && make test`.
 
 Test code (`#[cfg(test)]` modules and `tests/` directories) is exempt: the
 default `cargo clippy --workspace` invocation used by `make lint` and CI
