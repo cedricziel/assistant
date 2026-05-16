@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use tracing::{info, warn};
 
-use crate::AssistantConfig;
+use crate::types::agent::AssistantConfig;
 
 /// Return the default path to the assistant config file
 /// (`~/.assistant/config.toml`).

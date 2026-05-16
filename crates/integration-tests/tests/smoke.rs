@@ -14,7 +14,8 @@ use std::{env, time::Duration};
 
 use anyhow::Result;
 use assistant_core::{
-    AssistantConfig, MessageBus,
+    MessageBus,
+    types::agent::AssistantConfig,
     types::conversation::{ExecutionContext, Interface, TurnIdentity},
 };
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};

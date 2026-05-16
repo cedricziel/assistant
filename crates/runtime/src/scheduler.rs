@@ -548,7 +548,7 @@ async fn has_active_bus_message(pool: &SqlitePool, conversation_id: &str) -> Res
 mod tests {
     use std::sync::Arc;
 
-    use assistant_core::{AssistantConfig, LlmProvider, MessageBus, topic};
+    use assistant_core::{LlmProvider, MessageBus, topic, types::agent::AssistantConfig};
     use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
     use assistant_storage::StorageLayer;
     use assistant_storage::registry::SkillRegistry;

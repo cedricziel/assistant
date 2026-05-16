@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assistant_core::types::features::MemoryConfig;
-use assistant_core::{AssistantConfig, LlmProvider, expand_tilde};
+use assistant_core::{LlmProvider, expand_tilde, types::agent::AssistantConfig};
 use assistant_skills::SkillSource;
 use assistant_storage::StorageLayer;
 use tracing::info;

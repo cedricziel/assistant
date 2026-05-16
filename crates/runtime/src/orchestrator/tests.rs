@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use assistant_core::types::conversation::{Interface, TurnIdentity};
 use assistant_core::{
-    AssistantConfig, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, MessageBus, OrgId,
-    PublishRequest, SpaceId, ToolCallItem, UserId, bus_messages, topic,
+    ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, MessageBus, OrgId, PublishRequest,
+    SpaceId, ToolCallItem, UserId, bus_messages, topic, types::agent::AssistantConfig,
 };
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_storage::{StorageLayer, registry::SkillRegistry};

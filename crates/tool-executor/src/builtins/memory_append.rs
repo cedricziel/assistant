@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{
-    AssistantConfig, ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path,
+    ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path, types::agent::AssistantConfig,
 };
 
 /// Canonicalize as much of `p` as exists, then re-append non-existent tail
