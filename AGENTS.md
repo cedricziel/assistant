@@ -200,12 +200,17 @@ lint block in their `Cargo.toml` (`[lints.clippy]` + `[lints.rust]`).
 Currently ratcheted to `deny`:
 
 - `assistant-a2a-json-schema`, `assistant-auth`, `assistant-backup`,
-  `assistant-bus-nats`, `assistant-core`, `assistant-interfaces`,
-  `assistant-llm-provider`, `assistant-mcp-client`, `assistant-mcp-server`,
-  `assistant-runtime`, `assistant-skills`, `assistant-storage`,
-  `assistant-tool-executor`, `assistant-transcription`, `assistant-web-ui`,
-  `assistant-workflow`, `assistant-workflow-http`,
+  `assistant-bus-nats`, `assistant-cli`, `assistant-core`,
+  `assistant-interfaces`, `assistant-llm-provider`, `assistant-mcp-client`,
+  `assistant-mcp-server`, `assistant-runtime`, `assistant-skills`,
+  `assistant-storage`, `assistant-tool-executor`, `assistant-transcription`,
+  `assistant-web-ui`, `assistant-workflow`, `assistant-workflow-http`,
   `opentelemetry-exporter-iceberg`, `opentelemetry-exporter-sqlite`.
+
+All non-tests-only crates are now panic-free at `deny`. The only crate
+still on the workspace `warn` baseline is `assistant-integration-tests`,
+which has no production library code (its `src/lib.rs` is a stub for
+shared test helpers).
 
 The remaining crates still inherit the workspace `warn` default. Promoting
 a crate from `warn` to `deny` is a self-contained follow-up PR: clean the
