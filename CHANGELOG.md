@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.153](https://github.com/cedricziel/assistant/compare/v0.1.152...v0.1.153) (2026-05-16)
+
+
+### Bug Fixes
+
+* **chat:** make markdown hyperlinks clickable ([#619](https://github.com/cedricziel/assistant/issues/619)) ([#724](https://github.com/cedricziel/assistant/issues/724)) ([8a5ac8c](https://github.com/cedricziel/assistant/commit/8a5ac8c58ebd1a502dbae86836eedec85d237637))
+* **web-ui:** centralised theme tokens + contrast audit + lint enforcement ([#266](https://github.com/cedricziel/assistant/issues/266)) ([#727](https://github.com/cedricziel/assistant/issues/727)) ([24e3b14](https://github.com/cedricziel/assistant/commit/24e3b14f03eb1668dcb132b0509aad8287160fd8))
+* **web-ui:** collapsible iPad-landscape sidebar with persistence ([#620](https://github.com/cedricziel/assistant/issues/620)) ([#725](https://github.com/cedricziel/assistant/issues/725)) ([0754157](https://github.com/cedricziel/assistant/commit/0754157b986a0a60933ba517715eb263ac761700))
+* **web-ui:** dedicated tool-call cards in trace detail ([#265](https://github.com/cedricziel/assistant/issues/265)) ([#726](https://github.com/cedricziel/assistant/issues/726)) ([243856f](https://github.com/cedricziel/assistant/commit/243856feaf994bad7617655fdfe9708f4218c860))
+
 ## [0.1.152](https://github.com/cedricziel/assistant/compare/v0.1.151...v0.1.152) (2026-05-16)
 
 
