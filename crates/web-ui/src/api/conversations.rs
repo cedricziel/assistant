@@ -30,7 +30,7 @@ use super::{ApiState, sse_response};
 
 // -- Response types ----------------------------------------------------------
 
-/// A conversation summary (no message history).
+/// A conversation summary (no messages).
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ConversationSummary {
     pub id: Uuid,
@@ -110,7 +110,7 @@ pub struct UpdateConversationRequest {
 
 // -- Handlers ----------------------------------------------------------------
 
-/// `GET /api/conversations` — list all conversations.
+/// `GET /api/conversations` — list all conversations, newest first.
 #[utoipa::path(
     get,
     path = "/api/conversations",
