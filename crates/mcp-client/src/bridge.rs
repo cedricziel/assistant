@@ -11,7 +11,8 @@ use async_trait::async_trait;
 use rmcp::model::{Content, RawContent, Tool};
 use tracing::debug;
 
-use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::types::conversation::ExecutionContext;
+use assistant_core::{ToolHandler, ToolOutput};
 
 use crate::client::McpClient;
 

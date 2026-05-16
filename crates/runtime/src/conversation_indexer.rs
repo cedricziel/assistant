@@ -28,7 +28,8 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{LlmProvider, MessageRole};
+use assistant_core::LlmProvider;
+use assistant_core::types::conversation::MessageRole;
 use assistant_storage::{MemoryChunkStore, StorageLayer};
 use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
@@ -283,7 +284,7 @@ mod tests {
 
     #[tokio::test]
     async fn indexes_user_and_assistant_messages() {
-        use assistant_core::Message;
+        use assistant_core::types::conversation::Message;
         use uuid::Uuid;
 
         let storage = Arc::new(
@@ -331,7 +332,7 @@ mod tests {
 
     #[tokio::test]
     async fn skips_tool_json_and_thinking_steps() {
-        use assistant_core::Message;
+        use assistant_core::types::conversation::Message;
         use uuid::Uuid;
 
         let storage = Arc::new(

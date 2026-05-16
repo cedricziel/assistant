@@ -13,7 +13,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use assistant_core::{ExecutionContext, ToolHandler, ToolOutput, sanitize_llm_output};
+use assistant_core::{
+    ToolHandler, ToolOutput, sanitize_llm_output, types::conversation::ExecutionContext,
+};
 
 use super::signing::sign_request;
 

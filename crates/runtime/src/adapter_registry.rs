@@ -122,7 +122,10 @@ mod tests {
     use std::pin::Pin;
     use std::sync::Arc;
 
-    use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, Interface};
+    use assistant_core::{
+        ChannelAdapter, ChannelContent, ChannelMessage, types::conversation::ChannelType,
+        types::conversation::Interface,
+    };
     use async_trait::async_trait;
     use futures::Stream;
 

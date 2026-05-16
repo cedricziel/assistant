@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, SubagentRunner, ToolHandler, ToolOutput};
+use assistant_core::{
+    SubagentRunner, ToolHandler, ToolOutput, types::conversation::ExecutionContext,
+};
 use async_trait::async_trait;
 use serde_json::json;
 use tracing::info;
@@ -80,7 +82,9 @@ impl ToolHandler for AgentTerminateHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::{AgentReport, AgentReportStatus, AgentSpawn, Interface};
+    use assistant_core::{
+        AgentReport, AgentReportStatus, AgentSpawn, types::conversation::Interface,
+    };
     use std::sync::Mutex;
     use uuid::Uuid;
 

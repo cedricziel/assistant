@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::{Message, MessageRole};
+use assistant_core::types::conversation::{Message, MessageRole};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -518,7 +518,7 @@ mod tests {
     use crate::conversation_broadcaster::{
         ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
     };
-    use assistant_core::Message;
+    use assistant_core::types::conversation::Message;
     use uuid::Uuid;
 
     #[tokio::test]

@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use assistant_core::{
-    ChannelContent, ChannelMessage, ChannelType, ChannelUser, Interface, MessageBus,
-    PublishRequest, bus_messages, strip_html_comments, topic,
+    ChannelContent, ChannelMessage, ChannelUser, MessageBus, PublishRequest, bus_messages,
+    strip_html_comments, topic, types::conversation::ChannelType, types::conversation::Interface,
 };
 use assistant_storage::StorageLayer;
 use chrono::Utc;

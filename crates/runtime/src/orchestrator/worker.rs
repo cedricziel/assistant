@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    ClaimFilter, ContentBlock, Interface, MAX_TURN_REDELIVERIES, OrgId, PublishRequest, SpaceId,
-    ToolHandler, TurnIdentity, UserId, bus_messages, topic,
+    ClaimFilter, ContentBlock, MAX_TURN_REDELIVERIES, OrgId, PublishRequest, SpaceId, ToolHandler,
+    UserId, bus_messages, topic, types::conversation::Interface, types::conversation::TurnIdentity,
 };
 use chrono::{DateTime, Local, Utc};
 use opentelemetry::{

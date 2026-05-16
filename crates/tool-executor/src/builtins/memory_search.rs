@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, LlmProvider, ToolHandler, ToolOutput};
+use assistant_core::{LlmProvider, ToolHandler, ToolOutput, types::conversation::ExecutionContext};
 use assistant_storage::StorageLayer;
 use async_trait::async_trait;
 use chrono::{Local, NaiveDate};

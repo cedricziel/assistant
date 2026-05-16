@@ -308,7 +308,12 @@ impl TitleGeneratorWorker {
         };
         let first_user_len = history
             .iter()
-            .find(|m| matches!(m.role, assistant_core::MessageRole::User))
+            .find(|m| {
+                matches!(
+                    m.role,
+                    assistant_core::types::conversation::MessageRole::User
+                )
+            })
             .map(|m| m.content.chars().count())
             .unwrap_or(0);
 
@@ -380,12 +385,12 @@ fn backoff_for_delivery(delivery: u32) -> Duration {
     RETRY_BACKOFF[idx]
 }
 
-fn message_to_chat_history(m: &assistant_core::Message) -> ChatHistoryMessage {
+fn message_to_chat_history(m: &assistant_core::types::conversation::Message) -> ChatHistoryMessage {
     let role = match m.role {
-        assistant_core::MessageRole::User => ChatRole::User,
-        assistant_core::MessageRole::Assistant => ChatRole::Assistant,
-        assistant_core::MessageRole::System => ChatRole::System,
-        assistant_core::MessageRole::Tool => ChatRole::Tool,
+        assistant_core::types::conversation::MessageRole::User => ChatRole::User,
+        assistant_core::types::conversation::MessageRole::Assistant => ChatRole::Assistant,
+        assistant_core::types::conversation::MessageRole::System => ChatRole::System,
+        assistant_core::types::conversation::MessageRole::Tool => ChatRole::Tool,
     };
     ChatHistoryMessage::Text {
         role,
@@ -615,9 +620,9 @@ mod tests {
     // Worker integration tests (in-memory bus + storage)
     // ---------------------------------------------------------------
 
-    use assistant_core::Message as CoreMessage;
     use assistant_core::bus::{MessageBus, PublishRequest};
     use assistant_core::bus_messages;
+    use assistant_core::types::conversation::Message as CoreMessage;
     use assistant_storage::StorageLayer;
     use assistant_storage::message_bus::SqliteMessageBus;
 

@@ -19,9 +19,10 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::types::conversation::TurnIdentity;
 use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ContentBlock, ConversationConfig,
-    IdentityResolver, TurnIdentity,
+    IdentityResolver,
 };
 use assistant_storage::CommandEventStore;
 use base64::Engine as _;
@@ -151,7 +152,7 @@ impl ChannelRunner {
     /// when the platform user cannot be mapped.
     async fn resolve_identity(
         resolver: &Option<Arc<dyn IdentityResolver>>,
-        interface: &assistant_core::Interface,
+        interface: &assistant_core::types::conversation::Interface,
         platform_id: &str,
     ) -> TurnIdentity {
         let Some(resolver) = resolver else {
@@ -501,9 +502,8 @@ mod tests {
     use std::pin::Pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use assistant_core::{
-        ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser,
-    };
+    use assistant_core::types::conversation::ChannelType;
+    use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
     use async_trait::async_trait;
     use chrono::Utc;
     use futures::Stream;
@@ -789,7 +789,7 @@ mod tests {
 
     // -- identity resolution tests -------------------------------------------
 
-    use assistant_core::types::Interface;
+    use assistant_core::types::conversation::Interface;
     use assistant_core::{IdentityResolver, UserId};
 
     /// A mock resolver that returns a fixed user ID for a known platform user.

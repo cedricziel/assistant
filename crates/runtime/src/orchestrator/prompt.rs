@@ -3,7 +3,8 @@
 //! Builds the full system prompt from memory files and skill metadata,
 //! optionally appending extension-tool instructions for messaging interfaces.
 
-use assistant_core::{Interface, ToolSpec};
+use assistant_core::ToolSpec;
+use assistant_core::types::conversation::Interface;
 use assistant_skills::SkillDef as SpecSkillDef;
 
 use super::Orchestrator;
@@ -250,7 +251,7 @@ fn escape_xml(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use assistant_core::Interface;
+    use assistant_core::types::conversation::Interface;
 
     use super::output_capabilities;
 

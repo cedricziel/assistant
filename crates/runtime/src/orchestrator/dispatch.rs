@@ -6,8 +6,9 @@
 use std::sync::Arc;
 
 use assistant_core::{
-    Attachment, Capabilities, ChatHistoryMessage, ExecutionContext, HostedTool, Message,
-    MessageRole, ToolCallItem, ToolHandler, ToolSpec,
+    Attachment, Capabilities, ChatHistoryMessage, HostedTool, ToolCallItem, ToolHandler, ToolSpec,
+    types::conversation::ExecutionContext, types::conversation::Message,
+    types::conversation::MessageRole,
 };
 use assistant_storage::conversations::ConversationStore;
 use opentelemetry::KeyValue;

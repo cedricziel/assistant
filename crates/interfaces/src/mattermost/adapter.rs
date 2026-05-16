@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, ToolHandler,
+    ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, ToolHandler,
+    types::conversation::ChannelType,
 };
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;

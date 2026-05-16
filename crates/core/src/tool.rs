@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::types::ExecutionContext;
+use crate::types::conversation::ExecutionContext;
 
 // ── Attachment ────────────────────────────────────────────────────────────────
 

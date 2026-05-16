@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    AgentReportStatus, AgentSpawn, ExecutionContext, SubagentRunner, ToolHandler, ToolOutput,
+    AgentReportStatus, AgentSpawn, SubagentRunner, ToolHandler, ToolOutput,
+    types::conversation::ExecutionContext,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -144,7 +145,7 @@ impl ToolHandler for AgentSpawnHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::{AgentReport, Interface};
+    use assistant_core::{AgentReport, types::conversation::Interface};
     use std::sync::Mutex;
     use uuid::Uuid;
 

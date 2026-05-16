@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use assistant_core::{
-    ChatHistoryMessage, ChatRole, ContentBlock, Interface, LlmProvider, LlmResponse,
-    LlmResponseMeta, ToolSpec,
+    ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, LlmResponseMeta,
+    ToolSpec, types::conversation::Interface,
 };
 use opentelemetry::{
     Array, Context as OtelContext, KeyValue, StringValue, Value, global,
