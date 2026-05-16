@@ -6,13 +6,12 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use assistant_core::types::{
-    AnthropicUserLocation, AnthropicWebFetchOptions, AnthropicWebSearchOptions,
+use assistant_core::types::llm::{
+    AnthropicUserLocation, AnthropicWebFetchOptions, AnthropicWebSearchOptions, LlmConfig,
 };
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmConfig, LlmProvider,
-    LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
-    ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
+    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
 };
 
 // ── AnthropicConfig ───────────────────────────────────────────────────────────

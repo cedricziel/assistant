@@ -20,11 +20,11 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use assistant_core::types::llm::{EmbeddingConfig, EmbeddingProviderKind};
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
-    AssistantConfig, ConversationConfig, EmbeddingConfig, EmbeddingProviderKind, Interface,
-    MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
-    set_runtime_workspace_dir, validate_agent_id,
+    AssistantConfig, ConversationConfig, Interface, MemoryLoader, MessageBus, apply_agent_context,
+    default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_core::{EmbeddingProvider, LlmEmbedder, LlmProvider, WithEmbeddingOverride};
 use assistant_llm_provider::{OllamaConfig, OllamaProvider, OpenAIProvider, OpenAIProviderConfig};
@@ -1166,7 +1166,7 @@ fn home_agent_root(agent_id: &str) -> Result<PathBuf> {
 /// Falls back to provider-specific env vars for API keys.
 fn build_embedding_provider(
     emb_cfg: &EmbeddingConfig,
-    main_cfg: &assistant_core::LlmConfig,
+    main_cfg: &assistant_core::types::llm::LlmConfig,
 ) -> Result<Arc<dyn EmbeddingProvider>> {
     match emb_cfg.provider {
         EmbeddingProviderKind::Ollama => {

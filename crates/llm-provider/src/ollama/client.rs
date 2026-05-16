@@ -32,8 +32,8 @@ impl Default for LlmClientConfig {
     }
 }
 
-impl From<&assistant_core::LlmConfig> for LlmClientConfig {
-    fn from(cfg: &assistant_core::LlmConfig) -> Self {
+impl From<&assistant_core::types::llm::LlmConfig> for LlmClientConfig {
+    fn from(cfg: &assistant_core::types::llm::LlmConfig) -> Self {
         Self {
             model: cfg.model.clone(),
             base_url: cfg.base_url.clone(),
@@ -64,7 +64,7 @@ impl LlmClient {
     }
 
     /// Create a client directly from a `LlmConfig` (convenience wrapper).
-    pub fn from_llm_config(cfg: &assistant_core::LlmConfig) -> anyhow::Result<Self> {
+    pub fn from_llm_config(cfg: &assistant_core::types::llm::LlmConfig) -> anyhow::Result<Self> {
         Self::new(LlmClientConfig::from(cfg))
     }
 

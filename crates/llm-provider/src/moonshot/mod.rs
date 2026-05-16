@@ -11,9 +11,10 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
+use assistant_core::types::llm::LlmConfig;
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, HostedTool, LlmConfig, LlmProvider, LlmResponse,
-    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta,
+    StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
 };
 
 use crate::chat_completions::{ChatCompletionsConfig, ChatCompletionsProvider, build_raw_messages};
