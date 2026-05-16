@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.157](https://github.com/cedricziel/assistant/compare/v0.1.156...v0.1.157) (2026-05-16)
+
+
+### Features
+
+* **app:** add façade barrel re-export shim (Option C) ([#797](https://github.com/cedricziel/assistant/issues/797)) ([876f6f8](https://github.com/cedricziel/assistant/commit/876f6f8ed2e9f4ce59ac8f74d967c67731eef994))
+* **app:** adopt fresh_dio for proactive OAuth token refresh ([#790](https://github.com/cedricziel/assistant/issues/790)) ([b0a5a64](https://github.com/cedricziel/assistant/commit/b0a5a647f6424aef5728728b3867862bd181ccd7))
+* **app:** Phase 1 — adaptive UI consolidation façade wrappers ([#789](https://github.com/cedricziel/assistant/issues/789)) ([6927549](https://github.com/cedricziel/assistant/commit/69275494f1a85b71f694168fbdc9a9ba99c3bd94))
+
 ## [0.1.156](https://github.com/cedricziel/assistant/compare/v0.1.155...v0.1.156) (2026-05-16)
 
 
