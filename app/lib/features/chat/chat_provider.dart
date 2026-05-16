@@ -884,6 +884,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Base delay for exponential backoff between retries (1s, 2s, 4s).
   static const _baseRetryDelay = Duration(seconds: 1);
 
+  /// How long to wait after Send for the first non-[RunStartedEvent] from
+  /// the SSE stream before treating the stream as stalled and falling back
+  /// to a direct conversation fetch.
+  ///
+  /// Motivated by iOS Dio / dart:io HttpClient buffering: the response
+  /// headers arrive (so [RunStartedEvent] fires from the `X-Run-Id`
+  /// header) but no body chunks reach the parser until the connection
+  /// closes, leaving the user staring at "jumpy dots" until the byte-
+  /// level 90 s heartbeat finally trips. 12 s is short enough to feel
+  /// responsive and long enough to absorb a brief first-token delay.
+  static const _initialStallTimeout = Duration(seconds: 12);
+
   /// Whether a transient stream interruption occurred that should be retried
   /// on app resume.
   bool get needsReconnect => _needsReconnect;
@@ -1515,13 +1527,35 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       ),
     );
 
+    // Arm the initial-stall watchdog as a per-event timeout on the SSE
+    // stream. Until we see a UI-visible event (anything other than
+    // [RunStartedEvent]), a quiet interval of [_initialStallTimeout]
+    // triggers a fallback to a direct conversation fetch. After progress
+    // has been observed, the byte-level heartbeat (90 s) handles longer
+    // silences that may legitimately occur during tool execution.
+    var sawProgress = false;
+    final source = api
+        .streamMessages(
+          conversationId,
+          message,
+          attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
+        )
+        .timeout(
+          _initialStallTimeout,
+          onTimeout: (sink) {
+            if (sawProgress) return;
+            // Recover synchronously so the placeholder clears immediately
+            // (the synchronous prefix of [_recoverStalledStream] runs
+            // before its first await), then close the stream so the
+            // await-for loop exits cleanly.
+            unawaited(_recoverStalledStream(conversationId, userMsgId));
+            sink.close();
+          },
+        );
+
     // Stream SSE events.
     try {
-      await for (final event in api.streamMessages(
-        conversationId,
-        message,
-        attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
-      )) {
+      await for (final event in source) {
         if (_cancelled) break;
         final chatState = state.value ?? const ChatState();
 
@@ -1530,7 +1564,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _currentRunId = event.runId;
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           continue;
-        } else if (event is TokenEvent) {
+        }
+        // Any non-RunStartedEvent counts as progress — the initial-stall
+        // watchdog won't fire on subsequent quiet periods.
+        sawProgress = true;
+        if (event is TokenEvent) {
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           tokenController.add(event.token);
           final newContent = chatState.streamingContent + event.token;
@@ -1647,6 +1685,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // Stream ended without DoneEvent — close token controller and treat
       // accumulated buffer as final.
       unawaited(tokenController.close());
+      if (!ref.mounted) return;
       final finalState = state.value ?? const ChatState();
       if (finalState.isSending) {
         final msgs = List<ChatMessage>.from(finalState.messages);
@@ -1679,6 +1718,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     } catch (e) {
       unawaited(tokenController.close());
       _closeThinkingController();
+      if (!ref.mounted) return;
 
       // Transient error with a run ID: retry with exponential backoff,
       // then defer to app-resume reconnection if all retries fail.
@@ -1733,6 +1773,78 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     }
+  }
+
+  /// Recover from a stalled SSE stream by fetching the conversation
+  /// directly. Triggered by the [_initialStallTimeout] watchdog when the
+  /// stream produces no UI-visible event in time — primarily the iOS
+  /// case where Dio buffers the chunked body until the connection
+  /// closes.
+  ///
+  /// On success, replaces the streaming placeholder with the server-
+  /// persisted message list. On failure, clears the placeholder and
+  /// surfaces an error so the user can retry.
+  Future<void> _recoverStalledStream(
+    String conversationId,
+    String userMsgId,
+  ) async {
+    if (_cancelled || !ref.mounted) return;
+    _cancelled = true; // stop the await-for loop on its next iteration
+
+    // Step 1: clear the placeholder synchronously so the user immediately
+    // sees that the stream stalled and gets out of the dots state.
+    final current = state.value ?? const ChatState();
+    _clearStalledPlaceholder(
+      current,
+      userMsgId,
+      error: 'Response is taking longer than expected. Refreshing…',
+    );
+
+    // Step 2: in the background, fetch the conversation from the server.
+    // The user reported that a manual reload surfaces the actual reply, so
+    // a direct GET typically resolves the missing message.
+    final api = _api;
+    if (api == null) return;
+    try {
+      final response = await api.conversations.getConversation(
+        id: conversationId,
+      );
+      if (!ref.mounted) return;
+      final messages = chatMessagesFromHistory(response.data!.messages);
+      final latest = state.value ?? const ChatState();
+      state = AsyncData(
+        ChatState(
+          conversationId: conversationId,
+          messages: messages,
+          pendingQueue: latest.pendingQueue,
+        ),
+      );
+    } catch (_) {
+      // Fetch failed — keep the cleared placeholder and the error message
+      // already surfaced above so the user can retry.
+    }
+  }
+
+  void _clearStalledPlaceholder(
+    ChatState from,
+    String userMsgId, {
+    required String error,
+  }) {
+    if (!ref.mounted) return;
+    final msgs = List<ChatMessage>.from(from.messages)
+      ..removeWhere((m) => m.id == 'assistant-streaming');
+    final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+    if (userIdx != -1) {
+      msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.failed);
+    }
+    state = AsyncData(
+      from.copyWith(
+        messages: msgs,
+        isSending: false,
+        streamingContent: '',
+        error: error,
+      ),
+    );
   }
 
   /// Returns `true` if [error] looks like a transient connection failure

@@ -1584,4 +1584,92 @@ void main() {
       );
     });
   });
+
+  // -- Stalled-stream recovery (iPhone/iPad bug: dots forever) ---------------
+  //
+  // Reproduces the user-reported behaviour:
+  //   "I send a message and I see the three jumpy dots indefinitely on my
+  //    iPhone. […] reload the conversation via menu and a new message
+  //    appears."
+  //
+  // What we know from that report:
+  //   - POST /messages succeeds: the server receives, runs, and persists
+  //     the assistant reply (it's there on reload).
+  //   - The SSE response stream never delivers any events to the iPhone
+  //     in real time (likely iOS Dio / dart:io HttpClient buffering).
+  //   - ChatNotifier's existing recovery is the byte-level heartbeat
+  //     timeout (90 s) followed by up to three replay-run retries, each
+  //     with its own 90 s budget. That is "forever" from a user POV.
+  //
+  // This test pins a stronger user contract: a stream that delivers no
+  // useful events within ~15 s of the user pressing Send MUST NOT leave
+  // the UI in the "isStreaming, no content, dots showing" state. The fix
+  // is intentionally not prescribed by this test — surfacing an error,
+  // polling the conversation endpoint, exposing a retry button, or
+  // shortening the no-progress deadline are all acceptable.
+  group('ChatNotifier — stalled SSE stream recovery', () {
+    testWidgets('stream that emits no tokens within 15s does not leave the UI in '
+        'indefinite "streaming dots" state', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      // User hits Send. The notifier inserts a user bubble and an
+      // empty assistant-streaming placeholder, then awaits the SSE
+      // stream.
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+
+      // Server acknowledges the run (matches the X-Run-Id header path)
+      // but never emits a token, status, or done event afterwards —
+      // exactly what iOS sees when Dio buffers the chunked body.
+      ctrl.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+
+      // Precondition: we are in the "dots" state right now.
+      final initial = notifier.state.value!;
+      final initialPlaceholder = initial.messages.firstWhere(
+        (m) => m.id == 'assistant-streaming',
+        orElse: () =>
+            ChatMessage(id: 'missing', role: 'assistant', content: ''),
+      );
+      expect(
+        initialPlaceholder.isStreaming && initialPlaceholder.content.isEmpty,
+        isTrue,
+        reason:
+            'precondition: right after Send we expect the dots-state '
+            'placeholder to be present',
+      );
+
+      // Advance time past the no-progress watchdog. 15 s is well above
+      // what a user will tolerate while staring at jumpy dots, and well
+      // below the current 90 s heartbeat × 3-retry total. The trailing
+      // pump drains microtasks scheduled by the timeout-driven error
+      // propagation through the stream subscription.
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+
+      final after = notifier.state.value!;
+      final stillInDots = after.messages.any(
+        (m) =>
+            m.id == 'assistant-streaming' && m.isStreaming && m.content.isEmpty,
+      );
+
+      expect(
+        stillInDots,
+        isFalse,
+        reason:
+            'After 15s with no SSE progress the UI must exit the '
+            '"dots forever" state — surface an error, fall back to a '
+            'fetch of the conversation, or clear the placeholder. '
+            'Current state: isSending=${after.isSending}, '
+            'error=${after.error}, '
+            'messages=${after.messages.map((m) => '(${m.id}, streaming=${m.isStreaming}, content="${m.content}")').toList()}',
+      );
+    });
+  });
 }
