@@ -32,7 +32,7 @@
 //! metadata.
 
 use anyhow::Result;
-use assistant_core::IcebergConfig;
+use assistant_core::types::observability::IcebergConfig;
 
 pub mod catalog;
 mod log;

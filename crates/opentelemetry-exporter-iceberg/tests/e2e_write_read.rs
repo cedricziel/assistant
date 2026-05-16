@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use std::time::SystemTime;
 
 use arrow_array::Array;
-use assistant_core::{IcebergConfig, PartitionGranularity};
+use assistant_core::types::observability::{IcebergConfig, PartitionGranularity};
 use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::{
     SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState,

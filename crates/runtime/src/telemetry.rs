@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use assistant_core::{ObservabilityConfig, OtelExporter};
+use assistant_core::types::observability::{ObservabilityConfig, OtelExporter};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_exporter_iceberg::build_exporters;

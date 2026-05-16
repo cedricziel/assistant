@@ -21,7 +21,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde_json::Value;
 use uuid::Uuid;
 
-use assistant_core::IcebergConfig;
+use assistant_core::types::observability::IcebergConfig;
 use assistant_storage::{
     LogStats, MetricsSummary, ModelTokenUsage, RecordedLog, RecordedSpan, SkillStatsProvider,
     TimeSeriesPoint, ToolUsageStats, TraceFilter, TraceStats, TraceSummary,

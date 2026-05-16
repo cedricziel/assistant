@@ -6,7 +6,7 @@ use chrono::{Datelike, TimeZone, Utc};
 use iceberg::spec::{Literal, PartitionKey, SchemaRef, Struct, Transform, UnboundPartitionSpec};
 use iceberg::table::Table;
 
-use assistant_core::PartitionGranularity;
+use assistant_core::types::observability::PartitionGranularity;
 
 /// Build an [`UnboundPartitionSpec`] that partitions a table by the given time
 /// column field ID, using the requested granularity.

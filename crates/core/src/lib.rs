@@ -70,15 +70,15 @@ pub use memory::{
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput};
-// `assistant_core::types::storage::BusConfig`) rather than from the crate root.
+// `assistant_core::types::observability::OtelExporter`) rather than from the
+// crate root.
 pub use types::{
     AgentConfig, AssistantConfig, ChannelType, CompactionConfig, DEFAULT_MAX_AGENT_DEPTH,
-    EmbeddingConfig, EmbeddingProviderKind, ExecutionContext, IcebergConfig, Interface,
-    LearningConfig, LlmConfig, LlmProviderKind, MatrixConfig, MattermostConfig, McpConfig,
-    McpServerEntry, McpTransportConfig, McpTrustLevel, MemoryConfig, Message, MessageRole,
-    MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, NextcloudConfig, NotificationsConfig,
-    ObservabilityConfig, OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation, OpenAIWebSearchOptions,
-    OpenRouterOptions, OtelExporter, PartitionGranularity, SignalConfig, SkillsConfig, SlackConfig,
-    SlackListenMode, TitlingConfig, TurnIdentity,
+    EmbeddingConfig, EmbeddingProviderKind, ExecutionContext, Interface, LearningConfig, LlmConfig,
+    LlmProviderKind, MatrixConfig, MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig,
+    McpTrustLevel, MemoryConfig, Message, MessageRole, MirrorConfig, MoonshotOptions,
+    MoonshotWebSearchOptions, NextcloudConfig, NotificationsConfig, OpenAIAuthMode, OpenAIOptions,
+    OpenAIUserLocation, OpenAIWebSearchOptions, OpenRouterOptions, SignalConfig, SkillsConfig,
+    SlackConfig, SlackListenMode, TitlingConfig, TurnIdentity,
 };
 pub use upload::resolve_upload_bytes;
