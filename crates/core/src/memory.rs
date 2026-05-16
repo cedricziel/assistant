@@ -17,7 +17,8 @@ use chrono::Local;
 use tracing::{debug, warn};
 
 use crate::context::runtime_agent_root;
-use crate::types::{AssistantConfig, MemoryConfig};
+use crate::types::AssistantConfig;
+use crate::types::features::MemoryConfig;
 
 /// Maximum characters per individual memory file included in the system prompt.
 const BOOTSTRAP_MAX_CHARS_PER_FILE: usize = 20_000;

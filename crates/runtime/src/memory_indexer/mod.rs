@@ -167,7 +167,7 @@ impl MemoryIndexer {
 /// Returns a [`tokio::task::JoinHandle`] so the caller can abort or await the
 /// task during graceful shutdown.
 pub fn spawn_memory_indexer(
-    config: &assistant_core::MemoryConfig,
+    config: &assistant_core::types::features::MemoryConfig,
     storage: Arc<StorageLayer>,
     llm: Arc<dyn LlmProvider>,
 ) -> tokio::task::JoinHandle<()> {
