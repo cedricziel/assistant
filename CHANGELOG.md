@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.152](https://github.com/cedricziel/assistant/compare/v0.1.151...v0.1.152) (2026-05-16)
+
+
+### Features
+
+* **runtime:** auto-title conversations via turn.result consumer ([#722](https://github.com/cedricziel/assistant/issues/722)) ([a6528ef](https://github.com/cedricziel/assistant/commit/a6528efc9a0c63183b133691753d958b558144ab))
+
+
+### Bug Fixes
+
+* **app:** web favicon + PWA maskable icons match brand ([#721](https://github.com/cedricziel/assistant/issues/721)) ([b186134](https://github.com/cedricziel/assistant/commit/b18613440a10b83497be8972eb09977eeaef7729))
+* **chat:** drop empty bubbles for tool-only assistant history rows ([#717](https://github.com/cedricziel/assistant/issues/717)) ([73c75d6](https://github.com/cedricziel/assistant/commit/73c75d68784a3e7ba86cc717897b69237b66c866))
+
 ## [0.1.151](https://github.com/cedricziel/assistant/compare/v0.1.150...v0.1.151) (2026-05-10)
 
 
