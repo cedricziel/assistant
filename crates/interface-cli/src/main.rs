@@ -2081,6 +2081,18 @@ async fn main() -> Result<()> {
                 .run_worker_filtered("scheduler-worker", Some("Scheduler"))
                 .await;
         });
+
+        // Spawn a Web-filtered worker too. Turns submitted by the web-ui
+        // process (`assistant webui serve`) are published with
+        // `Interface::Web`; the web-ui no longer runs its own worker pool
+        // (it relies on this orchestrator service to consume them). Without
+        // this worker Web turns would queue indefinitely.
+        let web_orch = bs.orchestrator.clone();
+        tokio::spawn(async move {
+            web_orch
+                .run_worker_filtered("web-worker", Some("Web"))
+                .await;
+        });
     }
 
     if orchestrator_no_repl {

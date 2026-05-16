@@ -19,6 +19,25 @@ The Flutter web app loads at <http://127.0.0.1:8080>. In single-token mode,
 enter the server URL and token. In multi-user mode, the app uses OAuth2
 Authorization Code + PKCE to authenticate.
 
+## Operator note: web-ui requires the orchestrator service
+
+`assistant webui serve` is intentionally a thin HTTP/SSE/UI server. It
+publishes chat turns to the shared message bus but **does not spawn the
+turn-processing worker pool or the title-generator worker**. Operators
+must run an orchestrator service alongside it, e.g.
+
+```sh
+assistant orchestrator run --no-repl                # in another systemd unit
+# (or: --interfaces slack,matrix to also handle messengers)
+```
+
+The orchestrator service includes a `Web`-filtered worker that consumes
+the turns published by every `assistant webui serve` instance, so a
+single orchestrator handles Web + Slack + Matrix + Scheduler turns from
+one process. Running runtime workers in both processes simultaneously
+causes per-second `claim failed` warnings as the two consumers race for
+every bus claim.
+
 ## Navigation sidebar
 
 On viewports >= 768 dp wide, the app renders a navigation sidebar with all
