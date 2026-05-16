@@ -5,7 +5,7 @@
 //! re-exports it and adds runtime helpers that resolve tokens from
 //! environment variables when not explicitly configured.
 
-pub use assistant_core::SlackConfig;
+pub use assistant_core::types::channels::SlackConfig;
 
 /// Extension methods for [`SlackConfig`] that resolve tokens from the environment.
 pub trait SlackConfigExt {

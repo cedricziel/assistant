@@ -12,7 +12,7 @@ use super::adapter::MattermostAdapter;
 use super::client::MattermostClient;
 use super::config::MattermostConfigExt;
 
-pub use assistant_core::MattermostConfig;
+pub use assistant_core::types::channels::MattermostConfig;
 
 /// Mattermost interface runner. Connects via WebSocket and dispatches messages.
 pub struct MattermostInterface {
@@ -83,7 +83,7 @@ impl InterfaceRunner for MattermostInterface {
 
 #[cfg(test)]
 mod tests {
-    use assistant_core::MattermostConfig;
+    use assistant_core::types::channels::MattermostConfig;
 
     #[test]
     fn allowlist_channel_empty_accepts_all() {

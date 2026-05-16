@@ -11,9 +11,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::types::channels::{SlackConfig, SlackListenMode};
 use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, Message, MessageRole,
-    SlackConfig, SlackListenMode, ToolHandler,
+    ToolHandler,
 };
 use assistant_storage::StorageLayer;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
@@ -1221,7 +1222,7 @@ mod tests {
     #[test]
     fn mention_mode_accepts_dm() {
         let result = should_process(
-            &assistant_core::SlackListenMode::Mention,
+            &SlackListenMode::Mention,
             "U_BOT",
             "D123ABC", // DM channel
             "hello",
@@ -1239,7 +1240,7 @@ mod tests {
     #[test]
     fn mention_mode_accepts_at_mention() {
         let result = should_process(
-            &assistant_core::SlackListenMode::Mention,
+            &SlackListenMode::Mention,
             "U_BOT",
             "C123",
             "hey <@U_BOT> help me",
@@ -1257,7 +1258,7 @@ mod tests {
     #[test]
     fn mention_mode_accepts_tracked_thread_reply() {
         let result = should_process(
-            &assistant_core::SlackListenMode::Mention,
+            &SlackListenMode::Mention,
             "U_BOT",
             "C123",
             "thanks!",
@@ -1275,7 +1276,7 @@ mod tests {
     #[test]
     fn mention_mode_rejects_unmentioned_channel_message() {
         let result = should_process(
-            &assistant_core::SlackListenMode::Mention,
+            &SlackListenMode::Mention,
             "U_BOT",
             "C123",
             "just chatting",
@@ -1293,7 +1294,7 @@ mod tests {
     #[test]
     fn mention_mode_rejects_untracked_thread_reply() {
         let result = should_process(
-            &assistant_core::SlackListenMode::Mention,
+            &SlackListenMode::Mention,
             "U_BOT",
             "C123",
             "reply without prior mention",
@@ -1311,7 +1312,7 @@ mod tests {
     #[test]
     fn all_mode_accepts_everything() {
         let result = should_process(
-            &assistant_core::SlackListenMode::All,
+            &SlackListenMode::All,
             "U_BOT",
             "C123",
             "random message",

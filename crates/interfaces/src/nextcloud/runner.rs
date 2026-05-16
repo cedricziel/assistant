@@ -18,7 +18,7 @@ use tracing::info;
 use super::adapter::NextcloudAdapter;
 use super::config::NextcloudConfigExt;
 
-pub use assistant_core::NextcloudConfig;
+pub use assistant_core::types::channels::NextcloudConfig;
 
 /// The Nextcloud Talk bot interface.
 ///

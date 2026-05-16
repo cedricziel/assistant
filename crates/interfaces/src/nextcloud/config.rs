@@ -4,7 +4,7 @@
 //! it can be embedded in `AssistantConfig`.  This module adds an extension
 //! trait with runtime helpers (env-var fallbacks).
 
-pub use assistant_core::NextcloudConfig;
+pub use assistant_core::types::channels::NextcloudConfig;
 
 /// Extension methods for [`NextcloudConfig`] that provide env-var fallbacks.
 pub trait NextcloudConfigExt {

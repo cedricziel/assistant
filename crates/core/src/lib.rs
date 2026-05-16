@@ -74,9 +74,8 @@ pub use tool::{Attachment, ToolHandler, ToolOutput};
 // crate root.
 pub use types::{
     AgentConfig, AssistantConfig, ChannelType, DEFAULT_MAX_AGENT_DEPTH, EmbeddingConfig,
-    EmbeddingProviderKind, ExecutionContext, Interface, LlmConfig, LlmProviderKind, MatrixConfig,
-    MattermostConfig, Message, MessageRole, MoonshotOptions, MoonshotWebSearchOptions,
-    NextcloudConfig, OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation, OpenAIWebSearchOptions,
-    OpenRouterOptions, SignalConfig, SlackConfig, SlackListenMode, TurnIdentity,
+    EmbeddingProviderKind, ExecutionContext, Interface, LlmConfig, LlmProviderKind, Message,
+    MessageRole, MoonshotOptions, MoonshotWebSearchOptions, OpenAIAuthMode, OpenAIOptions,
+    OpenAIUserLocation, OpenAIWebSearchOptions, OpenRouterOptions, TurnIdentity,
 };
 pub use upload::resolve_upload_bytes;
