@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 
-use crate::AssistantConfig;
+use crate::types::agent::AssistantConfig;
 
 pub fn default_agent_id() -> &'static str {
     "default"

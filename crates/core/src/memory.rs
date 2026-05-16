@@ -17,7 +17,7 @@ use chrono::Local;
 use tracing::{debug, warn};
 
 use crate::context::runtime_agent_root;
-use crate::types::AssistantConfig;
+use crate::types::agent::AssistantConfig;
 use crate::types::features::MemoryConfig;
 
 /// Maximum characters per individual memory file included in the system prompt.

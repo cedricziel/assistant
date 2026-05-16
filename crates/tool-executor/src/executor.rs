@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use anyhow::Result;
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{
-    AssistantConfig, LlmProvider, SubagentRunner, ToolHandler, ToolOutput, ToolSpec,
+    LlmProvider, SubagentRunner, ToolHandler, ToolOutput, ToolSpec, types::agent::AssistantConfig,
 };
 use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use tracing::warn;

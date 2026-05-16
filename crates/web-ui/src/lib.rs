@@ -286,7 +286,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         Some(p) => assistant_core::load_config(&p),
         None => {
             warn!("Cannot determine home directory; using default LLM config");
-            assistant_core::AssistantConfig::default()
+            assistant_core::types::agent::AssistantConfig::default()
         }
     };
 

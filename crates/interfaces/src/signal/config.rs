@@ -1,7 +1,7 @@
 //! Signal interface configuration.
 //!
 //! [`SignalConfig`] is defined in `assistant-core` so it can be embedded in
-//! [`AssistantConfig`][assistant_core::AssistantConfig].  This module
+//! [`AssistantConfig`][assistant_core::types::agent::AssistantConfig].  This module
 //! re-exports it and adds runtime helpers (e.g. `resolved_api_url`) that
 //! resolve defaults and environment-variable overrides.
 
@@ -90,7 +90,8 @@ mod tests {
             phone_number = "+14155550123"
             allowed_senders = ["uuid-x"]
         "#;
-        let cfg: assistant_core::AssistantConfig = toml::from_str(toml_str).expect("parse");
+        let cfg: assistant_core::types::agent::AssistantConfig =
+            toml::from_str(toml_str).expect("parse");
         let sig = cfg.signal.expect("signal section present");
         assert_eq!(sig.phone_number.as_deref(), Some("+14155550123"));
         assert_eq!(sig.allowed_senders, ["uuid-x"]);
@@ -98,7 +99,7 @@ mod tests {
 
     #[test]
     fn assistant_config_without_signal_section_is_none() {
-        let cfg: assistant_core::AssistantConfig = toml::from_str("").expect("parse");
+        let cfg: assistant_core::types::agent::AssistantConfig = toml::from_str("").expect("parse");
         assert!(cfg.signal.is_none());
     }
 }

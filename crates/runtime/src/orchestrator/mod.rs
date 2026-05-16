@@ -234,7 +234,7 @@ impl Orchestrator {
         executor: Arc<ToolExecutor>,
         registry: Arc<SkillRegistry>,
         bus: Arc<dyn MessageBus>,
-        config: &assistant_core::AssistantConfig,
+        config: &assistant_core::types::agent::AssistantConfig,
     ) -> Self {
         let memory_loader = MemoryLoader::new(config);
         memory_loader.ensure_defaults();

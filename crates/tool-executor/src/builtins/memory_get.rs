@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    AssistantConfig, ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path,
+    ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path, types::agent::AssistantConfig,
     types::conversation::ExecutionContext,
 };
 use async_trait::async_trait;

@@ -2384,7 +2384,7 @@ mod tests {
 
     use std::collections::HashMap;
 
-    use assistant_core::AssistantConfig;
+    use assistant_core::types::agent::AssistantConfig;
     use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
     use assistant_llm_provider::retry::RetryConfig;
     use assistant_runtime::{CommandRegistry, Orchestrator};
@@ -2507,7 +2507,7 @@ mod tests {
     /// No worker task is spawned, so the single in-memory connection is not
     /// contended. Use this for tests that only exercise the event log endpoints.
     async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
-        use assistant_core::AssistantConfig;
+        use assistant_core::types::agent::AssistantConfig;
         use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
         use assistant_llm_provider::retry::RetryConfig;
         use assistant_runtime::Orchestrator;
@@ -3612,7 +3612,7 @@ mod tests {
         short_ttl_store.prune_expired().await.unwrap();
 
         // Build a state that uses the same pool (events are now gone).
-        use assistant_core::AssistantConfig;
+        use assistant_core::types::agent::AssistantConfig;
         use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
         use assistant_llm_provider::retry::RetryConfig;
         use assistant_runtime::Orchestrator;

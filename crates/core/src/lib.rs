@@ -72,5 +72,4 @@ pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput};
 // `assistant_core::types::observability::OtelExporter`) rather than from the
 // crate root.
-pub use types::{AgentConfig, AssistantConfig};
 pub use upload::resolve_upload_bytes;

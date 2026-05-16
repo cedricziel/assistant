@@ -20,12 +20,13 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::conversation::Interface;
 use assistant_core::types::llm::{EmbeddingConfig, EmbeddingProviderKind};
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
-    AssistantConfig, ConversationConfig, MemoryLoader, MessageBus, apply_agent_context,
-    default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
-    types::conversation::Interface, validate_agent_id,
+    ConversationConfig, MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir,
+    set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_core::{EmbeddingProvider, LlmEmbedder, LlmProvider, WithEmbeddingOverride};
 use assistant_llm_provider::{OllamaConfig, OllamaProvider, OpenAIProvider, OpenAIProviderConfig};
