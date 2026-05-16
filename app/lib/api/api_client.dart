@@ -6,9 +6,12 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'dart:io' show Platform;
+
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:native_dio_adapter/native_dio_adapter.dart';
 
 import 'auth_interceptor.dart';
 import 'event_source_stream.dart';
@@ -33,6 +36,12 @@ class ApiAuthException implements Exception {
   String toString() => message;
 }
 
+/// True when the current process is the `flutter test` runner. Used to
+/// avoid installing native-platform Dio adapters whose plugin bindings
+/// aren't initialized in unit-test mode.
+bool get _runningInFlutterTest =>
+    !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
+
 /// Configured client bundle: generated API instances + SSE streaming helper.
 class ApiClient {
   ApiClient({
@@ -48,6 +57,24 @@ class ApiClient {
         receiveTimeout: const Duration(minutes: 10),
       ),
     );
+
+    // Use the platform-native HTTP stack on iOS / macOS (NSURLSession via
+    // cupertino_http) and Android (Cronet) so chunked-transfer SSE
+    // responses stream in real time. dart:io's HttpClient — Dio's default
+    // — buffers SSE bodies on iOS / iPadOS until the connection closes,
+    // which is the root cause of the "jumpy dots forever" behaviour
+    // mitigated at the application layer by `_recoverStalledStream`.
+    //
+    // Skipped in two cases:
+    //   - Web: Dio's BrowserHttpClientAdapter already routes through the
+    //     browser's `fetch` and streams correctly.
+    //   - `flutter test`: NativeAdapter eagerly instantiates a native
+    //     URLSession via cupertino_http, which requires the iOS / macOS
+    //     platform binding. Unit tests run without that binding, so we
+    //     fall back to dart:io there.
+    if (!kIsWeb && !_runningInFlutterTest) {
+      _dio.httpClientAdapter = NativeAdapter();
+    }
 
     if (refreshTokens != null && onAuthExpired != null) {
       final interceptor = AuthRecoveryInterceptor(
