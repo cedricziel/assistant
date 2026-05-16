@@ -36,7 +36,6 @@ mod subagent;
 mod worker;
 
 #[cfg(test)]
-#[path = "tests.rs"]
 mod tests;
 
 pub use stream_event::OrchestratorEvent;
