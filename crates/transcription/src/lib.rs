@@ -22,7 +22,9 @@ mod whisper;
 
 use std::sync::Arc;
 
-use assistant_core::{TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsProviderKind};
+use assistant_core::types::transcription::{
+    TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsProviderKind,
+};
 
 pub use audio_store::AudioStore;
 pub use converter::{AudioConverter, AudioFormat, ConversionResult};

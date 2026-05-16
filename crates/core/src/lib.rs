@@ -70,6 +70,11 @@ pub use memory::{
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput};
+// Note: types previously flat-re-exported are being migrated out of the root
+// namespace into per-domain submodules under `types::*`. Consumers should
+// import from the canonical submodule path (e.g.
+// `assistant_core::types::transcription::TranscriptionConfig`) rather than
+// from the crate root.
 pub use types::{
     AgentConfig, AssistantConfig, BusConfig, BusKind, ChannelType, CompactionConfig,
     DEFAULT_MAX_AGENT_DEPTH, EmbeddingConfig, EmbeddingProviderKind, ExecutionContext,
@@ -78,7 +83,6 @@ pub use types::{
     Message, MessageRole, MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, NextcloudConfig,
     NotificationsConfig, ObservabilityConfig, OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation,
     OpenAIWebSearchOptions, OpenRouterOptions, OtelExporter, PartitionGranularity, SignalConfig,
-    SkillsConfig, SlackConfig, SlackListenMode, StorageConfig, TitlingConfig, TranscriptionConfig,
-    TranscriptionProviderKind, TtsConfig, TtsProviderKind, TurnIdentity,
+    SkillsConfig, SlackConfig, SlackListenMode, StorageConfig, TitlingConfig, TurnIdentity,
 };
 pub use upload::resolve_upload_bytes;
