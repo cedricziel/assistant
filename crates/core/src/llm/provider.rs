@@ -101,6 +101,21 @@ pub trait LlmProvider: Send + Sync {
         Err(anyhow::anyhow!("Embedding not supported by this provider"))
     }
 
+    /// Compute dense vector embeddings for a batch of texts in a single
+    /// request. The default implementation falls back to calling [`embed`]
+    /// once per text — providers that natively batch (Ollama, OpenAI, Voyage)
+    /// SHOULD override this for a meaningful speed-up (#30).
+    ///
+    /// The returned vector MUST have the same length and order as the input
+    /// slice. If any single text fails, the whole batch returns the error.
+    async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        let mut out = Vec::with_capacity(texts.len());
+        for text in texts {
+            out.push(self.embed(text).await?);
+        }
+        Ok(out)
+    }
+
     // ── Provider identity (for OTel GenAI semantic conventions) ───────────
 
     /// Short, stable identifier for the provider system (e.g. `"ollama"`,

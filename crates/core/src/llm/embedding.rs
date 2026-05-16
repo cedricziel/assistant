@@ -25,6 +25,18 @@ use super::types::{ChatHistoryMessage, LlmResponse};
 pub trait EmbeddingProvider: Send + Sync {
     /// Compute a dense vector embedding for `text`.
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+
+    /// Compute dense vector embeddings for a batch of texts. The default
+    /// implementation falls back to sequential [`embed`] calls — implementors
+    /// that support batched APIs (Ollama `/api/embed`, OpenAI, Voyage) SHOULD
+    /// override this for fewer round-trips (#30).
+    async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        let mut out = Vec::with_capacity(texts.len());
+        for text in texts {
+            out.push(self.embed(text).await?);
+        }
+        Ok(out)
+    }
 }
 
 // ── LlmEmbedder adapter ─────────────────────────────────────────────────────
@@ -40,6 +52,10 @@ pub struct LlmEmbedder(pub Arc<dyn LlmProvider>);
 impl EmbeddingProvider for LlmEmbedder {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         self.0.embed(text).await
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        self.0.embed_batch(texts).await
     }
 }
 
@@ -95,6 +111,10 @@ impl LlmProvider for WithEmbeddingOverride {
 
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         self.embedder.embed(text).await
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        self.embedder.embed_batch(texts).await
     }
 
     fn provider_name(&self) -> &str {
