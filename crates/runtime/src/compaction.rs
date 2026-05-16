@@ -21,9 +21,10 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::types::features::CompactionConfig;
 use assistant_core::{
-    ChatHistoryMessage, ChatRole, CompactionConfig, ContentBlock, LlmProvider, LlmResponse,
-    Message, MessageRole, ToolCallItem,
+    ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, Message, MessageRole,
+    ToolCallItem,
 };
 use assistant_storage::conversations::ConversationStore;
 use tracing::{debug, info, warn};
@@ -439,7 +440,7 @@ pub async fn maybe_compact(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::CompactionConfig;
+    use assistant_core::types::features::CompactionConfig;
 
     fn cfg(enabled: bool, window: u64, floor: u64, soft: u64, keep: usize) -> CompactionConfig {
         CompactionConfig {

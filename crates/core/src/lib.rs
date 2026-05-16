@@ -73,12 +73,11 @@ pub use tool::{Attachment, ToolHandler, ToolOutput};
 // `assistant_core::types::observability::OtelExporter`) rather than from the
 // crate root.
 pub use types::{
-    AgentConfig, AssistantConfig, ChannelType, CompactionConfig, DEFAULT_MAX_AGENT_DEPTH,
-    EmbeddingConfig, EmbeddingProviderKind, ExecutionContext, Interface, LearningConfig, LlmConfig,
-    LlmProviderKind, MatrixConfig, MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig,
-    McpTrustLevel, MemoryConfig, Message, MessageRole, MirrorConfig, MoonshotOptions,
-    MoonshotWebSearchOptions, NextcloudConfig, NotificationsConfig, OpenAIAuthMode, OpenAIOptions,
-    OpenAIUserLocation, OpenAIWebSearchOptions, OpenRouterOptions, SignalConfig, SkillsConfig,
-    SlackConfig, SlackListenMode, TitlingConfig, TurnIdentity,
+    AgentConfig, AssistantConfig, ChannelType, DEFAULT_MAX_AGENT_DEPTH, EmbeddingConfig,
+    EmbeddingProviderKind, ExecutionContext, Interface, LlmConfig, LlmProviderKind, MatrixConfig,
+    MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig, McpTrustLevel, Message,
+    MessageRole, MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, NextcloudConfig,
+    OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation, OpenAIWebSearchOptions, OpenRouterOptions,
+    SignalConfig, SkillsConfig, SlackConfig, SlackListenMode, TurnIdentity,
 };
 pub use upload::resolve_upload_bytes;

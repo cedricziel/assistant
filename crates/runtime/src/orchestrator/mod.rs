@@ -209,7 +209,7 @@ pub struct Orchestrator {
     /// platform tools for scheduler-originated turns.
     pub adapter_registry: crate::AdapterRegistry,
     /// Context compaction configuration.
-    pub(crate) compaction_config: assistant_core::CompactionConfig,
+    pub(crate) compaction_config: assistant_core::types::features::CompactionConfig,
     /// How long `submit_turn` waits for the worker to return a result before
     /// timing out. Defaults to 10 800 s (3 h). Configurable per persona via
     /// `with_submit_timeout`.
@@ -222,7 +222,7 @@ pub struct Orchestrator {
     /// Reset at the start of each turn.
     pub(crate) active_skill: tokio::sync::RwLock<Option<String>>,
     /// Learning configuration for autonomous skill creation and improvement.
-    pub(crate) learning_config: assistant_core::LearningConfig,
+    pub(crate) learning_config: assistant_core::types::features::LearningConfig,
 }
 
 impl Orchestrator {

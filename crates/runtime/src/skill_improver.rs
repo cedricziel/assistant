@@ -6,7 +6,8 @@
 //! immediately with revert-on-regression safety.
 
 use anyhow::Result;
-use assistant_core::{ChatHistoryMessage, ChatRole, LearningConfig, LlmProvider, LlmResponse};
+use assistant_core::types::features::LearningConfig;
+use assistant_core::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
 use assistant_storage::{
     RefinementStatus, RefinementsStore, SkillRegistry, SkillStatsProvider, StorageLayer,
 };
