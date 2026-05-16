@@ -533,6 +533,18 @@ impl MessageBus for NatsMessageBus {
         debug!("NATS purge: no-op (JetStream MaxAge handles expiration)");
         Ok(0)
     }
+
+    /// **NATS behavioural note:** Conservative `true` placeholder.
+    ///
+    /// JetStream doesn't expose a per-(conversation_id, topic) "is there an
+    /// active message" query without scanning the stream. Returning `true`
+    /// preserves the crash-recovery invariant ("if in doubt, assume the run
+    /// may still complete") at the cost of leaving orphaned SSE runs open
+    /// slightly longer than necessary. Implement properly when we need it.
+    async fn has_active_message(&self, _conversation_id: &str, _topic: &str) -> Result<bool> {
+        debug!("NATS has_active_message: returning true (no JetStream scan available)");
+        Ok(true)
+    }
 }
 
 // -- Helpers ----------------------------------------------------------------

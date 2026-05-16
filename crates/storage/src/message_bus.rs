@@ -259,6 +259,20 @@ impl MessageBus for SqliteMessageBus {
         }
         Ok(count)
     }
+
+    async fn has_active_message(&self, conversation_id: &str, topic: &str) -> Result<bool> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM bus_messages \
+             WHERE conversation_id = ?1 \
+               AND topic = ?2 \
+               AND status IN ('pending', 'claimed')",
+        )
+        .bind(conversation_id)
+        .bind(topic)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count > 0)
+    }
 }
 
 // -- Row parsing ------------------------------------------------------------
