@@ -349,3 +349,133 @@ pub struct OpenRouterOptions {
     /// Maximum completion tokens per response (default: 8192).
     pub max_tokens: Option<u32>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{EmbeddingConfig, EmbeddingProviderKind, LlmConfig, LlmProviderKind};
+
+    // -- EmbeddingConfig deserialization --------------------------------------
+
+    #[test]
+    fn embedding_config_voyage_all_fields() {
+        let toml_str = r#"
+            provider = "voyage"
+            model = "voyage-3-large"
+            base_url = "https://custom.voyage.example.com"
+            api_key = "pa-test-key"
+        "#;
+        let cfg: EmbeddingConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.provider, EmbeddingProviderKind::Voyage);
+        assert_eq!(cfg.model.as_deref(), Some("voyage-3-large"));
+        assert_eq!(
+            cfg.base_url.as_deref(),
+            Some("https://custom.voyage.example.com")
+        );
+        assert_eq!(cfg.api_key.as_deref(), Some("pa-test-key"));
+    }
+
+    #[test]
+    fn embedding_config_ollama_minimal() {
+        let toml_str = r#"provider = "ollama""#;
+        let cfg: EmbeddingConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.provider, EmbeddingProviderKind::Ollama);
+        assert!(cfg.model.is_none());
+        assert!(cfg.base_url.is_none());
+        assert!(cfg.api_key.is_none());
+    }
+
+    #[test]
+    fn embedding_config_openai_with_model() {
+        let toml_str = r#"
+            provider = "openai"
+            model = "text-embedding-3-large"
+        "#;
+        let cfg: EmbeddingConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.provider, EmbeddingProviderKind::OpenAI);
+        assert_eq!(cfg.model.as_deref(), Some("text-embedding-3-large"));
+    }
+
+    #[test]
+    fn embedding_config_invalid_provider_errors() {
+        let toml_str = r#"provider = "nonexistent""#;
+        let result = toml::from_str::<EmbeddingConfig>(toml_str);
+        assert!(
+            result.is_err(),
+            "Unknown provider should fail deserialization"
+        );
+    }
+
+    // -- LlmConfig with embeddings section -----------------------------------
+
+    #[test]
+    fn llm_config_without_embeddings_defaults_to_none() {
+        let toml_str = r#"
+            provider = "anthropic"
+            model = "claude-opus-4-6"
+        "#;
+        let cfg: LlmConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.provider, LlmProviderKind::Anthropic);
+        assert!(
+            cfg.embeddings.is_none(),
+            "Embeddings should default to None"
+        );
+    }
+
+    #[test]
+    fn llm_config_with_embeddings_section() {
+        let toml_str = r#"
+            provider = "anthropic"
+            model = "claude-opus-4-6"
+
+            [embeddings]
+            provider = "voyage"
+            model = "voyage-3-lite"
+            api_key = "pa-secret"
+        "#;
+        let cfg: LlmConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.provider, LlmProviderKind::Anthropic);
+        let emb = cfg.embeddings.expect("embeddings should be Some");
+        assert_eq!(emb.provider, EmbeddingProviderKind::Voyage);
+        assert_eq!(emb.model.as_deref(), Some("voyage-3-lite"));
+        assert_eq!(emb.api_key.as_deref(), Some("pa-secret"));
+    }
+
+    #[test]
+    fn llm_config_with_ollama_embeddings_override() {
+        let toml_str = r#"
+            provider = "anthropic"
+            model = "claude-opus-4-6"
+
+            [embeddings]
+            provider = "ollama"
+            model = "nomic-embed-text"
+            base_url = "http://localhost:11434"
+        "#;
+        let cfg: LlmConfig = toml::from_str(toml_str).unwrap();
+        let emb = cfg.embeddings.expect("embeddings should be Some");
+        assert_eq!(emb.provider, EmbeddingProviderKind::Ollama);
+        assert_eq!(emb.model.as_deref(), Some("nomic-embed-text"));
+        assert_eq!(emb.base_url.as_deref(), Some("http://localhost:11434"));
+    }
+
+    // -- Default values ------------------------------------------------------
+
+    #[test]
+    fn llm_config_default_has_no_embeddings() {
+        let cfg = LlmConfig::default();
+        assert!(
+            cfg.embeddings.is_none(),
+            "Default config should have no embedding override"
+        );
+    }
+
+    #[test]
+    fn embedding_provider_kind_serializes_lowercase() {
+        let json = serde_json::to_string(&EmbeddingProviderKind::Voyage).unwrap();
+        assert_eq!(json, "\"voyage\"");
+        let json = serde_json::to_string(&EmbeddingProviderKind::Ollama).unwrap();
+        assert_eq!(json, "\"ollama\"");
+        let json = serde_json::to_string(&EmbeddingProviderKind::OpenAI).unwrap();
+        assert_eq!(json, "\"openai\"");
+    }
+}

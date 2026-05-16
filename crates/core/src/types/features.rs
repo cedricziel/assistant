@@ -255,3 +255,35 @@ pub struct NotificationsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vapid_public_key: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MemoryConfig;
+
+    #[test]
+    fn memory_config_default_has_indexing_interval() {
+        let cfg = MemoryConfig::default();
+        assert_eq!(cfg.indexing_interval_seconds, Some(300));
+    }
+
+    #[test]
+    fn memory_config_omitted_interval_uses_serde_default() {
+        let toml_str = r#"enabled = true"#;
+        let cfg: MemoryConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            cfg.indexing_interval_seconds,
+            Some(300),
+            "omitted field should default to 300 via serde"
+        );
+    }
+
+    #[test]
+    fn memory_config_explicit_interval_is_preserved() {
+        let toml_str = r#"
+            enabled = true
+            indexing_interval_seconds = 60
+        "#;
+        let cfg: MemoryConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.indexing_interval_seconds, Some(60));
+    }
+}

@@ -131,3 +131,98 @@ impl Default for MirrorConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{McpConfig, McpTransportConfig, McpTrustLevel};
+
+    #[test]
+    fn mcp_config_default_has_empty_servers() {
+        let cfg = McpConfig::default();
+        assert!(cfg.servers.is_empty());
+    }
+
+    #[test]
+    fn mcp_config_stdio_server() {
+        let toml_str = r#"
+            [[servers]]
+            name = "github"
+            command = ["npx", "-y", "@modelcontextprotocol/server-github"]
+
+            [servers.env]
+            GITHUB_TOKEN = "gh-token-123"
+        "#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.servers.len(), 1);
+        let s = &cfg.servers[0];
+        assert_eq!(s.name, "github");
+        assert!(s.enabled);
+        assert_eq!(s.trust, McpTrustLevel::Confirm);
+        match &s.transport {
+            McpTransportConfig::Stdio { command } => {
+                assert_eq!(
+                    command,
+                    &["npx", "-y", "@modelcontextprotocol/server-github"]
+                );
+            }
+            other => panic!("expected Stdio, got {other:?}"),
+        }
+        assert_eq!(s.env.get("GITHUB_TOKEN").unwrap(), "gh-token-123");
+    }
+
+    #[test]
+    fn mcp_config_http_server() {
+        let toml_str = r#"
+            [[servers]]
+            name = "remote-db"
+            url = "https://db.example.com/mcp/sse"
+            trust = "trust"
+
+            [servers.headers]
+            Authorization = "Bearer secret"
+        "#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.servers.len(), 1);
+        let s = &cfg.servers[0];
+        assert_eq!(s.name, "remote-db");
+        assert_eq!(s.trust, McpTrustLevel::Trust);
+        match &s.transport {
+            McpTransportConfig::Http { url, headers } => {
+                assert_eq!(url, "https://db.example.com/mcp/sse");
+                assert_eq!(headers.get("Authorization").unwrap(), "Bearer secret");
+            }
+            other => panic!("expected Http, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mcp_config_multiple_servers() {
+        let toml_str = r#"
+            [[servers]]
+            name = "fs"
+            command = ["mcp-server-fs", "/tmp"]
+
+            [[servers]]
+            name = "api"
+            url = "https://api.example.com/mcp"
+            enabled = false
+        "#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.servers.len(), 2);
+        assert!(cfg.servers[0].enabled);
+        assert!(!cfg.servers[1].enabled);
+    }
+
+    #[test]
+    fn mcp_config_no_servers_section_defaults_empty() {
+        let toml_str = r#""#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.servers.is_empty());
+    }
+
+    #[test]
+    fn mcp_trust_level_default_is_confirm() {
+        let level = McpTrustLevel::default();
+        assert_eq!(level, McpTrustLevel::Confirm);
+    }
+}
