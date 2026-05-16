@@ -6,6 +6,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
     hide ToolCallStatus;
 
 import 'chat_provider.dart';
+import 'markdown_link_handler.dart';
 
 /// Display density for timeline entries, derived from viewport width.
 enum TimelineDensity {
@@ -186,6 +187,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
               fontStyle: FontStyle.italic,
             ),
           ),
+          onTapLink: (url) => MarkdownLinkHandler(context: context).onTap(url),
         ),
       );
     } else if (hasContent) {

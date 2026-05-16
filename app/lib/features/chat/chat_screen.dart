@@ -34,6 +34,7 @@ import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'image_utils.dart';
+import 'markdown_link_handler.dart';
 import 'streaming_timeline_entry.dart';
 import 'theme_aware_mermaid.dart';
 import 'voice_recorder_button.dart';
@@ -758,6 +759,8 @@ class _MessageBubble extends StatelessWidget {
                                 ),
                               ),
                           useEnhancedComponents: true,
+                          onTapLink: (url) =>
+                              MarkdownLinkHandler(context: context).onTap(url),
                           plugins: ParserPluginRegistry()
                             ..registerBlock(MermaidPlugin())
                             ..registerBlock(const SvgPlugin()),
@@ -788,6 +791,8 @@ class _MessageBubble extends StatelessWidget {
                               ),
                           selectable: true,
                           useEnhancedComponents: true,
+                          onTapLink: (url) =>
+                              MarkdownLinkHandler(context: context).onTap(url),
                           plugins: ParserPluginRegistry()
                             ..registerBlock(MermaidPlugin())
                             ..registerBlock(const SvgPlugin()),
