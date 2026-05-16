@@ -20,11 +20,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use assistant_core::LlmProvider;
+use assistant_core::types::llm::LlmProviderKind;
 use assistant_core::types::observability::OtelExporter;
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
-    Interface, LlmProviderKind, MessageBus, apply_agent_context, default_workspace_dir,
-    set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
+    Interface, MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
+    set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
 use assistant_runtime::{Orchestrator, init_tracing};

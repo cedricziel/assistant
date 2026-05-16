@@ -77,7 +77,7 @@ mod tests {
     fn test_load_config_missing_file_returns_default() {
         let cfg = load_config(Path::new("/nonexistent/path/config.toml"));
         // Should be the default — Ollama provider
-        assert_eq!(cfg.llm.provider, crate::LlmProviderKind::Ollama);
+        assert_eq!(cfg.llm.provider, crate::types::llm::LlmProviderKind::Ollama);
     }
 
     #[test]
@@ -96,7 +96,10 @@ model = "claude-sonnet-4-20250514"
         .unwrap();
 
         let cfg = load_config(&path);
-        assert_eq!(cfg.llm.provider, crate::LlmProviderKind::Anthropic);
+        assert_eq!(
+            cfg.llm.provider,
+            crate::types::llm::LlmProviderKind::Anthropic
+        );
         assert_eq!(cfg.llm.model, "claude-sonnet-4-20250514");
     }
 
@@ -107,6 +110,6 @@ model = "claude-sonnet-4-20250514"
         std::fs::write(&path, "{{{{not valid toml").unwrap();
 
         let cfg = load_config(&path);
-        assert_eq!(cfg.llm.provider, crate::LlmProviderKind::Ollama);
+        assert_eq!(cfg.llm.provider, crate::types::llm::LlmProviderKind::Ollama);
     }
 }

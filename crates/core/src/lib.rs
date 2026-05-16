@@ -73,9 +73,7 @@ pub use tool::{Attachment, ToolHandler, ToolOutput};
 // `assistant_core::types::observability::OtelExporter`) rather than from the
 // crate root.
 pub use types::{
-    AgentConfig, AssistantConfig, ChannelType, DEFAULT_MAX_AGENT_DEPTH, EmbeddingConfig,
-    EmbeddingProviderKind, ExecutionContext, Interface, LlmConfig, LlmProviderKind, Message,
-    MessageRole, MoonshotOptions, MoonshotWebSearchOptions, OpenAIAuthMode, OpenAIOptions,
-    OpenAIUserLocation, OpenAIWebSearchOptions, OpenRouterOptions, TurnIdentity,
+    AgentConfig, AssistantConfig, ChannelType, DEFAULT_MAX_AGENT_DEPTH, ExecutionContext,
+    Interface, Message, MessageRole, TurnIdentity,
 };
 pub use upload::resolve_upload_bytes;

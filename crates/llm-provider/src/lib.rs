@@ -6,8 +6,9 @@
 
 use std::sync::Arc;
 
-use assistant_core::types::LlmProviderKind;
-use assistant_core::{LlmConfig, LlmProvider};
+use assistant_core::LlmProvider;
+use assistant_core::types::llm::LlmConfig;
+use assistant_core::types::llm::LlmProviderKind;
 
 // -- Provider implementations --
 pub mod anthropic;

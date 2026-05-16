@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
+use assistant_core::types::llm::LlmConfig;
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, LlmConfig, LlmProvider, LlmResponse, StreamChunk, ToolSpec,
-    ToolSupport,
+    Capabilities, ChatHistoryMessage, LlmProvider, LlmResponse, StreamChunk, ToolSpec, ToolSupport,
 };
 
 use self::client::{LlmClient, LlmClientConfig};

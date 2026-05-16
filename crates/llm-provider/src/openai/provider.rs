@@ -26,11 +26,11 @@ use serde_json::Value;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, warn};
 
-use assistant_core::types::OpenAIUserLocation;
+use assistant_core::types::llm::LlmConfig;
+use assistant_core::types::llm::OpenAIUserLocation;
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmConfig, LlmProvider,
-    LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
-    ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
+    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
 };
 
 use crate::http::build_reqwest_client;
@@ -151,7 +151,7 @@ impl OpenAIProvider {
         };
 
         match cfg.openai.auth_mode {
-            assistant_core::OpenAIAuthMode::ApiKey => {
+            assistant_core::types::llm::OpenAIAuthMode::ApiKey => {
                 let api_key = cfg
                     .api_key
                     .clone()
@@ -164,7 +164,7 @@ impl OpenAIProvider {
                     })?;
                 Self::new(provider_cfg, &api_key)
             }
-            assistant_core::OpenAIAuthMode::OAuth => {
+            assistant_core::types::llm::OpenAIAuthMode::OAuth => {
                 let client_id = cfg.openai.oauth_client_id.clone().unwrap_or_default();
                 anyhow::ensure!(
                     !client_id.is_empty(),

@@ -10,9 +10,9 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use assistant_core::types::llm::LlmConfig;
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, LlmConfig, LlmProvider, LlmResponse, StreamChunk, ToolSpec,
-    ToolSupport,
+    Capabilities, ChatHistoryMessage, LlmProvider, LlmResponse, StreamChunk, ToolSpec, ToolSupport,
 };
 
 use crate::chat_completions::{ChatCompletionsConfig, ChatCompletionsProvider};
@@ -150,8 +150,8 @@ impl LlmProvider for OpenRouterProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::OpenRouterOptions;
-    use assistant_core::types::LlmProviderKind;
+    use assistant_core::types::llm::LlmProviderKind;
+    use assistant_core::types::llm::OpenRouterOptions;
     use serde_json::{Value, json};
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
