@@ -53,7 +53,7 @@
 - [x] 7.3 `cargo test -p assistant-web-ui` → all green (target: ≥ 232 passing, +1 new from 1.5).
 - [x] 7.4 `make lint && make format && make precommit` — clean.
 - [x] 7.5 `make build` — verify the new SW version injection works and no `cargo:warning=sw.js …` line appears.
-- [ ] 7.6 Open PR titled `fix(app): web session resilience — corruption detection, banner, persistence, SW versioning`. Body links the four scenarios.
-- [ ] 7.7 Merge after CI green.
+- [x] 7.6 Open PR titled `fix(app): web session resilience — corruption detection, banner, persistence, SW versioning`. Body links the four scenarios.
+- [x] 7.7 Merge after CI green.
 - [ ] 7.8 Deploy to schorschvm. Have the operator: clear browser cache once → log in → hard-refresh → confirm space selection persists. Then simulate decrypt failure (manually delete the `IndexedDB` entry for `flutter_secure_storage` via DevTools) → reload → confirm landing on `/login?reason=session-ended` with the banner visible. Then re-login → confirm context is reused (same context id), credentials refreshed, selection re-discovered.
 - [ ] 7.9 Archive: `openspec archive web-session-resilience`.
