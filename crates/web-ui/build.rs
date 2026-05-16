@@ -1,3 +1,9 @@
+// Build scripts are a special context: failures here mean the package cannot
+// be built, so `unwrap`/`expect`/`panic!` are the *correct* error signaling
+// mechanism (cargo surfaces them to the operator with full context). The
+// workspace-lint-policy deny doesn't apply to build scripts.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 //! Build script for `assistant-web-ui`.
 //!
 //! Runs `flutter build web --release` inside the `app/` directory at the repo

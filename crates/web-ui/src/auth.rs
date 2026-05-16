@@ -14,11 +14,6 @@
 //! it maps to a default org-admin context so existing single-user deployments
 //! continue to work without reconfiguration.
 
-#![cfg_attr(
-    not(test),
-    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
-)]
-
 use std::sync::Arc;
 
 use axum::Form;

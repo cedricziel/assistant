@@ -8,11 +8,6 @@
 //! File naming convention: `<slugified-name>.md` (e.g., `my-cool-profile.md`).
 //! The slug also serves as the profile ID.
 
-#![cfg_attr(
-    not(test),
-    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
-)]
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

@@ -43,12 +43,8 @@ const REQUIRED_WORKSPACE_LINTS: &[&str] = &[
 ];
 
 /// Crates that have completed the ratchet from `warn` to `deny` for the
-/// panic-free lint set. Crates that still contain non-test panics elsewhere
-/// in their source tree (e.g. `crates/web-ui`, which retains per-file
-/// `#![cfg_attr(not(test), deny(...))]` on hot paths but is not fully clean
-/// at the crate level) are not listed here and will be ratcheted in
-/// follow-up changes.
-const DENY_LEVEL_CRATES: &[&str] = &["crates/storage"];
+/// panic-free lint set.
+const DENY_LEVEL_CRATES: &[&str] = &["crates/storage", "crates/web-ui"];
 
 #[test]
 fn root_cargo_toml_declares_workspace_lint_table() {
@@ -151,11 +147,17 @@ fn deny_level_crates_enforce_panic_free_contract() {
 
 #[test]
 fn deny_level_source_files_do_not_duplicate_panic_free_attribute() {
-    // Only check source files for crates that enforce the contract at the
-    // crate (Cargo.toml) level. Crates still using per-file `cfg_attr` blocks
-    // (e.g. web-ui's hot paths) are not in scope until they ratchet to
-    // crate-level deny.
-    let suspects = ["crates/storage/src/lib.rs"];
+    // For deny-level crates, the contract lives in their Cargo.toml
+    // `[lints.clippy]` block. Source files MUST NOT redeclare the same
+    // policy via a `#![cfg_attr(not(test), deny(...))]` attribute — that
+    // would create two sources of truth.
+    let suspects = [
+        "crates/storage/src/lib.rs",
+        "crates/web-ui/src/auth.rs",
+        "crates/web-ui/src/oauth/mod.rs",
+        "crates/web-ui/src/a2a/agent_store.rs",
+        "crates/web-ui/src/api/mod.rs",
+    ];
 
     for suspect in suspects {
         let path = workspace_root().join(suspect);
