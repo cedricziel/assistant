@@ -16,6 +16,10 @@ pub struct ConversationRecord {
     pub id: Uuid,
     pub agent_id: String,
     pub title: Option<String>,
+    /// When true, the title-generator worker MUST NOT overwrite this title.
+    /// Set by manual renames, explicit titles at creation, and successful
+    /// auto-title runs.
+    pub title_locked: bool,
     /// The user who owns this conversation (multi-user scoping).
     /// `None` for legacy/unscoped conversations.
     pub user_id: Option<String>,
@@ -76,14 +80,16 @@ impl ConversationStore {
     ) -> Result<ConversationRecord> {
         let now = Utc::now();
         let id_str = id.to_string();
+        let title_locked = title.is_some();
 
         sqlx::query(
-            "INSERT INTO conversations (id, title, agent_id, user_id, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5) \
+            "INSERT INTO conversations (id, title, title_locked, agent_id, user_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id_str)
         .bind(title)
+        .bind(title_locked)
         .bind(&self.agent_id)
         .bind(&self.user_id)
         .bind(now)
@@ -110,13 +116,15 @@ impl ConversationStore {
         let id = Uuid::new_v4();
         let now = Utc::now();
         let id_str = id.to_string();
+        let title_locked = title.is_some();
 
         sqlx::query(
-            "INSERT INTO conversations (id, title, agent_id, user_id, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+            "INSERT INTO conversations (id, title, title_locked, agent_id, user_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
         )
         .bind(&id_str)
         .bind(title)
+        .bind(title_locked)
         .bind(&self.agent_id)
         .bind(&self.user_id)
         .bind(now)
@@ -127,6 +135,7 @@ impl ConversationStore {
             id,
             agent_id: self.agent_id.clone(),
             title: title.map(|s| s.to_string()),
+            title_locked,
             user_id: self.user_id.clone(),
             created_at: now,
             updated_at: now,
@@ -145,7 +154,7 @@ impl ConversationStore {
 
         let row = if self.user_id.is_some() {
             sqlx::query(
-                "SELECT id, title, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2 AND user_id = ?3",
             )
@@ -156,7 +165,7 @@ impl ConversationStore {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, title, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2",
             )
@@ -172,6 +181,7 @@ impl ConversationStore {
                 id: Uuid::parse_str(&raw_id)?,
                 agent_id: r.get("agent_id"),
                 title: r.get("title"),
+                title_locked: r.get("title_locked"),
                 user_id: r.get("user_id"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),
@@ -184,7 +194,7 @@ impl ConversationStore {
     pub async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
         let rows = if self.user_id.is_some() {
             sqlx::query(
-                "SELECT id, title, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
                  FROM conversations \
                  WHERE agent_id = ?1 AND user_id = ?2 \
                  ORDER BY updated_at DESC",
@@ -195,7 +205,7 @@ impl ConversationStore {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, title, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
                  FROM conversations \
                  WHERE agent_id = ?1 \
                  ORDER BY updated_at DESC",
@@ -212,6 +222,7 @@ impl ConversationStore {
                     id: Uuid::parse_str(&raw_id)?,
                     agent_id: r.get("agent_id"),
                     title: r.get("title"),
+                    title_locked: r.get("title_locked"),
                     user_id: r.get("user_id"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
@@ -222,12 +233,15 @@ impl ConversationStore {
 
     /// Update the title of an existing conversation.
     ///
+    /// Always sets `title_locked = 1` so the title-generator worker will not
+    /// overwrite this value on subsequent turns.
+    ///
     /// Returns an error if the conversation does not exist.
     pub async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
         let id_str = id.to_string();
         let result = sqlx::query(
             "UPDATE conversations
-                 SET title = ?1, updated_at = ?2
+                 SET title = ?1, title_locked = 1, updated_at = ?2
                  WHERE id = ?3 AND agent_id = ?4",
         )
         .bind(title)
@@ -505,6 +519,7 @@ mod tests {
         ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
     };
     use assistant_core::Message;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_create_and_load_conversation() {
@@ -516,6 +531,83 @@ mod tests {
 
         let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
         assert_eq!(loaded.id, conv.id);
+    }
+
+    #[tokio::test]
+    async fn test_create_conversation_with_title_locks() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        let titled = store.create_conversation(Some("My Title")).await.unwrap();
+        assert!(titled.title_locked);
+        assert_eq!(titled.title.as_deref(), Some("My Title"));
+
+        let untitled = store.create_conversation(None).await.unwrap();
+        assert!(!untitled.title_locked);
+        assert!(untitled.title.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_conversation_with_id_with_title_locks() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        let id = Uuid::new_v4();
+        let conv = store
+            .create_conversation_with_id(id, Some("Pinned"))
+            .await
+            .unwrap();
+        assert!(conv.title_locked);
+
+        let id2 = Uuid::new_v4();
+        let conv2 = store.create_conversation_with_id(id2, None).await.unwrap();
+        assert!(!conv2.title_locked);
+    }
+
+    #[tokio::test]
+    async fn test_update_title_locks() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        let conv = store.create_conversation(None).await.unwrap();
+        assert!(
+            !conv.title_locked,
+            "fresh untitled conversation is unlocked"
+        );
+
+        store.update_title(conv.id, "Fresh Title").await.unwrap();
+
+        let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+        assert_eq!(loaded.title.as_deref(), Some("Fresh Title"));
+        assert!(
+            loaded.title_locked,
+            "update_title must set title_locked = 1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_title_locked_defaults_to_zero_for_new_conversations() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        let untitled = store.create_conversation(None).await.unwrap();
+        assert!(
+            !untitled.title_locked,
+            "conversation with no title should not be title-locked"
+        );
+
+        let titled = store.create_conversation(Some("x")).await.unwrap();
+        assert!(
+            titled.title_locked,
+            "conversation created with a title should be title-locked"
+        );
+
+        // Round-trip through storage to ensure the field is persisted, not just
+        // returned from the in-memory builder.
+        let loaded_untitled = store.get_conversation(untitled.id).await.unwrap().unwrap();
+        assert!(!loaded_untitled.title_locked);
+        let loaded_titled = store.get_conversation(titled.id).await.unwrap().unwrap();
+        assert!(loaded_titled.title_locked);
     }
 
     #[tokio::test]
@@ -707,6 +799,10 @@ mod tests {
                     record.title.as_deref(),
                     Some("New"),
                     "title should be updated"
+                );
+                assert!(
+                    record.title_locked,
+                    "Upserted broadcast after update_title must carry title_locked = true"
                 );
             }
             _ => panic!("expected Upserted event"),

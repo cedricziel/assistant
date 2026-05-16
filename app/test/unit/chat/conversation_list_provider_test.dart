@@ -181,6 +181,72 @@ void main() {
     // Stream-driven upsert and delete
     // -----------------------------------------------------------------------
 
+    test(
+      'replaces title in-place when an upserted event arrives for an existing conversation',
+      () async {
+        // This is the contract the title-generator worker depends on:
+        // when the backend writes a new title (via `update_title`) and
+        // broadcasts an Upserted event, the conversation list must
+        // re-render with the new title without a manual refresh.
+        final controller = StreamController<ConversationListEvent>.broadcast();
+        final client = _FakeApiClient(streamController: controller);
+        final container = _makeContainer(client: client);
+        addTearDown(container.dispose);
+        addTearDown(controller.close);
+        final sub = _keepAlive(container);
+        addTearDown(sub.close);
+
+        await container.read(conversationListProvider.future);
+
+        // Snapshot: an "Untitled" conversation lands.
+        controller.add(
+          ConversationSnapshotEvent([
+            _makeEntry(
+              id: 'c1',
+              title: 'Untitled',
+              updatedAt: DateTime(2024, 1, 1),
+            ),
+          ]),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        // Sanity: list shows the placeholder title.
+        var state = container.read(conversationListProvider).value!;
+        expect(state.conversations.single.title, 'Untitled');
+
+        // Worker writes a generated title — server broadcasts the same id
+        // with a newer updatedAt and the resolved title.
+        controller.add(
+          ConversationUpsertedEvent(
+            _makeEntry(
+              id: 'c1',
+              title: 'Dinner Brainstorm',
+              updatedAt: DateTime(2024, 1, 2),
+            ),
+          ),
+        );
+        await _waitForDebounce();
+
+        state = container.read(conversationListProvider).value!;
+        expect(
+          state.conversations.length,
+          1,
+          reason:
+              'upserting an existing id must update in place, not append a duplicate',
+        );
+        expect(
+          state.conversations.single.id,
+          'c1',
+          reason: 'id must be preserved across the title update',
+        );
+        expect(
+          state.conversations.single.title,
+          'Dinner Brainstorm',
+          reason: 'title must reflect the worker-written value',
+        );
+      },
+    );
+
     test('applies upserted events from the stream', () async {
       final controller = StreamController<ConversationListEvent>.broadcast();
       final client = _FakeApiClient(streamController: controller);

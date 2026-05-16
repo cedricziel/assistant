@@ -511,7 +511,7 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let orchestrator = Arc::new({
         let mut o = Orchestrator::new(
-            llm,
+            llm.clone(),
             storage.clone(),
             executor.clone(),
             registry,
@@ -563,6 +563,17 @@ async fn run_with_args(args: Args) -> Result<()> {
             .run_worker_filtered("web-worker", Some("Web"))
             .await;
     });
+
+    // 5a. Spawn the title-generator worker. Consumes `turn.result` from the
+    //     shared bus so that conversations from every interface — Web, Slack,
+    //     Matrix, CLI, MCP, scheduler — eventually receive a meaningful title.
+    let _title_worker = assistant_runtime::spawn_title_generator_worker(
+        orchestrator.bus().clone(),
+        storage.clone(),
+        llm.clone(),
+        config.titling.clone(),
+        selected_agent.clone(),
+    );
 
     // 6. Spawn workflow run processor (loop guardrails + action executors).
     let turn_client = Arc::new(OrchestratorTurnClient {
@@ -1196,4 +1207,3 @@ mod base_url_tests {
         );
     }
 }
-

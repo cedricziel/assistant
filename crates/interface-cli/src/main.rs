@@ -1744,6 +1744,17 @@ async fn main() -> Result<()> {
     let _memory_indexer =
         spawn_memory_indexer(&bs.config.memory, bs.storage.clone(), bs.llm.clone());
 
+    // 7b'. Start the title-generator worker (consumes turn.result and auto-titles
+    //      conversations). Runs for every interface because every turn flows
+    //      through the same bus.
+    let _title_worker = assistant_runtime::spawn_title_generator_worker(
+        bs.orchestrator.bus().clone(),
+        bs.storage.clone(),
+        bs.llm.clone(),
+        bs.config.titling.clone(),
+        selected_persona.clone(),
+    );
+
     // 7c. Build transcription provider (shared across interfaces).
     let transcription_language = bs
         .config

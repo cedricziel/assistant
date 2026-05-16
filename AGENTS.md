@@ -118,29 +118,29 @@ GitHub Actions runs `flutter analyze --fatal-infos` and `flutter test` on every 
 
 Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 
-| Crate (package name)             | Path                                    | Purpose                                                                |
-| -------------------------------- | --------------------------------------- | ---------------------------------------------------------------------- |
-| `assistant-core`                 | `crates/core`                           | Shared types, LLM traits (LlmProvider, EmbeddingProvider), ToolHandler |
-| `assistant-auth`                 | `crates/auth`                           | OAuth2 server, JWT, API keys, OIDC federation, Axum auth middleware    |
-| `assistant-llm-provider`         | `crates/llm-provider`                   | All LlmProvider implementations (Ollama, Anthropic, OpenAI, Moonshot)  |
-| `assistant-skills`               | `crates/skills`                         | Skill parsing, validation, embedded builtins                           |
-| `assistant-storage`              | `crates/storage`                        | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus             |
-| `assistant-bus-nats`             | `crates/bus-nats`                       | NATS JetStream MessageBus (optional, feature-gated)                    |
-| `assistant-runtime`              | `crates/runtime`                        | Orchestrator (main ReAct loop), SafetyGate, Scheduler, ChannelRunner   |
-| `assistant-tool-executor`        | `crates/tool-executor`                  | ToolHandler registry, builtin tools, dispatch                          |
-| `assistant-mcp-server`           | `crates/mcp-server`                     | stdio JSON-RPC 2.0 MCP server                                          |
-| `assistant-mcp-client`           | `crates/mcp-client`                     | MCP client for external MCP server connections                         |
-| `assistant-cli`                  | `crates/interface-cli`                  | Unified binary: REPL + subcommands                                     |
-| `assistant-interfaces`           | `crates/interfaces`                     | All messenger adapters (Slack, Mattermost, Matrix, Nextcloud, Signal)  |
-| `assistant-web-ui`               | `crates/web-ui`                         | Web UI/A2A server implementation (invoked via `assistant webui serve`) |
-| `assistant-transcription`        | `crates/transcription`                  | Voice transcription providers (Whisper, Ollama, etc)                   |
-| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`                | A2A protocol JSON Schema types                                         |
-| `assistant-backup`               | `crates/backup`                         | Backup and restore for the assistant installation                      |
-| `assistant-workflow`             | `crates/workflow`                       | Workflow run engine and action executor abstractions                   |
-| `assistant-workflow-http`        | `crates/workflow-http`                  | HTTP action node executor for assistant-workflow                       |
-| `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite`  | SQLite exporter for OpenTelemetry spans/logs                           |
-| `opentelemetry-exporter-iceberg` | `crates/opentelemetry-exporter-iceberg` | Apache Iceberg exporter for OpenTelemetry spans, logs, and metrics     |
-| `assistant-integration-tests`    | `crates/integration-tests`              | End-to-end smoke tests                                                 |
+| Crate (package name)             | Path                                    | Purpose                                                                                                                                         |
+| -------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `assistant-core`                 | `crates/core`                           | Shared types, LLM traits (LlmProvider, EmbeddingProvider), ToolHandler                                                                          |
+| `assistant-auth`                 | `crates/auth`                           | OAuth2 server, JWT, API keys, OIDC federation, Axum auth middleware                                                                             |
+| `assistant-llm-provider`         | `crates/llm-provider`                   | All LlmProvider implementations (Ollama, Anthropic, OpenAI, Moonshot)                                                                           |
+| `assistant-skills`               | `crates/skills`                         | Skill parsing, validation, embedded builtins                                                                                                    |
+| `assistant-storage`              | `crates/storage`                        | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus                                                                                      |
+| `assistant-bus-nats`             | `crates/bus-nats`                       | NATS JetStream MessageBus (optional, feature-gated)                                                                                             |
+| `assistant-runtime`              | `crates/runtime`                        | Orchestrator (main ReAct loop), SafetyGate, Scheduler, ChannelRunner, TitleGeneratorWorker (consumes `turn.result` to auto-title conversations) |
+| `assistant-tool-executor`        | `crates/tool-executor`                  | ToolHandler registry, builtin tools, dispatch                                                                                                   |
+| `assistant-mcp-server`           | `crates/mcp-server`                     | stdio JSON-RPC 2.0 MCP server                                                                                                                   |
+| `assistant-mcp-client`           | `crates/mcp-client`                     | MCP client for external MCP server connections                                                                                                  |
+| `assistant-cli`                  | `crates/interface-cli`                  | Unified binary: REPL + subcommands                                                                                                              |
+| `assistant-interfaces`           | `crates/interfaces`                     | All messenger adapters (Slack, Mattermost, Matrix, Nextcloud, Signal)                                                                           |
+| `assistant-web-ui`               | `crates/web-ui`                         | Web UI/A2A server implementation (invoked via `assistant webui serve`)                                                                          |
+| `assistant-transcription`        | `crates/transcription`                  | Voice transcription providers (Whisper, Ollama, etc)                                                                                            |
+| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`                | A2A protocol JSON Schema types                                                                                                                  |
+| `assistant-backup`               | `crates/backup`                         | Backup and restore for the assistant installation                                                                                               |
+| `assistant-workflow`             | `crates/workflow`                       | Workflow run engine and action executor abstractions                                                                                            |
+| `assistant-workflow-http`        | `crates/workflow-http`                  | HTTP action node executor for assistant-workflow                                                                                                |
+| `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite`  | SQLite exporter for OpenTelemetry spans/logs                                                                                                    |
+| `opentelemetry-exporter-iceberg` | `crates/opentelemetry-exporter-iceberg` | Apache Iceberg exporter for OpenTelemetry spans, logs, and metrics                                                                              |
+| `assistant-integration-tests`    | `crates/integration-tests`              | End-to-end smoke tests                                                                                                                          |
 
 Dependency order (no cycles):
 

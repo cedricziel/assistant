@@ -15,6 +15,7 @@ pub mod scheduler;
 pub mod skill_improver;
 pub(crate) mod skill_learner;
 pub mod telemetry;
+pub mod title_generator;
 pub mod webhook_dispatch;
 
 pub use adapter_registry::AdapterRegistry;
@@ -28,3 +29,4 @@ pub use orchestrator::{Orchestrator, OrchestratorEvent, TurnResult};
 pub use otel_spans::start_conversation_context;
 pub use scheduler::spawn_scheduler;
 pub use telemetry::{OtelGuard, init_tracing};
+pub use title_generator::{TitleGeneratorWorker, spawn_title_generator_worker};
