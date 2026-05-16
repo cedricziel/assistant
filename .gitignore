@@ -20,6 +20,7 @@
 # Tool-specific project metadata (not part of the project)
 .claude/settings.local.json
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 .serena/
 
 # Environment / secrets
