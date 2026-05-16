@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use assistant_core::types::storage::BusKind;
 use assistant_core::{
     AssistantConfig, ConversationConfig, EmbeddingConfig, EmbeddingProviderKind, Interface,
     MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
@@ -1338,7 +1339,6 @@ async fn bootstrap(
     let bus: Arc<dyn MessageBus> = {
         #[cfg(feature = "nats")]
         {
-            use assistant_core::BusKind;
             if config.bus.kind == BusKind::Nats {
                 info!("Using NATS message bus");
                 Arc::new(
@@ -1352,7 +1352,6 @@ async fn bootstrap(
         }
         #[cfg(not(feature = "nats"))]
         {
-            use assistant_core::BusKind;
             if config.bus.kind == BusKind::Nats {
                 anyhow::bail!(
                     "[bus] kind = \"nats\" configured but this binary was built without the `nats` feature"

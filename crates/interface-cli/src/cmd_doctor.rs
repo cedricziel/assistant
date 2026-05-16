@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use assistant_core::{AssistantConfig, BusKind, LlmProviderKind, McpTransportConfig};
+use assistant_core::types::storage::BusKind;
+use assistant_core::{AssistantConfig, LlmProviderKind, McpTransportConfig};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
