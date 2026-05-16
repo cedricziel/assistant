@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
+import 'span_classifier.dart';
+import 'tool_call_span_card.dart';
 import 'traces_provider.dart';
 
 /// Full-page trace detail view showing all spans with timing and attributes.
@@ -127,7 +129,11 @@ class _TraceDetailBody extends StatelessWidget {
             ),
           )
         else
-          ...spans.map((span) => _SpanCard(span: span, totalMs: totalMs)),
+          ...spans.map(
+            (span) => isToolSpan(span)
+                ? ToolCallSpanCard(span: span, totalMs: totalMs)
+                : _SpanCard(span: span, totalMs: totalMs),
+          ),
       ],
     );
   }

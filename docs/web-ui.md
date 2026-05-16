@@ -37,6 +37,33 @@ right to expand, left to collapse. Mouse drags are ignored.
 Collapse state persists across reloads under the `SharedPreferences` key
 `assistant.sidebarCollapsed` (localStorage on web).
 
+## Trace detail — tool call cards
+
+Tool invocations performed by the agent are recorded as OpenTelemetry spans
+named `execute_tool <tool_name>` with the following attributes:
+
+| Attribute                                           | Description                                                    |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| `tool_name`                                         | Tool the agent invoked (e.g. `file-read`, `bash`, `web-fetch`) |
+| `tool_params`                                       | JSON-encoded parameter object                                  |
+| `tool_status`                                       | `ok`, `error`, or `denied`                                     |
+| `tool_observation`                                  | Output returned to the model (success path)                    |
+| `tool_error`                                        | Error / denial message (failure / denied path)                 |
+| `duration_ms`                                       | Execution duration                                             |
+| `iteration` / `turn` / `interface` / `active_skill` | ReAct loop context                                             |
+
+The trace detail screen (`/traces/{id}`) renders these spans as dedicated
+**tool-call cards** with:
+
+- Status icon + colour pill: ✓ (`tertiary`) for `ok`, ✕ (`error`) for `error`,
+  ⊘ (amber) for `denied`, ? (neutral) when unknown.
+- Side-by-side **Params** / **Output** panes when expanded (vertical stack
+  on viewports narrower than 600 dp).
+- A `Show all attributes` toggle to reveal the full attribute map.
+
+Spans that don't match this shape (LLM chat calls, orchestrator spans, etc.)
+keep the generic span card.
+
 ## CLI options
 
 | Flag                 | Env var                     | Default                     | Description                                               |
