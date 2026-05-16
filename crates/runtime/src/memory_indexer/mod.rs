@@ -118,24 +118,44 @@ impl MemoryIndexer {
         Ok(())
     }
 
-    /// Embed all unembedded chunks up to `EMBED_BATCH_SIZE`.
+    /// Embed all unembedded chunks up to `EMBED_BATCH_SIZE`. Uses
+    /// `LlmProvider::embed_batch` (#30) so providers that support batched
+    /// embeddings (Ollama / OpenAI / Voyage) issue a single HTTP request for
+    /// the whole batch. Providers without batching fall back to the trait's
+    /// sequential default — same behaviour as before but with one fewer
+    /// abstraction layer.
     async fn embed_pending(&self, store: &MemoryChunkStore) -> Result<()> {
         let unembedded = store.get_unembedded(EMBED_BATCH_SIZE).await?;
-        for chunk in unembedded {
-            match self.llm.embed(&chunk.content).await {
-                Ok(vec) => {
-                    if let Err(e) = store.update_embedding(chunk.id, &vec).await {
-                        warn!(chunk_id = chunk.id, error = %e, "Failed to store embedding");
-                    }
+        if unembedded.is_empty() {
+            return Ok(());
+        }
+
+        let texts: Vec<&str> = unembedded.iter().map(|c| c.content.as_str()).collect();
+        let vectors = match self.llm.embed_batch(&texts).await {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("not supported") || msg.contains("Not supported") {
+                    debug!("Embedding unsupported by provider; skipping batch");
+                } else {
+                    debug!(error = %e, "Embedding batch failed; skipping");
                 }
-                Err(e) => {
-                    let msg = e.to_string();
-                    if msg.contains("not supported") || msg.contains("Not supported") {
-                        debug!("Embedding unsupported by provider; skipping batch");
-                        break;
-                    }
-                    debug!(chunk_id = chunk.id, error = %e, "Embedding skipped");
-                }
+                return Ok(());
+            }
+        };
+
+        if vectors.len() != unembedded.len() {
+            warn!(
+                got = vectors.len(),
+                expected = unembedded.len(),
+                "embed_batch returned mismatched vector count; skipping persistence"
+            );
+            return Ok(());
+        }
+
+        for (chunk, vec) in unembedded.iter().zip(vectors.iter()) {
+            if let Err(e) = store.update_embedding(chunk.id, vec).await {
+                warn!(chunk_id = chunk.id, error = %e, "Failed to store embedding");
             }
         }
         Ok(())

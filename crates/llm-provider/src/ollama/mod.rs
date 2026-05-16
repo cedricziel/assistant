@@ -130,10 +130,25 @@ impl LlmProvider for OllamaProvider {
     }
 
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        let vectors = self.embed_batch(&[text]).await?;
+        vectors
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Empty embeddings array in response"))
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Ollama's `/api/embed` accepts a string OR an array of strings under
+        // `"input"` and returns `{"embeddings": [[…], [...]]}`. Sending the
+        // whole batch in one call avoids `texts.len()` round-trips (#30).
         let url = format!("{}/api/embed", self.base_url);
         let body = serde_json::json!({
             "model": self.embedding_model,
-            "input": text,
+            "input": texts,
         });
         let resp = self
             .http
@@ -154,11 +169,14 @@ impl LlmProvider for OllamaProvider {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to parse embed response: {e}"))?;
 
-        embed_resp
-            .embeddings
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Empty embeddings array in response"))
+        if embed_resp.embeddings.len() != texts.len() {
+            anyhow::bail!(
+                "Ollama returned {} embeddings for {} inputs",
+                embed_resp.embeddings.len(),
+                texts.len()
+            );
+        }
+        Ok(embed_resp.embeddings)
     }
 
     fn provider_name(&self) -> &str {
@@ -171,5 +189,109 @@ impl LlmProvider for OllamaProvider {
 
     fn server_address(&self) -> &str {
         &self.base_url
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_core::LlmProvider;
+    use wiremock::matchers::{body_json, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn provider_pointed_at(base_url: &str) -> OllamaProvider {
+        OllamaProvider::new(OllamaConfig {
+            model: "qwen2.5:7b".to_string(),
+            base_url: base_url.to_string(),
+            timeout_secs: 5,
+            embedding_model: "nomic-embed-text".to_string(),
+        })
+        .unwrap()
+    }
+
+    /// `embed_batch` SHALL send a single request with `"input": [...]` and
+    /// return all vectors in input order (#30).
+    #[tokio::test]
+    async fn embed_batch_sends_array_input_in_one_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/embed"))
+            .and(body_json(serde_json::json!({
+                "model": "nomic-embed-text",
+                "input": ["foo", "bar", "baz"],
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "embeddings": [
+                    [1.0, 2.0],
+                    [3.0, 4.0],
+                    [5.0, 6.0],
+                ],
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = provider_pointed_at(&server.uri());
+        let vectors = provider.embed_batch(&["foo", "bar", "baz"]).await.unwrap();
+
+        assert_eq!(
+            vectors,
+            vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
+            "vectors must be returned in input order"
+        );
+    }
+
+    /// Single-input `embed()` continues to work and routes through the same
+    /// batched endpoint.
+    #[tokio::test]
+    async fn embed_single_still_works() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/embed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "embeddings": [[0.1, 0.2, 0.3]],
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = provider_pointed_at(&server.uri());
+        let vec = provider.embed("hello").await.unwrap();
+        assert_eq!(vec, vec![0.1, 0.2, 0.3]);
+    }
+
+    /// Empty batch SHALL short-circuit without an HTTP request.
+    #[tokio::test]
+    async fn embed_batch_empty_skips_request() {
+        let server = MockServer::start().await;
+        // No mock mounted — any request hits a 404 from wiremock and fails
+        // the test. The call must return [] without touching the server.
+
+        let provider = provider_pointed_at(&server.uri());
+        let vectors: Vec<_> = vec![];
+        let texts: Vec<&str> = vectors.iter().copied().collect();
+        let result = provider.embed_batch(&texts).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    /// Mismatched response length SHALL surface as an error rather than
+    /// silently corrupting downstream embeddings.
+    #[tokio::test]
+    async fn embed_batch_rejects_mismatched_response_length() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/embed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "embeddings": [[1.0]],  // only one — but we asked for two
+            })))
+            .mount(&server)
+            .await;
+
+        let provider = provider_pointed_at(&server.uri());
+        let err = provider.embed_batch(&["a", "b"]).await.unwrap_err();
+        assert!(
+            err.to_string().contains("mismatch") || err.to_string().contains("1 embeddings for 2"),
+            "expected length-mismatch error, got: {err}"
+        );
     }
 }
