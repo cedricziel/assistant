@@ -24,6 +24,6 @@
 - [x] 4.2 `flutter test` → all green.
 - [x] 4.3 `flutter build web --release` → succeeds.
 - [x] 4.4 Manual smoke against schorschvm: open chat, confirm the conversation list populates within ~500ms of login. DevTools Network → see one `EventSource` connection (not XHR).
-- [ ] 4.5 PR: `feat(app): use EventSource for SSE on web`. Body links the four scenarios.
-- [ ] 4.6 Merge and deploy via apt update.
-- [ ] 4.7 Archive: `openspec archive web-sse-eventsource`.
+- [x] 4.5 PR: `feat(app): use EventSource for SSE on web`. Body links the four scenarios.
+- [x] 4.6 Merge and deploy via apt update.
+- [x] 4.7 Archive: `openspec archive web-sse-eventsource`.

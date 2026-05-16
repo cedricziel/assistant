@@ -31,7 +31,7 @@
 - [x] 5.1 Added "Lint policy" subsection to `AGENTS.md` under "Code Style". Names workspace lint table, lists `assistant-storage` as the sole deny-level crate, explains the inherit-vs-manual-replay shapes, points at the scanner test path and the OpenSpec change.
 - [x] 5.2 Added pointer in `crates/storage/src/lib.rs` module docs noting the Cargo-level enforcement.
 - [x] 5.3 `make lint` GREEN. `cargo fmt --all` clean. Policy scanner tests GREEN (4/4). `cargo machete` clean.
-- [ ] 5.4 Commit as `chore(workspace): introduce workspace-wide lint policy with per-crate ratchet`.
+- [x] 5.4 Commit as `chore(workspace): introduce workspace-wide lint policy with per-crate ratchet`.
 
 ## 6. Verification
 
