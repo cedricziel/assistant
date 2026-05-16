@@ -1604,6 +1604,34 @@ async fn main() -> Result<()> {
 
     let is_signal_only = matches!(cli.command, Some(Command::Signal));
 
+    let is_matrix_only = matches!(cli.command, Some(Command::Matrix));
+
+    let is_worker_only = matches!(cli.command, Some(Command::Worker { .. }));
+
+    // Derive the binary role and infrastructure-worker plan. The plan is the
+    // single source of truth for which `main-worker` / `scheduler-worker` /
+    // `web-worker` / `TitleGeneratorWorker` / `memory_indexer` to spawn.
+    // See `assistant_runtime::worker_plan` for the rules and their unit tests.
+    let binary_role = if is_mcp {
+        assistant_runtime::BinaryRole::Mcp
+    } else if is_worker_only {
+        assistant_runtime::BinaryRole::WorkerOnly
+    } else if is_slack_only
+        || is_mattermost_only
+        || is_nextcloud_only
+        || is_signal_only
+        || is_matrix_only
+    {
+        assistant_runtime::BinaryRole::InterfaceOnly
+    } else if orchestrator_interface_filtered {
+        assistant_runtime::BinaryRole::OrchestratorFiltered
+    } else if matches!(cli.command, Some(Command::Orchestrator { .. })) {
+        assistant_runtime::BinaryRole::OrchestratorUnfiltered
+    } else {
+        assistant_runtime::BinaryRole::Repl
+    };
+    let worker_plan = assistant_runtime::core_worker_plan(binary_role.clone());
+
     let confirmation_cb: Arc<dyn ConfirmationCallback> = if is_mcp
         || is_slack_only
         || is_mattermost_only
@@ -1689,21 +1717,22 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 5b. Spawn the main turn worker (processes generic bus messages).
-    // In interface-only modes we run a dedicated, interface-filtered worker
-    // below to avoid duplicate consumption of the same turn requests.
-    let _worker = if !is_slack_only
-        && !is_mattermost_only
-        && !is_nextcloud_only
-        && !orchestrator_interface_filtered
+    // 5b. Spawn the unfiltered main turn worker if the plan asks for it.
+    // The plan rules live in `assistant_runtime::worker_plan` and are unit
+    // tested there. Interface-filtered workers (scheduler-worker, web-worker)
+    // are spawned later in this function for the orchestrator-filtered role.
+    let mut _spawned_workers = Vec::new();
+    if let Some(spec) = worker_plan
+        .workers
+        .iter()
+        .find(|w| w.interface_filter.is_none())
     {
         let worker_orch = bs.orchestrator.clone();
-        Some(tokio::spawn(async move {
-            worker_orch.run_worker("main-worker").await;
-        }))
-    } else {
-        None
-    };
+        let id = spec.worker_id;
+        _spawned_workers.push(tokio::spawn(async move {
+            worker_orch.run_worker(id).await;
+        }));
+    }
 
     // 6. MCP mode — run the stdio JSON-RPC server and exit.
     #[cfg(feature = "mcp")]
@@ -1740,20 +1769,24 @@ async fn main() -> Result<()> {
         warn!(error = %e, "Failed to register skill improvement task");
     }
 
-    // 7b. Start the memory indexer background task.
-    let _memory_indexer =
-        spawn_memory_indexer(&bs.config.memory, bs.storage.clone(), bs.llm.clone());
+    // 7b. Start the memory indexer background task (gated by the worker plan).
+    let _memory_indexer = worker_plan
+        .spawn_memory_indexer
+        .then(|| spawn_memory_indexer(&bs.config.memory, bs.storage.clone(), bs.llm.clone()));
 
-    // 7b'. Start the title-generator worker (consumes turn.result and auto-titles
-    //      conversations). Runs for every interface because every turn flows
-    //      through the same bus.
-    let _title_worker = assistant_runtime::spawn_title_generator_worker(
-        bs.orchestrator.bus().clone(),
-        bs.storage.clone(),
-        bs.llm.clone(),
-        bs.config.titling.clone(),
-        selected_persona.clone(),
-    );
+    // 7b'. Start the title-generator worker (gated by the worker plan). Consumes
+    //      `turn.result` and auto-titles conversations across every interface.
+    //      The web-ui binary intentionally skips this to avoid duplicate
+    //      consumers racing on the same bus claim (#730).
+    let _title_worker = worker_plan.spawn_title_generator.then(|| {
+        assistant_runtime::spawn_title_generator_worker(
+            bs.orchestrator.bus().clone(),
+            bs.storage.clone(),
+            bs.llm.clone(),
+            bs.config.titling.clone(),
+            selected_persona.clone(),
+        )
+    });
 
     // 7c. Build transcription provider (shared across interfaces).
     let transcription_language = bs
@@ -2070,28 +2103,21 @@ async fn main() -> Result<()> {
         });
     }
 
-    // Spawn a scheduler worker when running in interface-filtered orchestrator
-    // mode. The main unfiltered worker is suppressed in this mode (to avoid
-    // double-consuming Slack/Mattermost/etc. turns), so scheduled tasks would
-    // never be consumed without a dedicated Scheduler worker.
-    if orchestrator_interface_filtered {
-        let sched_orch = bs.orchestrator.clone();
+    // Spawn the interface-filtered workers (scheduler-worker, web-worker)
+    // requested by the worker plan. The plan returns these for
+    // `OrchestratorFiltered` so scheduled tasks and Web-interface turns get
+    // consumed by this process — the main unfiltered worker is suppressed in
+    // that mode to avoid double-consuming Slack/Mattermost/etc. turns.
+    for spec in worker_plan
+        .workers
+        .iter()
+        .filter(|w| w.interface_filter.is_some())
+    {
+        let orch = bs.orchestrator.clone();
+        let id = spec.worker_id;
+        let filter = spec.interface_filter;
         tokio::spawn(async move {
-            sched_orch
-                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
-                .await;
-        });
-
-        // Spawn a Web-filtered worker too. Turns submitted by the web-ui
-        // process (`assistant webui serve`) are published with
-        // `Interface::Web`; the web-ui no longer runs its own worker pool
-        // (it relies on this orchestrator service to consume them). Without
-        // this worker Web turns would queue indefinitely.
-        let web_orch = bs.orchestrator.clone();
-        tokio::spawn(async move {
-            web_orch
-                .run_worker_filtered("web-worker", Some("Web"))
-                .await;
+            orch.run_worker_filtered(id, filter).await;
         });
     }
 
