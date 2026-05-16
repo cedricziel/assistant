@@ -47,15 +47,16 @@ image = { workspace = true }
 wiremock = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 
-# TODO(workspace-lint-policy): ratchet by removing the allow overrides below
-# once non-test unwrap/expect/panic calls are gone from this crate. The
-# workspace baseline (root Cargo.toml [workspace.lints]) is `warn`; we cannot
-# combine `workspace = true` with overrides, so this crate manually replays
-# the relevant lints. See openspec/changes/workspace-lint-policy/.
+# Panic-free contract: all non-test code in this crate propagates errors
+# via `Result<_, anyhow::Error>`, falls back via `std::future::pending()`
+# for signal-handler install failures, or compile-time-evaluates its
+# invariants. Cargo forbids combining `workspace = true` with per-crate
+# overrides, so this manually replays the workspace baseline plus the
+# deny ratchet. See openspec/changes/workspace-lint-policy/.
 [lints.clippy]
-unwrap_used = "allow"
-expect_used = "allow"
-panic = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
 unimplemented = "warn"
 todo = "warn"
 

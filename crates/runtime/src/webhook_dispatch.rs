@@ -54,7 +54,7 @@ pub async fn dispatch_event(
         delivery_span.set_attribute(KeyValue::new("webhook.id", webhook.id.clone()));
         delivery_span.set_attribute(KeyValue::new("webhook.url", webhook.url.clone()));
 
-        let signature = compute_signature(&webhook.secret, &body);
+        let signature = compute_signature(&webhook.secret, &body)?;
         let result = client
             .post(&webhook.url)
             .header("Content-Type", "application/json")
@@ -117,10 +117,11 @@ pub async fn dispatch_event(
     Ok(delivered)
 }
 
-fn compute_signature(secret: &str, body: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key size");
+fn compute_signature(secret: &str, body: &str) -> Result<String> {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .map_err(|e| anyhow::anyhow!("invalid HMAC key length: {e}"))?;
     mac.update(body.as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+    Ok(hex::encode(mac.finalize().into_bytes()))
 }
 
 fn payload_count_hint(payload: &Value) -> usize {

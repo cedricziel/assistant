@@ -34,6 +34,13 @@ use uuid::Uuid;
 use crate::command_registry::{CommandContext, CommandRegistry};
 use crate::orchestrator::Orchestrator;
 
+/// LRU capacity for the in-memory `conversation_key → Uuid` map.
+/// Compile-time-evaluated so the non-zero invariant cannot regress.
+const CONVERSATION_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(10_000) {
+    Some(n) => n,
+    None => unreachable!(),
+};
+
 /// Type alias for the per-conversation serialisation map.
 type ConvLocks = Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>;
 
@@ -67,9 +74,7 @@ impl ChannelRunner {
         Self {
             adapter,
             orchestrator,
-            conversations: Arc::new(Mutex::new(LruCache::new(
-                NonZeroUsize::new(10_000).unwrap(),
-            ))),
+            conversations: Arc::new(Mutex::new(LruCache::new(CONVERSATION_CACHE_CAPACITY))),
             conv_locks: Arc::new(Mutex::new(HashMap::new())),
             shutdown: None,
             command_registry: Arc::new(CommandRegistry::new()),
@@ -442,19 +447,33 @@ impl ChannelRunner {
     }
 
     /// Default (standalone) shutdown signal: Ctrl-C or SIGTERM.
+    ///
+    /// If either signal handler fails to install (extremely rare; typically
+    /// only happens in restricted sandboxes), that branch falls back to
+    /// `pending()` so the other handler still works. The runner can also be
+    /// stopped via the external `shutdown` token regardless of signal state.
     async fn default_shutdown_signal() {
         let ctrl_c = async {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("failed to install Ctrl+C handler");
+            match tokio::signal::ctrl_c().await {
+                Ok(()) => {}
+                Err(e) => {
+                    error!(error = %e, "failed to install Ctrl+C handler; falling back to pending");
+                    std::future::pending::<()>().await
+                }
+            }
         };
 
         #[cfg(unix)]
         let terminate = async {
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("failed to install SIGTERM handler")
-                .recv()
-                .await;
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(mut sig) => {
+                    sig.recv().await;
+                }
+                Err(e) => {
+                    error!(error = %e, "failed to install SIGTERM handler; falling back to pending");
+                    std::future::pending::<()>().await
+                }
+            }
         };
 
         #[cfg(not(unix))]
