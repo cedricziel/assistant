@@ -1,10 +1,9 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
-import '../../shared/platform/adaptive_sliver_nav_bar.dart';
+import '../../shared/platform/widgets.dart';
 import 'traces_provider.dart';
 
 /// Observability screen that lists recent assistant traces.
@@ -18,7 +17,7 @@ class TracesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tracesAsync = ref.watch(tracesProvider);
 
-    return Scaffold(
+    return AdaptiveScaffold(
       body: CustomScrollView(
         slivers: [
           AdaptiveSliverNavBar(
@@ -91,7 +90,7 @@ class _TraceRow extends StatelessWidget {
                 width: 8,
                 height: 8,
                 decoration: BoxDecoration(
-                  color: isError ? colorScheme.error : Colors.green,
+                  color: isError ? colorScheme.error : colorScheme.tertiary,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -212,7 +211,7 @@ class _ErrorView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Retry')),
+          AdaptiveButton.filled(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
     );
