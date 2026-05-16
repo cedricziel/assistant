@@ -78,7 +78,7 @@ pub use types::{
     Message, MessageRole, MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, NextcloudConfig,
     NotificationsConfig, ObservabilityConfig, OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation,
     OpenAIWebSearchOptions, OpenRouterOptions, OtelExporter, PartitionGranularity, SignalConfig,
-    SkillsConfig, SlackConfig, SlackListenMode, StorageConfig, TranscriptionConfig,
+    SkillsConfig, SlackConfig, SlackListenMode, StorageConfig, TitlingConfig, TranscriptionConfig,
     TranscriptionProviderKind, TtsConfig, TtsProviderKind, TurnIdentity,
 };
 pub use upload::resolve_upload_bytes;

@@ -453,6 +453,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "040_message_sender",
             include_str!("../../../migrations/040_message_sender.sql"),
         ),
+        (
+            "041_conversation_title_locked",
+            include_str!("../../../migrations/041_conversation_title_locked.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {

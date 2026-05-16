@@ -212,6 +212,9 @@ pub struct AssistantConfig {
     /// Autonomous learning configuration (`[learning]` section).
     #[serde(default)]
     pub learning: LearningConfig,
+    /// Conversation title-generator configuration (`[titling]` section).
+    #[serde(default)]
+    pub titling: TitlingConfig,
     #[serde(default)]
     pub agent: AgentConfig,
     /// Signal messenger interface configuration (optional).
@@ -1294,6 +1297,51 @@ impl Default for LearningConfig {
     }
 }
 
+/// Conversation title-generator configuration (`[titling]` section).
+///
+/// Controls when the background title-generator worker assigns titles to
+/// conversations.  The worker consumes `turn.result` from the message bus
+/// and is shared across every interface, so this single block governs
+/// titling for web, CLI, MCP, scheduler, and all messenger adapters.
+///
+/// The worker always uses the conversation's primary LLM provider for the
+/// title call.  A future change can re-introduce a per-org model override
+/// once the `LlmProvider` trait exposes a model-selection knob.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TitlingConfig {
+    /// Master switch (default: `true`).  When `false`, the worker still
+    /// consumes and acks `turn.result` messages but never calls the LLM.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Minimum turn number at which an otherwise-unlocked conversation
+    /// becomes eligible for an auto-title (default: `2`, i.e. the worker
+    /// waits until the second assistant response has landed).
+    #[serde(default = "default_titling_min_turns")]
+    pub min_turns: i64,
+    /// Length threshold above which a single first user message is
+    /// considered "substantive enough to title immediately" (default: `200`).
+    #[serde(default = "default_long_first_message_chars")]
+    pub long_first_message_chars: usize,
+}
+
+fn default_titling_min_turns() -> i64 {
+    2
+}
+
+fn default_long_first_message_chars() -> usize {
+    200
+}
+
+impl Default for TitlingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_turns: default_titling_min_turns(),
+            long_first_message_chars: default_long_first_message_chars(),
+        }
+    }
+}
+
 /// Push notification / VAPID configuration (`[notifications]` section).
 ///
 /// VAPID keys are generated on first `assistant webui serve` startup and
@@ -1314,6 +1362,37 @@ pub struct NotificationsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- TitlingConfig defaults / overrides ----------------------------------
+
+    #[test]
+    fn test_titling_defaults_when_block_absent() {
+        // An OrgConfig with no [titling] section must deserialize cleanly and
+        // the worker should pick up the default values.
+        let toml_str = "llm_provider = \"ollama\"";
+        let cfg: AssistantConfig = toml::from_str(toml_str).unwrap();
+        let titling = cfg.titling;
+        assert!(titling.enabled, "default: enabled = true");
+        assert_eq!(titling.min_turns, 2);
+        assert_eq!(titling.long_first_message_chars, 200);
+    }
+
+    #[test]
+    fn test_titling_explicit_block_overrides_defaults() {
+        let toml_str = r#"
+            llm_provider = "ollama"
+
+            [titling]
+            enabled = false
+            min_turns = 4
+            long_first_message_chars = 500
+        "#;
+        let cfg: AssistantConfig = toml::from_str(toml_str).unwrap();
+        let titling = cfg.titling;
+        assert!(!titling.enabled);
+        assert_eq!(titling.min_turns, 4);
+        assert_eq!(titling.long_first_message_chars, 500);
+    }
 
     // -- EmbeddingConfig deserialization --------------------------------------
 

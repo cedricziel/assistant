@@ -567,8 +567,10 @@ pub async fn create_conversation(
     let agent_id = state.agent_id.read().await.clone();
     let store = ConversationStore::for_agent(state.pool, &agent_id)
         .with_broadcaster(state.conversation_broadcaster.clone());
-    let title = body.title.as_deref().unwrap_or("New Chat");
-    match store.create_conversation(Some(title)).await {
+    // Pass the title through as-is. Without an explicit title, the row stays
+    // NULL-titled and the title-generator worker will fill it in once the
+    // conversation has enough material. Display layers coerce NULL → "Untitled".
+    match store.create_conversation(body.title.as_deref()).await {
         Ok(c) => (
             StatusCode::CREATED,
             Json(ConversationSummary {
@@ -876,23 +878,8 @@ pub async fn send_message(
         _ => {}
     }
 
-    // Auto-title on the first user message (empty history).
-    match store.load_history(conv_id).await {
-        Ok(prior) if prior.is_empty() => {
-            let title = if content.chars().count() > 60 {
-                format!("{}...", content.chars().take(57).collect::<String>())
-            } else {
-                content.clone()
-            };
-            if let Err(e) = store.update_title(conv_id, &title).await {
-                warn!("Auto-title failed for {conv_id}: {e}");
-            }
-        }
-        Err(e) => {
-            warn!("Failed to load history for {conv_id}: {e}");
-        }
-        _ => {}
-    }
+    // Title generation is owned by the title-generator worker (consumer of
+    // `turn.result`), not this handler. See `crates/runtime/src/title_generator.rs`.
 
     // Generate a unique ID for this orchestrator run.
     let run_id = Uuid::new_v4();
@@ -1587,13 +1574,10 @@ pub async fn quick_message(
         _ => content.clone(),
     };
 
-    // Create a new conversation.
-    let title = if content.chars().count() > 60 {
-        format!("{}...", content.chars().take(57).collect::<String>())
-    } else {
-        content.clone()
-    };
-    let conv = match store.create_conversation(Some(&title)).await {
+    // Create a new conversation with no title; the title-generator worker
+    // (consumer of `turn.result`) will produce one once the conversation has
+    // accumulated enough material.
+    let conv = match store.create_conversation(None).await {
         Ok(c) => c,
         Err(e) => {
             warn!("quick-message: failed to create conversation: {e}");
@@ -2675,9 +2659,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_conversation_without_title_uses_default() {
+    async fn test_create_conversation_without_title_leaves_title_null() {
         let server = MockServer::start().await;
-        let (state, _) = test_state(&server.uri()).await;
+        let (state, storage) = test_state(&server.uri()).await;
 
         let resp = app(state)
             .oneshot(
@@ -2693,7 +2677,46 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::CREATED);
         let json = body_json(resp.into_body()).await;
-        assert_eq!(json["title"], "New Chat");
+        // Response surfaces "Untitled" (NULL coerced for display).
+        assert_eq!(json["title"], "Untitled");
+
+        // DB row holds NULL with the lock cleared so the worker can title later.
+        let conv_id: Uuid = json["id"].as_str().unwrap().parse().unwrap();
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
+        assert!(conv.title.is_none(), "DB title must be NULL");
+        assert!(!conv.title_locked, "title_locked must be false");
+    }
+
+    #[tokio::test]
+    async fn test_create_conversation_with_explicit_title_locks() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"title":"Pinned Thread"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["title"], "Pinned Thread");
+
+        let conv_id: Uuid = json["id"].as_str().unwrap().parse().unwrap();
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
+        assert_eq!(conv.title.as_deref(), Some("Pinned Thread"));
+        assert!(
+            conv.title_locked,
+            "explicit title at create must lock the conversation"
+        );
     }
 
     // -- GET /conversations/{id} -----------------------------------------------
@@ -2864,6 +2887,48 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_send_message_first_turn_leaves_title_null() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Hello world").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(None).await.unwrap();
+        assert!(conv.title.is_none(), "precondition: conversation untitled");
+        assert!(!conv.title_locked, "precondition: conversation unlocked");
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"message":"What should we have for dinner tonight?"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Drain the SSE stream so the turn completes before we re-read.
+        let _ = body_bytes(resp.into_body()).await;
+
+        let loaded = store.get_conversation(id).await.unwrap().unwrap();
+        assert!(
+            loaded.title.is_none(),
+            "title must remain NULL after first message — got {:?}",
+            loaded.title
+        );
+        assert!(
+            !loaded.title_locked,
+            "title_locked must remain false; the worker (not send_message) is responsible for titling"
+        );
     }
 
     #[tokio::test]
@@ -3914,7 +3979,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quick_message_auto_titles_conversation() {
+    async fn test_quick_message_creates_conversation_with_null_title() {
         let server = MockServer::start().await;
         mount_llm_reply(&server, "response").await;
 
@@ -3938,13 +4003,16 @@ mod tests {
         let json = body_json(resp.into_body()).await;
         let conv_id: Uuid = json["conversation_id"].as_str().unwrap().parse().unwrap();
 
-        // Verify the conversation was titled with the message.
+        // The legacy auto-truncation is gone — the conversation starts NULL
+        // and the title-generator worker is solely responsible for titling.
         let store = ConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
-        assert_eq!(
-            conv.title.as_deref(),
-            Some("What should I cook for dinner tonight?")
+        assert!(
+            conv.title.is_none(),
+            "quick-message must not auto-truncate the title; got {:?}",
+            conv.title
         );
+        assert!(!conv.title_locked);
     }
 
     #[tokio::test]
@@ -4148,6 +4216,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_update_title_broadcasts_upserted_with_new_title() {
+        // Closes the loop the title-generator worker depends on: when the
+        // worker calls update_title on an existing conversation, an Upserted
+        // event MUST be broadcast carrying the new title so any subscribed
+        // UI re-renders without a refresh.  The wire-level forward to SSE
+        // is covered by `stream_conversations_forwards_upserted_delta`.
+        let (state, _storage) = event_log_state().await;
+        let broadcaster = state.conversation_broadcaster.clone();
+        let pool = state.pool.clone();
+
+        let store =
+            ConversationStore::for_agent(pool, "default").with_broadcaster(broadcaster.clone());
+        let conv = store.create_conversation(None).await.unwrap();
+        let conv_id = conv.id;
+
+        // Subscribe AFTER create so we only capture the update.
+        let mut rx = broadcaster.subscribe();
+        store
+            .update_title(conv_id, "Generated By Worker")
+            .await
+            .unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("broadcast must arrive within 2s")
+            .expect("recv must not error");
+
+        match event {
+            assistant_storage::ConversationEvent::Upserted(record) => {
+                assert_eq!(record.id, conv_id);
+                assert_eq!(record.title.as_deref(), Some("Generated By Worker"));
+                assert!(
+                    record.title_locked,
+                    "broadcast after update_title must carry title_locked = true",
+                );
+            }
+            other => panic!("expected Upserted, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn stream_conversations_filters_by_agent_id() {
         use assistant_storage::ConversationEvent;
 
@@ -4177,6 +4286,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 agent_id: "default".to_string(),
                 title: Some("DefaultConv".to_string()),
+                title_locked: true,
                 user_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -4189,6 +4299,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 agent_id: "work".to_string(),
                 title: Some("WorkConv".to_string()),
+                title_locked: true,
                 user_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
