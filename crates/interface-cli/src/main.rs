@@ -9,7 +9,9 @@ mod cmd_persona;
 mod cmd_reset;
 mod cmd_review;
 mod cmd_skill;
+mod cmd_webui;
 mod credentials;
+mod repl_helpers;
 mod skill_diff;
 
 use cli_helpers::{
@@ -18,8 +20,7 @@ use cli_helpers::{
 };
 
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Write as IoWrite};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -554,104 +555,6 @@ mod cli_parse_tests {
     }
 }
 
-async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
-    let args = match command {
-        WebUiCommand::Serve { args } => args,
-    };
-
-    let argv = std::iter::once("assistant-web-ui".to_string())
-        .chain(args.iter().cloned())
-        .collect::<Vec<_>>();
-    assistant_web_ui::run_from_iter(argv).await
-}
-
-// ── Attachment delivery ───────────────────────────────────────────────────────
-
-/// Save attachments from a turn result to `~/.assistant/attachments/` and print
-/// their file paths so the user knows where to find them.
-fn deliver_attachments(attachments: &[assistant_core::Attachment], assistant_dir: &Path) {
-    let attach_dir = assistant_dir.join("attachments");
-    if let Err(e) = std::fs::create_dir_all(&attach_dir) {
-        eprintln!("Failed to create attachments directory: {e}");
-        return;
-    }
-
-    for attachment in attachments {
-        // Disambiguate filenames by prepending a short UUID prefix.
-        let unique_name = format!(
-            "{}_{}",
-            &Uuid::new_v4().to_string()[..8],
-            attachment.filename
-        );
-        let dest = attach_dir.join(&unique_name);
-
-        match std::fs::write(&dest, &attachment.data) {
-            Ok(()) => {
-                let size = attachment.data.len();
-                let kind = if attachment.is_image() {
-                    "image"
-                } else {
-                    "file"
-                };
-                println!(
-                    "  [{kind}] {} ({}, {size} bytes)",
-                    dest.display(),
-                    attachment.mime_type,
-                );
-            }
-            Err(e) => {
-                eprintln!("Failed to save attachment '{}': {e}", attachment.filename);
-            }
-        }
-    }
-}
-
-// ── Token streaming ───────────────────────────────────────────────────────────
-
-/// Spawn a background task that prints tokens from `rx` to stdout as they
-/// arrive.  Returns a join handle; the task exits when the channel is closed
-/// (i.e. when the orchestrator drops its `Sender`).
-fn start_token_printer(
-    mut rx: mpsc::Receiver<assistant_runtime::OrchestratorEvent>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        use assistant_runtime::OrchestratorEvent;
-        let mut stdout = io::stdout();
-        while let Some(event) = rx.recv().await {
-            if let OrchestratorEvent::Token(token) = event {
-                print!("{token}");
-                let _ = stdout.flush();
-            }
-        }
-        // Trailing newline so the next prompt appears on its own line.
-        println!("\n");
-        let _ = stdout.flush();
-    })
-}
-
-// ── Print help ────────────────────────────────────────────────────────────────
-
-fn print_help() {
-    println!(
-        "\nAssistant REPL commands:\n\
-         \n\
-         /new                          Start a new conversation\n\
-         /stop                         Cancel the current turn\n\
-         /model [name]                 Show or switch the model for this conversation\n\
-         /compact                      Compress conversation context\n\
-         /status                       Show conversation status\n\
-         /help                         Show this help message\n\
-         /skills [name]                List all skills, or show detail for one\n\
-         /review                       Review pending skill refinement proposals\n\
-         /install <path|owner/repo>    Install a skill from disk or GitHub\n\
-         /quit | /exit                 Exit the assistant\n\
-         \n\
-         Any other input is sent to the AI assistant.\n"
-    );
-}
-
-// ── reset subcommand ─────────────────────────────────────────────────────────
-
 pub fn home_agent_root(agent_id: &str) -> Result<PathBuf> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     Ok(home.join(".assistant").join("agents").join(agent_id))
@@ -779,7 +682,7 @@ async fn main() -> Result<()> {
     }
 
     if let Some(Command::Webui { command }) = &cli.command {
-        return cmd_webui(command).await;
+        return cmd_webui::cmd_webui(command).await;
     }
 
     if matches!(cli.command, Some(Command::Doctor)) {
@@ -1507,7 +1410,7 @@ async fn main() -> Result<()> {
                         }
 
                         "?" => {
-                            print_help();
+                            repl_helpers::print_help();
                         }
 
                         // -- Shared registry commands (/help, /new, /stop, /model, /compact, /status) --
@@ -1539,7 +1442,7 @@ async fn main() -> Result<()> {
                 // Normal user input — submit through the message bus with
                 // live event streaming via a registered side-channel.
                 let (tx, rx) = mpsc::channel::<assistant_runtime::OrchestratorEvent>(64);
-                let printer = start_token_printer(rx);
+                let printer = repl_helpers::start_token_printer(rx);
 
                 // Register the token sink so the worker streams to it.
                 bs.orchestrator
@@ -1572,7 +1475,7 @@ async fn main() -> Result<()> {
                     Ok(Ok(result)) => {
                         // Deliver any file attachments returned by tools.
                         if !result.attachments.is_empty() {
-                            deliver_attachments(&result.attachments, &assistant_dir);
+                            repl_helpers::deliver_attachments(&result.attachments, &assistant_dir);
                         }
                     }
                     Ok(Err(e)) => {
