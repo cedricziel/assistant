@@ -3,6 +3,10 @@ mod cmd_backup;
 mod cmd_doctor;
 mod cmd_login;
 mod cmd_migrate;
+mod cmd_persona;
+mod cmd_reset;
+mod cmd_review;
+mod cmd_skill;
 mod credentials;
 mod skill_diff;
 
@@ -25,7 +29,7 @@ use assistant_core::types::conversation::Interface;
 use assistant_core::types::llm::{EmbeddingConfig, EmbeddingProviderKind};
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
-    ConversationConfig, MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir,
+    ConversationConfig, MessageBus, apply_agent_context, default_workspace_dir,
     set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_core::{EmbeddingProvider, LlmEmbedder, LlmProvider, WithEmbeddingOverride};
@@ -37,10 +41,7 @@ use assistant_runtime::{
     start_conversation_context,
 };
 use assistant_skills::SkillSource;
-use assistant_storage::{
-    OrgPoolFactory, PersonaSkillAccessStore, PersonaStore, RefinementStatus, StorageLayer,
-    registry::SkillRegistry,
-};
+use assistant_storage::{OrgPoolFactory, StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::{ToolExecutor, install_skill_from_source};
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -245,7 +246,7 @@ enum WebUiCommand {
 }
 
 #[derive(Subcommand)]
-enum PersonaCommand {
+pub enum PersonaCommand {
     /// List all configured Personas.
     List,
     /// Create a Persona context.
@@ -296,7 +297,7 @@ enum PersonaCommand {
 }
 
 #[derive(Subcommand)]
-enum SkillCommand {
+pub enum SkillCommand {
     /// List all registered skills.
     List {
         /// Filter by persona skill access (shows only skills visible to this persona).
@@ -657,134 +658,6 @@ async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
     assistant_web_ui::run_from_iter(argv).await
 }
 
-// ── /review command ───────────────────────────────────────────────────────────
-
-async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Result<()> {
-    let store = storage.refinements_store();
-    let pending = store.list_by_status(&RefinementStatus::Pending).await?;
-
-    if pending.is_empty() {
-        println!("No pending skill refinement proposals.");
-        return Ok(());
-    }
-
-    let use_colour = std::io::IsTerminal::is_terminal(&std::io::stdout());
-
-    println!("\nPending skill refinement proposals:\n");
-    for r in &pending {
-        println!(
-            "  id:     {}\n  skill:  {}\n  reason: {}",
-            r.id, r.target_skill, r.rationale
-        );
-
-        // Read current SKILL.md from disk so the reviewer can see exactly
-        // what the acceptance would change (#7).
-        let skill_def = registry.get(&r.target_skill).await;
-        let current_skill_md = match &skill_def {
-            Some(def) => std::fs::read_to_string(def.dir.join("SKILL.md")).unwrap_or_default(),
-            None => String::new(),
-        };
-
-        println!("  diff:");
-        let diff =
-            skill_diff::render_unified_diff(&current_skill_md, &r.proposed_skill_md, use_colour);
-        for line in diff.lines() {
-            println!("    {line}");
-        }
-        println!();
-    }
-
-    println!("Commands: accept <id>  |  reject <id> [note]  |  done");
-
-    loop {
-        print!("review> ");
-        io::stdout().flush().ok();
-
-        let mut line = String::new();
-        if io::stdin().read_line(&mut line).is_err() {
-            break;
-        }
-        let line = line.trim();
-
-        if line.is_empty() || line == "done" || line == "q" {
-            break;
-        }
-
-        let parts: Vec<&str> = line.splitn(3, ' ').collect();
-        match parts.as_slice() {
-            ["accept", id_str] => {
-                let id = match Uuid::parse_str(id_str) {
-                    Ok(id) => id,
-                    Err(_) => {
-                        eprintln!("Invalid UUID: {id_str}");
-                        continue;
-                    }
-                };
-
-                // Find the refinement in the pending list.
-                let Some(refinement) = pending.iter().find(|r| r.id == id) else {
-                    eprintln!("Refinement {id} not found in pending list.");
-                    continue;
-                };
-
-                // Find the skill in the registry to get its directory.
-                let skill_def = registry.get(&refinement.target_skill).await;
-                if let Some(def) = skill_def {
-                    let skill_md_path = def.dir.join("SKILL.md");
-                    if let Err(e) = std::fs::write(&skill_md_path, &refinement.proposed_skill_md) {
-                        eprintln!("Failed to write SKILL.md: {e}");
-                        continue;
-                    }
-                    // Reload the skill from disk.
-                    if let Err(e) = registry.reload(&refinement.target_skill).await {
-                        eprintln!("Failed to reload skill: {e}");
-                    } else {
-                        println!("Skill '{}' updated and reloaded.", refinement.target_skill);
-                    }
-                } else {
-                    eprintln!(
-                        "Skill '{}' not found in registry; cannot write SKILL.md.",
-                        refinement.target_skill
-                    );
-                }
-
-                store.review(id, true, None).await?;
-                println!("Refinement {id} accepted.");
-            }
-
-            ["reject", id_str] => {
-                let id = match Uuid::parse_str(id_str) {
-                    Ok(id) => id,
-                    Err(_) => {
-                        eprintln!("Invalid UUID: {id_str}");
-                        continue;
-                    }
-                };
-                store.review(id, false, None).await?;
-                println!("Refinement {id} rejected.");
-            }
-
-            ["reject", id_str, note] => {
-                let id = match Uuid::parse_str(id_str) {
-                    Ok(id) => id,
-                    Err(_) => {
-                        eprintln!("Invalid UUID: {id_str}");
-                        continue;
-                    }
-                };
-                store.review(id, false, Some(note)).await?;
-                println!("Refinement {id} rejected with note.");
-            }
-
-            _ => {
-                eprintln!("Unknown command. Use: accept <id> | reject <id> [note] | done");
-            }
-        }
-    }
-
-    Ok(())
-}
-
 // ── Attachment delivery ───────────────────────────────────────────────────────
 
 /// Save attachments from a turn result to `~/.assistant/attachments/` and print
@@ -872,291 +745,7 @@ fn print_help() {
 
 // ── reset subcommand ─────────────────────────────────────────────────────────
 
-fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Result<()> {
-    let loader = MemoryLoader::new(config);
-
-    // Collect everything that will be removed so we can show the user upfront.
-    let memory_files = [
-        loader.soul_path().to_path_buf(),
-        loader.identity_path().to_path_buf(),
-        loader.user_path().to_path_buf(),
-        loader.memory_path().to_path_buf(),
-    ];
-
-    println!("This will permanently delete:\n");
-    println!("  Database : {}", db_path.display());
-    for p in &memory_files {
-        println!("  Memory   : {}", p.display());
-    }
-    let notes_dir = loader.notes_dir_path().to_path_buf();
-    println!("  Notes dir: {}", notes_dir.display());
-    println!();
-
-    if !skip_confirm {
-        print!("Are you sure? [y/N] ");
-        io::stdout().flush().ok();
-        let mut buf = String::new();
-        io::stdin().read_line(&mut buf).ok();
-        if !matches!(buf.trim().to_lowercase().as_str(), "y" | "yes") {
-            println!("Aborted.");
-            return Ok(());
-        }
-    }
-
-    // Delete the SQLite database file.
-    if db_path.exists() {
-        std::fs::remove_file(db_path)
-            .with_context(|| format!("Failed to remove database at {}", db_path.display()))?;
-        println!("Removed: {}", db_path.display());
-    }
-
-    // Delete the four core memory files.
-    for p in &memory_files {
-        if p.exists() {
-            std::fs::remove_file(p).with_context(|| format!("Failed to remove {}", p.display()))?;
-            println!("Removed: {}", p.display());
-        }
-    }
-
-    // Delete the daily notes directory.
-    if notes_dir.exists() {
-        std::fs::remove_dir_all(&notes_dir)
-            .with_context(|| format!("Failed to remove {}", notes_dir.display()))?;
-        println!("Removed: {}", notes_dir.display());
-    }
-
-    // Re-seed default memory files so the next session starts with sensible
-    // content rather than an empty directory.
-    loader.ensure_defaults();
-    println!("\nDefaults restored. Assistant is ready for a fresh start.");
-
-    Ok(())
-}
-
-async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
-    let storage = StorageLayer::new(db_path).await?;
-    let store = storage.persona_store();
-    store.ensure_exists("default").await?;
-
-    match command {
-        PersonaCommand::List => {
-            let items = store.list().await?;
-            if items.is_empty() {
-                println!("No Personas configured.");
-                return Ok(());
-            }
-            println!("Configured Personas:\n");
-            for item in items {
-                println!("  {:20} {}", item.id, item.name);
-            }
-        }
-        PersonaCommand::Create { id } => {
-            if !validate_agent_id(id) {
-                anyhow::bail!(
-                    "Invalid Persona ID '{}'. Use only letters, numbers, '-' and '_'.",
-                    id
-                );
-            }
-            store.ensure_exists(id).await?;
-
-            let root = home_agent_root(id)?;
-            let workspace = default_workspace_dir(id);
-            tokio::fs::create_dir_all(&root).await?;
-            tokio::fs::create_dir_all(&workspace).await?;
-            println!("Persona '{}' is ready.", id);
-        }
-        PersonaCommand::Use { id } => {
-            if !validate_agent_id(id) {
-                anyhow::bail!(
-                    "Invalid Persona ID '{}'. Use only letters, numbers, '-' and '_'.",
-                    id
-                );
-            }
-            store.ensure_exists(id).await?;
-            let root = home_agent_root(id)?;
-            let workspace = default_workspace_dir(id);
-            tokio::fs::create_dir_all(&root).await?;
-            tokio::fs::create_dir_all(&workspace).await?;
-            println!(
-                "Persona '{}' activated. Use --agent {} on next run.",
-                id, id
-            );
-        }
-        PersonaCommand::SkillMode { persona_id, mode } => {
-            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
-            if access_store.has_skill_list_entries(persona_id).await? {
-                eprintln!(
-                    "Warning: persona '{}' has existing skill list entries. \
-                     Changing mode will reinterpret them as {} rules.",
-                    persona_id, mode
-                );
-            }
-            access_store.set_mode(persona_id, mode).await?;
-            println!(
-                "Persona '{}' skill access mode set to '{}'.",
-                persona_id, mode
-            );
-        }
-        PersonaCommand::SkillAdd {
-            persona_id,
-            skill_name,
-        } => {
-            let persona_store = PersonaStore::new(storage.pool.clone());
-            if persona_store.get(persona_id).await?.is_none() {
-                anyhow::bail!("Persona '{}' not found", persona_id);
-            }
-            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
-            let mode = access_store.get_mode(persona_id).await?;
-            if mode == "all" {
-                eprintln!(
-                    "Persona '{}' is in 'all' mode — use `skill-mode` to set whitelist or blacklist first.",
-                    persona_id
-                );
-                std::process::exit(1);
-            }
-            access_store.add_skill(persona_id, skill_name).await?;
-            println!(
-                "Skill '{}' added to persona '{}' {} list.",
-                skill_name, persona_id, mode
-            );
-        }
-        PersonaCommand::SkillRemove {
-            persona_id,
-            skill_name,
-        } => {
-            let persona_store = PersonaStore::new(storage.pool.clone());
-            if persona_store.get(persona_id).await?.is_none() {
-                anyhow::bail!("Persona '{}' not found", persona_id);
-            }
-            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
-            access_store.remove_skill(persona_id, skill_name).await?;
-            println!(
-                "Skill '{}' removed from persona '{}' list.",
-                skill_name, persona_id
-            );
-        }
-        PersonaCommand::TimeoutSet { persona_id, secs } => {
-            store.set_turn_timeout(persona_id, *secs).await?;
-            println!(
-                "Persona '{}' turn timeout set to {} s ({:.1} h).",
-                persona_id,
-                secs,
-                *secs as f64 / 3600.0
-            );
-        }
-        PersonaCommand::TimeoutClear { persona_id } => {
-            store.clear_turn_timeout(persona_id).await?;
-            println!(
-                "Persona '{}' turn timeout cleared (reverts to default 3 h).",
-                persona_id
-            );
-        }
-    }
-
-    Ok(())
-}
-
-async fn cmd_skill(db_path: &Path, config: &AssistantConfig, command: &SkillCommand) -> Result<()> {
-    let storage = StorageLayer::new(db_path).await?;
-    let registry = SkillRegistry::new(storage.pool.clone()).await?;
-
-    // Load builtin and on-disk skills so commands like `list`, `show`, and
-    // `create` (duplicate check) see the full registry — not just SQLite rows.
-    registry
-        .load_embedded()
-        .await
-        .context("Failed to load embedded skills")?;
-    let project_root = std::env::current_dir().ok();
-    let dirs_to_scan = assistant_runtime::bootstrap::skill_dirs(config, project_root.as_deref());
-    let dirs_ref: Vec<(&Path, SkillSource)> = dirs_to_scan
-        .iter()
-        .map(|(p, s)| (p.as_path(), s.clone()))
-        .collect();
-    registry
-        .load_from_dirs(&dirs_ref)
-        .await
-        .context("Failed to load skills from directories")?;
-
-    match command {
-        SkillCommand::List { persona } => {
-            let skills = if let Some(persona_id) = persona {
-                registry.list_for_persona(persona_id, &storage.pool).await?
-            } else {
-                registry.list().await
-            };
-
-            if skills.is_empty() {
-                println!("No skills registered.");
-                return Ok(());
-            }
-
-            println!("{:<30} {:<12} DESCRIPTION", "NAME", "SOURCE");
-            println!("{}", "-".repeat(80));
-            for s in skills {
-                let source = match s.source {
-                    SkillSource::Builtin => "builtin",
-                    SkillSource::User => "user",
-                    SkillSource::Project => "project",
-                    SkillSource::Installed => "installed",
-                };
-                println!("{:<30} {:<12} {}", s.name, source, s.description);
-            }
-        }
-        SkillCommand::Show { name } => {
-            let skill = registry
-                .get(name)
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Skill '{}' not found", name))?;
-
-            println!("name: {}", skill.name);
-            println!("description: {}", skill.description);
-            if let Some(license) = &skill.license {
-                println!("license: {}", license);
-            }
-            println!("source: {}", skill.source);
-            println!("dir: {}", skill.dir.display());
-            println!();
-            println!("{}", skill.body);
-        }
-        SkillCommand::Create {
-            name,
-            description,
-            body_file,
-        } => {
-            let body = tokio::fs::read_to_string(body_file)
-                .await
-                .with_context(|| format!("Failed to read body file {}", body_file.display()))?;
-
-            let def = registry.create_user_skill(name, description, &body).await?;
-            println!("Skill '{}' created at {}.", def.name, def.dir.display());
-        }
-        SkillCommand::Delete { name, yes } => {
-            if !*yes {
-                print!("Delete skill '{}'? [y/N] ", name);
-                io::stdout().flush().ok();
-                let mut buf = String::new();
-                if io::stdin().read_line(&mut buf).is_err()
-                    || !matches!(buf.trim().to_lowercase().as_str(), "y" | "yes")
-                {
-                    println!("Aborted.");
-                    return Ok(());
-                }
-            }
-            registry.delete_user_skill(name).await?;
-            println!("Skill '{}' deleted.", name);
-        }
-        // Handled after bootstrap in main() — should not be reached here.
-        SkillCommand::Generate { .. } => {
-            anyhow::bail!(
-                "Generate requires a running Orchestrator — this code path should not be reached"
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn home_agent_root(agent_id: &str) -> Result<PathBuf> {
+pub fn home_agent_root(agent_id: &str) -> Result<PathBuf> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     Ok(home.join(".assistant").join("agents").join(agent_id))
 }
@@ -1526,17 +1115,17 @@ async fn main() -> Result<()> {
 
     // 3. Handle Reset early — does not need heavy resources.
     if let Some(Command::Reset { yes }) = &cli.command {
-        return cmd_reset(&db_path, &config, *yes);
+        return cmd_reset::cmd_reset(&db_path, &config, *yes);
     }
 
     if let Some(Command::Persona { command }) = &cli.command {
-        return cmd_persona(&db_path, command).await;
+        return cmd_persona::cmd_persona(&db_path, command).await;
     }
 
     if let Some(Command::Skill { command }) = &cli.command {
         // Generate needs the full Orchestrator — handled after bootstrap.
         if !matches!(command, SkillCommand::Generate { .. }) {
-            return cmd_skill(&db_path, &config, command).await;
+            return cmd_skill::cmd_skill(&db_path, &config, command).await;
         }
     }
 
@@ -2248,7 +1837,8 @@ async fn main() -> Result<()> {
                         }
 
                         "review" => {
-                            if let Err(e) = cmd_review(&bs.storage, &bs.registry).await {
+                            if let Err(e) = cmd_review::cmd_review(&bs.storage, &bs.registry).await
+                            {
                                 eprintln!("Error during review: {e}");
                             }
                         }
