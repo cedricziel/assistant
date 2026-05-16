@@ -1835,6 +1835,7 @@ final chatProvider = AsyncNotifierProvider.autoDispose<ChatNotifier, ChatState>(
 
 ToolCallStatus _parseToolStatusString(String status) {
   return switch (status) {
+    'pending' => ToolCallStatus.pending,
     'ok' => ToolCallStatus.ok,
     'error' => ToolCallStatus.error,
     'denied' => ToolCallStatus.denied,
@@ -1861,10 +1862,13 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
   final messages = <ChatMessage>[];
   for (final m in source) {
     final toolCalls = m.toolCalls?.toList() ?? const [];
-    for (final tc in toolCalls) {
+    for (var i = 0; i < toolCalls.length; i++) {
+      final tc = toolCalls[i];
       messages.add(
         ChatMessage(
-          id: 'toolcall-${tc.name}-${m.id}',
+          // Include the index so multiple invocations of the same tool on a
+          // single assistant row produce distinct widget keys.
+          id: 'toolcall-${tc.name}-${m.id}-$i',
           role: 'assistant',
           content: '',
           timelineType: TimelineEntryType.toolCall,
