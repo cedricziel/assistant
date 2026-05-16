@@ -219,16 +219,6 @@ pub(crate) async fn run_due_tasks(
     let now = Utc::now();
     let task_store = storage.scheduled_task_store_for_agent(&orchestrator.agent_id);
     let due = task_store.due_tasks(now).await?;
-    let bus = orchestrator.bus();
-
-    // Resolve the persona's owner so scheduled tasks carry identity context.
-    let persona_owner = storage
-        .persona_store()
-        .get(&orchestrator.agent_id)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|p| p.owner_user_id);
 
     for task in due {
         info!(task_name = %task.name, "Dispatching scheduled task");
@@ -240,93 +230,29 @@ pub(crate) async fn run_due_tasks(
             Some(conversation_id),
         );
 
-        let trigger = serde_json::json!({
-            "task_id": task.id,
-            "task_name": task.name.clone(),
-            "conversation_id": conversation_id,
-            "triggered_at": now,
-        });
-        if let Err(e) = webhook_dispatch::dispatch_event(
+        // Fire schedule.trigger webhook + bus event before the TurnRequest so
+        // external listeners see the cron fire even if the turn fails to
+        // dispatch.
+        publish_schedule_trigger(
             storage,
-            &orchestrator.agent_id,
-            topic::SCHEDULE_TRIGGER,
-            trigger.clone(),
+            orchestrator,
+            &task,
+            now,
+            conversation_id,
+            &interface_cx,
+        )
+        .await;
+
+        let dispatched = match dispatch_scheduler_turn_request(
+            storage,
+            orchestrator,
+            task.prompt.clone(),
+            conversation_id,
+            &interface_cx,
         )
         .await
         {
-            error!(task_name = %task.name, error = %e, "Failed to dispatch schedule.trigger webhooks");
-        }
-        let mut produce_trigger_span = crate::otel_spans::start_bus_span(
-            SpanKind::Producer,
-            topic::SCHEDULE_TRIGGER,
-            Some(conversation_id),
-            &interface_cx,
-        );
-        match bus
-            .publish(
-                PublishRequest::new(topic::SCHEDULE_TRIGGER, trigger)
-                    .with_agent_id(orchestrator.agent_id.clone())
-                    .with_conversation_id(conversation_id)
-                    .with_interface(format!("{:?}", Interface::Scheduler))
-                    .with_user_id(SCHEDULER_USER_ID),
-            )
-            .await
-        {
-            Ok(message_id) => {
-                produce_trigger_span
-                    .set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
-                produce_trigger_span.set_attribute(KeyValue::new("bus.status", "ok"));
-            }
-            Err(e) => {
-                produce_trigger_span.set_attribute(KeyValue::new("bus.status", "error"));
-                produce_trigger_span.set_attribute(KeyValue::new("error", true));
-                produce_trigger_span.set_attribute(KeyValue::new("error.message", e.to_string()));
-                error!(task_name = %task.name, error = %e, "Failed to publish schedule.trigger event");
-            }
-        }
-        produce_trigger_span.end();
-
-        // Resolve home-channel tools and register them before publishing the
-        // TurnRequest so the worker can find them when it claims the message.
-        let home_tools = resolve_home_channel_tools(storage, orchestrator, conversation_id).await;
-        if !home_tools.is_empty() {
-            orchestrator
-                .register_extensions(conversation_id, home_tools, vec![])
-                .await;
-        }
-
-        let turn_req = bus_messages::TurnRequest {
-            prompt: task.prompt.clone(),
-            conversation_id,
-            extension_tools: vec![],
-            timestamp: Some(Utc::now()),
-            traceparent: traceparent_from_context(&interface_cx),
-            attachment_ids: vec![],
-            user_id: persona_owner.clone(),
-            org_id: None,
-            space_id: None,
-        };
-
-        let mut produce_turn_span = crate::otel_spans::start_bus_span(
-            SpanKind::Producer,
-            topic::TURN_REQUEST,
-            Some(conversation_id),
-            &interface_cx,
-        );
-        let dispatched = match bus
-            .publish(
-                PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
-                    .with_agent_id(orchestrator.agent_id.clone())
-                    .with_conversation_id(conversation_id)
-                    .with_interface(format!("{:?}", Interface::Scheduler))
-                    .with_user_id(SCHEDULER_USER_ID),
-            )
-            .await
-        {
-            Ok(message_id) => {
-                produce_turn_span
-                    .set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
-                produce_turn_span.set_attribute(KeyValue::new("bus.status", "ok"));
+            Ok(()) => {
                 info!(
                     task_name = %task.name,
                     conversation_id = %conversation_id,
@@ -335,9 +261,6 @@ pub(crate) async fn run_due_tasks(
                 true
             }
             Err(e) => {
-                produce_turn_span.set_attribute(KeyValue::new("bus.status", "error"));
-                produce_turn_span.set_attribute(KeyValue::new("error", true));
-                produce_turn_span.set_attribute(KeyValue::new("error.message", e.to_string()));
                 error!(
                     task_name = %task.name,
                     error = %e,
@@ -346,7 +269,6 @@ pub(crate) async fn run_due_tasks(
                 false
             }
         };
-        produce_turn_span.end();
 
         if !dispatched {
             continue;
@@ -365,6 +287,146 @@ pub(crate) async fn run_due_tasks(
     }
 
     Ok(())
+}
+
+/// Fire the `schedule.trigger` webhook and publish the same payload as a
+/// bus event so external listeners observe every cron fire. Both arms log
+/// (but never propagate) their failures — the caller still tries to
+/// dispatch the TurnRequest regardless.
+async fn publish_schedule_trigger(
+    storage: &StorageLayer,
+    orchestrator: &Orchestrator,
+    task: &assistant_storage::ScheduledTask,
+    now: chrono::DateTime<Utc>,
+    conversation_id: Uuid,
+    interface_cx: &opentelemetry::Context,
+) {
+    let trigger = serde_json::json!({
+        "task_id": task.id,
+        "task_name": task.name.clone(),
+        "conversation_id": conversation_id,
+        "triggered_at": now,
+    });
+
+    if let Err(e) = webhook_dispatch::dispatch_event(
+        storage,
+        &orchestrator.agent_id,
+        topic::SCHEDULE_TRIGGER,
+        trigger.clone(),
+    )
+    .await
+    {
+        error!(task_name = %task.name, error = %e, "Failed to dispatch schedule.trigger webhooks");
+    }
+
+    let mut span = crate::otel_spans::start_bus_span(
+        SpanKind::Producer,
+        topic::SCHEDULE_TRIGGER,
+        Some(conversation_id),
+        interface_cx,
+    );
+    match orchestrator
+        .bus()
+        .publish(
+            PublishRequest::new(topic::SCHEDULE_TRIGGER, trigger)
+                .with_agent_id(orchestrator.agent_id.clone())
+                .with_conversation_id(conversation_id)
+                .with_interface(format!("{:?}", Interface::Scheduler))
+                .with_user_id(SCHEDULER_USER_ID),
+        )
+        .await
+    {
+        Ok(message_id) => {
+            span.set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
+            span.set_attribute(KeyValue::new("bus.status", "ok"));
+        }
+        Err(e) => {
+            span.set_attribute(KeyValue::new("bus.status", "error"));
+            span.set_attribute(KeyValue::new("error", true));
+            span.set_attribute(KeyValue::new("error.message", e.to_string()));
+            error!(task_name = %task.name, error = %e, "Failed to publish schedule.trigger event");
+        }
+    }
+    span.end();
+}
+
+/// Build a [`TurnRequest`] for a scheduler-originated dispatch, publish it
+/// to the bus with proper OTel spans, and register any home-channel
+/// platform tools beforehand.
+///
+/// Shared entry point for [`run_due_tasks`] and [`run_heartbeat`] — both
+/// resolve persona-owner identity, home-channel tools, build the same
+/// envelope, and publish to [`topic::TURN_REQUEST`]. Returns `Ok(())` on
+/// success; `Err` if envelope serialisation or publish fails (caller
+/// decides whether to propagate or merely log).
+async fn dispatch_scheduler_turn_request(
+    storage: &StorageLayer,
+    orchestrator: &Orchestrator,
+    prompt: String,
+    conversation_id: Uuid,
+    interface_cx: &opentelemetry::Context,
+) -> Result<()> {
+    // Resolve home-channel tools and register them before publishing so the
+    // worker can find them when it claims the message.
+    let home_tools = resolve_home_channel_tools(storage, orchestrator, conversation_id).await;
+    if !home_tools.is_empty() {
+        orchestrator
+            .register_extensions(conversation_id, home_tools, vec![])
+            .await;
+    }
+
+    // Resolve the persona's owner so scheduler-driven turns carry identity.
+    let persona_owner = storage
+        .persona_store()
+        .get(&orchestrator.agent_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.owner_user_id);
+
+    let turn_req = bus_messages::TurnRequest {
+        prompt,
+        conversation_id,
+        extension_tools: vec![],
+        timestamp: Some(Utc::now()),
+        traceparent: traceparent_from_context(interface_cx),
+        attachment_ids: vec![],
+        user_id: persona_owner,
+        org_id: None,
+        space_id: None,
+    };
+
+    let mut span = crate::otel_spans::start_bus_span(
+        SpanKind::Producer,
+        topic::TURN_REQUEST,
+        Some(conversation_id),
+        interface_cx,
+    );
+    let publish_result = orchestrator
+        .bus()
+        .publish(
+            PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
+                .with_agent_id(orchestrator.agent_id.clone())
+                .with_conversation_id(conversation_id)
+                .with_interface(format!("{:?}", Interface::Scheduler))
+                .with_user_id(SCHEDULER_USER_ID),
+        )
+        .await;
+    match publish_result {
+        Ok(message_id) => {
+            span.set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
+            span.set_attribute(KeyValue::new("bus.status", "ok"));
+            span.end();
+            Ok(())
+        }
+        Err(e) => {
+            span.set_attribute(KeyValue::new("bus.status", "error"));
+            span.set_attribute(KeyValue::new("error", true));
+            span.set_attribute(KeyValue::new("error.message", e.to_string()));
+            span.end();
+            Err(e)
+        }
+    }
 }
 
 /// Resolve home-channel platform tools for a scheduler-originated turn.
@@ -466,68 +528,15 @@ pub(crate) async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         Some(conversation_id),
     );
 
-    // Resolve home-channel tools and register them before publishing.
     let storage = orchestrator.storage.clone();
-    let home_tools = resolve_home_channel_tools(&storage, orchestrator, conversation_id).await;
-    if !home_tools.is_empty() {
-        orchestrator
-            .register_extensions(conversation_id, home_tools, vec![])
-            .await;
-    }
-
-    // Resolve persona owner for identity context.
-    let persona_owner = orchestrator
-        .storage
-        .persona_store()
-        .get(&orchestrator.agent_id)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|p| p.owner_user_id);
-
-    let turn_req = bus_messages::TurnRequest {
+    dispatch_scheduler_turn_request(
+        &storage,
+        orchestrator,
         prompt,
         conversation_id,
-        extension_tools: vec![],
-        timestamp: Some(Utc::now()),
-        traceparent: traceparent_from_context(&interface_cx),
-        attachment_ids: vec![],
-        user_id: persona_owner,
-        org_id: None,
-        space_id: None,
-    };
-
-    let mut produce_turn_span = crate::otel_spans::start_bus_span(
-        SpanKind::Producer,
-        topic::TURN_REQUEST,
-        Some(conversation_id),
         &interface_cx,
-    );
-    let publish_result = orchestrator
-        .bus()
-        .publish(
-            PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
-                .with_agent_id(orchestrator.agent_id.clone())
-                .with_conversation_id(conversation_id)
-                .with_interface(format!("{:?}", Interface::Scheduler))
-                .with_user_id(SCHEDULER_USER_ID),
-        )
-        .await;
-    match publish_result {
-        Ok(message_id) => {
-            produce_turn_span
-                .set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
-            produce_turn_span.set_attribute(KeyValue::new("bus.status", "ok"));
-            produce_turn_span.end();
-        }
-        Err(e) => {
-            produce_turn_span.set_attribute(KeyValue::new("bus.status", "error"));
-            produce_turn_span.set_attribute(KeyValue::new("error", true));
-            produce_turn_span.set_attribute(KeyValue::new("error.message", e.to_string()));
-            produce_turn_span.end();
-            return Err(e);
-        }
-    }
+    )
+    .await?;
 
     info!(
         conversation_id = %conversation_id,
