@@ -1,17 +1,16 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
-import '../../shared/platform/platform.dart';
+import '../../shared/platform/adaptive_sliver_nav_bar.dart';
 import 'traces_provider.dart';
 
 /// Observability screen that lists recent assistant traces.
 ///
 /// Each row shows timestamp, persona, duration, and status.
-/// Expanding a row reveals the span breakdown.
+/// Tapping a row navigates to the full trace detail.
 class TracesScreen extends ConsumerWidget {
   const TracesScreen({super.key});
 
@@ -19,97 +18,49 @@ class TracesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tracesAsync = ref.watch(tracesProvider);
 
-    if (isAppleTouch) {
-      return Scaffold(
-        body: CustomScrollView(
-          slivers: [
-            CupertinoSliverNavigationBar(
-              largeTitle: const Text('Traces'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.refresh),
-                    onPressed: () =>
-                        ref.read(tracesProvider.notifier).refresh(),
-                  ),
-                ],
-              ),
-            ),
-            tracesAsync.when(
-              loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator.adaptive()),
-              ),
-              error: (err, _) => SliverFillRemaining(
-                child: _ErrorView(
-                  error: err.toString(),
-                  onRetry: () => ref.read(tracesProvider.notifier).refresh(),
-                ),
-              ),
-              data: (state) {
-                if (state.error != null) {
-                  return SliverFillRemaining(
-                    child: _ErrorView(
-                      error: state.error!,
-                      onRetry: () =>
-                          ref.read(tracesProvider.notifier).refresh(),
-                    ),
-                  );
-                }
-                if (state.traces.isEmpty) {
-                  return const SliverFillRemaining(child: _EmptyView());
-                }
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    return _TraceRow(trace: state.traces[index]);
-                  }, childCount: state.traces.length),
-                );
-              },
-            ),
-          ],
-        ),
-      );
-    }
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Traces'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/chat'),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.read(tracesProvider.notifier).refresh(),
+      body: CustomScrollView(
+        slivers: [
+          AdaptiveSliverNavBar(
+            title: 'Traces',
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: () => ref.read(tracesProvider.notifier).refresh(),
+              ),
+            ],
+          ),
+          tracesAsync.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator.adaptive()),
+            ),
+            error: (err, _) => SliverFillRemaining(
+              child: _ErrorView(
+                error: err.toString(),
+                onRetry: () => ref.read(tracesProvider.notifier).refresh(),
+              ),
+            ),
+            data: (state) {
+              if (state.error != null) {
+                return SliverFillRemaining(
+                  child: _ErrorView(
+                    error: state.error!,
+                    onRetry: () => ref.read(tracesProvider.notifier).refresh(),
+                  ),
+                );
+              }
+              if (state.traces.isEmpty) {
+                return const SliverFillRemaining(child: _EmptyView());
+              }
+              return SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _TraceRow(trace: state.traces[index]),
+                  childCount: state.traces.length,
+                ),
+              );
+            },
           ),
         ],
-      ),
-      body: tracesAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator.adaptive()),
-        error: (err, _) => _ErrorView(
-          error: err.toString(),
-          onRetry: () => ref.read(tracesProvider.notifier).refresh(),
-        ),
-        data: (state) {
-          if (state.error != null) {
-            return _ErrorView(
-              error: state.error!,
-              onRetry: () => ref.read(tracesProvider.notifier).refresh(),
-            );
-          }
-          if (state.traces.isEmpty) {
-            return const _EmptyView();
-          }
-          return ListView.builder(
-            itemCount: state.traces.length,
-            itemBuilder: (context, index) {
-              final trace = state.traces[index];
-              return _TraceRow(trace: trace);
-            },
-          );
-        },
       ),
     );
   }

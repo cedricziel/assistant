@@ -24,15 +24,15 @@
 - [x] 1.22 Implement `app/lib/shared/platform/adaptive_snack_bar.dart`
 - [x] 1.23 Run `make lint-flutter && make test-flutter` — green (933 tests pass, dart_pre_commit clean)
 - [x] 1.24 Run `cd app && flutter analyze --fatal-infos` — zero issues
-- [ ] 1.25 Open Phase 1 PR with stacked-PR-base flag set; merge before Phase 2
+- [x] 1.25 Open Phase 1 PR with stacked-PR-base flag set; merge before Phase 2 (PR #789)
 
 ## 2. Phase 2.1 — Trivial sweep (1 PR)
 
-- [ ] 2.1.1 Remove the vestigial `package:flutter/material.dart` import from `app/lib/shared/error_screen.dart`; verify the file still compiles and the existing widget test passes
+- [ ] 2.1.1 ~~Remove the vestigial `package:flutter/material.dart` import from `app/lib/shared/error_screen.dart`~~ **Deferred.** Original inventory was wrong: the file legitimately uses `Material()` widget (background colour), `Theme.of(context)`, `Icons.error_outline`, and `ExpansionTile`. It's a special-case bootstrap widget rendered via `ErrorWidget.builder` before the app's normal widget tree may be available. Decision: add `app/lib/shared/error_screen.dart` to the Phase 4 lint allowlist as a known exception. Migration to `AdaptiveScaffold` + `AdaptiveIcon` is possible but requires a small visual change (AppBar on Material path) and is out of scope here.
 
 ## 3. Phase 2.2 — Sliver-nav list screens (9 stacked PRs, one per screen)
 
-- [ ] 3.1 `traces_screen.dart`: replace inline `if (isAppleTouch) CupertinoSliverNavigationBar` with `AdaptiveSliverNavBar`; drop `package:flutter/cupertino.dart` import; existing tests stay green
+- [x] 3.1 `traces_screen.dart`: replace inline `if (isAppleTouch) CupertinoSliverNavigationBar` with `AdaptiveSliverNavBar`; drop `package:flutter/cupertino.dart` import; existing tests stay green. Unified both platform paths into a single CustomScrollView with the wrapper. Material visual change: SliverAppBar.large (collapsing) replaces fixed AppBar, and the explicit `IconButton(arrow_back) → /chat` is dropped (top-level nav screen — sidebar/tab bar already provides home access; matches the existing iOS path which had no back button).
 - [ ] 3.2 `logs_screen.dart`: same treatment
 - [ ] 3.3 `agents_screen.dart`: same treatment + replace `CupertinoButton`/`CupertinoIcons` with `AdaptiveButton`/`AdaptiveIcons`
 - [ ] 3.4 `workflows_screen.dart`: same as 3.3
