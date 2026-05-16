@@ -6228,6 +6228,7 @@
           {
             "name": "code_challenge_method",
             "in": "query",
+            "description": "Accepted per RFC 7636 §4.3 for forward-compatibility. We only support\n`S256` and assume it implicitly; the value is not yet validated.",
             "required": false,
             "schema": {
               "type": [
@@ -9823,7 +9824,7 @@
       },
       "RevokeRequest": {
         "type": "object",
-        "description": "POST /oauth/revoke request body.",
+        "description": "POST /oauth/revoke request body.\n\n`token_type_hint` (RFC 7009 §2.1) and `client_id` are accepted for\nspec compliance but currently informational — revocation looks up\ntokens by value alone. Kept on the struct so the OpenAPI surface\nmatches the RFC.",
         "required": [
           "token"
         ],
