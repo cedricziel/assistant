@@ -1671,5 +1671,59 @@ void main() {
             'messages=${after.messages.map((m) => '(${m.id}, streaming=${m.isStreaming}, content="${m.content}")').toList()}',
       );
     });
+
+    // The voice-send path has the same shape as the text path: it inserts a
+    // voice placeholder + an empty assistant-streaming bubble and then awaits
+    // an SSE stream. Same iOS Dio buffering risk → same user contract: a
+    // stream that delivers no useful events within ~15 s must not leave the
+    // UI in dots state.
+    testWidgets('voice stream that emits no events within 15s does not leave the '
+        'UI in indefinite "streaming dots" state', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueVoiceStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(
+        notifier.sendVoiceMessage(Uint8List.fromList([1, 2, 3]), 'audio/webm'),
+      );
+      await tester.pump();
+
+      // Precondition: the assistant-streaming placeholder is showing dots.
+      final initial = notifier.state.value!;
+      final initialPlaceholder = initial.messages.firstWhere(
+        (m) => m.id == 'assistant-streaming',
+        orElse: () =>
+            ChatMessage(id: 'missing', role: 'assistant', content: ''),
+      );
+      expect(
+        initialPlaceholder.isStreaming && initialPlaceholder.content.isEmpty,
+        isTrue,
+        reason:
+            'precondition: voice send should insert the dots-state '
+            'placeholder',
+      );
+
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+
+      final after = notifier.state.value!;
+      final stillInDots = after.messages.any(
+        (m) =>
+            m.id == 'assistant-streaming' && m.isStreaming && m.content.isEmpty,
+      );
+      expect(
+        stillInDots,
+        isFalse,
+        reason:
+            'After 15s with no voice-stream progress the UI must exit the '
+            '"dots forever" state. Current: isSending=${after.isSending}, '
+            'error=${after.error}, '
+            'messages=${after.messages.map((m) => '(${m.id}, streaming=${m.isStreaming}, content="${m.content}")').toList()}',
+      );
+    });
   });
 }
