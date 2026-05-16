@@ -41,12 +41,14 @@ use crate::api::conversations::{
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
     ToolCallSummary, UpdateConversationRequest,
 };
-use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
-use crate::api::{
+use crate::api::messages::{
     QuickMessageRequest, QuickMessageResponse, SendMessageRequest as ApiSendMessageRequest,
     SseStatusEvent, SseSubagentCompletedEvent, SseSubagentStartedEvent, SseSubagentStatusEvent,
     SseSubagentThinkingEvent, SseSubagentTokenEvent, SseSubagentToolResultEvent, SseThinkingEvent,
     SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
+};
+use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
+use crate::api::{
     account::{ChangePasswordRequest, UpdateCurrentUserRequest, UpdateCurrentUserResponse},
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
     analytics::{
@@ -199,10 +201,10 @@ pub struct ApiErrorResponse {
         crate::api::conversations::get_conversation,
         crate::api::conversations::delete_conversation,
         crate::api::conversations::update_conversation,
-        crate::api::send_message,
-        crate::api::quick_message,
-        crate::api::send_voice_message,
-        crate::api::stream_run_events,
+        crate::api::messages::send_message,
+        crate::api::messages::quick_message,
+        crate::api::messages::send_voice_message,
+        crate::api::messages::stream_run_events,
         crate::api::audio::get_message_audio,
         crate::api::audio::get_audio,
         crate::api::attachments::upload_attachment,
