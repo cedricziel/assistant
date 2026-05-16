@@ -72,8 +72,8 @@ Therefore:
 
 Acceptance criteria gain teeth:
 
-- **Favicon**: `app/web/favicon.png` size > 1 KB AND SHA-256 ≠ the known Flutter-default favicon hash. Asserted by a unit test in `app/test/assets/icons_test.dart` (new file).
-- **Maskable**: For each `Icon-maskable-*.png`, no pixel in the outer 10% border has alpha < 0xFF. Asserted by the same test using the `image` Dart package (already transitive in Flutter).
+- **Favicon dimensions**: `app/test/assets/icons_test.dart` asserts `web/favicon.png` is exactly 16×16 (legacy fallback) and `web/favicon-32.png` is exactly 32×32 (modern tab-icon size), and that `web/index.html` declares `sizes="32x32"` so browsers pick the sharper variant. Dimension checks replaced the original "> 1 KB + SHA-256-not-Flutter-default" heuristic after implementation revealed the existing favicon was already correctly sourced from the brand — the visibility issue was small size, not wrong source.
+- **Maskable**: For each `Icon-maskable-*.png`, no pixel in the outer 10% border has alpha less than the image's `maxChannelValue` (handles both 8-bit and 16-bit PNG depth). Asserted by the same test using the `image` Dart package.
 
 The test runs under `flutter test` and gates PRs via the existing flutter CI workflow. Drift gets caught immediately if someone re-overwrites the favicon by accident.
 
@@ -81,7 +81,7 @@ The test runs under `flutter test` and gates PRs via the existing flutter CI wor
 
 Symmetry with the existing API-client-generation workflow documented in `CLAUDE.md`. The target:
 
-```
+```make
 icons:
 	cd app && dart run flutter_launcher_icons
 	cd app && sips -z 192 192 icon_source_maskable.png --out web/icons/Icon-maskable-192.png
