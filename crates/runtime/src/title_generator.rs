@@ -235,8 +235,16 @@ impl TitleGeneratorWorker {
     }
 
     /// Stable worker identity used for bus claim attribution.
+    ///
+    /// The id is embedded in the NATS JetStream consumer name (via
+    /// `bus-nats::consumer_for`, which does
+    /// `format!("{worker_id}-{topic}")`). NATS consumer names only accept
+    /// `[A-Za-z0-9_-]`, so this method MUST avoid slashes and other special
+    /// characters — historically `title-generator/<agent_id>` produced an
+    /// invalid consumer name that `get_or_create_consumer` rejected every
+    /// poll, surfacing as a per-second `claim failed` WARN in production.
     fn worker_id(&self) -> String {
-        format!("title-generator/{}", self.agent_id)
+        format!("title-generator-{}", self.agent_id)
     }
 
     /// Run a single claim → process → ack/nack iteration.
@@ -349,7 +357,14 @@ impl TitleGeneratorWorker {
         info!(worker_id = %self.worker_id(), "Title-generator worker started");
         loop {
             if let Err(e) = self.run_one().await {
-                warn!(error = %e, "title-generator: run_one returned an error");
+                // `{:#}` walks the full anyhow context chain — without this,
+                // operators only see the outermost context ("claim failed")
+                // and can't tell what the underlying bus / provider failure
+                // actually was.
+                warn!(
+                    error = format!("{e:#}"),
+                    "title-generator: run_one returned an error"
+                );
                 sleep(Duration::from_secs(1)).await;
                 continue;
             }
@@ -450,6 +465,51 @@ mod tests {
 
         fn chat_calls(&self) -> usize {
             self.chat_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    /// Regression test: the title-generator's `worker_id()` is embedded in
+    /// the NATS JetStream consumer name via
+    /// `bus-nats::consumer_for` (`format!("{worker_id}-{topic}")`). NATS
+    /// rejects any consumer name containing characters outside
+    /// `[A-Za-z0-9_-]`. The original implementation used a slash separator
+    /// (`title-generator/<agent_id>`) which silently failed every poll,
+    /// producing the per-second `claim failed` WARN spam observed on
+    /// schorschvm. Lock the invariant in.
+    #[tokio::test]
+    async fn worker_id_is_nats_safe() {
+        let (bus, storage) = make_bus_and_storage().await;
+        let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm::new_ok("ignored"));
+
+        // Realistic agent_ids the system actually generates. Non-ASCII
+        // edge cases (e.g. user-supplied `team-α`) are covered by
+        // `bus-nats::sanitize_consumer_segment` instead — title-gen's own
+        // output just needs to be safe for the ASCII-only agent_ids the
+        // runtime currently mints.
+        for agent_id in &["default", "work", "ops-team", "agent_42"] {
+            let worker = TitleGeneratorWorker::new(
+                bus.clone(),
+                storage.clone(),
+                llm.clone(),
+                default_cfg(),
+                (*agent_id).to_string(),
+            );
+            let id = worker.worker_id();
+
+            // Whole id, plus the joined `<id>-<topic>` consumer name, must
+            // match `[A-Za-z0-9_-]+`.
+            let joined = format!("{id}-turn-result");
+            assert!(
+                joined
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                "worker_id-derived consumer name {joined:?} contains characters \
+                 NATS rejects; only [A-Za-z0-9_-] is allowed"
+            );
+            assert!(
+                !id.contains('/'),
+                "worker_id {id:?} contains a slash — NATS consumer names cannot include `/`"
+            );
         }
     }
 
