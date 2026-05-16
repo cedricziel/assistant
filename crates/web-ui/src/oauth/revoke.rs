@@ -10,12 +10,19 @@ use serde::{Deserialize, Serialize};
 use super::{OAuthError, OAuthErrorResponse, OAuthState};
 
 /// POST /oauth/revoke request body.
+///
+/// `token_type_hint` (RFC 7009 §2.1) and `client_id` are accepted for
+/// spec compliance but currently informational — revocation looks up
+/// tokens by value alone. Kept on the struct so the OpenAPI surface
+/// matches the RFC.
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct RevokeRequest {
     pub token: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub token_type_hint: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub client_id: Option<String>,
 }
 
