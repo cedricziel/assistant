@@ -35,12 +35,13 @@ use utoipa::{
 };
 
 use crate::a2a::handlers;
+use crate::api::attachments::AttachmentMetaResponse;
+use crate::api::capabilities::ServerCapabilities;
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::{
-    AttachmentMetaResponse, ConversationDetail, ConversationSummary, CreateConversationRequest,
-    MessageSummary, QuickMessageRequest, QuickMessageResponse,
-    SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, SseStatusEvent,
-    SseSubagentCompletedEvent, SseSubagentStartedEvent, SseSubagentStatusEvent,
+    ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
+    QuickMessageRequest, QuickMessageResponse, SendMessageRequest as ApiSendMessageRequest,
+    SseStatusEvent, SseSubagentCompletedEvent, SseSubagentStartedEvent, SseSubagentStatusEvent,
     SseSubagentThinkingEvent, SseSubagentTokenEvent, SseSubagentToolResultEvent, SseThinkingEvent,
     SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery, ToolCallSummary,
     UpdateConversationRequest,
@@ -189,7 +190,7 @@ pub struct ApiErrorResponse {
     ),
     modifiers(&SecuritySchemesAddon),
     paths(
-        crate::api::get_capabilities,
+        crate::api::capabilities::get_capabilities,
         crate::api::list_conversations,
         crate::api::stream_conversations,
         crate::api::create_conversation,
@@ -200,10 +201,10 @@ pub struct ApiErrorResponse {
         crate::api::quick_message,
         crate::api::send_voice_message,
         crate::api::stream_run_events,
-        crate::api::get_message_audio,
-        crate::api::get_audio,
-        crate::api::upload_attachment,
-        crate::api::serve_attachment,
+        crate::api::audio::get_message_audio,
+        crate::api::audio::get_audio,
+        crate::api::attachments::upload_attachment,
+        crate::api::attachments::serve_attachment,
         crate::api::commands::list_commands,
         crate::api::commands::execute_command,
         crate::api::commands::list_command_events,
