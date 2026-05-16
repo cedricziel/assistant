@@ -33,6 +33,8 @@ import 'command_autocomplete.dart';
 import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
+import '../../shared/theme/assistant_colors.dart';
+import '../../shared/theme/assistant_spacing.dart';
 import 'image_utils.dart';
 import 'markdown_link_handler.dart';
 import 'streaming_timeline_entry.dart';
@@ -1845,20 +1847,26 @@ class _InputRowState extends State<_InputRow> {
         if (widget.pendingQueueCount > 0)
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            color: Colors.amber.shade50,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AssistantSpacing.lg,
+              vertical: AssistantSpacing.xs,
+            ),
+            color: AssistantColors.warning.withValues(alpha: 0.12),
             child: Row(
               children: [
                 Icon(
                   Icons.hourglass_top_rounded,
                   size: 14,
-                  color: Colors.amber.shade800,
+                  color: AssistantColors.warning,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: AssistantSpacing.xs),
                 Text(
                   '${widget.pendingQueueCount} message${widget.pendingQueueCount == 1 ? '' : 's'} queued',
                   key: const Key('queue_depth_badge'),
-                  style: TextStyle(fontSize: 12, color: Colors.amber.shade800),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AssistantColors.warning,
+                  ),
                 ),
               ],
             ),

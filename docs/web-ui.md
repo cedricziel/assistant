@@ -64,6 +64,48 @@ The trace detail screen (`/traces/{id}`) renders these spans as dedicated
 Spans that don't match this shape (LLM chat calls, orchestrator spans, etc.)
 keep the generic span card.
 
+## Theme
+
+The Flutter app's theme is centralised in `app/lib/shared/theme/`. Use the
+exported tokens instead of inline `Color(0x...)` / `Colors.X` literals or
+ad-hoc `EdgeInsets`/`BorderRadius` numbers.
+
+### Modules
+
+- `assistant_colors.dart` — `AssistantColors.brand`, `accentSecondary`,
+  `accentTertiary`, `warning`. The first three seed the Material 3 scheme's
+  `primary` / `secondary` / `tertiary` slots. `warning` covers Material 3's
+  missing warning role.
+- `assistant_typography.dart` — `AssistantTypography.material()` builds the
+  `TextTheme` with the Inter family applied; `AssistantTypography.mono` is
+  a JetBrains Mono `TextStyle` for inline code, attribute keys, and log
+  lines. Fonts are fetched lazily via `google_fonts` and preloaded in
+  `main()` so they resolve on first paint.
+- `assistant_spacing.dart` — `AssistantSpacing.xs|sm|md|lg|xl|xxl`
+  (4/8/12/16/24/32 dp), `AssistantRadius.sm|md|lg` (8/12/16 dp), and
+  `AssistantElevation.low|medium|high`.
+- `assistant_theme.dart` — `assistantLightTheme()` and `assistantDarkTheme()`
+  builders consumed by `AdaptiveApp`.
+
+### Migrating a screen to tokens
+
+1. Replace inline `EdgeInsets.all(12)` / `SizedBox(height: 8)` / similar
+   literals with `AssistantSpacing.*`.
+2. Replace `BorderRadius.circular(12)` / similar with `AssistantRadius.*`.
+3. Replace `Colors.amber.shade50` etc. with `AssistantColors.*` (or
+   `theme.colorScheme.X` where the value should follow the active theme).
+4. Run `app/scripts/check_no_raw_colors.sh` — it fails on `Color(0x...)` /
+   `Colors.X` outside `lib/shared/theme/`. `Colors.transparent` is allowed.
+   Pre-existing offenders are listed in `app/scripts/theme_color_allowlist.txt`
+   and should be migrated incrementally.
+
+### Contrast
+
+Unit tests under `app/test/unit/shared/theme/` check that the audited
+foreground / background pairs meet WCAG AA on both light and dark themes
+(body text >= 4.5:1, large text / pills >= 3:1). Add a case to
+`contrast_test.dart` whenever a new colour pairing becomes load-bearing.
+
 ## CLI options
 
 | Flag                 | Env var                     | Default                     | Description                                               |

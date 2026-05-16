@@ -35,8 +35,12 @@ install-hooks:
 # ── Flutter quality checks ───────────────────────────────────────────────────
 
 # Run dart_pre_commit (format, analyze, deps, OSV scanning) on the Flutter app.
+# Also enforces theme token discipline via scripts/check_no_raw_colors.sh
+# (#266) — fails when a file outside lib/shared/theme/ uses a raw Color(0x...)
+# literal or Colors.X named colour without an allow-list entry.
 lint-flutter:
 	cd app && flutter pub run dart_pre_commit
+	cd app && ./scripts/check_no_raw_colors.sh
 
 # Run Flutter unit and widget tests.
 test-flutter:

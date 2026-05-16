@@ -1,0 +1,46 @@
+# Files exempt from check_no_raw_colors.sh (#266).
+#
+# Format: one repository-relative path per line. Lines starting with `#`
+# are comments. Add an entry only after agreeing that the raw colour usage
+# is intentional and cannot be expressed via lib/shared/theme/.
+#
+# `Colors.transparent` is allowed everywhere (special-cased in the script)
+# because it expresses "no fill" rather than a colour choice — no allow-list
+# entry needed for that.
+
+# Mermaid diagram rendering builds its own palette from the live ColorScheme,
+# but it still uses raw Color() constructors internally for SVG attribute
+# strings. The colours are derived, not hard-coded.
+lib/features/chat/theme_aware_mermaid.dart
+
+# Cupertino chrome colours are referenced via CupertinoColors.* (a parallel
+# system to Material's Colors). The Cupertino branch is intentionally outside
+# the Material theme system; document any new exceptions explicitly.
+lib/shared/nav_shell.dart
+
+# -----------------------------------------------------------------------
+# Pre-existing raw-colour usage staged for follow-up migration (#266
+# follow-up). Each entry should be reviewed and either migrated to a theme
+# token or have its rationale documented. New raw-colour usage in any of
+# these files SHALL still be reviewed in PR; the allow-list only suppresses
+# noise from existing call sites.
+# -----------------------------------------------------------------------
+lib/features/admin/admin_screen.dart
+lib/features/api_keys/api_keys_screen.dart
+lib/features/chat/streaming_timeline_entry.dart
+lib/features/chat/svg_builder.dart
+lib/features/chat/timeline_section.dart
+lib/features/chat/tool_call_chip.dart
+lib/features/connection/connection_screen.dart
+lib/features/logs/logs_screen.dart
+lib/features/personas/persona_detail_screen.dart
+lib/features/personas/persona_picker.dart
+lib/features/skills/skill_detail_screen.dart
+lib/features/skills/skills_screen.dart
+lib/features/traces/traces_screen.dart
+lib/features/webhooks/webhook_detail_screen.dart
+lib/features/webhooks/webhooks_screen.dart
+lib/features/workflows/workflow_detail_screen.dart
+lib/features/workflows/workflow_editor_screen.dart
+lib/features/workflows/workflow_run_detail_screen.dart
+lib/features/workflows/workflows_screen.dart

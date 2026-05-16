@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import 'features/pwa/pwa_update_service.dart';
 import 'router/app_router.dart';
 import 'shared/error_screen.dart';
 import 'shared/platform/adaptive_app.dart';
+import 'shared/theme/assistant_typography.dart';
 import 'tray/platform_init.dart';
 import 'tray/tray_platform.dart';
 import 'tray/window_handler_platform.dart';
@@ -41,6 +43,12 @@ Future<void> main() async {
   // Use /path URLs instead of /#/path. The Rust server's SPA handler serves
   // index.html for every unmatched path, so deep-linking works correctly.
   usePathUrlStrategy();
+
+  // Preload Inter + JetBrains Mono via `google_fonts` so the theme's declared
+  // font families resolve immediately on first paint. Failures are non-fatal
+  // — the app falls back to the system font and `google_fonts` will retry
+  // on next call.
+  unawaited(AssistantTypography.preloadFonts());
 
   // Initialize desktop-only features (window manager + tray icon) on macOS.
   // On web this is a no-op.
