@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.156](https://github.com/cedricziel/assistant/compare/v0.1.155...v0.1.156) (2026-05-16)
+
+
+### Bug Fixes
+
+* **app:** conditional import for native HTTP adapter to unbreak web build ([#772](https://github.com/cedricziel/assistant/issues/772)) ([cf69c78](https://github.com/cedricziel/assistant/commit/cf69c78b9ac7f965c6de339e337e559b0ee79fdb))
+* **app:** fall back to conversation fetch when SSE stream stalls ([#760](https://github.com/cedricziel/assistant/issues/760)) ([ee2c91b](https://github.com/cedricziel/assistant/commit/ee2c91bbfd26ec9a033de42567a12705cdd06dec))
+* **app:** iOS streaming follow-ups — native HTTP adapter + voice path watchdog ([#766](https://github.com/cedricziel/assistant/issues/766)) ([54330a8](https://github.com/cedricziel/assistant/commit/54330a8c3cee72ab8671ef30a3fdb6e9b9945c92))
+
 ## [0.1.155](https://github.com/cedricziel/assistant/compare/v0.1.154...v0.1.155) (2026-05-16)
 
 
