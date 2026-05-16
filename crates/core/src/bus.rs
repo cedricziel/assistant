@@ -372,4 +372,17 @@ pub trait MessageBus: Send + Sync {
     /// Backends with broker-managed retention windows may implement this as a
     /// no-op.
     async fn purge(&self, older_than: DateTime<Utc>) -> Result<u64>;
+
+    /// Return `true` if any `Pending` or `Claimed` message exists for the
+    /// given `(conversation_id, topic)` pair.
+    ///
+    /// Used by crash-recovery flows (e.g. orphaned SSE run reaper) to decide
+    /// whether a half-complete run might still receive delivery — if a
+    /// message for that conversation+topic is still active in the bus, the
+    /// run may complete after redelivery, so no synthetic terminal event
+    /// should be appended.
+    ///
+    /// `conversation_id` is the stringified UUID (matching the format stored
+    /// in `BusMessage::conversation_id`).
+    async fn has_active_message(&self, conversation_id: &str, topic: &str) -> Result<bool>;
 }

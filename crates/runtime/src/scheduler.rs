@@ -24,7 +24,6 @@ use opentelemetry::{
     KeyValue,
     trace::{Span as _, SpanKind},
 };
-use sqlx::SqlitePool;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -606,7 +605,10 @@ pub(crate) async fn reap_stale_and_recover(storage: &StorageLayer, bus: &dyn Mes
 
     // Step 3 & 4: for each orphan, check bus and potentially close.
     for (run_id, conversation_id) in orphans {
-        let has_active = match has_active_bus_message(&storage.pool, &conversation_id).await {
+        let has_active = match bus
+            .has_active_message(&conversation_id, topic::TURN_REQUEST)
+            .await
+        {
             Ok(v) => v,
             Err(e) => {
                 warn!(
@@ -648,22 +650,6 @@ pub(crate) async fn reap_stale_and_recover(storage: &StorageLayer, bus: &dyn Mes
             ),
         }
     }
-}
-
-/// Check whether there is a Pending or Claimed `turn.request` bus message for a
-/// conversation.  Only `turn.request` messages initiate orchestrator runs; other
-/// topics (e.g. `schedule.trigger`) should not block orphan recovery.
-async fn has_active_bus_message(pool: &SqlitePool, conversation_id: &str) -> Result<bool> {
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM bus_messages \
-         WHERE conversation_id = ?1 \
-           AND topic = 'turn.request' \
-           AND status IN ('pending', 'claimed')",
-    )
-    .bind(conversation_id)
-    .fetch_one(pool)
-    .await?;
-    Ok(count > 0)
 }
 
 // -- Tests ------------------------------------------------------------------
