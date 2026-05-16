@@ -23,3 +23,6 @@ url            = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 wiremock = { workspace = true }
+
+[lints]
+workspace = true

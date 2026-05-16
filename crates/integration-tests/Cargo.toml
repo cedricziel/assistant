@@ -24,3 +24,6 @@ tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 testcontainers = { workspace = true }
+
+[lints]
+workspace = true

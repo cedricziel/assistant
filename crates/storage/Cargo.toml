@@ -30,3 +30,23 @@ assistant-backup = { path = "../backup" }
 tokio = { workspace = true }
 tempfile = { workspace = true }
 toml = { workspace = true }
+
+# Storage is panic-free by contract: all production paths propagate errors
+# via `Result<_, anyhow::Error>` or domain-typed errors. Tests are exempt
+# because `make lint` (`cargo clippy --workspace`) does not check `#[cfg(test)]`
+# modules.
+#
+# Cargo forbids combining `[lints] workspace = true` with per-crate overrides,
+# so this crate manually replays the workspace baseline and raises the
+# panic-free lints to deny. Keep this block in sync with the workspace
+# baseline in the root Cargo.toml.
+# See openspec/changes/workspace-lint-policy/.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "warn"
+todo = "warn"
+
+[lints.rust]
+unused_must_use = "deny"

@@ -29,3 +29,18 @@ getrandom            = { workspace = true }
 
 [dev-dependencies]
 wiremock             = { workspace = true }
+
+# TODO(workspace-lint-policy): ratchet by removing the allow overrides below
+# once non-test unwrap/expect/panic calls are gone from this crate. The
+# workspace baseline (root Cargo.toml [workspace.lints]) is `warn`; we cannot
+# combine `workspace = true` with overrides, so this crate manually replays
+# the relevant lints. See openspec/changes/workspace-lint-policy/.
+[lints.clippy]
+unwrap_used = "allow"
+expect_used = "allow"
+panic = "allow"
+unimplemented = "warn"
+todo = "warn"
+
+[lints.rust]
+unused_must_use = "deny"

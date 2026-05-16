@@ -372,6 +372,9 @@ dependencies = [
 [[package]]
 name = "assistant"
 version = "0.1.155"
+dependencies = [
+ "toml",
+]
 
 [[package]]
 name = "assistant-a2a-json-schema"

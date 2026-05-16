@@ -21,11 +21,10 @@
 //! so the round-trip migration test in [`migration`] can exercise the same
 //! composition the production caller uses. The `dep_boundary` integration
 //! test enforces this boundary at compile time.
-
-#![cfg_attr(
-    not(test),
-    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
-)]
+//!
+//! The panic-free contract for non-test code is enforced via
+//! `[lints.clippy]` overrides in this crate's `Cargo.toml` (managed by the
+//! workspace-lint-policy change).
 
 pub mod agents;
 pub mod api_key_store;

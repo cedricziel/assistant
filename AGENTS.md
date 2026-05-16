@@ -181,6 +181,37 @@ All messenger interface adapters live in `crates/interfaces/` (`assistant-interf
 
 Default `cargo fmt` (no `rustfmt.toml`). Default clippy with `-D warnings` (all warnings are errors).
 
+### Lint policy
+
+The workspace declares its baseline lint set in the root `Cargo.toml`
+`[workspace.lints]` table. Crates pick one of two shapes:
+
+- **Inherit** — `[lints]\nworkspace = true`. Used by crates that have no
+  overrides (the default for new and clean crates).
+- **Manual replay** — explicit `[lints.clippy]` / `[lints.rust]` blocks.
+  Used by crates that need to raise or relax individual lints. Cargo forbids
+  combining `workspace = true` with overrides in the same manifest, so the
+  workspace lints must be replayed manually.
+
+**Panic-free contract.** `clippy::unwrap_used`, `clippy::expect_used`, and
+`clippy::panic` are `warn` at the workspace baseline. The following crates
+ratchet them to `deny` at the crate level:
+
+- `assistant-storage` — enforced via `crates/storage/Cargo.toml [lints.clippy]`.
+
+All other crates currently `allow` the panic-free lints with a
+`TODO(workspace-lint-policy)` comment recording the ratchet target. Promoting
+a crate from `allow` to `deny` is a self-contained follow-up PR: clean the
+unwraps, flip the lint level, run `make lint && make test`.
+
+Test code (`#[cfg(test)]` modules and `tests/` directories) is exempt: the
+default `cargo clippy --workspace` invocation used by `make lint` and CI
+does not check test targets, so `.unwrap()` remains ergonomic in tests.
+
+The enforcement scanner lives at `tests/workspace_lint_policy.rs` and runs as
+part of `cargo test -p assistant`. See `openspec/changes/workspace-lint-policy/`
+for the originating proposal.
+
 ### Imports
 
 Standard Rust ordering enforced by `cargo fmt`:

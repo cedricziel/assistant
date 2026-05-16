@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [workspace]
 members = [
     "crates/auth",
@@ -37,6 +40,20 @@ default-members = [
     "crates/mcp-server",
 ]
 resolver = "2"
+
+# Workspace-wide lint policy. Crates inherit via `[lints] workspace = true`.
+# The panic-free lint set (`unwrap_used`, `expect_used`, `panic`, `unimplemented`,
+# `todo`) is `warn` at the workspace level; deny-level crates raise it via a
+# per-crate `[lints.clippy]` override. See `openspec/changes/workspace-lint-policy/`.
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+unimplemented = "warn"
+todo = "warn"
+
+[workspace.lints.rust]
+unused_must_use = "deny"
 
 [workspace.package]
 version = "0.1.155"
@@ -186,6 +203,10 @@ tool-executor = { path = "crates/tool-executor" }
 
 # Text diffing for `/review` skill refinement display.
 similar = "2.6"
+
+[dev-dependencies]
+# Used by the workspace-lint-policy enforcement test in `tests/`.
+toml = { workspace = true }
 
 [profile.dev]
 # macOS: avoid dsymutil bottleneck at link time
