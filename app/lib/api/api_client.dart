@@ -6,12 +6,9 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'dart:io' show Platform;
-
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:native_dio_adapter/native_dio_adapter.dart';
 
 import 'auth_interceptor.dart';
 import 'event_source_stream.dart';
@@ -20,6 +17,9 @@ import 'event_source_stream_stub.dart'
     as event_source;
 import 'models/server_capabilities.dart';
 import 'models/stream_event.dart';
+import 'native_http_adapter_stub.dart'
+    if (dart.library.io) 'native_http_adapter_io.dart'
+    as native_http_adapter;
 
 /// Thrown when the server rejects an API request with HTTP 401.
 ///
@@ -35,12 +35,6 @@ class ApiAuthException implements Exception {
   @override
   String toString() => message;
 }
-
-/// True when the current process is the `flutter test` runner. Used to
-/// avoid installing native-platform Dio adapters whose plugin bindings
-/// aren't initialized in unit-test mode.
-bool get _runningInFlutterTest =>
-    !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
 
 /// Configured client bundle: generated API instances + SSE streaming helper.
 class ApiClient {
@@ -65,16 +59,13 @@ class ApiClient {
     // which is the root cause of the "jumpy dots forever" behaviour
     // mitigated at the application layer by `_recoverStalledStream`.
     //
-    // Skipped in two cases:
-    //   - Web: Dio's BrowserHttpClientAdapter already routes through the
-    //     browser's `fetch` and streams correctly.
-    //   - `flutter test`: NativeAdapter eagerly instantiates a native
-    //     URLSession via cupertino_http, which requires the iOS / macOS
-    //     platform binding. Unit tests run without that binding, so we
-    //     fall back to dart:io there.
-    if (!kIsWeb && !_runningInFlutterTest) {
-      _dio.httpClientAdapter = NativeAdapter();
-    }
+    // The implementation is selected via conditional import: a no-op stub
+    // on web (where `dart.library.io` is unavailable and Dio's
+    // BrowserHttpClientAdapter already streams via `fetch`), and the real
+    // NativeAdapter on native targets. native_dio_adapter pulls in
+    // `cronet_http` → `jni` → `dart:ffi`, so it can only be imported when
+    // dart:io is available.
+    native_http_adapter.installNativeHttpAdapter(_dio);
 
     if (refreshTokens != null && onAuthExpired != null) {
       final interceptor = AuthRecoveryInterceptor(
