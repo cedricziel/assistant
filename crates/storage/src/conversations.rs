@@ -683,6 +683,52 @@ mod tests {
         assert!(found.is_none());
     }
 
+    /// Regression test for #267 — `list_conversations` SHALL return rows in
+    /// `updated_at DESC` order. New messages MUST bump `updated_at` so the
+    /// affected conversation rises to the top of the list.
+    #[tokio::test]
+    async fn test_list_orders_by_updated_at_desc() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        // Create A, then B. Initially B sorts ahead of A because it was
+        // created later.
+        let conv_a = store.create_conversation(Some("Older")).await.unwrap();
+        // Sleep so the second create's timestamp is strictly greater.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let conv_b = store.create_conversation(Some("Newer")).await.unwrap();
+
+        let listed = store.list_conversations().await.unwrap();
+        assert_eq!(
+            listed.first().map(|c| c.id),
+            Some(conv_b.id),
+            "newest conversation should be first on initial list"
+        );
+        assert_eq!(
+            listed.get(1).map(|c| c.id),
+            Some(conv_a.id),
+            "older conversation should be second"
+        );
+
+        // Add a message to A — its updated_at bumps. A should now lead.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let mut msg = Message::user(conv_a.id, "ping");
+        msg.turn = 1;
+        store.save_message(&msg).await.unwrap();
+
+        let listed = store.list_conversations().await.unwrap();
+        assert_eq!(
+            listed.first().map(|c| c.id),
+            Some(conv_a.id),
+            "activity on older conversation should bump it to the top (#267)"
+        );
+        assert_eq!(
+            listed.get(1).map(|c| c.id),
+            Some(conv_b.id),
+            "the previously-newest conversation should now be second",
+        );
+    }
+
     #[tokio::test]
     async fn test_conversation_cannot_cross_agent_boundary() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
