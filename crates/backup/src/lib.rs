@@ -111,7 +111,13 @@ impl FakeFs {
 
     /// Seed a file into the fake filesystem.
     pub fn seed(&self, path: impl Into<PathBuf>, data: impl Into<Vec<u8>>) {
-        self.files.write().unwrap().insert(path.into(), data.into());
+        // Recover from a poisoned lock: this is an in-memory test fixture
+        // with no invariants beyond the HashMap itself, so a previous panic
+        // while holding the lock does not invalidate the data.
+        self.files
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(path.into(), data.into());
     }
 }
 
@@ -120,7 +126,7 @@ impl BackupFs for FakeFs {
     async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
         self.files
             .read()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(path)
             .cloned()
             .with_context(|| format!("FakeFs: file not found: {:?}", path))
@@ -129,13 +135,16 @@ impl BackupFs for FakeFs {
     async fn write_file(&self, path: &Path, data: &[u8]) -> Result<()> {
         self.files
             .write()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(path.to_path_buf(), data.to_vec());
         Ok(())
     }
 
     async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>> {
-        let guard = self.files.read().unwrap();
+        let guard = self
+            .files
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entries: Vec<PathBuf> = guard
             .keys()
             .filter(|k| k.parent() == Some(path))
@@ -145,13 +154,16 @@ impl BackupFs for FakeFs {
     }
 
     async fn file_exists(&self, path: &Path) -> bool {
-        self.files.read().unwrap().contains_key(path)
+        self.files
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(path)
     }
 
     async fn file_size(&self, path: &Path) -> Result<u64> {
         self.files
             .read()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(path)
             .map(|d| d.len() as u64)
             .with_context(|| format!("FakeFs: file not found: {:?}", path))
