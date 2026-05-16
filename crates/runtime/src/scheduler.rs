@@ -17,6 +17,7 @@ use assistant_core::{
     strip_html_comments, topic, types::conversation::ChannelType, types::conversation::Interface,
 };
 use assistant_storage::StorageLayer;
+use async_trait::async_trait;
 use chrono::Utc;
 use cron::Schedule;
 use opentelemetry::{
@@ -41,6 +42,110 @@ const EVENT_PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// (both scheduled tasks and heartbeats).
 const SCHEDULER_USER_ID: &str = "scheduler";
 
+// ── PeriodicTask ──────────────────────────────────────────────────────────────
+
+/// Shared context passed to every [`PeriodicTask`] invocation.
+pub(crate) struct SchedulerCtx {
+    pub storage: Arc<StorageLayer>,
+    pub orchestrator: Arc<Orchestrator>,
+}
+
+/// A unit of recurring work driven by the scheduler loop.
+///
+/// Each implementor is invoked at most once per `interval()`. The scheduler
+/// polls every `spawn_scheduler(... , poll_interval)` and runs whichever
+/// tasks are due.  Set `run_before_loop()` to `true` to fire once at startup
+/// before the first poll (useful for crash-recovery tasks that should not
+/// wait for the first tick).
+#[async_trait]
+pub(crate) trait PeriodicTask: Send + Sync {
+    fn name(&self) -> &'static str;
+
+    fn interval(&self) -> Duration;
+
+    /// Whether this task should fire once immediately at scheduler startup,
+    /// before the first `poll_interval` sleep. Default: `false` — task fires
+    /// on the first tick (since `last_run` is initialised to "already
+    /// elapsed").
+    fn run_before_loop(&self) -> bool {
+        false
+    }
+
+    async fn run(&self, ctx: &SchedulerCtx) -> Result<()>;
+}
+
+// ── Built-in tasks ────────────────────────────────────────────────────────────
+
+struct ScheduledTasks {
+    poll_interval: Duration,
+}
+
+#[async_trait]
+impl PeriodicTask for ScheduledTasks {
+    fn name(&self) -> &'static str {
+        "scheduled-tasks"
+    }
+    fn interval(&self) -> Duration {
+        self.poll_interval
+    }
+    async fn run(&self, ctx: &SchedulerCtx) -> Result<()> {
+        run_due_tasks(&ctx.storage, &ctx.orchestrator).await
+    }
+}
+
+struct Heartbeat;
+
+#[async_trait]
+impl PeriodicTask for Heartbeat {
+    fn name(&self) -> &'static str {
+        "heartbeat"
+    }
+    fn interval(&self) -> Duration {
+        HEARTBEAT_INTERVAL
+    }
+    async fn run(&self, ctx: &SchedulerCtx) -> Result<()> {
+        run_heartbeat(&ctx.orchestrator).await
+    }
+}
+
+struct ConversationEventPrune;
+
+#[async_trait]
+impl PeriodicTask for ConversationEventPrune {
+    fn name(&self) -> &'static str {
+        "event-prune"
+    }
+    fn interval(&self) -> Duration {
+        EVENT_PRUNE_INTERVAL
+    }
+    fn run_before_loop(&self) -> bool {
+        true
+    }
+    async fn run(&self, ctx: &SchedulerCtx) -> Result<()> {
+        prune_conversation_events(&ctx.storage).await;
+        Ok(())
+    }
+}
+
+struct ReapStale;
+
+#[async_trait]
+impl PeriodicTask for ReapStale {
+    fn name(&self) -> &'static str {
+        "reap-stale"
+    }
+    fn interval(&self) -> Duration {
+        REAP_STALE_INTERVAL
+    }
+    fn run_before_loop(&self) -> bool {
+        true
+    }
+    async fn run(&self, ctx: &SchedulerCtx) -> Result<()> {
+        reap_stale_and_recover(&ctx.storage, ctx.orchestrator.bus().as_ref()).await;
+        Ok(())
+    }
+}
+
 /// Spawn a background tokio task that:
 /// 1. Checks for due scheduled tasks every `poll_interval`.
 /// 2. Reads `HEARTBEAT.md` (from the configured memory path) as a prompt
@@ -51,48 +156,58 @@ pub fn spawn_scheduler(
     orchestrator: Arc<Orchestrator>,
     poll_interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        info!("Scheduler started (poll interval: {:?})", poll_interval);
-        // Subtract the full interval so the heartbeat fires on the first tick.
-        let mut last_heartbeat = Instant::now()
-            .checked_sub(HEARTBEAT_INTERVAL)
-            .unwrap_or_else(Instant::now);
-        let mut last_event_prune = Instant::now()
-            .checked_sub(EVENT_PRUNE_INTERVAL)
-            .unwrap_or_else(Instant::now);
-        let mut last_reap_stale = Instant::now()
-            .checked_sub(REAP_STALE_INTERVAL)
-            .unwrap_or_else(Instant::now);
+    let ctx = Arc::new(SchedulerCtx {
+        storage,
+        orchestrator,
+    });
+    let tasks: Vec<Box<dyn PeriodicTask>> = vec![
+        Box::new(ScheduledTasks { poll_interval }),
+        Box::new(Heartbeat),
+        Box::new(ConversationEventPrune),
+        Box::new(ReapStale),
+    ];
+    tokio::spawn(run_scheduler_loop(ctx, tasks, poll_interval))
+}
 
-        // Run once on startup.
-        prune_conversation_events(&storage).await;
-        reap_stale_and_recover(&storage, orchestrator.bus().as_ref()).await;
+/// Body of the scheduler tokio task. Split out so the loop is testable
+/// without `spawn_scheduler`'s detached task semantics.
+async fn run_scheduler_loop(
+    ctx: Arc<SchedulerCtx>,
+    tasks: Vec<Box<dyn PeriodicTask>>,
+    poll_interval: Duration,
+) {
+    info!("Scheduler started (poll interval: {:?})", poll_interval);
 
-        loop {
-            tokio::time::sleep(poll_interval).await;
-
-            if let Err(e) = run_due_tasks(&storage, &orchestrator).await {
-                error!("Scheduler error: {e}");
-            }
-
-            if last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
-                match run_heartbeat(&orchestrator).await {
-                    Ok(()) => last_heartbeat = Instant::now(),
-                    Err(e) => error!("Heartbeat error: {e}"),
-                }
-            }
-
-            if last_event_prune.elapsed() >= EVENT_PRUNE_INTERVAL {
-                prune_conversation_events(&storage).await;
-                last_event_prune = Instant::now();
-            }
-
-            if last_reap_stale.elapsed() >= REAP_STALE_INTERVAL {
-                reap_stale_and_recover(&storage, orchestrator.bus().as_ref()).await;
-                last_reap_stale = Instant::now();
-            }
+    // Pre-loop: fire any task that opts into `run_before_loop` (currently
+    // the crash-recovery tasks). Initialise `last_run` for every task to
+    // "already elapsed" so all of them are due on the first tick.
+    let mut last_run: Vec<Instant> = Vec::with_capacity(tasks.len());
+    for task in &tasks {
+        if task.run_before_loop()
+            && let Err(e) = task.run(&ctx).await
+        {
+            error!(task = task.name(), error = %e, "Periodic task startup error");
         }
-    })
+        last_run.push(
+            Instant::now()
+                .checked_sub(task.interval())
+                .unwrap_or_else(Instant::now),
+        );
+    }
+
+    loop {
+        tokio::time::sleep(poll_interval).await;
+
+        for (idx, task) in tasks.iter().enumerate() {
+            if last_run[idx].elapsed() < task.interval() {
+                continue;
+            }
+            if let Err(e) = task.run(&ctx).await {
+                error!(task = task.name(), error = %e, "Periodic task error");
+            }
+            last_run[idx] = Instant::now();
+        }
+    }
 }
 
 /// Dispatch due scheduled tasks by publishing [`TurnRequest`] messages to the
