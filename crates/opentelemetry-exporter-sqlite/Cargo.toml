@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-exporter-sqlite"
-version = "0.1.153"
+version = "0.1.154"
 license.workspace = true
 edition.workspace = true
 description = "OpenTelemetry SQLite exporters for spans, logs, and metrics"
