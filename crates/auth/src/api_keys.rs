@@ -141,17 +141,29 @@ impl Default for InMemoryApiKeyStore {
 #[async_trait::async_trait]
 impl ApiKeyStore for InMemoryApiKeyStore {
     async fn store_key(&self, record: ApiKeyRecord) -> Result<()> {
-        self.records.lock().unwrap().push(record);
+        // Recover from a poisoned mutex: this is an in-memory store with no
+        // critical invariants beyond the Vec itself, so a previous panic
+        // while holding the lock does not invalidate the data.
+        self.records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(record);
         Ok(())
     }
 
     async fn get_by_hash(&self, key_hash: &str) -> Result<Option<ApiKeyRecord>> {
-        let records = self.records.lock().unwrap();
+        let records = self
+            .records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(records.iter().find(|r| r.key_hash == key_hash).cloned())
     }
 
     async fn list_for_user(&self, user_id: &UserId) -> Result<Vec<ApiKeyRecord>> {
-        let records = self.records.lock().unwrap();
+        let records = self
+            .records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(records
             .iter()
             .filter(|r| r.user_id == *user_id)
@@ -160,7 +172,10 @@ impl ApiKeyStore for InMemoryApiKeyStore {
     }
 
     async fn revoke(&self, key_id: &str, user_id: &UserId) -> Result<bool> {
-        let mut records = self.records.lock().unwrap();
+        let mut records = self
+            .records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let len_before = records.len();
         records.retain(|r| !(r.id == key_id && r.user_id == *user_id));
         Ok(records.len() < len_before)
