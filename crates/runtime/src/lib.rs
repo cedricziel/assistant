@@ -17,6 +17,7 @@ pub(crate) mod skill_learner;
 pub mod telemetry;
 pub mod title_generator;
 pub mod webhook_dispatch;
+pub mod worker_plan;
 
 pub use adapter_registry::AdapterRegistry;
 pub use bootstrap::spawn_memory_indexer;
@@ -30,3 +31,4 @@ pub use otel_spans::start_conversation_context;
 pub use scheduler::spawn_scheduler;
 pub use telemetry::{OtelGuard, init_tracing};
 pub use title_generator::{TitleGeneratorWorker, spawn_title_generator_worker};
+pub use worker_plan::{BinaryRole, CoreWorkerPlan, CoreWorkerSpec, core_worker_plan};

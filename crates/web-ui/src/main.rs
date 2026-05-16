@@ -564,6 +564,20 @@ async fn run_with_args(args: Args) -> Result<()> {
     //
     // Operators MUST run an orchestrator service alongside the web-ui.
     // See docs/web-ui.md.
+    //
+    // The plan is computed (and asserted empty) so the binary is wired to
+    // the same source of truth as the orchestrator's spawn logic. If a
+    // future change adds a worker to `BinaryRole::WebUi` in
+    // `assistant_runtime::worker_plan`, the assertion fires loudly here
+    // instead of silently re-introducing the duplicate-consumer race.
+    let webui_worker_plan =
+        assistant_runtime::core_worker_plan(assistant_runtime::BinaryRole::WebUi);
+    assert!(
+        webui_worker_plan.is_empty(),
+        "BinaryRole::WebUi must not request any infrastructure workers; got {:?}",
+        webui_worker_plan
+    );
+    let _ = webui_worker_plan;
 
     // 6. Spawn workflow run processor (loop guardrails + action executors).
     let turn_client = Arc::new(OrchestratorTurnClient {
