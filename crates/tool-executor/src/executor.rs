@@ -91,7 +91,10 @@ impl ToolExecutor {
             Arc::new(AgentStatusHandler::new(storage.clone())),
         ];
 
-        let mut tool_handlers = self.tool_handlers.write().unwrap();
+        let mut tool_handlers = self
+            .tool_handlers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for t in tools {
             tool_handlers.insert(t.name().to_string(), t);
         }
@@ -101,7 +104,7 @@ impl ToolExecutor {
     pub fn register_ambient_tool(&self, handler: Arc<dyn ToolHandler>) {
         self.tool_handlers
             .write()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(handler.name().to_string(), handler);
     }
 
@@ -118,7 +121,7 @@ impl ToolExecutor {
         let handler = Arc::new(VoiceResponseHandler::new(tts, store));
         self.tool_handlers
             .write()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(handler.name().to_string(), handler);
     }
 
@@ -142,7 +145,7 @@ impl ToolExecutor {
     pub fn unregister_tools_by_prefix(&self, prefix: &str) {
         self.tool_handlers
             .write()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .retain(|name, _| !name.starts_with(prefix));
     }
 
@@ -150,7 +153,7 @@ impl ToolExecutor {
     pub fn list_tools(&self) -> Vec<Arc<dyn ToolHandler>> {
         self.tool_handlers
             .read()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .cloned()
             .collect()
@@ -161,7 +164,7 @@ impl ToolExecutor {
         let mut specs: Vec<ToolSpec> = self
             .tool_handlers
             .read()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .map(|t| ToolSpec {
                 name: t.name().to_string(),
@@ -182,7 +185,7 @@ impl ToolExecutor {
         let mut specs: Vec<ToolSpec> = self
             .tool_handlers
             .read()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .filter(|t| match allowed {
                 Some(list) => list.iter().any(|a| a == t.name()),
@@ -221,7 +224,12 @@ impl ToolExecutor {
         }
 
         // Clone Arc before releasing the read lock to avoid holding it across an await.
-        let handler = self.tool_handlers.read().unwrap().get(name).cloned();
+        let handler = self
+            .tool_handlers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(name)
+            .cloned();
 
         if let Some(handler) = handler {
             // Validate params against the declared JSON Schema before dispatch.

@@ -158,21 +158,29 @@ fn extract_title(document: &Html) -> Option<String> {
 fn extract_text(document: &Html) -> String {
     use scraper::Selector;
 
-    let body_selector = Selector::parse("body").expect("valid static selector");
-    let skip_selector =
-        Selector::parse("script, style, noscript, head").expect("valid static selector");
-
-    let root = if let Some(body) = document.select(&body_selector).next() {
-        body
-    } else {
-        return document
+    // Static, known-valid selectors. If parsing somehow fails we degrade
+    // gracefully to a root-only text extraction rather than panicking.
+    let root_text_fallback = || {
+        document
             .root_element()
             .text()
             .collect::<Vec<_>>()
             .join(" ")
             .split_whitespace()
             .collect::<Vec<_>>()
-            .join(" ");
+            .join(" ")
+    };
+    let Ok(body_selector) = Selector::parse("body") else {
+        return root_text_fallback();
+    };
+    let Ok(skip_selector) = Selector::parse("script, style, noscript, head") else {
+        return root_text_fallback();
+    };
+
+    let root = if let Some(body) = document.select(&body_selector).next() {
+        body
+    } else {
+        return root_text_fallback();
     };
 
     let skip_ids: std::collections::HashSet<_> =
