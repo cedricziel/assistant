@@ -221,7 +221,10 @@ pub struct InMemoryOrgStore {
 #[async_trait]
 impl OrgStore for InMemoryOrgStore {
     async fn create_org(&self, org: &Organization) -> Result<()> {
-        let mut orgs = self.orgs.lock().unwrap();
+        let mut orgs = self
+            .orgs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if orgs.iter().any(|o| o.id == org.id) {
             bail!("organization already exists: {}", org.id);
         }
@@ -236,7 +239,7 @@ impl OrgStore for InMemoryOrgStore {
         Ok(self
             .orgs
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|o| o.id == *id)
             .cloned())
@@ -246,14 +249,17 @@ impl OrgStore for InMemoryOrgStore {
         Ok(self
             .orgs
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|o| o.slug == slug)
             .cloned())
     }
 
     async fn update_org(&self, org: &Organization) -> Result<()> {
-        let mut orgs = self.orgs.lock().unwrap();
+        let mut orgs = self
+            .orgs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(existing) = orgs.iter_mut().find(|o| o.id == org.id) {
             *existing = org.clone();
             Ok(())
@@ -263,7 +269,11 @@ impl OrgStore for InMemoryOrgStore {
     }
 
     async fn list_orgs(&self) -> Result<Vec<Organization>> {
-        Ok(self.orgs.lock().unwrap().clone())
+        Ok(self
+            .orgs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone())
     }
 }
 
@@ -276,7 +286,10 @@ pub struct InMemoryUserStore {
 #[async_trait]
 impl UserStore for InMemoryUserStore {
     async fn create_user(&self, user: &User) -> Result<()> {
-        let mut users = self.users.lock().unwrap();
+        let mut users = self
+            .users
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if users.iter().any(|u| u.id == user.id) {
             bail!("user already exists: {}", user.id);
         }
@@ -294,7 +307,7 @@ impl UserStore for InMemoryUserStore {
         Ok(self
             .users
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|u| u.id == *id)
             .cloned())
@@ -304,7 +317,7 @@ impl UserStore for InMemoryUserStore {
         Ok(self
             .users
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|u| u.org_id == *org_id && u.email == email)
             .cloned())
@@ -314,7 +327,7 @@ impl UserStore for InMemoryUserStore {
         Ok(self
             .users
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|u| {
                 u.idp_issuer.as_deref() == Some(issuer) && u.idp_subject.as_deref() == Some(subject)
@@ -326,7 +339,7 @@ impl UserStore for InMemoryUserStore {
         Ok(self
             .users
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|u| u.org_id == *org_id)
             .cloned()
@@ -334,7 +347,10 @@ impl UserStore for InMemoryUserStore {
     }
 
     async fn update_user(&self, user: &User) -> Result<()> {
-        let mut users = self.users.lock().unwrap();
+        let mut users = self
+            .users
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(existing) = users.iter_mut().find(|u| u.id == user.id) {
             *existing = user.clone();
             Ok(())
@@ -344,7 +360,10 @@ impl UserStore for InMemoryUserStore {
     }
 
     async fn delete_user(&self, id: &UserId) -> Result<bool> {
-        let mut users = self.users.lock().unwrap();
+        let mut users = self
+            .users
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let len_before = users.len();
         users.retain(|u| u.id != *id);
         Ok(users.len() < len_before)
@@ -360,7 +379,10 @@ pub struct InMemorySpaceStore {
 #[async_trait]
 impl SpaceStore for InMemorySpaceStore {
     async fn create_space(&self, space: &Space) -> Result<()> {
-        let mut spaces = self.spaces.lock().unwrap();
+        let mut spaces = self
+            .spaces
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if spaces.iter().any(|s| s.id == space.id) {
             bail!("space already exists: {}", space.id);
         }
@@ -372,7 +394,7 @@ impl SpaceStore for InMemorySpaceStore {
         Ok(self
             .spaces
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|s| s.id == *id)
             .cloned())
@@ -382,7 +404,7 @@ impl SpaceStore for InMemorySpaceStore {
         Ok(self
             .spaces
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|s| s.org_id == *org_id)
             .cloned()
@@ -390,7 +412,10 @@ impl SpaceStore for InMemorySpaceStore {
     }
 
     async fn update_space(&self, space: &Space) -> Result<()> {
-        let mut spaces = self.spaces.lock().unwrap();
+        let mut spaces = self
+            .spaces
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(existing) = spaces.iter_mut().find(|s| s.id == space.id) {
             *existing = space.clone();
             Ok(())
@@ -400,7 +425,10 @@ impl SpaceStore for InMemorySpaceStore {
     }
 
     async fn delete_space(&self, id: &SpaceId) -> Result<bool> {
-        let mut spaces = self.spaces.lock().unwrap();
+        let mut spaces = self
+            .spaces
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let len_before = spaces.len();
         spaces.retain(|s| s.id != *id);
         Ok(spaces.len() < len_before)
@@ -416,7 +444,10 @@ pub struct InMemoryMembershipStore {
 #[async_trait]
 impl MembershipStore for InMemoryMembershipStore {
     async fn add_membership(&self, membership: &SpaceMembership) -> Result<()> {
-        let mut memberships = self.memberships.lock().unwrap();
+        let mut memberships = self
+            .memberships
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if memberships
             .iter()
             .any(|m| m.user_id == membership.user_id && m.space_id == membership.space_id)
@@ -432,7 +463,10 @@ impl MembershipStore for InMemoryMembershipStore {
     }
 
     async fn remove_membership(&self, user_id: &UserId, space_id: &SpaceId) -> Result<bool> {
-        let mut memberships = self.memberships.lock().unwrap();
+        let mut memberships = self
+            .memberships
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let len_before = memberships.len();
         memberships.retain(|m| !(m.user_id == *user_id && m.space_id == *space_id));
         Ok(memberships.len() < len_before)
@@ -442,7 +476,7 @@ impl MembershipStore for InMemoryMembershipStore {
         Ok(self
             .memberships
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|m| m.user_id == *user_id)
             .cloned()
@@ -453,7 +487,7 @@ impl MembershipStore for InMemoryMembershipStore {
         Ok(self
             .memberships
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|m| m.space_id == *space_id)
             .cloned()
@@ -470,7 +504,10 @@ pub struct InMemoryCatalogItemStore {
 #[async_trait]
 impl CatalogItemStore for InMemoryCatalogItemStore {
     async fn create_item(&self, item: &CatalogItem) -> Result<()> {
-        let mut items = self.items.lock().unwrap();
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if items.iter().any(|i| i.id == item.id) {
             bail!("catalog item already exists: {}", item.id);
         }
@@ -482,7 +519,7 @@ impl CatalogItemStore for InMemoryCatalogItemStore {
         Ok(self
             .items
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|i| i.id == id)
             .cloned())
@@ -496,7 +533,7 @@ impl CatalogItemStore for InMemoryCatalogItemStore {
         Ok(self
             .items
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|i| {
                 i.org_id == *org_id && resource_type.is_none_or(|rt| i.resource_type == *rt)
@@ -506,7 +543,10 @@ impl CatalogItemStore for InMemoryCatalogItemStore {
     }
 
     async fn delete_item(&self, id: &str) -> Result<bool> {
-        let mut items = self.items.lock().unwrap();
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let len_before = items.len();
         items.retain(|i| i.id != id);
         Ok(items.len() < len_before)
@@ -522,7 +562,10 @@ pub struct InMemoryCatalogSubscriptionStore {
 #[async_trait]
 impl CatalogSubscriptionStore for InMemoryCatalogSubscriptionStore {
     async fn create_subscription(&self, sub: &CatalogSubscription) -> Result<()> {
-        let mut subs = self.subs.lock().unwrap();
+        let mut subs = self
+            .subs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if subs.iter().any(|s| s.id == sub.id) {
             bail!("subscription already exists: {}", sub.id);
         }
@@ -544,7 +587,7 @@ impl CatalogSubscriptionStore for InMemoryCatalogSubscriptionStore {
         Ok(self
             .subs
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|s| s.id == id)
             .cloned())
@@ -554,7 +597,7 @@ impl CatalogSubscriptionStore for InMemoryCatalogSubscriptionStore {
         Ok(self
             .subs
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|s| s.space_id == *space_id)
             .cloned()
@@ -562,7 +605,10 @@ impl CatalogSubscriptionStore for InMemoryCatalogSubscriptionStore {
     }
 
     async fn delete_subscription(&self, id: &str) -> Result<bool> {
-        let mut subs = self.subs.lock().unwrap();
+        let mut subs = self
+            .subs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let len_before = subs.len();
         subs.retain(|s| s.id != id);
         Ok(subs.len() < len_before)
@@ -578,7 +624,10 @@ pub struct InMemoryInterfaceInstanceStore {
 #[async_trait]
 impl InterfaceInstanceStore for InMemoryInterfaceInstanceStore {
     async fn create_instance(&self, instance: &InterfaceInstance) -> Result<()> {
-        let mut instances = self.instances.lock().unwrap();
+        let mut instances = self
+            .instances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if instances.iter().any(|i| i.id == instance.id) {
             bail!("interface instance already exists: {}", instance.id);
         }
@@ -590,7 +639,7 @@ impl InterfaceInstanceStore for InMemoryInterfaceInstanceStore {
         Ok(self
             .instances
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|i| i.id == id)
             .cloned())
@@ -600,7 +649,7 @@ impl InterfaceInstanceStore for InMemoryInterfaceInstanceStore {
         Ok(self
             .instances
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|i| i.space_id == *space_id)
             .cloned()
@@ -608,7 +657,10 @@ impl InterfaceInstanceStore for InMemoryInterfaceInstanceStore {
     }
 
     async fn delete_instance(&self, id: &str) -> Result<bool> {
-        let mut instances = self.instances.lock().unwrap();
+        let mut instances = self
+            .instances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let len_before = instances.len();
         instances.retain(|i| i.id != id);
         Ok(instances.len() < len_before)
@@ -624,7 +676,10 @@ pub struct InMemoryBindingStore {
 #[async_trait]
 impl BindingStore for InMemoryBindingStore {
     async fn create_binding(&self, binding: &PersonaBinding) -> Result<()> {
-        let mut bindings = self.bindings.lock().unwrap();
+        let mut bindings = self
+            .bindings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if bindings.iter().any(|b| b.id == binding.id) {
             bail!("binding already exists: {}", binding.id);
         }
@@ -646,7 +701,7 @@ impl BindingStore for InMemoryBindingStore {
         Ok(self
             .bindings
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|b| b.id == id)
             .cloned())
@@ -656,7 +711,7 @@ impl BindingStore for InMemoryBindingStore {
         Ok(self
             .bindings
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|b| b.space_id == *space_id)
             .cloned()
@@ -664,7 +719,10 @@ impl BindingStore for InMemoryBindingStore {
     }
 
     async fn delete_binding(&self, id: &str) -> Result<bool> {
-        let mut bindings = self.bindings.lock().unwrap();
+        let mut bindings = self
+            .bindings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let len_before = bindings.len();
         bindings.retain(|b| b.id != id);
         Ok(bindings.len() < len_before)
