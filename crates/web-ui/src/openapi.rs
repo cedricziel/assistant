@@ -37,14 +37,16 @@ use utoipa::{
 use crate::a2a::handlers;
 use crate::api::attachments::AttachmentMetaResponse;
 use crate::api::capabilities::ServerCapabilities;
+use crate::api::conversations::{
+    ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
+    ToolCallSummary, UpdateConversationRequest,
+};
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::{
-    ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
     QuickMessageRequest, QuickMessageResponse, SendMessageRequest as ApiSendMessageRequest,
     SseStatusEvent, SseSubagentCompletedEvent, SseSubagentStartedEvent, SseSubagentStatusEvent,
     SseSubagentThinkingEvent, SseSubagentTokenEvent, SseSubagentToolResultEvent, SseThinkingEvent,
-    SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery, ToolCallSummary,
-    UpdateConversationRequest,
+    SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
     account::{ChangePasswordRequest, UpdateCurrentUserRequest, UpdateCurrentUserResponse},
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
     analytics::{
@@ -191,12 +193,12 @@ pub struct ApiErrorResponse {
     modifiers(&SecuritySchemesAddon),
     paths(
         crate::api::capabilities::get_capabilities,
-        crate::api::list_conversations,
-        crate::api::stream_conversations,
-        crate::api::create_conversation,
-        crate::api::get_conversation,
-        crate::api::delete_conversation,
-        crate::api::update_conversation,
+        crate::api::conversations::list_conversations,
+        crate::api::conversations::stream_conversations,
+        crate::api::conversations::create_conversation,
+        crate::api::conversations::get_conversation,
+        crate::api::conversations::delete_conversation,
+        crate::api::conversations::update_conversation,
         crate::api::send_message,
         crate::api::quick_message,
         crate::api::send_voice_message,
