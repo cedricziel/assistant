@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.155](https://github.com/cedricziel/assistant/compare/v0.1.154...v0.1.155) (2026-05-16)
+
+
+### Features
+
+* **cli:** unified diff view in /review command ([#734](https://github.com/cedricziel/assistant/issues/734)) ([8677be9](https://github.com/cedricziel/assistant/commit/8677be9ef9e95abb038915bdc3727734db5dd4e0)), closes [#7](https://github.com/cedricziel/assistant/issues/7)
+* **llm:** batched embed_batch() on LlmProvider; Ollama native batching ([#736](https://github.com/cedricziel/assistant/issues/736)) ([86bda03](https://github.com/cedricziel/assistant/commit/86bda0309e6490eb4d5f21f79e6a1d9e5c9463d3))
+
+
+### Bug Fixes
+
+* **bus-nats:** sanitize consumer names; fix title-generator claim spam ([#737](https://github.com/cedricziel/assistant/issues/737)) ([5aa976d](https://github.com/cedricziel/assistant/commit/5aa976d0c56eee7a50e5ecdeaabb2e30aca96b3f))
+
 ## [0.1.154](https://github.com/cedricziel/assistant/compare/v0.1.153...v0.1.154) (2026-05-16)
 
 
