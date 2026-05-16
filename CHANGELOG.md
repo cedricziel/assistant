@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.154](https://github.com/cedricziel/assistant/compare/v0.1.153...v0.1.154) (2026-05-16)
+
+
+### Bug Fixes
+
+* **web-ui:** stop spawning runtime workers; orchestrator owns the pool ([#730](https://github.com/cedricziel/assistant/issues/730)) ([74325c8](https://github.com/cedricziel/assistant/commit/74325c88d76b153a9833e61a758ca827d25fc5b9))
+
 ## [0.1.153](https://github.com/cedricziel/assistant/compare/v0.1.152...v0.1.153) (2026-05-16)
 
 
