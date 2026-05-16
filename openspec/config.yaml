@@ -69,6 +69,44 @@ context: |
   Examples: list_conversations, create_persona,
             set_default_agent, list_workflow_runs
 
+  ## Flutter app conventions
+  - Follow MVVM:
+      View       = Widget (stateless when possible)
+      ViewModel  = Riverpod AsyncNotifier / AutoDisposeAsyncNotifier
+                   in a sibling `*_provider.dart`
+      Model      = data class under `app/lib/api/models/`
+    Widgets read state via `ref.watch`; never call API clients
+    directly from a widget.
+  - Extract components aggressively. A screen is a thin composition
+    of well-named widgets, each in its own file. Avoid screen
+    widgets longer than ~300 lines; pull repeated UI into shared
+    components.
+  - Use adaptive widgets (Cupertino on iOS/macOS, Material on
+    web/Android) so the same screen renders correctly across web,
+    macOS, and iOS. See the `ux-principles` skill.
+  - All async providers must expose loading, error, and empty
+    states explicitly — never assume data is present.
+  - Never hand-edit `app/packages/assistant_api/`; regenerate via
+    `make dump-openapi && make generate-flutter-client`.
+
+  ## Testing discipline
+  - TDD is mandatory across Rust and Flutter:
+      1. Write a failing test first.
+      2. Confirm it is RED before writing implementation.
+      3. Write the minimum code to make it GREEN.
+      4. Refactor under green.
+    See `.claude/skills/tdd/SKILL.md`.
+  - Rust unit tests live in `#[cfg(test)] mod tests` at the bottom
+    of each file. Use `StorageLayer::new_in_memory()` for storage
+    tests and `wiremock` for HTTP mocking.
+  - Every new Flutter widget ships with a widget test; every
+    ViewModel/provider ships with a unit test that covers loading,
+    success, and error.
+  - Playwright visual-regression tests guard the Flutter SPA.
+    Whenever a screen's visuals change intentionally, update the
+    screenshot baselines in the same change and note the update in
+    tasks.md. See `.claude/skills/e2e-testing/SKILL.md`.
+
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
 # Example:
@@ -77,8 +115,39 @@ rules:
     - Keep proposals under 500 words
     - Always include a "Non-goals" section
     - Always include a verdict whether we need user facing documentation
+    - >-
+      Call out any visual/UI change so the implementer knows
+      screenshot baselines will move
   tasks:
     - Break tasks into chunks of max 2 hours
     - No lingering backwards compatibility code
+    - >-
+      Start every implementation phase with a failing test task —
+      never write production code before a red test exists
+    - >-
+      When adding a Flutter widget, add a widget test in the same
+      task; when adding a Riverpod ViewModel, add unit tests for
+      loading, success, and error states
+    - >-
+      When changing existing widgets, extract reusable components
+      into their own files instead of growing the parent screen
+    - >-
+      When a UI change is intentional, include an explicit task to
+      update Playwright screenshot baselines and document the
+      visual diff in the PR
+    - >-
+      When extracting a widget or refactoring a ViewModel, move
+      and extend the existing tests in the same task so coverage
+      never regresses
     - Ensure adding http api routes includes OpenAPI docs
-    - Ensure user-facing features are well documented in the docs/ directory
+    - >-
+      When routes change, include `make dump-openapi` and
+      `make generate-flutter-client` tasks before any Flutter work
+      that consumes them
+    - >-
+      Final phase runs `make lint && make format && make test`;
+      add `make lint-flutter && make test-flutter` when `app/` is
+      touched
+    - >-
+      Ensure user-facing features are well documented in the
+      docs/ directory
