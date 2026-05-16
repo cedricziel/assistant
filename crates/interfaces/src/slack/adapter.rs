@@ -6,6 +6,7 @@
 //! `futures::Stream`.
 
 use std::collections::HashSet;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -33,6 +34,14 @@ use super::config::SlackConfigExt;
 use crate::common::{BACKOFF_MIN, sleep_backoff};
 
 /// Maximum audio file size downloaded for transcription (25 MB — Whisper API limit).
+/// LRU capacity for the in-process cache of Slack thread roots that the bot
+/// has been @-mentioned in. Compile-time-evaluated so the non-zero invariant
+/// cannot regress.
+const ACTIVE_THREAD_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(1024) {
+    Some(n) => n,
+    None => unreachable!(),
+};
+
 const MAX_AUDIO_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 /// Maximum image file size downloaded for vision (10 MB).
 const MAX_IMAGE_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
@@ -141,7 +150,7 @@ impl ChannelAdapter for SlackAdapter {
             // Survives reconnects within the same process; DB provides
             // persistence across restarts.
             let mut active_threads: LruCache<String, ()> =
-                LruCache::new(std::num::NonZeroUsize::new(1024).unwrap());
+                LruCache::new(ACTIVE_THREAD_CACHE_CAPACITY);
 
             let mut backoff = BACKOFF_MIN;
             loop {
