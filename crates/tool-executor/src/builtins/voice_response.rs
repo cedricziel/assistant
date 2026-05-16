@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionContext};
 use assistant_transcription::{AudioStore, TtsProvider, TtsRequest};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -121,7 +121,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    use assistant_core::{ExecutionContext, Interface};
+    use assistant_core::{types::conversation::ExecutionContext, types::conversation::Interface};
     use assistant_transcription::{AudioStore, TtsProvider, TtsRequest, TtsResult};
     use async_trait::async_trait;
     use uuid::Uuid;

@@ -14,8 +14,9 @@ use async_trait::async_trait;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
+use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{
-    AssistantConfig, ExecutionContext, ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path,
+    AssistantConfig, ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path,
 };
 
 /// Canonicalize as much of `p` as exists, then re-append non-existent tail
@@ -269,7 +270,7 @@ mod tests {
             conversation_id: uuid::Uuid::nil(),
             agent_id: "default".to_string(),
             turn: 0,
-            interface: assistant_core::Interface::Cli,
+            interface: assistant_core::types::conversation::Interface::Cli,
             interactive: false,
             allowed_tools: None,
             depth: 0,

@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ExecutionContext, ToolHandler, ToolOutput, strip_cite_tags, strip_think_tags,
+    ToolHandler, ToolOutput, strip_cite_tags, strip_think_tags,
+    types::conversation::ExecutionContext,
 };
 use async_trait::async_trait;
 use serde_json::{Value, json};

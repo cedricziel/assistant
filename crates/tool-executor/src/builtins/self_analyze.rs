@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ChatHistoryMessage, ChatRole, ExecutionContext, LlmProvider, LlmResponse, ToolHandler,
-    ToolOutput,
+    ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, ToolHandler, ToolOutput,
+    types::conversation::ExecutionContext,
 };
 use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use async_trait::async_trait;

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use assistant_core::{ExecutionContext, Interface};
+use assistant_core::{types::conversation::ExecutionContext, types::conversation::Interface};
 use assistant_runtime::Orchestrator;
 use assistant_storage::registry::SkillRegistry;
 use assistant_tool_executor::{ToolExecutor, install_skill_from_source};

@@ -23,8 +23,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::types::features::CompactionConfig;
 use assistant_core::{
-    ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, Message, MessageRole,
-    ToolCallItem,
+    ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, ToolCallItem,
+    types::conversation::Message, types::conversation::MessageRole,
 };
 use assistant_storage::conversations::ConversationStore;
 use tracing::{debug, info, warn};

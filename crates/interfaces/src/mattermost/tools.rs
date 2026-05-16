@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, ToolHandler, ToolOutput, resolve_upload_bytes};
+use assistant_core::{
+    ToolHandler, ToolOutput, resolve_upload_bytes, types::conversation::ExecutionContext,
+};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tracing::{debug, warn};

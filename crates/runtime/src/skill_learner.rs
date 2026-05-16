@@ -171,9 +171,9 @@ async fn evaluate_and_create(
             // Record in conversation store for observability.
             // Use System role — Tool role requires a matching AssistantToolCalls
             // message and would cause providers to reject the request.
-            let msg = assistant_core::Message::new(
+            let msg = assistant_core::types::conversation::Message::new(
                 ctx.conversation_id,
-                assistant_core::MessageRole::System,
+                assistant_core::types::conversation::MessageRole::System,
                 format!("Auto-created skill '{final_name}': {description}"),
             );
             let conv_store = storage.conversation_store();

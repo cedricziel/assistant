@@ -9,9 +9,8 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use assistant_core::{
-    ChatHistoryMessage, ChatRole, ContentBlock, Message, MessageRole, ToolCallItem,
-};
+use assistant_core::types::conversation::{Message, MessageRole};
+use assistant_core::{ChatHistoryMessage, ChatRole, ContentBlock, ToolCallItem};
 use assistant_storage::conversations::ConversationStore;
 
 /// Pre-loaded attachment content blocks keyed by message ID.
@@ -227,7 +226,7 @@ pub(crate) fn append_tool_result(history: &mut Vec<ChatHistoryMessage>, name: &s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::MessageRole;
+    use assistant_core::types::conversation::MessageRole;
 
     fn make_user_msg(id: Uuid, content: &str) -> Message {
         Message {

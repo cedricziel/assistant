@@ -13,7 +13,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, ToolHandler, ToolOutput, runtime_workspace_dir};
+use assistant_core::types::conversation::ExecutionContext;
+use assistant_core::{ToolHandler, ToolOutput, runtime_workspace_dir};
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -488,7 +489,7 @@ impl ProcessHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::Interface;
+    use assistant_core::types::conversation::Interface;
     use uuid::Uuid;
 
     fn ctx() -> ExecutionContext {

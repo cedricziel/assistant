@@ -13,8 +13,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::types::channels::{SlackConfig, SlackListenMode};
 use assistant_core::{
-    ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, Message, MessageRole,
-    ToolHandler,
+    ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, ToolHandler,
+    types::conversation::ChannelType, types::conversation::Message,
+    types::conversation::MessageRole,
 };
 use assistant_storage::StorageLayer;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
@@ -973,7 +974,7 @@ mod tests {
     }
 
     fn make_msg(channel: &str, ts: &str) -> ChannelMessage {
-        use assistant_core::{ChannelContent, ChannelType};
+        use assistant_core::{ChannelContent, types::conversation::ChannelType};
         use chrono::Utc;
         let mut metadata = std::collections::HashMap::new();
         metadata.insert(

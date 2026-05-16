@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::tool::{Attachment, ToolHandler};
-use crate::types::{ChannelType, Interface};
+use crate::types::conversation::{ChannelType, Interface};
 
 // -- Types --
 

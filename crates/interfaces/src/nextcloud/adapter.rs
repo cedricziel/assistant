@@ -14,8 +14,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use assistant_core::types::channels::NextcloudConfig;
 use assistant_core::{
-    Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser,
-    ToolHandler,
+    Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, ToolHandler,
+    types::conversation::ChannelType,
 };
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;

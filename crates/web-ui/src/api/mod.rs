@@ -105,7 +105,9 @@ use assistant_transcription::{
 
 use std::collections::HashMap;
 
-use assistant_core::{ConversationConfig, Interface, MessageRole};
+use assistant_core::{
+    ConversationConfig, types::conversation::Interface, types::conversation::MessageRole,
+};
 use assistant_runtime::{AssistantInterface, CommandRegistry, Orchestrator, OrchestratorEvent};
 use assistant_storage::{
     AttachmentStore, CommandEventStore, ConversationBroadcast, ConversationEvent,

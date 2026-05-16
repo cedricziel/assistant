@@ -10,7 +10,7 @@
 //! coerced to `Arc<dyn AssistantInterface>` at construction sites.
 
 use anyhow::Result;
-use assistant_core::Interface;
+use assistant_core::types::conversation::Interface;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use uuid::Uuid;

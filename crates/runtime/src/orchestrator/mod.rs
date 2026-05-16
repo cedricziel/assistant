@@ -6,11 +6,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::types::conversation::{ExecutionContext, Interface, Message, TurnIdentity};
 use assistant_core::{
-    Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, ExecutionContext,
-    Interface, LlmProvider, LlmResponse, MemoryLoader, Message, MessageBus, StreamChunk,
-    ToolHandler, ToolSpec, TurnIdentity, context::agent_base_dir, is_resizable_mime_type,
-    is_supported_mime_type, is_text_mime_type, strip_html_comments,
+    Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
+    LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec,
+    context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type, is_text_mime_type,
+    strip_html_comments,
 };
 use assistant_storage::{SkillRegistry, StorageLayer, conversations::ConversationStore};
 use assistant_tool_executor::ToolExecutor;
@@ -888,7 +889,7 @@ impl Orchestrator {
                         let _ = sink.send(OrchestratorEvent::Thinking(text.clone())).await;
                     }
                     let thinking_msg = {
-                        let mut m = assistant_core::Message::assistant(
+                        let mut m = assistant_core::types::conversation::Message::assistant(
                             conversation_id,
                             format!("<think>{text}</think>"),
                         );

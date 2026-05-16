@@ -13,7 +13,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser};
+use assistant_core::{
+    ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, types::conversation::ChannelType,
+};
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;
 use base64::Engine as _;

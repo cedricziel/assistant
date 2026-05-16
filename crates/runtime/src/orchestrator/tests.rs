@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use std::time::Duration;
 
+use assistant_core::types::conversation::{Interface, TurnIdentity};
 use assistant_core::{
     AssistantConfig, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, MessageBus, OrgId,
-    PublishRequest, SpaceId, ToolCallItem, TurnIdentity, UserId, bus_messages, topic,
-    types::Interface,
+    PublishRequest, SpaceId, ToolCallItem, UserId, bus_messages, topic,
 };
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
@@ -216,11 +216,13 @@ async fn seeded_history_included_in_llm_call() {
         .await
         .unwrap();
 
-    let mut seed_user = assistant_core::Message::user(conv_id, "seeded user message");
+    let mut seed_user =
+        assistant_core::types::conversation::Message::user(conv_id, "seeded user message");
     seed_user.turn = 0;
     conv_store.save_message(&seed_user).await.unwrap();
 
-    let mut seed_bot = assistant_core::Message::assistant(conv_id, "seeded bot reply");
+    let mut seed_bot =
+        assistant_core::types::conversation::Message::assistant(conv_id, "seeded bot reply");
     seed_bot.turn = 1;
     conv_store.save_message(&seed_bot).await.unwrap();
 
@@ -545,7 +547,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use assistant_core::tool::{ToolHandler, ToolOutput};
-use assistant_core::types::ExecutionContext;
+use assistant_core::types::conversation::ExecutionContext;
 use async_trait::async_trait;
 
 /// A fake extension tool that records how many times it was called.
@@ -938,7 +940,7 @@ async fn empty_final_answer_not_persisted_and_retries() {
     let empty_text_assistant_msgs: Vec<_> = history
         .iter()
         .filter(|m| {
-            m.role == assistant_core::types::MessageRole::Assistant
+            m.role == assistant_core::types::conversation::MessageRole::Assistant
                 && m.content.trim().is_empty()
                 && m.tool_calls_json.is_none()
         })
@@ -952,7 +954,7 @@ async fn empty_final_answer_not_persisted_and_retries() {
     // Verify: the non-empty answer IS persisted.
     let assistant_msgs: Vec<_> = history
         .iter()
-        .filter(|m| m.role == assistant_core::types::MessageRole::Assistant)
+        .filter(|m| m.role == assistant_core::types::conversation::MessageRole::Assistant)
         .collect();
     assert!(
         assistant_msgs
@@ -992,7 +994,8 @@ async fn empty_final_answer_not_persisted_in_run_turn() {
     let empty_assistant_msgs: Vec<_> = history
         .iter()
         .filter(|m| {
-            m.role == assistant_core::types::MessageRole::Assistant && m.content.trim().is_empty()
+            m.role == assistant_core::types::conversation::MessageRole::Assistant
+                && m.content.trim().is_empty()
         })
         .collect();
     assert!(
@@ -1864,7 +1867,8 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
 
 // ── Subagent integration tests ────────────────────────────────────────────
 
-use assistant_core::{AgentReportStatus, AgentSpawn, DEFAULT_MAX_AGENT_DEPTH, SubagentRunner};
+use assistant_core::types::conversation::DEFAULT_MAX_AGENT_DEPTH;
+use assistant_core::{AgentReportStatus, AgentSpawn, SubagentRunner};
 
 #[tokio::test]
 async fn subagent_spawn_complete_round_trip() {

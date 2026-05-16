@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
+use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{
-    AssistantConfig, ExecutionContext, LlmProvider, SubagentRunner, ToolHandler, ToolOutput,
-    ToolSpec,
+    AssistantConfig, LlmProvider, SubagentRunner, ToolHandler, ToolOutput, ToolSpec,
 };
 use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use tracing::warn;
@@ -274,7 +274,7 @@ fn validate_params(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::Interface;
+    use assistant_core::types::conversation::Interface;
     use async_trait::async_trait;
     use serde_json::json;
     use uuid::Uuid;
