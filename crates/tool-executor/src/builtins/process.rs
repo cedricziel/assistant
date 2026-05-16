@@ -176,8 +176,20 @@ impl ProcessHandler {
 
         let pid = child.id().unwrap_or(0);
         let stdin = child.stdin.take();
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let stderr = child.stderr.take().expect("stderr was piped");
+        // stdout/stderr are guaranteed by the `Stdio::piped()` configuration
+        // above. If either is missing, the spawn invariants were violated by
+        // an OS-level error after spawn — surface it as a tool error rather
+        // than panicking the worker.
+        let Some(stdout) = child.stdout.take() else {
+            return Ok(ToolOutput::error(
+                "spawned process did not provide a piped stdout handle",
+            ));
+        };
+        let Some(stderr) = child.stderr.take() else {
+            return Ok(ToolOutput::error(
+                "spawned process did not provide a piped stderr handle",
+            ));
+        };
 
         let stdout_buf: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
         let stderr_buf: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));

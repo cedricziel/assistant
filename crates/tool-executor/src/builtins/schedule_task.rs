@@ -140,7 +140,15 @@ impl ToolHandler for ScheduleTaskHandler {
         }
 
         // -- Cron-based (recurring or once) ---------------------------------------
-        let cron_raw = cron_expr.unwrap();
+        // The two earlier branches (`cron_expr.is_none() && run_at.is_none()` and
+        // the `if let Some(raw) = run_at { ... return ... }` block) cover every
+        // case where `cron_expr` could be absent. Treat any leftover `None` as
+        // a tool-error rather than panicking the worker.
+        let Some(cron_raw) = cron_expr else {
+            return Ok(ToolOutput::error(
+                "internal: schedule-task reached cron branch without a cron_expr",
+            ));
+        };
         let (schedule, effective_expr) = match Schedule::from_str(cron_raw) {
             Ok(s) => (s, cron_raw.to_string()),
             Err(e) => {

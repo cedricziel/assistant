@@ -161,9 +161,18 @@ impl ToolHandler for WebSearchHandler {
 fn parse_ddg_results(html: &str, limit: usize) -> Vec<(String, String, Option<String>)> {
     let document = Html::parse_document(html);
 
-    let result_sel = Selector::parse(".result, .web-result").unwrap();
-    let title_sel = Selector::parse("a.result__a").unwrap();
-    let snippet_sel = Selector::parse(".result__snippet").unwrap();
+    // Static, known-valid selectors. If parsing fails (a scraper upgrade
+    // tightens validation, etc.) we degrade to "no results" rather than
+    // panicking the worker.
+    let Ok(result_sel) = Selector::parse(".result, .web-result") else {
+        return Vec::new();
+    };
+    let Ok(title_sel) = Selector::parse("a.result__a") else {
+        return Vec::new();
+    };
+    let Ok(snippet_sel) = Selector::parse(".result__snippet") else {
+        return Vec::new();
+    };
 
     let mut results = Vec::new();
 
