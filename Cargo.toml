@@ -32,6 +32,7 @@ members = [
     "crates/opentelemetry-exporter-iceberg",
     "crates/bus-nats",
     "crates/backup",
+    "crates/test-support",
 ]
 default-members = [
     "crates/interface-cli",

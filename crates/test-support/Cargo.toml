@@ -1,0 +1,24 @@
+[package]
+name = "assistant-test-support"
+version = "0.1.160"
+edition.workspace = true
+license.workspace = true
+description = "Composition layer for assistant workspace test fixtures. Hosts FixtureBuilder + prelude re-exports of in-memory persistence impls, ScriptedLlmProvider, and orchestration stubs."
+publish = false
+
+[dependencies]
+# Kept minimal at the scaffold stage. Re-export targets are added in later
+# phases of openspec/changes/workspace-test-coverage-floor/ as their owning
+# crates land their fakes: Clock (Phase 3), persistence stores (Phase 5),
+# orchestration stubs (Phase 7), ScriptedLlmProvider (Phase 5.H).
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+# Inherit the workspace lint baseline. This crate is library code (its
+# src/lib.rs is compiled like any other crate), so it must respect the
+# panic-free contract — keep .unwrap() / .expect() / panic!() out of
+# fixture composition logic. Tests inside crates/test-support/tests/
+# are exempt from clippy by default and may use .unwrap() freely.
+[lints]
+workspace = true

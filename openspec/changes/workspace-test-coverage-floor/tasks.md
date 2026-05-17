@@ -7,19 +7,19 @@
 - [x] 1.5 Add `tools/check_coverage.sh` (or `tools/check_coverage.rs`) that parses `coverage.json`, computes per-crate line coverage, and exits non-zero when any crate not in the report-only allowlist falls below 80%.
 - [x] 1.6 Seed the report-only allowlist with **every** crate; the gate prints but does not fail.
 - [x] 1.7 Document `cargo llvm-cov` usage in `AGENTS.md` and link to the gate script.
-- [ ] 1.8 Run `make lint && make format`; commit as `feat(ci): add cargo-llvm-cov coverage measurement (report-only)`.
+- [x] 1.8 Run `make lint && make format`; commit as `feat(ci): add cargo-llvm-cov coverage measurement (report-only)`.
 
 ## 2. Phase 2 — `assistant-test-support` crate scaffold (composition only)
 
 `assistant-test-support` is a thin composition layer. It hosts `FixtureBuilder` + a `prelude` module that re-exports the in-memory impls from their owning crates. The in-memory impls themselves do NOT live here — they live next to their SQLite peers in their owning crates and are plain `pub`, NOT feature-gated.
 
-- [ ] 2.1 Add failing test under `crates/test-support/tests/smoke.rs` that imports `assistant_test_support::FixtureBuilder` and constructs an empty fixture; should fail to compile (crate does not exist yet).
-- [ ] 2.2 Create `crates/test-support/` with `Cargo.toml`, `src/lib.rs`, and module stubs (`prelude`, `fixture`). Package name `assistant-test-support`. Empty `[dependencies]` initially (re-exports get added as their source crates land their fakes).
-- [ ] 2.3 Register `crates/test-support` in the root `Cargo.toml` workspace members list.
-- [ ] 2.4 Configure `[lints]\nworkspace = true` in `crates/test-support/Cargo.toml` — keep panic-free contract at workspace baseline (`warn`, not `deny`); `.unwrap()` is ergonomic in test helpers.
-- [ ] 2.5 Document the crate's purpose: it composes existing fakes, it does NOT host the fakes themselves. Document the rule that `assistant-test-support` MUST NOT appear in any crate's `[dependencies]` section (only `[dev-dependencies]`).
-- [ ] 2.6 Add `tests/workspace_test_support_lint.rs` at the repo root that fails when `assistant-test-support` appears in any crate's `[dependencies]` table (only `[dev-dependencies]` is allowed).
-- [ ] 2.7 Add `tests/workspace_test_impls_in_prod.rs` at the repo root that fails when types matching `InMemory*`, `Scripted*`, or `Stub*` are constructed in non-test production code paths (exempt: the defining module itself, `#[cfg(test)]` modules, `tests/` directories, the `assistant-test-support` crate, and the documented production-fallback construction sites for `InMemoryConversationBroadcaster`).
+- [x] 2.1 Add failing test under `crates/test-support/tests/smoke.rs` that imports `assistant_test_support::FixtureBuilder` and constructs an empty fixture; should fail to compile (crate does not exist yet).
+- [x] 2.2 Create `crates/test-support/` with `Cargo.toml`, `src/lib.rs`, and module stubs (`prelude`, `fixture`). Package name `assistant-test-support`. Empty `[dependencies]` initially (re-exports get added as their source crates land their fakes).
+- [x] 2.3 Register `crates/test-support` in the root `Cargo.toml` workspace members list.
+- [x] 2.4 Configure `[lints]\nworkspace = true` in `crates/test-support/Cargo.toml` — keep panic-free contract at workspace baseline (`warn`, not `deny`); `.unwrap()` is ergonomic in test helpers.
+- [x] 2.5 Document the crate's purpose: it composes existing fakes, it does NOT host the fakes themselves. Document the rule that `assistant-test-support` MUST NOT appear in any crate's `[dependencies]` section (only `[dev-dependencies]`).
+- [x] 2.6 Add `tests/workspace_test_support_lint.rs` at the repo root that fails when `assistant-test-support` appears in any crate's `[dependencies]` table (only `[dev-dependencies]` is allowed).
+- [x] 2.7 Add `tests/workspace_test_impls_in_prod.rs` at the repo root that fails when types matching `InMemory*`, `Scripted*`, or `Stub*` are constructed in non-test production code paths (exempt: the defining module itself, `#[cfg(test)]` modules, `tests/` directories, the `assistant-test-support` crate, and the documented production-fallback construction sites for `InMemoryConversationBroadcaster`).
 - [ ] 2.8 Run `make lint && make format`; commit as `feat(test-support): scaffold assistant-test-support composition crate`.
 
 ## 3. Phase 3 — `Clock` trait
