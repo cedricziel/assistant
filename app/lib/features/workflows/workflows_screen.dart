@@ -1,10 +1,8 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../shared/platform/platform.dart';
+import '../../shared/platform/widgets.dart';
 import 'workflows_provider.dart';
 
 /// Screen that lists all workflows.
@@ -21,77 +19,46 @@ class WorkflowsScreen extends ConsumerWidget {
       child: const Icon(Icons.add),
     );
 
-    if (isAppleTouch) {
-      return Scaffold(
-        floatingActionButton: fab,
-        body: CustomScrollView(
-          slivers: [
-            CupertinoSliverNavigationBar(
-              largeTitle: const Text('Workflows'),
-              trailing: CupertinoButton(
-                padding: EdgeInsets.zero,
-                child: const Icon(CupertinoIcons.refresh),
+    return AdaptiveScaffold(
+      body: CustomScrollView(
+        slivers: [
+          AdaptiveSliverNavBar(
+            title: 'Workflows',
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
                 onPressed: () => ref.read(workflowsProvider.notifier).refresh(),
               ),
-            ),
-            workflowsAsync.when(
-              loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator.adaptive()),
-              ),
-              error: (err, _) => SliverFillRemaining(
-                child: _ErrorView(
-                  error: err.toString(),
-                  onRetry: () => ref.read(workflowsProvider.notifier).refresh(),
-                ),
-              ),
-              data: (workflows) {
-                if (workflows.isEmpty) {
-                  return const SliverFillRemaining(child: _EmptyView());
-                }
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    if (index.isOdd) {
-                      return const Divider(height: 1, indent: 72);
-                    }
-                    return _WorkflowRow(workflow: workflows[index ~/ 2]);
-                  }, childCount: workflows.length * 2 - 1),
-                );
-              },
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Workflows'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.read(workflowsProvider.notifier).refresh(),
+            ],
           ),
+          workflowsAsync.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator.adaptive()),
+            ),
+            error: (err, _) => SliverFillRemaining(
+              child: _ErrorView(
+                error: err.toString(),
+                onRetry: () => ref.read(workflowsProvider.notifier).refresh(),
+              ),
+            ),
+            data: (workflows) {
+              if (workflows.isEmpty) {
+                return const SliverFillRemaining(child: _EmptyView());
+              }
+              return SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  if (index.isOdd) {
+                    return const Divider(height: 1, indent: 72);
+                  }
+                  return _WorkflowRow(workflow: workflows[index ~/ 2]);
+                }, childCount: workflows.length * 2 - 1),
+              );
+            },
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: 80)),
         ],
       ),
       floatingActionButton: fab,
-      body: workflowsAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator.adaptive()),
-        error: (err, _) => _ErrorView(
-          error: err.toString(),
-          onRetry: () => ref.read(workflowsProvider.notifier).refresh(),
-        ),
-        data: (workflows) {
-          if (workflows.isEmpty) return const _EmptyView();
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: workflows.length,
-            separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
-            itemBuilder: (context, index) =>
-                _WorkflowRow(workflow: workflows[index]),
-          );
-        },
-      ),
     );
   }
 }
@@ -104,39 +71,37 @@ class _WorkflowRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // Active uses the success token (colorScheme.tertiary, seeded from
+    // AssistantColors.accentTertiary). Inactive uses the dim outline.
+    final activeColor = colorScheme.tertiary;
+    final inactiveColor = colorScheme.onSurfaceVariant;
+    final swatch = workflow.active ? activeColor : inactiveColor;
+
     final badge = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: workflow.active
-            ? Colors.green.withAlpha(20)
+            ? colorScheme.tertiaryContainer
             : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: workflow.active
-              ? Colors.green.withAlpha(60)
-              : Colors.grey.withAlpha(60),
-        ),
+        border: Border.all(color: swatch.withValues(alpha: 0.4)),
       ),
       child: Text(
         workflow.active ? 'Active' : 'Inactive',
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: workflow.active ? Colors.green : Colors.grey,
+          color: swatch,
         ),
       ),
     );
 
-    return ListTile(
+    return AdaptiveListTile(
       leading: CircleAvatar(
         backgroundColor: workflow.active
-            ? Colors.green.withAlpha(30)
-            : Colors.grey.withAlpha(30),
-        child: Icon(
-          Icons.account_tree_outlined,
-          size: 20,
-          color: workflow.active ? Colors.green : Colors.grey,
-        ),
+            ? colorScheme.tertiaryContainer
+            : colorScheme.surfaceContainerHighest,
+        child: Icon(Icons.account_tree_outlined, size: 20, color: swatch),
       ),
       title: Row(
         children: [
@@ -215,7 +180,7 @@ class _ErrorView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Retry')),
+          AdaptiveButton.filled(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
     );
