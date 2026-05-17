@@ -34,6 +34,7 @@ import '../../shared/theme/assistant_colors.dart';
 import '../../shared/theme/assistant_spacing.dart';
 import 'image_utils.dart';
 import 'markdown_link_handler.dart';
+import 'queued_message_bubble.dart';
 import 'streaming_timeline_entry.dart';
 import 'turn_progress_card.dart';
 import 'theme_aware_mermaid.dart';
@@ -485,7 +486,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     Expanded(
                       child: Stack(
                         children: [
-                          chatState.messages.isEmpty
+                          chatState.messages.isEmpty &&
+                                  chatState.pendingQueue.isEmpty
                               ? const _EmptyChat()
                               : ListView.builder(
                                   controller: _scrollController,
@@ -493,8 +495,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                     vertical: 16,
                                     horizontal: 12,
                                   ),
-                                  itemCount: chatState.messages.length,
+                                  itemCount:
+                                      chatState.messages.length +
+                                      chatState.pendingQueue.length,
                                   itemBuilder: (context, index) {
+                                    // Render queued ghost bubbles after the
+                                    // committed messages, in send order. The
+                                    // actively-streaming message is already in
+                                    // `messages` (it was popped from the queue
+                                    // when its stream started), so ghost
+                                    // bubbles represent only the truly-waiting
+                                    // items.
+                                    if (index >= chatState.messages.length) {
+                                      final queueIdx =
+                                          index - chatState.messages.length;
+                                      final pending =
+                                          chatState.pendingQueue[queueIdx];
+                                      return QueuedMessageBubble(
+                                        message: pending,
+                                        index: queueIdx,
+                                      );
+                                    }
+
                                     final msg = chatState.messages[index];
 
                                     // Render command events as compact

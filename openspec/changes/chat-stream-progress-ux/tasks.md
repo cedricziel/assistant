@@ -17,12 +17,12 @@
 
 ## 3. Phase C — Queued ghost bubbles
 
-- [ ] 3.1 Write failing widget tests for `QueuedMessageBubble` (rendering + remove action via AdaptiveActionSheet).
-- [ ] 3.2 Implement `app/lib/features/chat/queued_message_bubble.dart`.
-- [ ] 3.3 Integrate into the conversation list rendering in `chat_screen.dart` — queued entries appear after the most recent committed message, before the streaming placeholder.
-- [ ] 3.4 Wire long-press / right-click → AdaptiveActionSheet → "Remove from queue".
-- [ ] 3.5 Add `ChatNotifier.removeFromQueue(messageId)` with unit tests for the no-op-on-active-stream case.
-- [ ] 3.6 Re-baseline Playwright screenshots.
+- [x] 3.1 Wrote `test/widget/features/chat/queued_message_bubble_test.dart` — 3 tests covering text+badge rendering, long-press → action-sheet, tap-Remove → notifier callback.
+- [x] 3.2 Implemented `lib/features/chat/queued_message_bubble.dart`. Right-aligned ghosted bubble (muted italic text, subtle border, "Queued" badge). GestureDetector wraps onLongPress + onSecondaryTap.
+- [x] 3.3 Integrated into `chat_screen.dart`'s `ListView.builder` — `itemCount = messages.length + pendingQueue.length`, queued entries render after the committed messages. EmptyChat now requires both lists to be empty.
+- [x] 3.4 Long-press / right-click → `showAdaptiveActionSheet` with a "Remove from queue" destructive action (iOS sheet, Material modal bottom sheet).
+- [x] 3.5 Added `ChatNotifier.removeFromQueue(int index)`. Unit tests: removes by index, out-of-bounds is a no-op. Active-streaming message is already popped from the queue so it's untouchable by design.
+- [ ] 3.6 Re-baseline Playwright screenshots — deferred (combined with Phase B/D baseline updates).
 
 ## 4. Phase D — Reconnect banner
 
