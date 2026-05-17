@@ -1,11 +1,9 @@
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../router/app_router.dart';
-import '../../shared/platform/platform.dart';
+import '../../shared/platform/widgets.dart';
 import '../notifications/notification_preferences.dart';
 import '../notifications/notification_service.dart';
 
@@ -17,198 +15,108 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final prefsAsync = ref.watch(notificationPreferencesProvider);
 
-    final bodyChildren = [
-      // -- Account -----------------------------------------------------
-      const _SectionHeader('Account'),
-      ListTile(
-        leading: const Icon(Icons.person_outline),
-        title: const Text('Account'),
-        subtitle: const Text('Name, email, and password'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => context.push(AppRoutes.settingsAccount),
-      ),
-      // -- Notifications -----------------------------------------------
-      const _SectionHeader('Notifications'),
-      prefsAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator.adaptive()),
-        error: (e, _) => ListTile(
-          leading: const Icon(Icons.error_outline),
-          title: Text('Failed to load preferences: $e'),
-        ),
-        data: (prefs) => Column(
-          children: [
-            SwitchListTile.adaptive(
-              secondary: const Icon(Icons.chat_bubble_outline),
-              title: const Text('New chat messages'),
-              subtitle: const Text(
-                'Notify when the assistant sends a new message',
+    return AdaptiveScaffold(
+      body: CustomScrollView(
+        slivers: [
+          const AdaptiveSliverNavBar(title: 'Settings'),
+          SliverToBoxAdapter(
+            child: AdaptiveListSection(
+              header: const Text('Account'),
+              children: [
+                AdaptiveListTile(
+                  leading: const AdaptiveIcon(
+                    cupertino: CupertinoIcons.person,
+                    material: Icons.person_outline,
+                  ),
+                  title: const Text('Account'),
+                  subtitle: const Text('Name, email, and password'),
+                  trailing: const AdaptiveIcon(
+                    cupertino: CupertinoIcons.chevron_forward,
+                    material: Icons.chevron_right,
+                  ),
+                  onTap: () => context.push(AppRoutes.settingsAccount),
+                ),
+              ],
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: prefsAsync.when(
+              loading: () =>
+                  const Center(child: CircularProgressIndicator.adaptive()),
+              error: (e, _) => AdaptiveListTile(
+                leading: const Icon(Icons.error_outline),
+                title: Text('Failed to load preferences: $e'),
               ),
-              value: prefs.notifyChatMessages,
-              onChanged: (value) async {
-                await prefs.setNotifyChatMessages(value);
-                // Refresh provider so UI stays in sync.
-                ref.invalidate(notificationPreferencesProvider);
-              },
-            ),
-            SwitchListTile.adaptive(
-              secondary: const Icon(Icons.extension_outlined),
-              title: const Text('Skill completions'),
-              subtitle: const Text('Notify when a skill run succeeds or fails'),
-              value: prefs.notifySkillComplete,
-              onChanged: (value) async {
-                await prefs.setNotifySkillComplete(value);
-                ref.invalidate(notificationPreferencesProvider);
-              },
-            ),
-            SwitchListTile.adaptive(
-              secondary: const Icon(Icons.warning_amber_outlined),
-              title: const Text('Agent errors'),
-              subtitle: const Text('Notify on critical assistant errors'),
-              value: prefs.notifyAgentErrors,
-              onChanged: (value) async {
-                await prefs.setNotifyAgentErrors(value);
-                ref.invalidate(notificationPreferencesProvider);
-              },
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.notifications_outlined),
-                label: const Text('Request notification permission'),
-                onPressed: () async {
-                  final ns = ref.read(notificationServiceProvider);
-                  await ns.initialize();
-                  await ns.requestPermission();
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    ];
-
-    if (isAppleTouch) {
-      return Scaffold(
-        body: CustomScrollView(
-          slivers: [
-            const CupertinoSliverNavigationBar(largeTitle: Text('Settings')),
-            SliverToBoxAdapter(
-              child: CupertinoListSection.insetGrouped(
-                header: const Text('Account'),
+              data: (prefs) => AdaptiveListSection(
+                header: const Text('Notifications'),
                 children: [
-                  CupertinoListTile(
-                    leading: const Icon(CupertinoIcons.person),
-                    title: const Text('Account'),
-                    subtitle: const Text('Name, email, and password'),
-                    trailing: const CupertinoListTileChevron(),
-                    onTap: () => context.push(AppRoutes.settingsAccount),
+                  AdaptiveSwitchTile(
+                    leading: const AdaptiveIcon(
+                      cupertino: CupertinoIcons.chat_bubble,
+                      material: Icons.chat_bubble_outline,
+                    ),
+                    title: const Text('New chat messages'),
+                    subtitle: const Text(
+                      'Notify when the assistant sends a new message',
+                    ),
+                    value: prefs.notifyChatMessages,
+                    onChanged: (value) async {
+                      if (isAppleTouch) HapticFeedback.lightImpact();
+                      await prefs.setNotifyChatMessages(value);
+                      ref.invalidate(notificationPreferencesProvider);
+                    },
+                  ),
+                  AdaptiveSwitchTile(
+                    leading: const AdaptiveIcon(
+                      cupertino: CupertinoIcons.square_grid_2x2,
+                      material: Icons.extension_outlined,
+                    ),
+                    title: const Text('Skill completions'),
+                    subtitle: const Text(
+                      'Notify when a skill run succeeds or fails',
+                    ),
+                    value: prefs.notifySkillComplete,
+                    onChanged: (value) async {
+                      if (isAppleTouch) HapticFeedback.lightImpact();
+                      await prefs.setNotifySkillComplete(value);
+                      ref.invalidate(notificationPreferencesProvider);
+                    },
+                  ),
+                  AdaptiveSwitchTile(
+                    leading: const AdaptiveIcon(
+                      cupertino: CupertinoIcons.exclamationmark_triangle,
+                      material: Icons.warning_amber_outlined,
+                    ),
+                    title: const Text('Agent errors'),
+                    subtitle: const Text('Notify on critical assistant errors'),
+                    value: prefs.notifyAgentErrors,
+                    onChanged: (value) async {
+                      if (isAppleTouch) HapticFeedback.lightImpact();
+                      await prefs.setNotifyAgentErrors(value);
+                      ref.invalidate(notificationPreferencesProvider);
+                    },
+                  ),
+                  AdaptiveListTile(
+                    leading: const AdaptiveIcon(
+                      cupertino: CupertinoIcons.bell,
+                      material: Icons.notifications_outlined,
+                    ),
+                    title: const Text('Request permission'),
+                    trailing: const AdaptiveIcon(
+                      cupertino: CupertinoIcons.chevron_forward,
+                      material: Icons.chevron_right,
+                    ),
+                    onTap: () async {
+                      final ns = ref.read(notificationServiceProvider);
+                      await ns.initialize();
+                      await ns.requestPermission();
+                    },
                   ),
                 ],
               ),
             ),
-            SliverToBoxAdapter(
-              child: prefsAsync.when(
-                loading: () =>
-                    const Center(child: CircularProgressIndicator.adaptive()),
-                error: (e, _) => ListTile(
-                  leading: const Icon(Icons.error_outline),
-                  title: Text('Failed to load preferences: $e'),
-                ),
-                data: (prefs) => CupertinoListSection.insetGrouped(
-                  header: const Text('Notifications'),
-                  children: [
-                    _buildCupertinoSwitchTile(
-                      icon: CupertinoIcons.chat_bubble,
-                      title: 'New chat messages',
-                      subtitle: 'Notify when the assistant sends a new message',
-                      value: prefs.notifyChatMessages,
-                      onChanged: (value) async {
-                        await prefs.setNotifyChatMessages(value);
-                        ref.invalidate(notificationPreferencesProvider);
-                      },
-                    ),
-                    _buildCupertinoSwitchTile(
-                      icon: CupertinoIcons.square_grid_2x2,
-                      title: 'Skill completions',
-                      subtitle: 'Notify when a skill run succeeds or fails',
-                      value: prefs.notifySkillComplete,
-                      onChanged: (value) async {
-                        await prefs.setNotifySkillComplete(value);
-                        ref.invalidate(notificationPreferencesProvider);
-                      },
-                    ),
-                    _buildCupertinoSwitchTile(
-                      icon: CupertinoIcons.exclamationmark_triangle,
-                      title: 'Agent errors',
-                      subtitle: 'Notify on critical assistant errors',
-                      value: prefs.notifyAgentErrors,
-                      onChanged: (value) async {
-                        await prefs.setNotifyAgentErrors(value);
-                        ref.invalidate(notificationPreferencesProvider);
-                      },
-                    ),
-                    CupertinoListTile(
-                      leading: const Icon(CupertinoIcons.bell),
-                      title: const Text('Request permission'),
-                      trailing: const CupertinoListTileChevron(),
-                      onTap: () async {
-                        final ns = ref.read(notificationServiceProvider);
-                        await ns.initialize();
-                        await ns.requestPermission();
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: ListView(children: bodyChildren),
-    );
-  }
-}
-
-CupertinoListTile _buildCupertinoSwitchTile({
-  required IconData icon,
-  required String title,
-  required String subtitle,
-  required bool value,
-  required ValueChanged<bool> onChanged,
-}) {
-  return CupertinoListTile(
-    leading: Icon(icon),
-    title: Text(title),
-    subtitle: Text(subtitle),
-    trailing: CupertinoSwitch(
-      value: value,
-      onChanged: (v) {
-        HapticFeedback.lightImpact();
-        onChanged(v);
-      },
-    ),
-  );
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-          color: Theme.of(context).colorScheme.primary,
-        ),
+          ),
+        ],
       ),
     );
   }
