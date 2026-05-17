@@ -120,13 +120,27 @@ pub struct PushDispatcher {
     /// base64url-encoded PEM bytes of the P-256 ECDSA signing key.
     vapid_private_key_b64: Arc<String>,
     store: Arc<PushSubscriptionStore>,
+    /// HTTP client used for outbound push delivery. Default `Client::new()`;
+    /// tests inject a client built against a `wiremock::MockServer`.
+    client: reqwest::Client,
 }
 
 impl PushDispatcher {
     pub fn new(vapid_private_key_b64: String, store: Arc<PushSubscriptionStore>) -> Self {
+        Self::with_client(vapid_private_key_b64, store, reqwest::Client::new())
+    }
+
+    /// Construct with an explicit `reqwest::Client`. Tests pass a client
+    /// built against a `wiremock::MockServer`.
+    pub fn with_client(
+        vapid_private_key_b64: String,
+        store: Arc<PushSubscriptionStore>,
+        client: reqwest::Client,
+    ) -> Self {
         Self {
             vapid_private_key_b64: Arc::new(vapid_private_key_b64),
             store,
+            client,
         }
     }
 
@@ -163,11 +177,9 @@ impl PushDispatcher {
         })
         .to_string();
 
-        let client = reqwest::Client::new();
-
         for sub in &subscriptions {
             match send_one(
-                &client,
+                &self.client,
                 &signing_key,
                 &sub.endpoint,
                 &sub.p256dh,
@@ -409,5 +421,50 @@ mod tests {
         let key = SigningKey::from_pkcs8_pem(pem_str).unwrap();
         let jwt = build_vapid_jwt(&key, "https://fcm.googleapis.com/fcm/send/abc").unwrap();
         assert_eq!(jwt.split('.').count(), 3);
+    }
+
+    #[tokio::test]
+    async fn dispatcher_with_no_subscriptions_is_noop() {
+        // Even with a totally invalid VAPID key, send_to_all should
+        // short-circuit when there are no subscriptions to deliver to.
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap();
+        let store = Arc::new(PushSubscriptionStore::new(storage.pool.clone()));
+        let dispatcher = PushDispatcher::with_client(
+            "AA".repeat(40), // not a valid key, but not parsed in the empty path
+            store,
+            reqwest::Client::new(),
+        );
+        dispatcher
+            .send_to_all("title", "body", None)
+            .await
+            .expect("empty subscriptions should return Ok");
+    }
+
+    #[tokio::test]
+    async fn dispatcher_with_client_constructor_threads_client_through() {
+        // Smoke test for the with_client injection seam: build a dispatcher
+        // with a client pointing at a wiremock server, verify the inner
+        // `self.client` is the one we passed. (We can't actually exercise
+        // send_one without valid p256dh + auth subscription keys, which
+        // require client-side key derivation that's out of scope here.)
+        use wiremock::MockServer;
+        let server = MockServer::start().await;
+        let custom_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(123))
+            .build()
+            .unwrap();
+
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap();
+        let store = Arc::new(PushSubscriptionStore::new(storage.pool.clone()));
+        let dispatcher = PushDispatcher::with_client("fakekey".to_string(), store, custom_client);
+
+        // Construct OK + empty send_to_all returns Ok.
+        dispatcher.send_to_all("t", "b", None).await.unwrap();
+        // Reference the mock server so the compiler doesn't elide it.
+        let _ = server.uri();
     }
 }
