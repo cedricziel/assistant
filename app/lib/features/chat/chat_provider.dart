@@ -1566,8 +1566,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               // normal (tool execution, extended thinking). Only close
               // early if the user has already enqueued another message
               // that is blocked waiting for this stream to finish.
-              final hasQueued = state.value?.pendingQueue.isNotEmpty ?? false;
-              if (!hasQueued) return;
+              final hasQueuedMessages =
+                  state.value?.pendingQueue.isNotEmpty ?? false;
+              if (!hasQueuedMessages) return;
             }
             // Recover synchronously so the placeholder clears immediately
             // (the synchronous prefix of [_recoverStalledStream] runs

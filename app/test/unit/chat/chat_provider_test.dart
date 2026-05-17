@@ -1911,7 +1911,7 @@ void main() {
         expect(notifier.state.value!.pendingQueue, isEmpty);
         expect(notifier.needsReconnect, isFalse);
 
-        // Simulating a foreground event: attemptReconnect should be a
+        // Simulate a foreground event: attemptReconnect should be a
         // no-op when there is nothing to reconnect or drain.
         await tester.runAsync(() async {
           await notifier.attemptReconnect();
