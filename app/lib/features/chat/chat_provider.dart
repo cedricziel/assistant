@@ -1004,6 +1004,21 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   ApiClient? get _api => ref.read(apiClientProvider);
 
+  /// Remove a queued message at [index] from [ChatState.pendingQueue].
+  ///
+  /// No-op when [index] is out of bounds. The actively-streaming message
+  /// is NOT in the queue (it was popped before `_streamMessage` started),
+  /// so this never aborts the in-flight turn.
+  ///
+  /// Used by the queued-message bubble's "Remove from queue" action sheet.
+  void removeFromQueue(int index) {
+    final current = state.value ?? const ChatState();
+    if (index < 0 || index >= current.pendingQueue.length) return;
+    final next = List<PendingMessage>.from(current.pendingQueue)
+      ..removeAt(index);
+    state = AsyncData(current.copyWith(pendingQueue: next));
+  }
+
   /// Cancel the current in-progress streaming response.
   ///
   /// Queued messages in [ChatState.pendingQueue] are preserved and will

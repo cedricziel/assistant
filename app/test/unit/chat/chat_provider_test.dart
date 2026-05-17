@@ -2302,4 +2302,77 @@ void main() {
       await tester.pumpAndSettle();
     });
   });
+
+  // -- Phase C of chat-stream-progress-ux: removeFromQueue ------------------
+
+  group('ChatNotifier.removeFromQueue', () {
+    testWidgets('removes the entry at the given index', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      await tester.pump();
+
+      // Seed the queue with three entries via state mutation (this
+      // matches what `sendMessage` would have done; no public mutator
+      // exists for direct injection, but state is settable from inside
+      // the notifier via the AsyncNotifier protected setter — which
+      // tests cannot reach. So we drive through sendMessage instead).
+      //
+      // First message goes straight to streaming via the drain;
+      // subsequent ones land in pendingQueue. We enqueue 3 streams that
+      // each immediately complete so the drain consumes them in order.
+      // To leave items in the queue, we send 3 messages while the FIRST
+      // stream is intentionally held open.
+      final ctrl1 = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl1.isClosed) await ctrl1.close();
+      });
+      // Streams for messages 2 + 3 that the drain will eventually pop;
+      // we don't actually advance to them in this test.
+      fakeApi.enqueueStream();
+      fakeApi.enqueueStream();
+
+      unawaited(notifier.sendMessage('a'));
+      await tester.pump();
+      ctrl1.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+      unawaited(notifier.sendMessage('b'));
+      await tester.pump();
+      unawaited(notifier.sendMessage('c'));
+      await tester.pump();
+
+      expect(
+        notifier.state.value!.pendingQueue.map((p) => p.text).toList(),
+        ['b', 'c'],
+        reason: 'precondition: a is streaming, b and c are queued in order',
+      );
+
+      // Remove the middle of the queue (index 0 in the visible queue,
+      // since `a` is no longer in pendingQueue — it's actively streaming).
+      notifier.removeFromQueue(0);
+      await tester.pump();
+
+      expect(
+        notifier.state.value!.pendingQueue.map((p) => p.text).toList(),
+        ['c'],
+        reason: 'removeFromQueue(0) drops "b" but leaves "c"',
+      );
+
+      await ctrl1.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('out-of-bounds index is a no-op', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      await tester.pump();
+
+      // Empty queue — any index is out of bounds.
+      notifier.removeFromQueue(0);
+      notifier.removeFromQueue(-1);
+      notifier.removeFromQueue(99);
+      await tester.pump();
+
+      expect(notifier.state.value!.pendingQueue, isEmpty);
+    });
+  });
 }
