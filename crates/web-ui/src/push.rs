@@ -17,9 +17,9 @@
 //! sends a VAPID-signed Web Push request to each endpoint.  Endpoints that
 //! respond with `410 Gone` are deleted from the database automatically.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes_gcm::{
     Aes128Gcm, Key, Nonce,
@@ -361,10 +361,7 @@ fn build_vapid_jwt(signing_key: &SigningKey, endpoint: &str) -> Result<String> {
         url.host_str().context("Push endpoint has no host")?
     );
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = SystemClock.now().timestamp() as u64;
 
     // Header + payload, base64url-encoded.
     let header = URL_SAFE_NO_PAD.encode(r#"{"typ":"JWT","alg":"ES256"}"#);

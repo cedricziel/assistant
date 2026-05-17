@@ -2,6 +2,7 @@
 //! `assistant_storage::OrgStorageLayer`.
 
 use anyhow::{Context, Result};
+use assistant_core::clock::{Clock, SystemClock};
 use async_trait::async_trait;
 
 use assistant_auth::oidc::{OidcUserInfo, OidcUserStore};
@@ -44,7 +45,7 @@ impl OidcUserStore for OrgOidcUserStore {
     }
 
     async fn create_user(&self, info: &OidcUserInfo) -> Result<UserId> {
-        let now = chrono::Utc::now();
+        let now = SystemClock.now();
         let user_id = UserId::from(format!("usr_{}", uuid::Uuid::new_v4()));
         let user = assistant_core::store::User {
             id: user_id.clone(),
@@ -74,7 +75,7 @@ impl OidcUserStore for OrgOidcUserStore {
             .with_context(|| format!("user {user_id} not found"))?;
         user.idp_issuer = Some(issuer.to_owned());
         user.idp_subject = Some(subject.to_owned());
-        user.updated_at = chrono::Utc::now();
+        user.updated_at = SystemClock.now();
         self.storage
             .user_store()
             .update_user(&user)

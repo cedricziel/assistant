@@ -16,6 +16,7 @@
 //! | GET    | `/api/workflows/{id}/runs`              | List recent runs                |
 //! | GET    | `/api/workflows/{id}/runs/{run_id}`     | Run detail with steps           |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -392,7 +393,7 @@ pub async fn test_run_workflow(
         run_id: run_id.to_string(),
         status: "accepted".to_string(),
         message: "Workflow run accepted and queued for execution worker".to_string(),
-        started_at: Utc::now(),
+        started_at: SystemClock.now(),
         max_steps: w.graph.execution.max_steps,
         max_visits_per_node: w.graph.execution.max_visits_per_node,
     }))

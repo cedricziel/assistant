@@ -3,10 +3,10 @@
 //! Manages task lifecycle, history, and artifact storage. Tasks are kept in
 //! memory for now; persistence can be added later via the storage layer.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::Utc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -53,7 +53,7 @@ impl TaskStore {
             status: TaskStatus {
                 state: TaskState::TaskStateSubmitted,
                 message: None,
-                timestamp: Some(Utc::now()),
+                timestamp: Some(SystemClock.now()),
             },
             artifacts: vec![],
             history: vec![],
@@ -84,7 +84,7 @@ impl TaskStore {
             task.status = TaskStatus {
                 state,
                 message,
-                timestamp: Some(Utc::now()),
+                timestamp: Some(SystemClock.now()),
             };
         }
 
@@ -146,7 +146,7 @@ impl TaskStore {
             task.status = TaskStatus {
                 state: TaskState::TaskStateCanceled,
                 message: None,
-                timestamp: Some(Utc::now()),
+                timestamp: Some(SystemClock.now()),
             };
         }
 

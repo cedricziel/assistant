@@ -10,6 +10,7 @@
 //! | PATCH  | `/api/orgs/{org_id}/spaces/{id}`| Update space      |
 //! | DELETE | `/api/orgs/{org_id}/spaces/{id}`| Delete space      |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -19,7 +20,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_core::auth::AuthContext;
@@ -193,7 +193,7 @@ pub async fn create_space(
     if body.name.is_empty() || body.slug.is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "name and slug are required");
     }
-    let now = Utc::now();
+    let now = SystemClock.now();
     let space = Space {
         id: SpaceId::from(format!("spc_{}", uuid::Uuid::new_v4())),
         org_id,
@@ -329,7 +329,7 @@ pub async fn update_space(
     if let Some(name) = body.name {
         space.name = name;
     }
-    space.updated_at = Utc::now();
+    space.updated_at = SystemClock.now();
 
     if let Err(e) = store.update_space(&space).await {
         tracing::error!("failed to update space: {e}");
@@ -455,8 +455,8 @@ mod tests {
             name: "Test Org".into(),
             slug: "test".into(),
             auth_mode: "password".into(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         };
         org_storage.org_store().create_org(&org).await.unwrap();
         SpacesApiState { org_storage }
@@ -537,7 +537,7 @@ mod tests {
         let state = setup_state().await;
 
         // Create a space directly.
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         let space = Space {
             id: SpaceId::from("spc_del"),
             org_id: OrgId::from("org_1"),

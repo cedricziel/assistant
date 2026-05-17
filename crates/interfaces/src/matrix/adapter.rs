@@ -6,6 +6,7 @@
 //!
 //! Auto-accepts room invitations via `POST /join/<room_id>`.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -19,7 +20,6 @@ use assistant_core::{
 };
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest};
 use async_trait::async_trait;
-use chrono::Utc;
 use futures::stream::Stream;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
@@ -568,7 +568,7 @@ fn build_message(
         },
         content,
         thread_id: None,
-        timestamp: Utc::now(),
+        timestamp: SystemClock.now(),
         metadata,
     }
 }

@@ -12,6 +12,7 @@
 //! | GET    | `/api/orgs/{org_id}/spaces/{space_id}/subscriptions`          | List subscriptions         |
 //! | DELETE | `/api/orgs/{org_id}/spaces/{space_id}/subscriptions/{sub_id}` | Unsubscribe                |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -21,7 +22,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_core::CatalogSubscription;
@@ -162,7 +162,7 @@ pub async fn publish_catalog_item(
         resource_type: body.resource_type,
         name: body.name,
         description: body.description,
-        created_at: Utc::now(),
+        created_at: SystemClock.now(),
     };
 
     let store = state.org_storage.catalog_item_store();
@@ -363,7 +363,7 @@ pub async fn create_subscription(
         }
     }
 
-    let now = Utc::now();
+    let now = SystemClock.now();
     let sub = CatalogSubscription {
         id: format!("sub_{}", uuid::Uuid::new_v4()),
         space_id: assistant_core::identity::SpaceId::from(space_id),
@@ -765,7 +765,7 @@ mod tests {
                 resource_type: assistant_core::catalog::CatalogResourceType::Skill,
                 name: "stolen-skill".into(),
                 description: "".into(),
-                created_at: Utc::now(),
+                created_at: chrono::Utc::now(),
             })
             .await
             .unwrap();
@@ -817,7 +817,7 @@ mod tests {
                 resource_type: assistant_core::catalog::CatalogResourceType::Skill,
                 name: "web-fetch".into(),
                 description: "".into(),
-                created_at: Utc::now(),
+                created_at: chrono::Utc::now(),
             })
             .await
             .unwrap();
@@ -827,7 +827,7 @@ mod tests {
             id: "sub_1".into(),
             space_id: assistant_core::identity::SpaceId::from("sp_eng"),
             catalog_item_id: "ci_1".into(),
-            created_at: Utc::now(),
+            created_at: chrono::Utc::now(),
         };
         sub_store.create_subscription(&sub).await.unwrap();
 
@@ -870,7 +870,7 @@ mod tests {
                 resource_type: assistant_core::catalog::CatalogResourceType::Skill,
                 name: "stolen-skill".into(),
                 description: "".into(),
-                created_at: Utc::now(),
+                created_at: chrono::Utc::now(),
             })
             .await
             .unwrap();
