@@ -14,6 +14,7 @@ class AdaptiveTextField extends StatelessWidget {
   const AdaptiveTextField({
     super.key,
     this.controller,
+    this.focusNode,
     this.placeholder,
     this.onChanged,
     this.onSubmitted,
@@ -22,9 +23,15 @@ class AdaptiveTextField extends StatelessWidget {
     this.autofocus = false,
     this.textInputAction,
     this.prefix,
+    this.minLines,
+    this.maxLines = 1,
+    this.cursorColor,
+    this.contentPadding,
+    this.enabled,
   });
 
   final TextEditingController? controller;
+  final FocusNode? focusNode;
   final String? placeholder;
   final ValueChanged<String>? onChanged;
   final ValueChanged<String>? onSubmitted;
@@ -38,11 +45,27 @@ class AdaptiveTextField extends StatelessWidget {
   /// on Material. Commonly an [Icon] used for search affordances.
   final Widget? prefix;
 
+  /// Multi-line support. `maxLines = 1` (the default) renders a single
+  /// line; pass `null` for unbounded growth.
+  final int? minLines;
+  final int? maxLines;
+
+  /// Caret colour. Maps directly on both platforms.
+  final Color? cursorColor;
+
+  /// Inner padding. Maps to `CupertinoTextField.padding` on iOS and to
+  /// `InputDecoration.contentPadding` on Material.
+  final EdgeInsetsGeometry? contentPadding;
+
+  /// Whether the field accepts input. `null` (the default) means enabled.
+  final bool? enabled;
+
   @override
   Widget build(BuildContext context) {
     if (isAppleTouch) {
       return CupertinoTextField(
         controller: controller,
+        focusNode: focusNode,
         placeholder: placeholder,
         onChanged: onChanged,
         onSubmitted: onSubmitted,
@@ -51,12 +74,25 @@ class AdaptiveTextField extends StatelessWidget {
         autofocus: autofocus,
         textInputAction: textInputAction,
         prefix: prefix,
+        minLines: minLines,
+        maxLines: maxLines,
+        cursorColor: cursorColor,
+        enabled: enabled ?? true,
+        padding:
+            contentPadding ??
+            const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
       );
     }
     return TextField(
       controller: controller,
-      decoration: (placeholder != null || prefix != null)
-          ? InputDecoration(hintText: placeholder, prefixIcon: prefix)
+      focusNode: focusNode,
+      decoration:
+          (placeholder != null || prefix != null || contentPadding != null)
+          ? InputDecoration(
+              hintText: placeholder,
+              prefixIcon: prefix,
+              contentPadding: contentPadding,
+            )
           : null,
       onChanged: onChanged,
       onSubmitted: onSubmitted,
@@ -64,6 +100,10 @@ class AdaptiveTextField extends StatelessWidget {
       obscureText: obscureText,
       autofocus: autofocus,
       textInputAction: textInputAction,
+      minLines: minLines,
+      maxLines: maxLines,
+      cursorColor: cursorColor,
+      enabled: enabled,
     );
   }
 }

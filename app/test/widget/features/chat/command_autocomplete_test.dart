@@ -4,6 +4,7 @@ import 'package:assistant_app/features/chat/chat_screen.dart';
 import 'package:assistant_app/features/chat/commands_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
+import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -211,7 +212,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 400));
 
         // Input should be filled with "/model " and popup should dismiss.
-        final controller = tester.widget<TextField>(
+        final controller = tester.widget<AdaptiveTextField>(
           find.byKey(const Key('message_input')),
         );
         expect(
