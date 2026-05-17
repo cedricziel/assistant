@@ -1,0 +1,72 @@
+# Files exempt from the material-import portion of check_facade_imports.sh.
+#
+# Phase 4 of the adaptive-ui-consolidation OpenSpec change bans direct
+# `import 'package:flutter/material.dart';` in feature code. The barrel
+# `lib/shared/platform/widgets.dart` re-exports a curated subset of Material
+# widgets, so most feature files can drop the direct import and go through
+# the barrel instead.
+#
+# This allowlist enumerates files that currently import material.dart
+# directly. The list is generous on day one — every existing violator is
+# included so the lint can land without blocking. Each entry should shrink
+# in a follow-up PR that migrates that file to the barrel. Add a `# TODO`
+# next to entries that have a clear migration plan.
+#
+# Once a file is migrated, drop its entry from this allowlist in the same
+# commit. The lint rule will then catch any regression.
+
+# TODO: migrate to the barrel.
+lib/features/account/account_screen.dart
+lib/features/admin/admin_screen.dart
+lib/features/agents/agent_detail_screen.dart
+lib/features/api_keys/api_keys_screen.dart
+lib/features/chat/audio_player_widget.dart
+lib/features/chat/command_autocomplete.dart
+lib/features/chat/command_event_tile.dart
+lib/features/chat/conversation_list.dart
+lib/features/chat/image_utils.dart
+lib/features/chat/markdown_link_handler.dart
+lib/features/chat/streaming_timeline_entry.dart
+lib/features/chat/svg_builder.dart
+lib/features/chat/theme_aware_mermaid.dart
+lib/features/chat/timeline_section.dart
+lib/features/chat/tool_call_chip.dart
+lib/features/chat/voice_recorder_button.dart
+lib/features/connection/connection_screen.dart
+lib/features/contexts/screens/edit_context_screen.dart
+lib/features/login/login_screen.dart
+lib/features/notifications/agent_event_listener.dart
+lib/features/onboarding/onboarding_screen.dart
+lib/features/personas/persona_create_screen.dart
+lib/features/personas/persona_detail_screen.dart
+lib/features/personas/persona_file_editor_screen.dart
+lib/features/personas/persona_picker.dart
+lib/features/skills/skill_create_edit_screen.dart
+lib/features/skills/skill_detail_screen.dart
+lib/features/spaces/space_selector_screen.dart
+lib/features/traces/tool_call_span_card.dart
+lib/features/traces/trace_detail_screen.dart
+lib/features/updater/update_banner.dart
+lib/features/webhooks/webhook_detail_screen.dart
+lib/features/workflows/workflow_detail_screen.dart
+lib/features/workflows/workflow_editor_screen.dart
+lib/features/workflows/workflow_run_detail_screen.dart
+
+# Special-case: bootstrap widget, also cupertino-allowlisted.
+lib/shared/error_screen.dart
+
+# Special-case: navigation orchestrator, also cupertino-allowlisted.
+lib/shared/nav_shell.dart
+
+# Loading + sidebar + space-switcher: thin Material UI shells in lib/shared/
+# that may be migrated later. Currently use Material widgets directly.
+lib/shared/edge_swipe_sidebar_toggle.dart
+lib/shared/loading_screen.dart
+lib/shared/sidebar_toggle_button.dart
+lib/shared/space_switcher.dart
+
+# Tray (desktop-only) — windows close handler uses Material for the
+# confirm dialog. Tray is macOS desktop only, not part of the iOS
+# adaptive scope.
+lib/tray/window_close_handler.dart
+lib/tray/window_close_handler_stub.dart

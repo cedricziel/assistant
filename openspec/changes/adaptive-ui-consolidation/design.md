@@ -130,6 +130,21 @@ The `show` list in the barrel is the **discipline boundary** — adding a widget
 
 Initial barrel re-exports include: `Card`, `InkWell`, `Material` (widget), `Icons` (constants), `CupertinoIcons` (constants, from cupertino.dart), `Theme`, `ThemeData`, `ColorScheme`, `TextTheme`, `Brightness`, `IconButton`, `FloatingActionButton`, `Tooltip`, `Divider`, `CircularProgressIndicator`, `MaterialPageRoute`, `ScaffoldMessenger`, `Drawer`, `TabBar`, `Tab`, `PopupMenuButton`, `PopupMenuItem`, `OutlinedButton`. Notably **NOT** re-exported (force migration to wrappers): `Scaffold`, `AppBar`, `ListTile`, `SwitchListTile`, `Switch`, `TextField`, `Slider`, `SnackBar`, `AlertDialog`, `FilledButton`, `TextButton`. Also **NOT** re-exported (already gated): `Colors`.
 
+### Decision 9: Phase 4 enforcement via shell script, not custom_lint
+
+The original Phase 4 plan called for a `custom_lint` plugin. In practice, the discipline boundary is simple enough — "no direct cupertino.dart / material.dart imports outside the allowlist" — that a shell-script gate (`scripts/check_facade_imports.sh`) modelled on the existing `scripts/check_no_raw_colors.sh` is the pragmatic choice. It ships immediately, requires no separate Dart package or analyzer setup, and integrates into `make lint-flutter` exactly like the existing colour-token check.
+
+**Why:** The custom_lint plugin would have given IDE integration and richer diagnostics, but at the cost of a separate package + analyzer wiring + a unit-test harness. The shell script matches the project's existing enforcement style and gets us 95% of the value for 10% of the work.
+
+**Alternatives considered:**
+
+- Full `custom_lint` plugin. Rejected for now as over-engineering; can be added later if the shell-script diagnostics prove insufficient.
+
+**Phase 4 special-case allowlists:**
+
+- `scripts/facade_cupertino_allowlist.txt` (2 entries): `lib/shared/nav_shell.dart` (navigation orchestrator combining `cupertino_sidebar` package + `CupertinoTabBar` / `CupertinoActionSheet` / `CupertinoModalPopup` + Material's `NavigationBar` / `NavigationRail`); `lib/shared/error_screen.dart` (bootstrap widget rendered before the normal widget tree). Both have hybrid platform semantics that wrapping would either complicate or visually regress.
+- `scripts/facade_material_allowlist.txt` (~44 entries on day one): all files currently importing `flutter/material.dart` that haven't yet migrated to the barrel. Each entry is marked for follow-up; every subsequent migration removes one allowlist entry. This is the ratchet that lands Phase 4 immediately without blocking on the full feature-code migration.
+
 ## Risks / Trade-offs
 
 - **Package v0.1.x solo publisher abandons.** → Mitigation: exact pin, confinement to wrapper internals, swap-back to Flutter Cupertino is a localised change in `lib/shared/platform/`. Source is MIT-licensed and small enough to vendor if needed.
