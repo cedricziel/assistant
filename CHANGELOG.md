@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.158](https://github.com/cedricziel/assistant/compare/v0.1.157...v0.1.158) (2026-05-17)
+
+
+### Features
+
+* **app:** migrate agents_screen onto AdaptiveSliverNavBar + barrel ([#801](https://github.com/cedricziel/assistant/issues/801)) ([853d9f8](https://github.com/cedricziel/assistant/commit/853d9f898af974f573479d59a72074b1c86e54a1))
+* **app:** migrate analytics_screen onto AdaptiveSliverNavBar + barrel ([#807](https://github.com/cedricziel/assistant/issues/807)) ([9d34214](https://github.com/cedricziel/assistant/commit/9d3421491eb34e870a6f4c2715ad1d5f8c102934))
+* **app:** migrate personas_screen + extend AdaptiveTextField with prefix ([#804](https://github.com/cedricziel/assistant/issues/804)) ([49f9e5a](https://github.com/cedricziel/assistant/commit/49f9e5a30df20e45b685fae6f61d293558706999))
+* **app:** migrate skills_screen onto AdaptiveSliverNavBar + barrel ([#805](https://github.com/cedricziel/assistant/issues/805)) ([f063408](https://github.com/cedricziel/assistant/commit/f0634083b3c3fd1623ee2de470e6bb73324eca1c))
+* **app:** migrate webhooks_screen onto AdaptiveSliverNavBar + barrel ([#806](https://github.com/cedricziel/assistant/issues/806)) ([4394c6f](https://github.com/cedricziel/assistant/commit/4394c6fb7f76f244f852875ee06f237d4efa3bfb))
+* **app:** migrate workflows_screen onto AdaptiveSliverNavBar + barrel ([#803](https://github.com/cedricziel/assistant/issues/803)) ([839f2da](https://github.com/cedricziel/assistant/commit/839f2dac7c337d9797b1abe223f703dc18dc3be4))
+
 ## [0.1.157](https://github.com/cedricziel/assistant/compare/v0.1.156...v0.1.157) (2026-05-16)
 
 
