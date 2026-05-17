@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.160](https://github.com/cedricziel/assistant/compare/v0.1.159...v0.1.160) (2026-05-17)
+
+
+### Bug Fixes
+
+* **app:** salvage PR [#809](https://github.com/cedricziel/assistant/issues/809) fix (2) + (3), pin TimeoutException + slow-stream contract ([#818](https://github.com/cedricziel/assistant/issues/818)) ([269dd32](https://github.com/cedricziel/assistant/commit/269dd32d7e26e7857121db8273531fe69f0ac244))
+
 ## [0.1.159](https://github.com/cedricziel/assistant/compare/v0.1.158...v0.1.159) (2026-05-17)
 
 
