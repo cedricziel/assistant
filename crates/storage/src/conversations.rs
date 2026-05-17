@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::types::conversation::{Message, MessageRole};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
@@ -34,6 +35,8 @@ pub struct ConversationStore {
     /// When set, all queries are scoped to this user.
     user_id: Option<String>,
     broadcaster: Option<Arc<dyn ConversationBroadcast>>,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl ConversationStore {
@@ -43,6 +46,7 @@ impl ConversationStore {
             agent_id: "default".to_string(),
             user_id: None,
             broadcaster: None,
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -52,12 +56,20 @@ impl ConversationStore {
             agent_id: agent_id.into(),
             user_id: None,
             broadcaster: None,
+            clock: Arc::new(SystemClock),
         }
     }
 
     /// Scope all queries to a specific user.
     pub fn with_user_id(mut self, user_id: impl Into<String>) -> Self {
         self.user_id = Some(user_id.into());
+        self
+    }
+
+    /// Inject a [`Clock`] implementation. Tests pass `Arc::new(FakeClock::new(...))`
+    /// to assert row-timestamp behavior against virtual time.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -78,7 +90,7 @@ impl ConversationStore {
         id: Uuid,
         title: Option<&str>,
     ) -> Result<ConversationRecord> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let id_str = id.to_string();
         let title_locked = title.is_some();
 
@@ -114,7 +126,7 @@ impl ConversationStore {
     /// Create a new conversation row and return its metadata.
     pub async fn create_conversation(&self, title: Option<&str>) -> Result<ConversationRecord> {
         let id = Uuid::new_v4();
-        let now = Utc::now();
+        let now = self.clock.now();
         let id_str = id.to_string();
         let title_locked = title.is_some();
 
@@ -245,7 +257,7 @@ impl ConversationStore {
                  WHERE id = ?3 AND agent_id = ?4",
         )
         .bind(title)
-        .bind(Utc::now())
+        .bind(self.clock.now())
         .bind(&id_str)
         .bind(&self.agent_id)
         .execute(&self.pool)
@@ -341,7 +353,7 @@ impl ConversationStore {
         .await?;
 
         // Update the conversation's updated_at timestamp
-        let now = Utc::now();
+        let now = self.clock.now();
         sqlx::query("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND agent_id = ?3")
             .bind(now)
             .bind(&conversation_id)

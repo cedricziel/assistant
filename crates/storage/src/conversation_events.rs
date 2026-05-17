@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
@@ -36,6 +37,8 @@ pub struct ConversationEventStore {
     pool: SqlitePool,
     /// How long events are retained before pruning.
     ttl: Duration,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl ConversationEventStore {
@@ -43,11 +46,16 @@ impl ConversationEventStore {
         Self {
             pool,
             ttl: Duration::hours(DEFAULT_EVENT_TTL_HOURS),
+            clock: Arc::new(SystemClock),
         }
     }
 
     pub fn with_ttl(pool: SqlitePool, ttl: Duration) -> Self {
-        Self { pool, ttl }
+        Self {
+            pool,
+            ttl,
+            clock: Arc::new(SystemClock),
+        }
     }
 
     /// Append a single event to the log.
@@ -62,7 +70,7 @@ impl ConversationEventStore {
         event_type: &str,
         payload: &Value,
     ) -> Result<()> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let expires_at = now + self.ttl;
         sqlx::query(
             "INSERT INTO conversation_events \
@@ -128,7 +136,7 @@ impl ConversationEventStore {
 
     /// Delete all rows where `expires_at < now`. Returns the number of rows deleted.
     pub async fn prune_expired(&self) -> Result<u64> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let result = sqlx::query("DELETE FROM conversation_events WHERE expires_at < ?1")
             .bind(now)
             .execute(&self.pool)
@@ -146,7 +154,7 @@ impl ConversationEventStore {
         &self,
         older_than: Duration,
     ) -> Result<Vec<(String, String)>> {
-        let cutoff = Utc::now() - older_than;
+        let cutoff = self.clock.now() - older_than;
         let rows = sqlx::query(
             "SELECT DISTINCT ce.run_id, ce.conversation_id \
              FROM conversation_events ce \

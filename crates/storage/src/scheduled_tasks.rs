@@ -1,6 +1,9 @@
 //! Scheduled task persistence (cron-style recurring prompts and one-shot tasks).
 
+use std::sync::Arc;
+
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -24,6 +27,8 @@ pub struct ScheduledTask {
 pub struct ScheduledTaskStore {
     pool: SqlitePool,
     agent_id: String,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl ScheduledTaskStore {
@@ -31,6 +36,7 @@ impl ScheduledTaskStore {
         Self {
             pool,
             agent_id: "default".to_string(),
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -38,7 +44,14 @@ impl ScheduledTaskStore {
         Self {
             pool,
             agent_id: agent_id.into(),
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Insert a new scheduled task.
@@ -52,7 +65,7 @@ impl ScheduledTaskStore {
     ) -> Result<Uuid> {
         let id = Uuid::new_v4();
         let id_str = id.to_string();
-        let now = Utc::now();
+        let now = self.clock.now();
 
         sqlx::query(
             "INSERT INTO scheduled_tasks \

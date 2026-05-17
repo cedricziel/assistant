@@ -1,6 +1,9 @@
 //! Subagent lifecycle persistence.
 
+use std::sync::Arc;
+
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
@@ -51,11 +54,22 @@ pub struct AgentRecord {
 /// SQLite-backed store for subagent lifecycle records.
 pub struct AgentStore {
     pool: SqlitePool,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl AgentStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Insert a new agent record in `running` status.
@@ -68,7 +82,7 @@ impl AgentStore {
         task: &str,
         depth: u32,
     ) -> Result<()> {
-        let now = Utc::now();
+        let now = self.clock.now();
         sqlx::query(
             "INSERT INTO agents \
                 (id, parent_agent_id, parent_conversation_id, conversation_id, task, status, depth, created_at) \
@@ -94,7 +108,7 @@ impl AgentStore {
         status: AgentStatus,
         result_summary: Option<&str>,
     ) -> Result<()> {
-        let now = Utc::now();
+        let now = self.clock.now();
         sqlx::query(
             "UPDATE agents SET status = ?1, completed_at = ?2, result_summary = ?3 WHERE id = ?4",
         )

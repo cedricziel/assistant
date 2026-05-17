@@ -14,7 +14,10 @@
 
 use std::path::PathBuf;
 
+use std::sync::Arc;
+
 use anyhow::{Context, bail};
+use assistant_core::clock::{Clock, SystemClock};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -70,6 +73,8 @@ pub struct OAuthManager {
     tokens: RwLock<Option<OAuthTokens>>,
     /// HTTP client for token exchange / refresh.
     http: reqwest::Client,
+    /// Clock for token-expiry calculations. Defaults to `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl OAuthManager {
@@ -97,7 +102,15 @@ impl OAuthManager {
             token_path,
             tokens: RwLock::new(cached),
             http,
+            clock: Arc::new(SystemClock),
         })
+    }
+
+    /// Inject a [`Clock`] implementation. Tests pass `Arc::new(FakeClock::new(...))`
+    /// to assert token-expiry behavior against virtual time.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Return a valid access token, refreshing or performing a full login if needed.
@@ -106,7 +119,7 @@ impl OAuthManager {
         {
             let guard = self.tokens.read().await;
             if let Some(ref t) = *guard
-                && t.expires_at > Utc::now() + Duration::seconds(REFRESH_MARGIN_SECS)
+                && t.expires_at > self.clock.now() + Duration::seconds(REFRESH_MARGIN_SECS)
             {
                 return Ok(t.access_token.clone());
             }
@@ -117,7 +130,7 @@ impl OAuthManager {
 
         // Double-check under write lock.
         if let Some(ref t) = *guard {
-            if t.expires_at > Utc::now() + Duration::seconds(REFRESH_MARGIN_SECS) {
+            if t.expires_at > self.clock.now() + Duration::seconds(REFRESH_MARGIN_SECS) {
                 return Ok(t.access_token.clone());
             }
             // Try refresh.
@@ -222,7 +235,8 @@ impl OAuthManager {
             .await
             .context("Failed to parse token response")?;
 
-        let expires_at = Utc::now() + Duration::seconds(token_resp.expires_in.unwrap_or(3600));
+        let expires_at =
+            self.clock.now() + Duration::seconds(token_resp.expires_in.unwrap_or(3600));
 
         Ok(OAuthTokens {
             access_token: token_resp.access_token,
@@ -262,7 +276,8 @@ impl OAuthManager {
             .await
             .context("Failed to parse refresh response")?;
 
-        let expires_at = Utc::now() + Duration::seconds(token_resp.expires_in.unwrap_or(3600));
+        let expires_at =
+            self.clock.now() + Duration::seconds(token_resp.expires_in.unwrap_or(3600));
 
         Ok(OAuthTokens {
             access_token: token_resp.access_token,

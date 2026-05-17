@@ -4,18 +4,31 @@
 //! responding in threads it was previously invited to.  `last_seen_at` is
 //! refreshed on every access so stale threads can be pruned.
 
+use std::sync::Arc;
+
 use anyhow::Result;
-use chrono::Utc;
+use assistant_core::clock::{Clock, SystemClock};
 use sqlx::SqlitePool;
 
 /// SQLite-backed store for active Slack thread keys.
 pub struct SlackActiveThreadStore {
     pool: SqlitePool,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl SlackActiveThreadStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Return `true` if `(channel_id, thread_ts)` exists in the database.
@@ -33,7 +46,7 @@ impl SlackActiveThreadStore {
 
     /// Insert or update a `(channel_id, thread_ts)` pair, refreshing `last_seen_at`.
     pub async fn upsert(&self, channel_id: &str, thread_ts: &str) -> Result<()> {
-        let now = Utc::now();
+        let now = self.clock.now();
         sqlx::query(
             "INSERT INTO slack_active_threads (channel_id, thread_ts, last_seen_at) \
              VALUES (?1, ?2, ?3) \
@@ -50,7 +63,7 @@ impl SlackActiveThreadStore {
     /// Delete threads that have not been seen for more than `older_than_days` days.
     /// Returns the number of rows deleted.
     pub async fn prune(&self, older_than_days: i64) -> Result<u64> {
-        let cutoff = Utc::now() - chrono::Duration::days(older_than_days);
+        let cutoff = self.clock.now() - chrono::Duration::days(older_than_days);
         let result = sqlx::query("DELETE FROM slack_active_threads WHERE last_seen_at < ?1")
             .bind(cutoff)
             .execute(&self.pool)

@@ -4,7 +4,10 @@
 //! timeline.  These records are never included in LLM context — the
 //! orchestrator only loads the `messages` table.
 
+use std::sync::Arc;
+
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
@@ -28,11 +31,22 @@ pub struct CommandEventRow {
 #[derive(Clone)]
 pub struct CommandEventStore {
     pool: SqlitePool,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl CommandEventStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Persist a command event.
@@ -44,7 +58,7 @@ impl CommandEventStore {
         ack_text: &str,
     ) -> Result<CommandEventRow> {
         let id = Uuid::new_v4();
-        let now = Utc::now();
+        let now = self.clock.now();
 
         let id_str = id.to_string();
         let conv_str = conversation_id.to_string();

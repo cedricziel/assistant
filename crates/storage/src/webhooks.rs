@@ -1,6 +1,9 @@
 //! Outgoing webhook persistence — CRUD and verification tracking.
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
@@ -23,6 +26,8 @@ pub struct WebhookRecord {
 pub struct WebhookStore {
     pool: SqlitePool,
     agent_id: String,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl WebhookStore {
@@ -30,6 +35,7 @@ impl WebhookStore {
         Self {
             pool,
             agent_id: "default".to_string(),
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -37,7 +43,14 @@ impl WebhookStore {
         Self {
             pool,
             agent_id: agent_id.into(),
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Insert a new webhook.
@@ -49,7 +62,7 @@ impl WebhookStore {
         secret: &str,
         event_types: &[String],
     ) -> Result<()> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let events_json = serde_json::to_string(event_types)?;
         sqlx::query(
             "INSERT INTO webhooks (id, agent_id, name, url, secret, event_types, active, created_at, updated_at) \
@@ -107,7 +120,7 @@ impl WebhookStore {
         event_types: &[String],
         active: bool,
     ) -> Result<bool> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let events_json = serde_json::to_string(event_types)?;
         let result = sqlx::query(
             "UPDATE webhooks SET name = ?1, url = ?2, event_types = ?3, active = ?4, updated_at = ?5 \
@@ -139,7 +152,7 @@ impl WebhookStore {
 
     /// Record a successful verification timestamp.
     pub async fn mark_verified(&self, id: &str) -> Result<bool> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE webhooks
                  SET verified_at = ?1, updated_at = ?1
@@ -156,7 +169,7 @@ impl WebhookStore {
 
     /// Toggle the active flag on a webhook.
     pub async fn toggle_active(&self, id: &str) -> Result<bool> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE webhooks
                  SET active = 1 - active, updated_at = ?1
@@ -174,7 +187,7 @@ impl WebhookStore {
     /// Regenerate the HMAC secret for a webhook. Clears `verified_at` since the
     /// old secret is no longer valid.
     pub async fn rotate_secret(&self, id: &str, new_secret: &str) -> Result<bool> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE webhooks
              SET secret = ?1, verified_at = NULL, updated_at = ?2
