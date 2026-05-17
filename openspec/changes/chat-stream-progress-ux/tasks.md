@@ -7,13 +7,13 @@
 
 ## 2. Phase B — TurnProgressCard widget + integration
 
-- [ ] 2.1 Spike: build a `turnStatusLabel(TurnStatusSnapshot)` pure function with widget tests for each case (run_started / token / status / thinking / tool_result / subagent_started / stalled / unknown).
-- [ ] 2.2 Write failing widget tests for `TurnProgressCard` rendering each state.
-- [ ] 2.3 Implement `app/lib/features/chat/turn_progress_card.dart`.
-- [ ] 2.4 Wire elapsed-seconds via a `Ticker` inside the card; dispose on widget removal.
-- [ ] 2.5 Integrate into `chat_screen.dart` above the composer.
-- [ ] 2.6 Re-baseline Playwright screenshots for the chat screen.
-- [ ] 2.7 Manual smoke on iPhone Simulator, iPad Simulator, Chrome, `flutter run -d macos`.
+- [x] 2.1 Built `turnStatusLabel(TurnStatusSnapshot)` pure function in `lib/features/chat/turn_status_label.dart`. 14 unit tests cover every TurnEventKind, tool-name interpolation, generic fallbacks, and the stalled elapsed-time format (`0:34`, `1:35`, padded seconds).
+- [x] 2.2 Wrote widget tests for every state (renders-nothing-when-null, per-event-kind labels, stalled-transition at 30 s, recovers-on-fresh-event, disappears-on-clear, ticker fires once per second, ticker disposes cleanly).
+- [x] 2.3 Implemented `app/lib/features/chat/turn_progress_card.dart` — Riverpod-driven, watches `chatProvider.select((s) => s.value?.currentTurnStatus)`.
+- [x] 2.4 Elapsed-seconds wired via a 1-second `Timer.periodic`. Started on first non-null snapshot, cancelled in `dispose()`. Verified via fake_async test.
+- [x] 2.5 Integrated into `chat_screen.dart` above the `_InputRow` composer. Single line: `const TurnProgressCard(),`. Renders to `SizedBox.shrink()` when no turn is in flight.
+- [ ] 2.6 Re-baseline Playwright screenshots for the chat screen. Defer to a follow-up — the visual diff is bounded to the composer area; existing baselines will fail until updated.
+- [ ] 2.7 Manual smoke on iPhone Simulator, iPad Simulator, Chrome, `flutter run -d macos`. Defer to user verification.
 
 ## 3. Phase C — Queued ghost bubbles
 

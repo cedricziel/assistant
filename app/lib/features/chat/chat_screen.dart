@@ -35,6 +35,7 @@ import '../../shared/theme/assistant_spacing.dart';
 import 'image_utils.dart';
 import 'markdown_link_handler.dart';
 import 'streaming_timeline_entry.dart';
+import 'turn_progress_card.dart';
 import 'theme_aware_mermaid.dart';
 import 'voice_recorder_button.dart';
 
@@ -572,6 +573,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ],
                       ),
                     ),
+
+                    // In-flight turn progress card — renders nothing when no
+                    // turn is active, an activity label otherwise, a stall
+                    // label after 30s of silence.
+                    const TurnProgressCard(),
 
                     // Input row.
                     _InputRow(
