@@ -1826,6 +1826,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (!ref.mounted) return;
       final messages = chatMessagesFromHistory(response.data!.messages);
       final latest = state.value ?? const ChatState();
+      // While we were awaiting the conversation fetch, the queue-drain
+      // loop may have advanced to the next pending message and started
+      // a new stream. Overwriting state here would silently wipe that
+      // in-flight placeholder. The new stream is the freshest truth —
+      // discard the stale recovery snapshot instead.
+      //
+      // Reproducer / regression test:
+      //   test/unit/chat/chat_provider_test.dart group 12 — "stalled
+      //   recovery does not clobber a concurrently-started stream".
+      if (latest.isSending) return;
       state = AsyncData(
         ChatState(
           conversationId: conversationId,
@@ -1889,8 +1899,26 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Called from the app lifecycle observer on [AppLifecycleState.resumed].
   /// Tries: 1) replay from last sequence, 2) fetch full conversation history,
   /// 3) show error only if both fail.
+  ///
+  /// Also kicks the queue-drain loop as a safety net: if for any reason
+  /// the drain stopped while messages remained queued (e.g. an exception
+  /// escaping a finally block, an app-lifecycle transition interacting
+  /// with `ref.mounted`), foregrounding the app would otherwise leave
+  /// the queue stuck. The byte-level watchdog plus the explicit `cancel`
+  /// surface (future work) cover the main paths, but a non-empty
+  /// `pendingQueue` arriving at this hook is an unambiguous signal to
+  /// re-kick the drain.
   Future<void> attemptReconnect() async {
-    if (!_needsReconnect) return;
+    if (!_needsReconnect) {
+      // No interrupted stream to recover, but still kick the drain if
+      // there are queued messages and nothing is processing them. This
+      // is a defence-in-depth net for races elsewhere in the state
+      // machine.
+      if (!_draining && (state.value?.pendingQueue.isNotEmpty ?? false)) {
+        unawaited(_drainQueue());
+      }
+      return;
+    }
 
     // Clear immediately to prevent re-entrant calls.
     _needsReconnect = false;
