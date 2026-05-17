@@ -1,12 +1,12 @@
 ## 1. Phase 1 — Coverage infrastructure
 
-- [ ] 1.1 Add failing CI smoke job that runs `cargo llvm-cov --workspace --json --output-path coverage.json` and uploads the artifact; assert exit code 0 (no parsing yet).
-- [ ] 1.2 Install `cargo-llvm-cov` in `.github/workflows/coverage.yml` (Linux runner, cached toolchain).
-- [ ] 1.3 Add `make coverage` target to root `Makefile` that runs the same command locally and prints a per-crate summary table.
-- [ ] 1.4 Commit `coverage.toml` with the exclude list (generated code globs, `build.rs`).
-- [ ] 1.5 Add `tools/check_coverage.sh` (or `tools/check_coverage.rs`) that parses `coverage.json`, computes per-crate line coverage, and exits non-zero when any crate not in the report-only allowlist falls below 80%.
-- [ ] 1.6 Seed the report-only allowlist with **every** crate; the gate prints but does not fail.
-- [ ] 1.7 Document `cargo llvm-cov` usage in `AGENTS.md` and link to the gate script.
+- [x] 1.1 Add failing CI smoke job that runs `cargo llvm-cov --workspace --json --output-path coverage.json` and uploads the artifact; assert exit code 0 (no parsing yet).
+- [x] 1.2 Install `cargo-llvm-cov` in `.github/workflows/coverage.yml` (Linux runner, cached toolchain).
+- [x] 1.3 Add `make coverage` target to root `Makefile` that runs the same command locally and prints a per-crate summary table.
+- [x] 1.4 Commit `coverage.toml` with the exclude list (generated code globs, `build.rs`).
+- [x] 1.5 Add `tools/check_coverage.sh` (or `tools/check_coverage.rs`) that parses `coverage.json`, computes per-crate line coverage, and exits non-zero when any crate not in the report-only allowlist falls below 80%.
+- [x] 1.6 Seed the report-only allowlist with **every** crate; the gate prints but does not fail.
+- [x] 1.7 Document `cargo llvm-cov` usage in `AGENTS.md` and link to the gate script.
 - [ ] 1.8 Run `make lint && make format`; commit as `feat(ci): add cargo-llvm-cov coverage measurement (report-only)`.
 
 ## 2. Phase 2 — `assistant-test-support` crate scaffold (composition only)

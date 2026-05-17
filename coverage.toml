@@ -1,0 +1,79 @@
+# Workspace coverage configuration consumed by `make coverage` and
+# `tools/check_coverage.sh`. Specified by the openspec change
+# `workspace-test-coverage-floor` (see openspec/changes/).
+
+# Per-crate line-coverage floor (percent). Crates not in `excluded_crates`
+# or `report_only` must meet or exceed this number on every PR.
+floor = 80.0
+
+# Crates permanently excluded from the coverage gate.
+# They may appear in coverage.json but never gate CI.
+#
+# Identifiers are workspace directory names under `crates/`, NOT Cargo
+# package names. (e.g. `mcp-server`, not `assistant-mcp-server`.) The
+# directory name is what cargo-llvm-cov emits in coverage.json file paths.
+#
+# Each exclusion must have a documented reason here.
+[excluded_crates]
+crates = [
+    # No production library code; src/lib.rs is a stub for shared
+    # test helpers used by the integration suite.
+    "integration-tests",
+
+    # Generated serde types mirroring the A2A JSON schema; coverage
+    # on typed data is not meaningful.
+    "a2a-json-schema",
+]
+
+# Crates in report-only mode during the rollout to the 80% floor.
+# The gate prints these crates' coverage and delta but does not fail
+# CI on them.
+#
+# Promotion to enforcing mode is a one-way ratchet: remove a crate from
+# this list once it sustainably reaches 80%, and the next PR that drops
+# it below 80% will fail.
+#
+# Seeded with every non-excluded workspace member. As crates clear the
+# floor (tracked in openspec/changes/workspace-test-coverage-floor/tasks.md
+# Phase 11), they are removed from this list.
+#
+# Identifiers are workspace directory names under `crates/`, NOT Cargo
+# package names. (e.g. `runtime` not `assistant-runtime`.)
+[report_only]
+crates = [
+    "auth",
+    "backup",
+    "bus-nats",
+    "core",
+    "interface-cli",
+    "interfaces",
+    "llm-provider",
+    "mcp-client",
+    "mcp-server",
+    "runtime",
+    "skills",
+    "storage",
+    "tool-executor",
+    "transcription",
+    "web-ui",
+    "workflow",
+    "workflow-http",
+    "opentelemetry-exporter-iceberg",
+    "opentelemetry-exporter-sqlite",
+    # test-support — added when the crate is scaffolded in Phase 2.
+]
+
+# File path regex patterns excluded from coverage measurement.
+# Passed to `cargo llvm-cov --ignore-filename-regex` as a joined alternation.
+[file_excludes]
+patterns = [
+    # Build scripts — run at compile time, not at test time.
+    "/build\\.rs$",
+    # Cargo build output.
+    "/target/",
+    # Protobuf-generated code (none today; reserved for future).
+    "\\.pb\\.rs$",
+    # Generated OpenAPI bindings inside Flutter dart code — out of scope
+    # for Rust coverage anyway, but listed for safety.
+    "/app/packages/assistant_api/",
+]
