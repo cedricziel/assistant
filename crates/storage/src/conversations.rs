@@ -584,7 +584,7 @@ impl ConversationStore for SqliteConversationStore {
 /// The workspace lint `tests/workspace_test_impls_in_prod.rs` forbids
 /// constructing this type outside test code or `assistant-test-support`.
 pub struct InMemoryConversationStore {
-    state: Arc<Mutex<InMemoryState>>,
+    state: Arc<Mutex<MemoryState>>,
     agent_id: String,
     user_id: Option<String>,
     broadcaster: Option<Arc<dyn ConversationBroadcast>>,
@@ -592,7 +592,7 @@ pub struct InMemoryConversationStore {
 }
 
 #[derive(Default)]
-struct InMemoryState {
+struct MemoryState {
     conversations: HashMap<Uuid, ConversationRecord>,
     messages: HashMap<Uuid, Vec<Message>>,
 }
@@ -601,7 +601,7 @@ impl InMemoryConversationStore {
     /// Create a new empty store with the default agent (`"default"`).
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(InMemoryState::default())),
+            state: Arc::new(Mutex::new(MemoryState::default())),
             agent_id: "default".to_string(),
             user_id: None,
             broadcaster: None,
@@ -637,7 +637,7 @@ impl InMemoryConversationStore {
 
     /// Lock the inner state for the duration of a single operation.
     /// Recovers from poisoned locks by extracting the inner state.
-    fn lock_state(&self) -> std::sync::MutexGuard<'_, InMemoryState> {
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, MemoryState> {
         match self.state.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
