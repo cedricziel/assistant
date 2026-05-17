@@ -68,19 +68,7 @@
 
 ## 7. Phase 3 — Wire adaptive_platform_ui inside façade (one PR or small stack)
 
-- [ ] 7.1 Add `adaptive_platform_ui` to `app/pubspec.yaml` with an exact pin (e.g. `adaptive_platform_ui: 0.1.107` — no caret); run `flutter pub get`
-- [ ] 7.2 Spike: build a minimal iOS-only test page that renders the package's native nav bar + tab bar; verify on iPhone Simulator running iOS 26 and on Apple Silicon Mac (Designed for iPad). Record findings in PR description
-- [ ] 7.3 Modify `app/lib/shared/platform/adaptive_nav_bar.dart` internals: on `isAppleTouch`, render the package's native iOS 26 nav bar (do NOT use `iOS26NativeSearchTabBar`). Material/macOS branches unchanged
-- [ ] 7.4 Modify `app/lib/shared/platform/adaptive_sliver_nav_bar.dart` internals: same treatment
-- [ ] 7.5 Replace nav_shell's iOS tab bar with the package's `iOS26NativeTabBar` (or equivalent non-search variant). EXPLICITLY skip `iOS26NativeSearchTabBar` (upstream broken)
-- [ ] 7.6 A/B test `AdaptiveTextField` vs Flutter Cupertino on iOS 26 hardware; if package version wins, swap; record decision in wrapper docstring + this task
-- [ ] 7.7 A/B test `AdaptiveSwitch` vs Flutter Cupertino on iOS 26; same protocol as 7.6
-- [ ] 7.8 A/B test `AdaptiveSlider` vs Flutter Cupertino on iOS 26; same protocol
-- [ ] 7.9 A/B test `AdaptiveSnackBar` vs Flutter Cupertino on iOS 26; same protocol
-- [ ] 7.10 Re-baseline iOS goldens; document the visual diff in PR description
-- [ ] 7.11 Add a "developer notes" section to `app/README.md` documenting the package's hot-reload caveats
-- [ ] 7.12 Verify web + macOS builds: no `adaptive_platform_ui` code path executes; `flutter analyze --fatal-infos` passes for both targets
-- [ ] 7.13 Run `make lint-flutter && make test-flutter`
+**Phase 3 deferred to a follow-up change.** Rationale: adopting `adaptive_platform_ui` v0.1.x (solo-published, 12 days old at the time of this change) requires (a) iOS hardware testing on iPhone Simulator and Apple Silicon Mac that can't be reliably done without an interactive review session, (b) re-baselining iOS goldens, and (c) absorbing the risk of a young dependency that the upstream README already flags one widget of as broken. The foundation laid by Phases 1 + 2 + 4 means Phase 3 is now a localized change confined to the façade wrappers — no feature code touches change. The original Phase 3 tasks 7.1–7.13 carry over verbatim when Phase 3 is taken up; nothing in the design.md or specs needs modification. See Decision 5 (exact pin) and Decision 6 (skip iOS26NativeSearchTabBar) for the constraints that survive.
 
 ## 8. Phase 4 — Lint enforcement (one PR)
 
