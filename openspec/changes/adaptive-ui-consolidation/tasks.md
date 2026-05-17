@@ -51,7 +51,7 @@
 
 ## 4. Phase 2.3 — Settings screen (1 PR)
 
-- [ ] 4.1 `settings_screen.dart`: replace `CupertinoListSection`/`CupertinoListTile`/`CupertinoSwitchTile` with `AdaptiveListSection`/`AdaptiveListTile`/`AdaptiveSwitchTile`; drop `package:flutter/cupertino.dart` import; update Playwright screenshot baseline if visual diff is non-zero on web
+- [x] 4.1 `settings_screen.dart`: unified both platform paths onto AdaptiveListSection + AdaptiveListTile + AdaptiveSwitchTile + AdaptiveIcon. Dropped the `_buildCupertinoSwitchTile` helper and `_SectionHeader` class — subsumed by the wrappers. Pair-of-icons mapping (`AdaptiveIcon(cupertino: CupertinoIcons.X, material: Icons.Y)`) preserves the existing iOS-filled / Material-outlined glyph difference. Haptic feedback on switch toggle gated on `isAppleTouch` so the existing `adaptive_haptics_test.dart` (no haptic on macOS) keeps passing.
 
 ## 5. Phase 2.4 — Chat screen (likely small stack inside one PR)
 
