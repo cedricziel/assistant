@@ -708,6 +708,7 @@ dependencies = [
 name = "assistant-test-support"
 version = "0.1.160"
 dependencies = [
+ "assistant-core",
  "tokio",
 ]
 

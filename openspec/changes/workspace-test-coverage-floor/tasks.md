@@ -24,10 +24,10 @@
 
 ## 3. Phase 3 — `Clock` trait
 
-- [ ] 3.1 Add failing test in `crates/core/src/clock.rs` that asserts `FakeClock` returns the seeded `DateTime<Utc>` and advances on `tick()`.
-- [ ] 3.2 Implement `pub trait Clock: Send + Sync` with `now() -> DateTime<Utc>` and `now_instant() -> Instant`. Implement `SystemClock` and `FakeClock` both as plain `pub` types in `assistant-core::clock` — no `#[cfg(test)]`, no feature flag. `FakeClock` is just another `Clock` impl, available wherever the `Clock` trait is.
-- [ ] 3.3 Re-export `Clock`, `SystemClock`, `FakeClock` from `assistant_core`'s lib root.
-- [ ] 3.4 Add `assistant_core::FakeClock` to the `assistant-test-support` prelude re-exports.
+- [x] 3.1 Add failing test in `crates/core/src/clock.rs` that asserts `FakeClock` returns the seeded `DateTime<Utc>` and advances on `tick()`.
+- [x] 3.2 Implement `pub trait Clock: Send + Sync` with `now() -> DateTime<Utc>` and `now_instant() -> Instant`. Implement `SystemClock` and `FakeClock` both as plain `pub` types in `assistant-core::clock` — no `#[cfg(test)]`, no feature flag. `FakeClock` is just another `Clock` impl, available wherever the `Clock` trait is.
+- [x] 3.3 Re-export `Clock`, `SystemClock`, `FakeClock` from `assistant_core`'s lib root.
+- [x] 3.4 Add `assistant_core::FakeClock` to the `assistant-test-support` prelude re-exports.
 - [ ] 3.5 Add failing test in `crates/auth/tests/jwt_clock.rs` asserting a JWT issued by a `FakeClock`-backed `JwtManager` reports `exp` relative to the fake clock.
 - [ ] 3.6 Thread `Arc<dyn Clock>` into `assistant_auth::jwt::JwtManager`; default to `Arc::new(SystemClock)` via a `Default` impl or `new()` builder.
 - [ ] 3.7 Replace `Utc::now()` calls in `crates/auth/src/{jwt,oauth2/device,api_keys,providers,middleware,oidc}.rs` with the injected clock.

@@ -11,10 +11,12 @@
 //! phases of `openspec/changes/workspace-test-coverage-floor/`, they are
 //! re-exported here:
 //!
-//! - Phase 3 — `FakeClock` from `assistant_core::clock`
+//! - Phase 3 — `FakeClock` from `assistant_core::clock` (present).
 //! - Phase 5 — `InMemory*Store` types from `assistant_storage` and
-//!   `ScriptedLlmProvider` from `assistant_llm_provider`
+//!   `ScriptedLlmProvider` from `assistant_llm_provider`.
 //! - Phase 7 — `StubOrchestrationEngine`, `StubToolDispatcher`,
-//!   `InMemorySkillCatalog`
+//!   `InMemorySkillCatalog`.
+
+pub use assistant_core::clock::{Clock, FakeClock, SystemClock};
 
 pub use crate::fixture::{Fixture, FixtureBuilder};
