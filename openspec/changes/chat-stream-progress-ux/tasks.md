@@ -1,9 +1,9 @@
 ## 1. Phase A — currentTurnStatus derived state
 
-- [ ] 1.1 Write failing unit tests for the new `currentTurnStatus` accessor on `ChatNotifier` (or sibling selector): covers turnId/lastEventKind/lastEventAt/currentToolName across every SSE event kind.
-- [ ] 1.2 Implement `currentTurnStatus` updates inside `ChatNotifier`'s SSE event handlers — one update per event kind. Cleared on `done` / `agent_error`.
-- [ ] 1.3 Run the new unit tests; confirm green.
-- [ ] 1.4 Run the full `flutter test` suite — must remain green.
+- [x] 1.1 Tests written (10 tests) — runId/lastEventKind/lastEventAt/currentToolName across every SSE event kind, plus initial state, DoneEvent clear, transient-error clear, and lastEventAt monotonicity.
+- [x] 1.2 Implemented: added `TurnEventKind` enum + `TurnStatusSnapshot` class + `ChatState.currentTurnStatus` field. `_streamMessage` opens the snapshot on `RunStartedEvent`, bumps it via a new `_bumpTurnStatus` helper on every subsequent event kind, and clears it on `DoneEvent` / `ErrorEvent` / retries-exhausted / `_clearStalledPlaceholder`. `TokenEvent` clears `currentToolName` inline (the assistant resumed text generation).
+- [x] 1.3 New tests: 10/10 pass.
+- [x] 1.4 Full suite: 968/968 pass. `flutter analyze --fatal-infos` clean.
 
 ## 2. Phase B — TurnProgressCard widget + integration
 

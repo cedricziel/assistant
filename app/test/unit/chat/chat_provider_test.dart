@@ -2021,4 +2021,285 @@ void main() {
       );
     },
   );
+
+  // -- Phase A of chat-stream-progress-ux: currentTurnStatus derived state --
+  //
+  // The UI's in-flight progress card consumes a `currentTurnStatus`
+  // snapshot exposed on ChatState. The snapshot tracks the active turn's
+  // runId, the kind of its most recent SSE event, the wall-clock
+  // timestamp of that event, and the name of any currently-active tool.
+  // These tests pin the state-machine transitions per SSE event kind so
+  // the widget layer (Phase B) can rely on a stable observable surface.
+
+  group('ChatNotifier — currentTurnStatus derived state', () {
+    testWidgets('initial state has no currentTurnStatus', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      await tester.pump();
+
+      expect(
+        notifier.state.value!.currentTurnStatus,
+        isNull,
+        reason: 'No turn in flight at startup — snapshot should be null',
+      );
+    });
+
+    testWidgets('RunStartedEvent populates currentTurnStatus.runId', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      ctrl.add(const RunStartedEvent('run-abc'));
+      await tester.pump();
+
+      final snap = notifier.state.value!.currentTurnStatus;
+      expect(snap, isNotNull, reason: 'RunStartedEvent should open a snapshot');
+      expect(snap!.runId, 'run-abc');
+      expect(snap.lastEventKind, TurnEventKind.runStarted);
+      expect(snap.currentToolName, isNull);
+
+      // Close the stream so the source's `.timeout()` watchdog is
+      // cancelled and the test exits without a pending-timer assertion.
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+      'TokenEvent updates lastEventKind to token and clears tool name',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl.isClosed) await ctrl.close();
+        });
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+        ctrl.add(const RunStartedEvent('run-1'));
+        await tester.pump();
+        // A tool result first — populates currentToolName.
+        ctrl.add(const ToolResultEvent(toolName: 'fetch_url', status: 'ok'));
+        await tester.pump();
+        expect(
+          notifier.state.value!.currentTurnStatus!.currentToolName,
+          'fetch_url',
+        );
+        // Now the assistant resumes producing tokens — tool name cleared,
+        // lastEventKind transitions to token.
+        ctrl.add(const TokenEvent('hi '));
+        await tester.pump();
+
+        final snap = notifier.state.value!.currentTurnStatus!;
+        expect(snap.lastEventKind, TurnEventKind.token);
+        expect(
+          snap.currentToolName,
+          isNull,
+          reason:
+              'TokenEvent means the assistant resumed text generation; '
+              'the tool name from the previous tool_result should clear',
+        );
+
+        await ctrl.close();
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'ToolResultEvent updates lastEventKind=toolResult and currentToolName',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl.isClosed) await ctrl.close();
+        });
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+        ctrl.add(const RunStartedEvent('run-1'));
+        await tester.pump();
+        ctrl.add(const ToolResultEvent(toolName: 'fetch_url', status: 'ok'));
+        await tester.pump();
+
+        final snap = notifier.state.value!.currentTurnStatus!;
+        expect(snap.lastEventKind, TurnEventKind.toolResult);
+        expect(snap.currentToolName, 'fetch_url');
+
+        await ctrl.close();
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets('ThinkingEvent updates lastEventKind=thinking', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      ctrl.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+      ctrl.add(const ThinkingEvent('reasoning...'));
+      await tester.pump();
+
+      expect(
+        notifier.state.value!.currentTurnStatus!.lastEventKind,
+        TurnEventKind.thinking,
+      );
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('StatusEvent updates lastEventKind=status', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      ctrl.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+      ctrl.add(const StatusEvent('Working...'));
+      await tester.pump();
+
+      expect(
+        notifier.state.value!.currentTurnStatus!.lastEventKind,
+        TurnEventKind.status,
+      );
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+      'SubagentStartedEvent updates lastEventKind=subagentStarted and tool name',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl.isClosed) await ctrl.close();
+        });
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+        ctrl.add(const RunStartedEvent('run-1'));
+        await tester.pump();
+        ctrl.add(
+          const SubagentStartedEvent(agentId: 'a1', task: 'analyze data'),
+        );
+        await tester.pump();
+
+        final snap = notifier.state.value!.currentTurnStatus!;
+        expect(snap.lastEventKind, TurnEventKind.subagentStarted);
+        expect(snap.currentToolName, 'analyze data');
+
+        await ctrl.close();
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets('DoneEvent clears currentTurnStatus', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      ctrl.add(const RunStartedEvent('run-1'));
+      ctrl.add(const TokenEvent('hi'));
+      ctrl.add(const DoneEvent(role: 'assistant', content: 'hi'));
+      await tester.pumpAndSettle();
+
+      expect(
+        notifier.state.value!.currentTurnStatus,
+        isNull,
+        reason: 'DoneEvent ends the turn — snapshot must be cleared',
+      );
+    });
+
+    testWidgets('transient stream error with run ID clears currentTurnStatus', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        ctrl.add(const RunStartedEvent('run-defer'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl.addError(
+          const HttpException('Connection closed while receiving data'),
+        );
+        await ctrl.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      // Pump through 3 retry delays (1+2+4 s).
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      expect(
+        notifier.state.value!.currentTurnStatus,
+        isNull,
+        reason: 'After retries exhaust, the snapshot must be cleared',
+      );
+    });
+
+    testWidgets('lastEventAt is monotonically updated on each event', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      ctrl.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+      final t1 = notifier.state.value!.currentTurnStatus!.lastEventAt;
+
+      // Real wall-clock delay so the second timestamp differs.
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      });
+      ctrl.add(const TokenEvent('hi'));
+      await tester.pump();
+      final t2 = notifier.state.value!.currentTurnStatus!.lastEventAt;
+
+      expect(
+        t2.isAfter(t1) || t2.isAtSameMomentAs(t1),
+        isTrue,
+        reason: 'lastEventAt must not regress between events',
+      );
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+  });
 }
