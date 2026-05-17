@@ -1,25 +1,54 @@
-//! Persistent attachment storage — filesystem for bytes, SQLite for metadata.
+//! Persistent attachment storage.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use assistant_core::{AttachmentMeta, agent_base_dir};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
-use std::path::PathBuf;
 use uuid::Uuid;
 
-/// Manages attachment persistence: metadata in SQLite, bytes on the filesystem.
+/// Trait-based interface for attachment persistence.
+#[async_trait]
+pub trait AttachmentStore: Send + Sync {
+    /// Persist attachment metadata and bytes.
+    async fn store(&self, meta: &AttachmentMeta, data: &[u8]) -> Result<()>;
+
+    /// Load attachment bytes by ID.
+    async fn load_bytes(&self, id: Uuid) -> Result<Vec<u8>>;
+
+    /// Fetch attachment metadata by ID.
+    async fn get_meta(&self, id: Uuid) -> Result<AttachmentMeta>;
+
+    /// List attachments linked to a message.
+    async fn list_for_message(&self, message_id: Uuid) -> Result<Vec<AttachmentMeta>>;
+
+    /// List attachments for a conversation.
+    async fn list_for_conversation(&self, conversation_id: Uuid) -> Result<Vec<AttachmentMeta>>;
+
+    /// Link an existing attachment to a message.
+    async fn link_to_message(&self, attachment_id: Uuid, message_id: Uuid) -> Result<()>;
+}
+
+/// SQLite + filesystem attachment store.
 #[derive(Clone)]
-pub struct AttachmentStore {
+pub struct SqliteAttachmentStore {
     pool: SqlitePool,
 }
 
-impl AttachmentStore {
+impl SqliteAttachmentStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+}
 
+#[async_trait]
+impl AttachmentStore for SqliteAttachmentStore {
     /// Persist an attachment: write bytes to disk and insert a metadata row.
-    pub async fn store(&self, meta: &AttachmentMeta, data: &[u8]) -> Result<()> {
+    async fn store(&self, meta: &AttachmentMeta, data: &[u8]) -> Result<()> {
         let path = attachment_path(meta);
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -50,7 +79,7 @@ impl AttachmentStore {
     }
 
     /// Read raw bytes from disk for the given attachment.
-    pub async fn load_bytes(&self, id: Uuid) -> Result<Vec<u8>> {
+    async fn load_bytes(&self, id: Uuid) -> Result<Vec<u8>> {
         let meta = self.get_meta(id).await?;
         let path = attachment_path(&meta);
         tokio::fs::read(&path)
@@ -59,7 +88,7 @@ impl AttachmentStore {
     }
 
     /// Look up attachment metadata by ID.
-    pub async fn get_meta(&self, id: Uuid) -> Result<AttachmentMeta> {
+    async fn get_meta(&self, id: Uuid) -> Result<AttachmentMeta> {
         let row = sqlx::query(
             "SELECT id, message_id, conversation_id, agent_id, filename, mime_type, size_bytes, created_at
              FROM message_attachments WHERE id = ?",
@@ -74,7 +103,7 @@ impl AttachmentStore {
     }
 
     /// List attachments linked to a message.
-    pub async fn list_for_message(&self, message_id: Uuid) -> Result<Vec<AttachmentMeta>> {
+    async fn list_for_message(&self, message_id: Uuid) -> Result<Vec<AttachmentMeta>> {
         let rows = sqlx::query(
             "SELECT id, message_id, conversation_id, agent_id, filename, mime_type, size_bytes, created_at
              FROM message_attachments WHERE message_id = ? ORDER BY created_at",
@@ -88,10 +117,7 @@ impl AttachmentStore {
     }
 
     /// List attachments in a conversation.
-    pub async fn list_for_conversation(
-        &self,
-        conversation_id: Uuid,
-    ) -> Result<Vec<AttachmentMeta>> {
+    async fn list_for_conversation(&self, conversation_id: Uuid) -> Result<Vec<AttachmentMeta>> {
         let rows = sqlx::query(
             "SELECT id, message_id, conversation_id, agent_id, filename, mime_type, size_bytes, created_at
              FROM message_attachments WHERE conversation_id = ? ORDER BY created_at",
@@ -105,7 +131,7 @@ impl AttachmentStore {
     }
 
     /// Link an unlinked attachment to a message (sets `message_id`).
-    pub async fn link_to_message(&self, attachment_id: Uuid, message_id: Uuid) -> Result<()> {
+    async fn link_to_message(&self, attachment_id: Uuid, message_id: Uuid) -> Result<()> {
         sqlx::query("UPDATE message_attachments SET message_id = ? WHERE id = ?")
             .bind(message_id.to_string())
             .bind(attachment_id.to_string())
@@ -154,6 +180,103 @@ fn row_to_meta(row: &sqlx::sqlite::SqliteRow) -> Result<AttachmentMeta> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation (test-only — see workspace_test_impls_in_prod.rs)
+// ---------------------------------------------------------------------------
+
+/// In-memory [`AttachmentStore`] for tests. Stores bytes in a HashMap
+/// keyed by ID; metadata in a separate HashMap. No filesystem.
+pub struct InMemoryAttachmentStore {
+    state: Arc<Mutex<InMemoryAttachmentState>>,
+}
+
+#[derive(Default)]
+struct InMemoryAttachmentState {
+    bytes: HashMap<Uuid, Vec<u8>>,
+    metas: HashMap<Uuid, AttachmentMeta>,
+}
+
+impl InMemoryAttachmentStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(InMemoryAttachmentState::default())),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryAttachmentState> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryAttachmentStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl AttachmentStore for InMemoryAttachmentStore {
+    async fn store(&self, meta: &AttachmentMeta, data: &[u8]) -> Result<()> {
+        let mut state = self.lock();
+        state.bytes.insert(meta.id, data.to_vec());
+        state.metas.insert(meta.id, meta.clone());
+        Ok(())
+    }
+
+    async fn load_bytes(&self, id: Uuid) -> Result<Vec<u8>> {
+        let state = self.lock();
+        state
+            .bytes
+            .get(&id)
+            .cloned()
+            .with_context(|| format!("attachment {id} bytes not found"))
+    }
+
+    async fn get_meta(&self, id: Uuid) -> Result<AttachmentMeta> {
+        let state = self.lock();
+        state
+            .metas
+            .get(&id)
+            .cloned()
+            .with_context(|| format!("attachment {id} not found"))
+    }
+
+    async fn list_for_message(&self, message_id: Uuid) -> Result<Vec<AttachmentMeta>> {
+        let state = self.lock();
+        let mut out: Vec<AttachmentMeta> = state
+            .metas
+            .values()
+            .filter(|m| m.message_id == Some(message_id))
+            .cloned()
+            .collect();
+        out.sort_by_key(|m| m.created_at);
+        Ok(out)
+    }
+
+    async fn list_for_conversation(&self, conversation_id: Uuid) -> Result<Vec<AttachmentMeta>> {
+        let state = self.lock();
+        let mut out: Vec<AttachmentMeta> = state
+            .metas
+            .values()
+            .filter(|m| m.conversation_id == conversation_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|m| m.created_at);
+        Ok(out)
+    }
+
+    async fn link_to_message(&self, attachment_id: Uuid, message_id: Uuid) -> Result<()> {
+        let mut state = self.lock();
+        if let Some(m) = state.metas.get_mut(&attachment_id) {
+            m.message_id = Some(message_id);
+        }
+        Ok(())
+    }
+}
+
 // -- Tests --------------------------------------------------------------------
 
 #[cfg(test)]
@@ -161,7 +284,7 @@ mod tests {
     use super::*;
     use crate::StorageLayer;
 
-    async fn setup() -> (StorageLayer, AttachmentStore) {
+    async fn setup() -> (StorageLayer, SqliteAttachmentStore) {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let store = storage.attachment_store();
         (storage, store)
@@ -181,7 +304,7 @@ mod tests {
     }
 
     /// Create a conversation + message row so FK constraints pass.
-    async fn seed_conv_and_msg(store: &AttachmentStore, conv_id: Uuid, msg_id: Uuid) {
+    async fn seed_conv_and_msg(store: &SqliteAttachmentStore, conv_id: Uuid, msg_id: Uuid) {
         sqlx::query("INSERT INTO conversations (id) VALUES (?)")
             .bind(conv_id.to_string())
             .execute(&store.pool)
@@ -197,7 +320,7 @@ mod tests {
         .unwrap();
     }
 
-    async fn insert_meta(store: &AttachmentStore, meta: &AttachmentMeta) {
+    async fn insert_meta(store: &SqliteAttachmentStore, meta: &AttachmentMeta) {
         sqlx::query(
             "INSERT INTO message_attachments (id, message_id, conversation_id, agent_id, filename, mime_type, size_bytes, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

@@ -14,7 +14,7 @@ use assistant_core::{
     strip_html_comments,
 };
 use assistant_storage::{
-    SkillRegistry, StorageLayer,
+    AttachmentStore as _AttachmentStoreTrait, SkillRegistry, StorageLayer,
     conversations::{ConversationStore, SqliteConversationStore},
 };
 use assistant_tool_executor::ToolExecutor;

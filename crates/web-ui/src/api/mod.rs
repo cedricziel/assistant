@@ -126,7 +126,7 @@ use assistant_core::ConversationConfig;
 use assistant_runtime::{AssistantInterface, CommandRegistry, Orchestrator};
 use assistant_storage::{
     AttachmentStore, CommandEventStore, ConversationBroadcast, ConversationEventStore,
-    InMemoryConversationBroadcaster, RunBroadcaster,
+    InMemoryConversationBroadcaster, RunBroadcaster, SqliteAttachmentStore,
 };
 use assistant_transcription::{TranscriptionProvider, TtsProvider};
 use axum::{
@@ -166,7 +166,7 @@ pub struct ApiState {
     /// In-memory broadcast registry for live-tailing active runs.
     pub run_broadcaster: RunBroadcaster,
     /// Persistent attachment storage (metadata in SQLite, bytes on disk).
-    pub attachment_store: AttachmentStore,
+    pub attachment_store: Arc<dyn AttachmentStore>,
     /// Slash-command registry (shared with all interfaces).
     pub command_registry: Arc<CommandRegistry>,
     /// Durable store for slash-command events.
@@ -191,7 +191,8 @@ impl ApiState {
         orchestrator_ref: Arc<Orchestrator>,
     ) -> Self {
         let event_store = ConversationEventStore::new(pool.clone());
-        let attachment_store = AttachmentStore::new(pool.clone());
+        let attachment_store: Arc<dyn AttachmentStore> =
+            Arc::new(SqliteAttachmentStore::new(pool.clone()));
         let command_event_store = CommandEventStore::new(pool.clone());
         let default_model = orchestrator_ref.llm.model_name().to_string();
         Self {

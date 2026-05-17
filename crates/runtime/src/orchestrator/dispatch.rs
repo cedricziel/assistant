@@ -10,6 +10,7 @@ use assistant_core::{
     types::conversation::ExecutionContext, types::conversation::Message,
     types::conversation::MessageRole,
 };
+use assistant_storage::AttachmentStore as _AttachmentStoreTrait;
 use assistant_storage::conversations::ConversationStore;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Span as _;
