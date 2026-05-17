@@ -40,7 +40,7 @@
 ## 3. Phase 2.2 — Sliver-nav list screens (9 stacked PRs, one per screen)
 
 - [x] 3.1 `traces_screen.dart`: replace inline `if (isAppleTouch) CupertinoSliverNavigationBar` with `AdaptiveSliverNavBar`; drop `package:flutter/cupertino.dart` import; existing tests stay green. Unified both platform paths into a single CustomScrollView with the wrapper. Material visual change: SliverAppBar.large (collapsing) replaces fixed AppBar, and the explicit `IconButton(arrow_back) → /chat` is dropped (top-level nav screen — sidebar/tab bar already provides home access; matches the existing iOS path which had no back button).
-- [ ] 3.2 `logs_screen.dart`: same treatment
+- [x] 3.2 `logs_screen.dart`: same treatment. Switched to the barrel and `AdaptiveSliverNavBar`. Surfaced `Colors.{orange,blue,grey,purple}.shade*` for the severity chip — extracted into `lib/shared/theme/log_severity_colors.dart` as a design token helper (inside the theme dir so it's exempt from `check_no_raw_colors.sh`). Also `Scaffold` → `AdaptiveScaffold`, `TextField` → `AdaptiveTextField` (with the inline progress spinner moved from `suffixIcon` to the nav-bar actions), `FilledButton` → `AdaptiveButton.filled`. Same Material visual change as traces: fixed AppBar → SliverAppBar.large, explicit back button dropped.
 - [ ] 3.3 `agents_screen.dart`: same treatment + replace `CupertinoButton`/`CupertinoIcons` with `AdaptiveButton`/`AdaptiveIcons`
 - [ ] 3.4 `workflows_screen.dart`: same as 3.3
 - [ ] 3.5 `personas_screen.dart`: same treatment
