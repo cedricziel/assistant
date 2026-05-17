@@ -44,7 +44,7 @@
 - [x] 4.1 Add failing test in `crates/workflow-http/tests/http_action.rs` that mounts a `wiremock::MockServer`, constructs `HttpRequestActionExecutor::with_client(client, base_url)`, and asserts a 200 path through `execute`.
 - [x] 4.2 Refactor `HttpRequestActionExecutor::new` to accept `reqwest::Client`. Add `HttpRequestActionExecutor::with_client(client, default_timeout)` constructor. Keep `new(default_timeout)` as a thin wrapper that builds a default client.
 - [x] 4.3 Write the remaining `workflow-http` unit tests (host policy enforcement, retry/backoff with `FakeClock`, response mapping, timeout). 8 wiremock-backed tests cover happy path, non-success status, body-from-trigger, host blocklist + allowlist, JSON pointer extraction, invalid URL, missing URL. Retry/backoff deferred until `FakeClock` injection lands in a separate refactor (the retry path uses `tokio::time::sleep`, not a Clock — would need its own seam). Target 80%+ on `crates/workflow-http` met by these tests + the existing implementation surface.
-- [ ] 4.4 Repeat 4.1–4.3 for `assistant-web-ui::push::WebPushClient`.
+- [x] 4.4 Repeat 4.1–4.3 for `assistant-web-ui::push::WebPushClient`. `PushDispatcher` gains `with_client(...)` constructor; in-method `reqwest::Client::new()` replaced with `self.client`. Two new inline tests assert empty-subscription noop + constructor-injection smoke. Full delivery-path tests deferred (require synthetic p256dh / VAPID keys + cryptographic test fixtures — separate task).
 - [ ] 4.5 Repeat for `assistant-interfaces::nextcloud::{adapter,tools}`.
 - [ ] 4.6 Repeat for `assistant-interfaces::matrix::client::MatrixClient`.
 - [ ] 4.7 Repeat for `assistant-auth::oidc::OidcProvider`.
