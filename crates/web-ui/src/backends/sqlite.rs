@@ -7,7 +7,8 @@ use sqlx::SqlitePool;
 
 use assistant_storage::{
     LogStats, LogStore, MetricsStore, MetricsSummary, ModelTokenUsage, RecordedLog, RecordedSpan,
-    SqliteTraceStore, TimeSeriesPoint, ToolUsageStats, TraceFilter, TraceStore, TraceSummary,
+    SqliteLogStore, SqliteTraceStore, TimeSeriesPoint, ToolUsageStats, TraceFilter, TraceStore,
+    TraceSummary,
 };
 
 use super::{LogBackend, MetricsBackend, TraceBackend};
@@ -115,7 +116,7 @@ impl LogBackend for SqliteLogBackend {
         until: Option<DateTime<Utc>>,
         agent_id: &str,
     ) -> Result<Vec<RecordedLog>> {
-        let store = LogStore::new(self.pool.clone());
+        let store = SqliteLogStore::new(self.pool.clone());
         if agent_id.is_empty() {
             // Unscoped: return all logs (top-level API view).
             store
@@ -148,7 +149,7 @@ impl LogBackend for SqliteLogBackend {
     }
 
     async fn get_log(&self, id: &str, agent_id: &str) -> Result<Option<RecordedLog>> {
-        let store = LogStore::new(self.pool.clone());
+        let store = SqliteLogStore::new(self.pool.clone());
         if agent_id.is_empty() {
             store.get_log(id).await
         } else {
@@ -157,7 +158,7 @@ impl LogBackend for SqliteLogBackend {
     }
 
     async fn log_stats(&self, agent_id: &str) -> Result<LogStats> {
-        let store = LogStore::new(self.pool.clone());
+        let store = SqliteLogStore::new(self.pool.clone());
         if agent_id.is_empty() {
             store.stats().await
         } else {
@@ -166,7 +167,7 @@ impl LogBackend for SqliteLogBackend {
     }
 
     async fn list_targets(&self, agent_id: &str) -> Result<Vec<String>> {
-        let store = LogStore::new(self.pool.clone());
+        let store = SqliteLogStore::new(self.pool.clone());
         if agent_id.is_empty() {
             store.list_targets().await
         } else {

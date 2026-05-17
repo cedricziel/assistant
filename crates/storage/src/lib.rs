@@ -77,7 +77,7 @@ pub use conversations::{
     ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
 };
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
-pub use logs::{LogStats, LogStore, RecordedLog};
+pub use logs::{InMemoryLogStore, LogStats, LogStore, RecordedLog, SqliteLogStore};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
 pub use message_bus::SqliteMessageBus;
 pub use metrics::{
@@ -165,9 +165,9 @@ impl StorageLayer {
         ConversationEventStore::new(self.pool.clone())
     }
 
-    /// Convenience: build a `LogStore` backed by this pool.
-    pub fn log_store(&self) -> LogStore {
-        LogStore::new(self.pool.clone())
+    /// Convenience: build a `SqliteLogStore` backed by this pool.
+    pub fn log_store(&self) -> SqliteLogStore {
+        SqliteLogStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `SqliteConversationStore` backed by this pool.
