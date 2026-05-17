@@ -19,8 +19,8 @@
 
 pub use assistant_core::clock::{Clock, FakeClock, SystemClock};
 pub use assistant_storage::{
-    ConversationStore, InMemoryConversationStore, InMemoryLogStore, InMemoryTraceStore, LogStore,
-    TraceStore,
+    AttachmentStore, ConversationStore, InMemoryAttachmentStore, InMemoryConversationStore,
+    InMemoryLogStore, InMemoryTraceStore, LogStore, TraceStore,
 };
 
 pub use crate::fixture::{Fixture, FixtureBuilder};

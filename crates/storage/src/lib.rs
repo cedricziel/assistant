@@ -60,7 +60,7 @@ pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
 pub use api_key_store::SqliteApiKeyStore;
-pub use attachments::AttachmentStore;
+pub use attachments::{AttachmentStore, InMemoryAttachmentStore, SqliteAttachmentStore};
 pub use auth_state_store::{
     SqliteAuthCodeStore, SqliteClientStore, SqliteDeviceCodeStore, SqliteRefreshTokenStore,
 };
@@ -250,9 +250,9 @@ impl StorageLayer {
         SlackActiveThreadStore::new(self.pool.clone())
     }
 
-    /// Convenience: build an [`AttachmentStore`] backed by this pool.
-    pub fn attachment_store(&self) -> AttachmentStore {
-        AttachmentStore::new(self.pool.clone())
+    /// Convenience: build a [`SqliteAttachmentStore`] backed by this pool.
+    pub fn attachment_store(&self) -> SqliteAttachmentStore {
+        SqliteAttachmentStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`WebhookStore`] scoped to a Persona.
