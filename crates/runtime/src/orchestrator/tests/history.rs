@@ -2,6 +2,7 @@
 //! first-turn payload shape, prior-turn replay, conversation isolation,
 //! and single/multi-tool-call observation accumulation in one iteration.
 
+use assistant_storage::ConversationStore;
 use serde_json::Value;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};

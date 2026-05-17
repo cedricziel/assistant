@@ -6,6 +6,7 @@
 //! `FinalAnswer` from the LLM is not persisted (which would otherwise
 //! poison subsequent history requests).
 
+use assistant_storage::ConversationStore;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

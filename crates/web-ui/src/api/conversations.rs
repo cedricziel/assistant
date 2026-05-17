@@ -23,7 +23,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use assistant_core::types::conversation::MessageRole;
-use assistant_storage::{ConversationEvent, ConversationStore};
+use assistant_storage::{ConversationEvent, ConversationStore, SqliteConversationStore};
 
 use super::attachments::AttachmentMetaResponse;
 use super::{ApiState, sse_response};
@@ -123,7 +123,7 @@ pub struct UpdateConversationRequest {
 )]
 pub async fn list_conversations(State(state): State<ApiState>) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool, &agent_id);
+    let store = SqliteConversationStore::for_agent(state.pool, &agent_id);
     match store.list_conversations().await {
         Ok(convs) => {
             let summaries: Vec<ConversationSummary> = convs
@@ -192,7 +192,7 @@ pub async fn stream_conversations(
         .to_string();
 
     // Fetch snapshot from DB.
-    let store = ConversationStore::for_agent(pool.clone(), &snapshot_agent_id);
+    let store = SqliteConversationStore::for_agent(pool.clone(), &snapshot_agent_id);
     let snapshot = match store.list_conversations().await {
         Ok(convs) => convs
             .into_iter()
@@ -296,7 +296,7 @@ pub async fn create_conversation(
     Json(body): Json<CreateConversationRequest>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool, &agent_id)
+    let store = SqliteConversationStore::for_agent(state.pool, &agent_id)
         .with_broadcaster(state.conversation_broadcaster.clone());
     // Pass the title through as-is. Without an explicit title, the row stays
     // NULL-titled and the title-generator worker will fill it in once the
@@ -344,7 +344,7 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
     };
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool, &agent_id);
+    let store = SqliteConversationStore::for_agent(state.pool, &agent_id);
 
     let conv = match store.get_conversation(conv_id).await {
         Ok(Some(c)) => c,
@@ -481,7 +481,7 @@ pub async fn delete_conversation(
     };
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool, &agent_id)
+    let store = SqliteConversationStore::for_agent(state.pool, &agent_id)
         .with_broadcaster(state.conversation_broadcaster.clone());
     match store.delete_conversation(conv_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -523,7 +523,7 @@ pub async fn update_conversation(
     };
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool, &agent_id)
+    let store = SqliteConversationStore::for_agent(state.pool, &agent_id)
         .with_broadcaster(state.conversation_broadcaster.clone());
     match store.update_title(conv_id, &body.title).await {
         Ok(()) => {}
@@ -566,7 +566,7 @@ mod tests {
 
     use chrono::Utc;
 
-    use assistant_storage::ConversationStore;
+    use assistant_storage::{ConversationStore, SqliteConversationStore};
 
     use super::super::api_router;
     use super::super::test_helpers::*;
@@ -598,7 +598,7 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         store.create_conversation(Some("Alpha")).await.unwrap();
         store.create_conversation(Some("Beta")).await.unwrap();
 
@@ -670,7 +670,7 @@ mod tests {
 
         // DB row holds NULL with the lock cleared so the worker can title later.
         let conv_id: Uuid = json["id"].as_str().unwrap().parse().unwrap();
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
         assert!(conv.title.is_none(), "DB title must be NULL");
         assert!(!conv.title_locked, "title_locked must be false");
@@ -698,7 +698,7 @@ mod tests {
         assert_eq!(json["title"], "Pinned Thread");
 
         let conv_id: Uuid = json["id"].as_str().unwrap().parse().unwrap();
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
         assert_eq!(conv.title.as_deref(), Some("Pinned Thread"));
         assert!(
@@ -714,7 +714,7 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(Some("Test")).await.unwrap();
         let id = conv.id;
 
@@ -779,7 +779,7 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(Some("Bye")).await.unwrap();
         let id = conv.id;
 
@@ -807,7 +807,7 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(Some("Old Name")).await.unwrap();
         let id = conv.id;
 
@@ -839,7 +839,7 @@ mod tests {
         let (state, storage) = test_state(&server.uri()).await;
 
         // Seed a conversation for "alice".
-        let store_alice = ConversationStore::for_agent(storage.pool.clone(), "alice");
+        let store_alice = SqliteConversationStore::for_agent(storage.pool.clone(), "alice");
         store_alice
             .create_conversation(Some("Alice conv"))
             .await
@@ -872,7 +872,7 @@ mod tests {
         let (state, storage) = event_log_state().await;
 
         // Create a conversation so the snapshot is non-empty.
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         store.create_conversation(Some("Hello")).await.unwrap();
 
         let resp = app(state)
@@ -927,7 +927,8 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Create a conversation through a broadcaster-wired store.
-        let store = ConversationStore::for_agent(pool, "default").with_broadcaster(broadcaster);
+        let store =
+            SqliteConversationStore::for_agent(pool, "default").with_broadcaster(broadcaster);
         store.create_conversation(Some("Delta Test")).await.unwrap();
 
         // Give the stream a moment to forward the event, then drop broadcaster
@@ -962,8 +963,8 @@ mod tests {
         let broadcaster = state.conversation_broadcaster.clone();
         let pool = state.pool.clone();
 
-        let store =
-            ConversationStore::for_agent(pool, "default").with_broadcaster(broadcaster.clone());
+        let store = SqliteConversationStore::for_agent(pool, "default")
+            .with_broadcaster(broadcaster.clone());
         let conv = store.create_conversation(None).await.unwrap();
         let conv_id = conv.id;
 

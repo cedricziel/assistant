@@ -11,6 +11,7 @@
 //!  - it survives process restarts via the bus's at-least-once delivery,
 //!  - the same code path serves every interface (web, messengers, CLI, MCP).
 
+use assistant_storage::ConversationStore;
 use std::sync::Arc;
 use std::time::Duration;
 

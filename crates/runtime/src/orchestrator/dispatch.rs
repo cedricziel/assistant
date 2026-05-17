@@ -84,7 +84,7 @@ impl Orchestrator {
     /// (extension-tools, core, and subagent).
     pub(crate) async fn persist_tool_calls(
         history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
+        conv_store: &dyn ConversationStore,
         conversation_id: Uuid,
         turn_index: i64,
         tool_call_items: &[ToolCallItem],
@@ -117,7 +117,7 @@ impl Orchestrator {
         elapsed: std::time::Duration,
         otel_span: &mut opentelemetry::global::BoxedSpan,
         history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
+        conv_store: &dyn ConversationStore,
         conversation_id: Uuid,
         turn_index: i64,
         turn_attachments: &mut Vec<Attachment>,
@@ -323,7 +323,7 @@ impl Orchestrator {
         ctx: &ExecutionContext,
         otel_span: &mut opentelemetry::global::BoxedSpan,
         history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
+        conv_store: &dyn ConversationStore,
         conversation_id: Uuid,
         turn_index: i64,
         turn_attachments: &mut Vec<Attachment>,

@@ -205,7 +205,10 @@ pub(crate) fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
 /// The user message was already persisted by `prepare_history`; without
 /// this recovery message the orphaned user entry would poison subsequent
 /// turns.
-pub(crate) async fn persist_error_recovery(conv_store: &ConversationStore, conversation_id: Uuid) {
+pub(crate) async fn persist_error_recovery(
+    conv_store: &dyn ConversationStore,
+    conversation_id: Uuid,
+) {
     let error_msg = Message::assistant(
         conversation_id,
         "[An error occurred processing this message.]",

@@ -1,10 +1,21 @@
-//! Conversation and message persistence backed by the `conversations` and `messages` tables.
+//! Conversation and message persistence.
+//!
+//! Defines the [`ConversationStore`] trait (the API consumers depend on),
+//! its SQLite-backed implementation [`SqliteConversationStore`], and the
+//! in-memory test implementation [`InMemoryConversationStore`].
+//!
+//! TODO(workspace-test-coverage-floor): the `ConversationStore` trait will
+//! eventually move to `assistant-core` once `ConversationRecord` is also
+//! relocated there. The trait currently lives alongside the record types
+//! to keep the migration tractable.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::types::conversation::{Message, MessageRole};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -28,8 +39,54 @@ pub struct ConversationRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Trait-based interface for conversation + message persistence.
+///
+/// Consumers in `assistant-runtime`, `assistant-web-ui`, and
+/// `assistant-interfaces` depend on this trait rather than the concrete
+/// SQLite implementation, so tests can substitute
+/// [`InMemoryConversationStore`].
+#[async_trait]
+pub trait ConversationStore: Send + Sync {
+    /// Create or retrieve a conversation by a specific UUID.
+    async fn create_conversation_with_id(
+        &self,
+        id: Uuid,
+        title: Option<&str>,
+    ) -> Result<ConversationRecord>;
+
+    /// Create a new conversation and return its metadata.
+    async fn create_conversation(&self, title: Option<&str>) -> Result<ConversationRecord>;
+
+    /// Fetch a conversation by ID. Returns `None` if not found.
+    async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>>;
+
+    /// List all conversations for the configured agent (most-recently-updated first).
+    async fn list_conversations(&self) -> Result<Vec<ConversationRecord>>;
+
+    /// Set a conversation's title and lock it from auto-titling.
+    async fn update_title(&self, id: Uuid, title: &str) -> Result<()>;
+
+    /// Replace the full message history of a conversation.
+    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()>;
+
+    /// Delete a conversation (and its messages).
+    async fn delete_conversation(&self, id: Uuid) -> Result<()>;
+
+    /// Persist a single message.
+    async fn save_message(&self, msg: &Message) -> Result<()>;
+
+    /// Load the full message history for a conversation.
+    async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>>;
+
+    /// Fetch a single message by ID.
+    async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>>;
+
+    /// Return the last N messages for a conversation, oldest first.
+    async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>>;
+}
+
 /// SQLite-backed store for conversations and messages.
-pub struct ConversationStore {
+pub struct SqliteConversationStore {
     pool: SqlitePool,
     agent_id: String,
     /// When set, all queries are scoped to this user.
@@ -39,7 +96,7 @@ pub struct ConversationStore {
     clock: Arc<dyn Clock>,
 }
 
-impl ConversationStore {
+impl SqliteConversationStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -79,13 +136,39 @@ impl ConversationStore {
         self
     }
 
-    // -----------------------------------------------------------------------
-    // Conversations
-    // -----------------------------------------------------------------------
+    /// Private helper: verify that the conversation belongs to this store's
+    /// configured agent. Called from `create_conversation_with_id` to enforce
+    /// agent scoping on inserts that touch existing rows.
+    async fn ensure_conversation_agent(&self, id: Uuid) -> Result<()> {
+        let id_str = id.to_string();
+        let owner =
+            sqlx::query_scalar::<_, String>("SELECT agent_id FROM conversations WHERE id = ?1")
+                .bind(&id_str)
+                .fetch_optional(&self.pool)
+                .await?;
 
+        match owner {
+            Some(found) if found == self.agent_id => Ok(()),
+            Some(found) => anyhow::bail!(
+                "conversation {} belongs to agent '{}' (requested '{}')",
+                id,
+                found,
+                self.agent_id
+            ),
+            None => anyhow::bail!("conversation {} not found", id),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+// ConversationStore trait impl for SqliteConversationStore
+// -----------------------------------------------------------------------
+
+#[async_trait]
+impl ConversationStore for SqliteConversationStore {
     /// Create or retrieve a conversation by a specific UUID.
     /// If a row with that ID already exists, return it unchanged.
-    pub async fn create_conversation_with_id(
+    async fn create_conversation_with_id(
         &self,
         id: Uuid,
         title: Option<&str>,
@@ -124,7 +207,7 @@ impl ConversationStore {
     }
 
     /// Create a new conversation row and return its metadata.
-    pub async fn create_conversation(&self, title: Option<&str>) -> Result<ConversationRecord> {
+    async fn create_conversation(&self, title: Option<&str>) -> Result<ConversationRecord> {
         let id = Uuid::new_v4();
         let now = self.clock.now();
         let id_str = id.to_string();
@@ -161,7 +244,7 @@ impl ConversationStore {
     }
 
     /// Fetch a conversation by ID. Returns `None` if not found.
-    pub async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>> {
+    async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>> {
         let id_str = id.to_string();
 
         let row = if self.user_id.is_some() {
@@ -203,7 +286,7 @@ impl ConversationStore {
     }
 
     /// List all conversations, most-recently updated first.
-    pub async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
+    async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
         let rows = if self.user_id.is_some() {
             sqlx::query(
                 "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
@@ -249,7 +332,7 @@ impl ConversationStore {
     /// overwrite this value on subsequent turns.
     ///
     /// Returns an error if the conversation does not exist.
-    pub async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
+    async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
         let id_str = id.to_string();
         let result = sqlx::query(
             "UPDATE conversations
@@ -283,7 +366,7 @@ impl ConversationStore {
     ///
     /// Used by context compaction to persist a shrunk history so subsequent
     /// turns do not reload the full pre-compaction history from storage.
-    pub async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
+    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
         let conv_id_str = conversation_id.to_string();
 
         // Verify the conversation belongs to this agent before mutating.
@@ -302,7 +385,7 @@ impl ConversationStore {
         Ok(())
     }
 
-    pub async fn delete_conversation(&self, id: Uuid) -> Result<()> {
+    async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
         let result = sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
             .bind(&id_str)
@@ -327,7 +410,7 @@ impl ConversationStore {
     // -----------------------------------------------------------------------
 
     /// Persist a message to the database.
-    pub async fn save_message(&self, msg: &Message) -> Result<()> {
+    async fn save_message(&self, msg: &Message) -> Result<()> {
         let id = msg.id.to_string();
         let conversation_id = msg.conversation_id.to_string();
         let role = msg.role.to_string();
@@ -370,28 +453,8 @@ impl ConversationStore {
         Ok(())
     }
 
-    async fn ensure_conversation_agent(&self, id: Uuid) -> Result<()> {
-        let id_str = id.to_string();
-        let owner =
-            sqlx::query_scalar::<_, String>("SELECT agent_id FROM conversations WHERE id = ?1")
-                .bind(&id_str)
-                .fetch_optional(&self.pool)
-                .await?;
-
-        match owner {
-            Some(found) if found == self.agent_id => Ok(()),
-            Some(found) => anyhow::bail!(
-                "conversation {} belongs to agent '{}' (requested '{}')",
-                id,
-                found,
-                self.agent_id
-            ),
-            None => anyhow::bail!("conversation {} not found", id),
-        }
-    }
-
     /// Load all messages for a conversation, ordered by turn then created_at.
-    pub async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>> {
+    async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>> {
         let conv_id_str = conversation_id.to_string();
 
         let rows = sqlx::query(
@@ -427,7 +490,7 @@ impl ConversationStore {
     }
 
     /// Fetch a single message by its ID (agent-scoped via the conversation join).
-    pub async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
+    async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let id_str = message_id.to_string();
         let row = sqlx::query(
             "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
@@ -460,7 +523,7 @@ impl ConversationStore {
     }
 
     /// Return the last `limit` messages for a conversation, in chronological order.
-    pub async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
+    async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
         let conv_id_str = conversation_id.to_string();
 
         // Fetch the newest rows first, then reverse to restore chronological order.
@@ -505,6 +568,258 @@ impl ConversationStore {
 }
 
 // ---------------------------------------------------------------------------
+// In-memory implementation (test-only — see workspace_test_impls_in_prod.rs)
+// ---------------------------------------------------------------------------
+
+/// In-memory [`ConversationStore`] implementation backed by hash maps.
+///
+/// Intended for unit tests of upstream consumers that need persistence-
+/// shaped storage without booting SQLite. Constructed via
+/// `InMemoryConversationStore::new()`; tests typically wrap in `Arc<dyn ConversationStore>`.
+///
+/// Honors agent scoping and basic referential cascades (delete-conversation
+/// removes its messages). Title locking and broadcaster integration are
+/// modeled. FTS-style search would land here if/when added to the trait.
+///
+/// The workspace lint `tests/workspace_test_impls_in_prod.rs` forbids
+/// constructing this type outside test code or `assistant-test-support`.
+pub struct InMemoryConversationStore {
+    state: Arc<Mutex<InMemoryState>>,
+    agent_id: String,
+    user_id: Option<String>,
+    broadcaster: Option<Arc<dyn ConversationBroadcast>>,
+    clock: Arc<dyn Clock>,
+}
+
+#[derive(Default)]
+struct InMemoryState {
+    conversations: HashMap<Uuid, ConversationRecord>,
+    messages: HashMap<Uuid, Vec<Message>>,
+}
+
+impl InMemoryConversationStore {
+    /// Create a new empty store with the default agent (`"default"`).
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(InMemoryState::default())),
+            agent_id: "default".to_string(),
+            user_id: None,
+            broadcaster: None,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Scope to a specific agent.
+    pub fn for_agent(agent_id: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            ..Self::new()
+        }
+    }
+
+    /// Scope all queries to a specific user.
+    pub fn with_user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
+        self
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Attach a broadcaster that will receive events on every conversation mutation.
+    pub fn with_broadcaster(mut self, broadcaster: Arc<dyn ConversationBroadcast>) -> Self {
+        self.broadcaster = Some(broadcaster);
+        self
+    }
+
+    /// Lock the inner state for the duration of a single operation.
+    /// Recovers from poisoned locks by extracting the inner state.
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, InMemoryState> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryConversationStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ConversationStore for InMemoryConversationStore {
+    async fn create_conversation_with_id(
+        &self,
+        id: Uuid,
+        title: Option<&str>,
+    ) -> Result<ConversationRecord> {
+        let now = self.clock.now();
+        let title_locked = title.is_some();
+        let record = {
+            let mut state = self.lock_state();
+            let entry = state
+                .conversations
+                .entry(id)
+                .or_insert_with(|| ConversationRecord {
+                    id,
+                    agent_id: self.agent_id.clone(),
+                    title: title.map(String::from),
+                    title_locked,
+                    user_id: self.user_id.clone(),
+                    created_at: now,
+                    updated_at: now,
+                });
+            if entry.agent_id != self.agent_id {
+                anyhow::bail!(
+                    "conversation {} belongs to agent '{}' (requested '{}')",
+                    id,
+                    entry.agent_id,
+                    self.agent_id
+                );
+            }
+            entry.clone()
+        };
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(record.clone()));
+        }
+        Ok(record)
+    }
+
+    async fn create_conversation(&self, title: Option<&str>) -> Result<ConversationRecord> {
+        self.create_conversation_with_id(Uuid::new_v4(), title)
+            .await
+    }
+
+    async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>> {
+        let state = self.lock_state();
+        let row = state
+            .conversations
+            .get(&id)
+            .filter(|c| c.agent_id == self.agent_id)
+            .filter(|c| {
+                self.user_id
+                    .as_ref()
+                    .is_none_or(|u| c.user_id.as_ref() == Some(u))
+            })
+            .cloned();
+        Ok(row)
+    }
+
+    async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
+        let state = self.lock_state();
+        let mut out: Vec<ConversationRecord> = state
+            .conversations
+            .values()
+            .filter(|c| c.agent_id == self.agent_id)
+            .filter(|c| {
+                self.user_id
+                    .as_ref()
+                    .is_none_or(|u| c.user_id.as_ref() == Some(u))
+            })
+            .cloned()
+            .collect();
+        out.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
+        Ok(out)
+    }
+
+    async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
+        let now = self.clock.now();
+        let updated = {
+            let mut state = self.lock_state();
+            let conv = state.conversations.get_mut(&id);
+            match conv {
+                Some(c) if c.agent_id == self.agent_id => {
+                    c.title = Some(title.to_string());
+                    c.title_locked = true;
+                    c.updated_at = now;
+                    Some(c.clone())
+                }
+                _ => None,
+            }
+        };
+        if let Some(rec) = updated
+            && let Some(b) = &self.broadcaster
+        {
+            b.emit(ConversationEvent::Upserted(rec));
+        }
+        Ok(())
+    }
+
+    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
+        let mut state = self.lock_state();
+        state.messages.insert(conversation_id, messages.to_vec());
+        Ok(())
+    }
+
+    async fn delete_conversation(&self, id: Uuid) -> Result<()> {
+        let mut state = self.lock_state();
+        state.conversations.remove(&id);
+        state.messages.remove(&id);
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Deleted {
+                conversation_id: id,
+                agent_id: self.agent_id.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    async fn save_message(&self, msg: &Message) -> Result<()> {
+        let mut state = self.lock_state();
+        state
+            .messages
+            .entry(msg.conversation_id)
+            .or_default()
+            .push(msg.clone());
+        if let Some(conv) = state.conversations.get_mut(&msg.conversation_id) {
+            conv.updated_at = self.clock.now();
+        }
+        Ok(())
+    }
+
+    async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>> {
+        let state = self.lock_state();
+        Ok(state
+            .messages
+            .get(&conversation_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
+        let state = self.lock_state();
+        Ok(state
+            .messages
+            .values()
+            .flat_map(|v| v.iter())
+            .find(|m| m.id == message_id)
+            .cloned())
+    }
+
+    async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
+        let state = self.lock_state();
+        let mut out = state
+            .messages
+            .get(&conversation_id)
+            .cloned()
+            .unwrap_or_default();
+        if limit > 0 {
+            let limit = limit as usize;
+            if out.len() > limit {
+                let start = out.len() - limit;
+                out = out.split_off(start);
+            }
+        }
+        Ok(out)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -526,6 +841,7 @@ fn parse_role(s: &str) -> Result<MessageRole> {
 mod tests {
     use std::sync::Arc;
 
+    use super::*;
     use crate::StorageLayer;
     use crate::conversation_broadcaster::{
         ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
