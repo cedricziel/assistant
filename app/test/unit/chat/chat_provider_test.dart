@@ -1726,4 +1726,207 @@ void main() {
       );
     });
   });
+
+  // -- Fix: queued messages not blocked by a stalled stream -------------------
+
+  group('ChatNotifier — stall timeout with queued messages', () {
+    testWidgets(
+      '10.1: stall timeout closes stream even after sawProgress=true '
+      'when a second message is waiting in the queue',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        // ctrl1: first message — receives a token then stalls.
+        final ctrl1 = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl1.isClosed) await ctrl1.close();
+        });
+        // ctrl2: second (queued) message — completes immediately.
+        fakeApi.enqueueStream()
+          ..add(const DoneEvent(role: 'assistant', content: 'r2'))
+          ..close();
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        // Send first message — starts drain.
+        unawaited(notifier.sendMessage('first'));
+        await tester.pump();
+
+        // Deliver a token so sawProgress = true, then let the stream stall.
+        await tester.runAsync(() async {
+          ctrl1.add(const TokenEvent('hello '));
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pump();
+
+        // Queue a second message while the first stream is stalled.
+        unawaited(notifier.sendMessage('second'));
+        await tester.pump();
+
+        expect(
+          notifier.state.value!.pendingQueue.map((p) => p.text),
+          contains('second'),
+          reason: 'second message should be queued while first stream stalls',
+        );
+
+        // Advance past the 12-second stall timeout.
+        // The timeout should now fire even though sawProgress=true because
+        // there is a message waiting in pendingQueue.
+        await tester.pump(const Duration(seconds: 13));
+        await tester.pumpAndSettle();
+
+        // The stall timeout should have closed the first stream and drained
+        // the second message from the queue.
+        final after = notifier.state.value!;
+        expect(
+          after.pendingQueue,
+          isEmpty,
+          reason:
+              'second message must be drained after stall timeout fires '
+              'with queued messages pending',
+        );
+        expect(
+          after.isSending,
+          isFalse,
+          reason: 'isSending must be false after drain completes',
+        );
+        // Both user messages should appear in the conversation.
+        final userMsgs = after.messages
+            .where((m) => m.isUser)
+            .map((m) => m.content)
+            .toList();
+        expect(
+          userMsgs,
+          contains('first'),
+          reason: 'first user message must still be present',
+        );
+        expect(
+          userMsgs,
+          contains('second'),
+          reason: 'second user message must appear after drain',
+        );
+      },
+    );
+
+    testWidgets(
+      '10.2: stall timeout is a no-op after sawProgress=true '
+      'when the queue is empty (no user is waiting)',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        // Single stream: receives a token then stalls — no queued messages.
+        final ctrl = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl.isClosed) await ctrl.close();
+        });
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('only'));
+        await tester.pump();
+
+        // Deliver a token so sawProgress = true.
+        await tester.runAsync(() async {
+          ctrl.add(const TokenEvent('hi'));
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pump();
+
+        // No second message — queue is empty.
+        expect(notifier.state.value!.pendingQueue, isEmpty);
+
+        // Advance past the stall timeout.  With an empty queue the
+        // timeout must be a no-op: the stream stays open and isSending
+        // remains true.
+        await tester.pump(const Duration(seconds: 13));
+        // Only a single pump — pumpAndSettle would wait for the stream to
+        // close which we deliberately keep open.
+        await tester.pump();
+
+        expect(
+          notifier.state.value!.isSending,
+          isTrue,
+          reason:
+              'stream should still be open when queue is empty; the timeout '
+              'must not close a non-stalled in-progress response',
+        );
+
+        // Clean up — close the stream so the test exits.
+        await tester.runAsync(() async {
+          ctrl
+            ..add(const DoneEvent(role: 'assistant', content: 'done'))
+            ..close();
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+      },
+    );
+  });
+
+  // -- Fix: attemptReconnect kicks drain when needsReconnect=false ------------
+
+  group('ChatNotifier.attemptReconnect — queue drain on foreground', () {
+    testWidgets(
+      '11.1: attemptReconnect drains queued messages even when '
+      'needsReconnect is false',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        // First stream: stalls, then the test ends it.
+        final ctrl1 = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl1.isClosed) await ctrl1.close();
+        });
+        // Second stream: the queued message — completes cleanly.
+        fakeApi.enqueueStream()
+          ..add(const DoneEvent(role: 'assistant', content: 'queued-response'))
+          ..close();
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        // Start streaming first message.
+        unawaited(notifier.sendMessage('first'));
+        await tester.pump();
+
+        // Queue a second message while drain is busy with the first.
+        unawaited(notifier.sendMessage('second'));
+        await tester.pump();
+
+        expect(
+          notifier.state.value!.pendingQueue.map((p) => p.text),
+          contains('second'),
+        );
+
+        // Complete the first stream cleanly so the drain loop processes
+        // the second message normally.  After both finish, _draining=false
+        // and the queue is empty — baseline for the foreground trigger test.
+        await tester.runAsync(() async {
+          ctrl1
+            ..add(const DoneEvent(role: 'assistant', content: 'r1'))
+            ..close();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+
+        // Both messages have been processed; queue is empty and no
+        // reconnect is needed.
+        expect(notifier.state.value!.pendingQueue, isEmpty);
+        expect(notifier.needsReconnect, isFalse);
+
+        // Simulating a foreground event: attemptReconnect should be a
+        // no-op when there is nothing to reconnect or drain.
+        await tester.runAsync(() async {
+          await notifier.attemptReconnect();
+        });
+        await tester.pumpAndSettle();
+
+        // State unchanged — messages still present, no error introduced.
+        final after = notifier.state.value!;
+        expect(after.pendingQueue, isEmpty);
+        expect(after.error, isNull);
+        expect(
+          after.messages.where((m) => m.isUser).map((m) => m.content).toList(),
+          containsAll(['first', 'second']),
+        );
+      },
+    );
+  });
 }

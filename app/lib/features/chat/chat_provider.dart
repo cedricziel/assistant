@@ -1547,6 +1547,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // triggers a fallback to a direct conversation fetch. After progress
     // has been observed, the byte-level heartbeat (90 s) handles longer
     // silences that may legitimately occur during tool execution.
+    //
+    // Exception: if there are messages waiting in the queue the watchdog
+    // fires even after progress so the drain is not blocked indefinitely
+    // by a slow/stalled stream.
     var sawProgress = false;
     final source = api
         .streamMessages(
@@ -1557,7 +1561,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         .timeout(
           _initialStallTimeout,
           onTimeout: (sink) {
-            if (sawProgress) return;
+            if (sawProgress) {
+              // After the first tokens arrived, extended silences are
+              // normal (tool execution, extended thinking). Only close
+              // early if the user has already enqueued another message
+              // that is blocked waiting for this stream to finish.
+              final hasQueued = state.value?.pendingQueue.isNotEmpty ?? false;
+              if (!hasQueued) return;
+            }
             // Recover synchronously so the placeholder clears immediately
             // (the synchronous prefix of [_recoverStalledStream] runs
             // before its first await), then close the stream so the
@@ -1826,6 +1837,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (!ref.mounted) return;
       final messages = chatMessagesFromHistory(response.data!.messages);
       final latest = state.value ?? const ChatState();
+      // A queued message may have started streaming while we were fetching
+      // the conversation — don't overwrite its in-flight state.
+      if (latest.isSending) return;
       state = AsyncData(
         ChatState(
           conversationId: conversationId,
@@ -1889,8 +1903,19 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Called from the app lifecycle observer on [AppLifecycleState.resumed].
   /// Tries: 1) replay from last sequence, 2) fetch full conversation history,
   /// 3) show error only if both fail.
+  ///
+  /// Also drains any messages that were queued while a previous stream was
+  /// in-flight but were not yet processed (e.g. when the drain loop stopped
+  /// for any reason while the queue was non-empty).
   Future<void> attemptReconnect() async {
-    if (!_needsReconnect) return;
+    if (!_needsReconnect) {
+      // No interrupted stream to recover, but still kick the drain for any
+      // messages that are queued and not currently being processed.
+      if (!_draining && (state.value?.pendingQueue.isNotEmpty ?? false)) {
+        _drainQueue();
+      }
+      return;
+    }
 
     // Clear immediately to prevent re-entrant calls.
     _needsReconnect = false;
