@@ -120,9 +120,19 @@ export 'package:flutter/material.dart'
         // needed directly for non-action sheets.
         showModalBottomSheet,
         // Dialogs — `showDialog` is sometimes needed for custom dialogs.
-        // AdaptiveDialog covers the confirm pattern; this is the lower-level
-        // entry point.
+        // AdaptiveDialog covers the confirm pattern; AlertDialog stays
+        // available for complex form dialogs that don't fit the
+        // showAdaptiveConfirmDialog two-button shape.
         showDialog,
+        AlertDialog,
+        // Form fields — TextFormField is required for form validation;
+        // AdaptiveTextField doesn't currently integrate with the Form
+        // machinery. InputDecoration is needed wherever Material text
+        // inputs are configured.
+        TextFormField,
+        InputDecoration,
+        TextInputAction,
+        TextInputType,
         // Material localisations (used in date/time pickers).
         DefaultMaterialLocalizations;
 
