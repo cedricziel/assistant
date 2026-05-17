@@ -13,8 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Once;
 
 use anyhow::Result;
-use chrono::Local;
 use tracing::{debug, warn};
+
+use crate::clock::{Clock, SystemClock};
 
 use crate::context::runtime_agent_root;
 use crate::types::agent::AssistantConfig;
@@ -160,7 +161,7 @@ impl MemoryLoader {
         }
 
         // Add current date/time context for task scheduling and time-aware responses.
-        let now = Local::now();
+        let now = SystemClock.now().with_timezone(&chrono::Local);
         let weekday = now.format("%A").to_string();
         let month = now.format("%B").to_string();
         let day = now.format("%d").to_string();
@@ -285,7 +286,7 @@ Read the file first with `memory-get` if unsure what text is there.\n\
     /// Returns a list of formatted sections ready to include in the system prompt.
     /// Files that do not exist are silently skipped.
     fn load_daily_notes(&self) -> Vec<String> {
-        let today = Local::now();
+        let today = SystemClock.now().with_timezone(&chrono::Local);
         let yesterday = today - chrono::Duration::days(1);
 
         let mut sections = Vec::new();
@@ -332,7 +333,11 @@ Read the file first with `memory-get` if unsure what text is there.\n\
 
     /// Return the path to today's daily notes file (notes_dir/YYYY-MM-DD.md).
     pub fn daily_notes_path(&self) -> PathBuf {
-        let date = Local::now().format("%Y-%m-%d").to_string();
+        let date = SystemClock
+            .now()
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string();
         self.notes_dir.join(format!("{date}.md"))
     }
 
@@ -343,7 +348,11 @@ Read the file first with `memory-get` if unsure what text is there.\n\
         }
         fs::create_dir_all(&self.notes_dir)?;
         let path = self.daily_notes_path();
-        let timestamp = Local::now().format("%H:%M").to_string();
+        let timestamp = SystemClock
+            .now()
+            .with_timezone(&chrono::Local)
+            .format("%H:%M")
+            .to_string();
         let header = match category {
             Some(c) => format!("## {timestamp} [{c}]"),
             None => format!("## {timestamp}"),

@@ -16,10 +16,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::{LlmProvider, ToolHandler, ToolOutput, types::conversation::ExecutionContext};
 use assistant_storage::StorageLayer;
 use async_trait::async_trait;
-use chrono::{Local, NaiveDate};
+use chrono::NaiveDate;
 use whatlang::Lang;
 
 const DEFAULT_LIMIT: i64 = 5;
@@ -236,7 +237,7 @@ impl ToolHandler for MemorySearchHandler {
         };
 
         // Step 4: Hybrid score + temporal decay → Candidate list.
-        let today = Local::now().date_naive();
+        let today = SystemClock.now().with_timezone(&chrono::Local).date_naive();
 
         let min_rank = fts_hits
             .iter()
