@@ -62,6 +62,36 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
+    testWidgets('prefix widget renders on iOS', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+      await tester.pumpWidget(
+        _harness(
+          const AdaptiveTextField(prefix: Icon(Icons.search, key: Key('px'))),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('px')), findsOneWidget);
+
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('prefix widget renders on Material as prefixIcon', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+
+      await tester.pumpWidget(
+        _harness(
+          const AdaptiveTextField(prefix: Icon(Icons.search, key: Key('px'))),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('px')), findsOneWidget);
+
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     testWidgets('onChanged fires on Material', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       String? captured;

@@ -21,6 +21,7 @@ class AdaptiveTextField extends StatelessWidget {
     this.obscureText = false,
     this.autofocus = false,
     this.textInputAction,
+    this.prefix,
   });
 
   final TextEditingController? controller;
@@ -31,6 +32,11 @@ class AdaptiveTextField extends StatelessWidget {
   final bool obscureText;
   final bool autofocus;
   final TextInputAction? textInputAction;
+
+  /// Optional leading widget rendered inside the field. Maps to
+  /// `CupertinoTextField.prefix` on iOS and `InputDecoration.prefixIcon`
+  /// on Material. Commonly an [Icon] used for search affordances.
+  final Widget? prefix;
 
   @override
   Widget build(BuildContext context) {
@@ -44,12 +50,13 @@ class AdaptiveTextField extends StatelessWidget {
         obscureText: obscureText,
         autofocus: autofocus,
         textInputAction: textInputAction,
+        prefix: prefix,
       );
     }
     return TextField(
       controller: controller,
-      decoration: placeholder != null
-          ? InputDecoration(hintText: placeholder)
+      decoration: (placeholder != null || prefix != null)
+          ? InputDecoration(hintText: placeholder, prefixIcon: prefix)
           : null,
       onChanged: onChanged,
       onSubmitted: onSubmitted,
