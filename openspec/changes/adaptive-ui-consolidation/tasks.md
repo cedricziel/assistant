@@ -46,7 +46,7 @@
 - [x] 3.5 `personas_screen.dart`: switched to barrel + AdaptiveSliverNavBar + AdaptiveScaffold + AdaptiveListTile + AdaptiveButton.filled. Extended `AdaptiveTextField` with a `prefix` parameter (maps to `CupertinoTextField.prefix` on iOS, `InputDecoration.prefixIcon` on Material) to preserve the leading search icon. Two new tests verify the prefix on both platforms.
 - [x] 3.6 `skills_screen.dart`: switched to barrel + AdaptiveSliverNavBar / AdaptiveScaffold / AdaptiveButton.filled. Enabled/disabled badge colours migrated from `Colors.green.shade*` / `Colors.grey.shade*` to `colorScheme.tertiary` / `colorScheme.onSurfaceVariant` (matches workflows). Added `VisualDensity` to the barrel show-list (Material-only). Fixed one test assertion (`findsOneWidget` → `findsAtLeastNWidgets(1)`) because `SliverAppBar.large` renders both a collapsed and expanded title.
 - [x] 3.7 `webhooks_screen.dart`: same treatment. Active/inactive badge migrated to colorScheme tokens (tertiary / onSurfaceVariant + tertiaryContainer / surfaceContainerHighest). The verified-checkmark icon's `Colors.blue.shade600` → `colorScheme.primary`. Cupertino's `CupertinoButton + CupertinoIcons.refresh` collapsed to `IconButton + Icons.refresh`.
-- [ ] 3.8 `analytics_screen.dart`: same as 3.3
+- [x] 3.8 `analytics_screen.dart`: same treatment. Added `ChoiceChip`, `InputChip`, `DataTable`, `DataColumn`, `DataRow`, `DataCell` to the barrel show-list (all Material-only — no Cupertino equivalents for chip-based selectors or tabular layouts). No raw colours to migrate.
 - [ ] 3.9 `contexts/screens/context_switcher_screen.dart`: same treatment + adopt `AdaptiveActionSheet` for delete confirmation
 
 ## 4. Phase 2.3 — Settings screen (1 PR)

@@ -97,8 +97,15 @@ export 'package:flutter/material.dart'
         DefaultTabController,
         // Chip / Badge / Avatar style widgets — no iOS equivalent.
         Chip,
+        ChoiceChip,
+        InputChip,
         Badge,
         CircleAvatar,
+        // DataTable family — Material-only tabular layout.
+        DataTable,
+        DataColumn,
+        DataRow,
+        DataCell,
         // Form-aware list tile, occasionally used in settings.
         // (Settings will migrate to AdaptiveSwitchTile, but `CheckboxListTile`
         // is occasionally useful and has no Cupertino equivalent.)
