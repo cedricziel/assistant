@@ -681,6 +681,65 @@
         ]
       }
     },
+    "/api/conversations/{conversation_id}/turns/{turn_id}/status": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`GET /api/conversations/{conversation_id}/turns/{turn_id}/status`",
+        "description": "Returns the authoritative state of the named turn.\n\nAuthorisation: the existing conversation-scoped auth middleware applies.",
+        "operationId": "get_turn_status",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "description": "Turn (run) UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Turn status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/{id}": {
       "get": {
         "tags": [
@@ -11010,6 +11069,50 @@
             "type": "string"
           },
           "trace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TurnState": {
+        "type": "string",
+        "description": "Closed enum of turn states surfaced by the status endpoint.\n\nAnything not in this set must round-trip to one of these four when\nserialised — the client's switch is exhaustive.",
+        "enum": [
+          "running",
+          "completed",
+          "errored",
+          "unknown"
+        ]
+      },
+      "TurnStatusResponse": {
+        "type": "object",
+        "description": "Response body for `GET .../turns/{turn_id}/status`.",
+        "required": [
+          "turn_id",
+          "conversation_id",
+          "state"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "last_event_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Wall-clock timestamp of the most recent SSE event recorded for\nthe turn, in RFC 3339 format. `null` when [`state`] is `unknown`."
+          },
+          "last_event_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Kind of the most recent SSE event (`run_started`, `token`,\n`status`, `thinking`, `tool_result`, `agent_error`, `done`, etc.).\n`null` when [`state`] is `unknown`."
+          },
+          "state": {
+            "$ref": "#/components/schemas/TurnState"
+          },
+          "turn_id": {
             "type": "string"
           }
         }

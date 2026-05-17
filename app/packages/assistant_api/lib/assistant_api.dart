@@ -165,6 +165,8 @@ export 'package:assistant_api/src/model/tool_call_summary.dart';
 export 'package:assistant_api/src/model/tool_usage_response.dart';
 export 'package:assistant_api/src/model/trace_detail_response.dart';
 export 'package:assistant_api/src/model/trace_summary_response.dart';
+export 'package:assistant_api/src/model/turn_state.dart';
+export 'package:assistant_api/src/model/turn_status_response.dart';
 export 'package:assistant_api/src/model/unsubscribe_request.dart';
 export 'package:assistant_api/src/model/update_agent_request.dart';
 export 'package:assistant_api/src/model/update_conversation_request.dart';

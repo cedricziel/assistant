@@ -37,7 +37,7 @@ final String clientId = clientId_example; // String |
 final String redirectUri = redirectUri_example; // String | 
 final String state = state_example; // String | 
 final String codeChallenge = codeChallenge_example; // String | 
-final String codeChallengeMethod = codeChallengeMethod_example; // String | 
+final String codeChallengeMethod = codeChallengeMethod_example; // String | Accepted per RFC 7636 §4.3 for forward-compatibility. We only support `S256` and assume it implicitly; the value is not yet validated.
 final String scope = scope_example; // String | 
 
 try {
@@ -56,7 +56,7 @@ Name | Type | Description  | Notes
  **redirectUri** | **String**|  | [optional] 
  **state** | **String**|  | [optional] 
  **codeChallenge** | **String**|  | [optional] 
- **codeChallengeMethod** | **String**|  | [optional] 
+ **codeChallengeMethod** | **String**| Accepted per RFC 7636 §4.3 for forward-compatibility. We only support `S256` and assume it implicitly; the value is not yet validated. | [optional] 
  **scope** | **String**|  | [optional] 
 
 ### Return type
