@@ -223,6 +223,10 @@ pub struct Orchestrator {
     pub(crate) active_skill: tokio::sync::RwLock<Option<String>>,
     /// Learning configuration for autonomous skill creation and improvement.
     pub(crate) learning_config: assistant_core::types::features::LearningConfig,
+    /// Clock used for timestamp generation on persisted records and for
+    /// scheduler-related comparisons. Defaults to `Arc::new(SystemClock)`;
+    /// tests inject a `FakeClock` via [`Self::with_clock`].
+    pub(crate) clock: Arc<dyn assistant_core::clock::Clock>,
 }
 
 impl Orchestrator {
@@ -277,6 +281,7 @@ impl Orchestrator {
             audio_store: None,
             active_skill: tokio::sync::RwLock::new(None),
             learning_config: config.learning.clone(),
+            clock: Arc::new(assistant_core::clock::SystemClock),
         }
     }
 
@@ -286,6 +291,16 @@ impl Orchestrator {
     /// loaded from the database.  The value must be > 0.
     pub fn with_submit_timeout(mut self, secs: u64) -> Self {
         self.submit_timeout_secs = secs.max(1);
+        self
+    }
+
+    /// Inject a [`Clock`](assistant_core::clock::Clock) implementation.
+    ///
+    /// Production binaries leave this as the default `SystemClock`. Tests
+    /// pass `Arc::new(FakeClock::new(...))` to assert timestamp-dependent
+    /// behavior against virtual time.
+    pub fn with_clock(mut self, clock: Arc<dyn assistant_core::clock::Clock>) -> Self {
+        self.clock = clock;
         self
     }
 

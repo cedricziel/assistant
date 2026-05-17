@@ -34,7 +34,7 @@ pub(crate) async fn run_due_tasks(
     storage: &StorageLayer,
     orchestrator: &Orchestrator,
 ) -> Result<()> {
-    let now = Utc::now();
+    let now = orchestrator.clock.now();
     let task_store = storage.scheduled_task_store_for_agent(&orchestrator.agent_id);
     let due = task_store.due_tasks(now).await?;
 
@@ -206,7 +206,7 @@ pub(super) async fn dispatch_scheduler_turn_request(
         prompt,
         conversation_id,
         extension_tools: vec![],
-        timestamp: Some(Utc::now()),
+        timestamp: Some(orchestrator.clock.now()),
         traceparent: traceparent_from_context(interface_cx),
         attachment_ids: vec![],
         user_id: persona_owner,
@@ -303,7 +303,7 @@ pub(crate) async fn resolve_home_channel_tools(
         },
         content: ChannelContent::Text(String::new()),
         thread_id: None,
-        timestamp: Utc::now(),
+        timestamp: orchestrator.clock.now(),
         metadata: HashMap::new(),
     };
 
