@@ -5,6 +5,7 @@ pub mod bus;
 pub mod bus_messages;
 pub mod catalog;
 pub mod channel;
+pub mod clock;
 pub mod command;
 pub mod config;
 pub mod context;
@@ -39,6 +40,7 @@ pub use bus_messages::{
 };
 pub use catalog::{CatalogEntry, CatalogResolver, CatalogResourceType};
 pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
+pub use clock::{Clock, FakeClock, SystemClock};
 pub use command::{CommandArg, CommandDef, CommandResult, ConversationConfig};
 pub use config::{default_config_path, load_config};
 pub use context::{
