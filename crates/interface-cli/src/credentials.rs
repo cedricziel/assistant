@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -31,7 +32,7 @@ impl CliCredentials {
     /// Returns `true` if the access token has expired (or will expire
     /// within the next 30 seconds).
     pub fn is_expired(&self) -> bool {
-        Utc::now() + chrono::Duration::seconds(30) >= self.expires_at
+        SystemClock.now() + chrono::Duration::seconds(30) >= self.expires_at
     }
 }
 
@@ -125,7 +126,7 @@ pub async fn refresh_if_needed(
     if let Some(rt) = token_resp.refresh_token {
         creds.refresh_token = rt;
     }
-    creds.expires_at = Utc::now() + chrono::Duration::seconds(token_resp.expires_in as i64);
+    creds.expires_at = SystemClock.now() + chrono::Duration::seconds(token_resp.expires_in as i64);
 
     save(path, creds)?;
     debug!("token refreshed successfully");

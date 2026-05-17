@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use assistant_core::clock::{Clock, SystemClock};
 use tracing::debug;
 
 /// Default installation directory (`~/.assistant/`).
@@ -22,7 +22,7 @@ pub fn default_backups_dir() -> PathBuf {
 ///
 /// Format: `assistant-backup-YYYYMMDD-HHMMSS.tar.gz`
 pub fn default_archive_name() -> String {
-    let now = Utc::now();
+    let now = SystemClock.now();
     format!("assistant-backup-{}.tar.gz", now.format("%Y%m%d-%H%M%S"))
 }
 

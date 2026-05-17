@@ -8,6 +8,7 @@ use arrow_array::{
     ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
 };
 use arrow_schema::Schema as ArrowSchema;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::types::observability::IcebergConfig;
 use iceberg::spec::DataFileFormat;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
@@ -245,10 +246,7 @@ fn sys_time_to_us(t: std::time::SystemTime, fallback: i64) -> i64 {
 
 fn collect_rows(rm: &ResourceMetrics) -> Vec<MetricRow> {
     let mut rows = Vec::new();
-    let now_us = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_micros() as i64)
-        .unwrap_or(0);
+    let now_us = SystemClock.now().timestamp_micros();
 
     for scope_metrics in rm.scope_metrics() {
         let scope_name = Some(scope_metrics.scope().name().to_string());

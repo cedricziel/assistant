@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use assistant_core::clock::{Clock, SystemClock};
 use clap::Parser;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use tokio::sync::mpsc;
@@ -946,7 +946,7 @@ async fn main() -> Result<()> {
                 // finds the registered sink, and calls run_turn_streaming.
                 let orch = bs.orchestrator.clone();
                 let prompt = input.to_string();
-                let msg_ts = Utc::now();
+                let msg_ts = SystemClock.now();
                 let submit = tokio::spawn(async move {
                     orch.submit_turn(&prompt, conversation_id, Interface::Cli, Some(msg_ts))
                         .await

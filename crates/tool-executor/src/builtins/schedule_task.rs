@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{ToolHandler, ToolOutput};
 use assistant_storage::StorageLayer;
@@ -118,7 +119,7 @@ impl ToolHandler for ScheduleTaskHandler {
                 }
             };
 
-            if dt <= Utc::now() {
+            if dt <= SystemClock.now() {
                 return Ok(ToolOutput::error(format!(
                     "run_at '{}' is in the past.",
                     raw

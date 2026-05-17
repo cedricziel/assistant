@@ -418,8 +418,8 @@ name = "assistant-backup"
 version = "0.1.160"
 dependencies = [
  "anyhow",
+ "assistant-core",
  "async-trait",
- "chrono",
  "dirs",
  "flate2",
  "hex",
@@ -4049,6 +4049,7 @@ dependencies = [
 name = "opentelemetry-exporter-sqlite"
 version = "0.1.160"
 dependencies = [
+ "assistant-core",
  "chrono",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
