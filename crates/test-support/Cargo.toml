@@ -10,8 +10,10 @@ publish = false
 # Re-export targets land in later phases of
 # openspec/changes/workspace-test-coverage-floor/ as their owning crates
 # add their fakes: Clock (Phase 3 — present), persistence stores
-# (Phase 5), orchestration stubs (Phase 7), ScriptedLlmProvider (Phase 5.H).
+# (Phase 5 — ConversationStore present), orchestration stubs (Phase 7),
+# ScriptedLlmProvider (Phase 5.H).
 assistant-core = { path = "../core" }
+assistant-storage = { path = "../storage" }
 
 [dev-dependencies]
 tokio = { workspace = true }

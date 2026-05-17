@@ -25,6 +25,7 @@
 //! tool results, and `<think>…</think>` thinking steps are skipped —
 //! they are noisy and rarely useful to recall.
 
+use assistant_storage::ConversationStore;
 use std::sync::Arc;
 
 use anyhow::Result;

@@ -4,6 +4,7 @@
 //! and dispatches execution.  All messenger interfaces and the CLI share the
 //! same registry instance.
 
+use assistant_storage::ConversationStore;
 use std::collections::HashMap;
 use std::sync::Arc;
 

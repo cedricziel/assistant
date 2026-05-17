@@ -10,7 +10,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use assistant_core::types::conversation::MessageRole;
-use assistant_storage::ConversationStore;
+use assistant_storage::{ConversationStore, SqliteConversationStore};
 use assistant_transcription::TtsRequest;
 
 use super::ApiState;
@@ -45,7 +45,7 @@ pub async fn get_message_audio(State(state): State<ApiState>, Path(id): Path<Str
     };
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store = SqliteConversationStore::for_agent(state.pool.clone(), &agent_id);
 
     let msg = match store.get_message(msg_id).await {
         Ok(Some(m)) => m,

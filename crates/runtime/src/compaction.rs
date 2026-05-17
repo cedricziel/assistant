@@ -353,7 +353,7 @@ fn chat_history_to_message(
 /// boundaries.  All existing messages for the conversation are replaced with
 /// the compacted set.
 async fn persist_compacted(
-    conv_store: &ConversationStore,
+    conv_store: &dyn ConversationStore,
     conversation_id: Uuid,
     compacted: &[ChatHistoryMessage],
 ) -> Result<()> {
@@ -385,7 +385,7 @@ pub async fn maybe_compact(
     history: &mut Vec<ChatHistoryMessage>,
     llm: &Arc<dyn LlmProvider>,
     cfg: &CompactionConfig,
-    conv_store: Option<(&ConversationStore, Uuid)>,
+    conv_store: Option<(&dyn ConversationStore, Uuid)>,
 ) -> bool {
     let keep = cfg.keep_recent_turns;
 

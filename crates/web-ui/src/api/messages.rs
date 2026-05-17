@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use assistant_core::types::conversation::Interface;
 use assistant_runtime::OrchestratorEvent;
-use assistant_storage::ConversationStore;
+use assistant_storage::{ConversationStore, SqliteConversationStore};
 use assistant_transcription::TranscriptionRequest;
 
 use super::{ApiState, sse_response};
@@ -101,7 +101,7 @@ pub async fn send_message(
 
     // Verify the conversation exists before streaming.
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id)
+    let store = SqliteConversationStore::for_agent(state.pool.clone(), &agent_id)
         .with_broadcaster(state.conversation_broadcaster.clone());
 
     match store.get_conversation(conv_id).await {
@@ -800,7 +800,7 @@ pub async fn quick_message(
     } else {
         state.agent_id.read().await.clone()
     };
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id)
+    let store = SqliteConversationStore::for_agent(state.pool.clone(), &agent_id)
         .with_broadcaster(state.conversation_broadcaster.clone());
 
     // Build the prompt: prepend context if provided.
@@ -953,7 +953,7 @@ pub async fn send_voice_message(
 
     // Verify the conversation exists.
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store = SqliteConversationStore::for_agent(state.pool.clone(), &agent_id);
     match store.get_conversation(conv_id).await {
         Ok(None) => return (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
         Err(e) => {
@@ -1196,7 +1196,7 @@ mod tests {
     use assistant_runtime::CommandRegistry;
     use assistant_storage::{
         AttachmentStore, CommandEventStore, ConversationStore, InMemoryConversationBroadcaster,
-        RunBroadcaster, SkillRegistry, StorageLayer,
+        RunBroadcaster, SkillRegistry, SqliteConversationStore, StorageLayer,
     };
 
     use super::super::ApiState;
@@ -1229,7 +1229,7 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(Some("T")).await.unwrap();
         let id = conv.id;
 
@@ -1254,7 +1254,7 @@ mod tests {
         mount_llm_reply(&server, "Hello world").await;
 
         let (state, storage) = test_state(&server.uri()).await;
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(None).await.unwrap();
         assert!(conv.title.is_none(), "precondition: conversation untitled");
         assert!(!conv.title_locked, "precondition: conversation unlocked");
@@ -1317,7 +1317,7 @@ mod tests {
         mount_llm_reply(&server, "Hello world").await;
 
         let (state, storage) = test_state(&server.uri()).await;
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(Some("Stream")).await.unwrap();
         let id = conv.id;
 
@@ -1355,7 +1355,7 @@ mod tests {
         mount_llm_reply(&server, "Hello world").await;
 
         let (state, storage) = test_state(&server.uri()).await;
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(Some("MsgId")).await.unwrap();
         let id = conv.id;
 
@@ -1400,7 +1400,7 @@ mod tests {
         mount_llm_reply(&server, "Voice reply").await;
 
         let (state, storage) = test_state(&server.uri()).await;
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(Some("VoiceMsgId")).await.unwrap();
 
         // Wire up the stub transcription provider.
@@ -1466,7 +1466,7 @@ mod tests {
     async fn voice_upload_without_transcription_provider_returns_503() {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.create_conversation(Some("test")).await.unwrap();
 
         // Build a minimal multipart body
@@ -1785,7 +1785,7 @@ mod tests {
         mount_llm_reply(&server, "Test reply").await;
 
         let (state, storage) = test_state(&server.uri()).await;
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store
             .create_conversation(Some("RunId header"))
             .await
@@ -1998,7 +1998,7 @@ mod tests {
 
         // The legacy auto-truncation is gone — the conversation starts NULL
         // and the title-generator worker is solely responsible for titling.
-        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
         assert!(
             conv.title.is_none(),
@@ -2036,7 +2036,7 @@ mod tests {
         let conv_id: Uuid = json["conversation_id"].as_str().unwrap().parse().unwrap();
 
         // Conversation should be scoped to the "reviewer" persona.
-        let store = ConversationStore::for_agent(storage.pool.clone(), "reviewer");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "reviewer");
         let conv = store.get_conversation(conv_id).await.unwrap();
         assert!(
             conv.is_some(),

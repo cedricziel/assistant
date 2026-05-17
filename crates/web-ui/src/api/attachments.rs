@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
-use assistant_storage::ConversationStore;
+use assistant_storage::{ConversationStore, SqliteConversationStore};
 
 use super::ApiState;
 
@@ -82,7 +82,7 @@ pub async fn upload_attachment(
     };
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store = SqliteConversationStore::for_agent(state.pool.clone(), &agent_id);
     match store.get_conversation(conv_id).await {
         Ok(None) => return (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
         Err(e) => {
@@ -324,14 +324,14 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use assistant_storage::ConversationStore;
+    use assistant_storage::{ConversationStore, SqliteConversationStore};
 
     use super::super::test_helpers::*;
 
     #[tokio::test]
     async fn upload_attachment_rejects_unsupported_mime() {
         let (state, storage) = event_log_state().await;
-        let conv_store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv_store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = conv_store.create_conversation(None).await.unwrap();
 
         let (content_type, body) =
@@ -353,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn upload_attachment_succeeds_with_png() {
         let (state, storage) = event_log_state().await;
-        let conv_store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv_store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = conv_store.create_conversation(None).await.unwrap();
 
         let png_data = tiny_png();

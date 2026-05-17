@@ -13,7 +13,10 @@ use assistant_core::{
     context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type, is_text_mime_type,
     strip_html_comments,
 };
-use assistant_storage::{SkillRegistry, StorageLayer, conversations::ConversationStore};
+use assistant_storage::{
+    SkillRegistry, StorageLayer,
+    conversations::{ConversationStore, SqliteConversationStore},
+};
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::AudioStore;
 use opentelemetry::{
@@ -1338,7 +1341,12 @@ impl Orchestrator {
         attachments: Vec<ContentBlock>,
         attachment_ids: &[Uuid],
         agent_id: &str,
-    ) -> Result<(ConversationStore, Vec<ChatHistoryMessage>, i64)> {
+    ) -> Result<(SqliteConversationStore, Vec<ChatHistoryMessage>, i64)> {
+        // Note: returns the concrete SqliteConversationStore because the
+        // function is an internal helper called only from this impl. External
+        // consumer signatures (helper fns in dispatch.rs, turn_control.rs,
+        // history.rs, web-ui handlers) take `&dyn ConversationStore`; the
+        // trait is what crosses crate / function-API boundaries.
         let conv_store = self.storage.conversation_store_for_agent(agent_id);
         conv_store
             .create_conversation_with_id(conversation_id, None)

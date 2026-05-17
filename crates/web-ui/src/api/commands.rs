@@ -6,6 +6,7 @@
 
 use assistant_core::CommandDef;
 use assistant_storage::CommandEventRow;
+use assistant_storage::ConversationStore;
 use axum::{
     Json,
     extract::{Path, State},
@@ -157,7 +158,8 @@ pub async fn execute_command(
 
     // Verify the conversation exists.
     let agent_id = state.agent_id.read().await.clone();
-    let store = assistant_storage::ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store =
+        assistant_storage::SqliteConversationStore::for_agent(state.pool.clone(), &agent_id);
     match store.get_conversation(conv_id).await {
         Ok(None) => {
             return (StatusCode::NOT_FOUND, "Conversation not found").into_response();

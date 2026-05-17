@@ -18,5 +18,6 @@
 //!   `InMemorySkillCatalog`.
 
 pub use assistant_core::clock::{Clock, FakeClock, SystemClock};
+pub use assistant_storage::{ConversationStore, InMemoryConversationStore};
 
 pub use crate::fixture::{Fixture, FixtureBuilder};

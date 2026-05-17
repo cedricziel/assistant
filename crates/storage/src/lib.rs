@@ -73,7 +73,9 @@ pub use conversation_broadcaster::{
 pub use conversation_events::{
     ConversationEventRow, ConversationEventStore, LiveEvent, RunBroadcaster,
 };
-pub use conversations::{ConversationRecord, ConversationStore};
+pub use conversations::{
+    ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
+};
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
@@ -167,14 +169,14 @@ impl StorageLayer {
         LogStore::new(self.pool.clone())
     }
 
-    /// Convenience: build a `ConversationStore` backed by this pool.
-    pub fn conversation_store(&self) -> ConversationStore {
-        ConversationStore::new(self.pool.clone())
+    /// Convenience: build a `SqliteConversationStore` backed by this pool.
+    pub fn conversation_store(&self) -> SqliteConversationStore {
+        SqliteConversationStore::new(self.pool.clone())
     }
 
-    /// Convenience: build a `ConversationStore` scoped to a Persona.
-    pub fn conversation_store_for_agent(&self, agent_id: &str) -> ConversationStore {
-        ConversationStore::for_agent(self.pool.clone(), agent_id)
+    /// Convenience: build a `SqliteConversationStore` scoped to a Persona.
+    pub fn conversation_store_for_agent(&self, agent_id: &str) -> SqliteConversationStore {
+        SqliteConversationStore::for_agent(self.pool.clone(), agent_id)
     }
 
     /// Convenience: build a `PersonaStore` backed by this pool.

@@ -37,7 +37,7 @@ impl Orchestrator {
         agent_id: &str,
         interface: &Interface,
         ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
-        conv_store: &ConversationStore,
+        conv_store: &dyn ConversationStore,
         turn_had_errors: bool,
     ) -> Result<FinalAnswerOutcome> {
         let turn_index = base_turn + iteration as i64 + 1;
@@ -171,7 +171,7 @@ impl Orchestrator {
         turn_index: i64,
         otel_span: &mut opentelemetry::global::BoxedSpan,
         history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
+        conv_store: &dyn ConversationStore,
     ) -> EndTurnOutcome {
         if has_real_calls {
             info!(

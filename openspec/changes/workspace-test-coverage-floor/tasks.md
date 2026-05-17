@@ -58,15 +58,15 @@ Each store: failing test → trait in `assistant-core` → `Sqlite*` impl + `InM
 
 ### 5.A — `ConversationStore`
 
-- [ ] 5.A.1 Add failing test in `crates/storage/tests/contract/conversation_store.rs` that runs `create → get → list → update_title → mark_locked` against both `SqliteConversationStore` and `InMemoryConversationStore`. Neither type exists yet — test will not compile.
-- [ ] 5.A.2 Define `pub trait ConversationStore: Send + Sync` in `crates/core/src/store.rs` (or a new `crates/core/src/persistence.rs`) with the methods consumers call today.
-- [ ] 5.A.3 Rename the existing `crates/storage/src/conversations.rs::ConversationStore` struct to `SqliteConversationStore` and `impl ConversationStore for SqliteConversationStore`.
-- [ ] 5.A.4 Add `pub struct InMemoryConversationStore` in the same file (`crates/storage/src/conversations.rs`) as plain `pub`. HashMap-backed, `Mutex`-protected, enforces obvious cascades. `impl ConversationStore for InMemoryConversationStore`.
-- [ ] 5.A.5 Confirm contract test from 5.A.1 passes for both impls.
-- [ ] 5.A.6 Add `pub use assistant_storage::InMemoryConversationStore;` to `assistant-test-support`'s prelude.
-- [ ] 5.A.7 Migrate consumers in `assistant-runtime`, `assistant-web-ui`, `assistant-interfaces` to `Arc<dyn ConversationStore>`. Existing call sites change `Arc<ConversationStore>` → `Arc<dyn ConversationStore>`.
-- [ ] 5.A.8 Update consumer tests to use `InMemoryConversationStore` (via the test-support prelude) where they were using `StorageLayer::new_in_memory()` solely for conversation access.
-- [ ] 5.A.9 Run `make lint && make format`; commit as `refactor(storage): extract ConversationStore trait + add InMemory impl`.
+- [x] 5.A.1 Add failing test in `crates/storage/tests/contract/conversation_store.rs` that runs `create → get → list → update_title → mark_locked` against both `SqliteConversationStore` and `InMemoryConversationStore`. Neither type exists yet — test will not compile.
+- [x] 5.A.2 Define `pub trait ConversationStore: Send + Sync` in `crates/storage/src/conversations.rs` (deferred trait-in-core promotion until `ConversationRecord` is also moved — TODO documented in the module-level doc).
+- [x] 5.A.3 Rename the existing `crates/storage/src/conversations.rs::ConversationStore` struct to `SqliteConversationStore` and `impl ConversationStore for SqliteConversationStore`.
+- [x] 5.A.4 Add `pub struct InMemoryConversationStore` in the same file (`crates/storage/src/conversations.rs`) as plain `pub`. HashMap-backed, `Mutex`-protected, enforces obvious cascades (delete-conversation removes its messages). `impl ConversationStore for InMemoryConversationStore`.
+- [x] 5.A.5 Confirm contract test from 5.A.1 passes for both impls. 10 scenarios × 2 impls = 20 tests pass.
+- [x] 5.A.6 Add `pub use assistant_storage::{ConversationStore, InMemoryConversationStore};` to `assistant-test-support`'s prelude. Added `assistant-storage` as a `[dependencies]` of test-support.
+- [x] 5.A.7 Migrate consumers in `assistant-runtime`, `assistant-web-ui`, `assistant-interfaces` to `&dyn ConversationStore`. Internal helper `Orchestrator::prepare_history` keeps the concrete `SqliteConversationStore` in its return (documented: internal-only, no consumer boundary crossed). External function signatures all use the trait.
+- [x] 5.A.8 Update consumer tests to use the new types via the test-support prelude. Most tests already used `StorageLayer::new_in_memory()`; left as-is since they exercise SQLite-backed paths. Future tests that don't need SQLite will use `InMemoryConversationStore`.
+- [x] 5.A.9 Run `make lint && make format`; commit as `refactor(storage): extract ConversationStore trait + add InMemory impl`.
 
 ### 5.B — `TraceStore`
 

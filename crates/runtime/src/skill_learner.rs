@@ -8,6 +8,7 @@
 //! This module is gated behind `LearningConfig.enabled &&
 //! LearningConfig.auto_create_skills`.
 
+use assistant_storage::ConversationStore;
 use std::sync::Arc;
 
 use anyhow::Result;

@@ -18,7 +18,7 @@ use assistant_core::{
     types::conversation::ChannelType, types::conversation::Message,
     types::conversation::MessageRole,
 };
-use assistant_storage::StorageLayer;
+use assistant_storage::{ConversationStore, StorageLayer};
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;
 use futures::SinkExt;
