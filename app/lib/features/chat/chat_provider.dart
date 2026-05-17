@@ -487,6 +487,69 @@ class ChatToolResult {
   bool get isSuccess => status == 'ok';
 }
 
+/// Plain-language summary of which SSE event last drove the in-flight turn.
+/// Drives the UI's progress card. Add a value here if the server protocol
+/// grows a new event kind that the UI should distinguish.
+enum TurnEventKind {
+  runStarted,
+  token,
+  status,
+  thinking,
+  toolResult,
+  subagentStarted,
+  subagentCompleted,
+  audioReady,
+}
+
+/// Snapshot of the in-flight turn's most recent activity, exposed for UI
+/// rendering of progress indicators. `null` on [ChatState.currentTurnStatus]
+/// means no turn is in flight.
+///
+/// Updated by [ChatNotifier] on each SSE event within `_streamMessage`.
+/// Cleared on `DoneEvent`, on the catch block after retries exhaust, and
+/// in `_recoverStalledStream`'s synchronous prefix.
+class TurnStatusSnapshot {
+  const TurnStatusSnapshot({
+    required this.runId,
+    required this.lastEventKind,
+    required this.lastEventAt,
+    this.currentToolName,
+  });
+
+  /// The run ID of the active turn — server-issued, captured from
+  /// `RunStartedEvent`.
+  final String runId;
+
+  /// Which kind of SSE event last fired for this turn.
+  final TurnEventKind lastEventKind;
+
+  /// Wall-clock timestamp of the most recent SSE event. The widget
+  /// derives "seconds since last event" via a [Ticker].
+  final DateTime lastEventAt;
+
+  /// Name of the tool or subagent task currently being executed, if
+  /// the most recent event implied one. Cleared when the assistant
+  /// resumes producing text (`TokenEvent`).
+  final String? currentToolName;
+
+  TurnStatusSnapshot copyWith({
+    String? runId,
+    TurnEventKind? lastEventKind,
+    DateTime? lastEventAt,
+    String? currentToolName,
+    bool clearToolName = false,
+  }) {
+    return TurnStatusSnapshot(
+      runId: runId ?? this.runId,
+      lastEventKind: lastEventKind ?? this.lastEventKind,
+      lastEventAt: lastEventAt ?? this.lastEventAt,
+      currentToolName: clearToolName
+          ? null
+          : (currentToolName ?? this.currentToolName),
+    );
+  }
+}
+
 /// State for the active chat.
 class ChatState {
   const ChatState({
@@ -499,6 +562,7 @@ class ChatState {
     this.lastToolResult,
     this.error,
     this.pendingQueue = const [],
+    this.currentTurnStatus,
   });
 
   final String? conversationId;
@@ -522,6 +586,11 @@ class ChatState {
   /// Messages waiting to be sent after the current in-flight response completes.
   final List<PendingMessage> pendingQueue;
 
+  /// Snapshot of the in-flight turn's most recent activity, exposed for
+  /// rendering progress indicators above the composer. `null` when no
+  /// turn is in flight (between `done` and the next `run_started`).
+  final TurnStatusSnapshot? currentTurnStatus;
+
   bool get isStreaming => isSending && streamingContent.isNotEmpty;
 
   ChatState copyWith({
@@ -537,6 +606,8 @@ class ChatState {
     bool clearConversation = false,
     bool clearStatusMessage = false,
     List<PendingMessage>? pendingQueue,
+    TurnStatusSnapshot? currentTurnStatus,
+    bool clearCurrentTurnStatus = false,
   }) {
     return ChatState(
       conversationId: clearConversation
@@ -552,6 +623,9 @@ class ChatState {
       lastToolResult: lastToolResult ?? this.lastToolResult,
       error: clearError ? null : (error ?? this.error),
       pendingQueue: pendingQueue ?? this.pendingQueue,
+      currentTurnStatus: clearCurrentTurnStatus
+          ? null
+          : (currentTurnStatus ?? this.currentTurnStatus),
     );
   }
 }
@@ -566,6 +640,29 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final c = _thinkingController;
     _thinkingController = null;
     if (c != null) unawaited(c.close());
+  }
+
+  /// Update the in-flight turn-status snapshot to reflect a newly-received
+  /// SSE event of [kind]. No-op when no turn is in flight (snapshot null).
+  ///
+  /// [toolName] populates `currentToolName` when relevant (e.g. on
+  /// `tool_result` or `subagent_started`). `TokenEvent` is handled
+  /// inline in `_streamMessage` so the tool name clears alongside the
+  /// streaming-content mutation.
+  void _bumpTurnStatus(TurnEventKind kind, {String? toolName}) {
+    final s = state.value;
+    if (s == null) return;
+    final prev = s.currentTurnStatus;
+    if (prev == null) return;
+    state = AsyncData(
+      s.copyWith(
+        currentTurnStatus: prev.copyWith(
+          lastEventKind: kind,
+          lastEventAt: DateTime.now(),
+          currentToolName: toolName ?? prev.currentToolName,
+        ),
+      ),
+    );
   }
 
   /// Extract a tool name from a [StatusEvent] message.
@@ -1435,6 +1532,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               isSending: false,
               streamingContent: '',
               error: event.message,
+              clearCurrentTurnStatus: true,
             ),
           );
           return;
@@ -1577,6 +1675,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           // Capture the run ID for potential reconnect; don't change UI.
           _currentRunId = event.runId;
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
+          // Open the turn-status snapshot used by the progress card.
+          state = AsyncData(
+            chatState.copyWith(
+              currentTurnStatus: TurnStatusSnapshot(
+                runId: event.runId,
+                lastEventKind: TurnEventKind.runStarted,
+                lastEventAt: DateTime.now(),
+              ),
+            ),
+          );
           continue;
         }
         // Any non-RunStartedEvent counts as progress — the initial-stall
@@ -1601,23 +1709,34 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               messages: msgs,
               streamingContent: newContent,
               clearStatusMessage: true,
+              // Resuming text generation — clear any active tool name.
+              currentTurnStatus: chatState.currentTurnStatus?.copyWith(
+                lastEventKind: TurnEventKind.token,
+                lastEventAt: DateTime.now(),
+                clearToolName: true,
+              ),
             ),
           );
         } else if (event is StatusEvent) {
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onStatusEvent(chatState, event);
+          _bumpTurnStatus(TurnEventKind.status);
         } else if (event is ToolResultEvent) {
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onToolResultEvent(chatState, event);
+          _bumpTurnStatus(TurnEventKind.toolResult, toolName: event.toolName);
         } else if (event is ThinkingEvent) {
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onThinkingEvent(chatState, event);
+          _bumpTurnStatus(TurnEventKind.thinking);
         } else if (event is SubagentStartedEvent) {
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onSubagentStartedEvent(chatState, event);
+          _bumpTurnStatus(TurnEventKind.subagentStarted, toolName: event.task);
         } else if (event is SubagentCompletedEvent) {
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onSubagentCompletedEvent(chatState, event);
+          _bumpTurnStatus(TurnEventKind.subagentCompleted);
         } else if (event is DoneEvent) {
           _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           unawaited(tokenController.close());
@@ -1690,6 +1809,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               isSending: false,
               streamingContent: '',
               error: event.message,
+              clearCurrentTurnStatus: true,
             ),
           );
           return;
@@ -1765,6 +1885,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             isSending: false,
             streamingContent: '',
             clearStatusMessage: true,
+            clearCurrentTurnStatus: true,
           ),
         );
         return;
@@ -1784,6 +1905,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           isSending: false,
           streamingContent: '',
           error: _friendlyErrorMessage(e),
+          clearCurrentTurnStatus: true,
         ),
       );
     }
@@ -1867,6 +1989,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         isSending: false,
         streamingContent: '',
         error: error,
+        clearCurrentTurnStatus: true,
       ),
     );
   }
