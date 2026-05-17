@@ -732,7 +732,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/conversations/{id}": {

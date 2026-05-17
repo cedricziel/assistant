@@ -82,6 +82,7 @@ pub struct TurnStatusResponse {
     ),
     operation_id = "get_turn_status",
     tag = "conversations",
+    security(("bearer_token" = [])),
 )]
 pub async fn get_turn_status(
     State(state): State<ApiState>,
