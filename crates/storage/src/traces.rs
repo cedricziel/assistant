@@ -1,6 +1,13 @@
-//! Distributed trace storage backed by OpenTelemetry spans persisted in SQLite.
+//! Distributed trace storage.
+//!
+//! Defines the [`TraceStore`] trait, its SQLite-backed implementation
+//! [`SqliteTraceStore`], and the test-only [`InMemoryTraceStore`].
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::sqlite::SqliteRow;
@@ -100,18 +107,68 @@ pub struct RecordedSpan {
     pub output_tokens: Option<i64>,
 }
 
+/// Trait-based interface for distributed trace storage.
+///
+/// Consumers in `assistant-web-ui` (`backends/sqlite.rs`) depend on this
+/// trait so tests can substitute [`InMemoryTraceStore`]. The trait is
+/// kept slim — methods on the concrete [`SqliteTraceStore`] that don't
+/// translate cleanly to in-memory storage (raw SQL, FTS) stay inherent.
+#[async_trait]
+pub trait TraceStore: Send + Sync {
+    /// Return the `limit` most-recent spans for the given skill name.
+    async fn get_recent_for_skill(&self, skill_name: &str, limit: i64)
+    -> Result<Vec<RecordedSpan>>;
+
+    /// Return the `limit` most-recent spans, regardless of skill.
+    async fn list_recent(&self, limit: i64) -> Result<Vec<RecordedSpan>>;
+
+    /// List recent trace summaries, optionally filtered by skill name.
+    async fn list_recent_traces(
+        &self,
+        limit: i64,
+        skill_filter: Option<&str>,
+    ) -> Result<Vec<TraceSummary>>;
+
+    /// List recent trace summaries for a specific agent.
+    async fn list_recent_traces_for_agent(
+        &self,
+        limit: i64,
+        filter: &TraceFilter,
+        agent_id: &str,
+    ) -> Result<Vec<TraceSummary>>;
+
+    /// Fetch all spans of a given trace by ID.
+    async fn get_trace(&self, trace_id: &str) -> Result<Vec<RecordedSpan>>;
+
+    /// Fetch all spans of a given trace, scoped to an agent.
+    async fn get_trace_for_agent(
+        &self,
+        trace_id: &str,
+        agent_id: &str,
+    ) -> Result<Vec<RecordedSpan>>;
+
+    /// List distinct skill names referenced in the trace log.
+    async fn list_skills(&self) -> Result<Vec<String>>;
+
+    /// Compute summary stats for a skill over the trailing `window` seconds.
+    async fn stats_for_skill(&self, skill_name: &str, window: i64) -> Result<TraceStats>;
+}
+
 /// SQLite-backed store for execution traces.
-pub struct TraceStore {
+pub struct SqliteTraceStore {
     pool: SqlitePool,
 }
 
-impl TraceStore {
+impl SqliteTraceStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+}
 
+#[async_trait]
+impl TraceStore for SqliteTraceStore {
     /// Return the `limit` most-recent traces for the given skill name.
-    pub async fn get_recent_for_skill(
+    async fn get_recent_for_skill(
         &self,
         skill_name: &str,
         limit: i64,
@@ -135,7 +192,7 @@ impl TraceStore {
     }
 
     /// Return the `limit` most-recent traces across all skills.
-    pub async fn list_recent(&self, limit: i64) -> Result<Vec<RecordedSpan>> {
+    async fn list_recent(&self, limit: i64) -> Result<Vec<RecordedSpan>> {
         let rows = sqlx::query(
             "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
                     service_name, \
@@ -155,7 +212,7 @@ impl TraceStore {
 
     /// Return metadata for the newest distributed traces, optionally filtered to
     /// those that include a particular tool span.
-    pub async fn list_recent_traces(
+    async fn list_recent_traces(
         &self,
         limit: i64,
         skill_filter: Option<&str>,
@@ -238,7 +295,7 @@ impl TraceStore {
     }
 
     /// Return metadata for recent traces scoped to a specific assistant agent.
-    pub async fn list_recent_traces_for_agent(
+    async fn list_recent_traces_for_agent(
         &self,
         limit: i64,
         filter: &TraceFilter,
@@ -340,7 +397,7 @@ impl TraceStore {
 
     /// Fetch every span belonging to a trace ordered by start time so the UI can
     /// render the full hierarchy/timeline.
-    pub async fn get_trace(&self, trace_id: &str) -> Result<Vec<RecordedSpan>> {
+    async fn get_trace(&self, trace_id: &str) -> Result<Vec<RecordedSpan>> {
         let rows = sqlx::query(
             "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
                     service_name, \
@@ -358,7 +415,7 @@ impl TraceStore {
     }
 
     /// Fetch every span for a trace, constrained to one assistant agent.
-    pub async fn get_trace_for_agent(
+    async fn get_trace_for_agent(
         &self,
         trace_id: &str,
         agent_id: &str,
@@ -382,7 +439,7 @@ impl TraceStore {
     }
 
     /// List distinct skill names that have recorded traces.
-    pub async fn list_skills(&self) -> Result<Vec<String>> {
+    async fn list_skills(&self) -> Result<Vec<String>> {
         let rows = sqlx::query(
             "SELECT DISTINCT tool_name \
              FROM distributed_traces \
@@ -399,7 +456,7 @@ impl TraceStore {
     }
 
     /// Compute aggregate statistics over the most-recent `window` traces for a skill.
-    pub async fn stats_for_skill(&self, skill_name: &str, window: i64) -> Result<TraceStats> {
+    async fn stats_for_skill(&self, skill_name: &str, window: i64) -> Result<TraceStats> {
         // Aggregate over the newest `window` rows for this skill.
         let agg_row = sqlx::query(
             "WITH recent AS ( \
@@ -467,7 +524,9 @@ impl TraceStore {
             common_errors,
         })
     }
+}
 
+impl SqliteTraceStore {
     fn row_to_span(row: SqliteRow) -> Result<RecordedSpan> {
         let conv_raw: Option<String> = row.try_get("conversation_id").ok().flatten();
         let conversation_id = match conv_raw {
@@ -518,6 +577,254 @@ impl TraceStore {
     }
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation (test-only — see workspace_test_impls_in_prod.rs)
+// ---------------------------------------------------------------------------
+
+/// In-memory [`TraceStore`] implementation.
+///
+/// Stores spans in a `Vec<RecordedSpan>` keyed by insertion order. Queries
+/// are naive linear scans, which is fine for unit tests against the trait
+/// contract. Use [`InMemoryTraceStore::insert`] to populate.
+pub struct InMemoryTraceStore {
+    spans: Arc<Mutex<Vec<RecordedSpan>>>,
+}
+
+impl InMemoryTraceStore {
+    /// Create an empty store.
+    pub fn new() -> Self {
+        Self {
+            spans: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Insert a span (for test setup).
+    pub fn insert(&self, span: RecordedSpan) {
+        if let Ok(mut g) = self.spans.lock() {
+            g.push(span);
+        }
+    }
+
+    fn snapshot(&self) -> Vec<RecordedSpan> {
+        match self.spans.lock() {
+            Ok(g) => g.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+}
+
+impl Default for InMemoryTraceStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl TraceStore for InMemoryTraceStore {
+    async fn get_recent_for_skill(
+        &self,
+        skill_name: &str,
+        limit: i64,
+    ) -> Result<Vec<RecordedSpan>> {
+        let mut out: Vec<RecordedSpan> = self
+            .snapshot()
+            .into_iter()
+            .filter(|s| s.tool_name.as_deref() == Some(skill_name))
+            .collect();
+        out.sort_by_key(|s| std::cmp::Reverse(s.start_time));
+        if limit > 0 {
+            out.truncate(limit as usize);
+        }
+        Ok(out)
+    }
+
+    async fn list_recent(&self, limit: i64) -> Result<Vec<RecordedSpan>> {
+        let mut out: Vec<RecordedSpan> = self
+            .snapshot()
+            .into_iter()
+            .filter(|s| s.tool_name.is_some())
+            .collect();
+        out.sort_by_key(|s| std::cmp::Reverse(s.start_time));
+        if limit > 0 {
+            out.truncate(limit as usize);
+        }
+        Ok(out)
+    }
+
+    async fn list_recent_traces(
+        &self,
+        limit: i64,
+        skill_filter: Option<&str>,
+    ) -> Result<Vec<TraceSummary>> {
+        let spans = self.snapshot();
+        let summaries = summarize_traces(&spans, skill_filter, None);
+        Ok(take_limit(summaries, limit))
+    }
+
+    async fn list_recent_traces_for_agent(
+        &self,
+        limit: i64,
+        filter: &TraceFilter,
+        _agent_id: &str,
+    ) -> Result<Vec<TraceSummary>> {
+        // The in-memory impl doesn't track agent_id on spans (it's an
+        // attribute in production); apply the post-filter portion only.
+        let spans = self.snapshot();
+        let skill = filter.skill.as_deref();
+        let summaries = summarize_traces(&spans, skill, Some(filter));
+        Ok(take_limit(summaries, limit))
+    }
+
+    async fn get_trace(&self, trace_id: &str) -> Result<Vec<RecordedSpan>> {
+        let mut out: Vec<RecordedSpan> = self
+            .snapshot()
+            .into_iter()
+            .filter(|s| s.trace_id == trace_id)
+            .collect();
+        out.sort_by_key(|s| s.start_time);
+        Ok(out)
+    }
+
+    async fn get_trace_for_agent(
+        &self,
+        trace_id: &str,
+        _agent_id: &str,
+    ) -> Result<Vec<RecordedSpan>> {
+        // Same caveat as list_recent_traces_for_agent: the in-memory impl
+        // doesn't filter by agent_id.
+        self.get_trace(trace_id).await
+    }
+
+    async fn list_skills(&self) -> Result<Vec<String>> {
+        let mut skills: Vec<String> = self
+            .snapshot()
+            .into_iter()
+            .filter_map(|s| s.tool_name)
+            .collect();
+        skills.sort();
+        skills.dedup();
+        Ok(skills)
+    }
+
+    async fn stats_for_skill(&self, skill_name: &str, _window: i64) -> Result<TraceStats> {
+        let spans: Vec<RecordedSpan> = self
+            .snapshot()
+            .into_iter()
+            .filter(|s| s.tool_name.as_deref() == Some(skill_name))
+            .collect();
+        let total = spans.len() as i64;
+        let error_count = spans.iter().filter(|s| s.error.is_some()).count() as i64;
+        let success_count = total - error_count;
+        let avg_duration_ms = if total > 0 {
+            spans.iter().map(|s| s.duration_ms).sum::<i64>() as f64 / total as f64
+        } else {
+            0.0
+        };
+        let total_input_tokens = spans.iter().filter_map(|s| s.input_tokens).sum();
+        let total_output_tokens = spans.iter().filter_map(|s| s.output_tokens).sum();
+        let mut common_errors: Vec<String> = spans.iter().filter_map(|s| s.error.clone()).collect();
+        common_errors.sort();
+        common_errors.dedup();
+        common_errors.truncate(5);
+        Ok(TraceStats {
+            skill_name: skill_name.to_string(),
+            total,
+            success_count,
+            error_count,
+            avg_duration_ms,
+            total_input_tokens,
+            total_output_tokens,
+            common_errors,
+        })
+    }
+}
+
+/// Group spans by trace_id and summarize. Used by the InMemory impl's
+/// list_recent_traces variants.
+fn summarize_traces(
+    spans: &[RecordedSpan],
+    skill_filter: Option<&str>,
+    full_filter: Option<&TraceFilter>,
+) -> Vec<TraceSummary> {
+    let mut by_trace: HashMap<String, Vec<RecordedSpan>> = HashMap::new();
+    for span in spans {
+        by_trace
+            .entry(span.trace_id.clone())
+            .or_default()
+            .push(span.clone());
+    }
+    let mut summaries: Vec<TraceSummary> = by_trace
+        .into_iter()
+        .map(|(trace_id, trace_spans)| {
+            let start_time = trace_spans
+                .iter()
+                .map(|s| s.start_time)
+                .min()
+                .unwrap_or_else(|| {
+                    trace_spans
+                        .first()
+                        .map(|s| s.start_time)
+                        .unwrap_or_else(chrono::Utc::now)
+                });
+            let end_time = trace_spans
+                .iter()
+                .map(|s| s.end_time)
+                .max()
+                .unwrap_or(start_time);
+            let span_count = trace_spans.len() as i64;
+            let tool_span_count =
+                trace_spans.iter().filter(|s| s.tool_name.is_some()).count() as i64;
+            let error_count = trace_spans.iter().filter(|s| s.error.is_some()).count() as i64;
+            let mut tool_names: Vec<String> = trace_spans
+                .iter()
+                .filter_map(|s| s.tool_name.clone())
+                .collect();
+            tool_names.sort();
+            tool_names.dedup();
+            let root = trace_spans.iter().find(|s| s.parent_span_id.is_none());
+            TraceSummary {
+                trace_id,
+                conversation_id: trace_spans.iter().find_map(|s| s.conversation_id),
+                start_time,
+                end_time,
+                span_count,
+                tool_span_count,
+                error_count,
+                has_reply: tool_names
+                    .iter()
+                    .any(|t| t.contains("reply") || t.contains("slack-post")),
+                tool_names,
+                root_span_name: root.map(|s| s.name.clone()),
+                root_service_name: root.and_then(|s| s.service_name.clone()),
+                interface: None,
+            }
+        })
+        .collect();
+
+    if let Some(skill) = skill_filter {
+        summaries.retain(|s| s.tool_names.iter().any(|n| n == skill));
+    }
+    if let Some(f) = full_filter {
+        summaries.retain(|s| {
+            f.conversation.is_none_or(|c| s.conversation_id == Some(c))
+                && f.since.is_none_or(|since| s.start_time >= since)
+                && f.until.is_none_or(|until| s.start_time <= until)
+                && f.min_duration_ms
+                    .is_none_or(|min_ms| (s.end_time - s.start_time).num_milliseconds() >= min_ms)
+        });
+    }
+
+    summaries.sort_by_key(|s| std::cmp::Reverse(s.start_time));
+    summaries
+}
+
+fn take_limit(mut v: Vec<TraceSummary>, limit: i64) -> Vec<TraceSummary> {
+    if limit > 0 {
+        v.truncate(limit as usize);
+    }
+    v
+}
+
 /// Trait for querying skill-scoped execution statistics from trace storage.
 ///
 /// Implementations exist for both SQLite (`TraceStore`) and Iceberg backends.
@@ -529,7 +836,7 @@ pub trait SkillStatsProvider: Send + Sync {
 }
 
 #[async_trait::async_trait]
-impl SkillStatsProvider for TraceStore {
+impl SkillStatsProvider for SqliteTraceStore {
     async fn stats_for_active_skill(&self, skill_name: &str, window: i64) -> Result<TraceStats> {
         let agg_row = sqlx::query(
             "WITH recent AS ( \

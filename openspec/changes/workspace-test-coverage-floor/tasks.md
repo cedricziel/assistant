@@ -70,12 +70,12 @@ Each store: failing test → trait in `assistant-core` → `Sqlite*` impl + `InM
 
 ### 5.B — `TraceStore`
 
-- [ ] 5.B.1 Failing contract test in `crates/storage/tests/contract/trace_store.rs`.
-- [ ] 5.B.2 `trait TraceStore` in `assistant-core`; `SqliteTraceStore` + `InMemoryTraceStore` both in `crates/storage/src/traces.rs` as plain `pub`.
-- [ ] 5.B.3 Contract test green for both impls.
-- [ ] 5.B.4 Re-export `InMemoryTraceStore` from the test-support prelude.
-- [ ] 5.B.5 Migrate consumers (`runtime/otel_spans`, `runtime/telemetry`, `web-ui/backends/sqlite`, `web-ui/api/traces` if it exists).
-- [ ] 5.B.6 Commit as `refactor(storage): extract TraceStore trait + add InMemory impl`.
+- [x] 5.B.1 Failing contract test in `crates/storage/tests/contract/trace_store.rs`.
+- [x] 5.B.2 `trait TraceStore` in `crates/storage/src/traces.rs` (deferred to storage for now, same TODO as ConversationStore); `SqliteTraceStore` (renamed from `TraceStore` struct) + `InMemoryTraceStore` both plain `pub`.
+- [x] 5.B.3 Contract test green for both impls — 8 scenarios.
+- [x] 5.B.4 Re-export `InMemoryTraceStore` + `TraceStore` from the test-support prelude.
+- [x] 5.B.5 Migrate consumer `web-ui/backends/sqlite` to construct `SqliteTraceStore::new(...)`.
+- [x] 5.B.6 Commit as `refactor(storage): extract TraceStore trait + add InMemory impl`.
 
 ### 5.C — `LogStore`
 

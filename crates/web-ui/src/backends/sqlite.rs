@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 
 use assistant_storage::{
     LogStats, LogStore, MetricsStore, MetricsSummary, ModelTokenUsage, RecordedLog, RecordedSpan,
-    TimeSeriesPoint, ToolUsageStats, TraceFilter, TraceStore, TraceSummary,
+    SqliteTraceStore, TimeSeriesPoint, ToolUsageStats, TraceFilter, TraceStore, TraceSummary,
 };
 
 use super::{LogBackend, MetricsBackend, TraceBackend};
@@ -32,7 +32,7 @@ impl TraceBackend for SqliteTraceBackend {
         filter: &TraceFilter,
         agent_id: &str,
     ) -> Result<Vec<TraceSummary>> {
-        let store = TraceStore::new(self.pool.clone());
+        let store = SqliteTraceStore::new(self.pool.clone());
         if agent_id.is_empty() {
             // Unscoped: the base query only accepts a skill filter, so we
             // fetch a larger batch and apply the remaining filters in memory.
@@ -80,7 +80,7 @@ impl TraceBackend for SqliteTraceBackend {
     }
 
     async fn get_trace(&self, trace_id: &str, agent_id: &str) -> Result<Vec<RecordedSpan>> {
-        let store = TraceStore::new(self.pool.clone());
+        let store = SqliteTraceStore::new(self.pool.clone());
         if agent_id.is_empty() {
             store.get_trace(trace_id).await
         } else {
