@@ -182,7 +182,7 @@ impl Orchestrator {
                             filename: att.filename.clone(),
                             mime_type: att.mime_type.clone(),
                             size_bytes: att.data.len() as u64,
-                            created_at: chrono::Utc::now(),
+                            created_at: self.clock.now(),
                         };
                         match store.store(&meta, &att.data).await {
                             Ok(()) => {
