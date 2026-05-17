@@ -6,5 +6,6 @@
 
 mod contract {
     pub mod conversation_store;
+    pub mod log_store;
     pub mod trace_store;
 }
