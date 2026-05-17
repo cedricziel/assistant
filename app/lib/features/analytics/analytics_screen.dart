@@ -1,9 +1,7 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../shared/platform/platform.dart';
+import '../../shared/platform/widgets.dart';
 import 'analytics_provider.dart';
 
 /// Screen showing aggregated assistant usage analytics.
@@ -14,72 +12,42 @@ class AnalyticsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final analyticsAsync = ref.watch(analyticsProvider);
 
-    if (isAppleTouch) {
-      return Scaffold(
-        body: CustomScrollView(
-          slivers: [
-            CupertinoSliverNavigationBar(
-              largeTitle: const Text('Analytics'),
-              trailing: CupertinoButton(
-                padding: EdgeInsets.zero,
-                child: const Icon(CupertinoIcons.refresh),
+    return AdaptiveScaffold(
+      body: CustomScrollView(
+        slivers: [
+          AdaptiveSliverNavBar(
+            title: 'Analytics',
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
                 onPressed: () => ref.read(analyticsProvider.notifier).refresh(),
               ),
+            ],
+          ),
+          analyticsAsync.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator.adaptive()),
             ),
-            analyticsAsync.when(
-              loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator.adaptive()),
+            error: (err, _) => SliverFillRemaining(
+              child: _ErrorView(
+                error: err.toString(),
+                onRetry: () => ref.read(analyticsProvider.notifier).refresh(),
               ),
-              error: (err, _) => SliverFillRemaining(
-                child: _ErrorView(
-                  error: err.toString(),
-                  onRetry: () => ref.read(analyticsProvider.notifier).refresh(),
-                ),
-              ),
-              data: (state) {
-                if (state.error != null) {
-                  return SliverFillRemaining(
-                    child: _ErrorView(
-                      error: state.error!,
-                      onRetry: () =>
-                          ref.read(analyticsProvider.notifier).refresh(),
-                    ),
-                  );
-                }
-                return SliverFillRemaining(child: _AnalyticsBody(state: state));
-              },
             ),
-          ],
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Analytics'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.read(analyticsProvider.notifier).refresh(),
+            data: (state) {
+              if (state.error != null) {
+                return SliverFillRemaining(
+                  child: _ErrorView(
+                    error: state.error!,
+                    onRetry: () =>
+                        ref.read(analyticsProvider.notifier).refresh(),
+                  ),
+                );
+              }
+              return SliverFillRemaining(child: _AnalyticsBody(state: state));
+            },
           ),
         ],
-      ),
-      body: analyticsAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator.adaptive()),
-        error: (err, _) => _ErrorView(
-          error: err.toString(),
-          onRetry: () => ref.read(analyticsProvider.notifier).refresh(),
-        ),
-        data: (state) {
-          if (state.error != null) {
-            return _ErrorView(
-              error: state.error!,
-              onRetry: () => ref.read(analyticsProvider.notifier).refresh(),
-            );
-          }
-          return _AnalyticsBody(state: state);
-        },
       ),
     );
   }
@@ -416,7 +384,7 @@ class _ErrorView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Retry')),
+          AdaptiveButton.filled(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
     );
