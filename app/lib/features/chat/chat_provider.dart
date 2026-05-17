@@ -557,6 +557,7 @@ class ChatState {
     this.messages = const [],
     this.isSending = false,
     this.isLoadingHistory = false,
+    this.isReconnecting = false,
     this.streamingContent = '',
     this.statusMessage,
     this.lastToolResult,
@@ -569,6 +570,12 @@ class ChatState {
   final List<ChatMessage> messages;
   final bool isSending;
   final bool isLoadingHistory;
+
+  /// True while [ChatNotifier.attemptReconnect] is actively recovering an
+  /// interrupted stream — drives the "Reconnecting…" banner.
+  /// Distinct from [isSending]: reconnect happens after the original
+  /// stream terminated, before its replay reaches DoneEvent.
+  final bool isReconnecting;
 
   /// Accumulated token content during streaming (before DoneEvent).
   final String streamingContent;
@@ -598,6 +605,7 @@ class ChatState {
     List<ChatMessage>? messages,
     bool? isSending,
     bool? isLoadingHistory,
+    bool? isReconnecting,
     String? streamingContent,
     String? statusMessage,
     ChatToolResult? lastToolResult,
@@ -616,6 +624,7 @@ class ChatState {
       messages: messages ?? this.messages,
       isSending: isSending ?? this.isSending,
       isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
+      isReconnecting: isReconnecting ?? this.isReconnecting,
       streamingContent: streamingContent ?? this.streamingContent,
       statusMessage: clearStatusMessage
           ? null
@@ -2071,45 +2080,62 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     if (api == null || conversationId == null) return;
 
-    // Strategy 1: Replay from last event sequence.
-    if (runId != null && userMsgId != null) {
-      try {
-        final replayed = await _replayRun(
-          api,
-          conversationId,
-          userMsgId,
-          runId,
-          _lastSeq,
-        );
-        if (replayed) return;
-      } catch (_) {
-        // Replay failed — fall through to history fetch.
+    // Surface the recovery work as a banner — set BEFORE any await so
+    // the UI shows "Reconnecting…" promptly. Cleared in every exit path.
+    final current = state.value ?? const ChatState();
+    state = AsyncData(current.copyWith(isReconnecting: true));
+
+    try {
+      // Strategy 1: Replay from last event sequence.
+      if (runId != null && userMsgId != null) {
+        try {
+          final replayed = await _replayRun(
+            api,
+            conversationId,
+            userMsgId,
+            runId,
+            _lastSeq,
+          );
+          if (replayed) return;
+        } catch (_) {
+          // Replay failed — fall through to history fetch.
+        }
+      }
+
+      // Strategy 2: Fetch full conversation history.
+      // Save current messages in case loadConversation fails and wipes
+      // them.
+      final preLoadMessages = List<ChatMessage>.from(
+        state.value?.messages ?? [],
+      );
+      await loadConversation(conversationId);
+      // loadConversation catches errors internally — check if it
+      // succeeded.
+      final afterLoad = state.value;
+      if (afterLoad != null && afterLoad.error == null) return;
+
+      // Both strategies failed: restore messages and show friendly error.
+      final msgs = List<ChatMessage>.from(preLoadMessages);
+      if (userMsgId != null) {
+        final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+        if (userIdx != -1) {
+          msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.failed);
+        }
+      }
+      state = AsyncData(
+        ChatState(
+          conversationId: conversationId,
+          messages: msgs,
+          error: 'Connection lost — tap retry to resend',
+        ),
+      );
+    } finally {
+      // Clear the banner regardless of which branch terminated us.
+      final s = state.value;
+      if (s != null && s.isReconnecting) {
+        state = AsyncData(s.copyWith(isReconnecting: false));
       }
     }
-
-    // Strategy 2: Fetch full conversation history.
-    // Save current messages in case loadConversation fails and wipes them.
-    final preLoadMessages = List<ChatMessage>.from(state.value?.messages ?? []);
-    await loadConversation(conversationId);
-    // loadConversation catches errors internally — check if it succeeded.
-    final afterLoad = state.value;
-    if (afterLoad != null && afterLoad.error == null) return;
-
-    // Both strategies failed: restore messages and show friendly error.
-    final msgs = List<ChatMessage>.from(preLoadMessages);
-    if (userMsgId != null) {
-      final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
-      if (userIdx != -1) {
-        msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.failed);
-      }
-    }
-    state = AsyncData(
-      ChatState(
-        conversationId: conversationId,
-        messages: msgs,
-        error: 'Connection lost — tap retry to resend',
-      ),
-    );
   }
 
   /// Clears deferred reconnection state.

@@ -35,6 +35,7 @@ import '../../shared/theme/assistant_spacing.dart';
 import 'image_utils.dart';
 import 'markdown_link_handler.dart';
 import 'queued_message_bubble.dart';
+import 'reconnect_banner.dart';
 import 'streaming_timeline_entry.dart';
 import 'turn_progress_card.dart';
 import 'theme_aware_mermaid.dart';
@@ -595,6 +596,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ],
                       ),
                     ),
+
+                    // Brief banner shown while attemptReconnect is
+                    // recovering an interrupted stream after a resume.
+                    // Renders nothing on routine foreground transitions.
+                    const ReconnectBanner(),
 
                     // In-flight turn progress card — renders nothing when no
                     // turn is active, an activity label otherwise, a stall
