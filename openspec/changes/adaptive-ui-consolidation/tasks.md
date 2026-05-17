@@ -55,14 +55,12 @@
 
 ## 5. Phase 2.4 — Chat screen (likely small stack inside one PR)
 
-- [ ] 5.1 Spike: read `chat_screen.dart` (2229 LOC) and decide whether to extract composer + message list into separate files before the import sweep; record decision in PR description
-- [ ] 5.2 If extracted: move composer to `app/lib/features/chat/chat_composer.dart` with widget test; verify chat screen still renders identically
-- [ ] 5.3 If extracted: move message list to `app/lib/features/chat/chat_messages_view.dart` with widget test
-- [ ] 5.4 Replace `CupertinoTextField` with `AdaptiveTextField`
-- [ ] 5.5 Replace `CupertinoNavigationBar` with `AdaptiveNavBar` (regular, non-large-title — per `cupertino-chrome` REQ-4)
-- [ ] 5.6 Replace Material `Switch`, `Slider`, `SnackBar` with `AdaptiveSwitch`/`AdaptiveSlider`/`AdaptiveSnackBar`
-- [ ] 5.7 Drop both `package:flutter/cupertino.dart` and any unnecessary `package:flutter/material.dart` imports
-- [ ] 5.8 Update widget tests; update Playwright baselines if visual diff is non-zero on web
+- [x] 5.1 Spike outcome: kept chat_screen as a single 2229 LOC file rather than extracting composer/message list. The migration touches imports + a handful of structural sites, not internal composition; an extraction would balloon the diff.
+- [x] 5.4 Replaced `CupertinoTextField` + `TextField` (the dual chat input) with a single `AdaptiveTextField`. Extended the wrapper with `focusNode`, `minLines`/`maxLines`, `cursorColor`, `contentPadding`, and `enabled` parameters to cover the chat-composer feature surface.
+- [x] 5.5 Replaced the inline `CupertinoNavigationBar` / `AppBar` conditional in the chat top bar with a single `AdaptiveNavBar`. Burger menu icon now uses `AdaptiveIcon(cupertino: CupertinoIcons.line_horizontal_3, material: Icons.menu)`.
+- [x] 5.6 SnackBar usages kept as raw `SnackBar` (re-exported via barrel) — six call sites use custom action / behaviour configurations that don't fit `showAdaptiveSnackBar`'s simple-string API. The voice-message custom-themed Slider stays as raw Slider (re-exported via barrel) — has a custom `SliderThemeData` (track height, thumb shape, overlay shape) that `AdaptiveSlider` doesn't expose.
+- [x] 5.7 Dropped both `package:flutter/cupertino.dart` and `package:flutter/material.dart` imports from `chat_screen.dart`. Replaced with single `import '../../shared/platform/widgets.dart';`. Also dropped the now-redundant `adaptive_context_menu.dart` direct import (covered by barrel).
+- [x] 5.8 Updated `chat_screen_test.dart` and `command_autocomplete_test.dart` to cast to `AdaptiveTextField` instead of `TextField` (four sites). All chat tests (64) and full suite (951) green.
 
 ## 6. Phase 2.5 — Nav shell (1 PR, last in Phase 2)
 

@@ -131,8 +131,45 @@ export 'package:flutter/material.dart'
         // inputs are configured.
         TextFormField,
         InputDecoration,
+        InputBorder,
+        OutlineInputBorder,
+        UnderlineInputBorder,
         TextInputAction,
         TextInputType,
+        // Structural widgets needed by hybrid screens (chat, nav_shell)
+        // that combine a Material Scaffold with adaptive top chrome.
+        // Pure-list screens should still prefer AdaptiveScaffold +
+        // AdaptiveNavBar / AdaptiveSliverNavBar.
+        Scaffold,
+        ScaffoldState,
+        AppBar,
+        // SnackBar configuration types — `ScaffoldMessenger.showSnackBar`
+        // accepts a SnackBar; the wrapper-only path via showAdaptiveSnackBar
+        // covers simple cases, but custom SnackBars are sometimes needed.
+        SnackBar,
+        SnackBarBehavior,
+        // Linear progress indicator — used by chat for in-flight stream
+        // progress; no Cupertino equivalent.
+        LinearProgressIndicator,
+        // Selectable text (long-press to copy) — Material-only.
+        SelectableText,
+        AdaptiveTextSelectionToolbar,
+        // Generic dialog widget — used for custom modals (e.g. image preview)
+        // that aren't a two-button confirmation.
+        Dialog,
+        // Slider + theming for custom voice-message playback slider.
+        // AdaptiveSlider is the wrapper for general 0..1 sliders; this
+        // re-export covers cases that need custom SliderTheme.
+        Slider,
+        SliderTheme,
+        SliderThemeData,
+        RoundSliderThumbShape,
+        SliderComponentShape,
+        // Colors class — Material's named colour catalog. The
+        // check_no_raw_colors.sh gate still fires on every Colors.X usage
+        // outside lib/shared/theme/ (except Colors.transparent), so re-exporting
+        // the class is safe — direct usage is enforced at a different layer.
+        Colors,
         // Material localisations (used in date/time pickers).
         DefaultMaterialLocalizations;
 

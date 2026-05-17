@@ -12,6 +12,7 @@ import 'package:assistant_app/features/chat/chat_screen.dart';
 import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
+import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -114,7 +115,7 @@ void main() {
       await tester.pump();
 
       // Verify focus before sending.
-      final textField = tester.widget<TextField>(inputFinder);
+      final textField = tester.widget<AdaptiveTextField>(inputFinder);
       expect(
         textField.focusNode?.hasFocus,
         isTrue,
@@ -129,7 +130,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      final afterSend = tester.widget<TextField>(inputFinder);
+      final afterSend = tester.widget<AdaptiveTextField>(inputFinder);
       expect(
         afterSend.focusNode?.hasFocus,
         isTrue,
@@ -158,7 +159,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      final afterSubmit = tester.widget<TextField>(inputFinder);
+      final afterSubmit = tester.widget<AdaptiveTextField>(inputFinder);
       expect(
         afterSubmit.focusNode?.hasFocus,
         isTrue,
@@ -181,7 +182,7 @@ void main() {
       );
       await tester.pump();
 
-      final textField = tester.widget<TextField>(
+      final textField = tester.widget<AdaptiveTextField>(
         find.byKey(const Key('message_input')),
       );
       expect(

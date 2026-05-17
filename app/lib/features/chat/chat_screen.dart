@@ -6,8 +6,6 @@ import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,8 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'svg_builder.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../shared/platform/adaptive_context_menu.dart';
-import '../../shared/platform/platform.dart';
+import '../../shared/platform/widgets.dart';
 import '../../services/share_service.dart';
 import '../../api/api_client.dart';
 import '../../api/attachment_service.dart';
@@ -365,34 +362,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     ];
 
     return Scaffold(
-      appBar: isAppleTouch
-          ? CupertinoNavigationBar(
-              middle: Text(activePersonaName),
-              leading: isWide
-                  ? null
-                  : Builder(
-                      builder: (ctx) => GestureDetector(
-                        onTap: () => Scaffold.of(ctx).openDrawer(),
-                        child: const Icon(CupertinoIcons.line_horizontal_3),
-                      ),
-                    ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: chatActions,
+      appBar: AdaptiveNavBar(
+        title: activePersonaName,
+        leading: isWide
+            ? null
+            : Builder(
+                builder: (ctx) => IconButton(
+                  icon: const AdaptiveIcon(
+                    cupertino: CupertinoIcons.line_horizontal_3,
+                    material: Icons.menu,
+                  ),
+                  onPressed: () => Scaffold.of(ctx).openDrawer(),
+                ),
               ),
-            )
-          : AppBar(
-              title: Text(activePersonaName),
-              leading: isWide
-                  ? null
-                  : Builder(
-                      builder: (ctx) => IconButton(
-                        icon: const Icon(Icons.menu),
-                        onPressed: () => Scaffold.of(ctx).openDrawer(),
-                      ),
-                    ),
-              actions: chatActions,
-            ),
+        actions: chatActions,
+      ),
 
       // Drawer on narrow screens.
       drawer: isWide
@@ -1985,45 +1969,23 @@ class _InputRowState extends State<_InputRow> {
                       });
                     }
                   },
-                  child: isAppleTouch
-                      ? CupertinoTextField(
-                          key: const Key('message_input'),
-                          controller: widget.controller,
-                          focusNode: widget.focusNode,
-                          placeholder: widget.pendingAttachments.isNotEmpty
-                              ? 'Add a caption...'
-                              : 'Type a message...',
-                          cursorColor: colorScheme.primary,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          minLines: 1,
-                          maxLines: 6,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => widget.onSend(),
-                        )
-                      : TextField(
-                          key: const Key('message_input'),
-                          controller: widget.controller,
-                          focusNode: widget.focusNode,
-                          cursorColor: colorScheme.primary,
-                          decoration: InputDecoration(
-                            hintText: widget.pendingAttachments.isNotEmpty
-                                ? 'Add a caption...'
-                                : 'Type a message...',
-                            border: const OutlineInputBorder(),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            isDense: true,
-                          ),
-                          minLines: 1,
-                          maxLines: 6,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => widget.onSend(),
-                        ),
+                  child: AdaptiveTextField(
+                    key: const Key('message_input'),
+                    controller: widget.controller,
+                    focusNode: widget.focusNode,
+                    placeholder: widget.pendingAttachments.isNotEmpty
+                        ? 'Add a caption...'
+                        : 'Type a message...',
+                    cursorColor: colorScheme.primary,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    minLines: 1,
+                    maxLines: 6,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => widget.onSend(),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
