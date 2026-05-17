@@ -1,10 +1,7 @@
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../shared/platform/adaptive_dialog.dart';
-import '../../../shared/platform/platform.dart';
+import '../../../shared/platform/widgets.dart';
 import '../models/context_model.dart';
 import '../providers/context_providers.dart';
 import 'edit_context_screen.dart';
@@ -28,67 +25,37 @@ class ContextSwitcherScreen extends ConsumerWidget {
       child: const Icon(Icons.add),
     );
 
-    if (isAppleTouch) {
-      return Scaffold(
-        floatingActionButton: fab,
-        body: CustomScrollView(
-          slivers: [
-            const CupertinoSliverNavigationBar(largeTitle: Text('Contexts')),
-            contextsAsync.when(
-              loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator.adaptive()),
-              ),
-              error: (e, _) =>
-                  SliverFillRemaining(child: Center(child: Text('Error: $e'))),
-              data: (contexts) {
-                if (contexts.isEmpty) {
-                  return const SliverFillRemaining(child: _EmptyState());
-                }
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate((ctx, i) {
-                    final item = contexts[i];
-                    final isActive = activeContext?.id == item.id;
-                    return _ContextTile(
-                      context: item,
-                      isActive: isActive,
-                      onTap: () => _activateAndNavigate(ctx, ref, item),
-                      onEdit: () => _openEdit(ctx, item),
-                      onDelete: () => _confirmDelete(ctx, ref, item),
-                    );
-                  }, childCount: contexts.length),
-                );
-              },
+    return AdaptiveScaffold(
+      body: CustomScrollView(
+        slivers: [
+          const AdaptiveSliverNavBar(title: 'Contexts'),
+          contextsAsync.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator.adaptive()),
             ),
-          ],
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Contexts')),
-      body: contextsAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator.adaptive()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (contexts) {
-          if (contexts.isEmpty) {
-            return const _EmptyState();
-          }
-          return ListView.builder(
-            itemCount: contexts.length,
-            itemBuilder: (context, i) {
-              final ctx = contexts[i];
-              final isActive = activeContext?.id == ctx.id;
-              return _ContextTile(
-                context: ctx,
-                isActive: isActive,
-                onTap: () => _activateAndNavigate(context, ref, ctx),
-                onEdit: () => _openEdit(context, ctx),
-                onDelete: () => _confirmDelete(context, ref, ctx),
+            error: (e, _) =>
+                SliverFillRemaining(child: Center(child: Text('Error: $e'))),
+            data: (contexts) {
+              if (contexts.isEmpty) {
+                return const SliverFillRemaining(child: _EmptyState());
+              }
+              return SliverList(
+                delegate: SliverChildBuilderDelegate((ctx, i) {
+                  final item = contexts[i];
+                  final isActive = activeContext?.id == item.id;
+                  return _ContextTile(
+                    context: item,
+                    isActive: isActive,
+                    onTap: () => _activateAndNavigate(ctx, ref, item),
+                    onEdit: () => _openEdit(ctx, item),
+                    onDelete: () => _confirmDelete(ctx, ref, item),
+                  );
+                }, childCount: contexts.length),
               );
             },
-          );
-        },
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 80)),
+        ],
       ),
       floatingActionButton: fab,
     );
@@ -195,7 +162,7 @@ class _ContextTile extends StatelessWidget {
       label:
           '${context.name}, ${context.serverUrl}${isActive ? ', active' : ''}',
       button: true,
-      child: ListTile(
+      child: AdaptiveListTile(
         leading: isActive
             ? Icon(
                 Icons.check_circle,
@@ -343,11 +310,11 @@ class _CreateContextDialogState extends ConsumerState<_CreateContextDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        AdaptiveButton.plain(
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
+        AdaptiveButton.filled(
           onPressed: _saving ? null : _save,
           child: _saving
               ? const SizedBox(

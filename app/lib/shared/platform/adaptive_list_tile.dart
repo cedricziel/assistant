@@ -17,6 +17,7 @@ class AdaptiveListTile extends StatelessWidget {
     this.leading,
     this.trailing,
     this.onTap,
+    this.onLongPress,
   });
 
   final Widget title;
@@ -25,15 +26,26 @@ class AdaptiveListTile extends StatelessWidget {
   final Widget? trailing;
   final VoidCallback? onTap;
 
+  /// Long-press handler. On Material the underlying [ListTile] supports it
+  /// natively. On iOS [CupertinoListTile] has no long-press slot, so we wrap
+  /// the tile in a [GestureDetector] when a callback is provided.
+  final VoidCallback? onLongPress;
+
   @override
   Widget build(BuildContext context) {
     if (isAppleTouch) {
-      return CupertinoListTile(
+      final tile = CupertinoListTile(
         title: title,
         subtitle: subtitle,
         leading: leading,
         trailing: trailing,
         onTap: onTap,
+      );
+      if (onLongPress == null) return tile;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onLongPress: onLongPress,
+        child: tile,
       );
     }
     return ListTile(
@@ -42,6 +54,7 @@ class AdaptiveListTile extends StatelessWidget {
       leading: leading,
       trailing: trailing,
       onTap: onTap,
+      onLongPress: onLongPress,
     );
   }
 }
