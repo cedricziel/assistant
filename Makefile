@@ -41,6 +41,7 @@ install-hooks:
 lint-flutter:
 	cd app && flutter pub run dart_pre_commit
 	cd app && ./scripts/check_no_raw_colors.sh
+	cd app && ./scripts/check_facade_imports.sh
 
 # Run Flutter unit and widget tests.
 test-flutter:

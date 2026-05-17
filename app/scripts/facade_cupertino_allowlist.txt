@@ -1,0 +1,27 @@
+# Files exempt from the cupertino-import portion of check_facade_imports.sh.
+#
+# Phase 4 of the adaptive-ui-consolidation OpenSpec change bans direct
+# `import 'package:flutter/cupertino.dart';` in feature code. The barrel
+# `lib/shared/platform/widgets.dart` re-exports `CupertinoIcons` (constants
+# only) so feature code can pass `cupertino:` IconData to AdaptiveIcon
+# without needing the direct import.
+#
+# This allowlist enumerates the legitimate exceptions. Adding a new entry
+# requires a comment explaining why the file genuinely cannot route through
+# the façade.
+
+# Navigation orchestrator. Combines CupertinoSidebar (external package),
+# CupertinoTabBar, CupertinoActionSheet, CupertinoModalPopup, CupertinoColors
+# with Material's NavigationBar / NavigationRail. The file's entire purpose
+# is to bridge platform-specific nav primitives — wrapping every one in an
+# Adaptive equivalent would either lose functionality or duplicate the
+# existing structure. Already allowlisted in theme_color_allowlist.txt for
+# the same reason.
+lib/shared/nav_shell.dart
+
+# Bootstrap error widget rendered via ErrorWidget.builder before the normal
+# widget tree is up. Uses CupertinoPageScaffold + CupertinoNavigationBar on
+# Apple platforms and Material's Material widget elsewhere. Routing through
+# AdaptiveScaffold + AdaptiveNavBar would change the Material visual (adds
+# an AppBar where there isn't one today) — out of scope for the consolidation.
+lib/shared/error_screen.dart
