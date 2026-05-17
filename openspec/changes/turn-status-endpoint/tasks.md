@@ -10,13 +10,13 @@
 
 ## 2. HTTP layer — handlers + OpenAPI
 
-- [ ] 2.1 Create `crates/web-ui/src/api/turns.rs` with the two handlers.
-- [ ] 2.2 Register routes in `crates/web-ui/src/api/mod.rs`: `GET /api/conversations/{conversationId}/turns/{turnId}/status` and `POST /api/conversations/{conversationId}/turns/{turnId}/cancel`.
-- [ ] 2.3 Add `TurnStatusResponse` type with the four-state enum, `last_event_at` (RFC 3339), `last_event_kind` (closed enum or null).
-- [ ] 2.4 Conversation-scoped auth middleware applies — confirm no extra permission model needed.
-- [ ] 2.5 Write integration tests for both endpoints covering every state in the spec scenarios. Use `wiremock` / test-orchestrator stubs where the runtime needs to be driven.
-- [ ] 2.6 Run `make dump-openapi` to regenerate `openapi.json`. Commit the diff.
-- [ ] 2.7 Run `make lint-openapi` (Spectral) — must pass project rules (operation IDs, response shapes, error envelopes).
+- [x] 2.1 Create `crates/web-ui/src/api/turns.rs` with the read handler. Cancel handler deferred until runtime cancellation tokens land (section 1).
+- [x] 2.2 Register the GET status route in `crates/web-ui/src/api/mod.rs`. Cancel route deferred with section 1.
+- [x] 2.3 Add `TurnStatusResponse` type with the four-state enum (`running`/`completed`/`errored`/`unknown`), `last_event_at` (RFC 3339), `last_event_kind` (open string for forward-compat).
+- [x] 2.4 Conversation-scoped auth middleware applies — the route is mounted under the same `/api` sub-router as all other conversation endpoints. No extra permission model needed.
+- [x] 2.5 Read endpoint unit tests in `api::turns::tests` cover all four states (running / completed / errored / unknown), plus the cross-conversation guard. Cancel-endpoint tests deferred.
+- [x] 2.6 `make dump-openapi` regenerated `openapi.json`; path + components diff committed.
+- [ ] 2.7 `make lint-openapi` (Spectral) — runs in CI; local spectral binary not installed.
 
 ## 3. Flutter client — generate and integrate
 

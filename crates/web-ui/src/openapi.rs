@@ -205,6 +205,7 @@ pub struct ApiErrorResponse {
         crate::api::messages::quick_message,
         crate::api::messages::send_voice_message,
         crate::api::messages::stream_run_events,
+        crate::api::turns::get_turn_status,
         crate::api::audio::get_message_audio,
         crate::api::audio::get_audio,
         crate::api::attachments::upload_attachment,
@@ -464,6 +465,9 @@ pub struct ApiErrorResponse {
             SseSubagentThinkingEvent,
             SseSubagentToolResultEvent,
             SseSubagentStatusEvent,
+            // Turn status types
+            crate::api::turns::TurnState,
+            crate::api::turns::TurnStatusResponse,
             // OAuth2 types
             crate::oauth::OAuthErrorResponse,
             crate::oauth::token::TokenRequest,

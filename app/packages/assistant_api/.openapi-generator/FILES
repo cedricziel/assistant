@@ -151,6 +151,8 @@ doc/ToolUsageResponse.md
 doc/TraceDetailResponse.md
 doc/TraceSummaryResponse.md
 doc/TracesApi.md
+doc/TurnState.md
+doc/TurnStatusResponse.md
 doc/UnsubscribeRequest.md
 doc/UpdateAgentRequest.md
 doc/UpdateConversationRequest.md
@@ -345,6 +347,8 @@ lib/src/model/tool_call_summary.dart
 lib/src/model/tool_usage_response.dart
 lib/src/model/trace_detail_response.dart
 lib/src/model/trace_summary_response.dart
+lib/src/model/turn_state.dart
+lib/src/model/turn_status_response.dart
 lib/src/model/unsubscribe_request.dart
 lib/src/model/update_agent_request.dart
 lib/src/model/update_conversation_request.dart
@@ -373,4 +377,5 @@ lib/src/model/workflow_webhook_trigger_accepted.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/error_body_test.dart
+test/turn_state_test.dart
+test/turn_status_response_test.dart

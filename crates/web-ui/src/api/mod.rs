@@ -29,6 +29,7 @@ pub mod skills;
 pub mod spaces;
 pub mod templates;
 pub mod traces;
+pub mod turns;
 pub mod users;
 pub mod webhooks;
 pub mod workflows;
@@ -265,6 +266,10 @@ pub fn api_router() -> Router<ApiState> {
         .route(
             "/conversations/{id}/runs/{run_id}/events/stream",
             get(messages::stream_run_events),
+        )
+        .route(
+            "/conversations/{conversation_id}/turns/{turn_id}/status",
+            get(turns::get_turn_status),
         )
         .route("/messages/{id}/audio", get(audio::get_message_audio))
         .route("/audio/{id}", get(audio::get_audio))

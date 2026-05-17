@@ -140,6 +140,8 @@ import 'package:assistant_api/src/model/tool_call_summary.dart';
 import 'package:assistant_api/src/model/tool_usage_response.dart';
 import 'package:assistant_api/src/model/trace_detail_response.dart';
 import 'package:assistant_api/src/model/trace_summary_response.dart';
+import 'package:assistant_api/src/model/turn_state.dart';
+import 'package:assistant_api/src/model/turn_status_response.dart';
 import 'package:assistant_api/src/model/unsubscribe_request.dart';
 import 'package:assistant_api/src/model/update_agent_request.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
@@ -296,6 +298,8 @@ part 'serializers.g.dart';
   ToolUsageResponse,
   TraceDetailResponse,
   TraceSummaryResponse,
+  TurnState,
+  TurnStatusResponse,
   UnsubscribeRequest,
   UpdateAgentRequest,
   UpdateConversationRequest,
