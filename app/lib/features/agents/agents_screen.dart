@@ -1,10 +1,8 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../shared/platform/platform.dart';
+import '../../shared/platform/widgets.dart';
 import 'agents_provider.dart';
 
 /// Screen that lists all registered agents.
@@ -15,93 +13,51 @@ class AgentsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final agentsAsync = ref.watch(agentsProvider);
 
-    if (isAppleTouch) {
-      return Scaffold(
-        body: CustomScrollView(
-          slivers: [
-            CupertinoSliverNavigationBar(
-              largeTitle: const Text('Agents'),
-              trailing: CupertinoButton(
-                padding: EdgeInsets.zero,
-                child: const Icon(CupertinoIcons.refresh),
+    return AdaptiveScaffold(
+      body: CustomScrollView(
+        slivers: [
+          AdaptiveSliverNavBar(
+            title: 'Agents',
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
                 onPressed: () => ref.read(agentsProvider.notifier).refresh(),
               ),
+            ],
+          ),
+          agentsAsync.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator.adaptive()),
             ),
-            agentsAsync.when(
-              loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator.adaptive()),
+            error: (err, _) => SliverFillRemaining(
+              child: _ErrorView(
+                error: err.toString(),
+                onRetry: () => ref.read(agentsProvider.notifier).refresh(),
               ),
-              error: (err, _) => SliverFillRemaining(
-                child: _ErrorView(
-                  error: err.toString(),
-                  onRetry: () => ref.read(agentsProvider.notifier).refresh(),
-                ),
-              ),
-              data: (state) {
-                if (state.error != null) {
-                  return SliverFillRemaining(
-                    child: _ErrorView(
-                      error: state.error!,
-                      onRetry: () =>
-                          ref.read(agentsProvider.notifier).refresh(),
-                    ),
-                  );
-                }
-                if (state.agents.isEmpty) {
-                  return const SliverFillRemaining(child: _EmptyView());
-                }
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    if (index.isOdd) {
-                      return const Divider(height: 1, indent: 72);
-                    }
-                    return _AgentRow(agent: state.agents[index ~/ 2]);
-                  }, childCount: state.agents.length * 2 - 1),
+            ),
+            data: (state) {
+              if (state.error != null) {
+                return SliverFillRemaining(
+                  child: _ErrorView(
+                    error: state.error!,
+                    onRetry: () => ref.read(agentsProvider.notifier).refresh(),
+                  ),
                 );
-              },
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Agents'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.read(agentsProvider.notifier).refresh(),
+              }
+              if (state.agents.isEmpty) {
+                return const SliverFillRemaining(child: _EmptyView());
+              }
+              return SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  if (index.isOdd) {
+                    return const Divider(height: 1, indent: 72);
+                  }
+                  return _AgentRow(agent: state.agents[index ~/ 2]);
+                }, childCount: state.agents.length * 2 - 1),
+              );
+            },
           ),
         ],
-      ),
-      body: agentsAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator.adaptive()),
-        error: (err, _) => _ErrorView(
-          error: err.toString(),
-          onRetry: () => ref.read(agentsProvider.notifier).refresh(),
-        ),
-        data: (state) {
-          if (state.error != null) {
-            return _ErrorView(
-              error: state.error!,
-              onRetry: () => ref.read(agentsProvider.notifier).refresh(),
-            );
-          }
-          if (state.agents.isEmpty) {
-            return const _EmptyView();
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: state.agents.length,
-            separatorBuilder: (context, index) =>
-                const Divider(height: 1, indent: 72),
-            itemBuilder: (context, index) {
-              return _AgentRow(agent: state.agents[index]);
-            },
-          );
-        },
       ),
     );
   }
@@ -114,7 +70,7 @@ class _AgentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    return AdaptiveListTile(
       leading: CircleAvatar(
         backgroundColor: agent.isDefault
             ? Theme.of(context).colorScheme.primaryContainer
@@ -202,7 +158,7 @@ class _ErrorView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Retry')),
+          AdaptiveButton.filled(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
     );

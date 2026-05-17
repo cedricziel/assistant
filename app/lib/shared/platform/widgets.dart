@@ -92,9 +92,10 @@ export 'package:flutter/material.dart'
         TabBarView,
         TabController,
         DefaultTabController,
-        // Chip / Badge style widgets — no iOS equivalent.
+        // Chip / Badge / Avatar style widgets — no iOS equivalent.
         Chip,
         Badge,
+        CircleAvatar,
         // Form-aware list tile, occasionally used in settings.
         // (Settings will migrate to AdaptiveSwitchTile, but `CheckboxListTile`
         // is occasionally useful and has no Cupertino equivalent.)
