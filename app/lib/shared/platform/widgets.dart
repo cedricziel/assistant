@@ -64,6 +64,9 @@ export 'package:flutter/material.dart'
         // remain in the show list. Each new wrapper removes one entry.
         IconButton,
         OutlinedButton,
+        // VisualDensity tunes the tap-target compactness of Material
+        // buttons / tiles — Material-only concept.
+        VisualDensity,
         PopupMenuButton,
         PopupMenuItem,
         CheckedPopupMenuItem,

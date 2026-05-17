@@ -1,11 +1,9 @@
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
-import '../../shared/platform/platform.dart';
+import '../../shared/platform/widgets.dart';
 import '../personas/personas_provider.dart';
 import 'skills_provider.dart';
 
@@ -29,107 +27,56 @@ class SkillsScreen extends ConsumerWidget {
       child: const Icon(Icons.add),
     );
 
-    if (isAppleTouch) {
-      return Scaffold(
-        floatingActionButton: fab,
-        body: CustomScrollView(
-          slivers: [
-            CupertinoSliverNavigationBar(
-              largeTitle: Text('Skills — $activePersonaName'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.refresh),
-                    onPressed: () =>
-                        ref.read(skillsProvider.notifier).refresh(),
-                  ),
-                ],
+    return AdaptiveScaffold(
+      body: CustomScrollView(
+        slivers: [
+          AdaptiveSliverNavBar(
+            title: 'Skills — $activePersonaName',
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: () => ref.read(skillsProvider.notifier).refresh(),
               ),
-            ),
-            skillsAsync.when(
-              loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator.adaptive()),
-              ),
-              error: (err, _) => SliverFillRemaining(
-                child: _ErrorView(
-                  error: err.toString(),
-                  onRetry: () => ref.read(skillsProvider.notifier).refresh(),
-                ),
-              ),
-              data: (state) {
-                if (state.error != null) {
-                  return SliverFillRemaining(
-                    child: _ErrorView(
-                      error: state.error!,
-                      onRetry: () =>
-                          ref.read(skillsProvider.notifier).refresh(),
-                    ),
-                  );
-                }
-                if (state.skills.isEmpty) {
-                  return SliverFillRemaining(
-                    child: _EmptyView(personaName: activePersonaName),
-                  );
-                }
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    if (index.isOdd) {
-                      return const Divider(height: 1, indent: 72);
-                    }
-                    return _SkillRow(skill: state.skills[index ~/ 2]);
-                  }, childCount: state.skills.length * 2 - 1),
-                );
-              },
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Skills — $activePersonaName'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/chat'),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.read(skillsProvider.notifier).refresh(),
+            ],
           ),
+          skillsAsync.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator.adaptive()),
+            ),
+            error: (err, _) => SliverFillRemaining(
+              child: _ErrorView(
+                error: err.toString(),
+                onRetry: () => ref.read(skillsProvider.notifier).refresh(),
+              ),
+            ),
+            data: (state) {
+              if (state.error != null) {
+                return SliverFillRemaining(
+                  child: _ErrorView(
+                    error: state.error!,
+                    onRetry: () => ref.read(skillsProvider.notifier).refresh(),
+                  ),
+                );
+              }
+              if (state.skills.isEmpty) {
+                return SliverFillRemaining(
+                  child: _EmptyView(personaName: activePersonaName),
+                );
+              }
+              return SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  if (index.isOdd) {
+                    return const Divider(height: 1, indent: 72);
+                  }
+                  return _SkillRow(skill: state.skills[index ~/ 2]);
+                }, childCount: state.skills.length * 2 - 1),
+              );
+            },
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 80)),
         ],
       ),
       floatingActionButton: fab,
-      body: skillsAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator.adaptive()),
-        error: (err, _) => _ErrorView(
-          error: err.toString(),
-          onRetry: () => ref.read(skillsProvider.notifier).refresh(),
-        ),
-        data: (state) {
-          if (state.error != null) {
-            return _ErrorView(
-              error: state.error!,
-              onRetry: () => ref.read(skillsProvider.notifier).refresh(),
-            );
-          }
-          if (state.skills.isEmpty) {
-            return _EmptyView(personaName: activePersonaName);
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: state.skills.length,
-            separatorBuilder: (context, index) =>
-                const Divider(height: 1, indent: 72),
-            itemBuilder: (context, index) {
-              return _SkillRow(skill: state.skills[index]);
-            },
-          );
-        },
-      ),
     );
   }
 }
@@ -151,6 +98,16 @@ class _SkillRowState extends State<_SkillRow> {
   @override
   Widget build(BuildContext context) {
     final skill = widget.skill;
+    final colorScheme = Theme.of(context).colorScheme;
+    // Enabled uses the tertiary (success) token; disabled uses the dim
+    // surface/outline pair.
+    final swatch = skill.enabled
+        ? colorScheme.tertiary
+        : colorScheme.onSurfaceVariant;
+    final softFill = skill.enabled
+        ? colorScheme.tertiaryContainer
+        : colorScheme.surfaceContainerHighest;
+
     return InkWell(
       onTap: () => setState(() => _expanded = !_expanded),
       child: Padding(
@@ -159,15 +116,11 @@ class _SkillRowState extends State<_SkillRow> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CircleAvatar(
-              backgroundColor: skill.enabled
-                  ? Colors.green.shade100
-                  : Colors.grey.shade200,
+              backgroundColor: softFill,
               child: Icon(
                 skill.enabled ? Icons.extension : Icons.extension_off_outlined,
                 size: 20,
-                color: skill.enabled
-                    ? Colors.green.shade700
-                    : Colors.grey.shade500,
+                color: swatch,
               ),
             ),
             const SizedBox(width: 16),
@@ -192,14 +145,10 @@ class _SkillRowState extends State<_SkillRow> {
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color: skill.enabled
-                              ? Colors.green.shade50
-                              : Colors.grey.shade100,
+                          color: softFill,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: skill.enabled
-                                ? Colors.green.shade300
-                                : Colors.grey.shade400,
+                            color: swatch.withValues(alpha: 0.4),
                           ),
                         ),
                         child: Text(
@@ -207,9 +156,7 @@ class _SkillRowState extends State<_SkillRow> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: skill.enabled
-                                ? Colors.green.shade700
-                                : Colors.grey.shade600,
+                            color: swatch,
                           ),
                         ),
                       ),
@@ -235,7 +182,7 @@ class _SkillRowState extends State<_SkillRow> {
                         'Tap to expand',
                         style: TextStyle(
                           fontSize: 11,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          color: colorScheme.onSurfaceVariant,
                           fontStyle: FontStyle.italic,
                         ),
                       ),
@@ -314,7 +261,7 @@ class _ErrorView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Retry')),
+          AdaptiveButton.filled(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
     );
