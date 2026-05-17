@@ -102,7 +102,9 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.text('Skills — Ada'), findsOneWidget);
+      // SliverAppBar.large renders both a collapsed and an expanded
+      // title widget, so at least one occurrence is enough.
+      expect(find.text('Skills — Ada'), findsAtLeastNWidgets(1));
     });
 
     testWidgets('shows error view when state has error', (tester) async {
