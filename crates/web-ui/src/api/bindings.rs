@@ -8,6 +8,7 @@
 //! | GET    | `/api/orgs/{org_id}/spaces/{space_id}/bindings`          | List bindings     |
 //! | DELETE | `/api/orgs/{org_id}/spaces/{space_id}/bindings/{id}`     | Delete binding    |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -17,7 +18,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_core::auth::AuthContext;
@@ -132,7 +132,7 @@ pub async fn create_binding(
         }
     }
 
-    let now = Utc::now();
+    let now = SystemClock.now();
     let binding = PersonaBinding {
         id: format!("bind_{}", uuid::Uuid::new_v4()),
         space_id,

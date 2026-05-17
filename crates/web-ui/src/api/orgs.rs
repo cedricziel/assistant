@@ -9,6 +9,7 @@
 //! | GET    | `/api/orgs/{id}`  | Get org detail            |
 //! | PATCH  | `/api/orgs/{id}`  | Update org settings       |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -18,7 +19,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_core::OrgStore;
@@ -147,7 +147,7 @@ pub async fn create_org(
         return json_error(StatusCode::BAD_REQUEST, "name and slug are required");
     }
 
-    let now = Utc::now();
+    let now = SystemClock.now();
     let org = Organization {
         id: OrgId::from(format!("org_{}", uuid::Uuid::new_v4())),
         name: body.name,
@@ -268,7 +268,7 @@ pub async fn update_org(
     if let Some(auth_mode) = body.auth_mode {
         org.auth_mode = auth_mode;
     }
-    org.updated_at = Utc::now();
+    org.updated_at = SystemClock.now();
 
     if let Err(e) = store.update_org(&org).await {
         tracing::error!("failed to update org: {e}");
@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(detail.slug, "acme");
 
         // Seed the caller's own org so we can GET it.
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         let own_org = Organization {
             id: OrgId::from("org_1"),
             name: "Own Org".into(),
@@ -449,7 +449,7 @@ mod tests {
         let state = setup_state().await;
 
         // Seed an org.
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         let org = Organization {
             id: OrgId::from("org_1"),
             name: "Old Name".into(),

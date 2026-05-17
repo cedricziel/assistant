@@ -9,6 +9,7 @@
 //! | PATCH  | `/api/orgs/{org_id}/spaces/{space_id}/members/{user_id}` | Change role       |
 //! | DELETE | `/api/orgs/{org_id}/spaces/{space_id}/members/{user_id}` | Remove member     |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -18,7 +19,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_core::MembershipStore;
@@ -208,7 +208,7 @@ pub async fn add_member(
         );
     }
 
-    let now = Utc::now();
+    let now = SystemClock.now();
     let membership = SpaceMembership {
         user_id: UserId::from(body.user_id),
         space_id: space_id.clone(),
@@ -415,7 +415,7 @@ mod tests {
 
     async fn setup_state() -> MembersApiState {
         let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         // Seed org, space, and users so FK constraints are satisfied.
         let org = Organization {
             id: OrgId::from("org_1"),
@@ -536,7 +536,7 @@ mod tests {
             user_id: UserId::from("bob"),
             space_id: SpaceId::from("eng"),
             role: Role::Viewer,
-            created_at: Utc::now(),
+            created_at: chrono::Utc::now(),
         };
         state
             .org_storage
@@ -580,7 +580,7 @@ mod tests {
             user_id: UserId::from("bob"),
             space_id: SpaceId::from("eng"),
             role: Role::Member,
-            created_at: Utc::now(),
+            created_at: chrono::Utc::now(),
         };
         state
             .org_storage

@@ -8,6 +8,7 @@
 //! | POST   | `/api/orgs/{org_id}/spaces/{space_id}/personas/from-template`         | Create persona from tpl   |
 //! | GET    | `/api/users/me/onboarding-status`                                     | Onboarding status         |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -17,7 +18,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_core::auth::AuthContext;
@@ -183,7 +183,7 @@ pub async fn create_from_template(
 
     let persona_name = body.name.unwrap_or_else(|| template.name.clone());
     let persona_id = format!("persona_{}", uuid::Uuid::new_v4());
-    let now = Utc::now();
+    let now = SystemClock.now();
 
     // Insert into the personas table in the main assistant.db.
     let result = sqlx::query(
@@ -322,7 +322,7 @@ mod tests {
 
         // Publish a template to the catalog.
         let catalog = state.org_storage.catalog_item_store();
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         catalog
             .create_item(&assistant_core::store::CatalogItem {
                 id: "tpl_1".into(),
@@ -405,7 +405,7 @@ mod tests {
                 resource_type: CatalogResourceType::Template,
                 name: "evil-chatbot".into(),
                 description: "".into(),
-                created_at: Utc::now(),
+                created_at: chrono::Utc::now(),
             })
             .await
             .unwrap();

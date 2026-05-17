@@ -5,6 +5,7 @@
 //! reconnection.  Inbound events are yielded as [`ChannelMessage`]s via a
 //! `futures::Stream`.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
@@ -20,7 +21,6 @@ use assistant_core::{
 use assistant_storage::StorageLayer;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;
-use chrono::Utc;
 use futures::SinkExt;
 use futures::stream::Stream;
 use lru::LruCache;
@@ -705,7 +705,7 @@ fn parse_event(
         },
         content: ChannelContent::Text(text),
         thread_id: Some(thread_ts),
-        timestamp: Utc::now(),
+        timestamp: SystemClock.now(),
         metadata,
     })
 }
@@ -975,7 +975,6 @@ mod tests {
 
     fn make_msg(channel: &str, ts: &str) -> ChannelMessage {
         use assistant_core::{ChannelContent, types::conversation::ChannelType};
-        use chrono::Utc;
         let mut metadata = std::collections::HashMap::new();
         metadata.insert(
             "channel_id".into(),
@@ -990,7 +989,7 @@ mod tests {
             },
             content: ChannelContent::Text("hello".into()),
             thread_id: Some(ts.into()),
-            timestamp: Utc::now(),
+            timestamp: chrono::Utc::now(),
             metadata,
         }
     }

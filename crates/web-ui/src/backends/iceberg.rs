@@ -8,6 +8,7 @@
 //! This works well for single-user deployments; for high-volume setups a
 //! persistent catalog (e.g. Nessie) and pushdown predicates are recommended.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -202,7 +203,7 @@ impl TraceBackend for IcebergTraceBackend {
         for batch in &batches {
             for i in 0..batch.num_rows() {
                 let trace_id = str_col_req(batch, "trace_id", i).to_string();
-                let start = ts_col(batch, "start_time", i).unwrap_or_else(Utc::now);
+                let start = ts_col(batch, "start_time", i).unwrap_or_else(|| SystemClock.now());
                 let end = ts_col(batch, "end_time", i).unwrap_or(start);
 
                 // Apply time filters.
@@ -346,7 +347,7 @@ impl TraceBackend for IcebergTraceBackend {
                     continue;
                 }
 
-                let start = ts_col(batch, "start_time", i).unwrap_or_else(Utc::now);
+                let start = ts_col(batch, "start_time", i).unwrap_or_else(|| SystemClock.now());
                 let end = ts_col(batch, "end_time", i).unwrap_or(start);
                 let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
                 let attributes: Value =
@@ -511,7 +512,7 @@ impl LogBackend for IcebergLogBackend {
                 if str_col_req(batch, "id", i) != id {
                     continue;
                 }
-                let ts = ts_col(batch, "timestamp", i).unwrap_or_else(Utc::now);
+                let ts = ts_col(batch, "timestamp", i).unwrap_or_else(|| SystemClock.now());
                 let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
                 let attributes: Value =
                     serde_json::from_str(attrs_str).unwrap_or(Value::Object(Default::default()));
@@ -721,7 +722,7 @@ struct MetricRow {
 
 /// Parse all metric rows from batches, filtering by window and agent.
 fn parse_metric_rows(batches: &[RecordBatch], window_hours: i64, agent_id: &str) -> Vec<MetricRow> {
-    let cutoff = Utc::now() - chrono::Duration::hours(window_hours);
+    let cutoff = SystemClock.now() - chrono::Duration::hours(window_hours);
     let mut rows = Vec::new();
 
     for batch in batches {

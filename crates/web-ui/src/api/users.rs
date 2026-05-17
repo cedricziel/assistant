@@ -10,6 +10,7 @@
 //! | PATCH  | `/api/orgs/{org_id}/users/{id}`  | Update user     |
 //! | DELETE | `/api/orgs/{org_id}/users/{id}`  | Delete user     |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -19,7 +20,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_core::UserStore;
@@ -192,7 +192,7 @@ pub async fn create_user(
         _ => String::new(),
     };
 
-    let now = Utc::now();
+    let now = SystemClock.now();
     let user = User {
         id: UserId::from(format!("usr_{}", uuid::Uuid::new_v4())),
         org_id,
@@ -328,7 +328,7 @@ pub async fn update_user(
     if let Some(email) = body.email {
         user.email = email;
     }
-    user.updated_at = Utc::now();
+    user.updated_at = SystemClock.now();
 
     if let Err(e) = store.update_user(&user).await {
         tracing::error!("failed to update user: {e}");
@@ -441,8 +441,8 @@ mod tests {
             name: "Test Org".into(),
             slug: "test".into(),
             auth_mode: "password".into(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         };
         org_storage.org_store().create_org(&org).await.unwrap();
         UsersApiState { org_storage }
@@ -520,7 +520,7 @@ mod tests {
         let state = setup_state().await;
 
         // Seed a user.
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         let user = User {
             id: UserId::from("usr_existing"),
             org_id: OrgId::from("org_1"),
@@ -566,7 +566,7 @@ mod tests {
         let state = setup_state().await;
 
         // Seed a user.
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         let user = User {
             id: UserId::from("usr_del"),
             org_id: OrgId::from("org_1"),

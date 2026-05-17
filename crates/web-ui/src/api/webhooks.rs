@@ -13,6 +13,7 @@
 //! | POST   | `/api/webhooks/{id}/rotate-secret`| Rotate signing secret         |
 //! | POST   | `/api/webhooks/{id}/verify`       | Send a signed verification    |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -497,7 +498,7 @@ pub async fn verify_webhook(
     let payload = serde_json::json!({
         "type": "webhook.verify",
         "webhook_id": wh.id,
-        "timestamp": Utc::now().to_rfc3339(),
+        "timestamp": SystemClock.now().to_rfc3339(),
     });
     let body_str = serde_json::to_string(&payload).unwrap_or_default();
     let signature = compute_signature(&wh.secret, &body_str);

@@ -8,6 +8,7 @@
 //! | POST   | `/api/users/me/api-keys`      | Create a new API key   |
 //! | DELETE | `/api/users/me/api-keys/{id}` | Revoke an API key      |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -175,7 +176,7 @@ pub async fn create_api_key(
         space_roles: ctx.space_roles.clone(),
         scopes: scopes.clone(),
         expires_at: None,
-        created_at: chrono::Utc::now(),
+        created_at: SystemClock.now(),
     };
 
     if let Err(e) = state.api_key_store.store_key(record).await {

@@ -11,6 +11,7 @@
 //! See `openspec/changes/self-service-account/specs/self-service-account/spec.md`
 //! for the full requirement and scenario list.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -20,7 +21,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_auth::oauth2::server::RefreshTokenStore;
@@ -255,7 +255,7 @@ pub async fn update_current_user(
     }
 
     if changed {
-        user.updated_at = Utc::now();
+        user.updated_at = SystemClock.now();
         if let Err(e) = user_store.update_user(&user).await {
             tracing::error!("failed to update user: {e}");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "failed to update user");
@@ -327,7 +327,7 @@ pub async fn change_password(
     };
 
     user.password_hash = new_hash;
-    user.updated_at = Utc::now();
+    user.updated_at = SystemClock.now();
     if let Err(e) = user_store.update_user(&user).await {
         tracing::error!("failed to persist new password: {e}");
         return err(
@@ -400,14 +400,14 @@ mod tests {
             name: "Test Org".into(),
             slug: "test".into(),
             auth_mode: auth_mode.into(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         };
         layer.org_store().create_org(&org).await.unwrap();
     }
 
     async fn seed_user(layer: &OrgStorageLayer, id: &str, email: &str, password: &str) {
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         let hash = if password.is_empty() {
             String::new()
         } else {
@@ -428,7 +428,7 @@ mod tests {
     }
 
     async fn seed_oidc_user(layer: &OrgStorageLayer, id: &str, email: &str, issuer: &str) {
-        let now = Utc::now();
+        let now = chrono::Utc::now();
         let user = User {
             id: UserId::from(id),
             org_id: OrgId::from(ORG_ID),
@@ -756,7 +756,7 @@ mod tests {
             user_id: user_id.into(),
             client_id: "test".into(),
             scopes: vec![],
-            expires_at: Utc::now() + chrono::Duration::days(30),
+            expires_at: chrono::Utc::now() + chrono::Duration::days(30),
             consumed: false,
         }
     }

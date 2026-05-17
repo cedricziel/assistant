@@ -8,6 +8,7 @@
 //! | GET    | `/api/orgs/{org_id}/spaces/{space_id}/interfaces`          | List instances         |
 //! | DELETE | `/api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}`     | Delete instance        |
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
 
 use axum::{
@@ -17,7 +18,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use assistant_core::auth::AuthContext;
@@ -127,7 +127,7 @@ pub async fn create_interface(
         space_id: space_id_typed,
         interface_type: body.interface_type,
         config: config_str,
-        created_at: Utc::now(),
+        created_at: SystemClock.now(),
     };
 
     let store = state.org_storage.interface_instance_store();

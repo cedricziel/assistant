@@ -6,6 +6,7 @@
 //!
 //! HMAC-SHA256 signing logic is unchanged — it lives in `signing.rs`.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -24,7 +25,6 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
-use chrono::Utc;
 use futures::stream::Stream;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
@@ -450,7 +450,7 @@ async fn webhook_handler(
         },
         content: ChannelContent::Text(text),
         thread_id: Some(message_id),
-        timestamp: Utc::now(),
+        timestamp: SystemClock.now(),
         metadata,
     };
 

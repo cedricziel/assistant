@@ -8,6 +8,7 @@
 //! Auto-reconnects with exponential backoff on disconnect (same pattern as
 //! [`SlackAdapter`][crate]).
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -20,7 +21,6 @@ use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_au
 use async_trait::async_trait;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64_STANDARD;
-use chrono::Utc;
 use futures::stream::Stream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
@@ -527,7 +527,7 @@ fn envelope_to_channel_message(
         },
         content: ChannelContent::Text(text),
         thread_id: env.group_id,
-        timestamp: Utc::now(),
+        timestamp: SystemClock.now(),
         metadata,
     })
 }
@@ -744,7 +744,7 @@ mod tests {
             },
             content: ChannelContent::Text("hi".to_string()),
             thread_id: Some("groupABC".to_string()),
-            timestamp: Utc::now(),
+            timestamp: chrono::Utc::now(),
             metadata,
         };
         assert_eq!(adapter.conversation_key(&msg), "groupABC");
@@ -868,7 +868,7 @@ mod tests {
             },
             content: ChannelContent::Text("hi".to_string()),
             thread_id: None,
-            timestamp: Utc::now(),
+            timestamp: chrono::Utc::now(),
             metadata: HashMap::new(),
         };
         assert_eq!(adapter.conversation_key(&msg), "+19995550001");

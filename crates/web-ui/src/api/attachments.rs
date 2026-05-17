@@ -1,6 +1,7 @@
 //! Image attachment endpoints: upload (`POST /api/conversations/{id}/attachments`)
 //! and serve (`GET /api/attachments/{id}`) with on-demand resizing.
 
+use assistant_core::clock::{Clock, SystemClock};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Multipart, Path, State};
@@ -156,7 +157,7 @@ pub async fn upload_attachment(
         filename,
         mime_type,
         size_bytes: file_bytes.len() as u64,
-        created_at: Utc::now(),
+        created_at: SystemClock.now(),
     };
 
     if let Err(e) = state.attachment_store.store(&meta, &file_bytes).await {

@@ -1,5 +1,6 @@
 //! Shared helpers used across multiple interface adapters.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::time::Duration;
 
 /// Minimum reconnect delay.
@@ -30,11 +31,10 @@ pub async fn sleep_backoff(
 
 /// Simple LCG-based float in `[0, 1)` without pulling in `rand`.
 pub fn rand_jitter() -> f64 {
-    use std::time::SystemTime;
-    let seed = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as u64;
+    // Use wall-clock subsec-nanos as the seed source. This is sufficient
+    // randomness for jitter; security-sensitive randomness should use
+    // `getrandom` instead.
+    let seed = SystemClock.now().timestamp_subsec_nanos() as u64;
     let v = seed
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);

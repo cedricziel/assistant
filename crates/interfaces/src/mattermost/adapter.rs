@@ -4,6 +4,7 @@
 //! challenge, and yields inbound `posted` events as [`ChannelMessage`]s.
 //! Automatic exponential-backoff reconnection is built in.
 
+use assistant_core::clock::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,7 +16,6 @@ use assistant_core::{
 };
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;
-use chrono::Utc;
 use futures::SinkExt;
 use futures::stream::Stream;
 use tokio::sync::{Mutex, mpsc};
@@ -499,7 +499,7 @@ fn parse_posted_event(
         },
         content: ChannelContent::Text(text),
         thread_id: Some(thread_root),
-        timestamp: Utc::now(),
+        timestamp: SystemClock.now(),
         metadata,
     })
 }
