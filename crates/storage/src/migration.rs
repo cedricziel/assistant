@@ -335,6 +335,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    use crate::conversations::ConversationStore;
     use assistant_core::store::{MembershipStore, OrgStore, SpaceStore, UserStore};
 
     // -- is_legacy_layout tests ----------------------------------------------

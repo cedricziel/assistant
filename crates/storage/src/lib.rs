@@ -95,7 +95,8 @@ pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
 pub use slack_threads::SlackActiveThreadStore;
 pub use space_store::{SqliteMembershipStore, SqliteSpaceStore};
 pub use traces::{
-    RecordedSpan, SkillStatsProvider, TraceFilter, TraceStats, TraceStore, TraceSummary,
+    InMemoryTraceStore, RecordedSpan, SkillStatsProvider, SqliteTraceStore, TraceFilter,
+    TraceStats, TraceStore, TraceSummary,
 };
 pub use user_store::SqliteUserStore;
 pub use webhooks::{WebhookRecord, WebhookStore};
@@ -154,9 +155,9 @@ impl StorageLayer {
         Ok(Self { pool })
     }
 
-    /// Convenience: build a `TraceStore` backed by this pool.
-    pub fn trace_store(&self) -> TraceStore {
-        TraceStore::new(self.pool.clone())
+    /// Convenience: build a `SqliteTraceStore` backed by this pool.
+    pub fn trace_store(&self) -> SqliteTraceStore {
+        SqliteTraceStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`ConversationEventStore`] backed by this pool.
