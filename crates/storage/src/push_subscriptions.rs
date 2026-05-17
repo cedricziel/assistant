@@ -4,7 +4,10 @@
 //! are upserted by endpoint URL (unique) and deleted automatically when the
 //! push service returns `410 Gone`.
 
+use std::sync::Arc;
+
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
@@ -22,16 +25,27 @@ pub struct PushSubscription {
 #[derive(Clone)]
 pub struct PushSubscriptionStore {
     pool: SqlitePool,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl PushSubscriptionStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Insert or update a subscription by `endpoint` (unique key).
     pub async fn upsert(&self, endpoint: &str, p256dh: &str, auth: &str) -> Result<()> {
-        let now = Utc::now();
+        let now = self.clock.now();
         sqlx::query(
             "INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at) \
              VALUES (?1, ?2, ?3, ?4) \

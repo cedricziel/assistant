@@ -191,13 +191,20 @@ where
                 // Compute delay with optional jitter.
                 let actual_delay = if config.jitter {
                     // Simple jitter: random value between 50% and 100% of delay.
-                    let jitter_factor = 0.5
-                        + 0.5
-                            * (std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .subsec_nanos() as f64
-                                / u32::MAX as f64);
+                    // Uses getrandom for proper randomness instead of
+                    // SystemTime::now() (which is banned in production code by
+                    // the workspace clock lint and was an abuse of the system
+                    // clock for entropy anyway).
+                    let mut buf = [0u8; 4];
+                    let unit = if getrandom::fill(&mut buf).is_ok() {
+                        u32::from_le_bytes(buf) as f64 / u32::MAX as f64
+                    } else {
+                        // Random fill should be infallible on supported
+                        // platforms; if it isn't, fall back to mid-jitter
+                        // (75% of base delay).
+                        0.5
+                    };
+                    let jitter_factor = 0.5 + 0.5 * unit;
                     delay_ms * jitter_factor
                 } else {
                     delay_ms

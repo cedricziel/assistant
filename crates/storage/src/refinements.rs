@@ -1,6 +1,9 @@
 //! Skill refinement proposals — the `/review` workflow.
 
+use std::sync::Arc;
+
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -62,11 +65,22 @@ fn parse_status(s: &str) -> RefinementStatus {
 /// SQLite-backed store for skill refinement proposals.
 pub struct RefinementsStore {
     pool: SqlitePool,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl RefinementsStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Insert a new pending refinement proposal.
@@ -78,7 +92,7 @@ impl RefinementsStore {
     ) -> Result<Uuid> {
         let id = Uuid::new_v4();
         let id_str = id.to_string();
-        let now = Utc::now();
+        let now = self.clock.now();
 
         sqlx::query(
             "INSERT INTO skill_refinements \
@@ -132,7 +146,7 @@ impl RefinementsStore {
     pub async fn review(&self, id: Uuid, accepted: bool, note: Option<&str>) -> Result<()> {
         let status = if accepted { "accepted" } else { "rejected" };
         let id_str = id.to_string();
-        let now = Utc::now();
+        let now = self.clock.now();
 
         sqlx::query(
             "UPDATE skill_refinements \
@@ -159,7 +173,7 @@ impl RefinementsStore {
     ) -> Result<Uuid> {
         let id = Uuid::new_v4();
         let id_str = id.to_string();
-        let now = Utc::now();
+        let now = self.clock.now();
 
         sqlx::query(
             "INSERT INTO skill_refinements \
@@ -181,7 +195,7 @@ impl RefinementsStore {
     /// Update the status of a refinement (used by revert/confirm logic).
     pub async fn set_status(&self, id: Uuid, status: &RefinementStatus) -> Result<()> {
         let id_str = id.to_string();
-        let now = Utc::now();
+        let now = self.clock.now();
 
         sqlx::query(
             "UPDATE skill_refinements \

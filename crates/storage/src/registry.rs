@@ -1,8 +1,8 @@
 //! Skill registry — maps skill names to `SkillDef` and keeps the `skills` SQLite table in sync.
 
 use anyhow::{Context, Result};
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_skills::{SkillDef, SkillSource, parse_skill_content};
-use chrono::Utc;
 use sqlx::SqlitePool;
 use std::{collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::RwLock;
@@ -48,6 +48,8 @@ pub struct SkillRegistry {
     pool: SqlitePool,
     /// Fast in-process cache; all mutations update both this map and the DB.
     skills: Arc<RwLock<HashMap<String, SkillDef>>>,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl SkillRegistry {
@@ -56,9 +58,16 @@ impl SkillRegistry {
         let registry = Self {
             pool,
             skills: Arc::new(RwLock::new(HashMap::new())),
+            clock: Arc::new(SystemClock),
         };
         registry.load_from_db().await?;
         Ok(registry)
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     // -----------------------------------------------------------------------
@@ -441,7 +450,7 @@ impl SkillRegistry {
         let tier = "knowledge";
         let source_type = skill.source.to_string();
         let metadata_json = serde_json::to_string(&skill.metadata)?;
-        let now = Utc::now();
+        let now = self.clock.now();
 
         sqlx::query(
             "INSERT INTO skills \

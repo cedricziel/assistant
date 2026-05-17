@@ -8,9 +8,11 @@
 //! `conversation_id`, `batch_id`) and dynamic WHERE-clause construction
 //! in [`claim_filtered`](MessageBus::claim_filtered).
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
@@ -30,11 +32,22 @@ const SELECT_COLS: &str = "\
 /// SQLite-backed message bus.
 pub struct SqliteMessageBus {
     pool: SqlitePool,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl SqliteMessageBus {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -44,7 +57,7 @@ impl MessageBus for SqliteMessageBus {
         let id = Uuid::new_v4();
         let id_str = id.to_string();
         let payload_str = serde_json::to_string(&req.payload)?;
-        let now = Utc::now();
+        let now = self.clock.now();
         let conv_str = req.conversation_id.map(|c| c.to_string());
         let corr_str = req.correlation_id.map(|c| c.to_string());
         let cause_str = req.causation_id.map(|c| c.to_string());
@@ -88,7 +101,7 @@ impl MessageBus for SqliteMessageBus {
         worker_id: &str,
         filter: &ClaimFilter,
     ) -> Result<Option<BusMessage>> {
-        let now = Utc::now();
+        let now = self.clock.now();
 
         // Build the inner SELECT with optional filter predicates.
         let mut where_clauses = vec!["topic = ?3".to_string(), "status = 'pending'".to_string()];
@@ -228,7 +241,7 @@ impl MessageBus for SqliteMessageBus {
     }
 
     async fn reap_stale(&self, timeout: Duration) -> Result<u64> {
-        let cutoff = Utc::now() - chrono::Duration::from_std(timeout)?;
+        let cutoff = self.clock.now() - chrono::Duration::from_std(timeout)?;
 
         let result = sqlx::query(
             "UPDATE bus_messages \

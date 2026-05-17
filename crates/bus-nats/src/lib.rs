@@ -27,12 +27,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use async_nats::jetstream::consumer::Consumer;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::stream::RetentionPolicy;
 use async_nats::jetstream::{self, AckKind};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Utc;
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::RwLock;
@@ -100,6 +102,10 @@ pub struct NatsMessageBus {
     stream: jetstream::stream::Stream,
     /// In-flight messages awaiting ack/nack/fail, keyed by our Bus-Message-Id.
     inflight: Arc<RwLock<HashMap<Uuid, async_nats::jetstream::Message>>>,
+    /// Clock for `published_at` / `claimed_at` timestamps. Default
+    /// `Arc::new(SystemClock)`; tests inject a `FakeClock` via
+    /// [`Self::with_clock`].
+    clock: Arc<dyn Clock>,
 }
 
 impl NatsMessageBus {
@@ -141,6 +147,7 @@ impl NatsMessageBus {
             js,
             stream,
             inflight: Arc::new(RwLock::new(HashMap::new())),
+            clock: Arc::new(SystemClock),
         })
     }
 
@@ -151,6 +158,13 @@ impl NatsMessageBus {
             ..Default::default()
         };
         Self::connect(&config).await
+    }
+
+    /// Inject a [`Clock`] implementation. Tests pass `Arc::new(FakeClock::new(...))`
+    /// to assert publish / claim timestamps against virtual time.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Build [`async_nats::ConnectOptions`] from the config, resolving env
@@ -304,7 +318,7 @@ where
 impl MessageBus for NatsMessageBus {
     async fn publish(&self, req: PublishRequest) -> Result<Uuid> {
         let id = Uuid::new_v4();
-        let now = Utc::now();
+        let now = self.clock.now();
         let subject = format!("bus.{}", req.topic);
 
         // -- build headers --
@@ -400,7 +414,7 @@ impl MessageBus for NatsMessageBus {
                 continue;
             }
 
-            let bus_msg = parse_nats_message(&msg, worker_id)?;
+            let bus_msg = parse_nats_message(&msg, worker_id, self.clock.as_ref())?;
             debug!(
                 id = %bus_msg.id,
                 topic = %topic,
@@ -499,7 +513,7 @@ impl MessageBus for NatsMessageBus {
                 let inflight = self.inflight.read().await;
                 let result: Vec<BusMessage> = inflight
                     .values()
-                    .filter_map(|msg| parse_nats_message(msg, "list").ok())
+                    .filter_map(|msg| parse_nats_message(msg, "list", self.clock.as_ref()).ok())
                     .filter(|m| m.topic == topic)
                     .collect();
                 debug!(
@@ -597,7 +611,11 @@ fn header_str<'a>(h: &'a async_nats::HeaderMap, key: &str) -> Option<&'a str> {
 }
 
 /// Reconstruct a [`BusMessage`] from a NATS JetStream message.
-fn parse_nats_message(msg: &async_nats::jetstream::Message, worker_id: &str) -> Result<BusMessage> {
+fn parse_nats_message(
+    msg: &async_nats::jetstream::Message,
+    worker_id: &str,
+    clock: &dyn Clock,
+) -> Result<BusMessage> {
     let headers = msg
         .headers
         .as_ref()
@@ -616,7 +634,7 @@ fn parse_nats_message(msg: &async_nats::jetstream::Message, worker_id: &str) -> 
     let created_at = header_str(headers, H_CREATED_AT)
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(Utc::now);
+        .unwrap_or_else(|| clock.now());
 
     let conversation_id =
         header_str(headers, H_CONVERSATION_ID).and_then(|s| Uuid::parse_str(s).ok());
@@ -648,7 +666,7 @@ fn parse_nats_message(msg: &async_nats::jetstream::Message, worker_id: &str) -> 
         causation_id,
         batch_id,
         created_at,
-        claimed_at: Some(Utc::now()),
+        claimed_at: Some(clock.now()),
         claimed_by: Some(worker_id.to_string()),
         delivery_count,
     })

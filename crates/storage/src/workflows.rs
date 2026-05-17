@@ -1,8 +1,10 @@
 //! Workflow persistence for graph-style trigger/action automation.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use cron::Schedule;
 use serde::{Deserialize, Serialize};
@@ -153,6 +155,8 @@ pub struct WorkflowRunStepRecord {
 pub struct WorkflowStore {
     pool: SqlitePool,
     agent_id: String,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl WorkflowStore {
@@ -160,6 +164,7 @@ impl WorkflowStore {
         Self {
             pool,
             agent_id: "default".to_string(),
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -167,7 +172,15 @@ impl WorkflowStore {
         Self {
             pool,
             agent_id: agent_id.into(),
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// Inject a [`Clock`] implementation. Tests pass `Arc::new(FakeClock::new(...))`
+    /// to assert row-timestamp behavior against virtual time.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Insert a new workflow.
@@ -181,7 +194,7 @@ impl WorkflowStore {
         validate_workflow_graph(graph)?;
 
         let id = Uuid::new_v4();
-        let now = Utc::now();
+        let now = self.clock.now();
         let graph_json = serde_json::to_string(graph)?;
 
         sqlx::query(
@@ -213,7 +226,7 @@ impl WorkflowStore {
             return Ok(existing);
         }
 
-        let now = Utc::now();
+        let now = self.clock.now();
         let token = Uuid::new_v4().to_string();
         sqlx::query(
             "INSERT INTO workflow_webhook_endpoints
@@ -253,7 +266,7 @@ impl WorkflowStore {
         &self,
         workflow_id: Uuid,
     ) -> Result<Option<WorkflowWebhookEndpoint>> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let token = Uuid::new_v4().to_string();
         let result = sqlx::query(
             "UPDATE workflow_webhook_endpoints
@@ -323,7 +336,7 @@ impl WorkflowStore {
         .bind(&workflow.agent_id)
         .bind(trigger.as_str())
         .bind(payload_json)
-        .bind(Utc::now())
+        .bind(self.clock.now())
         .execute(&self.pool)
         .await?;
 
@@ -422,7 +435,7 @@ impl WorkflowStore {
         .bind(node_kind)
         .bind(note)
         .bind(output_json)
-        .bind(Utc::now())
+        .bind(self.clock.now())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -441,7 +454,7 @@ impl WorkflowStore {
              WHERE id = ?4 AND finished_at IS NULL",
         )
         .bind(status)
-        .bind(Utc::now())
+        .bind(self.clock.now())
         .bind(error_message)
         .bind(run_id.to_string())
         .execute(&self.pool)
@@ -508,7 +521,7 @@ impl WorkflowStore {
     ) -> Result<bool> {
         validate_workflow_graph(graph)?;
 
-        let now = Utc::now();
+        let now = self.clock.now();
         let graph_json = serde_json::to_string(graph)?;
         let result = sqlx::query(
             "UPDATE workflows
@@ -538,7 +551,7 @@ impl WorkflowStore {
 
     /// Toggle active status.
     pub async fn set_active(&self, id: Uuid, active: bool) -> Result<bool> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE workflows
              SET active = ?1, updated_at = ?2
@@ -555,7 +568,7 @@ impl WorkflowStore {
 
     /// Atomically toggle active status and return the new state.
     pub async fn toggle_active(&self, id: Uuid) -> Result<Option<bool>> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE workflows
              SET active = CASE WHEN active = 0 THEN 1 ELSE 0 END,
