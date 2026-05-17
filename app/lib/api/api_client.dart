@@ -468,8 +468,20 @@ class ApiClient {
 /// Wraps an SSE byte stream with a watchdog timer that fires a
 /// [TimeoutException] if no data arrives within [timeout].
 ///
-/// The server sends keepalive comments every 30 seconds. A 90-second default
-/// tolerates 2 missed keepalives before declaring the connection stale.
+/// The Axum backend applies `KeepAlive::default()` to every `Sse` response
+/// (see `crates/web-ui/src/api/mod.rs::sse_response`), which emits a `:`
+/// comment line every 15 seconds during periods of byte silence. The
+/// watchdog resets on **any** byte arriving on the underlying stream —
+/// including those comment bytes — so a healthy slow tool call that emits
+/// no semantic events for minutes does NOT trip this timeout.
+///
+/// A 90-second default tolerates ~6 missed keep-alive intervals before
+/// declaring the connection genuinely stale.
+///
+/// Contract lock: this reset-on-any-byte behaviour is covered by
+/// `app/test/unit/api/heartbeat_timeout_test.dart` and the end-to-end
+/// keep-alive wire contract is locked by
+/// `crates/web-ui/tests/sse_keepalive_contract.rs`.
 Stream<List<int>> withHeartbeatTimeout(
   Stream<List<int>> source, {
   Duration timeout = const Duration(seconds: 90),

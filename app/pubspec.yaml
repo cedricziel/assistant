@@ -56,12 +56,13 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.4
   dart_pre_commit: ^6.1.2
   image: ^4.8.0
+  fake_async: ^1.3.3
 flutter_launcher_icons:
   web:
     generate: true
     image_path: icon_source.png
-    background_color: '#080C1A'
-    theme_color: '#080C1A'
+    background_color: "#080C1A"
+    theme_color: "#080C1A"
 flutter:
   uses-material-design: true
   assets:
