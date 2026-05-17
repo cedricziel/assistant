@@ -7,7 +7,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use chrono::{Duration, Utc};
+use chrono::Duration;
+#[cfg(test)]
+use chrono::Utc;
+
+use assistant_core::clock::{Clock, SystemClock};
 use tokio::sync::RwLock;
 
 use super::pkce;
@@ -97,10 +101,13 @@ pub struct OAuth2Server {
     code_ttl: Duration,
     /// How long a refresh token is valid.
     refresh_ttl: Duration,
+    /// Clock used for TTL calculations. Defaults to `Arc::new(SystemClock)`;
+    /// tests inject a `FakeClock` via [`Self::with_clock`].
+    clock: Arc<dyn Clock>,
 }
 
 impl OAuth2Server {
-    /// Create a new OAuth2 server with the given stores.
+    /// Create a new OAuth2 server with the given stores and the system clock.
     pub fn new(
         code_store: Arc<dyn AuthCodeStore>,
         refresh_store: Arc<dyn RefreshTokenStore>,
@@ -110,6 +117,7 @@ impl OAuth2Server {
             refresh_store,
             code_ttl: Duration::minutes(10),
             refresh_ttl: Duration::days(30),
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -122,6 +130,13 @@ impl OAuth2Server {
     /// Override the refresh token TTL.
     pub fn with_refresh_ttl(mut self, ttl: Duration) -> Self {
         self.refresh_ttl = ttl;
+        self
+    }
+
+    /// Inject a [`Clock`] implementation. Tests pass `Arc::new(FakeClock::new(...))`
+    /// to assert auth-code / refresh-token expiry against virtual time.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -142,7 +157,7 @@ impl OAuth2Server {
             redirect_uri: redirect_uri.to_owned(),
             scopes,
             pkce_challenge: pkce_challenge.map(|s| s.to_owned()),
-            expires_at: Utc::now() + self.code_ttl,
+            expires_at: self.clock.now() + self.code_ttl,
         };
         self.code_store.store_code(auth_code).await?;
         Ok(code)
@@ -175,7 +190,7 @@ impl OAuth2Server {
         }
 
         // Validate expiry.
-        if Utc::now() > auth_code.expires_at {
+        if self.clock.now() > auth_code.expires_at {
             bail!("authorization code expired");
         }
 
@@ -203,7 +218,7 @@ impl OAuth2Server {
                 user_id: auth_code.user_id,
                 client_id: auth_code.client_id,
                 scopes: auth_code.scopes,
-                expires_at: Utc::now() + self.refresh_ttl,
+                expires_at: self.clock.now() + self.refresh_ttl,
                 consumed: false,
             })
             .await?;
@@ -241,7 +256,7 @@ impl OAuth2Server {
         }
 
         // Validate expiry.
-        if Utc::now() > stored.expires_at {
+        if self.clock.now() > stored.expires_at {
             bail!("refresh token expired");
         }
 
@@ -259,7 +274,7 @@ impl OAuth2Server {
                 user_id: stored.user_id,
                 client_id: stored.client_id,
                 scopes: stored.scopes,
-                expires_at: Utc::now() + self.refresh_ttl,
+                expires_at: self.clock.now() + self.refresh_ttl,
                 consumed: false,
             })
             .await?;
@@ -291,7 +306,7 @@ impl OAuth2Server {
                 user_id: user_id.to_string(),
                 client_id: client_id.to_string(),
                 scopes,
-                expires_at: Utc::now() + self.refresh_ttl,
+                expires_at: self.clock.now() + self.refresh_ttl,
                 consumed: false,
             })
             .await?;

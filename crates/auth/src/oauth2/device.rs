@@ -7,13 +7,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use chrono::{Duration, Utc};
+use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 // `DeviceCodeStore` and `DeviceState` live in `assistant_core::auth`; re-export
 // here for back-compat.
 pub use assistant_core::auth::{DeviceCodeStore, DeviceState};
+use assistant_core::clock::{Clock, SystemClock};
 
 // -- Types --
 
@@ -100,22 +101,33 @@ pub struct DeviceCodeManager {
     verification_uri: String,
     code_ttl: Duration,
     poll_interval: u64,
+    /// Clock used for TTL calculations. Defaults to `Arc::new(SystemClock)`;
+    /// tests inject a `FakeClock` via [`Self::with_clock`].
+    clock: Arc<dyn Clock>,
 }
 
 impl DeviceCodeManager {
-    /// Create a new device code manager.
+    /// Create a new device code manager with the system clock.
     pub fn new(store: Arc<dyn DeviceCodeStore>, verification_uri: String) -> Self {
         Self {
             store,
             verification_uri,
             code_ttl: Duration::minutes(15),
             poll_interval: 5,
+            clock: Arc::new(SystemClock),
         }
     }
 
     /// Override the device code TTL.
     pub fn with_code_ttl(mut self, ttl: Duration) -> Self {
         self.code_ttl = ttl;
+        self
+    }
+
+    /// Inject a [`Clock`] implementation. Tests pass `Arc::new(FakeClock::new(...))`
+    /// to assert TTL behavior against virtual time.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -127,7 +139,7 @@ impl DeviceCodeManager {
     ) -> Result<DeviceCodeResponse> {
         let device_code = generate_random_token();
         let user_code = generate_user_code();
-        let expires_at = Utc::now() + self.code_ttl;
+        let expires_at = self.clock.now() + self.code_ttl;
 
         let state = DeviceState {
             device_code: device_code.clone(),
@@ -157,7 +169,7 @@ impl DeviceCodeManager {
             .await?
             .ok_or_else(|| anyhow::anyhow!("unknown device code"))?;
 
-        if Utc::now() > state.expires_at {
+        if self.clock.now() > state.expires_at {
             self.store.remove(device_code).await?;
             return Ok(PollResult::Expired);
         }
@@ -182,7 +194,7 @@ impl DeviceCodeManager {
             .await?
             .ok_or_else(|| anyhow::anyhow!("unknown user code"))?;
 
-        if Utc::now() > state.expires_at {
+        if self.clock.now() > state.expires_at {
             self.store.remove(&state.device_code).await?;
             bail!("device code expired");
         }
