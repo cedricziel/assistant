@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use rand::RngExt;
 use tracing::info;
 
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 use assistant_core::store::{MembershipStore, SpaceMembership, User, UserStore};
 
@@ -26,6 +27,18 @@ pub struct AdminCredentials {
     pub generated_password: Option<String>,
 }
 
+/// Create the initial admin user during legacy migration using the system clock.
+///
+/// Convenience wrapper around [`create_admin_user_with_clock`].
+pub async fn create_admin_user(
+    user_store: &dyn UserStore,
+    membership_store: &dyn MembershipStore,
+    org_id: &OrgId,
+    space_id: &SpaceId,
+) -> Result<AdminCredentials> {
+    create_admin_user_with_clock(user_store, membership_store, org_id, space_id, &SystemClock).await
+}
+
 /// Create the initial admin user during legacy migration.
 ///
 /// - If `ASSISTANT_WEB_TOKEN` is set, uses it as a temporary password.
@@ -33,13 +46,17 @@ pub struct AdminCredentials {
 ///
 /// Grants the new user the `OrgAdmin` role in `space_id`. Returns
 /// [`AdminCredentials`] so the caller can display them.
-pub async fn create_admin_user(
+///
+/// Tests pass a `FakeClock` to assert `created_at` / `updated_at`
+/// timestamps against virtual time.
+pub async fn create_admin_user_with_clock(
     user_store: &dyn UserStore,
     membership_store: &dyn MembershipStore,
     org_id: &OrgId,
     space_id: &SpaceId,
+    clock: &dyn Clock,
 ) -> Result<AdminCredentials> {
-    let now = chrono::Utc::now();
+    let now = clock.now();
 
     // Determine password source.
     let (password, was_generated) = match std::env::var("ASSISTANT_WEB_TOKEN") {

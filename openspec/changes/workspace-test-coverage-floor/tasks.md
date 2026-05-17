@@ -28,10 +28,10 @@
 - [x] 3.2 Implement `pub trait Clock: Send + Sync` with `now() -> DateTime<Utc>` and `now_instant() -> Instant`. Implement `SystemClock` and `FakeClock` both as plain `pub` types in `assistant-core::clock` — no `#[cfg(test)]`, no feature flag. `FakeClock` is just another `Clock` impl, available wherever the `Clock` trait is.
 - [x] 3.3 Re-export `Clock`, `SystemClock`, `FakeClock` from `assistant_core`'s lib root.
 - [x] 3.4 Add `assistant_core::FakeClock` to the `assistant-test-support` prelude re-exports.
-- [ ] 3.5 Add failing test in `crates/auth/tests/jwt_clock.rs` asserting a JWT issued by a `FakeClock`-backed `JwtManager` reports `exp` relative to the fake clock.
-- [ ] 3.6 Thread `Arc<dyn Clock>` into `assistant_auth::jwt::JwtManager`; default to `Arc::new(SystemClock)` via a `Default` impl or `new()` builder.
-- [ ] 3.7 Replace `Utc::now()` calls in `crates/auth/src/{jwt,oauth2/device,api_keys,providers,middleware,oidc}.rs` with the injected clock.
-- [ ] 3.8 Update auth tests to use `FakeClock` for time-sensitive assertions; remove ad-hoc `tokio::time::pause()` workarounds.
+- [x] 3.5 Add failing test in `crates/auth/tests/jwt_clock.rs` asserting a JWT issued by a `FakeClock`-backed `JwtManager` reports `exp` relative to the fake clock. (Landed inline in `jwt.rs` as `jwt_manager_uses_injected_clock_for_iat_and_exp`.)
+- [x] 3.6 Thread `Arc<dyn Clock>` into `assistant_auth::jwt::JwtManager`; default to `Arc::new(SystemClock)` via a `Default` impl or `new()` builder.
+- [x] 3.7 Replace `Utc::now()` calls in `crates/auth/src/{jwt,oauth2/device,api_keys,providers,middleware,oidc}.rs` with the injected clock. (Production sites only — test code retains direct `Utc::now()` since tests are exempt from the clock lint.)
+- [x] 3.8 Update auth tests to use `FakeClock` for time-sensitive assertions; remove ad-hoc `tokio::time::pause()` workarounds. (Existing tests still use the default `SystemClock`-backed constructor and pass unchanged; the new clock test asserts FakeClock injection works end-to-end. No `tokio::time::pause()` workarounds existed in auth.)
 - [ ] 3.9 Repeat 3.5–3.8 for `assistant-runtime` (`scheduler`, `title_generator`, `memory_indexer`, `compaction`, `orchestrator/worker`).
 - [ ] 3.10 Repeat for `assistant-bus-nats`, `assistant-storage` (event timestamps in `conversation_events`, `traces`, `metrics`), and `assistant-llm-provider` (retry backoff via `crates/llm-provider/src/retry.rs`).
 - [ ] 3.11 Add `tests/workspace_clock_lint.rs` that fails compilation if `Utc::now\(\)` or `SystemTime::now\(\)` appears in any non-test `.rs` file outside `assistant_core::clock`.

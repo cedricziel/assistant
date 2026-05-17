@@ -14,11 +14,13 @@ use std::sync::Mutex;
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+#[cfg(test)]
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
 use assistant_core::auth::AuthContext;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::UserId;
 
 // Canonical home for these is now `assistant_core::auth`. Re-export from this
@@ -82,11 +84,23 @@ pub fn hash_key(key: &str) -> String {
 
 // -- Resolution --
 
-/// Resolve an API key string to an [`AuthContext`].
+/// Resolve an API key string to an [`AuthContext`] using the system clock.
 ///
-/// Hashes the provided key, looks it up in the store, validates expiry,
-/// and builds an AuthContext from the stored metadata.
+/// Convenience wrapper around [`resolve_key_with_clock`] that defaults to
+/// `SystemClock`. Production HTTP middleware constructs the clock once at
+/// startup and threads it through; this free function exists for callers
+/// that don't have a clock handy.
 pub async fn resolve_key(key_plaintext: &str, store: &dyn ApiKeyStore) -> Result<AuthContext> {
+    resolve_key_with_clock(key_plaintext, store, &SystemClock).await
+}
+
+/// Resolve an API key with an explicit [`Clock`]. Tests pass a `FakeClock`
+/// to assert TTL behavior without depending on `Utc::now()`.
+pub async fn resolve_key_with_clock(
+    key_plaintext: &str,
+    store: &dyn ApiKeyStore,
+    clock: &dyn Clock,
+) -> Result<AuthContext> {
     // Must start with the expected prefix.
     if !key_plaintext.starts_with(KEY_PREFIX_TAG) {
         bail!("invalid API key format: missing prefix");
@@ -100,7 +114,7 @@ pub async fn resolve_key(key_plaintext: &str, store: &dyn ApiKeyStore) -> Result
 
     // Check expiry.
     if let Some(expires_at) = record.expires_at
-        && Utc::now() > expires_at
+        && clock.now() > expires_at
     {
         bail!("API key has expired");
     }

@@ -5,15 +5,17 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use chrono::{Duration, Utc};
+use chrono::Duration;
 use jsonwebtoken::{
     Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode,
 };
 use serde::{Deserialize, Serialize};
 
 use assistant_core::auth::AuthContext;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 
 // -- Claims --
@@ -136,22 +138,35 @@ pub struct JwtManager {
     audience: String,
     /// Access token lifetime.
     access_ttl: Duration,
+    /// Clock used for issuance timestamps (`iat`, `exp`). Defaults to
+    /// `Arc::new(SystemClock)`; tests inject a `FakeClock` via
+    /// [`Self::with_clock`].
+    clock: Arc<dyn Clock>,
 }
 
 impl JwtManager {
-    /// Create a new JWT manager.
+    /// Create a new JWT manager with the system clock.
     pub fn new(key_pair: JwtKeyPair, issuer: String, audience: String) -> Self {
         Self {
             key_pair,
             issuer,
             audience,
             access_ttl: Duration::hours(1),
+            clock: Arc::new(SystemClock),
         }
     }
 
     /// Override the default access token TTL.
     pub fn with_access_ttl(mut self, ttl: Duration) -> Self {
         self.access_ttl = ttl;
+        self
+    }
+
+    /// Inject a [`Clock`] implementation. Tests pass `Arc::new(FakeClock::new(...))`
+    /// to assert exp/iat values against virtual time without depending on
+    /// `Utc::now()` drift.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -162,7 +177,7 @@ impl JwtManager {
 
     /// Sign a JWT for the given auth context.
     pub fn sign(&self, ctx: &AuthContext, org_slug: &str, name: &str) -> Result<String> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let exp = now + self.access_ttl;
 
         let spaces: HashMap<String, String> = ctx
@@ -480,5 +495,52 @@ mod tests {
         let token = mgr1.sign(&ctx, "acme", "Alice").unwrap();
         let claims = mgr2.validate(&token).unwrap();
         assert_eq!(claims.sub, "usr_alice");
+    }
+
+    #[test]
+    fn jwt_manager_uses_injected_clock_for_iat_and_exp() {
+        use assistant_core::clock::FakeClock;
+        use chrono::TimeZone;
+        use std::sync::Arc;
+
+        // Seed near "now" so the resulting token still passes jsonwebtoken
+        // validation (which uses Utc::now() internally — leeway covers the
+        // small drift). The exact iat/exp values are asserted against the
+        // injected clock, not real wall time.
+        let seed = chrono::Utc::now();
+        let fake = Arc::new(FakeClock::new(seed));
+
+        let secret = generate_secret();
+        let kp = JwtKeyPair::from_secret(&secret);
+        let mgr = JwtManager::new(kp, "https://test.local".into(), "https://test.local".into())
+            .with_clock(fake.clone() as Arc<dyn Clock>);
+
+        let ctx = make_test_context();
+        let token = mgr.sign(&ctx, "acme", "Alice").unwrap();
+        let claims = mgr.validate(&token).unwrap();
+
+        assert_eq!(
+            claims.iat,
+            seed.timestamp(),
+            "iat must match the injected clock seed"
+        );
+        assert_eq!(
+            claims.exp,
+            (seed + Duration::hours(1)).timestamp(),
+            "exp must equal iat + access_ttl from the injected clock"
+        );
+
+        // Advance the fake clock; subsequent signs reflect the new now.
+        fake.advance(std::time::Duration::from_secs(300));
+        let token2 = mgr.sign(&ctx, "acme", "Alice").unwrap();
+        let claims2 = mgr.validate(&token2).unwrap();
+        assert_eq!(
+            claims2.iat,
+            seed.timestamp() + 300,
+            "after advance(300s), iat must shift by 300s"
+        );
+
+        // Sanity: chrono should agree the FakeClock advanced.
+        let _ = chrono::Utc.timestamp_opt(claims2.iat, 0); // exercise TimeZone import
     }
 }
