@@ -22,10 +22,18 @@ pub struct HttpRequestActionExecutor {
 }
 
 impl HttpRequestActionExecutor {
-    /// Creates a new HTTP action executor.
+    /// Creates a new HTTP action executor with a default `reqwest::Client`.
     pub fn new(default_timeout: Duration) -> Self {
+        Self::with_client(Client::new(), default_timeout)
+    }
+
+    /// Creates a new HTTP action executor with a caller-supplied
+    /// `reqwest::Client`. Tests pass a client built against a
+    /// `wiremock::MockServer` so they can assert request shape and
+    /// inject mock responses.
+    pub fn with_client(client: Client, default_timeout: Duration) -> Self {
         Self {
-            client: Client::new(),
+            client,
             default_timeout,
             default_retry_attempts: 1,
             default_retry_backoff: Duration::from_millis(250),
