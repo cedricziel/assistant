@@ -60,7 +60,7 @@ crates = [
     "workflow-http",
     "opentelemetry-exporter-iceberg",
     "opentelemetry-exporter-sqlite",
-    # test-support — added when the crate is scaffolded in Phase 2.
+    "test-support",
 ]
 
 # File path regex patterns excluded from coverage measurement.

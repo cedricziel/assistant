@@ -705,6 +705,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant-test-support"
+version = "0.1.160"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "assistant-tool-executor"
 version = "0.1.160"
 dependencies = [
