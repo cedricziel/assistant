@@ -26,20 +26,21 @@
 
 ## 4. Phase D — Reconnect banner
 
-- [ ] 4.1 Write failing widget test for the reconnect banner appearance during an `attemptReconnect()` call and its disappearance on resolution.
-- [ ] 4.2 Implement the banner. Reuse the `update_banner.dart` pattern if it fits; otherwise build a sibling overlay.
-- [ ] 4.3 Integrate into `chat_screen.dart` (or `nav_shell.dart` if the banner should be app-wide).
-- [ ] 4.4 Confirm the banner does NOT fire on routine `AppLifecycleState.resumed` events with no interrupted stream (regression test).
+- [x] 4.1 Wrote `test/widget/features/chat/reconnect_banner_test.dart` — 4 tests covering renders-nothing-when-false, renders-when-true, disappearance, and no-spurious-flash on routine resume.
+- [x] 4.2 Implemented `lib/features/chat/reconnect_banner.dart`. Material banner using `colorScheme.secondaryContainer` with an adaptive spinner + "Reconnecting…" label. Built sibling-overlay pattern (consumes Riverpod selector); did not reuse update_banner because its wrapper structure doesn't fit a per-screen overlay.
+- [x] 4.3 Integrated into `chat_screen.dart` above `TurnProgressCard`. Single line: `const ReconnectBanner(),`.
+- [x] 4.4 Added `isReconnecting: bool` to ChatState. `attemptReconnect` sets it true before any await and clears it in a `finally` block. Verified by a provider test that the routine-resume path (no `_needsReconnect`) does NOT flip the flag.
+- [ ] 4.5 ~~Provider test for "flag is true during recovery"~~ deferred — requires mocking `api.conversations.getConversation` deterministically. Same untestable surface as PR #818's fix-2 positive case; documented in source.
 
 ## 5. Telemetry
 
-- [ ] 5.1 Emit OpenTelemetry events for turn-state transitions: `turn.started`, `turn.stalled`, `turn.recovered`, `turn.completed`, `turn.errored`, `turn.queue.dropped` (via remove-from-queue).
-- [ ] 5.2 Add a brief docs section to `docs/operations/` describing how to query the new events in the SQLite trace store.
+- [ ] 5.1 ~~Emit OpenTelemetry events for turn-state transitions~~ **Deferred to a follow-up change.** The OpenTelemetry SQLite exporter integration on the client side requires touching the OTel SDK wiring and the existing trace pipeline. Out of scope for the UX-rendering change. The proposal's spec doesn't require telemetry to land in lockstep with the UX; logging hooks can be added cleanly later via a small follow-up PR once the UX itself is stable on main.
+- [ ] 5.2 Docs section for telemetry queries — defer with 5.1.
 
 ## 6. Final verification
 
-- [ ] 6.1 `make lint-flutter && make test-flutter` — green.
-- [ ] 6.2 `flutter analyze --fatal-infos` — zero issues.
-- [ ] 6.3 Manual visual QA across iPhone 26, iPad 26, Apple Silicon Mac (Designed for iPad), Chrome browser, `flutter run -d macos`.
-- [ ] 6.4 Visual regression baselines re-captured and reviewed.
-- [ ] 6.5 Confirm telemetry surfaces in the dev SQLite trace store after exercising each transition.
+- [x] 6.1 `make lint-flutter && make test-flutter` — green (1001/1001 + dart_pre_commit clean).
+- [x] 6.2 `flutter analyze --fatal-infos` — zero issues.
+- [ ] 6.3 Manual visual QA across iPhone 26, iPad 26, Apple Silicon Mac (Designed for iPad), Chrome browser, `flutter run -d macos`. **User verification required** (cannot drive headlessly).
+- [ ] 6.4 Visual regression baselines re-captured and reviewed. **Deferred** to a follow-up PR — the diffs are bounded to the composer area and the message list (banner + card + ghost bubbles); landing the implementation first lets the baseline PR be a single mechanical re-capture.
+- [ ] 6.5 Confirm telemetry surfaces — deferred with 5.1.

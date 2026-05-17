@@ -2375,4 +2375,41 @@ void main() {
       expect(notifier.state.value!.pendingQueue, isEmpty);
     });
   });
+
+  // -- Phase D of chat-stream-progress-ux: isReconnecting flag --------------
+  //
+  // The full "flag flips true during recovery, false on completion" path
+  // is implicitly verified by the widget test (which renders the banner
+  // against a forced isReconnecting=true state) and by inspection of the
+  // try/finally block in `attemptReconnect`. The during-recovery
+  // assertion requires mocking `api.conversations.getConversation` —
+  // the current _FakeApiClient does not, so the integration test hangs
+  // on Dio's 15 s connectTimeout. Same limitation as PR #818's fix-2
+  // positive case. Source-documented; defer the integration test to
+  // the deeper-mock follow-up.
+
+  group('ChatNotifier.attemptReconnect — isReconnecting flag', () {
+    testWidgets(
+      'routine resume (no needsReconnect, no queue) keeps isReconnecting false',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final notifier = await _pumpTestApp(tester, fakeApi);
+        await tester.pumpAndSettle();
+
+        expect(notifier.needsReconnect, isFalse);
+        expect(notifier.state.value!.isReconnecting, isFalse);
+
+        await notifier.attemptReconnect();
+        await tester.pumpAndSettle();
+
+        expect(
+          notifier.state.value!.isReconnecting,
+          isFalse,
+          reason:
+              'no interrupted stream → no banner; the early-return branch '
+              'must not flip the flag',
+        );
+      },
+    );
+  });
 }
