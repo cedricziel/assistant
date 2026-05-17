@@ -70,9 +70,22 @@ where
 
 /// Build an SSE response with keepalive pings and `Cache-Control: no-cache`.
 ///
-/// Keepalive prevents proxies from closing idle connections (nginx default 60s,
-/// AWS ALB 60s).  `Cache-Control: no-cache` prevents intermediaries from
-/// buffering the stream.
+/// Contract: every SSE response from this crate MUST flow through this helper
+/// (or apply the same `.keep_alive(KeepAlive::default())` directly if it
+/// builds `Sse::new(...)` itself). The default emits a `:` comment line
+/// every 15 seconds during periods of byte silence — this is the wire-level
+/// liveness signal that prevents:
+/// - Reverse-proxy idle timeouts from closing the connection (nginx default
+///   60 s, AWS ALB default 60 s).
+/// - The Flutter client's 90-second byte-level watchdog
+///   (`withHeartbeatTimeout` in `app/lib/api/api_client.dart`) from
+///   false-firing during slow tool calls.
+///
+/// `Cache-Control: no-cache` prevents intermediaries from buffering the
+/// stream.
+///
+/// Contract lock: end-to-end behaviour is covered by
+/// `crates/web-ui/tests/sse_keepalive_contract.rs`.
 pub(crate) fn sse_response(rx: mpsc::Receiver<Result<Event, Infallible>>) -> Response {
     let mut response = Sse::new(ReceiverStream::new(rx))
         .keep_alive(KeepAlive::default())
