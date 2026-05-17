@@ -1,10 +1,8 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../shared/platform/platform.dart';
+import '../../shared/platform/widgets.dart';
 import 'webhooks_provider.dart';
 
 /// Screen that lists all registered webhooks.
@@ -15,93 +13,52 @@ class WebhooksScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final webhooksAsync = ref.watch(webhooksProvider);
 
-    if (isAppleTouch) {
-      return Scaffold(
-        body: CustomScrollView(
-          slivers: [
-            CupertinoSliverNavigationBar(
-              largeTitle: const Text('Webhooks'),
-              trailing: CupertinoButton(
-                padding: EdgeInsets.zero,
-                child: const Icon(CupertinoIcons.refresh),
+    return AdaptiveScaffold(
+      body: CustomScrollView(
+        slivers: [
+          AdaptiveSliverNavBar(
+            title: 'Webhooks',
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
                 onPressed: () => ref.read(webhooksProvider.notifier).refresh(),
               ),
+            ],
+          ),
+          webhooksAsync.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator.adaptive()),
             ),
-            webhooksAsync.when(
-              loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator.adaptive()),
+            error: (err, _) => SliverFillRemaining(
+              child: _ErrorView(
+                error: err.toString(),
+                onRetry: () => ref.read(webhooksProvider.notifier).refresh(),
               ),
-              error: (err, _) => SliverFillRemaining(
-                child: _ErrorView(
-                  error: err.toString(),
-                  onRetry: () => ref.read(webhooksProvider.notifier).refresh(),
-                ),
-              ),
-              data: (state) {
-                if (state.error != null) {
-                  return SliverFillRemaining(
-                    child: _ErrorView(
-                      error: state.error!,
-                      onRetry: () =>
-                          ref.read(webhooksProvider.notifier).refresh(),
-                    ),
-                  );
-                }
-                if (state.webhooks.isEmpty) {
-                  return const SliverFillRemaining(child: _EmptyView());
-                }
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    if (index.isOdd) {
-                      return const Divider(height: 1, indent: 72);
-                    }
-                    return _WebhookRow(webhook: state.webhooks[index ~/ 2]);
-                  }, childCount: state.webhooks.length * 2 - 1),
+            ),
+            data: (state) {
+              if (state.error != null) {
+                return SliverFillRemaining(
+                  child: _ErrorView(
+                    error: state.error!,
+                    onRetry: () =>
+                        ref.read(webhooksProvider.notifier).refresh(),
+                  ),
                 );
-              },
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Webhooks'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.read(webhooksProvider.notifier).refresh(),
+              }
+              if (state.webhooks.isEmpty) {
+                return const SliverFillRemaining(child: _EmptyView());
+              }
+              return SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  if (index.isOdd) {
+                    return const Divider(height: 1, indent: 72);
+                  }
+                  return _WebhookRow(webhook: state.webhooks[index ~/ 2]);
+                }, childCount: state.webhooks.length * 2 - 1),
+              );
+            },
           ),
         ],
-      ),
-      body: webhooksAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator.adaptive()),
-        error: (err, _) => _ErrorView(
-          error: err.toString(),
-          onRetry: () => ref.read(webhooksProvider.notifier).refresh(),
-        ),
-        data: (state) {
-          if (state.error != null) {
-            return _ErrorView(
-              error: state.error!,
-              onRetry: () => ref.read(webhooksProvider.notifier).refresh(),
-            );
-          }
-          if (state.webhooks.isEmpty) {
-            return const _EmptyView();
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: state.webhooks.length,
-            separatorBuilder: (context, index) =>
-                const Divider(height: 1, indent: 72),
-            itemBuilder: (context, index) {
-              return _WebhookRow(webhook: state.webhooks[index]);
-            },
-          );
-        },
       ),
     );
   }
@@ -114,18 +71,20 @@ class _WebhookRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final isVerified = webhook.verifiedAt != null;
+    // Active uses tertiary (success token); inactive uses dim outline.
+    final swatch = webhook.active
+        ? colorScheme.tertiary
+        : colorScheme.onSurfaceVariant;
+    final softFill = webhook.active
+        ? colorScheme.tertiaryContainer
+        : colorScheme.surfaceContainerHighest;
 
-    return ListTile(
+    return AdaptiveListTile(
       leading: CircleAvatar(
-        backgroundColor: webhook.active
-            ? Colors.green.shade100
-            : Colors.grey.shade200,
-        child: Icon(
-          Icons.webhook,
-          size: 20,
-          color: webhook.active ? Colors.green.shade700 : Colors.grey.shade500,
-        ),
+        backgroundColor: softFill,
+        child: Icon(Icons.webhook, size: 20, color: swatch),
       ),
       title: Text(
         webhook.name,
@@ -146,30 +105,22 @@ class _WebhookRow extends StatelessWidget {
               child: Icon(
                 Icons.verified_outlined,
                 size: 16,
-                color: Colors.blue.shade600,
+                color: colorScheme.primary,
               ),
             ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: webhook.active
-                  ? Colors.green.shade50
-                  : Colors.grey.shade100,
+              color: softFill,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: webhook.active
-                    ? Colors.green.shade300
-                    : Colors.grey.shade400,
-              ),
+              border: Border.all(color: swatch.withValues(alpha: 0.4)),
             ),
             child: Text(
               webhook.active ? 'Active' : 'Inactive',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: webhook.active
-                    ? Colors.green.shade700
-                    : Colors.grey.shade600,
+                color: swatch,
               ),
             ),
           ),
@@ -228,7 +179,7 @@ class _ErrorView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Retry')),
+          AdaptiveButton.filled(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
     );
