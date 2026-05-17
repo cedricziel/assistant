@@ -1726,4 +1726,299 @@ void main() {
       );
     });
   });
+
+  // -- Salvaged from PR #809 fix (2): stalled recovery vs concurrent stream --
+  //
+  // The fix adds `if (latest.isSending) return;` immediately before the
+  // `state = AsyncData(...)` write in _recoverStalledStream's success path.
+  // This defends a real race: between recovery's onTimeout firing and its
+  // `await getConversation(...)` resolving, the queue-drain loop can start
+  // a new stream for the next pending message. Without the guard, the
+  // recovery's state write silently wipes the new stream's placeholder.
+  //
+  // A focused integration test for this race needs a fake conversations
+  // API that resolves getConversation deterministically — the current
+  // _FakeApiClient only mocks streamMessages and sendVoiceMessage, so
+  // getConversation goes through the real Dio path and hangs the test on
+  // the connectTimeout (15 s real time). Building the deeper mock is its
+  // own follow-up. The fix itself is small, additive, and well-commented
+  // in source; the trace lives in this change's commit message + the
+  // openspec/changes/sse-keepalive/ analysis.
+
+  // -- Salvaged from PR #809 fix (3): attemptReconnect drains queue ---------
+  //
+  // attemptReconnect's early-return (`if (!_needsReconnect) return;`)
+  // historically skipped any queue drain when there was no interrupted
+  // stream to recover. If the drain stopped while messages remained in
+  // pendingQueue (rare, but possible via any control-flow path that
+  // exits _drainQueue with a non-empty queue), foregrounding the app
+  // would not recover. The salvaged fix adds a defence-in-depth net:
+  // when !_needsReconnect && !_draining && queue.isNotEmpty, kick the
+  // drain anyway.
+
+  group(
+    'ChatNotifier.attemptReconnect — queue drain safety net on foreground',
+    () {
+      testWidgets(
+        '13.1: attemptReconnect with no queue and no interrupted stream is a no-op',
+        (tester) async {
+          final fakeApi = _FakeApiClient();
+          final notifier = await _pumpTestApp(tester, fakeApi);
+
+          // Baseline state: no queue, no streaming.
+          await tester.pumpAndSettle();
+          final before = notifier.state.value!;
+          expect(before.pendingQueue, isEmpty);
+          expect(before.isSending, isFalse);
+
+          // Reconnect call should do nothing.
+          await notifier.attemptReconnect();
+          await tester.pumpAndSettle();
+
+          final after = notifier.state.value!;
+          expect(after.pendingQueue, isEmpty);
+          expect(after.isSending, isFalse);
+          // No new messages should have appeared.
+          expect(
+            after.messages,
+            isEmpty,
+            reason: 'attemptReconnect on a clean state must be a true no-op',
+          );
+        },
+      );
+    },
+  );
+
+  // -- Coverage gap #2: TimeoutException from byte heartbeat ----------------
+  //
+  // The 90-second byte-level watchdog (`withHeartbeatTimeout` in
+  // api_client.dart) injects a TimeoutException into the SSE event
+  // stream when no bytes arrive for the configured window. That
+  // exception flows up to _streamMessage's catch block, which classifies
+  // it via _isTransientError (`if (error is TimeoutException) return true`).
+  //
+  // The classification is unit-tested at the heartbeat layer but the
+  // chat_provider's reaction — same retry/defer machinery as for
+  // HttpException — was never exercised. This pins it.
+
+  group(
+    'ChatNotifier — heartbeat TimeoutException is treated as transient',
+    () {
+      testWidgets('14.1: TimeoutException after a run ID defers reconnect '
+          '(same path as HttpException)', (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+
+        await tester.runAsync(() async {
+          // Run ID captured so deferred reconnect is possible.
+          ctrl.add(const RunStartedEvent('run-timeout'));
+          await Future<void>.delayed(Duration.zero);
+          // Byte heartbeat watchdog elapsed — surfaces as a
+          // TimeoutException on the event stream.
+          ctrl.addError(
+            TimeoutException(
+              'No data received within 0:01:30.000000',
+              const Duration(seconds: 90),
+            ),
+          );
+          await ctrl.close();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        // Pump through the 3 retry delays (1 + 2 + 4 = 7 s).
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+
+        final chatState = notifier.state.value!;
+        expect(
+          chatState.error,
+          isNull,
+          reason:
+              'transient TimeoutException with run ID should NOT show '
+              'an error to the user — it should silently defer',
+        );
+        expect(
+          notifier.needsReconnect,
+          isTrue,
+          reason: 'TimeoutException should flag for reconnect on resume',
+        );
+        expect(
+          chatState.isSending,
+          isFalse,
+          reason:
+              'after retries exhausted, isSending must be cleared so the '
+              'composer is interactive again',
+        );
+        final userMsg = chatState.messages.firstWhere((m) => m.isUser);
+        expect(
+          userMsg.status,
+          MessageStatus.sending,
+          reason:
+              'user message stays "sending" until the deferred reconnect '
+              'replays the run',
+        );
+      });
+
+      testWidgets(
+        '14.2: TimeoutException without a run ID shows friendly error',
+        (tester) async {
+          final fakeApi = _FakeApiClient();
+          final ctrl = fakeApi.enqueueStream();
+
+          final notifier = await _pumpTestApp(tester, fakeApi);
+
+          unawaited(notifier.sendMessage('hello'));
+          await tester.pump();
+
+          await tester.runAsync(() async {
+            // Heartbeat fires before any RunStartedEvent arrived.
+            ctrl.addError(
+              TimeoutException(
+                'No data received within 0:01:30.000000',
+                const Duration(seconds: 90),
+              ),
+            );
+            await ctrl.close();
+            await Future<void>.delayed(Duration.zero);
+            await Future<void>.delayed(Duration.zero);
+          });
+          await tester.pumpAndSettle();
+
+          final chatState = notifier.state.value!;
+          expect(
+            chatState.error,
+            isNotNull,
+            reason:
+                'no run ID means no replay possibility — must show error '
+                'instead of silent defer',
+          );
+          expect(
+            chatState.error,
+            isNot(contains('TimeoutException')),
+            reason: 'must not expose the raw exception type to the user',
+          );
+          expect(
+            chatState.error!.toLowerCase(),
+            anyOf(contains('connection'), contains('timed out')),
+            reason: 'should surface a friendly connection / timeout message',
+          );
+          expect(
+            notifier.needsReconnect,
+            isFalse,
+            reason: 'cannot defer without a run ID',
+          );
+          expect(
+            chatState.isSending,
+            isFalse,
+            reason: 'isSending cleared so user can retry',
+          );
+        },
+      );
+    },
+  );
+
+  // -- Coverage gap #5: legitimate slow stream blocks drain (the user-      --
+  //    visible symptom motivating PR #809). Documents current contract.    --
+  //
+  // When a stream legitimately takes a long time (e.g. a slow tool call),
+  // the queue does NOT advance until the stream completes. This is the
+  // current — and intentional — behaviour. The user-experience problem
+  // ("my queued message felt stuck") is addressed by the
+  // chat-stream-progress-ux + turn-status-endpoint OpenSpec changes,
+  // which add visible queue affordances and explicit cancellation. This
+  // test pins the current contract so when those changes alter behaviour,
+  // the regression is conscious and visible.
+
+  group(
+    'ChatNotifier — long legitimate stream holds the drain (current contract)',
+    () {
+      testWidgets(
+        '15.1: a stream that emits a token then stays open holds the queued '
+        'second message in pendingQueue until the first stream completes',
+        (tester) async {
+          final fakeApi = _FakeApiClient();
+          // ctrl1: emits a token (sawProgress=true) then stays open for
+          // an extended period — simulating a slow tool call with the
+          // initial pre-progress fence already crossed.
+          final ctrl1 = fakeApi.enqueueStream();
+          addTearDown(() async {
+            if (!ctrl1.isClosed) await ctrl1.close();
+          });
+          // ctrl2: queued message — fully prepared, will be consumed
+          // when the drain advances to it.
+          fakeApi.enqueueStream()
+            ..add(const TokenEvent('reply2-token'))
+            ..add(const DoneEvent(role: 'assistant', content: 'reply2-token'))
+            ..close();
+
+          final notifier = await _pumpTestApp(tester, fakeApi);
+
+          unawaited(notifier.sendMessage('slow tool turn'));
+          await tester.pump();
+          // First token arrives — sawProgress=true now, the 12s
+          // initial-stall watchdog becomes a no-op for subsequent
+          // silence on this stream.
+          ctrl1.add(const RunStartedEvent('run-slow'));
+          ctrl1.add(const TokenEvent('Calling tool... '));
+          await tester.pump();
+
+          // User types a follow-up while the slow tool is running.
+          unawaited(notifier.sendMessage('do this next'));
+          await tester.pump();
+          expect(
+            notifier.state.value!.pendingQueue.map((p) => p.text),
+            contains('do this next'),
+            reason: 'second message must be queued, not dropped',
+          );
+
+          // Advance simulated time well past the 12 s initial-stall
+          // watchdog. sawProgress=true makes that timeout a no-op for
+          // ongoing silence on this stream. The 90 s byte heartbeat
+          // operates on a byte-level stream not driven by this event-
+          // level controller, so it does NOT fire here either. The
+          // stream is "legitimately busy" from the client's view.
+          await tester.pump(const Duration(seconds: 60));
+          await tester.pump();
+
+          // Current contract: the queued message stays queued. The
+          // user sees no progress — that's the UX problem the future
+          // chat-stream-progress-ux change will address. We pin the
+          // current behaviour so future changes are conscious.
+          expect(
+            notifier.state.value!.pendingQueue.map((p) => p.text),
+            contains('do this next'),
+            reason:
+                'CURRENT CONTRACT: a legitimate long-running stream holds '
+                'the queue. The user-visible symptom that motivated PR '
+                '#809 is this state — invisible to the user. When the '
+                'chat-stream-progress-ux change ships and this test fails, '
+                'the failure must be intentional (visible queue + skip '
+                'affordance) and the test should be updated.',
+          );
+          expect(
+            notifier.state.value!.isSending,
+            isTrue,
+            reason: 'first turn is still streaming',
+          );
+
+          // The follow-up assertion ("when ctrl1 completes, the drain
+          // advances and processes the queued message") is what the
+          // overall contract guarantees, but verifying it in this test
+          // would couple to microtask ordering after ctrl1.close().
+          // The existing "ChatNotifier.sendMessage — queue behaviour"
+          // tests (group 7) cover the drain-advances-after-Done case
+          // exhaustively. The unique contract this test pins is
+          // the held-queue state during the slow stream above.
+        },
+      );
+    },
+  );
 }
