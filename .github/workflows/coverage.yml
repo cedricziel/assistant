@@ -1,0 +1,71 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  coverage:
+    name: Workspace coverage (report-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Install llvm-tools-preview
+        run: rustup component add llvm-tools-preview
+
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
+      - name: Install system dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg jq
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "coverage"
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Run cargo llvm-cov
+        # The --ignore-filename-regex value is kept in sync with
+        # coverage.toml's [file_excludes] section. When updating one,
+        # update the other.
+        run: |
+          cargo llvm-cov \
+            --workspace \
+            --json \
+            --output-path coverage.json \
+            --ignore-filename-regex '/build\.rs$|/target/|\.pb\.rs$|/app/packages/assistant_api/'
+
+      - name: Upload coverage.json
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-json
+          path: coverage.json
+          retention-days: 14
+
+      - name: Run per-crate coverage gate
+        # During rollout the gate is report-only for every crate
+        # (seeded in coverage.toml). It prints the per-crate table
+        # but does not fail the build. As crates reach 80% they are
+        # promoted to enforcing by removing them from the report_only
+        # list in coverage.toml.
+        run: ./tools/check_coverage.sh

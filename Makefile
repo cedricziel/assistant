@@ -1,4 +1,4 @@
-.PHONY: all build test lint lint-signal lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal build-macos-binary build-macos-bundle test-flutter precommit icons
+.PHONY: all build test lint lint-signal lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal build-macos-binary build-macos-bundle test-flutter precommit icons coverage
 
 all: build
 
@@ -13,6 +13,20 @@ test:
 
 test-integration:
 	cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture --test-threads=1
+
+# Run cargo-llvm-cov over the workspace and apply the per-crate coverage
+# gate from coverage.toml. Requires `cargo install cargo-llvm-cov` and
+# the `llvm-tools-preview` rustup component. The gate is currently
+# report-only for every crate during the rollout to the 80% floor;
+# crates promote to enforcing by being removed from coverage.toml's
+# [report_only].crates list. See openspec/changes/workspace-test-coverage-floor/.
+coverage:
+	cargo llvm-cov \
+		--workspace \
+		--json \
+		--output-path coverage.json \
+		--ignore-filename-regex '/build\.rs$$|/target/|\.pb\.rs$$|/app/packages/assistant_api/'
+	./tools/check_coverage.sh
 
 lint:
 	cargo clippy --workspace -- -D warnings
