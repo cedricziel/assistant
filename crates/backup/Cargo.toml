@@ -6,13 +6,13 @@ license.workspace = true
 description = "Backup and restore for the assistant installation"
 
 [dependencies]
+assistant-core = { path = "../core" }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-chrono = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 tar = { workspace = true }

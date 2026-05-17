@@ -1,5 +1,6 @@
 //! OpenTelemetry log exporter that persists log records into the `logs` SQLite table.
 
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use opentelemetry::Key;
 use opentelemetry::logs::{AnyValue, Severity};
@@ -73,7 +74,10 @@ impl SqliteLogExporter {
     ) -> Result<(), sqlx::Error> {
         let id = Uuid::new_v4().to_string();
 
-        let timestamp: DateTime<Utc> = record.timestamp().map(Into::into).unwrap_or_else(Utc::now);
+        let timestamp: DateTime<Utc> = record
+            .timestamp()
+            .map(Into::into)
+            .unwrap_or_else(|| SystemClock.now());
 
         let observed_timestamp: Option<DateTime<Utc>> = record.observed_timestamp().map(Into::into);
 

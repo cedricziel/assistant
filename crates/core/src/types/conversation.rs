@@ -2,6 +2,8 @@
 //! identity, and interface/channel discriminators.
 
 use chrono::{DateTime, Utc};
+
+use crate::clock::{Clock, SystemClock};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -56,7 +58,7 @@ impl Message {
             skill_name: None,
             tool_calls_json: None,
             turn: 0,
-            created_at: Utc::now(),
+            created_at: SystemClock.now(),
             sender_user_id: None,
         }
     }

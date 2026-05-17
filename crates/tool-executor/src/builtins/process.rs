@@ -13,10 +13,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{ToolHandler, ToolOutput, runtime_workspace_dir};
 use async_trait::async_trait;
-use chrono::Utc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::ChildStdin;
 use tokio::sync::{Mutex, oneshot};
@@ -248,7 +248,7 @@ impl ProcessHandler {
         let handle = Arc::new(ProcessHandle {
             pid,
             command: command.clone(),
-            started_at: Utc::now().to_rfc3339(),
+            started_at: SystemClock.now().to_rfc3339(),
             stdin: Mutex::new(stdin),
             stdout_buf,
             stderr_buf,

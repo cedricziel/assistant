@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result, bail};
+use assistant_core::clock::{Clock, SystemClock};
 use async_trait::async_trait;
-use chrono::Utc;
 use tracing::{info, warn};
 
 use crate::archive::{extract_tar_gz, read_tar_gz_manifest, write_tar_gz};
@@ -353,7 +353,7 @@ impl BackupEngine {
         let manifest = BackupManifest {
             version: MANIFEST_VERSION,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
-            created_at: Utc::now().to_rfc3339(),
+            created_at: SystemClock.now().to_rfc3339(),
             install_dir: opts.install_dir.to_string_lossy().to_string(),
             entries: manifest_entries,
         };
@@ -560,7 +560,7 @@ pub async fn backup_legacy_install(base_path: &Path) -> Result<PathBuf> {
     // Millisecond precision (`%Y%m%d-%H%M%S%.3f` would include the dot;
     // we drop it to keep filenames POSIX-friendly) so two invocations within
     // the same second don't collide on archive name.
-    let now = Utc::now();
+    let now = SystemClock.now();
     let archive_name = format!(
         "pre-migration-{}-{:03}.tar.gz",
         now.format("%Y%m%d-%H%M%S"),

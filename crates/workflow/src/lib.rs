@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::{MessageBus, MessageStatus, bus_messages};
 use assistant_storage::{
     StorageLayer, WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRunRecord, WorkflowStore,
@@ -155,7 +156,7 @@ pub fn spawn_event_trigger_adapter(
         info!(?poll_interval, "Workflow event adapter started");
         let mut seen: HashSet<Uuid> = HashSet::new();
         let mut seen_order: VecDeque<Uuid> = VecDeque::new();
-        let started_at = Utc::now();
+        let started_at = SystemClock.now();
         let mut warned_done_filter_fallback = false;
 
         loop {
@@ -230,7 +231,7 @@ async fn process_pending_runs(
 async fn process_schedule_triggers(storage: &StorageLayer) -> Result<()> {
     let store = storage.workflow_store();
     let workflows = store.list().await?;
-    let now = Utc::now();
+    let now = SystemClock.now();
 
     for workflow in workflows.into_iter().filter(|w| w.active) {
         for node in workflow

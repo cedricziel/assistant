@@ -2,6 +2,7 @@
 //! and computes representative [`PartitionKey`]s for batch writes.
 
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{Datelike, TimeZone, Utc};
 use iceberg::spec::{Literal, PartitionKey, SchemaRef, Struct, Transform, UnboundPartitionSpec};
 use iceberg::table::Table;
@@ -76,7 +77,7 @@ fn granularity_to_partition_int(micros: i64, granularity: &PartitionGranularity)
             let dt = Utc
                 .timestamp_opt(secs, nsecs)
                 .single()
-                .unwrap_or_else(Utc::now);
+                .unwrap_or_else(|| SystemClock.now());
             (dt.year() - 1970) * 12 + (dt.month() as i32 - 1)
         }
         PartitionGranularity::Year => {
@@ -85,7 +86,7 @@ fn granularity_to_partition_int(micros: i64, granularity: &PartitionGranularity)
             let dt = Utc
                 .timestamp_opt(secs, nsecs)
                 .single()
-                .unwrap_or_else(Utc::now);
+                .unwrap_or_else(|| SystemClock.now());
             dt.year() - 1970
         }
     }

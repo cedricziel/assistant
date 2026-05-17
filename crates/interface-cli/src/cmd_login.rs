@@ -4,7 +4,7 @@ use std::io::{self, Write as IoWrite};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use assistant_core::clock::{Clock, SystemClock};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -134,13 +134,13 @@ pub async fn cmd_login(server_url: &str) -> Result<()> {
 
     // 4. Poll token endpoint.
     let interval = Duration::from_secs(device.interval.max(5));
-    let deadline = Utc::now() + chrono::Duration::seconds(device.expires_in as i64);
+    let deadline = SystemClock.now() + chrono::Duration::seconds(device.expires_in as i64);
     let token_url = format!("{server_url}/oauth/token");
 
     let token_resp = loop {
         tokio::time::sleep(interval).await;
 
-        if Utc::now() >= deadline {
+        if SystemClock.now() >= deadline {
             println!();
             anyhow::bail!("device code expired — please run `assistant login` again");
         }
@@ -209,7 +209,7 @@ pub async fn cmd_login(server_url: &str) -> Result<()> {
         client_id,
         access_token: token_resp.access_token,
         refresh_token,
-        expires_at: Utc::now() + chrono::Duration::seconds(token_resp.expires_in as i64),
+        expires_at: SystemClock.now() + chrono::Duration::seconds(token_resp.expires_in as i64),
     };
     credentials::save(&creds_path, &creds)?;
 
@@ -253,7 +253,7 @@ pub fn cmd_status() -> Result<()> {
             if creds.is_expired() {
                 println!("  Access token: expired (will refresh on next request)");
             } else {
-                let remaining = creds.expires_at - Utc::now();
+                let remaining = creds.expires_at - SystemClock.now();
                 let mins = remaining.num_minutes();
                 println!("  Access token: valid ({mins} min remaining)");
             }

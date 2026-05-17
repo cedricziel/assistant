@@ -6,6 +6,7 @@ edition.workspace = true
 description = "OpenTelemetry SQLite exporters for spans, logs, and metrics"
 
 [dependencies]
+assistant-core = { path = "../core" }
 chrono = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }

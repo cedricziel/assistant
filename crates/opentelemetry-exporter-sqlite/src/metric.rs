@@ -4,6 +4,7 @@
 //! join tables (`resources`, `metric_scopes`) to avoid duplicating
 //! identical metadata on every data-point row.
 
+use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};
 use opentelemetry::InstrumentationScope;
 use opentelemetry::{KeyValue, Value};
@@ -295,7 +296,7 @@ impl SqliteMetricExporter {
         .bind(description)
         .bind(dp.value())
         .bind(&attrs_json)
-        .bind(Utc::now())
+        .bind(SystemClock.now())
         .bind(&da.model)
         .bind(&da.provider)
         .bind(&da.operation)
@@ -338,7 +339,7 @@ impl SqliteMetricExporter {
         .bind(description)
         .bind(dp.value() as f64)
         .bind(&attrs_json)
-        .bind(Utc::now())
+        .bind(SystemClock.now())
         .bind(&da.model)
         .bind(&da.provider)
         .bind(&da.operation)
@@ -566,7 +567,7 @@ impl SqliteMetricExporter {
         .bind(description)
         .bind(dp.value() as f64)
         .bind(&attrs_json)
-        .bind(Utc::now())
+        .bind(SystemClock.now())
         .bind(&da.model)
         .bind(&da.provider)
         .bind(&da.operation)
