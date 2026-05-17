@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.159](https://github.com/cedricziel/assistant/compare/v0.1.158...v0.1.159) (2026-05-17)
+
+
+### Features
+
+* **app:** migrate chat_screen onto barrel + Adaptive wrappers ([#813](https://github.com/cedricziel/assistant/issues/813)) ([7c12fbc](https://github.com/cedricziel/assistant/commit/7c12fbc9df5f628bd15509b7e4cdd0240842755d))
+* **app:** migrate context_switcher_screen onto barrel + AdaptiveScaffold ([#810](https://github.com/cedricziel/assistant/issues/810)) ([f5884b2](https://github.com/cedricziel/assistant/commit/f5884b2f0366983a81b95ab706cbb75f9bcb243f))
+* **app:** migrate settings_screen onto barrel + Adaptive wrappers ([#812](https://github.com/cedricziel/assistant/issues/812)) ([c7a60aa](https://github.com/cedricziel/assistant/commit/c7a60aa0aa5b0e3a39a9de84f3cd280138da76a1))
+* **app:** Phase 4 — façade-import lint via shell-script gate ([#814](https://github.com/cedricziel/assistant/issues/814)) ([c316051](https://github.com/cedricziel/assistant/commit/c316051c1c3c6dd3ff6a6773d66987b826bcd6fb))
+
 ## [0.1.158](https://github.com/cedricziel/assistant/compare/v0.1.157...v0.1.158) (2026-05-17)
 
 
