@@ -319,6 +319,36 @@ Prefixes: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.
 - Helper functions for fixtures: `make_skill()`, `build()`, `mount_answer()`.
 - Use `assert_eq!` with descriptive messages as the third argument.
 
+### Choosing fakes
+
+The workspace ships three test seams; pick the one whose blast radius
+matches what's actually under test:
+
+- **`InMemoryFooStore`** — when the code under test takes
+  `Arc<dyn FooStore>` (or `&dyn FooStore`) and you only need that store's
+  surface. Constructs in microseconds, no SQLite, no migrations. Defined
+  alongside the `SqliteFooStore` impl in `crates/storage/src/*.rs`;
+  re-exported through `assistant_test_support::prelude`. See
+  `docs/adr/adr-0009-testability-architecture.md` for the trait-pair
+  pattern.
+- **`StorageLayer::new_in_memory()`** — when the code under test reaches
+  into multiple stores or runs a SQL query directly. Spins a `:memory:`
+  SQLite pool with all migrations applied. ~10ms per test.
+- **`wiremock::MockServer`** — when the code under test calls an HTTP
+  endpoint. Pair with `with_client(client, base_url)` constructors
+  (`HttpRequestActionExecutor`, `WebPushClient`, etc.) so the test can
+  route requests to the mock instead of the real host.
+
+For LLM-shaped behavior, use `ScriptedLlmProvider` from
+`assistant_llm_provider::scripted` to queue canned `LlmResponse` values
+without booting any backend.
+
+For orchestration-shaped behavior, use the trait facades — `Arc<dyn
+OrchestrationEngine>`, `Arc<dyn ToolDispatcher>`, `Arc<dyn SkillCatalog>`
+— with `StubOrchestrationEngine`, `StubToolDispatcher`,
+`InMemorySkillCatalog`. The `crates/mcp-server/tests/dispatch.rs` suite
+is the canonical worked example.
+
 ## Test Coverage Floor
 
 The workspace targets `>= 80%` line coverage per crate, measured by
