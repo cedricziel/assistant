@@ -399,6 +399,7 @@ fn build_vapid_jwt(signing_key: &SigningKey, endpoint: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assistant_storage::SqlitePushSubscriptionStore;
 
     #[test]
     fn keypair_roundtrip() {

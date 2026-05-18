@@ -266,7 +266,7 @@ pub async fn list_command_events(
 mod tests {
     use super::*;
     use assistant_runtime::CommandRegistry;
-    use assistant_storage::SqliteCommandEventStore;
+    use assistant_storage::{CommandEventStore, SqliteCommandEventStore};
 
     #[test]
     fn list_commands_returns_all_builtins() {
@@ -308,7 +308,7 @@ mod tests {
         let storage = assistant_storage::StorageLayer::new_in_memory()
             .await
             .unwrap();
-        let store = CommandEventStore::new(storage.pool.clone());
+        let store = SqliteCommandEventStore::new(storage.pool.clone());
         let conv_id = Uuid::new_v4();
 
         // Save an event.
@@ -336,7 +336,7 @@ mod tests {
         let storage = assistant_storage::StorageLayer::new_in_memory()
             .await
             .unwrap();
-        let store = CommandEventStore::new(storage.pool.clone());
+        let store = SqliteCommandEventStore::new(storage.pool.clone());
 
         let events = store.list_events(Uuid::new_v4()).await.unwrap();
         let responses: Vec<CommandEventResponse> =

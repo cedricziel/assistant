@@ -489,9 +489,9 @@ mod tests {
     use super::*;
     use crate::StorageLayer;
 
-    async fn store() -> WebhookStore {
+    async fn store() -> SqliteWebhookStore {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        WebhookStore::new(storage.pool)
+        SqliteWebhookStore::new(storage.pool)
     }
 
     #[tokio::test]

@@ -1195,8 +1195,8 @@ mod tests {
 
     use assistant_runtime::CommandRegistry;
     use assistant_storage::{
-        CommandEventStore, ConversationStore, InMemoryConversationBroadcaster, RunBroadcaster,
-        SkillRegistry, SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
+        ConversationStore, InMemoryConversationBroadcaster, RunBroadcaster, SkillRegistry,
+        SqliteAttachmentStore, SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
     };
 
     use super::super::ApiState;

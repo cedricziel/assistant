@@ -187,11 +187,11 @@ fn row_to_meta(row: &sqlx::sqlite::SqliteRow) -> Result<AttachmentMeta> {
 /// In-memory [`AttachmentStore`] for tests. Stores bytes in a HashMap
 /// keyed by ID; metadata in a separate HashMap. No filesystem.
 pub struct InMemoryAttachmentStore {
-    state: Arc<Mutex<InMemoryAttachmentState>>,
+    state: Arc<Mutex<MemoryAttachmentState>>,
 }
 
 #[derive(Default)]
-struct InMemoryAttachmentState {
+struct MemoryAttachmentState {
     bytes: HashMap<Uuid, Vec<u8>>,
     metas: HashMap<Uuid, AttachmentMeta>,
 }
@@ -199,11 +199,11 @@ struct InMemoryAttachmentState {
 impl InMemoryAttachmentStore {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(InMemoryAttachmentState::default())),
+            state: Arc::new(Mutex::new(MemoryAttachmentState::default())),
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryAttachmentState> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, MemoryAttachmentState> {
         match self.state.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
