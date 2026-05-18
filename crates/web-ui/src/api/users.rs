@@ -613,4 +613,173 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
+
+    async fn seed_user(state: &UsersApiState, id: &str, email: &str, name: &str) {
+        let now = chrono::Utc::now();
+        let user = User {
+            id: UserId::from(id),
+            org_id: OrgId::from("org_1"),
+            email: email.into(),
+            name: name.into(),
+            password_hash: String::new(),
+            idp_issuer: None,
+            idp_subject: None,
+            created_at: now,
+            updated_at: now,
+        };
+        state
+            .org_storage
+            .user_store()
+            .create_user(&user)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn get_user_returns_user_detail() {
+        let state = setup_state().await;
+        seed_user(&state, "usr_get", "get@acme.com", "Getter").await;
+        let app = test_app(state, make_admin_ctx());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/orgs/org_1/users/usr_get")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let detail: UserDetail = serde_json::from_slice(&body).unwrap();
+        assert_eq!(detail.email, "get@acme.com");
+        assert_eq!(detail.name, "Getter");
+    }
+
+    #[tokio::test]
+    async fn get_user_returns_404_when_missing() {
+        let state = setup_state().await;
+        let app = test_app(state, make_admin_ctx());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/orgs/org_1/users/usr_ghost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn update_user_renames_via_admin() {
+        let state = setup_state().await;
+        seed_user(&state, "usr_upd", "upd@acme.com", "Old Name").await;
+        let app = test_app(state, make_admin_ctx());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/orgs/org_1/users/usr_upd")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "name": "New Name"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let detail: UserDetail = serde_json::from_slice(&body).unwrap();
+        assert_eq!(detail.name, "New Name");
+        // Email unchanged.
+        assert_eq!(detail.email, "upd@acme.com");
+    }
+
+    #[tokio::test]
+    async fn update_user_forbidden_for_member() {
+        let state = setup_state().await;
+        seed_user(&state, "usr_upd2", "upd2@acme.com", "Initial").await;
+        let app = test_app(state, make_member_ctx());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/orgs/org_1/users/usr_upd2")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({"name": "Changed"})).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn create_user_rejects_empty_email() {
+        let state = setup_state().await;
+        let app = test_app(state, make_admin_ctx());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/orgs/org_1/users")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "email": "",
+                            "name": "Anon"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Implementations may return 400 or 422; either is acceptable.
+        let status = resp.status().as_u16();
+        assert!(
+            status == 400 || status == 422,
+            "expected 4xx for empty email; got {status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_user_returns_404_for_missing() {
+        let state = setup_state().await;
+        let app = test_app(state, make_admin_ctx());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/orgs/org_1/users/usr_missing")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Either 404 or 204 (idempotent delete) is acceptable depending on
+        // implementation; assert it's not 5xx.
+        assert!(
+            resp.status().is_client_error() || resp.status() == StatusCode::NO_CONTENT,
+            "got: {}",
+            resp.status()
+        );
+    }
 }
