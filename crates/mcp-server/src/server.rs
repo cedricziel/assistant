@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use assistant_core::tool::ToolDispatcher;
 use assistant_core::{types::conversation::ExecutionContext, types::conversation::Interface};
-use assistant_runtime::Orchestrator;
-use assistant_storage::registry::SkillRegistry;
-use assistant_tool_executor::{ToolExecutor, install_skill_from_source};
+use assistant_runtime::OrchestrationEngine;
+use assistant_storage::SkillCatalog;
+use assistant_tool_executor::install_skill_from_source;
 use serde_json::{Value, json};
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -17,10 +18,11 @@ use crate::protocol::*;
 /// Handles a single MCP JSON-RPC request and returns a response.
 pub async fn handle_request(
     req: JsonRpcRequest,
-    registry: Arc<SkillRegistry>,
-    executor: Arc<ToolExecutor>,
-    orchestrator: Arc<Orchestrator>,
+    registry: Arc<dyn SkillCatalog>,
+    executor: Arc<dyn ToolDispatcher>,
+    orchestrator: Arc<dyn OrchestrationEngine>,
     user_skills_dir: PathBuf,
+    install_registry: Option<Arc<assistant_storage::SkillRegistry>>,
 ) -> JsonRpcResponse {
     debug!(method = %req.method, "MCP request");
 
@@ -129,7 +131,14 @@ pub async fn handle_request(
                         "Missing required parameter 'source'",
                     );
                 };
-                return match install_skill_from_source(source, &user_skills_dir, registry.clone())
+                let Some(install_target) = install_registry.clone() else {
+                    return JsonRpcResponse::err(
+                        req.id,
+                        -32603,
+                        "Skill installation requires a SkillRegistry — none configured",
+                    );
+                };
+                return match install_skill_from_source(source, &user_skills_dir, install_target)
                     .await
                 {
                     Ok(name) => {

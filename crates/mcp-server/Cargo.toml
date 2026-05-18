@@ -21,6 +21,10 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
+[dev-dependencies]
+assistant-skills = { path = "../skills" }
+tempfile = { workspace = true }
+
 # Panic-free contract: production code propagates errors via `anyhow::Result`.
 # Tests are exempt because `make lint` (`cargo clippy --workspace`) does not
 # check `#[cfg(test)]` modules. Cargo forbids combining `[lints] workspace = true`

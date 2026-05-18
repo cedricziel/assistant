@@ -76,6 +76,7 @@ pub async fn run(
             executor.clone(),
             orchestrator.clone(),
             user_skills_dir.clone(),
+            Some(registry.clone()),
         )
         .await;
 

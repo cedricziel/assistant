@@ -9,6 +9,7 @@ pub mod interface_runner;
 pub mod interface_trait;
 pub mod memory_indexer;
 pub mod metrics;
+pub mod orchestration;
 pub mod orchestrator;
 pub(crate) mod otel_spans;
 pub mod scheduler;
@@ -26,6 +27,7 @@ pub use command_registry::{CommandContext, CommandRegistry};
 pub use interface_runner::InterfaceRunner;
 pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;
+pub use orchestration::{OrchestrationEngine, RecordedSubmitTurn, StubOrchestrationEngine};
 pub use orchestrator::{
     CancelOutcome, Orchestrator, OrchestratorEvent, TURN_CANCELLED_MARKER, TurnResult,
 };
