@@ -7,8 +7,8 @@ use sqlx::SqlitePool;
 
 use assistant_storage::{
     LogStats, LogStore, MetricsStore, MetricsSummary, ModelTokenUsage, RecordedLog, RecordedSpan,
-    SqliteLogStore, SqliteTraceStore, TimeSeriesPoint, ToolUsageStats, TraceFilter, TraceStore,
-    TraceSummary,
+    SqliteLogStore, SqliteMetricsStore, SqliteTraceStore, TimeSeriesPoint, ToolUsageStats,
+    TraceFilter, TraceStore, TraceSummary,
 };
 
 use super::{LogBackend, MetricsBackend, TraceBackend};
@@ -191,7 +191,7 @@ impl SqliteMetricsBackend {
 #[async_trait]
 impl MetricsBackend for SqliteMetricsBackend {
     async fn summary(&self, window_hours: i64, agent_id: &str) -> Result<MetricsSummary> {
-        MetricsStore::for_agent(self.pool.clone(), agent_id)
+        SqliteMetricsStore::for_agent(self.pool.clone(), agent_id)
             .summary(window_hours)
             .await
     }
@@ -202,7 +202,7 @@ impl MetricsBackend for SqliteMetricsBackend {
         bucket_minutes: i64,
         agent_id: &str,
     ) -> Result<Vec<TimeSeriesPoint>> {
-        MetricsStore::for_agent(self.pool.clone(), agent_id)
+        SqliteMetricsStore::for_agent(self.pool.clone(), agent_id)
             .token_usage_over_time(window_hours, bucket_minutes)
             .await
     }
@@ -212,13 +212,13 @@ impl MetricsBackend for SqliteMetricsBackend {
         window_hours: i64,
         agent_id: &str,
     ) -> Result<Vec<ModelTokenUsage>> {
-        MetricsStore::for_agent(self.pool.clone(), agent_id)
+        SqliteMetricsStore::for_agent(self.pool.clone(), agent_id)
             .model_comparison(window_hours)
             .await
     }
 
     async fn tool_usage(&self, window_hours: i64, agent_id: &str) -> Result<Vec<ToolUsageStats>> {
-        MetricsStore::for_agent(self.pool.clone(), agent_id)
+        SqliteMetricsStore::for_agent(self.pool.clone(), agent_id)
             .tool_usage(window_hours)
             .await
     }
@@ -229,7 +229,7 @@ impl MetricsBackend for SqliteMetricsBackend {
         bucket_minutes: i64,
         agent_id: &str,
     ) -> Result<Vec<TimeSeriesPoint>> {
-        MetricsStore::for_agent(self.pool.clone(), agent_id)
+        SqliteMetricsStore::for_agent(self.pool.clone(), agent_id)
             .request_rate(window_hours, bucket_minutes)
             .await
     }

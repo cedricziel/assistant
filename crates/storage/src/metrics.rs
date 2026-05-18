@@ -1,6 +1,9 @@
 //! Query API for persisted metrics, powering the analytics dashboard.
 
+use std::sync::{Arc, Mutex};
+
 use anyhow::Result;
+use async_trait::async_trait;
 use opentelemetry_semantic_conventions::attribute::GEN_AI_TOKEN_TYPE;
 use opentelemetry_semantic_conventions::metric::{
     GEN_AI_CLIENT_OPERATION_DURATION, GEN_AI_CLIENT_TOKEN_USAGE,
@@ -11,8 +14,32 @@ const ASSISTANT_TURN_COUNT: &str = "assistant.turn.count";
 const ASSISTANT_TOOL_INVOCATIONS: &str = "assistant.tool.invocations";
 const ASSISTANT_ERROR_COUNT: &str = "assistant.error.count";
 
-/// Query API for the `metric_points` table and its join tables.
-pub struct MetricsStore {
+/// Trait-based interface for analytics metric queries.
+#[async_trait]
+pub trait MetricsStore: Send + Sync {
+    async fn summary(&self, window_hours: i64) -> Result<MetricsSummary>;
+    async fn token_usage_over_time(
+        &self,
+        window_hours: i64,
+        bucket_minutes: i64,
+    ) -> Result<Vec<TimeSeriesPoint>>;
+    async fn model_comparison(&self, window_hours: i64) -> Result<Vec<ModelTokenUsage>>;
+    async fn tool_usage(&self, window_hours: i64) -> Result<Vec<ToolUsageStats>>;
+    async fn request_rate(
+        &self,
+        window_hours: i64,
+        bucket_minutes: i64,
+    ) -> Result<Vec<TimeSeriesPoint>>;
+    async fn error_rate(
+        &self,
+        window_hours: i64,
+        bucket_minutes: i64,
+    ) -> Result<Vec<TimeSeriesPoint>>;
+    async fn list_resources(&self) -> Result<Vec<ResourceRecord>>;
+}
+
+/// SQLite-backed metrics store.
+pub struct SqliteMetricsStore {
     pool: SqlitePool,
     agent_id: String,
 }
@@ -57,7 +84,7 @@ pub struct ResourceRecord {
     pub attributes: String,
 }
 
-impl MetricsStore {
+impl SqliteMetricsStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -71,9 +98,12 @@ impl MetricsStore {
             agent_id: agent_id.into(),
         }
     }
+}
 
+#[async_trait]
+impl MetricsStore for SqliteMetricsStore {
     /// Overall summary for the last `window_hours` hours.
-    pub async fn summary(&self, window_hours: i64) -> Result<MetricsSummary> {
+    async fn summary(&self, window_hours: i64) -> Result<MetricsSummary> {
         let window = format!("-{window_hours} hours");
 
         // Token counts from gen_ai.client.token.usage histogram.
@@ -177,7 +207,7 @@ impl MetricsStore {
     }
 
     /// Token-usage time series grouped into fixed-width time buckets.
-    pub async fn token_usage_over_time(
+    async fn token_usage_over_time(
         &self,
         window_hours: i64,
         bucket_minutes: i64,
@@ -208,7 +238,7 @@ impl MetricsStore {
     }
 
     /// Per-model token-usage breakdown.
-    pub async fn model_comparison(&self, window_hours: i64) -> Result<Vec<ModelTokenUsage>> {
+    async fn model_comparison(&self, window_hours: i64) -> Result<Vec<ModelTokenUsage>> {
         let rows: Vec<(String, f64, f64, f64, f64)> = sqlx::query_as(&format!(
             "SELECT \
                  COALESCE(model, 'unknown') AS m, \
@@ -243,7 +273,7 @@ impl MetricsStore {
     }
 
     /// Tool-usage stats for the operational dashboard.
-    pub async fn tool_usage(&self, window_hours: i64) -> Result<Vec<ToolUsageStats>> {
+    async fn tool_usage(&self, window_hours: i64) -> Result<Vec<ToolUsageStats>> {
         let rows: Vec<(String, f64, f64)> = sqlx::query_as(&format!(
             "SELECT \
                  COALESCE( \
@@ -276,7 +306,7 @@ impl MetricsStore {
     }
 
     /// Request-rate time series (turns per bucket).
-    pub async fn request_rate(
+    async fn request_rate(
         &self,
         window_hours: i64,
         bucket_minutes: i64,
@@ -307,7 +337,7 @@ impl MetricsStore {
     }
 
     /// Error-count time series.
-    pub async fn error_rate(
+    async fn error_rate(
         &self,
         window_hours: i64,
         bucket_minutes: i64,
@@ -338,7 +368,7 @@ impl MetricsStore {
     }
 
     /// List all known resources.
-    pub async fn list_resources(&self) -> Result<Vec<ResourceRecord>> {
+    async fn list_resources(&self) -> Result<Vec<ResourceRecord>> {
         let rows: Vec<(i64, String, String)> = sqlx::query_as(
             "SELECT id, fingerprint, attributes FROM resources ORDER BY created_at DESC",
         )
@@ -356,6 +386,85 @@ impl MetricsStore {
     }
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation (test-only)
+// ---------------------------------------------------------------------------
+
+/// In-memory [`MetricsStore`] that returns canned empty/default results.
+///
+/// Metrics are populated by the OpenTelemetry exporter, not direct writes;
+/// the in-memory variant exists purely as a stub for consumers (e.g.
+/// `assistant-web-ui` analytics endpoints) under test. Test code that wants
+/// to verify analytics output should mock at a higher level.
+pub struct InMemoryMetricsStore {
+    _state: Arc<Mutex<()>>,
+}
+
+impl InMemoryMetricsStore {
+    pub fn new() -> Self {
+        Self {
+            _state: Arc::new(Mutex::new(())),
+        }
+    }
+}
+
+impl Default for InMemoryMetricsStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl MetricsStore for InMemoryMetricsStore {
+    async fn summary(&self, _window_hours: i64) -> Result<MetricsSummary> {
+        Ok(MetricsSummary {
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+            total_requests: 0,
+            total_tool_invocations: 0,
+            avg_duration_s: 0.0,
+            error_count: 0,
+            unique_models: Vec::new(),
+        })
+    }
+
+    async fn token_usage_over_time(
+        &self,
+        _window_hours: i64,
+        _bucket_minutes: i64,
+    ) -> Result<Vec<TimeSeriesPoint>> {
+        Ok(Vec::new())
+    }
+
+    async fn model_comparison(&self, _window_hours: i64) -> Result<Vec<ModelTokenUsage>> {
+        Ok(Vec::new())
+    }
+
+    async fn tool_usage(&self, _window_hours: i64) -> Result<Vec<ToolUsageStats>> {
+        Ok(Vec::new())
+    }
+
+    async fn request_rate(
+        &self,
+        _window_hours: i64,
+        _bucket_minutes: i64,
+    ) -> Result<Vec<TimeSeriesPoint>> {
+        Ok(Vec::new())
+    }
+
+    async fn error_rate(
+        &self,
+        _window_hours: i64,
+        _bucket_minutes: i64,
+    ) -> Result<Vec<TimeSeriesPoint>> {
+        Ok(Vec::new())
+    }
+
+    async fn list_resources(&self) -> Result<Vec<ResourceRecord>> {
+        Ok(Vec::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,7 +473,7 @@ mod tests {
     #[tokio::test]
     async fn summary_returns_zeros_on_empty_db() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = MetricsStore::new(storage.pool.clone());
+        let store = SqliteMetricsStore::new(storage.pool.clone());
 
         let summary = store.summary(24).await.unwrap();
         assert_eq!(summary.total_tokens_in, 0);
@@ -378,7 +487,7 @@ mod tests {
     #[tokio::test]
     async fn token_usage_over_time_empty() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = MetricsStore::new(storage.pool.clone());
+        let store = SqliteMetricsStore::new(storage.pool.clone());
 
         let series = store.token_usage_over_time(24, 5).await.unwrap();
         assert!(series.is_empty());
@@ -387,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn list_resources_empty() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = MetricsStore::new(storage.pool.clone());
+        let store = SqliteMetricsStore::new(storage.pool.clone());
 
         let resources = store.list_resources().await.unwrap();
         assert!(resources.is_empty());
@@ -490,7 +599,7 @@ mod tests {
         .await
         .unwrap();
 
-        let store = MetricsStore::new(pool);
+        let store = SqliteMetricsStore::new(pool);
 
         // All of these previously failed with "mismatched types; Rust type
         // `f64` (as SQL type `REAL`) is not compatible with SQL type `INTEGER`"
