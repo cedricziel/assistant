@@ -1,9 +1,11 @@
 //! Subagent lifecycle persistence.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
@@ -52,13 +54,45 @@ pub struct AgentRecord {
 }
 
 /// SQLite-backed store for subagent lifecycle records.
-pub struct AgentStore {
+/// Trait-based interface for subagent process persistence.
+#[async_trait]
+pub trait AgentStore: Send + Sync {
+    /// Insert a new agent record in `running` status.
+    async fn create(
+        &self,
+        id: &str,
+        parent_agent_id: Option<&str>,
+        parent_conversation_id: &str,
+        conversation_id: &str,
+        task: &str,
+        depth: u32,
+    ) -> Result<()>;
+
+    /// Mark an agent as completed/failed/cancelled.
+    async fn complete(
+        &self,
+        id: &str,
+        status: AgentStatus,
+        result_summary: Option<&str>,
+    ) -> Result<()>;
+
+    /// Fetch a single agent record by ID.
+    async fn get(&self, id: &str) -> Result<Option<AgentRecord>>;
+
+    /// List all subagents spawned within a parent conversation.
+    async fn list_by_parent_conversation(
+        &self,
+        parent_conversation_id: &str,
+    ) -> Result<Vec<AgentRecord>>;
+}
+
+pub struct SqliteAgentStore {
     pool: SqlitePool,
     /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
     clock: Arc<dyn Clock>,
 }
 
-impl AgentStore {
+impl SqliteAgentStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -71,9 +105,12 @@ impl AgentStore {
         self.clock = clock;
         self
     }
+}
 
+#[async_trait]
+impl AgentStore for SqliteAgentStore {
     /// Insert a new agent record in `running` status.
-    pub async fn create(
+    async fn create(
         &self,
         id: &str,
         parent_agent_id: Option<&str>,
@@ -102,7 +139,7 @@ impl AgentStore {
     }
 
     /// Mark an agent as completed or failed and record a result summary.
-    pub async fn complete(
+    async fn complete(
         &self,
         id: &str,
         status: AgentStatus,
@@ -123,7 +160,7 @@ impl AgentStore {
     }
 
     /// Fetch a single agent by ID.
-    pub async fn get(&self, id: &str) -> Result<Option<AgentRecord>> {
+    async fn get(&self, id: &str) -> Result<Option<AgentRecord>> {
         let row = sqlx::query(
             "SELECT id, parent_agent_id, parent_conversation_id, conversation_id, \
                     task, status, depth, created_at, completed_at, result_summary \
@@ -140,7 +177,7 @@ impl AgentStore {
     }
 
     /// List agents spawned within a given parent conversation.
-    pub async fn list_by_parent_conversation(
+    async fn list_by_parent_conversation(
         &self,
         parent_conversation_id: &str,
     ) -> Result<Vec<AgentRecord>> {
@@ -173,6 +210,110 @@ fn parse_row(row: sqlx::sqlite::SqliteRow) -> Result<AgentRecord> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+/// In-memory [`AgentStore`]. HashMap<id, AgentRecord>.
+pub struct InMemoryAgentStore {
+    state: Arc<Mutex<HashMap<String, AgentRecord>>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl InMemoryAgentStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(HashMap::new())),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, AgentRecord>> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryAgentStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl AgentStore for InMemoryAgentStore {
+    async fn create(
+        &self,
+        id: &str,
+        parent_agent_id: Option<&str>,
+        parent_conversation_id: &str,
+        conversation_id: &str,
+        task: &str,
+        depth: u32,
+    ) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state.insert(
+            id.to_string(),
+            AgentRecord {
+                id: id.to_string(),
+                parent_agent_id: parent_agent_id.map(str::to_string),
+                parent_conversation_id: parent_conversation_id.to_string(),
+                conversation_id: conversation_id.to_string(),
+                task: task.to_string(),
+                status: AgentStatus::Running,
+                depth: depth as i64,
+                created_at: now,
+                completed_at: None,
+                result_summary: None,
+            },
+        );
+        Ok(())
+    }
+
+    async fn complete(
+        &self,
+        id: &str,
+        status: AgentStatus,
+        result_summary: Option<&str>,
+    ) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(a) = state.get_mut(id) {
+            a.status = status;
+            a.completed_at = Some(now);
+            a.result_summary = result_summary.map(str::to_string);
+        }
+        Ok(())
+    }
+
+    async fn get(&self, id: &str) -> Result<Option<AgentRecord>> {
+        let state = self.lock();
+        Ok(state.get(id).cloned())
+    }
+
+    async fn list_by_parent_conversation(
+        &self,
+        parent_conversation_id: &str,
+    ) -> Result<Vec<AgentRecord>> {
+        let state = self.lock();
+        let mut out: Vec<AgentRecord> = state
+            .values()
+            .filter(|a| a.parent_conversation_id == parent_conversation_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|a| a.created_at);
+        Ok(out)
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -180,9 +321,9 @@ mod tests {
     use super::*;
     use crate::StorageLayer;
 
-    async fn store() -> AgentStore {
+    async fn store() -> SqliteAgentStore {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        AgentStore::new(storage.pool)
+        SqliteAgentStore::new(storage.pool)
     }
 
     #[tokio::test]

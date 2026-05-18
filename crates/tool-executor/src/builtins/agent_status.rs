@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{ToolHandler, ToolOutput};
-use assistant_storage::StorageLayer;
+use assistant_storage::{AgentStore, StorageLayer};
 use async_trait::async_trait;
 use serde_json::json;
 
@@ -144,7 +144,7 @@ impl ToolHandler for AgentStatusHandler {
 mod tests {
     use super::*;
     use assistant_core::types::conversation::Interface;
-    use assistant_storage::{AgentStore, StorageLayer};
+    use assistant_storage::{AgentStore, SqliteAgentStore, StorageLayer};
     use uuid::Uuid;
 
     fn ctx_with_conversation(conversation_id: Uuid) -> ExecutionContext {
@@ -162,7 +162,7 @@ mod tests {
         }
     }
 
-    async fn setup() -> (Arc<StorageLayer>, AgentStatusHandler, AgentStore) {
+    async fn setup() -> (Arc<StorageLayer>, AgentStatusHandler, SqliteAgentStore) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let handler = AgentStatusHandler::new(storage.clone());
         let agent_store = storage.agent_store();

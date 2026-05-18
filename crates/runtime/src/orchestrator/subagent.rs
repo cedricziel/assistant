@@ -11,7 +11,7 @@ use assistant_core::{
     types::conversation::ExecutionContext, types::conversation::Interface,
     types::conversation::Message,
 };
-use assistant_storage::ConversationStore;
+use assistant_storage::{AgentStore, ConversationStore};
 use async_trait::async_trait;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,
