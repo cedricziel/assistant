@@ -194,7 +194,7 @@ rand = "0.10"
 subtle = "2"
 
 # Text diffing for `/review` skill refinement display.
-similar = "2.6"
+similar = "3.1"
 
 [dev-dependencies]
 # Used by the workspace-lint-policy enforcement test in `tests/`.
