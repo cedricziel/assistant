@@ -24,7 +24,7 @@ use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ContentBlock, ConversationConfig,
     IdentityResolver,
 };
-use assistant_storage::CommandEventStore;
+use assistant_storage::{CommandEventStore, SqliteCommandEventStore};
 use base64::Engine as _;
 use futures::StreamExt;
 use lru::LruCache;
@@ -63,7 +63,7 @@ pub struct ChannelRunner {
     /// Active turns: conv_id → request_id (for `/stop`).
     active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
     /// Store for persisting command events.
-    command_event_store: CommandEventStore,
+    command_event_store: Arc<dyn CommandEventStore>,
     /// Optional resolver that maps platform user IDs to assistant user IDs.
     identity_resolver: Option<Arc<dyn IdentityResolver>>,
 }
@@ -71,7 +71,9 @@ pub struct ChannelRunner {
 impl ChannelRunner {
     /// Create a new runner for `adapter`.
     pub fn new(adapter: Arc<dyn ChannelAdapter>, orchestrator: Arc<Orchestrator>) -> Self {
-        let command_event_store = CommandEventStore::new(orchestrator.storage.pool.clone());
+        let command_event_store: Arc<dyn CommandEventStore> = Arc::new(
+            SqliteCommandEventStore::new(orchestrator.storage.pool.clone()),
+        );
         Self {
             adapter,
             orchestrator,

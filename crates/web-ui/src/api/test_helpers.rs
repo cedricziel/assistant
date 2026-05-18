@@ -22,7 +22,7 @@ use assistant_llm_provider::retry::RetryConfig;
 use assistant_runtime::{CommandRegistry, Orchestrator};
 use assistant_storage::{
     AttachmentStore, CommandEventStore, ConversationEventStore, InMemoryConversationBroadcaster,
-    RunBroadcaster, SkillRegistry, SqliteAttachmentStore, StorageLayer,
+    RunBroadcaster, SkillRegistry, SqliteAttachmentStore, SqliteCommandEventStore, StorageLayer,
 };
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
@@ -122,7 +122,7 @@ pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
         run_broadcaster: RunBroadcaster::new(),
         attachment_store: Arc::new(SqliteAttachmentStore::new(storage.pool.clone())),
         command_registry: Arc::new(CommandRegistry::new()),
-        command_event_store: CommandEventStore::new(storage.pool.clone()),
+        command_event_store: Arc::new(SqliteCommandEventStore::new(storage.pool.clone())),
         conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
         conversation_configs: Arc::new(RwLock::new(HashMap::new())),
         orchestrator_ref,
@@ -180,7 +180,7 @@ pub(crate) async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
         run_broadcaster: RunBroadcaster::new(),
         attachment_store: Arc::new(SqliteAttachmentStore::new(storage.pool.clone())),
         command_registry: Arc::new(CommandRegistry::new()),
-        command_event_store: CommandEventStore::new(storage.pool.clone()),
+        command_event_store: Arc::new(SqliteCommandEventStore::new(storage.pool.clone())),
         conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
         conversation_configs: Arc::new(RwLock::new(HashMap::new())),
         orchestrator_ref,
