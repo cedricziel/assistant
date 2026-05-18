@@ -23,7 +23,7 @@ use crate::api::internal_error;
 
 #[derive(Clone)]
 pub struct PushApiState {
-    pub store: Arc<PushSubscriptionStore>,
+    pub store: Arc<dyn PushSubscriptionStore>,
     /// Base64url-encoded VAPID public key (uncompressed P-256 point).
     pub vapid_public_key: Arc<String>,
 }

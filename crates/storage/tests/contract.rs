@@ -8,5 +8,6 @@ mod contract {
     pub mod attachment_store;
     pub mod conversation_store;
     pub mod log_store;
+    pub mod push_subscription_store;
     pub mod trace_store;
 }
