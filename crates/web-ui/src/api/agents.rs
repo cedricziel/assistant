@@ -452,4 +452,198 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
+
+    /// Build a minimal AgentCard JSON value that satisfies the schema deserialiser.
+    fn minimal_card_json(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "description": "test card",
+            "url": "https://example.com/agent",
+            "version": "0.1.0",
+            "protocolVersion": "0.2.0",
+            "skills": [],
+            "capabilities": {},
+            "defaultInputModes": ["text"],
+            "defaultOutputModes": ["text"],
+            "supportedInterfaces": []
+        })
+    }
+
+    #[tokio::test]
+    async fn register_then_get_and_list_succeeds() {
+        let (state, _tmp) = test_state().await;
+        let app1 = app(state.clone());
+        let resp = app1
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/agents")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "card": minimal_card_json("alpha"),
+                            "set_default": false,
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let detail = body_json(resp.into_body()).await;
+        let id = detail["id"].as_str().unwrap().to_string();
+
+        // GET /agents/{id}
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/agents/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got = body_json(resp.into_body()).await;
+        assert_eq!(got["id"], detail["id"]);
+
+        // LIST should contain one entry.
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let list = body_json(resp.into_body()).await;
+        assert_eq!(list.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn update_agent_changes_card_fields() {
+        let (state, _tmp) = test_state().await;
+        // Register first.
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/agents")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "card": minimal_card_json("alpha"),
+                            "set_default": false,
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let detail = body_json(resp.into_body()).await;
+        let id = detail["id"].as_str().unwrap().to_string();
+
+        // PUT a card with a different name.
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/agents/{id}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "card": minimal_card_json("beta"),
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let updated = body_json(resp.into_body()).await;
+        assert_eq!(updated["card"]["name"], "beta");
+    }
+
+    #[tokio::test]
+    async fn update_agent_unknown_returns_404() {
+        let (state, _tmp) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/agents/no-such-agent")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "card": minimal_card_json("ghost"),
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn update_agent_invalid_card_returns_400() {
+        let (state, _tmp) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/agents/something")
+                    .header("Content-Type", "application/json")
+                    // Missing required `name` field.
+                    .body(Body::from(r#"{"card":{}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn delete_agent_after_register_returns_204() {
+        let (state, _tmp) = test_state().await;
+        // Register.
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/agents")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "card": minimal_card_json("alpha"),
+                            "set_default": false,
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let detail = body_json(resp.into_body()).await;
+        let id = detail["id"].as_str().unwrap().to_string();
+
+        // DELETE returns 204.
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/agents/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
 }
