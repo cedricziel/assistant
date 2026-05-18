@@ -9,7 +9,8 @@ use anyhow::Result;
 use assistant_core::types::features::LearningConfig;
 use assistant_core::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
 use assistant_storage::{
-    RefinementStatus, RefinementsStore, SkillRegistry, SkillStatsProvider, StorageLayer,
+    RefinementStatus, RefinementsStore, ScheduledTaskStore, SkillRegistry, SkillStatsProvider,
+    StorageLayer,
 };
 use chrono::Utc;
 use tracing::{debug, info, warn};

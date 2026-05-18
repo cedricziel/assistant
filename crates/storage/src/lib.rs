@@ -96,7 +96,9 @@ pub use push_subscriptions::{
 };
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
-pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
+pub use scheduled_tasks::{
+    InMemoryScheduledTaskStore, ScheduledTask, ScheduledTaskStore, SqliteScheduledTaskStore,
+};
 pub use slack_threads::{
     InMemorySlackActiveThreadStore, SlackActiveThreadStore, SqliteSlackActiveThreadStore,
 };
@@ -198,13 +200,13 @@ impl StorageLayer {
     }
 
     /// Convenience: build a `ScheduledTaskStore` backed by this pool.
-    pub fn scheduled_task_store(&self) -> ScheduledTaskStore {
-        ScheduledTaskStore::new(self.pool.clone())
+    pub fn scheduled_task_store(&self) -> SqliteScheduledTaskStore {
+        SqliteScheduledTaskStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `ScheduledTaskStore` scoped to a Persona.
-    pub fn scheduled_task_store_for_agent(&self, agent_id: &str) -> ScheduledTaskStore {
-        ScheduledTaskStore::for_agent(self.pool.clone(), agent_id)
+    pub fn scheduled_task_store_for_agent(&self, agent_id: &str) -> SqliteScheduledTaskStore {
+        SqliteScheduledTaskStore::for_agent(self.pool.clone(), agent_id)
     }
 
     /// Convenience: build a `MemoryChunkStore` backed by this pool.

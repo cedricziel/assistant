@@ -21,9 +21,9 @@ pub use assistant_core::clock::{Clock, FakeClock, SystemClock};
 pub use assistant_storage::{
     AgentStore, AttachmentStore, CommandEventStore, ConversationStore, InMemoryAgentStore,
     InMemoryAttachmentStore, InMemoryCommandEventStore, InMemoryConversationStore,
-    InMemoryLogStore, InMemoryPushSubscriptionStore, InMemorySlackActiveThreadStore,
-    InMemoryTraceStore, InMemoryWebhookStore, LogStore, PushSubscriptionStore,
-    SlackActiveThreadStore, TraceStore, WebhookStore,
+    InMemoryLogStore, InMemoryPushSubscriptionStore, InMemoryScheduledTaskStore,
+    InMemorySlackActiveThreadStore, InMemoryTraceStore, InMemoryWebhookStore, LogStore,
+    PushSubscriptionStore, ScheduledTaskStore, SlackActiveThreadStore, TraceStore, WebhookStore,
 };
 
 pub use crate::fixture::{Fixture, FixtureBuilder};
