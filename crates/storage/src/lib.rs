@@ -81,7 +81,9 @@ pub use conversations::{
 };
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use logs::{InMemoryLogStore, LogStats, LogStore, RecordedLog, SqliteLogStore};
-pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
+pub use memory_chunks::{
+    FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,
+};
 pub use message_bus::SqliteMessageBus;
 pub use metrics::{
     InMemoryMetricsStore, MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord,
@@ -218,8 +220,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a `MemoryChunkStore` backed by this pool.
-    pub fn memory_chunks_store(&self) -> MemoryChunkStore {
-        MemoryChunkStore::new(self.pool.clone())
+    pub fn memory_chunks_store(&self) -> SqliteMemoryChunkStore {
+        SqliteMemoryChunkStore::new(self.pool.clone())
     }
 
     /// Convenience: build an [`AgentStore`] backed by this pool.

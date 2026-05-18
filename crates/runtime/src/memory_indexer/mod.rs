@@ -102,7 +102,7 @@ impl MemoryIndexer {
     }
 
     /// Index a single file: compute hash, skip if unchanged, else re-chunk.
-    async fn index_file(&self, store: &MemoryChunkStore, path: &Path) -> Result<()> {
+    async fn index_file(&self, store: &dyn MemoryChunkStore, path: &Path) -> Result<()> {
         let content = tokio::fs::read_to_string(path).await?;
         let hash = sha256_hex(&content);
         let path_str = path.to_string_lossy().to_string();
@@ -126,7 +126,7 @@ impl MemoryIndexer {
     /// the whole batch. Providers without batching fall back to the trait's
     /// sequential default — same behaviour as before but with one fewer
     /// abstraction layer.
-    async fn embed_pending(&self, store: &MemoryChunkStore) -> Result<()> {
+    async fn embed_pending(&self, store: &dyn MemoryChunkStore) -> Result<()> {
         let unembedded = store.get_unembedded(EMBED_BATCH_SIZE).await?;
         if unembedded.is_empty() {
             return Ok(());

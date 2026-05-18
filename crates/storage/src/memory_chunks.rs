@@ -4,7 +4,11 @@
 //! `memory_chunks` alongside an optional embedding vector (BLOB of raw f32
 //! bytes).  A companion FTS5 virtual table enables fast full-text search.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use anyhow::Result;
+use async_trait::async_trait;
 use sqlx::SqlitePool;
 
 /// A single stored chunk from a memory file.
@@ -30,16 +34,45 @@ pub struct FtsMatch {
 // Row type alias to avoid clippy::type_complexity lint.
 type ChunkRow = (i64, String, i32, String, Option<Vec<u8>>, String);
 
-/// SQLite-backed store for memory chunks and their embeddings.
-pub struct MemoryChunkStore(pub(crate) SqlitePool);
+/// Trait-based interface for memory chunk persistence.
+#[async_trait]
+pub trait MemoryChunkStore: Send + Sync {
+    async fn get_file_hash(&self, file_path: &str) -> Result<Option<String>>;
+    async fn delete_file_chunks(&self, file_path: &str) -> Result<()>;
+    async fn upsert_chunk(
+        &self,
+        file_path: &str,
+        file_hash: &str,
+        chunk_index: i32,
+        content: &str,
+    ) -> Result<i64>;
+    async fn update_embedding(&self, id: i64, embedding: &[f32]) -> Result<()>;
+    async fn get_unembedded(&self, limit: i64) -> Result<Vec<StoredChunk>>;
+    async fn get_all_embedded(&self) -> Result<Vec<StoredChunk>>;
+    async fn get_embeddings_by_ids(&self, ids: &[i64]) -> Result<Vec<StoredChunk>>;
+    async fn search_fts(&self, query: &str, limit: i64) -> Result<Vec<FtsMatch>>;
+    async fn replace_file_chunks(
+        &self,
+        file_path: &str,
+        file_hash: &str,
+        chunks: &[String],
+    ) -> Result<()>;
+    async fn count(&self) -> Result<i64>;
+}
 
-impl MemoryChunkStore {
+/// SQLite-backed store for memory chunks and their embeddings.
+pub struct SqliteMemoryChunkStore(pub(crate) SqlitePool);
+
+impl SqliteMemoryChunkStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self(pool)
     }
+}
 
+#[async_trait]
+impl MemoryChunkStore for SqliteMemoryChunkStore {
     /// Return the stored SHA-256 hash for `file_path`, if any chunks exist.
-    pub async fn get_file_hash(&self, file_path: &str) -> Result<Option<String>> {
+    async fn get_file_hash(&self, file_path: &str) -> Result<Option<String>> {
         let row: Option<(String,)> =
             sqlx::query_as("SELECT file_hash FROM memory_chunks WHERE file_path = ? LIMIT 1")
                 .bind(file_path)
@@ -49,7 +82,7 @@ impl MemoryChunkStore {
     }
 
     /// Delete all chunks for `file_path` (call before re-indexing a changed file).
-    pub async fn delete_file_chunks(&self, file_path: &str) -> Result<()> {
+    async fn delete_file_chunks(&self, file_path: &str) -> Result<()> {
         sqlx::query("DELETE FROM memory_chunks WHERE file_path = ?")
             .bind(file_path)
             .execute(&self.0)
@@ -58,7 +91,7 @@ impl MemoryChunkStore {
     }
 
     /// Insert or replace a single chunk, returning its row id.
-    pub async fn upsert_chunk(
+    async fn upsert_chunk(
         &self,
         file_path: &str,
         file_hash: &str,
@@ -87,7 +120,7 @@ impl MemoryChunkStore {
     /// Persist an embedding vector for the given chunk id.
     ///
     /// The vector is stored as raw little-endian f32 bytes.
-    pub async fn update_embedding(&self, id: i64, embedding: &[f32]) -> Result<()> {
+    async fn update_embedding(&self, id: i64, embedding: &[f32]) -> Result<()> {
         let bytes: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
         sqlx::query("UPDATE memory_chunks SET embedding = ? WHERE id = ?")
             .bind(bytes)
@@ -98,7 +131,7 @@ impl MemoryChunkStore {
     }
 
     /// Return up to `limit` chunks that have no embedding yet.
-    pub async fn get_unembedded(&self, limit: i64) -> Result<Vec<StoredChunk>> {
+    async fn get_unembedded(&self, limit: i64) -> Result<Vec<StoredChunk>> {
         let rows: Vec<ChunkRow> = sqlx::query_as(
             "SELECT id, file_path, chunk_index, content, embedding, file_hash
              FROM memory_chunks
@@ -113,7 +146,7 @@ impl MemoryChunkStore {
     }
 
     /// Return all chunks that have an embedding (for cosine similarity search).
-    pub async fn get_all_embedded(&self) -> Result<Vec<StoredChunk>> {
+    async fn get_all_embedded(&self) -> Result<Vec<StoredChunk>> {
         let rows: Vec<ChunkRow> = sqlx::query_as(
             "SELECT id, file_path, chunk_index, content, embedding, file_hash
              FROM memory_chunks
@@ -129,7 +162,7 @@ impl MemoryChunkStore {
     ///
     /// More efficient than [`get_all_embedded`] when you only need the embeddings
     /// for a known set of FTS hits.
-    pub async fn get_embeddings_by_ids(&self, ids: &[i64]) -> Result<Vec<StoredChunk>> {
+    async fn get_embeddings_by_ids(&self, ids: &[i64]) -> Result<Vec<StoredChunk>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -150,7 +183,7 @@ impl MemoryChunkStore {
     /// Full-text search using the FTS5 virtual table.
     ///
     /// Results are ranked by FTS5's built-in BM25 rank (lower rank = better).
-    pub async fn search_fts(&self, query: &str, limit: i64) -> Result<Vec<FtsMatch>> {
+    async fn search_fts(&self, query: &str, limit: i64) -> Result<Vec<FtsMatch>> {
         let rows: Vec<(i64, String, String, f64)> = sqlx::query_as(
             "SELECT mc.id, mc.file_path, mc.content, fts.rank
              FROM memory_chunks_fts fts
@@ -179,7 +212,7 @@ impl MemoryChunkStore {
     ///
     /// Deletes existing chunks and inserts the new ones so that a failure
     /// mid-way leaves the old data intact rather than a partial update.
-    pub async fn replace_file_chunks(
+    async fn replace_file_chunks(
         &self,
         file_path: &str,
         file_hash: &str,
@@ -223,7 +256,7 @@ impl MemoryChunkStore {
     }
 
     /// Return the total number of indexed chunks.
-    pub async fn count(&self) -> Result<i64> {
+    async fn count(&self) -> Result<i64> {
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_chunks")
             .fetch_one(&self.0)
             .await?;
@@ -249,5 +282,224 @@ fn decode_chunk(row: ChunkRow) -> StoredChunk {
         content,
         embedding,
         file_hash,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct InMemoryMemoryChunkState {
+    next_id: i64,
+    chunks: HashMap<i64, StoredChunk>,
+}
+
+/// In-memory [`MemoryChunkStore`]. HashMap-backed; FTS search does a naive
+/// substring scan. Use for test seams; production embedding indexers
+/// should run against SQLite.
+pub struct InMemoryMemoryChunkStore {
+    state: Arc<Mutex<InMemoryMemoryChunkState>>,
+}
+
+impl InMemoryMemoryChunkStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(InMemoryMemoryChunkState::default())),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryMemoryChunkState> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryMemoryChunkStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl MemoryChunkStore for InMemoryMemoryChunkStore {
+    async fn get_file_hash(&self, file_path: &str) -> Result<Option<String>> {
+        let state = self.lock();
+        Ok(state
+            .chunks
+            .values()
+            .find(|c| c.file_path == file_path)
+            .map(|c| c.file_hash.clone()))
+    }
+
+    async fn delete_file_chunks(&self, file_path: &str) -> Result<()> {
+        let mut state = self.lock();
+        state.chunks.retain(|_, c| c.file_path != file_path);
+        Ok(())
+    }
+
+    async fn upsert_chunk(
+        &self,
+        file_path: &str,
+        file_hash: &str,
+        chunk_index: i32,
+        content: &str,
+    ) -> Result<i64> {
+        let mut state = self.lock();
+        // Search for existing chunk at this (file_path, chunk_index).
+        let existing_id = state
+            .chunks
+            .iter()
+            .find(|(_, c)| c.file_path == file_path && c.chunk_index == chunk_index)
+            .map(|(id, _)| *id);
+        let id = if let Some(id) = existing_id {
+            if let Some(c) = state.chunks.get_mut(&id) {
+                c.content = content.to_string();
+                c.file_hash = file_hash.to_string();
+                c.embedding = None;
+            }
+            id
+        } else {
+            state.next_id += 1;
+            let id = state.next_id;
+            state.chunks.insert(
+                id,
+                StoredChunk {
+                    id,
+                    file_path: file_path.to_string(),
+                    chunk_index,
+                    content: content.to_string(),
+                    embedding: None,
+                    file_hash: file_hash.to_string(),
+                },
+            );
+            id
+        };
+        Ok(id)
+    }
+
+    async fn update_embedding(&self, id: i64, embedding: &[f32]) -> Result<()> {
+        let mut state = self.lock();
+        if let Some(c) = state.chunks.get_mut(&id) {
+            c.embedding = Some(embedding.to_vec());
+        }
+        Ok(())
+    }
+
+    async fn get_unembedded(&self, limit: i64) -> Result<Vec<StoredChunk>> {
+        let state = self.lock();
+        let mut out: Vec<StoredChunk> = state
+            .chunks
+            .values()
+            .filter(|c| c.embedding.is_none())
+            .map(|c| StoredChunk {
+                id: c.id,
+                file_path: c.file_path.clone(),
+                chunk_index: c.chunk_index,
+                content: c.content.clone(),
+                embedding: None,
+                file_hash: c.file_hash.clone(),
+            })
+            .collect();
+        out.sort_by_key(|c| c.id);
+        if limit > 0 {
+            out.truncate(limit as usize);
+        }
+        Ok(out)
+    }
+
+    async fn get_all_embedded(&self) -> Result<Vec<StoredChunk>> {
+        let state = self.lock();
+        let mut out: Vec<StoredChunk> = state
+            .chunks
+            .values()
+            .filter(|c| c.embedding.is_some())
+            .map(|c| StoredChunk {
+                id: c.id,
+                file_path: c.file_path.clone(),
+                chunk_index: c.chunk_index,
+                content: c.content.clone(),
+                embedding: c.embedding.clone(),
+                file_hash: c.file_hash.clone(),
+            })
+            .collect();
+        out.sort_by_key(|c| c.id);
+        Ok(out)
+    }
+
+    async fn get_embeddings_by_ids(&self, ids: &[i64]) -> Result<Vec<StoredChunk>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let state = self.lock();
+        let id_set: std::collections::HashSet<i64> = ids.iter().copied().collect();
+        let out: Vec<StoredChunk> = state
+            .chunks
+            .values()
+            .filter(|c| id_set.contains(&c.id) && c.embedding.is_some())
+            .map(|c| StoredChunk {
+                id: c.id,
+                file_path: c.file_path.clone(),
+                chunk_index: c.chunk_index,
+                content: c.content.clone(),
+                embedding: c.embedding.clone(),
+                file_hash: c.file_hash.clone(),
+            })
+            .collect();
+        Ok(out)
+    }
+
+    async fn search_fts(&self, query: &str, limit: i64) -> Result<Vec<FtsMatch>> {
+        // Naive substring scan — no real FTS5 ranking in-memory.
+        let q = query.to_lowercase();
+        let state = self.lock();
+        let mut out: Vec<FtsMatch> = state
+            .chunks
+            .values()
+            .filter(|c| c.content.to_lowercase().contains(&q))
+            .map(|c| FtsMatch {
+                chunk_id: c.id,
+                file_path: c.file_path.clone(),
+                content: c.content.clone(),
+                rank: 0.0,
+            })
+            .collect();
+        if limit > 0 {
+            out.truncate(limit as usize);
+        }
+        Ok(out)
+    }
+
+    async fn replace_file_chunks(
+        &self,
+        file_path: &str,
+        file_hash: &str,
+        chunks: &[String],
+    ) -> Result<()> {
+        let mut state = self.lock();
+        state.chunks.retain(|_, c| c.file_path != file_path);
+        for (i, content) in chunks.iter().enumerate() {
+            state.next_id += 1;
+            let id = state.next_id;
+            state.chunks.insert(
+                id,
+                StoredChunk {
+                    id,
+                    file_path: file_path.to_string(),
+                    chunk_index: i as i32,
+                    content: content.clone(),
+                    embedding: None,
+                    file_hash: file_hash.to_string(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    async fn count(&self) -> Result<i64> {
+        let state = self.lock();
+        Ok(state.chunks.len() as i64)
     }
 }
