@@ -319,6 +319,251 @@ fn parse_row(r: sqlx::sqlite::SqliteRow) -> Result<BusMessage> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+/// Internal envelope wrapping a BusMessage with delayed-redelivery support.
+#[derive(Clone)]
+struct InMemoryEnvelope {
+    msg: BusMessage,
+    /// When set, the message is invisible to claim until `now >= visible_at`.
+    visible_at: DateTime<Utc>,
+}
+
+#[derive(Default)]
+struct InMemoryBusState {
+    by_id: HashMap<Uuid, InMemoryEnvelope>,
+}
+
+/// In-memory [`MessageBus`] implementation.
+///
+/// Stores messages in a HashMap keyed by message id. Honors claim/ack/nack
+/// transitions and topic + ClaimFilter routing. Pure FIFO within a topic
+/// (no SQL `ORDER BY` — we sort by created_at).
+pub struct InMemoryMessageBus {
+    state: Arc<Mutex<InMemoryBusState>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl InMemoryMessageBus {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(InMemoryBusState::default())),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryBusState> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+
+    /// Pure helper: find the earliest pending message in a topic matching
+    /// the optional filter. Returns the message id.
+    fn pick_claim_target(
+        state: &InMemoryBusState,
+        topic: &str,
+        now: DateTime<Utc>,
+        filter: Option<&ClaimFilter>,
+    ) -> Option<Uuid> {
+        let mut candidates: Vec<(&Uuid, &InMemoryEnvelope)> = state
+            .by_id
+            .iter()
+            .filter(|(_, e)| {
+                e.msg.topic == topic
+                    && e.msg.status == MessageStatus::Pending
+                    && e.visible_at <= now
+            })
+            .filter(|(_, e)| {
+                if let Some(f) = filter {
+                    if let Some(user_id) = &f.user_id
+                        && e.msg.user_id.as_ref() != Some(user_id)
+                    {
+                        return false;
+                    }
+                    if let Some(agent_id) = &f.agent_id
+                        && e.msg.agent_id.as_ref() != Some(agent_id)
+                    {
+                        return false;
+                    }
+                    if let Some(conv_id) = &f.conversation_id
+                        && e.msg.conversation_id.as_ref() != Some(conv_id)
+                    {
+                        return false;
+                    }
+                    if let Some(batch_id) = &f.batch_id
+                        && e.msg.batch_id.as_ref() != Some(batch_id)
+                    {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+        candidates.sort_by_key(|(_, e)| e.msg.created_at);
+        candidates.first().map(|(id, _)| **id)
+    }
+}
+
+impl Default for InMemoryMessageBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl MessageBus for InMemoryMessageBus {
+    async fn publish(&self, req: PublishRequest) -> Result<Uuid> {
+        let id = Uuid::new_v4();
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state.by_id.insert(
+            id,
+            InMemoryEnvelope {
+                msg: BusMessage {
+                    id,
+                    topic: req.topic,
+                    payload: req.payload,
+                    status: MessageStatus::Pending,
+                    user_id: req.user_id,
+                    agent_id: req.agent_id,
+                    conversation_id: req.conversation_id,
+                    interface: req.interface,
+                    reply_to: req.reply_to,
+                    correlation_id: req.correlation_id,
+                    causation_id: req.causation_id,
+                    batch_id: req.batch_id,
+                    delivery_count: 0,
+                    created_at: now,
+                    claimed_at: None,
+                    claimed_by: None,
+                },
+                visible_at: now,
+            },
+        );
+        Ok(id)
+    }
+
+    async fn claim_filtered(
+        &self,
+        topic: &str,
+        worker_id: &str,
+        filter: &ClaimFilter,
+    ) -> Result<Option<BusMessage>> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        let id = Self::pick_claim_target(&state, topic, now, Some(filter));
+        if let Some(id) = id
+            && let Some(e) = state.by_id.get_mut(&id)
+        {
+            e.msg.status = MessageStatus::Claimed;
+            e.msg.claimed_at = Some(now);
+            e.msg.claimed_by = Some(worker_id.to_string());
+            return Ok(Some(e.msg.clone()));
+        }
+        Ok(None)
+    }
+
+    async fn ack(&self, message_id: Uuid) -> Result<()> {
+        let mut state = self.lock();
+        if let Some(e) = state.by_id.get_mut(&message_id) {
+            e.msg.status = MessageStatus::Done;
+        }
+        Ok(())
+    }
+
+    async fn nack(&self, message_id: Uuid) -> Result<()> {
+        let mut state = self.lock();
+        if let Some(e) = state.by_id.get_mut(&message_id) {
+            e.msg.status = MessageStatus::Pending;
+            e.msg.claimed_at = None;
+            e.msg.claimed_by = None;
+        }
+        Ok(())
+    }
+
+    async fn fail(&self, message_id: Uuid) -> Result<()> {
+        let mut state = self.lock();
+        if let Some(e) = state.by_id.get_mut(&message_id) {
+            e.msg.status = MessageStatus::Failed;
+        }
+        Ok(())
+    }
+
+    async fn list(
+        &self,
+        topic: &str,
+        status: Option<MessageStatus>,
+        limit: u32,
+    ) -> Result<Vec<BusMessage>> {
+        let state = self.lock();
+        let mut out: Vec<BusMessage> = state
+            .by_id
+            .values()
+            .filter(|e| e.msg.topic == topic)
+            .filter(|e| status.as_ref().is_none_or(|s| &e.msg.status == s))
+            .map(|e| e.msg.clone())
+            .collect();
+        out.sort_by_key(|m| std::cmp::Reverse(m.created_at));
+        out.truncate(limit as usize);
+        Ok(out)
+    }
+
+    async fn reap_stale(&self, timeout: Duration) -> Result<u64> {
+        let now = self.clock.now();
+        let cutoff =
+            now - chrono::Duration::from_std(timeout).unwrap_or(chrono::Duration::seconds(0));
+        let mut count: u64 = 0;
+        let mut state = self.lock();
+        for e in state.by_id.values_mut() {
+            if e.msg.status == MessageStatus::Claimed
+                && let Some(claimed) = e.msg.claimed_at
+                && claimed < cutoff
+            {
+                e.msg.status = MessageStatus::Pending;
+                e.msg.claimed_at = None;
+                e.msg.claimed_by = None;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
+    async fn purge(&self, older_than: DateTime<Utc>) -> Result<u64> {
+        let mut state = self.lock();
+        let before = state.by_id.len();
+        state
+            .by_id
+            .retain(|_, e| !(e.msg.status == MessageStatus::Done && e.msg.created_at < older_than));
+        Ok((before - state.by_id.len()) as u64)
+    }
+
+    async fn has_active_message(&self, conversation_id: &str, topic: &str) -> Result<bool> {
+        let conv_uuid = match Uuid::parse_str(conversation_id) {
+            Ok(u) => u,
+            Err(_) => return Ok(false),
+        };
+        let state = self.lock();
+        Ok(state.by_id.values().any(|e| {
+            e.msg.conversation_id == Some(conv_uuid)
+                && e.msg.topic == topic
+                && (e.msg.status == MessageStatus::Pending
+                    || e.msg.status == MessageStatus::Claimed)
+        }))
+    }
+}
+
 // -- Tests ------------------------------------------------------------------
 
 #[cfg(test)]

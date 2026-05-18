@@ -22,11 +22,11 @@ pub use assistant_storage::{
     AgentStore, AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
     InMemoryAgentStore, InMemoryAttachmentStore, InMemoryCommandEventStore,
     InMemoryConversationEventStore, InMemoryConversationStore, InMemoryLogStore,
-    InMemoryMemoryChunkStore, InMemoryMetricsStore, InMemoryPersonaSkillAccessStore,
-    InMemoryPersonaStore, InMemoryPushSubscriptionStore, InMemoryRefinementsStore,
-    InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore, InMemoryTraceStore,
-    InMemoryWebhookStore, InMemoryWorkflowStore, LogStore, MemoryChunkStore, MetricsStore,
-    PersonaSkillAccessStore, PersonaStore, PushSubscriptionStore, RefinementsStore,
+    InMemoryMemoryChunkStore, InMemoryMessageBus, InMemoryMetricsStore,
+    InMemoryPersonaSkillAccessStore, InMemoryPersonaStore, InMemoryPushSubscriptionStore,
+    InMemoryRefinementsStore, InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore,
+    InMemoryTraceStore, InMemoryWebhookStore, InMemoryWorkflowStore, LogStore, MemoryChunkStore,
+    MetricsStore, PersonaSkillAccessStore, PersonaStore, PushSubscriptionStore, RefinementsStore,
     ScheduledTaskStore, SlackActiveThreadStore, TraceStore, WebhookStore, WorkflowStore,
 };
 
