@@ -132,21 +132,21 @@ Each store: failing test → trait in `assistant-core` → `Sqlite*` impl + `InM
 
 ## 6. Phase 6 — Persistence trait extraction (Wave B: lower-traffic stores)
 
-One sub-phase per store; same `failing test → trait + impls → consumer migration → commit` pattern. Smaller PRs since each store is less central.
+All Wave B stores were extracted as part of Phase 5 PRs (the wave A / wave B split was nominal — same mechanical work). The merged PRs are listed alongside each store below.
 
-- [ ] 6.A `CommandEventStore` (consumed by interface adapters)
-- [ ] 6.B `MetricsStore`
-- [ ] 6.C `AgentStore`
-- [ ] 6.D `MemoryChunkStore` (FTS-specific scenarios annotated EXEMPT in contract test)
-- [ ] 6.E `PersonaStore`
-- [ ] 6.F `PersonaSkillAccess`
-- [ ] 6.G `PushSubscriptionStore`
-- [ ] 6.H `RefinementStore`
-- [ ] 6.I `ScheduledTasksStore`
-- [ ] 6.J `SlackThreadStore`
-- [ ] 6.K `WebhookStore`
-- [ ] 6.L `WorkflowStore`
-- [ ] 6.M `SkillRegistry` read-side (`SkillCatalog` trait — overlaps with Phase 7)
+- [x] 6.A `CommandEventStore` (consumed by interface adapters) — #852
+- [x] 6.B `MetricsStore` — #862
+- [x] 6.C `AgentStore` — #858
+- [x] 6.D `MemoryChunkStore` (InMemory FTS uses substring-scan; real BM25 rank only in SQLite) — #868
+- [x] 6.E `PersonaStore` — #866
+- [x] 6.F `PersonaSkillAccess` — #869
+- [x] 6.G `PushSubscriptionStore` — #851
+- [x] 6.H `RefinementStore` — #863
+- [x] 6.I `ScheduledTasksStore` — #859
+- [x] 6.J `SlackThreadStore` — #854
+- [x] 6.K `WebhookStore` — #855
+- [x] 6.L `WorkflowStore` — #867
+- [ ] 6.M `SkillRegistry` read-side (`SkillCatalog` trait) — deferred to Phase 7 where it overlaps with orchestration facades
 
 ## 7. Phase 7 — Orchestration trait facades
 

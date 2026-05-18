@@ -3,10 +3,28 @@
 use anyhow::{Context, Result};
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_skills::{SkillDef, SkillSource, parse_skill_content};
+use async_trait::async_trait;
 use sqlx::SqlitePool;
+use std::sync::Mutex as StdMutex;
 use std::{collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
+
+/// Read-side facade over a skill registry.
+///
+/// Consumers (`mcp-server`, `web-ui`) depend on this trait rather than on
+/// the concrete [`SkillRegistry`] so test code can substitute
+/// [`InMemorySkillCatalog`]. The trait is intentionally narrow: only the
+/// query methods used by external consumers, not the registry's reload
+/// and write paths.
+#[async_trait]
+pub trait SkillCatalog: Send + Sync {
+    /// Return every skill in the catalog, sorted by name.
+    async fn list(&self) -> Vec<SkillDef>;
+
+    /// Look up a skill by name. `None` if the name is not registered.
+    async fn get(&self, name: &str) -> Option<SkillDef>;
+}
 
 // -- Helpers -----------------------------------------------------------------
 
@@ -480,6 +498,76 @@ impl SkillRegistry {
         .await?;
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl SkillCatalog for SkillRegistry {
+    async fn list(&self) -> Vec<SkillDef> {
+        SkillRegistry::list(self).await
+    }
+
+    async fn get(&self, name: &str) -> Option<SkillDef> {
+        SkillRegistry::get(self, name).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+/// In-memory [`SkillCatalog`] for tests. Constructed with a slice of
+/// [`SkillDef`] values; ignores the database entirely.
+pub struct InMemorySkillCatalog {
+    skills: StdMutex<HashMap<String, SkillDef>>,
+}
+
+impl InMemorySkillCatalog {
+    pub fn new() -> Self {
+        Self {
+            skills: StdMutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn with_skills(skills: Vec<SkillDef>) -> Self {
+        let map: HashMap<String, SkillDef> =
+            skills.into_iter().map(|s| (s.name.clone(), s)).collect();
+        Self {
+            skills: StdMutex::new(map),
+        }
+    }
+
+    pub fn insert(&self, skill: SkillDef) {
+        if let Ok(mut s) = self.skills.lock() {
+            s.insert(skill.name.clone(), skill);
+        }
+    }
+}
+
+impl Default for InMemorySkillCatalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl SkillCatalog for InMemorySkillCatalog {
+    async fn list(&self) -> Vec<SkillDef> {
+        let guard = match self.skills.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let mut out: Vec<SkillDef> = guard.values().cloned().collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+
+    async fn get(&self, name: &str) -> Option<SkillDef> {
+        let guard = match self.skills.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        guard.get(name).cloned()
     }
 }
 

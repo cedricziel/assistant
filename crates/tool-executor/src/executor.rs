@@ -246,6 +246,30 @@ impl ToolExecutor {
     }
 }
 
+#[async_trait::async_trait]
+impl assistant_core::tool::ToolDispatcher for ToolExecutor {
+    fn to_specs(&self) -> Vec<ToolSpec> {
+        ToolExecutor::to_specs(self)
+    }
+
+    async fn execute(
+        &self,
+        name: &str,
+        params: std::collections::HashMap<String, serde_json::Value>,
+        ctx: &assistant_core::types::conversation::ExecutionContext,
+    ) -> anyhow::Result<ToolOutput> {
+        ToolExecutor::execute(self, name, params, ctx).await
+    }
+
+    fn is_mutating(&self, name: &str) -> bool {
+        let handlers = self
+            .tool_handlers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        handlers.get(name).map(|h| h.is_mutating()).unwrap_or(false)
+    }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /// Validate `params` against the JSON Schema declared by `schema_json`.

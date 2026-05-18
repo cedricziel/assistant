@@ -106,7 +106,7 @@ pub use refinements::{
     InMemoryRefinementsStore, RefinementStatus, RefinementsStore, SkillRefinement,
     SqliteRefinementsStore,
 };
-pub use registry::SkillRegistry;
+pub use registry::{InMemorySkillCatalog, SkillCatalog, SkillRegistry};
 pub use scheduled_tasks::{
     InMemoryScheduledTaskStore, ScheduledTask, ScheduledTaskStore, SqliteScheduledTaskStore,
 };
