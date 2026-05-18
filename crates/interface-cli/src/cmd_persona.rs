@@ -5,7 +5,10 @@ use std::path::Path;
 use anyhow::Result;
 
 use assistant_core::{default_workspace_dir, validate_agent_id};
-use assistant_storage::{PersonaSkillAccessStore, PersonaStore, SqlitePersonaStore, StorageLayer};
+use assistant_storage::{
+    PersonaSkillAccessStore, PersonaStore, SqlitePersonaSkillAccessStore, SqlitePersonaStore,
+    StorageLayer,
+};
 
 use crate::args::PersonaCommand;
 use crate::home_agent_root;
@@ -60,7 +63,7 @@ pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()>
             );
         }
         PersonaCommand::SkillMode { persona_id, mode } => {
-            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
+            let access_store = SqlitePersonaSkillAccessStore::new(storage.pool.clone());
             if access_store.has_skill_list_entries(persona_id).await? {
                 eprintln!(
                     "Warning: persona '{}' has existing skill list entries. \
@@ -82,7 +85,7 @@ pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()>
             if persona_store.get(persona_id).await?.is_none() {
                 anyhow::bail!("Persona '{}' not found", persona_id);
             }
-            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
+            let access_store = SqlitePersonaSkillAccessStore::new(storage.pool.clone());
             let mode = access_store.get_mode(persona_id).await?;
             if mode == "all" {
                 eprintln!(
@@ -105,7 +108,7 @@ pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()>
             if persona_store.get(persona_id).await?.is_none() {
                 anyhow::bail!("Persona '{}' not found", persona_id);
             }
-            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
+            let access_store = SqlitePersonaSkillAccessStore::new(storage.pool.clone());
             access_store.remove_skill(persona_id, skill_name).await?;
             println!(
                 "Skill '{}' removed from persona '{}' list.",

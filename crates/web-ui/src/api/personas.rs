@@ -15,6 +15,7 @@
 //! | POST   | `/api/personas/{id}/skill-access/skills`      | Add skill to access list         |
 //! | DELETE | `/api/personas/{id}/skill-access/skills/{sk}` | Remove skill from access list    |
 
+use assistant_storage::PersonaSkillAccessStore as _;
 use assistant_storage::PersonaStore as _;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -622,8 +623,9 @@ pub async fn get_skill_access(
         _ => {}
     }
 
-    let access_store =
-        assistant_storage::persona_skill_access::PersonaSkillAccessStore::new(state.pool.clone());
+    let access_store = assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
+        state.pool.clone(),
+    );
     let mode = access_store
         .get_mode(&id)
         .await
@@ -687,8 +689,9 @@ pub async fn patch_skill_access_mode(
         _ => {}
     }
 
-    let access_store =
-        assistant_storage::persona_skill_access::PersonaSkillAccessStore::new(state.pool.clone());
+    let access_store = assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
+        state.pool.clone(),
+    );
 
     if let Err(e) = access_store.set_mode(&id, &mode).await {
         warn!("Failed to set skill access mode for {id}: {e}");
@@ -745,8 +748,9 @@ pub async fn add_skill_access(
         _ => {}
     }
 
-    let access_store =
-        assistant_storage::persona_skill_access::PersonaSkillAccessStore::new(state.pool.clone());
+    let access_store = assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
+        state.pool.clone(),
+    );
 
     if let Err(e) = access_store.add_skill(&id, &body.skill_name).await {
         warn!("Failed to add skill {} for {id}: {e}", body.skill_name);
@@ -808,8 +812,9 @@ pub async fn delete_skill_access(
         _ => {}
     }
 
-    let access_store =
-        assistant_storage::persona_skill_access::PersonaSkillAccessStore::new(state.pool.clone());
+    let access_store = assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
+        state.pool.clone(),
+    );
 
     if let Err(e) = access_store.remove_skill(&id, &skill_name).await {
         warn!("Failed to remove skill {skill_name} for {id}: {e}");
