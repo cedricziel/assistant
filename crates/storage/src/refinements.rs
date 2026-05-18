@@ -1,9 +1,11 @@
 //! Skill refinement proposals — the `/review` workflow.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -62,14 +64,39 @@ fn parse_status(s: &str) -> RefinementStatus {
     }
 }
 
+/// Trait-based interface for skill refinement persistence.
+#[async_trait]
+pub trait RefinementsStore: Send + Sync {
+    async fn insert(
+        &self,
+        target_skill: &str,
+        proposed_skill_md: &str,
+        rationale: &str,
+    ) -> Result<Uuid>;
+
+    async fn insert_with_previous(
+        &self,
+        target_skill: &str,
+        proposed_skill_md: &str,
+        rationale: &str,
+        previous_skill_md: &str,
+    ) -> Result<Uuid>;
+
+    async fn list_by_status(&self, status: &RefinementStatus) -> Result<Vec<SkillRefinement>>;
+
+    async fn review(&self, id: Uuid, accepted: bool, note: Option<&str>) -> Result<()>;
+
+    async fn set_status(&self, id: Uuid, status: &RefinementStatus) -> Result<()>;
+}
+
 /// SQLite-backed store for skill refinement proposals.
-pub struct RefinementsStore {
+pub struct SqliteRefinementsStore {
     pool: SqlitePool,
     /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
     clock: Arc<dyn Clock>,
 }
 
-impl RefinementsStore {
+impl SqliteRefinementsStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -82,9 +109,12 @@ impl RefinementsStore {
         self.clock = clock;
         self
     }
+}
 
+#[async_trait]
+impl RefinementsStore for SqliteRefinementsStore {
     /// Insert a new pending refinement proposal.
-    pub async fn insert(
+    async fn insert(
         &self,
         target_skill: &str,
         proposed_skill_md: &str,
@@ -111,7 +141,7 @@ impl RefinementsStore {
     }
 
     /// List all refinement proposals with a given status.
-    pub async fn list_by_status(&self, status: &RefinementStatus) -> Result<Vec<SkillRefinement>> {
+    async fn list_by_status(&self, status: &RefinementStatus) -> Result<Vec<SkillRefinement>> {
         let rows = sqlx::query(
             "SELECT id, target_skill, proposed_skill_md, rationale, status, \
                     review_note, previous_skill_md, created_at, reviewed_at \
@@ -143,7 +173,7 @@ impl RefinementsStore {
     }
 
     /// Accept or reject a refinement proposal.
-    pub async fn review(&self, id: Uuid, accepted: bool, note: Option<&str>) -> Result<()> {
+    async fn review(&self, id: Uuid, accepted: bool, note: Option<&str>) -> Result<()> {
         let status = if accepted { "accepted" } else { "rejected" };
         let id_str = id.to_string();
         let now = self.clock.now();
@@ -164,7 +194,7 @@ impl RefinementsStore {
     }
 
     /// Insert a refinement with the previous skill body stored for rollback.
-    pub async fn insert_with_previous(
+    async fn insert_with_previous(
         &self,
         target_skill: &str,
         proposed_skill_md: &str,
@@ -193,7 +223,7 @@ impl RefinementsStore {
     }
 
     /// Update the status of a refinement (used by revert/confirm logic).
-    pub async fn set_status(&self, id: Uuid, status: &RefinementStatus) -> Result<()> {
+    async fn set_status(&self, id: Uuid, status: &RefinementStatus) -> Result<()> {
         let id_str = id.to_string();
         let now = self.clock.now();
 
@@ -208,6 +238,135 @@ impl RefinementsStore {
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+/// In-memory [`RefinementsStore`]. HashMap<Uuid, SkillRefinement>.
+pub struct InMemoryRefinementsStore {
+    state: Arc<Mutex<HashMap<Uuid, SkillRefinement>>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl InMemoryRefinementsStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(HashMap::new())),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, SkillRefinement>> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryRefinementsStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl RefinementsStore for InMemoryRefinementsStore {
+    async fn insert(
+        &self,
+        target_skill: &str,
+        proposed_skill_md: &str,
+        rationale: &str,
+    ) -> Result<Uuid> {
+        let id = Uuid::new_v4();
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state.insert(
+            id,
+            SkillRefinement {
+                id,
+                target_skill: target_skill.to_string(),
+                proposed_skill_md: proposed_skill_md.to_string(),
+                rationale: rationale.to_string(),
+                status: RefinementStatus::Pending,
+                review_note: None,
+                previous_skill_md: None,
+                created_at: now,
+                reviewed_at: None,
+            },
+        );
+        Ok(id)
+    }
+
+    async fn insert_with_previous(
+        &self,
+        target_skill: &str,
+        proposed_skill_md: &str,
+        rationale: &str,
+        previous_skill_md: &str,
+    ) -> Result<Uuid> {
+        let id = Uuid::new_v4();
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state.insert(
+            id,
+            SkillRefinement {
+                id,
+                target_skill: target_skill.to_string(),
+                proposed_skill_md: proposed_skill_md.to_string(),
+                rationale: rationale.to_string(),
+                status: RefinementStatus::Accepted,
+                review_note: None,
+                previous_skill_md: Some(previous_skill_md.to_string()),
+                created_at: now,
+                reviewed_at: None,
+            },
+        );
+        Ok(id)
+    }
+
+    async fn list_by_status(&self, status: &RefinementStatus) -> Result<Vec<SkillRefinement>> {
+        let state = self.lock();
+        let mut out: Vec<SkillRefinement> = state
+            .values()
+            .filter(|r| &r.status == status)
+            .cloned()
+            .collect();
+        out.sort_by_key(|r| r.created_at);
+        Ok(out)
+    }
+
+    async fn review(&self, id: Uuid, accepted: bool, note: Option<&str>) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(r) = state.get_mut(&id) {
+            r.status = if accepted {
+                RefinementStatus::Accepted
+            } else {
+                RefinementStatus::Rejected
+            };
+            r.review_note = note.map(str::to_string);
+            r.reviewed_at = Some(now);
+        }
+        Ok(())
+    }
+
+    async fn set_status(&self, id: Uuid, status: &RefinementStatus) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(r) = state.get_mut(&id) {
+            r.status = status.clone();
+            r.reviewed_at = Some(now);
+        }
         Ok(())
     }
 }

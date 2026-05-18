@@ -8,6 +8,8 @@
 use anyhow::Result;
 use assistant_core::types::features::LearningConfig;
 use assistant_core::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
+#[cfg(test)]
+use assistant_storage::SqliteRefinementsStore;
 use assistant_storage::{
     RefinementStatus, RefinementsStore, ScheduledTaskStore, SkillRegistry, SkillStatsProvider,
     StorageLayer,
@@ -64,7 +66,7 @@ pub async fn run_improvement_cycle(
     config: &LearningConfig,
     registry: &SkillRegistry,
     stats_provider: &dyn SkillStatsProvider,
-    refinements_store: &RefinementsStore,
+    refinements_store: &dyn RefinementsStore,
     llm: &dyn LlmProvider,
 ) -> Result<()> {
     // First, check recently-applied refinements for regression.
@@ -156,7 +158,7 @@ async fn check_regressions(
     config: &LearningConfig,
     registry: &SkillRegistry,
     stats_provider: &dyn SkillStatsProvider,
-    refinements_store: &RefinementsStore,
+    refinements_store: &dyn RefinementsStore,
 ) -> Result<()> {
     let accepted = refinements_store
         .list_by_status(&RefinementStatus::Accepted)
@@ -454,7 +456,7 @@ mod tests {
             },
         };
 
-        let refinements_store = RefinementsStore::new(storage.pool.clone());
+        let refinements_store = SqliteRefinementsStore::new(storage.pool.clone());
         let llm = MockLlm {
             response: r#"{"improved": true, "body": "improved body"}"#.to_string(),
         };
@@ -514,7 +516,7 @@ mod tests {
             },
         };
 
-        let refinements_store = RefinementsStore::new(storage.pool.clone());
+        let refinements_store = SqliteRefinementsStore::new(storage.pool.clone());
         let llm = MockLlm {
             response:
                 r##"{"improved": true, "body": "# Improved flaky-skill\n\nBetter instructions."}"##
@@ -564,7 +566,7 @@ mod tests {
         };
 
         // Insert an accepted refinement with previous body stored.
-        let refinements_store = RefinementsStore::new(storage.pool.clone());
+        let refinements_store = SqliteRefinementsStore::new(storage.pool.clone());
         refinements_store
             .insert_with_previous(
                 "regressing-skill",
@@ -621,7 +623,7 @@ mod tests {
         };
 
         // Insert an accepted refinement with previous body.
-        let refinements_store = RefinementsStore::new(storage.pool.clone());
+        let refinements_store = SqliteRefinementsStore::new(storage.pool.clone());
         refinements_store
             .insert_with_previous(
                 "stable-skill",

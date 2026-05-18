@@ -12,6 +12,7 @@ mod contract {
     pub mod conversation_store;
     pub mod log_store;
     pub mod push_subscription_store;
+    pub mod refinements_store;
     pub mod scheduled_task_store;
     pub mod slack_active_thread_store;
     pub mod trace_store;
