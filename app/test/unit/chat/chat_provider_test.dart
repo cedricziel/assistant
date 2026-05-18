@@ -101,6 +101,26 @@ class _FakeApiClient extends ApiClient {
       }
     }
   }
+
+  // -- Turn-status probe stub ------------------------------------------------
+  //
+  // Configure [nextTurnStatus] to drive `ChatNotifier`'s initial-stall
+  // watchdog. `null` (default) means "probe failed" → notifier falls back
+  // to its recovery path.
+
+  /// Value returned by the next [turnStatus] call. `null` means the probe
+  /// throws or the server returns no body — both paths fall back to the
+  /// legacy recovery in the notifier.
+  TurnState? nextTurnStatus;
+
+  /// Captures each `(conversationId, runId)` the notifier probes for.
+  final List<({String conversationId, String runId})> turnStatusCalls = [];
+
+  @override
+  Future<TurnState?> turnStatus(String conversationId, String runId) async {
+    turnStatusCalls.add((conversationId: conversationId, runId: runId));
+    return nextTurnStatus;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1725,6 +1745,254 @@ void main() {
             'messages=${after.messages.map((m) => '(${m.id}, streaming=${m.isStreaming}, content="${m.content}")').toList()}',
       );
     });
+  });
+
+  // -- Turn-status probe routes the initial-stall watchdog ------------------
+  //
+  // When `_initialStallTimeout` fires before any UI-visible event, the
+  // notifier now consults `api.turnStatus` instead of unconditionally
+  // recovering. The decision matrix:
+  //
+  //   server says `running`       → keep the sink open (don't clear dots)
+  //   server says `completed`     → recover (clear placeholder, refetch)
+  //   server says `errored`       → recover (clear placeholder, refetch)
+  //   server says `unknown`       → recover (server doesn't recognise turn)
+  //   probe fails / returns null  → recover (fallback to legacy behaviour)
+
+  group('ChatNotifier — stall probe routing', () {
+    testWidgets('probe=running keeps the placeholder in the dots state', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      fakeApi.nextTurnStatus = TurnState.running;
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+
+      // RunStarted gives the notifier a run id to probe with — without it
+      // the probe path is bypassed and the legacy recovery runs instead.
+      ctrl.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+
+      final after = notifier.state.value!;
+      final placeholder = after.messages.firstWhere(
+        (m) => m.id == 'assistant-streaming',
+        orElse: () =>
+            ChatMessage(id: 'missing', role: 'assistant', content: ''),
+      );
+      expect(
+        placeholder.id == 'assistant-streaming' &&
+            placeholder.isStreaming &&
+            placeholder.content.isEmpty,
+        isTrue,
+        reason:
+            'probe=running must leave the streaming placeholder in place '
+            'so the 90 s byte-watchdog (not the 12 s app watchdog) decides '
+            'whether to recover. Current: '
+            'isSending=${after.isSending}, error=${after.error}, '
+            'messages=${after.messages.map((m) => '(${m.id}, streaming=${m.isStreaming})').toList()}',
+      );
+      expect(
+        after.error,
+        isNull,
+        reason: 'no error surfaced on a healthy turn',
+      );
+      expect(after.isSending, isTrue, reason: 'still sending');
+      expect(
+        fakeApi.turnStatusCalls,
+        isNotEmpty,
+        reason: 'probe must have been invoked',
+      );
+      expect(fakeApi.turnStatusCalls.first.runId, 'run-1');
+
+      // Drain the controller before teardown so the await-for completes.
+      ctrl.add(const DoneEvent(role: 'assistant', content: ''));
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+      'probe=completed triggers recovery and clears the placeholder',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        fakeApi.nextTurnStatus = TurnState.completed;
+        final ctrl = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl.isClosed) await ctrl.close();
+        });
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+        ctrl.add(const RunStartedEvent('run-1'));
+        await tester.pump();
+
+        await tester.pump(const Duration(seconds: 15));
+        await tester.pumpAndSettle();
+
+        final after = notifier.state.value!;
+        final stillInDots = after.messages.any(
+          (m) =>
+              m.id == 'assistant-streaming' &&
+              m.isStreaming &&
+              m.content.isEmpty,
+        );
+        expect(
+          stillInDots,
+          isFalse,
+          reason: 'probe=completed must clear the dots placeholder',
+        );
+        expect(fakeApi.turnStatusCalls, isNotEmpty);
+      },
+    );
+
+    testWidgets('probe=errored triggers recovery and clears the placeholder', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      fakeApi.nextTurnStatus = TurnState.errored;
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      ctrl.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+
+      final after = notifier.state.value!;
+      final stillInDots = after.messages.any(
+        (m) =>
+            m.id == 'assistant-streaming' && m.isStreaming && m.content.isEmpty,
+      );
+      expect(
+        stillInDots,
+        isFalse,
+        reason: 'probe=errored must clear the dots placeholder',
+      );
+    });
+
+    testWidgets(
+      'probe=unknown triggers recovery (server no longer has the turn)',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        fakeApi.nextTurnStatus = TurnState.unknown;
+        final ctrl = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl.isClosed) await ctrl.close();
+        });
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+        ctrl.add(const RunStartedEvent('run-1'));
+        await tester.pump();
+
+        await tester.pump(const Duration(seconds: 15));
+        await tester.pumpAndSettle();
+
+        final after = notifier.state.value!;
+        final stillInDots = after.messages.any(
+          (m) =>
+              m.id == 'assistant-streaming' &&
+              m.isStreaming &&
+              m.content.isEmpty,
+        );
+        expect(
+          stillInDots,
+          isFalse,
+          reason: 'probe=unknown must clear the dots placeholder',
+        );
+      },
+    );
+
+    testWidgets('probe failure (null return) falls back to legacy recovery', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      fakeApi.nextTurnStatus = null; // simulate probe failing
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      ctrl.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+
+      final after = notifier.state.value!;
+      final stillInDots = after.messages.any(
+        (m) =>
+            m.id == 'assistant-streaming' && m.isStreaming && m.content.isEmpty,
+      );
+      expect(
+        stillInDots,
+        isFalse,
+        reason:
+            'probe failure must not leave the UI in dots — fall back to '
+            'legacy recovery so the user gets out of the wait state',
+      );
+    });
+
+    testWidgets(
+      'stream without RunStarted (no run id) bypasses probe, runs recovery',
+      (tester) async {
+        // No RunStartedEvent ever fires → `_currentRunId` stays null and the
+        // probe is skipped. The watchdog must still resolve via recovery.
+        final fakeApi = _FakeApiClient();
+        // nextTurnStatus left null; should not be consulted anyway.
+        final ctrl = fakeApi.enqueueStream();
+        addTearDown(() async {
+          if (!ctrl.isClosed) await ctrl.close();
+        });
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+        // Intentionally no RunStartedEvent.
+
+        await tester.pump(const Duration(seconds: 15));
+        await tester.pumpAndSettle();
+
+        final after = notifier.state.value!;
+        final stillInDots = after.messages.any(
+          (m) =>
+              m.id == 'assistant-streaming' &&
+              m.isStreaming &&
+              m.content.isEmpty,
+        );
+        expect(stillInDots, isFalse);
+        expect(
+          fakeApi.turnStatusCalls,
+          isEmpty,
+          reason: 'no run id → probe must not be called',
+        );
+      },
+    );
   });
 
   // -- Salvaged from PR #809 fix (2): stalled recovery vs concurrent stream --

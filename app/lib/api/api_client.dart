@@ -223,6 +223,29 @@ class ApiClient {
     }
   }
 
+  /// Probe the authoritative server-side state of a turn.
+  ///
+  /// Returns the [TurnState] from `GET .../turns/{turnId}/status`, or `null`
+  /// if the call failed for any reason (network error, deserialization
+  /// failure, etc.). Callers treat `null` as "probe inconclusive" and fall
+  /// back to whatever they were going to do anyway.
+  ///
+  /// Used by `ChatNotifier`'s initial-stall watchdog: when the SSE stream
+  /// has been quiet for ~12 s but we already have a run id, the probe
+  /// disambiguates a slow server (state == running, keep waiting) from
+  /// a dead one (completed/errored/unknown, recover).
+  Future<TurnState?> turnStatus(String conversationId, String turnId) async {
+    try {
+      final resp = await conversations.getTurnStatus(
+        conversationId: conversationId,
+        turnId: turnId,
+      );
+      return resp.data?.state;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Stream assistant tokens for a conversation message.
   ///
   /// Yields [RunStartedEvent] first (from the `X-Run-Id` response header),

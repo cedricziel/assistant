@@ -1454,8 +1454,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // Arm the same initial-stall watchdog used by the text path. The voice
     // SSE response carries TranscriptEvent + token/status events; any event
     // counts as progress. Until the first event arrives, a quiet interval
-    // of [_initialStallTimeout] triggers a fallback to a direct
-    // conversation fetch (iOS Dio buffering safety net).
+    // of [_initialStallTimeout] probes the server: a `running` reply keeps
+    // the sink open (iOS Dio buffering safety net), anything else recovers.
     var sawProgress = false;
     final source = api
         .sendVoiceMessage(conversationId, audioBytes, mimeType)
@@ -1463,8 +1463,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _initialStallTimeout,
           onTimeout: (sink) {
             if (sawProgress) return;
-            unawaited(_recoverStalledStream(conversationId, userMsgId));
-            sink.close();
+            unawaited(
+              _probeOrRecover(
+                conversationId: conversationId,
+                userMsgId: userMsgId,
+                sink: sink,
+                sawProgress: () => sawProgress,
+              ),
+            );
           },
         );
 
@@ -1687,9 +1693,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // Arm the initial-stall watchdog as a per-event timeout on the SSE
     // stream. Until we see a UI-visible event (anything other than
     // [RunStartedEvent]), a quiet interval of [_initialStallTimeout]
-    // triggers a fallback to a direct conversation fetch. After progress
-    // has been observed, the byte-level heartbeat (90 s) handles longer
-    // silences that may legitimately occur during tool execution.
+    // probes the server to disambiguate iOS Dio buffering (server still
+    // running — keep the sink open) from a dead turn (recover via
+    // [_recoverStalledStream]). After progress has been observed, the
+    // byte-level heartbeat (90 s) handles longer silences that may
+    // legitimately occur during tool execution.
     var sawProgress = false;
     final source = api
         .streamMessages(
@@ -1701,12 +1709,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _initialStallTimeout,
           onTimeout: (sink) {
             if (sawProgress) return;
-            // Recover synchronously so the placeholder clears immediately
-            // (the synchronous prefix of [_recoverStalledStream] runs
-            // before its first await), then close the stream so the
-            // await-for loop exits cleanly.
-            unawaited(_recoverStalledStream(conversationId, userMsgId));
-            sink.close();
+            unawaited(
+              _probeOrRecover(
+                conversationId: conversationId,
+                userMsgId: userMsgId,
+                sink: sink,
+                sawProgress: () => sawProgress,
+              ),
+            );
           },
         );
 
@@ -1954,6 +1964,47 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     }
+  }
+
+  /// Called from the initial-stall watchdog's `onTimeout`. Probes the
+  /// server-side turn state to decide whether to keep the SSE sink open
+  /// (server still working — most often iOS Dio buffering the chunked
+  /// body) or to fall back to [_recoverStalledStream] for terminal /
+  /// unknown turns.
+  ///
+  /// `sawProgress` is a closure-captured getter — the same flag the
+  /// caller sets to `true` on the first UI-visible event. We re-check
+  /// it after the probe completes because the stream may have woken up
+  /// while we were awaiting the server.
+  Future<void> _probeOrRecover({
+    required String conversationId,
+    required String userMsgId,
+    required EventSink<StreamEvent> sink,
+    required bool Function() sawProgress,
+  }) async {
+    if (sawProgress() || _cancelled) return;
+    final api = _api;
+    final runId = _currentRunId;
+    if (api == null || runId == null) {
+      // RunStarted hasn't fired yet (or no client) — no run id to probe.
+      // Fall back to the legacy recovery path so the dots state still
+      // resolves within the watchdog window.
+      await _recoverStalledStream(conversationId, userMsgId);
+      if (!_cancelled) sink.close();
+      return;
+    }
+    final state = await api.turnStatus(conversationId, runId);
+    if (sawProgress() || _cancelled) return;
+    if (state == TurnState.running) {
+      // Server says the turn is still in flight — leave the sink open.
+      // The chat-stream-progress-ux card already shows a stalled UI past
+      // `kTurnStallThreshold`; the 90 s byte-watchdog is the final
+      // safety net for genuinely dead connections.
+      return;
+    }
+    // completed / errored / unknown / null (probe failed) → recover.
+    await _recoverStalledStream(conversationId, userMsgId);
+    if (!_cancelled) sink.close();
   }
 
   /// Recover from a stalled SSE stream by fetching the conversation
