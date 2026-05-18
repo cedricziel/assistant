@@ -1,4 +1,9 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use anyhow::Result;
+use assistant_core::clock::{Clock, SystemClock};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
@@ -32,16 +37,45 @@ pub struct PersonaRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-pub struct PersonaStore {
+/// Trait-based interface for persona persistence.
+#[async_trait]
+pub trait PersonaStore: Send + Sync {
+    async fn ensure_exists(&self, id: &str) -> Result<PersonaRecord>;
+    async fn list(&self) -> Result<Vec<PersonaRecord>>;
+    async fn get(&self, id: &str) -> Result<Option<PersonaRecord>>;
+    async fn get_accessible(&self, id: &str, user_id: &str) -> Result<Option<PersonaRecord>>;
+    async fn create(&self, id: &str, name: &str) -> Result<PersonaRecord>;
+    async fn create_owned(
+        &self,
+        id: &str,
+        name: &str,
+        owner_user_id: &str,
+    ) -> Result<PersonaRecord>;
+    async fn set_turn_timeout(&self, id: &str, secs: u64) -> Result<()>;
+    async fn clear_turn_timeout(&self, id: &str) -> Result<()>;
+    async fn set_home_channel(
+        &self,
+        id: &str,
+        home_interface: &str,
+        home_channel: &str,
+    ) -> Result<()>;
+    async fn clear_home_channel(&self, id: &str) -> Result<()>;
+    async fn list_accessible(&self, user_id: &str) -> Result<Vec<PersonaRecord>>;
+}
+
+pub struct SqlitePersonaStore {
     pool: SqlitePool,
 }
 
-impl PersonaStore {
+impl SqlitePersonaStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+}
 
-    pub async fn ensure_exists(&self, id: &str) -> Result<PersonaRecord> {
+#[async_trait]
+impl PersonaStore for SqlitePersonaStore {
+    async fn ensure_exists(&self, id: &str) -> Result<PersonaRecord> {
         if let Some(existing) = self.get(id).await? {
             return Ok(existing);
         }
@@ -65,7 +99,7 @@ impl PersonaStore {
             .ok_or_else(|| anyhow::anyhow!("persona '{}' missing after ensure_exists", id))
     }
 
-    pub async fn list(&self) -> Result<Vec<PersonaRecord>> {
+    async fn list(&self) -> Result<Vec<PersonaRecord>> {
         let rows = sqlx::query(
             "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
              FROM personas
@@ -77,7 +111,7 @@ impl PersonaStore {
         rows.into_iter().map(row_to_record).collect()
     }
 
-    pub async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
+    async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
         let row = sqlx::query(
             "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
              FROM personas
@@ -94,7 +128,7 @@ impl PersonaStore {
     ///
     /// Returns the persona when it is org-owned (`owner_user_id IS NULL`)
     /// **or** owned by the given `user_id`. Returns `Ok(None)` otherwise.
-    pub async fn get_accessible(&self, id: &str, user_id: &str) -> Result<Option<PersonaRecord>> {
+    async fn get_accessible(&self, id: &str, user_id: &str) -> Result<Option<PersonaRecord>> {
         anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
 
         let row = sqlx::query(
@@ -110,7 +144,7 @@ impl PersonaStore {
         row.map(row_to_record).transpose()
     }
 
-    pub async fn create(&self, id: &str, name: &str) -> Result<PersonaRecord> {
+    async fn create(&self, id: &str, name: &str) -> Result<PersonaRecord> {
         sqlx::query("INSERT INTO personas (id, name, is_default) VALUES (?1, ?2, 0)")
             .bind(id)
             .bind(name)
@@ -133,7 +167,7 @@ impl PersonaStore {
     }
 
     /// Set a per-persona turn timeout. `secs` must be > 0.
-    pub async fn set_turn_timeout(&self, id: &str, secs: u64) -> Result<()> {
+    async fn set_turn_timeout(&self, id: &str, secs: u64) -> Result<()> {
         anyhow::ensure!(secs > 0, "turn_timeout_secs must be greater than 0");
         let rows = sqlx::query(
             "UPDATE personas
@@ -151,7 +185,7 @@ impl PersonaStore {
 
     /// Set the home channel for scheduler-originated output routing.
     /// Both `interface` and `channel` must be non-empty.
-    pub async fn set_home_channel(
+    async fn set_home_channel(
         &self,
         id: &str,
         home_interface: &str,
@@ -177,7 +211,7 @@ impl PersonaStore {
     }
 
     /// Clear the home channel, disabling scheduler output routing for this persona.
-    pub async fn clear_home_channel(&self, id: &str) -> Result<()> {
+    async fn clear_home_channel(&self, id: &str) -> Result<()> {
         let rows = sqlx::query(
             "UPDATE personas
              SET home_interface = NULL, home_channel = NULL, updated_at = CURRENT_TIMESTAMP
@@ -193,7 +227,7 @@ impl PersonaStore {
 
     /// List personas accessible to a given user: org-owned (`owner_user_id IS NULL`)
     /// plus those owned by the user (`owner_user_id = ?`).
-    pub async fn list_accessible(&self, user_id: &str) -> Result<Vec<PersonaRecord>> {
+    async fn list_accessible(&self, user_id: &str) -> Result<Vec<PersonaRecord>> {
         anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
 
         let rows = sqlx::query(
@@ -210,7 +244,7 @@ impl PersonaStore {
     }
 
     /// Create a user-owned persona.
-    pub async fn create_owned(
+    async fn create_owned(
         &self,
         id: &str,
         name: &str,
@@ -246,7 +280,7 @@ impl PersonaStore {
     }
 
     /// Clear the per-persona turn timeout, reverting to the compiled-in default.
-    pub async fn clear_turn_timeout(&self, id: &str) -> Result<()> {
+    async fn clear_turn_timeout(&self, id: &str) -> Result<()> {
         let rows = sqlx::query(
             "UPDATE personas
              SET turn_timeout_secs = NULL, updated_at = CURRENT_TIMESTAMP
@@ -258,6 +292,217 @@ impl PersonaStore {
         .rows_affected();
         anyhow::ensure!(rows > 0, "persona '{}' not found", id);
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+/// In-memory [`PersonaStore`]. HashMap<id, PersonaRecord>.
+pub struct InMemoryPersonaStore {
+    state: Arc<Mutex<HashMap<String, PersonaRecord>>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl InMemoryPersonaStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(HashMap::new())),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, PersonaRecord>> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryPersonaStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl PersonaStore for InMemoryPersonaStore {
+    async fn ensure_exists(&self, id: &str) -> Result<PersonaRecord> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        let entry = state
+            .entry(id.to_string())
+            .or_insert_with(|| PersonaRecord {
+                id: id.to_string(),
+                name: if id.is_empty() {
+                    id.to_string()
+                } else {
+                    id.replace(['_', '-'], " ")
+                },
+                is_default: false,
+                skill_access_mode: "all".to_string(),
+                turn_timeout_secs: None,
+                home_channel: None,
+                owner_user_id: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .clone();
+        Ok(entry)
+    }
+
+    async fn list(&self) -> Result<Vec<PersonaRecord>> {
+        let state = self.lock();
+        let mut out: Vec<PersonaRecord> = state.values().cloned().collect();
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(out)
+    }
+
+    async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
+        let state = self.lock();
+        Ok(state.get(id).cloned())
+    }
+
+    async fn get_accessible(&self, id: &str, user_id: &str) -> Result<Option<PersonaRecord>> {
+        anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
+        let state = self.lock();
+        Ok(state
+            .get(id)
+            .filter(|p| p.owner_user_id.is_none() || p.owner_user_id.as_deref() == Some(user_id))
+            .cloned())
+    }
+
+    async fn create(&self, id: &str, name: &str) -> Result<PersonaRecord> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if state.contains_key(id) {
+            anyhow::bail!(
+                "persona with id '{}' already exists (UNIQUE constraint)",
+                id
+            );
+        }
+        let record = PersonaRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            is_default: false,
+            skill_access_mode: "all".to_string(),
+            turn_timeout_secs: None,
+            home_channel: None,
+            owner_user_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+        state.insert(id.to_string(), record.clone());
+        Ok(record)
+    }
+
+    async fn create_owned(
+        &self,
+        id: &str,
+        name: &str,
+        owner_user_id: &str,
+    ) -> Result<PersonaRecord> {
+        anyhow::ensure!(
+            !owner_user_id.trim().is_empty(),
+            "owner_user_id must be non-empty"
+        );
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if state.contains_key(id) {
+            anyhow::bail!(
+                "persona with id '{}' already exists (UNIQUE constraint)",
+                id
+            );
+        }
+        let record = PersonaRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            is_default: false,
+            skill_access_mode: "all".to_string(),
+            turn_timeout_secs: None,
+            home_channel: None,
+            owner_user_id: Some(owner_user_id.to_string()),
+            created_at: now,
+            updated_at: now,
+        };
+        state.insert(id.to_string(), record.clone());
+        Ok(record)
+    }
+
+    async fn set_turn_timeout(&self, id: &str, secs: u64) -> Result<()> {
+        anyhow::ensure!(secs > 0, "turn_timeout_secs must be greater than 0");
+        let now = self.clock.now();
+        let mut state = self.lock();
+        let p = state
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("persona '{}' not found", id))?;
+        p.turn_timeout_secs = Some(secs);
+        p.updated_at = now;
+        Ok(())
+    }
+
+    async fn clear_turn_timeout(&self, id: &str) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        let p = state
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("persona '{}' not found", id))?;
+        p.turn_timeout_secs = None;
+        p.updated_at = now;
+        Ok(())
+    }
+
+    async fn set_home_channel(
+        &self,
+        id: &str,
+        home_interface: &str,
+        home_channel: &str,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            !home_interface.is_empty() && !home_channel.is_empty(),
+            "home_interface and home_channel must both be non-empty"
+        );
+        let now = self.clock.now();
+        let mut state = self.lock();
+        let p = state
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("persona '{}' not found", id))?;
+        p.home_channel = Some(HomeChannel {
+            home_interface: home_interface.to_string(),
+            home_channel: home_channel.to_string(),
+        });
+        p.updated_at = now;
+        Ok(())
+    }
+
+    async fn clear_home_channel(&self, id: &str) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        let p = state
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("persona '{}' not found", id))?;
+        p.home_channel = None;
+        p.updated_at = now;
+        Ok(())
+    }
+
+    async fn list_accessible(&self, user_id: &str) -> Result<Vec<PersonaRecord>> {
+        anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
+        let state = self.lock();
+        let mut out: Vec<PersonaRecord> = state
+            .values()
+            .filter(|p| p.owner_user_id.is_none() || p.owner_user_id.as_deref() == Some(user_id))
+            .cloned()
+            .collect();
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(out)
     }
 }
 
@@ -292,12 +537,13 @@ fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
 
 #[cfg(test)]
 mod tests {
+    use super::PersonaStore;
     use crate::StorageLayer;
 
     #[tokio::test]
     async fn ensure_exists_replaces_ensure_default() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         // ensure_exists("default") should work as the replacement for ensure_default()
         let persona = store.ensure_exists("default").await.unwrap();
@@ -309,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn list_orders_by_id_not_is_default() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         // Create personas with IDs that sort alphabetically
         store.create("zeta", "Zeta").await.unwrap();
@@ -329,7 +575,7 @@ mod tests {
     #[tokio::test]
     async fn create_returns_error_on_duplicate_id() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.create("foo", "Foo").await.unwrap();
         let result = store.create("foo", "Foo Again").await;
@@ -339,7 +585,7 @@ mod tests {
     #[tokio::test]
     async fn turn_timeout_defaults_to_none() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.ensure_exists("default").await.unwrap();
         let persona = store.get("default").await.unwrap().unwrap();
@@ -352,7 +598,7 @@ mod tests {
     #[tokio::test]
     async fn set_and_clear_turn_timeout() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.create("bot", "Bot").await.unwrap();
 
@@ -375,7 +621,7 @@ mod tests {
     #[tokio::test]
     async fn set_turn_timeout_rejects_zero() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.create("bot", "Bot").await.unwrap();
         let result = store.set_turn_timeout("bot", 0).await;
@@ -385,7 +631,7 @@ mod tests {
     #[tokio::test]
     async fn set_turn_timeout_unknown_persona_returns_error() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         let result = store.set_turn_timeout("nonexistent", 3600).await;
         assert!(
@@ -397,7 +643,7 @@ mod tests {
     #[tokio::test]
     async fn home_channel_defaults_to_none() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.ensure_exists("default").await.unwrap();
         let persona = store.get("default").await.unwrap().unwrap();
@@ -410,7 +656,7 @@ mod tests {
     #[tokio::test]
     async fn set_and_clear_home_channel() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.create("bot", "Bot").await.unwrap();
 
@@ -434,7 +680,7 @@ mod tests {
     #[tokio::test]
     async fn set_home_channel_rejects_empty_fields() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.create("bot", "Bot").await.unwrap();
 
@@ -451,7 +697,7 @@ mod tests {
     #[tokio::test]
     async fn set_home_channel_unknown_persona_returns_error() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         let result = store.set_home_channel("nonexistent", "slack", "#ops").await;
         assert!(
@@ -463,7 +709,7 @@ mod tests {
     #[tokio::test]
     async fn home_channel_visible_in_list() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.ensure_exists("default").await.unwrap();
         store.create("notifier", "Notifier").await.unwrap();
@@ -485,7 +731,7 @@ mod tests {
     #[tokio::test]
     async fn turn_timeout_visible_in_list() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.ensure_exists("default").await.unwrap();
         store.create("slow", "Slow").await.unwrap();
@@ -506,7 +752,7 @@ mod tests {
     #[tokio::test]
     async fn create_owned_sets_owner_user_id() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         let persona = store
             .create_owned("alice-bot", "Alice Bot", "alice")
@@ -522,7 +768,7 @@ mod tests {
     #[tokio::test]
     async fn org_owned_persona_has_null_owner() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         let persona = store.create("shared-bot", "Shared Bot").await.unwrap();
         assert!(
@@ -534,7 +780,7 @@ mod tests {
     #[tokio::test]
     async fn list_accessible_includes_org_owned_and_user_owned() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         // Create an org-owned persona (NULL owner)
         store.create("shared", "Shared").await.unwrap();
@@ -572,7 +818,7 @@ mod tests {
     #[tokio::test]
     async fn list_returns_all_personas_regardless_of_owner() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.create("shared", "Shared").await.unwrap();
         store
@@ -594,7 +840,7 @@ mod tests {
     #[tokio::test]
     async fn list_accessible_rejects_empty_user_id() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         let result = store.list_accessible("").await;
         assert!(result.is_err(), "empty user_id should be rejected");
@@ -603,7 +849,7 @@ mod tests {
     #[tokio::test]
     async fn create_owned_rejects_empty_owner() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         let result = store.create_owned("bot", "Bot", "").await;
         assert!(result.is_err(), "empty owner_user_id should be rejected");
@@ -612,7 +858,7 @@ mod tests {
     #[tokio::test]
     async fn get_accessible_returns_org_owned() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store.create("shared", "Shared").await.unwrap();
 
@@ -626,7 +872,7 @@ mod tests {
     #[tokio::test]
     async fn get_accessible_returns_own_persona() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store
             .create_owned("alice-bot", "Alice Bot", "alice")
@@ -640,7 +886,7 @@ mod tests {
     #[tokio::test]
     async fn get_accessible_denies_other_user() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         store
             .create_owned("alice-bot", "Alice Bot", "alice")
@@ -657,7 +903,7 @@ mod tests {
     #[tokio::test]
     async fn get_accessible_rejects_empty_user_id() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = super::PersonaStore::new(storage.pool.clone());
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
 
         let result = store.get_accessible("any", "").await;
         assert!(result.is_err(), "empty user_id should be rejected");

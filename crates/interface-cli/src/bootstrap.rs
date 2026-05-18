@@ -19,7 +19,7 @@ use assistant_llm_provider::{
 };
 use assistant_runtime::{Orchestrator, orchestrator::ConfirmationCallback};
 use assistant_skills::SkillSource;
-use assistant_storage::{StorageLayer, registry::SkillRegistry};
+use assistant_storage::{PersonaStore as _, StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 
 /// Build a dedicated [`EmbeddingProvider`] from an [`EmbeddingConfig`].

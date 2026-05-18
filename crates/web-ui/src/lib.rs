@@ -11,6 +11,7 @@ mod openapi;
 pub(crate) mod push;
 pub mod sw_version;
 
+use assistant_storage::PersonaStore as _;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::net::SocketAddr;

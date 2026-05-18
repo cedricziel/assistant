@@ -90,7 +90,9 @@ pub use metrics::{
 pub use org_storage::OrgStorageLayer;
 pub use org_store::SqliteOrgStore;
 pub use persona_skill_access::PersonaSkillAccessStore;
-pub use personas::{PersonaRecord, PersonaStore};
+pub use personas::{
+    HomeChannel, InMemoryPersonaStore, PersonaRecord, PersonaStore, SqlitePersonaStore,
+};
 pub use pool_factory::OrgPoolFactory;
 pub use push_subscriptions::{
     InMemoryPushSubscriptionStore, PushSubscription, PushSubscriptionStore,
@@ -195,8 +197,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a `PersonaStore` backed by this pool.
-    pub fn persona_store(&self) -> PersonaStore {
-        PersonaStore::new(self.pool.clone())
+    pub fn persona_store(&self) -> SqlitePersonaStore {
+        SqlitePersonaStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `RefinementsStore` backed by this pool.

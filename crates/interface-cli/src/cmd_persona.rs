@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use assistant_core::{default_workspace_dir, validate_agent_id};
-use assistant_storage::{PersonaSkillAccessStore, PersonaStore, StorageLayer};
+use assistant_storage::{PersonaSkillAccessStore, PersonaStore, SqlitePersonaStore, StorageLayer};
 
 use crate::args::PersonaCommand;
 use crate::home_agent_root;
@@ -78,7 +78,7 @@ pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()>
             persona_id,
             skill_name,
         } => {
-            let persona_store = PersonaStore::new(storage.pool.clone());
+            let persona_store = SqlitePersonaStore::new(storage.pool.clone());
             if persona_store.get(persona_id).await?.is_none() {
                 anyhow::bail!("Persona '{}' not found", persona_id);
             }
@@ -101,7 +101,7 @@ pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()>
             persona_id,
             skill_name,
         } => {
-            let persona_store = PersonaStore::new(storage.pool.clone());
+            let persona_store = SqlitePersonaStore::new(storage.pool.clone());
             if persona_store.get(persona_id).await?.is_none() {
                 anyhow::bail!("Persona '{}' not found", persona_id);
             }
