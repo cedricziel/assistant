@@ -40,6 +40,8 @@ use sha2::Sha256;
 use tracing::{debug, info, warn};
 
 use assistant_storage::PushSubscriptionStore;
+#[cfg(test)]
+use assistant_storage::SqlitePushSubscriptionStore;
 
 // -- VAPID key provisioning --------------------------------------------------
 
