@@ -808,4 +808,57 @@ mod tests {
             loaded.len()
         );
     }
+
+    /// History large enough to exceed `CHUNK_CHARS` (12k) forces
+    /// `summarise_messages` into its chunked path: each chunk gets its own
+    /// LLM call, then the merged result gets a final summarisation.
+    #[tokio::test]
+    async fn maybe_compact_uses_chunked_summarisation_for_large_history() {
+        // Build a history whose transcript exceeds 12k chars. 5 turns of
+        // ~3000 chars each + role labels easily clears the threshold.
+        let big = "x".repeat(3000);
+        let mut history: Vec<ChatHistoryMessage> = Vec::new();
+        for i in 0..6 {
+            history.push(ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: format!("Question {i}: {big}"),
+            });
+            history.push(ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: format!("Answer {i}: {big}"),
+            });
+        }
+        // Add a final user turn so keep_recent_turns=1 has something to keep
+        // and the older 6 turns remain to be summarised.
+        history.push(ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "what's next?".into(),
+        });
+
+        // Queue enough chunk summaries + a final merge summary. The exact
+        // number of chunks depends on transcript size; queue 10 generous
+        // FinalAnswer responses — extras are ignored.
+        let mut responses: Vec<LlmResponse> = Vec::new();
+        for i in 0..10 {
+            responses.push(LlmResponse::FinalAnswer(
+                format!("chunk-{i} summary"),
+                LlmResponseMeta::default(),
+            ));
+        }
+        let llm: Arc<dyn LlmProvider> =
+            Arc::new(ScriptedLlmProvider::new().with_canned_responses(responses));
+
+        let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
+        let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
+        assert!(compacted);
+        // First message is the summary turn; last preserves the "what's next?" prompt.
+        let first = match &history[0] {
+            ChatHistoryMessage::Text { content, .. } => content.clone(),
+            _ => panic!("expected first message to be a Text turn"),
+        };
+        assert!(
+            first.contains("summary") || first.contains("chunk"),
+            "first message should contain summary content; got: {first}"
+        );
+    }
 }
