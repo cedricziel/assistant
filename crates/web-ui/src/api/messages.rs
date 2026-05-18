@@ -8,6 +8,7 @@
 //! - `POST /api/quick-message`                       — synchronous send
 //! - `GET  /api/conversations/{id}/runs/{run_id}/events/stream` — run replay
 
+use assistant_storage::PersonaStore as _;
 use std::convert::Infallible;
 
 use axum::Json;
@@ -841,7 +842,8 @@ pub async fn quick_message(
 
     // Resolve persona: use explicit persona_id if valid, otherwise active.
     let agent_id = if let Some(ref pid) = body.persona_id {
-        let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+        let persona_store =
+            assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
         if persona_store.get(pid).await.ok().flatten().is_some() {
             pid.clone()
         } else {
@@ -1233,6 +1235,7 @@ pub async fn send_voice_message(
 
 #[cfg(test)]
 mod tests {
+    use assistant_storage::PersonaStore as _;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -2067,7 +2070,8 @@ mod tests {
         let (state, storage) = test_state(&server.uri()).await;
 
         // Create a persona so it can be resolved.
-        let persona_store = assistant_storage::personas::PersonaStore::new(storage.pool.clone());
+        let persona_store =
+            assistant_storage::personas::SqlitePersonaStore::new(storage.pool.clone());
         persona_store.create("reviewer", "Reviewer").await.unwrap();
 
         let resp = app(state)

@@ -123,6 +123,7 @@ impl PersonaSkillAccessStore {
 mod tests {
     use super::*;
     use crate::StorageLayer;
+    use crate::personas::PersonaStore as _;
 
     #[tokio::test]
     async fn test_default_mode_is_all() {

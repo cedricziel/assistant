@@ -15,6 +15,7 @@
 //! | POST   | `/api/personas/{id}/skill-access/skills`      | Add skill to access list         |
 //! | DELETE | `/api/personas/{id}/skill-access/skills/{sk}` | Remove skill from access list    |
 
+use assistant_storage::PersonaStore as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -219,7 +220,7 @@ pub async fn list_personas(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
 ) -> Response {
-    let store = assistant_storage::personas::PersonaStore::new(state.pool);
+    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool);
     match store.list_accessible(&ctx.user_id.0).await {
         Ok(personas) => {
             let summaries: Vec<PersonaSummary> = personas
@@ -276,7 +277,7 @@ pub async fn create_persona(
             .into_response();
     }
 
-    let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
     match store.create_owned(&id, &name, &ctx.user_id.0).await {
         Ok(p) => {
             let files: Vec<PersonaFileSlot> = PERSONA_FILE_SLOTS
@@ -337,7 +338,7 @@ pub async fn set_active_persona(
         return (StatusCode::BAD_REQUEST, "Persona ID is required").into_response();
     }
 
-    let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
 
     // Verify the persona exists and is accessible to this user.
     let persona = match store.get_accessible(&id, &ctx.user_id.0).await {
@@ -393,7 +394,7 @@ pub async fn get_persona(
             .into_response();
     }
 
-    let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
     let persona = match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(Some(p)) => p,
         Ok(None) => {
@@ -459,7 +460,7 @@ pub async fn get_persona_file(
             .into_response();
     }
 
-    let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
     match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -532,7 +533,7 @@ pub async fn put_persona_file(
             .into_response();
     }
 
-    let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
     match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -605,7 +606,7 @@ pub async fn get_skill_access(
             .into_response();
     }
 
-    let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
     match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -670,7 +671,7 @@ pub async fn patch_skill_access_mode(
             .into_response();
     }
 
-    let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
     match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -728,7 +729,7 @@ pub async fn add_skill_access(
             .into_response();
     }
 
-    let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
     match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -791,7 +792,7 @@ pub async fn delete_skill_access(
             .into_response();
     }
 
-    let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
     match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -825,6 +826,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use assistant_storage::PersonaStore as _;
     use axum::Extension;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};

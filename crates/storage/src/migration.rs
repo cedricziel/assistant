@@ -24,6 +24,8 @@ use tracing::{info, warn};
 use assistant_core::identity::{OrgId, SpaceId};
 
 use crate::org_storage::OrgStorageLayer;
+#[cfg(test)]
+use crate::personas::PersonaStore as _;
 
 // -- Constants ---------------------------------------------------------------
 

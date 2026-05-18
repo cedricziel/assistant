@@ -22,10 +22,11 @@ pub use assistant_storage::{
     AgentStore, AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
     InMemoryAgentStore, InMemoryAttachmentStore, InMemoryCommandEventStore,
     InMemoryConversationEventStore, InMemoryConversationStore, InMemoryLogStore,
-    InMemoryMetricsStore, InMemoryPushSubscriptionStore, InMemoryRefinementsStore,
-    InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore, InMemoryTraceStore,
-    InMemoryWebhookStore, LogStore, MetricsStore, PushSubscriptionStore, RefinementsStore,
-    ScheduledTaskStore, SlackActiveThreadStore, TraceStore, WebhookStore,
+    InMemoryMetricsStore, InMemoryPersonaStore, InMemoryPushSubscriptionStore,
+    InMemoryRefinementsStore, InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore,
+    InMemoryTraceStore, InMemoryWebhookStore, LogStore, MetricsStore, PersonaStore,
+    PushSubscriptionStore, RefinementsStore, ScheduledTaskStore, SlackActiveThreadStore,
+    TraceStore, WebhookStore,
 };
 
 pub use crate::fixture::{Fixture, FixtureBuilder};

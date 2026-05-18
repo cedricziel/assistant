@@ -3,6 +3,7 @@
 //! `schedule.trigger` webhook/bus fan-out, home-channel tool resolution,
 //! and the cron parser.
 
+use assistant_storage::PersonaStore as _;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;

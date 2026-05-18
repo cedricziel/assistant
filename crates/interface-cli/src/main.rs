@@ -45,7 +45,7 @@ use assistant_runtime::{
     CommandContext, CommandRegistry, init_tracing, orchestrator::ConfirmationCallback,
     spawn_memory_indexer, spawn_scheduler, start_conversation_context,
 };
-use assistant_storage::{OrgPoolFactory, StorageLayer};
+use assistant_storage::{OrgPoolFactory, PersonaStore as _, StorageLayer};
 use assistant_tool_executor::install_skill_from_source;
 
 pub fn home_agent_root(agent_id: &str) -> Result<PathBuf> {

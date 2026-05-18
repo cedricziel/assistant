@@ -11,6 +11,7 @@
 //! | PUT    | `/api/skills/{name}`           | Update a skill           |
 //! | DELETE | `/api/skills/{name}`           | Delete a skill           |
 
+use assistant_storage::PersonaStore as _;
 use std::sync::Arc;
 
 use axum::{
@@ -104,7 +105,7 @@ pub async fn list_persona_skills(
     State(state): State<SkillsApiState>,
     Path(persona_id): Path<String>,
 ) -> Response {
-    let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
 
     // Verify the persona exists and the caller owns it.
     match persona_store.get(&persona_id).await {
@@ -394,6 +395,7 @@ pub async fn delete_skill(
 
 #[cfg(test)]
 mod tests {
+    use assistant_storage::PersonaStore as _;
     use std::collections::HashMap;
     use std::sync::Arc;
 
