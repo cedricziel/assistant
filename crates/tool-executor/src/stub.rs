@@ -23,13 +23,20 @@ pub struct RecordedToolCall {
     pub params: HashMap<String, Value>,
 }
 
+/// Queued response — either a successful [`ToolOutput`] or an error
+/// payload that the dispatcher should propagate as `Err(...)`.
+enum QueuedResponse {
+    Ok(ToolOutput),
+    Err(String),
+}
+
 #[derive(Default)]
 struct StubState {
     specs: Vec<ToolSpec>,
     /// Queued responses, keyed by tool name. When a tool is invoked and a
     /// response exists for it, the first queued one is consumed (FIFO).
     /// When none queued, returns benign success.
-    responses: HashMap<String, Vec<ToolOutput>>,
+    responses: HashMap<String, Vec<QueuedResponse>>,
     recorded: Vec<RecordedToolCall>,
     mutating_names: std::collections::HashSet<String>,
 }
@@ -58,7 +65,23 @@ impl StubToolDispatcher {
     /// calls consume queued responses in FIFO order.
     pub fn queue_response(self, name: impl Into<String>, output: ToolOutput) -> Self {
         if let Ok(mut s) = self.state.lock() {
-            s.responses.entry(name.into()).or_default().push(output);
+            s.responses
+                .entry(name.into())
+                .or_default()
+                .push(QueuedResponse::Ok(output));
+        }
+        self
+    }
+
+    /// Queue an error for the named tool. The next `execute(name, ...)` call
+    /// will return `Err(...)` with the supplied message — exercising the
+    /// error-propagation path on the dispatcher caller side.
+    pub fn queue_error(self, name: impl Into<String>, err: anyhow::Error) -> Self {
+        if let Ok(mut s) = self.state.lock() {
+            s.responses
+                .entry(name.into())
+                .or_default()
+                .push(QueuedResponse::Err(err.to_string()));
         }
         self
     }
@@ -112,7 +135,10 @@ impl ToolDispatcher for StubToolDispatcher {
         if let Some(queue) = state.responses.get_mut(name)
             && !queue.is_empty()
         {
-            return Ok(queue.remove(0));
+            return match queue.remove(0) {
+                QueuedResponse::Ok(out) => Ok(out),
+                QueuedResponse::Err(msg) => Err(anyhow::anyhow!(msg)),
+            };
         }
         Ok(ToolOutput::success(format!("(stub: {name})")))
     }
