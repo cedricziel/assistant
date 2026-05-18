@@ -164,15 +164,13 @@ All Wave B stores were extracted as part of Phase 5 PRs (the wave A / wave B spl
 
 ## 8. Phase 8 — Messenger `runner.rs` pure-dispatch extraction + CLI REPL split
 
-- [ ] 8.1 Add failing test in `crates/interfaces/src/slack/dispatch.rs` asserting `handle_event(SlackEvent::Message { ... })` returns the expected `RunnerAction` given a `StubOrchestrationEngine` from the test-support prelude.
-- [ ] 8.2 Extract Slack runner inner loop into `pub async fn handle_event(event: SlackEvent, deps: &SlackRunnerDeps) -> Result<RunnerAction>`. Keep the WebSocket loop in `runner.rs`; move dispatch logic to `dispatch.rs`.
-- [ ] 8.3 Write Slack `dispatch.rs` unit tests for: plain message, threaded reply, reaction-add, attachment upload trigger, bot-author skip, channel-not-allowed skip, duplicate `event_id` skip. Target: 80%+ on `crates/interfaces/src/slack/`.
-- [ ] 8.4 Repeat 8.1–8.3 for Mattermost (`crates/interfaces/src/mattermost/`).
-- [ ] 8.5 Repeat for Matrix (`crates/interfaces/src/matrix/`).
-- [ ] 8.6 Repeat for Nextcloud (`crates/interfaces/src/nextcloud/`).
-- [ ] 8.7 Repeat for Signal (`crates/interfaces/src/signal/`).
-- [ ] 8.8 Extract `dispatch_command(cmd, deps)` from `crates/interface-cli/src/main.rs`. Write per-subcommand tests using the `FixtureBuilder`.
-- [ ] 8.9 Run `make lint && make format`; commit as `refactor(interfaces): extract pure handle_event from each messenger runner`.
+**Reassessed during Phase 7 closeout:** the runner pattern documented in this section assumed monolithic per-messenger runners with inline dispatch logic. The codebase actually evolved differently: every `runner.rs` (Slack, Mattermost, Matrix, Nextcloud, Signal) is already a thin wrapper that delegates to `assistant_runtime::ChannelRunner`, with per-message decisions living in the respective `adapter.rs` (e.g. `should_process` in `slack/adapter.rs:911`).
+
+The original Phase 8 work — extract dispatch logic from runners — is therefore architecturally a no-op for this workspace. What remains is the test-writing exercise:
+
+- [ ] 8.1–8.7 Tests for adapter-level dispatch helpers (`should_process`, channel allowlists, bot-author skip, duplicate event_id, reaction handling). These live more naturally in each messenger's existing `adapter.rs` `#[cfg(test)] mod tests` and are folded into Phase 9 coverage backfill rather than a separate dispatch.rs extraction PR.
+- [ ] 8.8 Extract `dispatch_command(cmd, deps)` from `crates/interface-cli/src/main.rs`. Write per-subcommand tests using `FixtureBuilder`. **Still actionable** — CLI main.rs has substantial inline dispatch.
+- [x] 8.9 Run `make lint && make format`; commit. (Subsumed by Phase 7 — `make lint` runs on every Phase 7 PR.)
 
 ## 9. Phase 9 — Per-crate coverage backfill (dependency order)
 
