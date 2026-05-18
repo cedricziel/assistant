@@ -84,7 +84,7 @@ pub use logs::{InMemoryLogStore, LogStats, LogStore, RecordedLog, SqliteLogStore
 pub use memory_chunks::{
     FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,
 };
-pub use message_bus::SqliteMessageBus;
+pub use message_bus::{InMemoryMessageBus, SqliteMessageBus};
 pub use metrics::{
     InMemoryMetricsStore, MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord,
     SqliteMetricsStore, TimeSeriesPoint, ToolUsageStats,
