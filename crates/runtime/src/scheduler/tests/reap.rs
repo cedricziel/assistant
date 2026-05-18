@@ -2,6 +2,7 @@
 //! runs and stale bus messages.
 
 use assistant_core::{MessageBus, topic};
+use assistant_storage::ConversationEventStore as _;
 use uuid::Uuid;
 use wiremock::MockServer;
 

@@ -127,7 +127,7 @@ use assistant_runtime::{AssistantInterface, CommandRegistry, Orchestrator};
 use assistant_storage::{
     AttachmentStore, CommandEventStore, ConversationBroadcast, ConversationEventStore,
     InMemoryConversationBroadcaster, RunBroadcaster, SqliteAttachmentStore,
-    SqliteCommandEventStore,
+    SqliteCommandEventStore, SqliteConversationEventStore,
 };
 use assistant_transcription::{TranscriptionProvider, TtsProvider};
 use axum::{
@@ -163,7 +163,7 @@ pub struct ApiState {
     /// In-memory store for tool-synthesized audio blobs.
     pub audio_store: Arc<crate::audio_store::AudioStore>,
     /// Durable event log store for conversation streaming runs.
-    pub event_store: ConversationEventStore,
+    pub event_store: Arc<dyn ConversationEventStore>,
     /// In-memory broadcast registry for live-tailing active runs.
     pub run_broadcaster: RunBroadcaster,
     /// Persistent attachment storage (metadata in SQLite, bytes on disk).
@@ -191,7 +191,8 @@ impl ApiState {
         agent_id: Arc<RwLock<String>>,
         orchestrator_ref: Arc<Orchestrator>,
     ) -> Self {
-        let event_store = ConversationEventStore::new(pool.clone());
+        let event_store: Arc<dyn ConversationEventStore> =
+            Arc::new(SqliteConversationEventStore::new(pool.clone()));
         let attachment_store: Arc<dyn AttachmentStore> =
             Arc::new(SqliteAttachmentStore::new(pool.clone()));
         let command_event_store: Arc<dyn CommandEventStore> =

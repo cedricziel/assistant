@@ -73,7 +73,8 @@ pub use conversation_broadcaster::{
     ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
 };
 pub use conversation_events::{
-    ConversationEventRow, ConversationEventStore, LiveEvent, RunBroadcaster,
+    ConversationEventRow, ConversationEventStore, InMemoryConversationEventStore, LiveEvent,
+    RunBroadcaster, SqliteConversationEventStore,
 };
 pub use conversations::{
     ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
@@ -170,8 +171,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a [`ConversationEventStore`] backed by this pool.
-    pub fn conversation_event_store(&self) -> ConversationEventStore {
-        ConversationEventStore::new(self.pool.clone())
+    pub fn conversation_event_store(&self) -> SqliteConversationEventStore {
+        SqliteConversationEventStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `SqliteLogStore` backed by this pool.
