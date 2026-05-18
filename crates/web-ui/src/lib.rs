@@ -1214,3 +1214,60 @@ mod base_url_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod harden_agent_card_tests {
+    use super::harden_agent_card;
+    use assistant_a2a_json_schema::agent_card::AgentCard;
+
+    fn empty_card() -> AgentCard {
+        // Construct via Default since the schema is generated; fall back to
+        // serde if not Default.
+        serde_json::from_value::<AgentCard>(serde_json::json!({
+            "name": "test",
+            "description": "test card",
+            "url": "https://example.com",
+            "version": "0.1.0",
+            "protocolVersion": "0.2.0",
+            "skills": [],
+            "capabilities": {},
+            "defaultInputModes": ["text"],
+            "defaultOutputModes": ["text"],
+            "supportedInterfaces": []
+        }))
+        .expect("valid empty card")
+    }
+
+    #[test]
+    fn injects_bearer_scheme_when_missing() {
+        let mut card = empty_card();
+        assert!(card.security_schemes.is_empty());
+        harden_agent_card(&mut card);
+        assert!(card.security_schemes.contains_key("bearer_token"));
+    }
+
+    #[test]
+    fn appends_security_requirement_for_bearer() {
+        let mut card = empty_card();
+        assert!(card.security_requirements.is_empty());
+        harden_agent_card(&mut card);
+        assert!(
+            card.security_requirements
+                .iter()
+                .any(|r| r.schemes.contains_key("bearer_token")),
+            "expected a SecurityRequirement referencing bearer_token"
+        );
+    }
+
+    #[test]
+    fn is_idempotent() {
+        let mut card = empty_card();
+        harden_agent_card(&mut card);
+        let scheme_count = card.security_schemes.len();
+        let req_count = card.security_requirements.len();
+        harden_agent_card(&mut card);
+        // A second pass must not duplicate the scheme or requirement.
+        assert_eq!(card.security_schemes.len(), scheme_count);
+        assert_eq!(card.security_requirements.len(), req_count);
+    }
+}
