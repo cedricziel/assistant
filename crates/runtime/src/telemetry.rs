@@ -420,4 +420,27 @@ mod tests {
             );
         }
     }
+
+    /// `build_resource` injects SERVICE_NAME and SERVICE_VERSION from env / Cargo.
+    #[test]
+    fn build_resource_includes_service_attributes() {
+        let resource = build_resource();
+        // Resource exposes attributes via `iter`.
+        let names: Vec<String> = resource
+            .iter()
+            .map(|(k, _)| k.as_str().to_string())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .any(|n| n == opentelemetry_semantic_conventions::attribute::SERVICE_NAME),
+            "service.name should be present: {names:?}"
+        );
+        assert!(
+            names
+                .iter()
+                .any(|n| n == opentelemetry_semantic_conventions::attribute::SERVICE_VERSION),
+            "service.version should be present: {names:?}"
+        );
+    }
 }
