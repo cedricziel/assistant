@@ -5,7 +5,7 @@ use anyhow::Result;
 use assistant_core::{MessageBus, PublishRequest, bus_messages};
 use assistant_storage::{
     StorageLayer, WorkflowEdge, WorkflowExecutionLimits, WorkflowGraph, WorkflowNode,
-    WorkflowNodeKind, WorkflowTriggerKind,
+    WorkflowNodeKind, WorkflowStore as _, WorkflowTriggerKind,
 };
 use assistant_workflow::{
     WorkflowActionExecutor, WorkflowActionInput, WorkflowActionResult, spawn_event_trigger_adapter,
