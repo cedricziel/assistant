@@ -1195,9 +1195,9 @@ mod tests {
 
     use assistant_runtime::CommandRegistry;
     use assistant_storage::{
-        CommandEventStore, ConversationStore, InMemoryConversationBroadcaster, RunBroadcaster,
-        SkillRegistry, SqliteAttachmentStore, SqliteCommandEventStore, SqliteConversationStore,
-        StorageLayer,
+        CommandEventStore, ConversationEventStore, ConversationStore,
+        InMemoryConversationBroadcaster, RunBroadcaster, SkillRegistry, SqliteAttachmentStore,
+        SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
     };
 
     use super::super::ApiState;
@@ -1824,7 +1824,7 @@ mod tests {
     async fn stream_run_events_returns_404_for_pruned_run() {
         let sl = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         // Use a very short TTL (already negative = instantly expired).
-        let short_ttl_store = assistant_storage::ConversationEventStore::with_ttl(
+        let short_ttl_store = assistant_storage::SqliteConversationEventStore::with_ttl(
             sl.pool.clone(),
             chrono::Duration::seconds(-1),
         );
@@ -1891,7 +1891,7 @@ mod tests {
             transcription_provider: None,
             tts_provider: None,
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-            event_store: short_ttl_store,
+            event_store: Arc::new(short_ttl_store),
             run_broadcaster: RunBroadcaster::new(),
             attachment_store: Arc::new(SqliteAttachmentStore::new(sl.pool.clone())),
             command_registry: Arc::new(CommandRegistry::new()),

@@ -1,6 +1,7 @@
 //! Crash-recovery sweep: reclaim stale bus messages and close orphaned
 //! SSE event streams left over after a server restart.
 
+use assistant_storage::ConversationEventStore as _;
 use std::time::Duration;
 
 use tracing::{info, warn};

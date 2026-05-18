@@ -22,7 +22,8 @@ use assistant_llm_provider::retry::RetryConfig;
 use assistant_runtime::{CommandRegistry, Orchestrator};
 use assistant_storage::{
     AttachmentStore, CommandEventStore, ConversationEventStore, InMemoryConversationBroadcaster,
-    RunBroadcaster, SkillRegistry, SqliteAttachmentStore, SqliteCommandEventStore, StorageLayer,
+    RunBroadcaster, SkillRegistry, SqliteAttachmentStore, SqliteCommandEventStore,
+    SqliteConversationEventStore, StorageLayer,
 };
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
@@ -118,7 +119,7 @@ pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
         transcription_provider: None,
         tts_provider: None,
         audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-        event_store: ConversationEventStore::new(storage.pool.clone()),
+        event_store: Arc::new(SqliteConversationEventStore::new(storage.pool.clone())),
         run_broadcaster: RunBroadcaster::new(),
         attachment_store: Arc::new(SqliteAttachmentStore::new(storage.pool.clone())),
         command_registry: Arc::new(CommandRegistry::new()),
@@ -176,7 +177,7 @@ pub(crate) async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
         transcription_provider: None,
         tts_provider: None,
         audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-        event_store: ConversationEventStore::new(storage.pool.clone()),
+        event_store: Arc::new(SqliteConversationEventStore::new(storage.pool.clone())),
         run_broadcaster: RunBroadcaster::new(),
         attachment_store: Arc::new(SqliteAttachmentStore::new(storage.pool.clone())),
         command_registry: Arc::new(CommandRegistry::new()),

@@ -1,6 +1,7 @@
 //! Periodic conversation-event pruning — drops rows that have aged past
 //! their configured TTL.
 
+use assistant_storage::ConversationEventStore as _;
 use tracing::{info, warn};
 
 use assistant_storage::StorageLayer;

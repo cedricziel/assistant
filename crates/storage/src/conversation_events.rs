@@ -5,10 +5,11 @@
 //! Events are ephemeral: `expires_at` drives TTL-based pruning.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
+use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
@@ -31,9 +32,43 @@ pub struct ConversationEventRow {
     pub expires_at: DateTime<Utc>,
 }
 
+/// Trait-based interface for conversation event log persistence.
+#[async_trait]
+pub trait ConversationEventStore: Send + Sync {
+    async fn append_event(
+        &self,
+        run_id: &str,
+        conversation_id: &str,
+        sequence: i64,
+        event_type: &str,
+        payload: &Value,
+    ) -> Result<()>;
+
+    async fn list_events_since(
+        &self,
+        run_id: &str,
+        since: i64,
+    ) -> Result<Vec<ConversationEventRow>>;
+
+    async fn has_events(&self, run_id: &str) -> Result<bool>;
+
+    async fn is_run_complete(&self, run_id: &str) -> Result<bool>;
+
+    async fn prune_expired(&self) -> Result<u64>;
+
+    async fn find_incomplete_runs(&self, older_than: Duration) -> Result<Vec<(String, String)>>;
+
+    async fn append_synthetic_terminal(
+        &self,
+        run_id: &str,
+        conversation_id: &str,
+        message: &str,
+    ) -> Result<i64>;
+}
+
 /// SQLite-backed store for conversation event log entries.
 #[derive(Clone)]
-pub struct ConversationEventStore {
+pub struct SqliteConversationEventStore {
     pool: SqlitePool,
     /// How long events are retained before pruning.
     ttl: Duration,
@@ -41,7 +76,7 @@ pub struct ConversationEventStore {
     clock: Arc<dyn Clock>,
 }
 
-impl ConversationEventStore {
+impl SqliteConversationEventStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -57,12 +92,15 @@ impl ConversationEventStore {
             clock: Arc::new(SystemClock),
         }
     }
+}
 
+#[async_trait]
+impl ConversationEventStore for SqliteConversationEventStore {
     /// Append a single event to the log.
     ///
     /// `sequence` must be monotonically increasing within a `run_id`.
     /// The unique index on `(run_id, sequence)` enforces this at the DB level.
-    pub async fn append_event(
+    async fn append_event(
         &self,
         run_id: &str,
         conversation_id: &str,
@@ -90,7 +128,7 @@ impl ConversationEventStore {
     }
 
     /// Return all events for `run_id` with `sequence >= since`, ordered by sequence.
-    pub async fn list_events_since(
+    async fn list_events_since(
         &self,
         run_id: &str,
         since: i64,
@@ -113,7 +151,7 @@ impl ConversationEventStore {
     ///
     /// Used to distinguish "run not found" (no rows at all) from "run expired"
     /// (rows existed but TTL elapsed and were pruned).
-    pub async fn has_events(&self, run_id: &str) -> Result<bool> {
+    async fn has_events(&self, run_id: &str) -> Result<bool> {
         let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM conversation_events WHERE run_id = ?1")
                 .bind(run_id)
@@ -123,7 +161,7 @@ impl ConversationEventStore {
     }
 
     /// Return `true` if the run has completed (a `done` or `agent_error` event was persisted).
-    pub async fn is_run_complete(&self, run_id: &str) -> Result<bool> {
+    async fn is_run_complete(&self, run_id: &str) -> Result<bool> {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM conversation_events \
              WHERE run_id = ?1 AND (event_type = 'done' OR event_type = 'agent_error')",
@@ -135,7 +173,7 @@ impl ConversationEventStore {
     }
 
     /// Delete all rows where `expires_at < now`. Returns the number of rows deleted.
-    pub async fn prune_expired(&self) -> Result<u64> {
+    async fn prune_expired(&self) -> Result<u64> {
         let now = self.clock.now();
         let result = sqlx::query("DELETE FROM conversation_events WHERE expires_at < ?1")
             .bind(now)
@@ -150,10 +188,7 @@ impl ConversationEventStore {
     ///
     /// Returns `(run_id, conversation_id)` pairs for orphaned runs that likely
     /// died mid-stream (e.g. server restart).
-    pub async fn find_incomplete_runs(
-        &self,
-        older_than: Duration,
-    ) -> Result<Vec<(String, String)>> {
+    async fn find_incomplete_runs(&self, older_than: Duration) -> Result<Vec<(String, String)>> {
         let cutoff = self.clock.now() - older_than;
         let rows = sqlx::query(
             "SELECT DISTINCT ce.run_id, ce.conversation_id \
@@ -186,7 +221,7 @@ impl ConversationEventStore {
     /// Auto-determines the next sequence number. The payload includes
     /// `"synthetic": true` so clients can distinguish crash recovery from real
     /// errors.
-    pub async fn append_synthetic_terminal(
+    async fn append_synthetic_terminal(
         &self,
         run_id: &str,
         conversation_id: &str,
@@ -268,6 +303,169 @@ impl RunBroadcaster {
     }
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+/// In-memory [`ConversationEventStore`]. Vec<ConversationEventRow> backed.
+pub struct InMemoryConversationEventStore {
+    state: Arc<Mutex<Vec<ConversationEventRow>>>,
+    ttl: Duration,
+    clock: Arc<dyn Clock>,
+    next_id: Arc<Mutex<i64>>,
+}
+
+impl InMemoryConversationEventStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(Vec::new())),
+            ttl: Duration::hours(DEFAULT_EVENT_TTL_HOURS),
+            clock: Arc::new(SystemClock),
+            next_id: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    pub fn with_ttl(ttl: Duration) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(Vec::new())),
+            ttl,
+            clock: Arc::new(SystemClock),
+            next_id: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<ConversationEventRow>> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+
+    fn next_id(&self) -> i64 {
+        let mut id = match self.next_id.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        *id += 1;
+        *id
+    }
+}
+
+impl Default for InMemoryConversationEventStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ConversationEventStore for InMemoryConversationEventStore {
+    async fn append_event(
+        &self,
+        run_id: &str,
+        conversation_id: &str,
+        sequence: i64,
+        event_type: &str,
+        payload: &Value,
+    ) -> Result<()> {
+        let now = self.clock.now();
+        let expires_at = now + self.ttl;
+        let id = self.next_id();
+        let mut state = self.lock();
+        state.push(ConversationEventRow {
+            id,
+            run_id: run_id.to_string(),
+            conversation_id: conversation_id.to_string(),
+            sequence,
+            event_type: event_type.to_string(),
+            payload: payload.clone(),
+            created_at: now,
+            expires_at,
+        });
+        Ok(())
+    }
+
+    async fn list_events_since(
+        &self,
+        run_id: &str,
+        since: i64,
+    ) -> Result<Vec<ConversationEventRow>> {
+        let state = self.lock();
+        let mut out: Vec<ConversationEventRow> = state
+            .iter()
+            .filter(|e| e.run_id == run_id && e.sequence >= since)
+            .cloned()
+            .collect();
+        out.sort_by_key(|e| e.sequence);
+        Ok(out)
+    }
+
+    async fn has_events(&self, run_id: &str) -> Result<bool> {
+        let state = self.lock();
+        Ok(state.iter().any(|e| e.run_id == run_id))
+    }
+
+    async fn is_run_complete(&self, run_id: &str) -> Result<bool> {
+        let state = self.lock();
+        Ok(state.iter().any(|e| {
+            e.run_id == run_id && (e.event_type == "done" || e.event_type == "agent_error")
+        }))
+    }
+
+    async fn prune_expired(&self) -> Result<u64> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        let before = state.len();
+        state.retain(|e| e.expires_at >= now);
+        Ok((before - state.len()) as u64)
+    }
+
+    async fn find_incomplete_runs(&self, older_than: Duration) -> Result<Vec<(String, String)>> {
+        let cutoff = self.clock.now() - older_than;
+        let state = self.lock();
+        let mut runs: Vec<(String, String)> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for e in state.iter() {
+            if e.event_type == "run_started" && e.created_at < cutoff && !seen.contains(&e.run_id) {
+                let complete = state.iter().any(|other| {
+                    other.run_id == e.run_id
+                        && (other.event_type == "done" || other.event_type == "agent_error")
+                });
+                if !complete {
+                    seen.insert(e.run_id.clone());
+                    runs.push((e.run_id.clone(), e.conversation_id.clone()));
+                }
+            }
+        }
+        Ok(runs)
+    }
+
+    async fn append_synthetic_terminal(
+        &self,
+        run_id: &str,
+        conversation_id: &str,
+        message: &str,
+    ) -> Result<i64> {
+        let next_seq = {
+            let state = self.lock();
+            state
+                .iter()
+                .filter(|e| e.run_id == run_id)
+                .map(|e| e.sequence)
+                .max()
+                .unwrap_or(0)
+                + 1
+        };
+
+        let payload = serde_json::json!({
+            "synthetic": true,
+            "message": message,
+        });
+        self.append_event(run_id, conversation_id, next_seq, "agent_error", &payload)
+            .await?;
+        Ok(next_seq)
+    }
+}
+
 fn parse_row(r: &sqlx::sqlite::SqliteRow) -> Result<ConversationEventRow> {
     let payload_str: String = r.try_get("payload")?;
     let payload: Value = serde_json::from_str(&payload_str)?;
@@ -288,9 +486,9 @@ mod tests {
     use super::*;
     use crate::StorageLayer;
 
-    async fn make_store() -> ConversationEventStore {
+    async fn make_store() -> SqliteConversationEventStore {
         let sl = StorageLayer::new_in_memory().await.unwrap();
-        ConversationEventStore::new(sl.pool)
+        SqliteConversationEventStore::new(sl.pool)
     }
 
     #[tokio::test]
@@ -380,7 +578,7 @@ mod tests {
     #[tokio::test]
     async fn prune_expired_removes_old_rows() {
         let sl = StorageLayer::new_in_memory().await.unwrap();
-        let store = ConversationEventStore::with_ttl(
+        let store = SqliteConversationEventStore::with_ttl(
             sl.pool.clone(),
             Duration::seconds(-1), // already expired on insert
         );
