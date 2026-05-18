@@ -9,6 +9,7 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**cancelTurn**](ConversationsApi.md#cancelturn) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/cancel | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel&#x60;
 [**createConversation**](ConversationsApi.md#createconversation) | **POST** /api/conversations | &#x60;POST /api/conversations&#x60; — create a new conversation.
 [**createQuickMessage**](ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
 [**deleteConversation**](ConversationsApi.md#deleteconversation) | **DELETE** /api/conversations/{id} | &#x60;DELETE /api/conversations/{id}&#x60; — delete a conversation and all its messages.
@@ -23,6 +24,51 @@ Method | HTTP request | Description
 [**streamRunEvents**](ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [**updateConversation**](ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
 
+
+# **cancelTurn**
+> TurnStatusResponse cancelTurn(conversationId, turnId)
+
+`POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`
+
+Idempotent: triggers `Orchestrator::cancel_turn` if a matching token is registered, otherwise no-op. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker's `tokio::select!`, the SSE stream's terminal `agent_error` event, and the `event_store`. Clients should poll `GET .../status` (or wait for the stream's `agent_error`) to observe the transition.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String conversationId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation UUID
+final String turnId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Turn (run) UUID — matches the SSE run_id
+
+try {
+    final response = api.cancelTurn(conversationId, turnId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->cancelTurn: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **conversationId** | **String**| Conversation UUID | 
+ **turnId** | **String**| Turn (run) UUID — matches the SSE run_id | 
+
+### Return type
+
+[**TurnStatusResponse**](TurnStatusResponse.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createConversation**
 > ConversationSummary createConversation(createConversationRequest)

@@ -206,6 +206,7 @@ pub struct ApiErrorResponse {
         crate::api::messages::send_voice_message,
         crate::api::messages::stream_run_events,
         crate::api::turns::get_turn_status,
+        crate::api::turns::cancel_turn,
         crate::api::audio::get_message_audio,
         crate::api::audio::get_audio,
         crate::api::attachments::upload_attachment,

@@ -7,6 +7,7 @@
 // Specified by: openspec/changes/chat-stream-progress-ux/specs/...
 //   "In-flight turn progress card"
 
+import 'package:assistant_api/assistant_api.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +21,24 @@ class _FakeChatNotifier extends ChatNotifier {
   Future<ChatState> build() async => const ChatState();
 
   void push(ChatState s) => state = AsyncData(s);
+}
+
+/// A notifier that overrides [requestCancelTurn] to count invocations
+/// without performing any network I/O. Used by the Skip button widget
+/// test.
+class _SpyChatNotifier extends ChatNotifier {
+  int cancelCalls = 0;
+
+  @override
+  Future<ChatState> build() async => const ChatState();
+
+  void push(ChatState s) => state = AsyncData(s);
+
+  @override
+  Future<TurnState?> requestCancelTurn() async {
+    cancelCalls++;
+    return TurnState.errored;
+  }
 }
 
 Future<_FakeChatNotifier> _pumpCard(WidgetTester tester) async {
@@ -201,6 +220,74 @@ void main() {
         reason:
             'The card must keep rendering across ticker frames — no '
             'dispose-during-build errors or null-state crashes',
+      );
+    });
+
+    // -- Skip button (gated by kSkipButtonEnabled) ---------------------------
+
+    testWidgets(
+      'Skip button is hidden while the card is in the activity state',
+      (tester) async {
+        final notifier = await _pumpCard(tester);
+        // Not stalled.
+        notifier.push(
+          ChatState(currentTurnStatus: _snap(TurnEventKind.runStarted)),
+        );
+        await tester.pump();
+        expect(
+          find.byKey(const Key('turn_progress_card_skip_button')),
+          findsNothing,
+          reason:
+              'The Skip affordance must only appear once the card has '
+              'transitioned to the stalled state; otherwise users could '
+              'cancel a healthy turn mid-progress',
+        );
+      },
+    );
+
+    testWidgets('Skip button appears once the card transitions to stalled', (
+      tester,
+    ) async {
+      final notifier = await _pumpCard(tester);
+      // 35 s in the past → past the 30 s stall threshold.
+      final past = DateTime.now().subtract(const Duration(seconds: 35));
+      notifier.push(
+        ChatState(currentTurnStatus: _snap(TurnEventKind.token, at: past)),
+      );
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('turn_progress_card_skip_button')),
+        findsOneWidget,
+      );
+      expect(find.text('Skip'), findsOneWidget);
+    });
+
+    testWidgets('Tapping Skip invokes requestCancelTurn on the notifier', (
+      tester,
+    ) async {
+      // Spy on requestCancelTurn by counting invocations.
+      final spy = _SpyChatNotifier();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [chatProvider.overrideWith(() => spy)],
+          child: const MaterialApp(home: Scaffold(body: TurnProgressCard())),
+        ),
+      );
+
+      final past = DateTime.now().subtract(const Duration(seconds: 35));
+      spy.push(
+        ChatState(currentTurnStatus: _snap(TurnEventKind.token, at: past)),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('turn_progress_card_skip_button')));
+      await tester.pump();
+
+      expect(
+        spy.cancelCalls,
+        1,
+        reason: 'Tapping Skip must call requestCancelTurn exactly once',
       );
     });
 

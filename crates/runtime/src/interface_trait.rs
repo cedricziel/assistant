@@ -56,6 +56,41 @@ pub trait AssistantInterface: Send + Sync {
         attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult>;
 
+    /// Submit a user turn using a caller-supplied `request_id`, so the SSE
+    /// `run_id` can double as the orchestrator's request identifier (enabling
+    /// external cancellation by run_id).
+    ///
+    /// Default implementation ignores the `request_id` and delegates to
+    /// [`submit_turn_with_attachments`] — sufficient for test mocks that
+    /// don't exercise cancellation.
+    async fn submit_turn_with_request_id(
+        &self,
+        _request_id: Uuid,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<chrono::DateTime<chrono::Utc>>,
+        attachment_ids: Vec<Uuid>,
+    ) -> Result<TurnResult> {
+        self.submit_turn_with_attachments(
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            attachment_ids,
+        )
+        .await
+    }
+
+    /// Cancel an in-flight turn by `request_id`. Returns whether a token was
+    /// found and triggered.
+    ///
+    /// Default implementation is a no-op returning `false` — sufficient for
+    /// mocks that don't exercise cancellation.
+    async fn cancel_turn(&self, _request_id: Uuid) -> bool {
+        false
+    }
+
     /// Run the BOOT.md startup hook for the given conversation.
     ///
     /// Returns `Ok(true)` if a boot turn was executed, `Ok(false)` if skipped
@@ -89,6 +124,33 @@ impl AssistantInterface for Orchestrator {
             attachment_ids,
         )
         .await
+    }
+
+    async fn submit_turn_with_request_id(
+        &self,
+        request_id: Uuid,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<chrono::DateTime<chrono::Utc>>,
+        attachment_ids: Vec<Uuid>,
+    ) -> Result<TurnResult> {
+        self.submit_turn_with_request_id(
+            request_id,
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            attachment_ids,
+        )
+        .await
+    }
+
+    async fn cancel_turn(&self, request_id: Uuid) -> bool {
+        matches!(
+            self.cancel_turn(request_id).await,
+            crate::orchestrator::CancelOutcome::Cancelled
+        )
     }
 
     async fn run_boot(&self, conversation_id: Uuid, interface: Interface) -> Result<bool> {

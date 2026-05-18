@@ -131,25 +131,24 @@ pub async fn send_message(
 
     let orchestrator = state.orchestrator.clone();
     let user_attachment_ids = body.attachment_ids;
+    // Use `run_id` as the orchestrator's `request_id` so external cancel
+    // calls — `POST .../turns/{run_id}/cancel` — can find the matching
+    // CancellationToken via `Orchestrator::cancel_turn`.
     let turn_result_rx = {
         let (tx, rx) =
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
+        let submit_request_id = run_id;
         tokio::spawn(async move {
-            let result = if user_attachment_ids.is_empty() {
-                orchestrator
-                    .submit_turn(&content, conv_id, Interface::Web, None)
-                    .await
-            } else {
-                orchestrator
-                    .submit_turn_with_attachments(
-                        &content,
-                        conv_id,
-                        Interface::Web,
-                        None,
-                        user_attachment_ids,
-                    )
-                    .await
-            };
+            let result = orchestrator
+                .submit_turn_with_request_id(
+                    submit_request_id,
+                    &content,
+                    conv_id,
+                    Interface::Web,
+                    None,
+                    user_attachment_ids,
+                )
+                .await;
             let _ = tx.send(result);
         });
         rx
@@ -444,45 +443,96 @@ pub async fn send_message(
             seq += 1;
         }
 
-        let (reply_text, reply_message_id, reply_attachment_ids) = match turn_result_rx.await {
-            Ok(Ok(result)) => (result.answer, result.message_id, result.attachment_ids),
-            Ok(Err(_)) | Err(_) => (full_text, None, vec![]),
+        // Decide the terminal event: `done` for a successful turn, or
+        // `agent_error` with a `cancelled` reason when the turn was aborted
+        // via `Orchestrator::cancel_turn` (e.g. POST .../turns/{id}/cancel).
+        // Any other Err is also surfaced as `agent_error` so SSE clients see
+        // a structured terminal rather than a `done` with empty content.
+        enum TerminalKind {
+            Done,
+            Cancelled,
+            Errored(String),
+        }
+        let (reply_text, reply_message_id, reply_attachment_ids, terminal) =
+            match turn_result_rx.await {
+                Ok(Ok(result)) => (
+                    result.answer,
+                    result.message_id,
+                    result.attachment_ids,
+                    TerminalKind::Done,
+                ),
+                Ok(Err(e)) => {
+                    let msg = e.to_string();
+                    let kind = if msg.contains(assistant_runtime::TURN_CANCELLED_MARKER) {
+                        TerminalKind::Cancelled
+                    } else {
+                        TerminalKind::Errored(msg)
+                    };
+                    (full_text, None, vec![], kind)
+                }
+                Err(_) => (
+                    full_text,
+                    None,
+                    vec![],
+                    TerminalKind::Errored("submit_turn channel dropped".to_string()),
+                ),
+            };
+
+        let (event_type, payload) = match &terminal {
+            TerminalKind::Done => {
+                let mut done_data = serde_json::json!({
+                    "role": "assistant",
+                    "content": reply_text,
+                });
+                if let Some(mid) = reply_message_id {
+                    done_data["message_id"] = serde_json::Value::String(mid.to_string());
+                }
+                if !reply_attachment_ids.is_empty() {
+                    done_data["attachment_ids"] = serde_json::json!(
+                        reply_attachment_ids
+                            .iter()
+                            .map(|id| id.to_string())
+                            .collect::<Vec<_>>()
+                    );
+                }
+                ("done", done_data)
+            }
+            TerminalKind::Cancelled => (
+                "agent_error",
+                serde_json::json!({
+                    "reason": "cancelled",
+                    "message": "Turn cancelled by user",
+                    "partial_content": reply_text,
+                }),
+            ),
+            TerminalKind::Errored(msg) => (
+                "agent_error",
+                serde_json::json!({
+                    "reason": "error",
+                    "message": msg,
+                    "partial_content": reply_text,
+                }),
+            ),
         };
 
-        let mut done_data = serde_json::json!({
-            "role": "assistant",
-            "content": reply_text,
-        });
-        if let Some(mid) = reply_message_id {
-            done_data["message_id"] = serde_json::Value::String(mid.to_string());
-        }
-        if !reply_attachment_ids.is_empty() {
-            done_data["attachment_ids"] = serde_json::json!(
-                reply_attachment_ids
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-            );
-        }
-
-        // Persist done event.
+        // Persist terminal event.
         if let Err(e) = event_store
-            .append_event(&run_id_str, &conv_id_str, seq, "done", &done_data)
+            .append_event(&run_id_str, &conv_id_str, seq, event_type, &payload)
             .await
         {
-            warn!("Failed to persist done event for run {run_id}: {e}");
+            warn!("Failed to persist {event_type} event for run {run_id}: {e}");
         }
         let _ = broadcast_tx.send(assistant_storage::LiveEvent {
             sequence: seq,
-            event_type: "done".to_string(),
-            payload: done_data.clone(),
+            event_type: event_type.to_string(),
+            payload: payload.clone(),
         });
 
-        let done = Event::default()
-            .event("done")
-            .data(done_data.to_string())
+        let terminal_sse = Event::default()
+            .event(event_type)
+            .data(payload.to_string())
             .id(seq.to_string());
-        let _ = sse_tx.send(Ok(done)).await;
+        let _ = sse_tx.send(Ok(terminal_sse)).await;
 
         // Signal run completion — drops broadcast channel, subscribers observe close.
         run_broadcaster.finish_run(&run_id).await;
@@ -1195,9 +1245,9 @@ mod tests {
 
     use assistant_runtime::CommandRegistry;
     use assistant_storage::{
-        CommandEventStore, ConversationEventStore, ConversationStore,
-        InMemoryConversationBroadcaster, RunBroadcaster, SkillRegistry, SqliteAttachmentStore,
-        SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
+        ConversationEventStore, ConversationStore, InMemoryConversationBroadcaster, RunBroadcaster,
+        SkillRegistry, SqliteAttachmentStore, SqliteCommandEventStore, SqliteConversationStore,
+        StorageLayer,
     };
 
     use super::super::ApiState;

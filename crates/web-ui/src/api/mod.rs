@@ -275,6 +275,10 @@ pub fn api_router() -> Router<ApiState> {
             "/conversations/{conversation_id}/turns/{turn_id}/status",
             get(turns::get_turn_status),
         )
+        .route(
+            "/conversations/{conversation_id}/turns/{turn_id}/cancel",
+            post(turns::cancel_turn),
+        )
         .route("/messages/{id}/audio", get(audio::get_message_audio))
         .route("/audio/{id}", get(audio::get_audio))
         .route("/commands", get(commands::list_commands))

@@ -27,6 +27,99 @@ class ConversationsApi {
 
   const ConversationsApi(this._dio, this._serializers);
 
+  /// &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel&#x60;
+  /// Idempotent: triggers &#x60;Orchestrator::cancel_turn&#x60; if a matching token is registered, otherwise no-op. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker&#39;s &#x60;tokio::select!&#x60;, the SSE stream&#39;s terminal &#x60;agent_error&#x60; event, and the &#x60;event_store&#x60;. Clients should poll &#x60;GET .../status&#x60; (or wait for the stream&#39;s &#x60;agent_error&#x60;) to observe the transition.
+  ///
+  /// Parameters:
+  /// * [conversationId] - Conversation UUID
+  /// * [turnId] - Turn (run) UUID — matches the SSE run_id
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [TurnStatusResponse] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<TurnStatusResponse>> cancelTurn({
+    required String conversationId,
+    required String turnId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/api/conversations/{conversation_id}/turns/{turn_id}/cancel'
+        .replaceAll(
+            '{' r'conversation_id' '}',
+            encodeQueryParameter(
+                    _serializers, conversationId, const FullType(String))
+                .toString())
+        .replaceAll(
+            '{' r'turn_id' '}',
+            encodeQueryParameter(_serializers, turnId, const FullType(String))
+                .toString());
+    final _options = Options(
+      method: r'POST',
+      headers: <String, dynamic>{
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      validateStatus: validateStatus,
+    );
+
+    final _response = await _dio.request<Object>(
+      _path,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    TurnStatusResponse? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(TurnStatusResponse),
+            ) as TurnStatusResponse;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<TurnStatusResponse>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
+  }
+
   /// &#x60;POST /api/conversations&#x60; — create a new conversation.
   ///
   ///
