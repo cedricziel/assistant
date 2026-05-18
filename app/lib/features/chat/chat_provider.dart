@@ -1095,6 +1095,27 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     state = AsyncData(current.copyWith(clearError: true));
   }
 
+  /// Ask the server to cancel the currently in-flight turn.
+  ///
+  /// Best-effort: does nothing if no turn is in flight (no run id captured)
+  /// or if the client isn't connected. The server-side cancellation
+  /// propagates asynchronously — the SSE stream emits an `agent_error` event
+  /// with `{"reason": "cancelled"}` and the await-for loop here cleans up
+  /// state the same way it would for any other agent-terminated turn.
+  ///
+  /// Returns the post-cancel server-reported state for callers that want
+  /// to wait on the reconciled result; returns `null` when the cancel
+  /// call could not be made (no run id, no client, or transport error).
+  Future<TurnState?> requestCancelTurn() async {
+    final api = _api;
+    final runId = _currentRunId;
+    final convId = state.value?.conversationId;
+    if (api == null || runId == null || convId == null) {
+      return null;
+    }
+    return api.cancelTurn(convId, runId);
+  }
+
   /// Set the active conversation ID without loading history.
   void setConversationId(String id) {
     state = AsyncData(
