@@ -2,7 +2,7 @@
 //! `run_subagent`, conversation delegation, depth limit, tool filtering,
 //! cancellation, LLM-error reporting.
 
-use assistant_storage::ConversationStore;
+use assistant_storage::{AgentStore, ConversationStore};
 use std::time::Duration;
 
 use serde_json::{Value, json};

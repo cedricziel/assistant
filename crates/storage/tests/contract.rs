@@ -5,6 +5,7 @@
 //! impls fails CI.
 
 mod contract {
+    pub mod agent_store;
     pub mod attachment_store;
     pub mod command_event_store;
     pub mod conversation_store;

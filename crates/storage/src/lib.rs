@@ -58,7 +58,7 @@ pub mod user_store;
 pub mod webhooks;
 pub mod workflows;
 
-pub use agents::{AgentRecord, AgentStatus, AgentStore};
+pub use agents::{AgentRecord, AgentStatus, AgentStore, InMemoryAgentStore, SqliteAgentStore};
 pub use api_key_store::SqliteApiKeyStore;
 pub use attachments::{AttachmentStore, InMemoryAttachmentStore, SqliteAttachmentStore};
 pub use auth_state_store::{
@@ -213,8 +213,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build an [`AgentStore`] backed by this pool.
-    pub fn agent_store(&self) -> AgentStore {
-        AgentStore::new(self.pool.clone())
+    pub fn agent_store(&self) -> SqliteAgentStore {
+        SqliteAgentStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`PersonaSkillAccessStore`] backed by this pool.
