@@ -26,7 +26,9 @@ pub use command_registry::{CommandContext, CommandRegistry};
 pub use interface_runner::InterfaceRunner;
 pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;
-pub use orchestrator::{Orchestrator, OrchestratorEvent, TurnResult};
+pub use orchestrator::{
+    CancelOutcome, Orchestrator, OrchestratorEvent, TURN_CANCELLED_MARKER, TurnResult,
+};
 pub use otel_spans::start_conversation_context;
 pub use scheduler::spawn_scheduler;
 pub use telemetry::{OtelGuard, init_tracing};

@@ -53,6 +53,29 @@ pub trait ConfirmationCallback: Send + Sync {
     fn confirm(&self, tool_name: &str, params: &serde_json::Value) -> bool;
 }
 
+/// Outcome of [`Orchestrator::cancel_turn`].
+///
+/// Distinguishes "we found and triggered a token" from "no in-flight turn
+/// matched the request_id" — the latter is not an error, just an authoritative
+/// signal to the caller that the turn already finished, errored, or was never
+/// registered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelOutcome {
+    /// A cancellation token was registered for this `request_id` and has been
+    /// triggered. The turn worker will abort on its next yield point and
+    /// `submit_turn` will return an error containing the cancellation marker.
+    Cancelled,
+    /// No matching turn was registered — either the turn already finished
+    /// (success or error), was never started, or used a different request_id.
+    NotFound,
+}
+
+/// Error message fragment that appears in [`anyhow::Error`] when a turn was
+/// aborted via [`Orchestrator::cancel_turn`]. Callers (e.g. the SSE handler
+/// in `assistant-web-ui`) match on this substring to emit a final
+/// `agent_error` event with the structured cancellation reason.
+pub const TURN_CANCELLED_MARKER: &str = "turn_cancelled";
+
 /// The result of a single orchestrator turn.
 pub struct TurnResult {
     /// The assistant's final answer to the user.
@@ -310,6 +333,45 @@ impl Orchestrator {
     /// Return a reference to the message bus.
     pub fn bus(&self) -> &Arc<dyn MessageBus> {
         &self.bus
+    }
+
+    /// Cancel an in-flight turn by `request_id` (the same UUID `submit_turn`
+    /// assigned, also used as the SSE `run_id` when callers pass it through
+    /// [`Self::submit_turn_with_request_id`]).
+    ///
+    /// Cancellation is propagated via the existing per-turn `CancellationToken`
+    /// stored in [`Self::turn_cancellations`]; the worker's `tokio::select!`
+    /// aborts the in-flight LLM/tool work on the next yield point, and
+    /// `submit_turn` returns an error containing the cancellation marker.
+    ///
+    /// Returns [`CancelOutcome::Cancelled`] if a matching token was found,
+    /// [`CancelOutcome::NotFound`] if the turn has already finished or was
+    /// never registered. The caller is responsible for any side effects
+    /// (e.g. emitting a final SSE `agent_error` event for streaming clients).
+    pub async fn cancel_turn(&self, request_id: Uuid) -> CancelOutcome {
+        let token = self
+            .turn_cancellations
+            .read()
+            .await
+            .get(&request_id)
+            .cloned();
+        match token {
+            Some(t) => {
+                t.cancel();
+                info!(request_id = %request_id, "cancel_turn: cancelled in-flight turn");
+                CancelOutcome::Cancelled
+            }
+            None => CancelOutcome::NotFound,
+        }
+    }
+
+    /// True when `request_id` currently has a registered cancellation token —
+    /// i.e. a turn is in flight under this id. Exposed primarily for tests.
+    pub async fn is_turn_in_flight(&self, request_id: Uuid) -> bool {
+        self.turn_cancellations
+            .read()
+            .await
+            .contains_key(&request_id)
     }
 
     /// Attach an [`AudioStore`] so that audio produced by the `voice-response`
