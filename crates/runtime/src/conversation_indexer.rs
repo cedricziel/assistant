@@ -167,7 +167,7 @@ fn split_turn(text: &str) -> Vec<String> {
 }
 
 /// Embed unembedded chunks (same logic as `MemoryIndexer::embed_pending`).
-async fn embed_pending(store: &MemoryChunkStore, llm: &dyn LlmProvider) {
+async fn embed_pending(store: &dyn MemoryChunkStore, llm: &dyn LlmProvider) {
     let unembedded = match store.get_unembedded(50).await {
         Ok(v) => v,
         Err(e) => {

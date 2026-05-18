@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::{LlmProvider, ToolHandler, ToolOutput, types::conversation::ExecutionContext};
-use assistant_storage::StorageLayer;
+use assistant_storage::{MemoryChunkStore, StorageLayer};
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use whatlang::Lang;
