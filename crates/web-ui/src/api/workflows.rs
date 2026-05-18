@@ -30,7 +30,7 @@ use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use assistant_storage::{WorkflowGraph, WorkflowStore, WorkflowTriggerKind};
+use assistant_storage::{SqliteWorkflowStore, WorkflowGraph, WorkflowStore, WorkflowTriggerKind};
 
 use crate::api::internal_error;
 
@@ -518,9 +518,9 @@ pub async fn get_workflow_run(
 
 // -- Helpers -----------------------------------------------------------------
 
-async fn workflow_store(state: &WorkflowsApiState) -> WorkflowStore {
+async fn workflow_store(state: &WorkflowsApiState) -> SqliteWorkflowStore {
     let agent_id = state.agent_id.read().await.clone();
-    WorkflowStore::for_agent(state.pool.clone(), agent_id)
+    SqliteWorkflowStore::for_agent(state.pool.clone(), agent_id)
 }
 
 fn parse_uuid(s: &str) -> Result<Uuid, (StatusCode, String)> {

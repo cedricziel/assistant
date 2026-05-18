@@ -1,16 +1,17 @@
 //! Workflow persistence for graph-style trigger/action automation.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, bail};
 use assistant_core::clock::{Clock, SystemClock};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Workflow node kind.
@@ -152,14 +153,97 @@ pub struct WorkflowRunStepRecord {
 }
 
 /// SQLite-backed store for workflows.
-pub struct WorkflowStore {
+/// Trait-based interface for workflow persistence.
+#[async_trait]
+pub trait WorkflowStore: Send + Sync {
+    async fn create(
+        &self,
+        name: &str,
+        description: &str,
+        graph: &WorkflowGraph,
+        active: bool,
+    ) -> Result<Uuid>;
+
+    async fn ensure_webhook_endpoint(&self, workflow_id: Uuid) -> Result<WorkflowWebhookEndpoint>;
+
+    async fn get_webhook_endpoint(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<WorkflowWebhookEndpoint>>;
+
+    async fn rotate_webhook_token(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<WorkflowWebhookEndpoint>>;
+
+    async fn resolve_by_webhook(
+        &self,
+        workflow_id: Uuid,
+        token: &str,
+    ) -> Result<Option<WorkflowRecord>>;
+
+    async fn create_run(
+        &self,
+        workflow_id: Uuid,
+        trigger: WorkflowTriggerKind,
+        trigger_payload: &Value,
+    ) -> Result<Uuid>;
+
+    async fn list_runs(&self, workflow_id: Uuid, limit: i64) -> Result<Vec<WorkflowRunRecord>>;
+
+    async fn get_run(&self, workflow_id: Uuid, run_id: Uuid) -> Result<Option<WorkflowRunRecord>>;
+
+    async fn list_runnable_runs(&self, limit: i64) -> Result<Vec<WorkflowRunRecord>>;
+
+    async fn workflow_for_run(&self, run_id: Uuid) -> Result<Option<WorkflowRecord>>;
+
+    async fn append_run_step(
+        &self,
+        run_id: Uuid,
+        step_index: i64,
+        node_id: &str,
+        node_kind: &str,
+        note: Option<&str>,
+        output: Option<&Value>,
+    ) -> Result<()>;
+
+    async fn finish_run(
+        &self,
+        run_id: Uuid,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<bool>;
+
+    async fn list_run_steps(&self, run_id: Uuid, limit: i64) -> Result<Vec<WorkflowRunStepRecord>>;
+
+    async fn list(&self) -> Result<Vec<WorkflowRecord>>;
+
+    async fn get(&self, id: Uuid) -> Result<Option<WorkflowRecord>>;
+
+    async fn update(
+        &self,
+        id: Uuid,
+        name: &str,
+        description: &str,
+        graph: &WorkflowGraph,
+        active: bool,
+    ) -> Result<bool>;
+
+    async fn set_active(&self, id: Uuid, active: bool) -> Result<bool>;
+
+    async fn toggle_active(&self, id: Uuid) -> Result<Option<bool>>;
+
+    async fn delete(&self, id: Uuid) -> Result<bool>;
+}
+
+pub struct SqliteWorkflowStore {
     pool: SqlitePool,
     agent_id: String,
     /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
     clock: Arc<dyn Clock>,
 }
 
-impl WorkflowStore {
+impl SqliteWorkflowStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -182,9 +266,12 @@ impl WorkflowStore {
         self.clock = clock;
         self
     }
+}
 
+#[async_trait]
+impl WorkflowStore for SqliteWorkflowStore {
     /// Insert a new workflow.
-    pub async fn create(
+    async fn create(
         &self,
         name: &str,
         description: &str,
@@ -218,10 +305,7 @@ impl WorkflowStore {
     }
 
     /// Returns webhook endpoint metadata for a workflow, creating one if missing.
-    pub async fn ensure_webhook_endpoint(
-        &self,
-        workflow_id: Uuid,
-    ) -> Result<WorkflowWebhookEndpoint> {
+    async fn ensure_webhook_endpoint(&self, workflow_id: Uuid) -> Result<WorkflowWebhookEndpoint> {
         if let Some(existing) = self.get_webhook_endpoint(workflow_id).await? {
             return Ok(existing);
         }
@@ -245,7 +329,7 @@ impl WorkflowStore {
     }
 
     /// Returns inbound webhook endpoint metadata for a workflow.
-    pub async fn get_webhook_endpoint(
+    async fn get_webhook_endpoint(
         &self,
         workflow_id: Uuid,
     ) -> Result<Option<WorkflowWebhookEndpoint>> {
@@ -262,7 +346,7 @@ impl WorkflowStore {
     }
 
     /// Rotates the webhook token for a workflow endpoint.
-    pub async fn rotate_webhook_token(
+    async fn rotate_webhook_token(
         &self,
         workflow_id: Uuid,
     ) -> Result<Option<WorkflowWebhookEndpoint>> {
@@ -287,7 +371,7 @@ impl WorkflowStore {
     }
 
     /// Resolves a workflow by webhook credentials.
-    pub async fn resolve_by_webhook(
+    async fn resolve_by_webhook(
         &self,
         workflow_id: Uuid,
         token: &str,
@@ -316,7 +400,7 @@ impl WorkflowStore {
     }
 
     /// Records a workflow run triggered by manual, webhook, schedule, or events.
-    pub async fn create_run(
+    async fn create_run(
         &self,
         workflow_id: Uuid,
         trigger: WorkflowTriggerKind,
@@ -344,7 +428,7 @@ impl WorkflowStore {
     }
 
     /// Lists recent runs for a workflow.
-    pub async fn list_runs(&self, workflow_id: Uuid, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
+    async fn list_runs(&self, workflow_id: Uuid, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
         let rows = sqlx::query(
             "SELECT id, workflow_id, agent_id, trigger_type, trigger_payload_json, status, started_at, finished_at, error_message
              FROM workflow_runs
@@ -362,11 +446,7 @@ impl WorkflowStore {
     }
 
     /// Fetch one workflow run by workflow and run id.
-    pub async fn get_run(
-        &self,
-        workflow_id: Uuid,
-        run_id: Uuid,
-    ) -> Result<Option<WorkflowRunRecord>> {
+    async fn get_run(&self, workflow_id: Uuid, run_id: Uuid) -> Result<Option<WorkflowRunRecord>> {
         let row = sqlx::query(
             "SELECT id, workflow_id, agent_id, trigger_type, trigger_payload_json, status, started_at, finished_at, error_message
              FROM workflow_runs
@@ -382,7 +462,7 @@ impl WorkflowStore {
     }
 
     /// Lists globally runnable workflow runs.
-    pub async fn list_runnable_runs(&self, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
+    async fn list_runnable_runs(&self, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
         let rows = sqlx::query(
             "SELECT id, workflow_id, agent_id, trigger_type, trigger_payload_json, status, started_at, finished_at, error_message
              FROM workflow_runs
@@ -398,7 +478,7 @@ impl WorkflowStore {
     }
 
     /// Load the workflow definition associated with a run.
-    pub async fn workflow_for_run(&self, run_id: Uuid) -> Result<Option<WorkflowRecord>> {
+    async fn workflow_for_run(&self, run_id: Uuid) -> Result<Option<WorkflowRecord>> {
         let row = sqlx::query(
             "SELECT w.id, w.agent_id, w.name, w.description, w.graph_json, w.active, w.created_at, w.updated_at
              FROM workflow_runs wr
@@ -413,7 +493,7 @@ impl WorkflowStore {
     }
 
     /// Append one execution step record for a workflow run.
-    pub async fn append_run_step(
+    async fn append_run_step(
         &self,
         run_id: Uuid,
         step_index: i64,
@@ -442,7 +522,7 @@ impl WorkflowStore {
     }
 
     /// Mark a run finished with final status and optional error message.
-    pub async fn finish_run(
+    async fn finish_run(
         &self,
         run_id: Uuid,
         status: &str,
@@ -463,11 +543,7 @@ impl WorkflowStore {
     }
 
     /// List recorded step events for a run.
-    pub async fn list_run_steps(
-        &self,
-        run_id: Uuid,
-        limit: i64,
-    ) -> Result<Vec<WorkflowRunStepRecord>> {
+    async fn list_run_steps(&self, run_id: Uuid, limit: i64) -> Result<Vec<WorkflowRunStepRecord>> {
         let rows = sqlx::query(
             "SELECT id, run_id, step_index, node_id, node_kind, note, output_json, occurred_at
              FROM workflow_run_steps
@@ -484,7 +560,7 @@ impl WorkflowStore {
     }
 
     /// List workflows for this agent.
-    pub async fn list(&self) -> Result<Vec<WorkflowRecord>> {
+    async fn list(&self) -> Result<Vec<WorkflowRecord>> {
         let rows = sqlx::query(
             "SELECT id, agent_id, name, description, graph_json, active, created_at, updated_at \
              FROM workflows WHERE agent_id = ?1 ORDER BY created_at DESC",
@@ -497,7 +573,7 @@ impl WorkflowStore {
     }
 
     /// Fetch one workflow by ID.
-    pub async fn get(&self, id: Uuid) -> Result<Option<WorkflowRecord>> {
+    async fn get(&self, id: Uuid) -> Result<Option<WorkflowRecord>> {
         let row = sqlx::query(
             "SELECT id, agent_id, name, description, graph_json, active, created_at, updated_at \
              FROM workflows WHERE id = ?1 AND agent_id = ?2",
@@ -511,7 +587,7 @@ impl WorkflowStore {
     }
 
     /// Update mutable workflow fields.
-    pub async fn update(
+    async fn update(
         &self,
         id: Uuid,
         name: &str,
@@ -550,7 +626,7 @@ impl WorkflowStore {
     }
 
     /// Toggle active status.
-    pub async fn set_active(&self, id: Uuid, active: bool) -> Result<bool> {
+    async fn set_active(&self, id: Uuid, active: bool) -> Result<bool> {
         let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE workflows
@@ -567,7 +643,7 @@ impl WorkflowStore {
     }
 
     /// Atomically toggle active status and return the new state.
-    pub async fn toggle_active(&self, id: Uuid) -> Result<Option<bool>> {
+    async fn toggle_active(&self, id: Uuid) -> Result<Option<bool>> {
         let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE workflows
@@ -596,7 +672,7 @@ impl WorkflowStore {
     }
 
     /// Delete a workflow.
-    pub async fn delete(&self, id: Uuid) -> Result<bool> {
+    async fn delete(&self, id: Uuid) -> Result<bool> {
         let result = sqlx::query("DELETE FROM workflows WHERE id = ?1 AND agent_id = ?2")
             .bind(id.to_string())
             .bind(&self.agent_id)
@@ -891,6 +967,368 @@ fn parse_schedule(expr: &str) -> Option<Schedule> {
         .ok()
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct InMemoryWorkflowState {
+    workflows: HashMap<Uuid, WorkflowRecord>,
+    webhooks: HashMap<Uuid, WorkflowWebhookEndpoint>,
+    runs: HashMap<Uuid, WorkflowRunRecord>,
+    steps: HashMap<Uuid, Vec<WorkflowRunStepRecord>>,
+}
+
+/// In-memory [`WorkflowStore`].
+pub struct InMemoryWorkflowStore {
+    state: Arc<Mutex<InMemoryWorkflowState>>,
+    agent_id: String,
+    clock: Arc<dyn Clock>,
+}
+
+impl InMemoryWorkflowStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(InMemoryWorkflowState::default())),
+            agent_id: "default".to_string(),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn for_agent(agent_id: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            ..Self::new()
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryWorkflowState> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryWorkflowStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl WorkflowStore for InMemoryWorkflowStore {
+    async fn create(
+        &self,
+        name: &str,
+        description: &str,
+        graph: &WorkflowGraph,
+        active: bool,
+    ) -> Result<Uuid> {
+        validate_workflow_graph(graph)?;
+        let id = Uuid::new_v4();
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state.workflows.insert(
+            id,
+            WorkflowRecord {
+                id,
+                agent_id: self.agent_id.clone(),
+                name: name.to_string(),
+                description: description.to_string(),
+                graph: graph.clone(),
+                active,
+                created_at: now,
+                updated_at: now,
+            },
+        );
+        Ok(id)
+    }
+
+    async fn ensure_webhook_endpoint(&self, workflow_id: Uuid) -> Result<WorkflowWebhookEndpoint> {
+        if let Some(existing) = self.get_webhook_endpoint(workflow_id).await? {
+            return Ok(existing);
+        }
+        let now = self.clock.now();
+        let endpoint = WorkflowWebhookEndpoint {
+            workflow_id,
+            token: Uuid::new_v4().to_string(),
+            active: true,
+            created_at: now,
+            updated_at: now,
+        };
+        let mut state = self.lock();
+        state.webhooks.insert(workflow_id, endpoint.clone());
+        Ok(endpoint)
+    }
+
+    async fn get_webhook_endpoint(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<WorkflowWebhookEndpoint>> {
+        let state = self.lock();
+        Ok(state.webhooks.get(&workflow_id).cloned())
+    }
+
+    async fn rotate_webhook_token(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<WorkflowWebhookEndpoint>> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(e) = state.webhooks.get_mut(&workflow_id) {
+            e.token = Uuid::new_v4().to_string();
+            e.updated_at = now;
+            return Ok(Some(e.clone()));
+        }
+        Ok(None)
+    }
+
+    async fn resolve_by_webhook(
+        &self,
+        workflow_id: Uuid,
+        token: &str,
+    ) -> Result<Option<WorkflowRecord>> {
+        let state = self.lock();
+        let endpoint_ok = state
+            .webhooks
+            .get(&workflow_id)
+            .map(|e| e.active && e.token == token)
+            .unwrap_or(false);
+        if !endpoint_ok {
+            return Ok(None);
+        }
+        Ok(state
+            .workflows
+            .get(&workflow_id)
+            .filter(|w| w.active && w.agent_id == self.agent_id)
+            .cloned())
+    }
+
+    async fn create_run(
+        &self,
+        workflow_id: Uuid,
+        trigger: WorkflowTriggerKind,
+        trigger_payload: &Value,
+    ) -> Result<Uuid> {
+        let _w = self.get(workflow_id).await?.context("workflow not found")?;
+        let run_id = Uuid::new_v4();
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state.runs.insert(
+            run_id,
+            WorkflowRunRecord {
+                id: run_id,
+                workflow_id,
+                agent_id: self.agent_id.clone(),
+                trigger_type: trigger.as_str().to_string(),
+                trigger_payload: trigger_payload.clone(),
+                status: "pending".to_string(),
+                started_at: now,
+                finished_at: None,
+                error_message: None,
+            },
+        );
+        Ok(run_id)
+    }
+
+    async fn list_runs(&self, workflow_id: Uuid, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
+        let state = self.lock();
+        let mut out: Vec<WorkflowRunRecord> = state
+            .runs
+            .values()
+            .filter(|r| r.workflow_id == workflow_id && r.agent_id == self.agent_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|r| std::cmp::Reverse(r.started_at));
+        if limit > 0 {
+            out.truncate(limit as usize);
+        }
+        Ok(out)
+    }
+
+    async fn get_run(&self, workflow_id: Uuid, run_id: Uuid) -> Result<Option<WorkflowRunRecord>> {
+        let state = self.lock();
+        Ok(state
+            .runs
+            .get(&run_id)
+            .filter(|r| r.workflow_id == workflow_id && r.agent_id == self.agent_id)
+            .cloned())
+    }
+
+    async fn list_runnable_runs(&self, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
+        let state = self.lock();
+        let mut out: Vec<WorkflowRunRecord> = state
+            .runs
+            .values()
+            .filter(|r| r.status == "pending" && r.finished_at.is_none())
+            .cloned()
+            .collect();
+        out.sort_by_key(|r| r.started_at);
+        if limit > 0 {
+            out.truncate(limit as usize);
+        }
+        Ok(out)
+    }
+
+    async fn workflow_for_run(&self, run_id: Uuid) -> Result<Option<WorkflowRecord>> {
+        let state = self.lock();
+        let Some(run) = state.runs.get(&run_id) else {
+            return Ok(None);
+        };
+        Ok(state.workflows.get(&run.workflow_id).cloned())
+    }
+
+    async fn append_run_step(
+        &self,
+        run_id: Uuid,
+        step_index: i64,
+        node_id: &str,
+        node_kind: &str,
+        note: Option<&str>,
+        output: Option<&Value>,
+    ) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state
+            .steps
+            .entry(run_id)
+            .or_default()
+            .push(WorkflowRunStepRecord {
+                id: Uuid::new_v4(),
+                run_id,
+                step_index,
+                node_id: node_id.to_string(),
+                node_kind: node_kind.to_string(),
+                note: note.map(str::to_string),
+                output: output.cloned(),
+                occurred_at: now,
+            });
+        Ok(())
+    }
+
+    async fn finish_run(
+        &self,
+        run_id: Uuid,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<bool> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(run) = state.runs.get_mut(&run_id)
+            && run.finished_at.is_none()
+        {
+            run.status = status.to_string();
+            run.finished_at = Some(now);
+            run.error_message = error_message.map(str::to_string);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn list_run_steps(&self, run_id: Uuid, limit: i64) -> Result<Vec<WorkflowRunStepRecord>> {
+        let state = self.lock();
+        let mut out: Vec<WorkflowRunStepRecord> =
+            state.steps.get(&run_id).cloned().unwrap_or_default();
+        out.sort_by_key(|s| s.occurred_at);
+        if limit > 0 {
+            out.truncate(limit as usize);
+        }
+        Ok(out)
+    }
+
+    async fn list(&self) -> Result<Vec<WorkflowRecord>> {
+        let state = self.lock();
+        let mut out: Vec<WorkflowRecord> = state
+            .workflows
+            .values()
+            .filter(|w| w.agent_id == self.agent_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|w| std::cmp::Reverse(w.created_at));
+        Ok(out)
+    }
+
+    async fn get(&self, id: Uuid) -> Result<Option<WorkflowRecord>> {
+        let state = self.lock();
+        Ok(state
+            .workflows
+            .get(&id)
+            .filter(|w| w.agent_id == self.agent_id)
+            .cloned())
+    }
+
+    async fn update(
+        &self,
+        id: Uuid,
+        name: &str,
+        description: &str,
+        graph: &WorkflowGraph,
+        active: bool,
+    ) -> Result<bool> {
+        validate_workflow_graph(graph)?;
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(w) = state.workflows.get_mut(&id)
+            && w.agent_id == self.agent_id
+        {
+            w.name = name.to_string();
+            w.description = description.to_string();
+            w.graph = graph.clone();
+            w.active = active;
+            w.updated_at = now;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn set_active(&self, id: Uuid, active: bool) -> Result<bool> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(w) = state.workflows.get_mut(&id)
+            && w.agent_id == self.agent_id
+        {
+            w.active = active;
+            w.updated_at = now;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn toggle_active(&self, id: Uuid) -> Result<Option<bool>> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(w) = state.workflows.get_mut(&id)
+            && w.agent_id == self.agent_id
+        {
+            w.active = !w.active;
+            w.updated_at = now;
+            return Ok(Some(w.active));
+        }
+        Ok(None)
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<bool> {
+        let mut state = self.lock();
+        if state
+            .workflows
+            .get(&id)
+            .map(|w| w.agent_id == self.agent_id)
+            .unwrap_or(false)
+        {
+            state.workflows.remove(&id);
+            state.webhooks.remove(&id);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -976,7 +1414,7 @@ mod tests {
     #[tokio::test]
     async fn create_and_get_roundtrip() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = WorkflowStore::new(storage.pool.clone());
+        let store = SqliteWorkflowStore::new(storage.pool.clone());
         let graph = graph_with_loop();
 
         let id = store
@@ -993,7 +1431,7 @@ mod tests {
     #[tokio::test]
     async fn update_and_toggle() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = WorkflowStore::new(storage.pool.clone());
+        let store = SqliteWorkflowStore::new(storage.pool.clone());
         let graph = graph_with_loop();
 
         let id = store.create("wf", "desc", &graph, true).await.unwrap();
@@ -1019,7 +1457,7 @@ mod tests {
     #[tokio::test]
     async fn webhook_endpoint_and_runs_roundtrip() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = WorkflowStore::new(storage.pool.clone());
+        let store = SqliteWorkflowStore::new(storage.pool.clone());
         let graph = graph_with_loop();
         let workflow_id = store.create("wf", "desc", &graph, true).await.unwrap();
 

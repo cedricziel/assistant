@@ -279,7 +279,7 @@ async fn process_schedule_triggers(storage: &StorageLayer) -> Result<()> {
 }
 
 async fn schedule_trigger_due(
-    store: &WorkflowStore,
+    store: &dyn WorkflowStore,
     workflow_id: Uuid,
     trigger_node_id: &str,
     cron_expr: &str,
@@ -406,7 +406,7 @@ enum RunOutcome {
 async fn traverse_graph(
     run: &WorkflowRunRecord,
     graph: &WorkflowGraph,
-    store: &WorkflowStore,
+    store: &dyn WorkflowStore,
     action_executors: &[Arc<dyn WorkflowActionExecutor>],
 ) -> Result<RunOutcome> {
     let mut nodes_by_id: HashMap<&str, &WorkflowNode> = HashMap::new();
@@ -519,7 +519,7 @@ fn run_starts_from_trigger(run: &WorkflowRunRecord, trigger_node: &WorkflowNode)
 async fn execute_node(
     run: &WorkflowRunRecord,
     node: &WorkflowNode,
-    store: &WorkflowStore,
+    store: &dyn WorkflowStore,
     step_index: i64,
     action_executors: &[Arc<dyn WorkflowActionExecutor>],
 ) -> Result<String> {

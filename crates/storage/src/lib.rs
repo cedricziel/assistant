@@ -117,9 +117,10 @@ pub use traces::{
 pub use user_store::SqliteUserStore;
 pub use webhooks::{InMemoryWebhookStore, SqliteWebhookStore, WebhookRecord, WebhookStore};
 pub use workflows::{
-    WorkflowEdge, WorkflowEdgeCondition, WorkflowExecutionLimits, WorkflowGraph, WorkflowNode,
-    WorkflowNodeKind, WorkflowRecord, WorkflowRunRecord, WorkflowRunStepRecord, WorkflowStore,
-    WorkflowTriggerKind, WorkflowWebhookEndpoint,
+    InMemoryWorkflowStore, SqliteWorkflowStore, WorkflowEdge, WorkflowEdgeCondition,
+    WorkflowExecutionLimits, WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRecord,
+    WorkflowRunRecord, WorkflowRunStepRecord, WorkflowStore, WorkflowTriggerKind,
+    WorkflowWebhookEndpoint,
 };
 
 use std::path::Path;
@@ -257,8 +258,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a [`WorkflowStore`] backed by this pool.
-    pub fn workflow_store(&self) -> WorkflowStore {
-        WorkflowStore::new(self.pool.clone())
+    pub fn workflow_store(&self) -> SqliteWorkflowStore {
+        SqliteWorkflowStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`SlackActiveThreadStore`] backed by this pool.
