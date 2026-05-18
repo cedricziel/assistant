@@ -1,9 +1,11 @@
 //! Outgoing webhook persistence — CRUD and verification tracking.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use assistant_core::clock::{Clock, SystemClock};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
@@ -22,15 +24,60 @@ pub struct WebhookRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Trait-based interface for outgoing webhook persistence.
+#[async_trait]
+pub trait WebhookStore: Send + Sync {
+    /// Create a new webhook row.
+    async fn create(
+        &self,
+        id: &str,
+        name: &str,
+        url: &str,
+        secret: &str,
+        event_types: &[String],
+    ) -> Result<()>;
+
+    /// Fetch a webhook by ID.
+    async fn get(&self, id: &str) -> Result<Option<WebhookRecord>>;
+
+    /// List all webhooks for the configured agent.
+    async fn list(&self) -> Result<Vec<WebhookRecord>>;
+
+    /// Update mutable fields of a webhook.
+    async fn update(
+        &self,
+        id: &str,
+        name: &str,
+        url: &str,
+        event_types: &[String],
+        active: bool,
+    ) -> Result<bool>;
+
+    /// Delete a webhook. Returns `true` if a row was deleted.
+    async fn delete(&self, id: &str) -> Result<bool>;
+
+    /// Mark a webhook as verified.
+    async fn mark_verified(&self, id: &str) -> Result<bool>;
+
+    /// Toggle the `active` flag.
+    async fn toggle_active(&self, id: &str) -> Result<bool>;
+
+    /// Replace the webhook secret.
+    async fn rotate_secret(&self, id: &str, new_secret: &str) -> Result<bool>;
+
+    /// List all active webhooks whose `event_types` contains `event_topic`.
+    async fn list_active_for_event(&self, event_topic: &str) -> Result<Vec<WebhookRecord>>;
+}
+
 /// SQLite-backed store for outgoing webhooks.
-pub struct WebhookStore {
+pub struct SqliteWebhookStore {
     pool: SqlitePool,
     agent_id: String,
     /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
     clock: Arc<dyn Clock>,
 }
 
-impl WebhookStore {
+impl SqliteWebhookStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -52,9 +99,12 @@ impl WebhookStore {
         self.clock = clock;
         self
     }
+}
 
+#[async_trait]
+impl WebhookStore for SqliteWebhookStore {
     /// Insert a new webhook.
-    pub async fn create(
+    async fn create(
         &self,
         id: &str,
         name: &str,
@@ -82,7 +132,7 @@ impl WebhookStore {
     }
 
     /// Fetch a single webhook by ID.
-    pub async fn get(&self, id: &str) -> Result<Option<WebhookRecord>> {
+    async fn get(&self, id: &str) -> Result<Option<WebhookRecord>> {
         let row = sqlx::query(
             "SELECT id, agent_id, name, url, secret, event_types, active, verified_at, created_at, updated_at \
              FROM webhooks WHERE id = ?1 AND agent_id = ?2",
@@ -99,7 +149,7 @@ impl WebhookStore {
     }
 
     /// List all webhooks ordered by creation time (newest first).
-    pub async fn list(&self) -> Result<Vec<WebhookRecord>> {
+    async fn list(&self) -> Result<Vec<WebhookRecord>> {
         let rows = sqlx::query(
             "SELECT id, agent_id, name, url, secret, event_types, active, verified_at, created_at, updated_at \
              FROM webhooks WHERE agent_id = ?1 ORDER BY created_at DESC",
@@ -112,7 +162,7 @@ impl WebhookStore {
     }
 
     /// Update an existing webhook's mutable fields.
-    pub async fn update(
+    async fn update(
         &self,
         id: &str,
         name: &str,
@@ -140,7 +190,7 @@ impl WebhookStore {
     }
 
     /// Delete a webhook by ID.
-    pub async fn delete(&self, id: &str) -> Result<bool> {
+    async fn delete(&self, id: &str) -> Result<bool> {
         let result = sqlx::query("DELETE FROM webhooks WHERE id = ?1 AND agent_id = ?2")
             .bind(id)
             .bind(&self.agent_id)
@@ -151,7 +201,7 @@ impl WebhookStore {
     }
 
     /// Record a successful verification timestamp.
-    pub async fn mark_verified(&self, id: &str) -> Result<bool> {
+    async fn mark_verified(&self, id: &str) -> Result<bool> {
         let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE webhooks
@@ -168,7 +218,7 @@ impl WebhookStore {
     }
 
     /// Toggle the active flag on a webhook.
-    pub async fn toggle_active(&self, id: &str) -> Result<bool> {
+    async fn toggle_active(&self, id: &str) -> Result<bool> {
         let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE webhooks
@@ -186,7 +236,7 @@ impl WebhookStore {
 
     /// Regenerate the HMAC secret for a webhook. Clears `verified_at` since the
     /// old secret is no longer valid.
-    pub async fn rotate_secret(&self, id: &str, new_secret: &str) -> Result<bool> {
+    async fn rotate_secret(&self, id: &str, new_secret: &str) -> Result<bool> {
         let now = self.clock.now();
         let result = sqlx::query(
             "UPDATE webhooks
@@ -204,7 +254,7 @@ impl WebhookStore {
     }
 
     /// List active webhooks subscribed to a specific event topic.
-    pub async fn list_active_for_event(&self, event_topic: &str) -> Result<Vec<WebhookRecord>> {
+    async fn list_active_for_event(&self, event_topic: &str) -> Result<Vec<WebhookRecord>> {
         let rows = sqlx::query(
             "SELECT id, agent_id, name, url, secret, event_types, active, verified_at, created_at, updated_at \
              FROM webhooks \
@@ -247,6 +297,189 @@ fn parse_row(row: sqlx::sqlite::SqliteRow) -> Result<WebhookRecord> {
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
+}
+
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+/// In-memory [`WebhookStore`]. Webhooks live in a HashMap keyed by ID.
+pub struct InMemoryWebhookStore {
+    state: Arc<Mutex<HashMap<String, WebhookRecord>>>,
+    agent_id: String,
+    clock: Arc<dyn Clock>,
+}
+
+impl InMemoryWebhookStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(HashMap::new())),
+            agent_id: "default".to_string(),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn for_agent(agent_id: impl Into<String>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(HashMap::new())),
+            agent_id: agent_id.into(),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, WebhookRecord>> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryWebhookStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl WebhookStore for InMemoryWebhookStore {
+    async fn create(
+        &self,
+        id: &str,
+        name: &str,
+        url: &str,
+        secret: &str,
+        event_types: &[String],
+    ) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state.insert(
+            id.to_string(),
+            WebhookRecord {
+                id: id.to_string(),
+                agent_id: self.agent_id.clone(),
+                name: name.to_string(),
+                url: url.to_string(),
+                secret: secret.to_string(),
+                event_types: event_types.to_vec(),
+                active: true,
+                verified_at: None,
+                created_at: now,
+                updated_at: now,
+            },
+        );
+        Ok(())
+    }
+
+    async fn get(&self, id: &str) -> Result<Option<WebhookRecord>> {
+        let state = self.lock();
+        Ok(state
+            .get(id)
+            .filter(|w| w.agent_id == self.agent_id)
+            .cloned())
+    }
+
+    async fn list(&self) -> Result<Vec<WebhookRecord>> {
+        let state = self.lock();
+        let mut out: Vec<WebhookRecord> = state
+            .values()
+            .filter(|w| w.agent_id == self.agent_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|w| std::cmp::Reverse(w.created_at));
+        Ok(out)
+    }
+
+    async fn update(
+        &self,
+        id: &str,
+        name: &str,
+        url: &str,
+        event_types: &[String],
+        active: bool,
+    ) -> Result<bool> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(w) = state.get_mut(id)
+            && w.agent_id == self.agent_id
+        {
+            w.name = name.to_string();
+            w.url = url.to_string();
+            w.event_types = event_types.to_vec();
+            w.active = active;
+            w.updated_at = now;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn delete(&self, id: &str) -> Result<bool> {
+        let mut state = self.lock();
+        if state
+            .get(id)
+            .map(|w| w.agent_id == self.agent_id)
+            .unwrap_or(false)
+        {
+            state.remove(id);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn mark_verified(&self, id: &str) -> Result<bool> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(w) = state.get_mut(id)
+            && w.agent_id == self.agent_id
+        {
+            w.verified_at = Some(now);
+            w.updated_at = now;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn toggle_active(&self, id: &str) -> Result<bool> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(w) = state.get_mut(id)
+            && w.agent_id == self.agent_id
+        {
+            w.active = !w.active;
+            w.updated_at = now;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn rotate_secret(&self, id: &str, new_secret: &str) -> Result<bool> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(w) = state.get_mut(id)
+            && w.agent_id == self.agent_id
+        {
+            w.secret = new_secret.to_string();
+            w.verified_at = None;
+            w.updated_at = now;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn list_active_for_event(&self, event_topic: &str) -> Result<Vec<WebhookRecord>> {
+        let state = self.lock();
+        let out: Vec<WebhookRecord> = state
+            .values()
+            .filter(|w| w.active && w.event_types.iter().any(|t| t == event_topic))
+            .cloned()
+            .collect();
+        Ok(out)
+    }
 }
 
 // -- Tests --

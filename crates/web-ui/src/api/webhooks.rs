@@ -29,7 +29,7 @@ use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use assistant_storage::WebhookStore;
+use assistant_storage::{SqliteWebhookStore, WebhookStore};
 
 // -- State -------------------------------------------------------------------
 
@@ -136,7 +136,7 @@ pub fn webhooks_api_router() -> Router<WebhooksApiState> {
 )]
 pub async fn list_webhooks(State(state): State<WebhooksApiState>) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = WebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
     match store.list().await {
         Ok(webhooks) => {
             Json(webhooks.into_iter().map(to_response).collect::<Vec<_>>()).into_response()
@@ -183,7 +183,7 @@ pub async fn create_webhook(
     }
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = WebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
     let id = uuid::Uuid::new_v4().to_string();
     let secret = generate_secret();
 
@@ -231,7 +231,7 @@ pub async fn get_webhook(
     Path(id): Path<String>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = WebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
     match store.get(&id).await {
         Ok(Some(wh)) => Json(to_response(wh)).into_response(),
         Ok(None) => (
@@ -267,7 +267,7 @@ pub async fn update_webhook(
     Json(body): Json<UpdateWebhookRequest>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = WebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
 
     // Fetch the existing record to merge with.
     let existing = match store.get(&id).await {
@@ -351,7 +351,7 @@ pub async fn delete_webhook(
     Path(id): Path<String>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = WebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
     match store.delete(&id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => (
@@ -388,7 +388,7 @@ pub async fn toggle_webhook(
     Path(id): Path<String>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = WebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
     match store.toggle_active(&id).await {
         Ok(true) => match store.get(&id).await {
             Ok(Some(wh)) => Json(to_response(wh)).into_response(),
@@ -432,7 +432,7 @@ pub async fn rotate_secret(
     Path(id): Path<String>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = WebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
     let new_secret = generate_secret();
     match store.rotate_secret(&id, &new_secret).await {
         Ok(true) => Json(RotateSecretResponse { secret: new_secret }).into_response(),
@@ -469,7 +469,7 @@ pub async fn verify_webhook(
     Path(id): Path<String>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = WebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
 
     let wh = match store.get(&id).await {
         Ok(Some(wh)) => wh,
