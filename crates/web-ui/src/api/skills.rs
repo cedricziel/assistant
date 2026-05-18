@@ -11,6 +11,7 @@
 //! | PUT    | `/api/skills/{name}`           | Update a skill           |
 //! | DELETE | `/api/skills/{name}`           | Delete a skill           |
 
+use assistant_storage::PersonaSkillAccessStore as _;
 use assistant_storage::PersonaStore as _;
 use std::sync::Arc;
 
@@ -136,7 +137,9 @@ pub async fn list_persona_skills(
     }
 
     let skill_access_store =
-        assistant_storage::persona_skill_access::PersonaSkillAccessStore::new(state.pool.clone());
+        assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
+            state.pool.clone(),
+        );
 
     // Determine which skills are enabled for this persona.
     let mode = skill_access_store

@@ -91,7 +91,9 @@ pub use metrics::{
 };
 pub use org_storage::OrgStorageLayer;
 pub use org_store::SqliteOrgStore;
-pub use persona_skill_access::PersonaSkillAccessStore;
+pub use persona_skill_access::{
+    InMemoryPersonaSkillAccessStore, PersonaSkillAccessStore, SqlitePersonaSkillAccessStore,
+};
 pub use personas::{
     HomeChannel, InMemoryPersonaStore, PersonaRecord, PersonaStore, SqlitePersonaStore,
 };
@@ -230,8 +232,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a [`PersonaSkillAccessStore`] backed by this pool.
-    pub fn persona_skill_access_store(&self) -> PersonaSkillAccessStore {
-        PersonaSkillAccessStore::new(self.pool.clone())
+    pub fn persona_skill_access_store(&self) -> SqlitePersonaSkillAccessStore {
+        SqlitePersonaSkillAccessStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`SqliteMessageBus`] backed by this pool.
