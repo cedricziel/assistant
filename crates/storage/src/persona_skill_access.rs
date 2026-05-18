@@ -142,24 +142,24 @@ impl PersonaSkillAccessStore for SqlitePersonaSkillAccessStore {
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-struct InMemoryPersonaSkillAccessState {
+struct PersonaSkillAccessMemoryState {
     modes: HashMap<String, String>,
     skills: HashMap<String, HashSet<String>>,
 }
 
 /// In-memory [`PersonaSkillAccessStore`].
 pub struct InMemoryPersonaSkillAccessStore {
-    state: Arc<Mutex<InMemoryPersonaSkillAccessState>>,
+    state: Arc<Mutex<PersonaSkillAccessMemoryState>>,
 }
 
 impl InMemoryPersonaSkillAccessStore {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(InMemoryPersonaSkillAccessState::default())),
+            state: Arc::new(Mutex::new(PersonaSkillAccessMemoryState::default())),
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryPersonaSkillAccessState> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, PersonaSkillAccessMemoryState> {
         match self.state.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),

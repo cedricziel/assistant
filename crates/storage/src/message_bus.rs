@@ -328,15 +328,15 @@ use std::sync::Mutex;
 
 /// Internal envelope wrapping a BusMessage with delayed-redelivery support.
 #[derive(Clone)]
-struct InMemoryEnvelope {
+struct BusEnvelope {
     msg: BusMessage,
     /// When set, the message is invisible to claim until `now >= visible_at`.
     visible_at: DateTime<Utc>,
 }
 
 #[derive(Default)]
-struct InMemoryBusState {
-    by_id: HashMap<Uuid, InMemoryEnvelope>,
+struct BusMemoryState {
+    by_id: HashMap<Uuid, BusEnvelope>,
 }
 
 /// In-memory [`MessageBus`] implementation.
@@ -345,14 +345,14 @@ struct InMemoryBusState {
 /// transitions and topic + ClaimFilter routing. Pure FIFO within a topic
 /// (no SQL `ORDER BY` — we sort by created_at).
 pub struct InMemoryMessageBus {
-    state: Arc<Mutex<InMemoryBusState>>,
+    state: Arc<Mutex<BusMemoryState>>,
     clock: Arc<dyn Clock>,
 }
 
 impl InMemoryMessageBus {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(InMemoryBusState::default())),
+            state: Arc::new(Mutex::new(BusMemoryState::default())),
             clock: Arc::new(SystemClock),
         }
     }
@@ -362,7 +362,7 @@ impl InMemoryMessageBus {
         self
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryBusState> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, BusMemoryState> {
         match self.state.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
@@ -372,12 +372,12 @@ impl InMemoryMessageBus {
     /// Pure helper: find the earliest pending message in a topic matching
     /// the optional filter. Returns the message id.
     fn pick_claim_target(
-        state: &InMemoryBusState,
+        state: &BusMemoryState,
         topic: &str,
         now: DateTime<Utc>,
         filter: Option<&ClaimFilter>,
     ) -> Option<Uuid> {
-        let mut candidates: Vec<(&Uuid, &InMemoryEnvelope)> = state
+        let mut candidates: Vec<(&Uuid, &BusEnvelope)> = state
             .by_id
             .iter()
             .filter(|(_, e)| {
@@ -430,7 +430,7 @@ impl MessageBus for InMemoryMessageBus {
         let mut state = self.lock();
         state.by_id.insert(
             id,
-            InMemoryEnvelope {
+            BusEnvelope {
                 msg: BusMessage {
                     id,
                     topic: req.topic,

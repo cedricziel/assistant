@@ -41,27 +41,39 @@ crates = [
 # package names. (e.g. `runtime` not `assistant-runtime`.)
 [report_only]
 crates = [
-    "auth",
-    "backup",
-    "bus-nats",
-    "core",
-    "interface-cli",
-    "interfaces",
-    "llm-provider",
-    "mcp-client",
-    "mcp-server",
-    "runtime",
-    "skills",
-    "storage",
-    "tool-executor",
-    "transcription",
-    "web-ui",
-    "workflow",
-    "workflow-http",
-    "opentelemetry-exporter-iceberg",
-    "opentelemetry-exporter-sqlite",
-    "test-support",
+    # Crates still below the 80% floor — gate prints delta but does
+    # not fail CI. Promoted (removed from this list) as each crate
+    # reaches the floor sustainably; one-way ratchet.
+    #
+    # Last measured (2026-05-18 via `make coverage`):
+    "bus-nats",                          # 34.4% (delta -45.6%)
+    "interface-cli",                     # 28.9% (delta -51.1%)
+    "interfaces",                        # 61.6% (delta -18.4%)
+    "llm-provider",                      # 70.5% (delta  -9.5%)
+    "mcp-client",                        # 20.3% (delta -59.7%)
+    "mcp-server",                        # 59.6% (delta -20.4%)
+    "opentelemetry-exporter-iceberg",    # 37.5% (delta -42.5%)
+    "opentelemetry-exporter-sqlite",     # 51.4% (delta -28.6%)
+    "runtime",                           # 72.7% (delta  -7.3%)
+    "skills",                            # 66.1% (delta -13.9%)
+    "tool-executor",                     # 76.7% (delta  -3.3%)
+    "transcription",                     # 76.3% (delta  -3.7%)
+    "web-ui",                            # 73.3% (delta  -6.7%)
 ]
+
+# Crates promoted off `report_only` and now ENFORCING the 80% floor.
+# This is a one-way ratchet: removing a crate from `report_only`
+# means the next PR that drops it below 80% will fail CI.
+#
+# Promoted 2026-05-18 in the Phase 11 ratchet of
+# `workspace-test-coverage-floor`:
+#   auth          (95.1%)
+#   backup        (81.4%)
+#   core          (83.9%)
+#   storage       (89.2%)
+#   test-support  (93.7%)
+#   workflow      (87.0%)
+#   workflow-http (82.9%)
 
 # File path regex patterns excluded from coverage measurement.
 # Passed to `cargo llvm-cov --ignore-filename-regex` as a joined alternation.

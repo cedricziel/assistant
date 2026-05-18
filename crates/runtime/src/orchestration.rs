@@ -62,7 +62,7 @@ pub struct RecordedSubmitTurn {
 }
 
 #[derive(Default)]
-struct StubState {
+struct StubData {
     responses: Vec<Result<TurnResult, anyhow::Error>>,
     submits: Vec<RecordedSubmitTurn>,
     cancel_outcomes: Vec<CancelOutcome>,
@@ -74,13 +74,13 @@ struct StubState {
 /// Queue turn responses with [`queue_turn`](Self::queue_turn). Empty queue
 /// returns a benign `TurnResult` containing `(stub: no more responses)`.
 pub struct StubOrchestrationEngine {
-    state: Arc<Mutex<StubState>>,
+    state: Arc<Mutex<StubData>>,
 }
 
 impl StubOrchestrationEngine {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(StubState::default())),
+            state: Arc::new(Mutex::new(StubData::default())),
         }
     }
 

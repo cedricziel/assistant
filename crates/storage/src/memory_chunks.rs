@@ -290,7 +290,7 @@ fn decode_chunk(row: ChunkRow) -> StoredChunk {
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-struct InMemoryMemoryChunkState {
+struct MemoryChunkMemoryState {
     next_id: i64,
     chunks: HashMap<i64, StoredChunk>,
 }
@@ -299,17 +299,17 @@ struct InMemoryMemoryChunkState {
 /// substring scan. Use for test seams; production embedding indexers
 /// should run against SQLite.
 pub struct InMemoryMemoryChunkStore {
-    state: Arc<Mutex<InMemoryMemoryChunkState>>,
+    state: Arc<Mutex<MemoryChunkMemoryState>>,
 }
 
 impl InMemoryMemoryChunkStore {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(InMemoryMemoryChunkState::default())),
+            state: Arc::new(Mutex::new(MemoryChunkMemoryState::default())),
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryMemoryChunkState> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, MemoryChunkMemoryState> {
         match self.state.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),

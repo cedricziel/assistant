@@ -972,7 +972,7 @@ fn parse_schedule(expr: &str) -> Option<Schedule> {
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-struct InMemoryWorkflowState {
+struct WorkflowMemoryState {
     workflows: HashMap<Uuid, WorkflowRecord>,
     webhooks: HashMap<Uuid, WorkflowWebhookEndpoint>,
     runs: HashMap<Uuid, WorkflowRunRecord>,
@@ -981,7 +981,7 @@ struct InMemoryWorkflowState {
 
 /// In-memory [`WorkflowStore`].
 pub struct InMemoryWorkflowStore {
-    state: Arc<Mutex<InMemoryWorkflowState>>,
+    state: Arc<Mutex<WorkflowMemoryState>>,
     agent_id: String,
     clock: Arc<dyn Clock>,
 }
@@ -989,7 +989,7 @@ pub struct InMemoryWorkflowStore {
 impl InMemoryWorkflowStore {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(InMemoryWorkflowState::default())),
+            state: Arc::new(Mutex::new(WorkflowMemoryState::default())),
             agent_id: "default".to_string(),
             clock: Arc::new(SystemClock),
         }
@@ -1007,7 +1007,7 @@ impl InMemoryWorkflowStore {
         self
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, InMemoryWorkflowState> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, WorkflowMemoryState> {
         match self.state.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
