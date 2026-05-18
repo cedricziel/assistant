@@ -34,7 +34,7 @@ pub struct RecordedCall {
 /// Internal state — wrapped in `Mutex` so the provider can be shared
 /// across async tasks while still being mutable.
 #[derive(Default)]
-struct ScriptedState {
+struct ScriptedData {
     responses: Vec<LlmResponse>,
     stream_chunks: Vec<StreamChunk>,
     embeddings: Vec<Vec<f32>>,
@@ -58,7 +58,7 @@ struct ScriptedState {
 ///   queue yields a zero-length vector (so callers can detect "not
 ///   configured" without an explicit error).
 pub struct ScriptedLlmProvider {
-    state: Arc<Mutex<ScriptedState>>,
+    state: Arc<Mutex<ScriptedData>>,
     capabilities: Capabilities,
     provider_name: String,
     model_name: String,
@@ -68,7 +68,7 @@ impl ScriptedLlmProvider {
     /// Create an empty scripted provider with default capabilities.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(ScriptedState::default())),
+            state: Arc::new(Mutex::new(ScriptedData::default())),
             capabilities: Capabilities {
                 tools: ToolSupport::Native,
                 streaming: true,

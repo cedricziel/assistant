@@ -39,6 +39,11 @@ const EXEMPT_TYPE_NAMES: &[&str] = &[
     // `crates/storage/src/conversation_broadcaster.rs`; constructed in
     // `crates/web-ui/src/api/mod.rs::ApiState::new` and analogous locations.
     "InMemoryConversationBroadcaster",
+    // Private inner-state structs of the public `StubOrchestrationEngine`
+    // and `ScriptedLlmProvider` types. Constructed only inside their
+    // wrapping types `new()` methods.
+    "StubData",
+    "ScriptedData",
 ];
 
 /// Crate directories under `crates/` exempt from the scan.
