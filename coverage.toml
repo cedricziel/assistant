@@ -55,7 +55,6 @@ crates = [
     "opentelemetry-exporter-iceberg",    # 37.5% (delta -42.5%)
     "opentelemetry-exporter-sqlite",     # 51.4% (delta -28.6%)
     "runtime",                           # 72.7% (delta  -7.3%)
-    "skills",                            # 66.1% (delta -13.9%)
     "web-ui",                            # 73.3% (delta  -6.7%)
 ]
 
@@ -74,6 +73,7 @@ crates = [
 #   workflow-http (82.9%)
 #   tool-executor (80.5%) — added tests/builtins_{io,skills,web,bash}.rs
 #   transcription (86.7%) — added tests/builders.rs
+#   skills        (87.2%) — added tests/coverage.rs
 
 # File path regex patterns excluded from coverage measurement.
 # Passed to `cargo llvm-cov --ignore-filename-regex` as a joined alternation.
