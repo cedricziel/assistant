@@ -88,13 +88,17 @@ impl OAuthManager {
         std::fs::create_dir_all(&assistant_dir)
             .context("Failed to create ~/.assistant directory")?;
         let token_path = assistant_dir.join("openai-oauth.json");
+        Self::new_with_token_path(client_id, token_path)
+    }
 
+    /// Create a manager that persists tokens to an explicit path. Used by
+    /// tests so they can point at a `TempDir` instead of `~/.assistant`.
+    pub fn new_with_token_path(client_id: String, token_path: PathBuf) -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .context("Failed to build HTTP client for OAuth")?;
 
-        // Try to load existing tokens.
         let cached = Self::load_tokens_from_disk(&token_path);
 
         Ok(Self {
@@ -104,6 +108,18 @@ impl OAuthManager {
             http,
             clock: Arc::new(SystemClock),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_tokens_snapshot(&self) -> Option<OAuthTokens> {
+        self.tokens.try_read().ok().and_then(|g| g.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn seed_tokens(&self, tokens: OAuthTokens) -> anyhow::Result<()> {
+        self.save_tokens_to_disk(&tokens)?;
+        *self.tokens.write().await = Some(tokens);
+        Ok(())
     }
 
     /// Inject a [`Clock`] implementation. Tests pass `Arc::new(FakeClock::new(...))`
@@ -449,5 +465,113 @@ mod tests {
     fn urlencoded_encodes_special_chars() {
         assert_eq!(urlencoded("hello world"), "hello+world");
         assert_eq!(urlencoded("a=b&c=d"), "a%3Db%26c%3Dd");
+    }
+
+    // ── OAuthManager: token persistence ──────────────────────────────────────
+
+    use assistant_core::clock::FakeClock;
+    use chrono::TimeZone;
+
+    fn sample_tokens(expires_at: DateTime<Utc>) -> OAuthTokens {
+        OAuthTokens {
+            access_token: "access-abc".into(),
+            refresh_token: "refresh-xyz".into(),
+            expires_at,
+            account_id: Some("acct-1".into()),
+        }
+    }
+
+    #[test]
+    fn load_tokens_from_disk_returns_none_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.json");
+        assert!(OAuthManager::load_tokens_from_disk(&path).is_none());
+    }
+
+    #[test]
+    fn load_tokens_from_disk_returns_none_on_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oauth.json");
+        std::fs::write(&path, "not-json").unwrap();
+        assert!(OAuthManager::load_tokens_from_disk(&path).is_none());
+    }
+
+    #[tokio::test]
+    async fn save_and_reload_round_trips_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oauth.json");
+        let mgr = OAuthManager::new_with_token_path("client-id".into(), path.clone()).unwrap();
+
+        let original = sample_tokens(Utc.with_ymd_and_hms(2030, 1, 1, 0, 0, 0).unwrap());
+        mgr.seed_tokens(original.clone()).await.unwrap();
+
+        // Reload via fresh manager — should read from disk.
+        let mgr2 = OAuthManager::new_with_token_path("client-id".into(), path).unwrap();
+        let cached = mgr2.cached_tokens_snapshot().unwrap();
+        assert_eq!(cached.access_token, original.access_token);
+        assert_eq!(cached.refresh_token, original.refresh_token);
+        assert_eq!(cached.expires_at, original.expires_at);
+        assert_eq!(cached.account_id, original.account_id);
+    }
+
+    #[tokio::test]
+    async fn ensure_valid_token_returns_cached_when_not_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oauth.json");
+        // Fake clock at 2026-01-01; expire the token a year in the future.
+        let now = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mgr = OAuthManager::new_with_token_path("client-id".into(), path)
+            .unwrap()
+            .with_clock(Arc::new(FakeClock::new(now)));
+
+        let future_expiry = now + Duration::days(365);
+        mgr.seed_tokens(sample_tokens(future_expiry)).await.unwrap();
+
+        let token = mgr.ensure_valid_token().await.unwrap();
+        assert_eq!(token, "access-abc");
+    }
+
+    // ── wait_for_callback ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn wait_for_callback_parses_code_and_state_from_get() {
+        use tokio::io::AsyncWriteExt as _;
+        use tokio::net::TcpStream;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move { wait_for_callback(&listener).await });
+
+        // Client: connect and send a synthetic OAuth callback GET.
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let req = "GET /auth/callback?code=abc123&state=xyz789 HTTP/1.1\r\n\
+                   Host: 127.0.0.1\r\n\
+                   Connection: close\r\n\r\n";
+        client.write_all(req.as_bytes()).await.unwrap();
+
+        let (code, state) = server.await.unwrap().unwrap();
+        assert_eq!(code, "abc123");
+        assert_eq!(state, "xyz789");
+    }
+
+    #[tokio::test]
+    async fn wait_for_callback_errors_when_code_missing() {
+        use tokio::io::AsyncWriteExt as _;
+        use tokio::net::TcpStream;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move { wait_for_callback(&listener).await });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        // No code parameter.
+        let req = "GET /auth/callback?state=xyz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        client.write_all(req.as_bytes()).await.unwrap();
+
+        let result = server.await.unwrap();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("code"));
     }
 }

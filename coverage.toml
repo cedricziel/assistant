@@ -49,7 +49,6 @@ crates = [
     "bus-nats",                          # 34.4% (delta -45.6%)
     "interface-cli",                     # 28.9% (delta -51.1%)
     "interfaces",                        # 61.6% (delta -18.4%)
-    "llm-provider",                      # 70.5% (delta  -9.5%)
     "mcp-client",                        # 20.3% (delta -59.7%)
     "opentelemetry-exporter-iceberg",    # 37.5% (delta -42.5%)
     "opentelemetry-exporter-sqlite",     # 51.4% (delta -28.6%)
@@ -74,6 +73,7 @@ crates = [
 #   transcription (86.7%) — added tests/builders.rs
 #   skills        (87.2%) — added tests/coverage.rs
 #   mcp-server    (89.0%) — refactored stdin loop into testable run_io + 12 new dispatch tests
+#   llm-provider  (80.3%) — pure-function tests across anthropic, openai/oauth, chat_completions, ollama
 
 # File path regex patterns excluded from coverage measurement.
 # Passed to `cargo llvm-cov --ignore-filename-regex` as a joined alternation.

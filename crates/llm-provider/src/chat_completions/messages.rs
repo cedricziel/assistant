@@ -449,4 +449,93 @@ mod tests {
         );
         assert_eq!(msgs[4]["tool_call_id"], "call_c");
     }
+
+    // ── Raw message builder — uncovered branches ──────────────────────────
+
+    use assistant_core::ContentBlock;
+
+    #[test]
+    fn build_raw_messages_multimodal_emits_image_url_parts() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("look".into()),
+                ContentBlock::Image {
+                    media_type: "image/png".into(),
+                    data: "iVBORw==".into(),
+                },
+            ],
+        }];
+        let msgs = build_raw_messages("", &history);
+        assert_eq!(msgs.len(), 1);
+        let parts = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[1]["type"], "image_url");
+        // Data URL contains the base64 payload.
+        assert!(
+            parts[1]["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .contains("iVBORw==")
+        );
+    }
+
+    #[test]
+    fn build_raw_messages_multimodal_drops_documents() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("describe".into()),
+                ContentBlock::Document {
+                    media_type: "application/pdf".into(),
+                    data: "JVBERi".into(),
+                },
+            ],
+        }];
+        let msgs = build_raw_messages("", &history);
+        let parts = msgs[0]["content"].as_array().unwrap();
+        // Document is filtered out — only the text block remains.
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["type"], "text");
+    }
+
+    #[test]
+    fn build_raw_messages_assistant_tool_call_without_id_synthesises_one() {
+        let history = vec![ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+            name: "shell".into(),
+            params: json!({}),
+            id: None,
+        }])];
+        let msgs = build_raw_messages("", &history);
+        let calls = msgs[0]["tool_calls"].as_array().unwrap();
+        let id = calls[0]["id"].as_str().unwrap();
+        assert!(id.starts_with("call_"), "got: {id}");
+    }
+
+    #[test]
+    fn build_raw_messages_tool_result_without_matching_call_uses_unknown_fallback() {
+        let history = vec![ChatHistoryMessage::ToolResult {
+            name: "ghost".into(),
+            content: "unmatched".into(),
+        }];
+        let msgs = build_raw_messages("", &history);
+        let id = msgs[0]["tool_call_id"].as_str().unwrap();
+        assert!(id.contains("ghost"), "got: {id}");
+    }
+
+    // ── build_chat_messages — multimodal branch (uncovered) ───────────────
+
+    #[test]
+    fn build_chat_messages_multimodal_user_path() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("hi".into()),
+                ContentBlock::Image {
+                    media_type: "image/jpeg".into(),
+                    data: "/9j/4AAQ".into(),
+                },
+            ],
+        }];
+        let (msgs, _) = build_chat_messages("", &history);
+        assert_eq!(msgs.len(), 1);
+    }
 }

@@ -835,4 +835,51 @@ mod tests {
             "document blocks should not produce images"
         );
     }
+
+    // ── Pure helpers ───────────────────────────────────────────────────────
+
+    #[test]
+    fn tool_spec_to_ollama_json_emits_function_envelope() {
+        let spec = ToolSpec {
+            name: "shell".into(),
+            description: "Run a shell command".into(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {"cmd": {"type": "string"}},
+                "required": ["cmd"],
+            }),
+            is_mutating: true,
+            requires_confirmation: true,
+        };
+        let v = tool_spec_to_ollama_json(&spec);
+        assert_eq!(v["type"], "function");
+        assert_eq!(v["function"]["name"], "shell");
+        assert_eq!(v["function"]["description"], "Run a shell command");
+        assert!(v["function"]["parameters"].is_object());
+    }
+
+    #[test]
+    fn extract_ollama_meta_pulls_known_fields() {
+        let json = serde_json::json!({
+            "model": "llama3.1",
+            "prompt_eval_count": 32,
+            "eval_count": 64,
+            "done_reason": "stop",
+        });
+        let meta = extract_ollama_meta(&json);
+        assert_eq!(meta.model.as_deref(), Some("llama3.1"));
+        assert_eq!(meta.input_tokens, Some(32));
+        assert_eq!(meta.output_tokens, Some(64));
+        assert_eq!(meta.finish_reason.as_deref(), Some("stop"));
+        assert!(meta.response_id.is_none());
+    }
+
+    #[test]
+    fn extract_ollama_meta_handles_missing_fields() {
+        let meta = extract_ollama_meta(&serde_json::json!({}));
+        assert!(meta.model.is_none());
+        assert!(meta.input_tokens.is_none());
+        assert!(meta.output_tokens.is_none());
+        assert!(meta.finish_reason.is_none());
+    }
 }

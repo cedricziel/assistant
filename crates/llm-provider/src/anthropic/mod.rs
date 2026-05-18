@@ -1160,4 +1160,422 @@ mod tests {
         assert_eq!(messages[2]["content"], "I see an image");
         assert_eq!(messages[2]["role"], "assistant");
     }
+
+    // ── tool_spec_to_anthropic_json ──────────────────────────────────────────
+
+    use super::tool_spec_to_anthropic_json;
+    use assistant_core::ToolSpec;
+
+    #[test]
+    fn tool_spec_serialises_input_schema_under_anthropic_key() {
+        let spec = ToolSpec {
+            name: "file-read".to_string(),
+            description: "Read a file".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            }),
+            is_mutating: false,
+            requires_confirmation: false,
+        };
+        let v = tool_spec_to_anthropic_json(&spec);
+        assert_eq!(v["name"], "file-read");
+        assert_eq!(v["description"], "Read a file");
+        assert!(v["input_schema"].is_object());
+        // Anthropic uses `input_schema`, NOT `parameters`.
+        assert!(v.get("parameters").is_none());
+    }
+
+    // ── AssistantToolCalls + ToolResult ──────────────────────────────────────
+
+    use assistant_core::ToolCallItem;
+
+    #[test]
+    fn assistant_tool_calls_emit_tool_use_blocks_with_ids() {
+        let history = vec![ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+            name: "shell".to_string(),
+            params: serde_json::json!({"cmd": "ls"}),
+            id: Some("toolu_123".to_string()),
+        }])];
+        let (messages, _) = build_anthropic_messages(&history);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "assistant");
+        let blocks = messages[0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "tool_use");
+        assert_eq!(blocks[0]["id"], "toolu_123");
+        assert_eq!(blocks[0]["name"], "shell");
+        assert_eq!(blocks[0]["input"]["cmd"], "ls");
+    }
+
+    #[test]
+    fn assistant_tool_calls_without_id_synthesise_one() {
+        let history = vec![ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+            name: "shell".to_string(),
+            params: serde_json::json!({}),
+            id: None,
+        }])];
+        let (messages, _) = build_anthropic_messages(&history);
+        let blocks = messages[0]["content"].as_array().unwrap();
+        let id = blocks[0]["id"].as_str().unwrap();
+        assert!(id.starts_with("toolu_"), "got: {id}");
+    }
+
+    #[test]
+    fn tool_result_pairs_with_matching_pending_call() {
+        let history = vec![
+            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+                name: "shell".to_string(),
+                params: serde_json::json!({}),
+                id: Some("call_a".to_string()),
+            }]),
+            ChatHistoryMessage::ToolResult {
+                name: "shell".to_string(),
+                content: "ok".to_string(),
+            },
+        ];
+        let (messages, _) = build_anthropic_messages(&history);
+        // assistant + user(tool_result)
+        assert_eq!(messages.len(), 2);
+        let result_block = &messages[1]["content"][0];
+        assert_eq!(result_block["type"], "tool_result");
+        assert_eq!(result_block["tool_use_id"], "call_a");
+        assert_eq!(result_block["content"], "ok");
+    }
+
+    #[test]
+    fn tool_result_without_matching_call_uses_unknown_sentinel() {
+        let history = vec![ChatHistoryMessage::ToolResult {
+            name: "ghost".to_string(),
+            content: "unmatched".to_string(),
+        }];
+        let (messages, _) = build_anthropic_messages(&history);
+        let result_block = &messages[0]["content"][0];
+        let id = result_block["tool_use_id"].as_str().unwrap();
+        assert!(id.contains("ghost"), "got: {id}");
+    }
+
+    // ── parse_response_json ──────────────────────────────────────────────────
+
+    use super::parse_response_json;
+    use assistant_core::{LlmResponse, LlmResponseMeta};
+
+    fn meta() -> LlmResponseMeta {
+        LlmResponseMeta::default()
+    }
+
+    #[test]
+    fn parse_response_returns_text_for_plain_content() {
+        let json = serde_json::json!({
+            "content": [{"type": "text", "text": "Hello"}],
+        });
+        let resp = parse_response_json(&json, meta()).unwrap();
+        match resp {
+            LlmResponse::FinalAnswer(text, _) => assert_eq!(text, "Hello"),
+            other => panic!("expected FinalAnswer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_response_concatenates_multiple_text_blocks() {
+        let json = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "Hello "},
+                {"type": "text", "text": "world"},
+            ],
+        });
+        let resp = parse_response_json(&json, meta()).unwrap();
+        match resp {
+            LlmResponse::FinalAnswer(text, _) => assert_eq!(text, "Hello world"),
+            other => panic!("expected FinalAnswer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_response_returns_thinking_when_only_thinking_present() {
+        let json = serde_json::json!({
+            "content": [{"type": "thinking", "thinking": "reasoning..."}],
+        });
+        let resp = parse_response_json(&json, meta()).unwrap();
+        match resp {
+            LlmResponse::Thinking(text, _) => assert_eq!(text, "reasoning..."),
+            other => panic!("expected Thinking, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_response_prioritises_tool_use_over_text_and_thinking() {
+        let json = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "preamble"},
+                {"type": "thinking", "thinking": "ponder"},
+                {"type": "tool_use", "id": "toolu_1", "name": "shell", "input": {"cmd": "ls"}},
+            ],
+        });
+        let resp = parse_response_json(&json, meta()).unwrap();
+        match resp {
+            LlmResponse::ToolCalls(tc) => {
+                assert_eq!(tc.items.len(), 1);
+                assert_eq!(tc.items[0].name, "shell");
+                assert_eq!(tc.items[0].id.as_deref(), Some("toolu_1"));
+                // Thinking propagates alongside tool calls.
+                assert_eq!(tc.thinking.as_deref(), Some("ponder"));
+            }
+            other => panic!("expected ToolCalls, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_response_skips_tool_use_with_empty_name() {
+        let json = serde_json::json!({
+            "content": [
+                {"type": "tool_use", "id": "toolu_1", "name": "", "input": {}},
+                {"type": "text", "text": "ok"},
+            ],
+        });
+        // The empty-name tool_use is skipped; falls through to FinalAnswer.
+        let resp = parse_response_json(&json, meta()).unwrap();
+        assert!(matches!(resp, LlmResponse::FinalAnswer(_, _)));
+    }
+
+    #[test]
+    fn parse_response_errors_when_content_missing() {
+        let json = serde_json::json!({"id": "msg_1"});
+        let err = parse_response_json(&json, meta()).unwrap_err();
+        assert!(err.to_string().contains("content"));
+    }
+
+    // ── extract_anthropic_meta ───────────────────────────────────────────────
+
+    use super::extract_anthropic_meta;
+
+    #[test]
+    fn extract_meta_pulls_top_level_fields() {
+        let json = serde_json::json!({
+            "model": "claude-3-5-sonnet",
+            "id": "msg_abc",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 42, "output_tokens": 17},
+        });
+        let m = extract_anthropic_meta(&json);
+        assert_eq!(m.model.as_deref(), Some("claude-3-5-sonnet"));
+        assert_eq!(m.response_id.as_deref(), Some("msg_abc"));
+        assert_eq!(m.finish_reason.as_deref(), Some("end_turn"));
+        assert_eq!(m.input_tokens, Some(42));
+        assert_eq!(m.output_tokens, Some(17));
+    }
+
+    #[test]
+    fn extract_meta_handles_missing_fields_gracefully() {
+        let json = serde_json::json!({});
+        let m = extract_anthropic_meta(&json);
+        assert!(m.model.is_none());
+        assert!(m.response_id.is_none());
+        assert!(m.finish_reason.is_none());
+        assert!(m.input_tokens.is_none());
+        assert!(m.output_tokens.is_none());
+    }
+
+    // ── process_sse_event ────────────────────────────────────────────────────
+
+    use super::{ToolBlock, process_sse_event};
+    use assistant_core::StreamChunk;
+    use tokio::sync::mpsc;
+
+    fn empty_state() -> (
+        String,
+        String,
+        Vec<ToolBlock>,
+        Option<usize>,
+        String,
+        LlmResponseMeta,
+    ) {
+        (
+            String::new(),
+            String::new(),
+            Vec::new(),
+            None,
+            String::new(),
+            LlmResponseMeta::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_message_start_populates_meta() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        let evt = serde_json::json!({
+            "message": {
+                "model": "claude-3-5-sonnet",
+                "id": "msg_xyz",
+                "usage": {"input_tokens": 100}
+            }
+        });
+        process_sse_event(
+            "message_start",
+            &evt,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            &mut meta,
+        )
+        .await;
+        assert_eq!(meta.model.as_deref(), Some("claude-3-5-sonnet"));
+        assert_eq!(meta.response_id.as_deref(), Some("msg_xyz"));
+        assert_eq!(meta.input_tokens, Some(100));
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_text_delta_appends_and_streams_chunk() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        let (tx, mut rx) = mpsc::channel::<StreamChunk>(8);
+        let evt = serde_json::json!({"delta": {"type": "text_delta", "text": "Hello"}});
+        process_sse_event(
+            "content_block_delta",
+            &evt,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &Some(tx),
+            &mut meta,
+        )
+        .await;
+        assert_eq!(text, "Hello");
+        let chunk = rx.recv().await.unwrap();
+        match chunk {
+            StreamChunk::Text(t) => assert_eq!(t, "Hello"),
+            _ => panic!("expected Text chunk"),
+        }
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_thinking_delta_appends_and_streams_chunk() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        let (tx, mut rx) = mpsc::channel::<StreamChunk>(8);
+        let evt = serde_json::json!({"delta": {"type": "thinking_delta", "thinking": "ponder"}});
+        process_sse_event(
+            "content_block_delta",
+            &evt,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &Some(tx),
+            &mut meta,
+        )
+        .await;
+        assert_eq!(thinking, "ponder");
+        let chunk = rx.recv().await.unwrap();
+        assert!(matches!(chunk, StreamChunk::Thinking(s) if s == "ponder"));
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_content_block_start_tool_use_registers_tool() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        let evt = serde_json::json!({
+            "index": 0,
+            "content_block": {"type": "tool_use", "id": "toolu_1", "name": "shell"}
+        });
+        process_sse_event(
+            "content_block_start",
+            &evt,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            &mut meta,
+        )
+        .await;
+        assert_eq!(idx, Some(0));
+        assert_eq!(block_type, "tool_use");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].id, "toolu_1");
+        assert_eq!(blocks[0].name, "shell");
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_input_json_delta_appends_partial_json() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        // First register a tool_use block at index 0.
+        process_sse_event(
+            "content_block_start",
+            &serde_json::json!({
+                "index": 0,
+                "content_block": {"type": "tool_use", "id": "toolu_1", "name": "shell"}
+            }),
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            &mut meta,
+        )
+        .await;
+        // Then send an input_json_delta.
+        process_sse_event(
+            "content_block_delta",
+            &serde_json::json!({"delta": {"type": "input_json_delta", "partial_json": "{\"cmd\":\"ls\"}"}}),
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            &mut meta,
+        )
+        .await;
+        assert_eq!(blocks[0].partial_json, r#"{"cmd":"ls"}"#);
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_message_delta_populates_finish_and_tokens() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        let evt = serde_json::json!({
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 50},
+        });
+        process_sse_event(
+            "message_delta",
+            &evt,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            &mut meta,
+        )
+        .await;
+        assert_eq!(meta.finish_reason.as_deref(), Some("end_turn"));
+        assert_eq!(meta.output_tokens, Some(50));
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_unknown_event_type_is_a_noop() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        process_sse_event(
+            "ping",
+            &serde_json::json!({}),
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            &mut meta,
+        )
+        .await;
+        assert!(text.is_empty());
+        assert!(thinking.is_empty());
+        assert!(blocks.is_empty());
+    }
 }

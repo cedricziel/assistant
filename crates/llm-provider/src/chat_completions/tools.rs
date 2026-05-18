@@ -62,3 +62,99 @@ pub fn parse_tool_calls(tool_calls: &[ChatCompletionMessageToolCalls]) -> Vec<To
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_openai::types::chat::{
+        ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls, FunctionCall,
+    };
+
+    #[test]
+    fn tool_spec_to_chat_builds_function_object() {
+        let spec = ToolSpec {
+            name: "echo".into(),
+            description: "Echo a string".into(),
+            params_schema: serde_json::json!({"type": "object"}),
+            is_mutating: false,
+            requires_confirmation: false,
+        };
+        let tool = tool_spec_to_chat(&spec).unwrap();
+        assert_eq!(tool.function.name, "echo");
+        assert_eq!(tool.function.description.as_deref(), Some("Echo a string"));
+    }
+
+    #[test]
+    fn extract_chat_meta_includes_usage_when_present() {
+        let usage = Some(CompletionUsage {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            prompt_tokens_details: None,
+            completion_tokens_details: None,
+        });
+        let meta = extract_chat_meta("gpt-4o", "chatcmpl-1", &usage);
+        assert_eq!(meta.model.as_deref(), Some("gpt-4o"));
+        assert_eq!(meta.response_id.as_deref(), Some("chatcmpl-1"));
+        assert_eq!(meta.input_tokens, Some(10));
+        assert_eq!(meta.output_tokens, Some(5));
+        assert!(meta.finish_reason.is_none());
+    }
+
+    #[test]
+    fn extract_chat_meta_handles_no_usage() {
+        let meta = extract_chat_meta("m", "i", &None);
+        assert!(meta.input_tokens.is_none());
+        assert!(meta.output_tokens.is_none());
+    }
+
+    #[test]
+    fn parse_tool_calls_parses_arguments_to_value() {
+        let calls = vec![ChatCompletionMessageToolCalls::Function(
+            ChatCompletionMessageToolCall {
+                id: "call_1".into(),
+                function: FunctionCall {
+                    name: "shell".into(),
+                    arguments: r#"{"cmd":"ls"}"#.into(),
+                },
+            },
+        )];
+        let parsed = parse_tool_calls(&calls);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].name, "shell");
+        assert_eq!(parsed[0].params["cmd"], "ls");
+        assert_eq!(parsed[0].id.as_deref(), Some("call_1"));
+    }
+
+    #[test]
+    fn parse_tool_calls_skips_calls_with_empty_name() {
+        let calls = vec![ChatCompletionMessageToolCalls::Function(
+            ChatCompletionMessageToolCall {
+                id: "call_x".into(),
+                function: FunctionCall {
+                    name: "".into(),
+                    arguments: "{}".into(),
+                },
+            },
+        )];
+        let parsed = parse_tool_calls(&calls);
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn parse_tool_calls_falls_back_to_empty_object_on_bad_arguments() {
+        let calls = vec![ChatCompletionMessageToolCalls::Function(
+            ChatCompletionMessageToolCall {
+                id: "call_2".into(),
+                function: FunctionCall {
+                    name: "shell".into(),
+                    arguments: "not-json".into(),
+                },
+            },
+        )];
+        let parsed = parse_tool_calls(&calls);
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].params.is_object());
+        assert!(parsed[0].params.as_object().unwrap().is_empty());
+    }
+}
