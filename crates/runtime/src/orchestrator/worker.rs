@@ -614,6 +614,7 @@ impl Orchestrator {
             HashMap::new(),
             vec![],
             TurnIdentity::default(),
+            None,
         )
         .await
     }
@@ -635,6 +636,7 @@ impl Orchestrator {
             HashMap::new(),
             attachment_ids,
             TurnIdentity::default(),
+            None,
         )
         .await
     }
@@ -657,6 +659,36 @@ impl Orchestrator {
             HashMap::new(),
             attachment_ids,
             identity,
+            None,
+        )
+        .await
+    }
+
+    /// Submit a turn using a caller-supplied `request_id`.
+    ///
+    /// Used by streaming HTTP handlers in `assistant-web-ui` so that the SSE
+    /// `run_id` doubles as the orchestrator's `request_id` — letting clients
+    /// invoke [`Self::cancel_turn`] with the same id they already observe in
+    /// the `run_started` event. Behaviour is otherwise identical to
+    /// [`Self::submit_turn_with_attachments`].
+    pub async fn submit_turn_with_request_id(
+        &self,
+        request_id: Uuid,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+        attachment_ids: Vec<Uuid>,
+    ) -> Result<TurnResult> {
+        self.submit_turn_internal(
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            HashMap::new(),
+            attachment_ids,
+            TurnIdentity::default(),
+            Some(request_id),
         )
         .await
     }
@@ -673,8 +705,9 @@ impl Orchestrator {
         submit_metadata: HashMap<String, String>,
         attachment_ids: Vec<Uuid>,
         identity: TurnIdentity,
+        request_id_override: Option<Uuid>,
     ) -> Result<TurnResult> {
-        let request_id = Uuid::new_v4();
+        let request_id = request_id_override.unwrap_or_else(Uuid::new_v4);
         // Register a cancellation token so the worker can be interrupted if
         // submit_turn times out before the turn finishes.
         let cancel_token = CancellationToken::new();
@@ -771,6 +804,27 @@ impl Orchestrator {
             .with_conversation_id(conversation_id)
             .with_batch_id(request_id);
         loop {
+            // Honor external cancellation (e.g. POST .../cancel) by short-
+            // circuiting the wait. The worker's own select! already aborts
+            // mid-turn when the same token fires; this branch is what lets
+            // `submit_turn` return promptly instead of waiting for the bus
+            // result that will never arrive.
+            if cancel_token.is_cancelled() {
+                self.turn_cancellations.write().await.remove(&request_id);
+                info!(
+                    conversation_id = %conversation_id,
+                    request_id = %request_id,
+                    interface = %interface_label,
+                    submit_state = "cancelled",
+                    "submit_turn waiter state"
+                );
+                anyhow::bail!(
+                    "{}: submit_turn aborted by cancel_turn \
+                     (conversation_id={conversation_id}, request_id={request_id})",
+                    crate::orchestrator::TURN_CANCELLED_MARKER
+                );
+            }
+
             let now = tokio::time::Instant::now();
             if now > late_result_deadline {
                 self.metrics

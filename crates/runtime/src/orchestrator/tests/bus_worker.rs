@@ -519,3 +519,136 @@ async fn failed_turn_with_tools_max_iterations_returns_error() {
         ),
     }
 }
+
+// -- Cancellation -------------------------------------------------------------
+
+/// Cancelling an unknown `request_id` is a no-op and reports `NotFound`.
+#[tokio::test]
+async fn cancel_turn_unknown_request_id_returns_not_found() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "unused").await;
+    let (orch, _) = build(&server.uri()).await;
+
+    let outcome = orch.cancel_turn(Uuid::new_v4()).await;
+    assert_eq!(
+        outcome,
+        crate::orchestrator::CancelOutcome::NotFound,
+        "cancelling an unregistered request_id must report NotFound"
+    );
+}
+
+/// Cancelling a turn that's been launched with a caller-supplied request_id
+/// reports `Cancelled`, aborts the in-flight worker future, and unblocks
+/// `submit_turn_with_request_id` promptly with the `turn_cancelled` marker.
+#[tokio::test]
+async fn cancel_turn_aborts_inflight_submit() {
+    // LLM never responds — without cancellation submit_turn would wait the
+    // full configured submit_timeout. We assert the cancel returns it early.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(60)))
+        .mount(&server)
+        .await;
+
+    let mut config = AssistantConfig::default();
+    config.memory.enabled = false;
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let llm: Arc<dyn LlmProvider> = Arc::new(
+        LlmClient::new(LlmClientConfig {
+            model: "test".to_string(),
+            base_url: server.uri(),
+            timeout_secs: 120,
+            retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
+        })
+        .unwrap(),
+    );
+    let executor = Arc::new(ToolExecutor::new(
+        storage.clone(),
+        llm.clone(),
+        registry.clone(),
+        Arc::new(config.clone()),
+    ));
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+    let orch = Arc::new(
+        Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor.clone(),
+            registry,
+            bus,
+            &config,
+        )
+        .with_submit_timeout(30), // generous; the test must finish well before this
+    );
+    executor.set_subagent_runner(orch.clone());
+
+    // Spawn the worker so the bus message gets picked up and dispatched.
+    let orch_worker = orch.clone();
+    tokio::spawn(async move {
+        orch_worker.run_worker("test-worker").await;
+    });
+
+    let conv_id = Uuid::new_v4();
+    let request_id = Uuid::new_v4();
+
+    // Fire submit_turn_with_request_id in the background — it will block on
+    // the slow LLM call until we cancel.
+    let orch_for_submit = orch.clone();
+    let handle = tokio::spawn(async move {
+        orch_for_submit
+            .submit_turn_with_request_id(
+                request_id,
+                "say hi",
+                conv_id,
+                Interface::Web,
+                None,
+                vec![],
+            )
+            .await
+    });
+
+    // Wait until the orchestrator has registered the cancellation token —
+    // i.e. submit_turn_internal has reached the body. Bounded to keep the
+    // test from hanging if registration ever regresses.
+    let registration_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !orch.is_turn_in_flight(request_id).await {
+        if tokio::time::Instant::now() > registration_deadline {
+            panic!("turn never registered its cancellation token");
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Cancel.
+    let outcome = orch.cancel_turn(request_id).await;
+    assert_eq!(
+        outcome,
+        crate::orchestrator::CancelOutcome::Cancelled,
+        "cancel_turn must report Cancelled when a token is registered"
+    );
+
+    // submit_turn_with_request_id should return promptly with the cancelled
+    // marker — well under the 30 s submit_timeout configured above.
+    let result = tokio::time::timeout(Duration::from_secs(10), handle)
+        .await
+        .expect("submit must return within 10 s of cancel")
+        .expect("join task");
+    let err = match result {
+        Ok(_) => panic!("submit_turn must return Err on cancel"),
+        Err(e) => e,
+    };
+    assert!(
+        err.to_string()
+            .contains(crate::orchestrator::TURN_CANCELLED_MARKER),
+        "cancelled submit must carry the marker; got: {err}"
+    );
+
+    // The token should be deregistered once submit_turn returns, so a
+    // second cancel attempt is a no-op.
+    assert_eq!(
+        orch.cancel_turn(request_id).await,
+        crate::orchestrator::CancelOutcome::NotFound,
+        "request_id should be deregistered after submit_turn returns"
+    );
+}
