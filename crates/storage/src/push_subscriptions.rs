@@ -109,12 +109,12 @@ impl PushSubscriptionStore for SqlitePushSubscriptionStore {
 
 /// In-memory [`PushSubscriptionStore`]. Vec-backed.
 pub struct InMemoryPushSubscriptionStore {
-    state: Arc<Mutex<InMemoryPushState>>,
+    state: Arc<Mutex<MemoryPushState>>,
     clock: Arc<dyn Clock>,
 }
 
 #[derive(Default)]
-struct InMemoryPushState {
+struct MemoryPushState {
     next_id: i64,
     by_endpoint: HashMap<String, PushSubscription>,
 }
@@ -122,7 +122,7 @@ struct InMemoryPushState {
 impl InMemoryPushSubscriptionStore {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(InMemoryPushState::default())),
+            state: Arc::new(Mutex::new(MemoryPushState::default())),
             clock: Arc::new(SystemClock),
         }
     }
