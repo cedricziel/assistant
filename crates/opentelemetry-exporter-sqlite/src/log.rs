@@ -391,4 +391,54 @@ mod tests {
         assert!(row.0.is_none(), "trace_id should be NULL without context");
         assert!(row.1.is_none(), "span_id should be NULL without context");
     }
+
+    // ── Pure helper tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn severity_to_i32_maps_across_severity_classes() {
+        assert_eq!(severity_to_i32(Severity::Trace), 1);
+        assert_eq!(severity_to_i32(Severity::Trace4), 4);
+        assert_eq!(severity_to_i32(Severity::Debug), 5);
+        assert_eq!(severity_to_i32(Severity::Info), 9);
+        assert_eq!(severity_to_i32(Severity::Warn), 13);
+        assert_eq!(severity_to_i32(Severity::Error), 17);
+        assert_eq!(severity_to_i32(Severity::Fatal), 21);
+        assert_eq!(severity_to_i32(Severity::Fatal4), 24);
+    }
+
+    #[test]
+    fn any_value_to_string_renders_scalars() {
+        assert_eq!(any_value_to_string(&AnyValue::Int(42)), "42");
+        assert_eq!(any_value_to_string(&AnyValue::Boolean(true)), "true");
+        assert_eq!(any_value_to_string(&AnyValue::String("hi".into())), "hi");
+        // Float renders with Rust's default `Display`; just check it's numeric.
+        let f = any_value_to_string(&AnyValue::Double(1.5));
+        assert!(f.starts_with("1.5"));
+    }
+
+    #[test]
+    fn any_value_to_json_maps_scalars_and_collections() {
+        assert_eq!(any_value_to_json(&AnyValue::Int(7)), serde_json::json!(7));
+        assert_eq!(
+            any_value_to_json(&AnyValue::Boolean(false)),
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            any_value_to_json(&AnyValue::String("hello".into())),
+            serde_json::json!("hello")
+        );
+        let list = AnyValue::ListAny(vec![AnyValue::Int(1), AnyValue::Int(2)].into());
+        let v = any_value_to_json(&list);
+        assert_eq!(v, serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn attributes_to_json_emits_each_key() {
+        let mut record = new_record();
+        record.add_attribute("k1", AnyValue::String("v1".into()));
+        record.add_attribute("k2", AnyValue::Int(42));
+        let v = attributes_to_json(&record);
+        assert_eq!(v["k1"], "v1");
+        assert_eq!(v["k2"], 42);
+    }
 }
