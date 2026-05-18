@@ -18,6 +18,7 @@
 //!   `InMemorySkillCatalog`.
 
 pub use assistant_core::clock::{Clock, FakeClock, SystemClock};
+pub use assistant_llm_provider::{RecordedCall, ScriptedLlmProvider};
 pub use assistant_storage::{
     AgentStore, AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
     InMemoryAgentStore, InMemoryAttachmentStore, InMemoryCommandEventStore,

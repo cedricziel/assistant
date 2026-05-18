@@ -21,6 +21,7 @@ pub mod openrouter;
 pub mod chat_completions;
 pub mod http;
 pub mod retry;
+pub mod scripted;
 pub mod voyage;
 
 pub use anthropic::{AnthropicConfig, AnthropicProvider};
@@ -28,6 +29,7 @@ pub use moonshot::MoonshotProvider;
 pub use ollama::{OllamaConfig, OllamaProvider};
 pub use openai::{OAuthManager, OpenAIProvider, OpenAIProviderConfig};
 pub use openrouter::OpenRouterProvider;
+pub use scripted::{RecordedCall, ScriptedLlmProvider};
 pub use voyage::{VoyageConfig, VoyageEmbedder};
 
 /// Create an [`LlmProvider`] from the given configuration.
