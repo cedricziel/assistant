@@ -711,6 +711,7 @@ dependencies = [
  "assistant-core",
  "assistant-llm-provider",
  "assistant-storage",
+ "assistant-tool-executor",
  "chrono",
  "serde_json",
  "tokio",

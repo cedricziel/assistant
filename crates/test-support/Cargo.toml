@@ -15,6 +15,7 @@ publish = false
 assistant-core = { path = "../core" }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-storage = { path = "../storage" }
+assistant-tool-executor = { path = "../tool-executor" }
 chrono = { workspace = true }
 
 [dev-dependencies]

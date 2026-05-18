@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::llm::tool_spec::ToolSpec;
 use crate::types::conversation::ExecutionContext;
 
 // ── Attachment ────────────────────────────────────────────────────────────────
@@ -143,6 +144,39 @@ pub trait ToolHandler: Send + Sync {
         params: HashMap<String, Value>,
         ctx: &ExecutionContext,
     ) -> anyhow::Result<ToolOutput>;
+}
+
+// ── ToolDispatcher facade ────────────────────────────────────────────────────
+
+/// Higher-level facade over a registry of [`ToolHandler`] implementations.
+///
+/// Concrete implementation lives in `assistant_tool_executor::ToolExecutor`;
+/// a test stub lives in `assistant_tool_executor::stub::StubToolDispatcher`
+/// and is re-exported from `assistant_test_support::prelude`.
+///
+/// Consumers — `mcp-server`, `web-ui`, `interfaces` — depend on this trait
+/// rather than on the concrete executor so tests can substitute the stub.
+#[async_trait]
+pub trait ToolDispatcher: Send + Sync {
+    /// Return the [`ToolSpec`] for every registered tool. Used by MCP's
+    /// `tools/list` and by the orchestrator when assembling the LLM
+    /// prompt.
+    fn to_specs(&self) -> Vec<ToolSpec>;
+
+    /// Execute a tool by name. Returns the tool's output (success or
+    /// error) wrapped in `Ok`; `Err` is reserved for truly unrecoverable
+    /// dispatcher failures (e.g. tool not registered).
+    async fn execute(
+        &self,
+        name: &str,
+        params: HashMap<String, Value>,
+        ctx: &ExecutionContext,
+    ) -> anyhow::Result<ToolOutput>;
+
+    /// Whether the named tool is registered AND classified as mutating
+    /// (i.e. requires confirmation under the safety gate). Returns
+    /// `false` if the tool is unknown.
+    fn is_mutating(&self, name: &str) -> bool;
 }
 
 #[cfg(test)]
