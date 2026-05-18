@@ -97,7 +97,9 @@ pub use push_subscriptions::{
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
-pub use slack_threads::SlackActiveThreadStore;
+pub use slack_threads::{
+    InMemorySlackActiveThreadStore, SlackActiveThreadStore, SqliteSlackActiveThreadStore,
+};
 pub use space_store::{SqliteMembershipStore, SqliteSpaceStore};
 pub use traces::{
     InMemoryTraceStore, RecordedSpan, SkillStatsProvider, SqliteTraceStore, TraceFilter,
@@ -251,8 +253,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a [`SlackActiveThreadStore`] backed by this pool.
-    pub fn slack_active_thread_store(&self) -> SlackActiveThreadStore {
-        SlackActiveThreadStore::new(self.pool.clone())
+    pub fn slack_active_thread_store(&self) -> SqliteSlackActiveThreadStore {
+        SqliteSlackActiveThreadStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`SqliteAttachmentStore`] backed by this pool.
