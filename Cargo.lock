@@ -739,10 +739,12 @@ dependencies = [
  "scraper",
  "serde_json",
  "stop-words",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid",
  "whatlang",
+ "wiremock",
 ]
 
 [[package]]
