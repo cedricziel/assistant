@@ -199,6 +199,30 @@ class ApiClient {
   CatalogApi get catalog => _generatedApi.getCatalogApi();
   TemplatesApi get templates => _generatedApi.getTemplatesApi();
 
+  /// Request that the server cancel an in-flight turn.
+  ///
+  /// Returns the post-cancel [TurnState] as reported by the server, or
+  /// `null` on any error. The endpoint is idempotent — cancelling a
+  /// completed / errored / unknown turn is a no-op that simply returns
+  /// the current state.
+  ///
+  /// The actual cancellation propagates asynchronously: the runtime
+  /// aborts the in-flight LLM/tool work on its next yield point and the
+  /// SSE stream emits a final `agent_error` event with
+  /// `{"reason": "cancelled"}`. Callers should still observe the stream
+  /// terminating before considering the turn fully reconciled.
+  Future<TurnState?> cancelTurn(String conversationId, String turnId) async {
+    try {
+      final resp = await conversations.cancelTurn(
+        conversationId: conversationId,
+        turnId: turnId,
+      );
+      return resp.data?.state;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Stream assistant tokens for a conversation message.
   ///
   /// Yields [RunStartedEvent] first (from the `X-Run-Id` response header),

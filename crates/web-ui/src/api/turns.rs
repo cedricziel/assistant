@@ -1,16 +1,18 @@
-//! Turn-status read API.
+//! Turn-status read + cancel API.
 //!
-//! `GET /api/conversations/{conversation_id}/turns/{turn_id}/status` returns
-//! the authoritative server-side state of a single turn (running, completed,
-//! errored, or unknown). The client polls this when it suspects a stream
-//! has stalled — replacing the byte-watchdog-driven cancellation heuristic
-//! with an explicit health probe.
+//! - `GET /api/conversations/{conversation_id}/turns/{turn_id}/status`
+//!   returns the authoritative server-side state of a single turn
+//!   (running, completed, errored, or unknown). The client polls this
+//!   when it suspects a stream has stalled — replacing the byte-watchdog
+//!   driven cancellation heuristic with an explicit health probe.
 //!
-//! The cancel surface (`POST .../cancel`) is intentionally NOT in this
-//! module: it requires runtime-level cancellation-token plumbing (per-turn
-//! abort propagating to LLM calls and tool invocations) that lives outside
-//! the scope of this read-only endpoint. See
-//! `openspec/changes/turn-status-endpoint/design.md` Decision 3.
+//! - `POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`
+//!   triggers the runtime's per-turn cancellation token. The worker
+//!   aborts in-flight LLM/tool work on its next yield point, `submit_turn`
+//!   bails with the `turn_cancelled` marker, and the SSE handler emits a
+//!   final `agent_error` event with `{"reason": "cancelled"}`. The
+//!   endpoint is idempotent: cancelling a completed / errored / unknown
+//!   turn is a no-op that returns the current status.
 //!
 //! Spec: `openspec/changes/turn-status-endpoint/specs/turn-status-api/spec.md`
 
@@ -160,6 +162,44 @@ pub async fn get_turn_status(
         last_event_at: Some(last_at),
         last_event_kind: Some(last_kind),
     }))
+}
+
+/// `POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`
+///
+/// Idempotent: triggers `Orchestrator::cancel_turn` if a matching token is
+/// registered, otherwise no-op. Always returns 200 with the current turn
+/// status — the cancellation propagates asynchronously through the worker's
+/// `tokio::select!`, the SSE stream's terminal `agent_error` event, and the
+/// `event_store`. Clients should poll `GET .../status` (or wait for the
+/// stream's `agent_error`) to observe the transition.
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{conversation_id}/turns/{turn_id}/cancel",
+    params(
+        ("conversation_id" = Uuid, Path, description = "Conversation UUID"),
+        ("turn_id" = Uuid, Path, description = "Turn (run) UUID — matches the SSE run_id"),
+    ),
+    responses(
+        (status = 200, description = "Current turn status after cancel signal", body = TurnStatusResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    operation_id = "cancel_turn",
+    tag = "conversations",
+    security(("bearer_token" = [])),
+)]
+pub async fn cancel_turn(
+    State(state): State<ApiState>,
+    Path((conversation_id, turn_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<TurnStatusResponse>, (StatusCode, Json<ErrorBody>)> {
+    // Fire the cancellation signal. Outcome is intentionally not surfaced —
+    // the endpoint is idempotent and the authoritative reply is whatever
+    // the event store shows after the worker reacts.
+    let _outcome = state.orchestrator.cancel_turn(turn_id).await;
+
+    // Return the current status. The transition from `running` →
+    // `errored` (via the synthetic `agent_error` event from the SSE
+    // handler) may not be visible yet — that's fine. The client polls.
+    get_turn_status(State(state), Path((conversation_id, turn_id))).await
 }
 
 #[cfg(test)]
@@ -321,6 +361,111 @@ mod tests {
         assert!(body["last_event_at"].is_null());
         assert!(body["last_event_kind"].is_null());
     }
+
+    // -- POST .../cancel ------------------------------------------------------
+
+    /// Cancelling a turn the server doesn't know about is a no-op that
+    /// returns `unknown` (same shape as the status endpoint). The endpoint
+    /// is idempotent.
+    #[tokio::test]
+    async fn cancel_unknown_turn_returns_unknown() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4();
+        let turn_id = Uuid::new_v4(); // never seeded, no registered token
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/turns/{turn_id}/cancel"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp.into_body()).await;
+        assert_eq!(body["state"], "unknown");
+    }
+
+    /// Cancelling a turn that already finished cleanly returns its current
+    /// `completed` state without modification. The cancel signal fires
+    /// (no-op since no token registered), then the status read returns
+    /// what the event store has.
+    #[tokio::test]
+    async fn cancel_completed_turn_returns_completed() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4();
+        let turn_id = Uuid::new_v4();
+
+        for (seq, kind) in [(0, "run_started"), (1, "done")] {
+            state
+                .event_store
+                .append_event(
+                    &turn_id.to_string(),
+                    &conv_id.to_string(),
+                    seq,
+                    kind,
+                    &serde_json::json!({}),
+                )
+                .await
+                .unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/turns/{turn_id}/cancel"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp.into_body()).await;
+        assert_eq!(body["state"], "completed");
+    }
+
+    /// Cancelling a turn whose `(conversation_id, turn_id)` pair doesn't
+    /// match returns `unknown` (same guard as the status endpoint).
+    #[tokio::test]
+    async fn cancel_mismatched_conversation_returns_unknown() {
+        let (state, _storage) = event_log_state().await;
+        let real_conv = Uuid::new_v4();
+        let other_conv = Uuid::new_v4();
+        let turn_id = Uuid::new_v4();
+
+        state
+            .event_store
+            .append_event(
+                &turn_id.to_string(),
+                &real_conv.to_string(),
+                0,
+                "run_started",
+                &serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/conversations/{other_conv}/turns/{turn_id}/cancel"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp.into_body()).await;
+        assert_eq!(body["state"], "unknown");
+    }
+
+    // -- existing status tests below --
 
     /// Guard against turn-id reuse across conversations: if a path conversation
     /// id does not match the conversation recorded against the turn's events,
