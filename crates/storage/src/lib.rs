@@ -96,7 +96,10 @@ pub use push_subscriptions::{
     InMemoryPushSubscriptionStore, PushSubscription, PushSubscriptionStore,
     SqlitePushSubscriptionStore,
 };
-pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
+pub use refinements::{
+    InMemoryRefinementsStore, RefinementStatus, RefinementsStore, SkillRefinement,
+    SqliteRefinementsStore,
+};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{
     InMemoryScheduledTaskStore, ScheduledTask, ScheduledTaskStore, SqliteScheduledTaskStore,
@@ -197,8 +200,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a `RefinementsStore` backed by this pool.
-    pub fn refinements_store(&self) -> RefinementsStore {
-        RefinementsStore::new(self.pool.clone())
+    pub fn refinements_store(&self) -> SqliteRefinementsStore {
+        SqliteRefinementsStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `ScheduledTaskStore` backed by this pool.

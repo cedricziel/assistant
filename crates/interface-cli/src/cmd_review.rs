@@ -5,7 +5,9 @@ use std::io::{self, Write as IoWrite};
 use anyhow::Result;
 use uuid::Uuid;
 
-use assistant_storage::{RefinementStatus, StorageLayer, registry::SkillRegistry};
+use assistant_storage::{
+    RefinementStatus, RefinementsStore, StorageLayer, registry::SkillRegistry,
+};
 
 use crate::skill_diff;
 

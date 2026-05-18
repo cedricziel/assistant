@@ -12,7 +12,7 @@ use assistant_core::{
     ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, ToolHandler, ToolOutput,
     types::conversation::ExecutionContext,
 };
-use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
+use assistant_storage::{RefinementsStore, SkillRegistry, SkillStatsProvider, StorageLayer};
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
