@@ -214,7 +214,6 @@ Each sub-phase: add failing tests for the lowest-covered files first, then imple
 
 ## 12. Phase 12 — Closeout
 
-- [ ] 12.1 Update `openapi.json` only if any of the trait-facade refactors touched a route (none expected). Run `make dump-openapi && make generate-flutter-client` if so.
-- [ ] 12.2 Add an ADR under `docs/adr/` documenting the persistence-trait-symmetry pattern, the `assistant-test-support` crate boundary, and the trait-facade pattern for `OrchestrationEngine`/`ToolDispatcher`/`SkillCatalog`.
-- [ ] 12.3 Add an ADR (or extend 12.2) documenting the `Clock` injection rule and the HTTP-client injection rule.
-- [ ] 12.4 Archive this change with `openspec archive workspace-test-coverage-floor` once all phases are green on `main`.
+- [x] 12.1 Update `openapi.json` only if any of the trait-facade refactors touched a route. None of the Phase 5/7 refactors changed any HTTP routes — the only API-surface change in this session was the cancel endpoint (#853), which committed its own openapi.json update.
+- [x] 12.2 / 12.3 ADR landed at `docs/adr/adr-0009-testability-architecture.md` documenting all five patterns: Clock injection, HTTP-client injection, persistence-trait symmetry, orchestration trait facades, and the `assistant-test-support` composition boundary.
+- [ ] 12.4 Archive this change with `openspec archive workspace-test-coverage-floor` once Phase 9 (per-crate coverage backfill) lands enough crates to flip CI gate ratchets in Phase 11.
