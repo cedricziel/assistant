@@ -6,7 +6,9 @@ completes, and surfaces the queue visibly so the user retains agency
 (see what's queued, remove entries) without interrupting the in-flight
 turn. The `Stop` action cancels the current response without clearing
 the queue.
+
 ## Requirements
+
 ### Requirement: Input remains enabled during streaming
 
 The chat input field and send button SHALL remain interactive (enabled) at all times, including while the assistant is generating a response.
@@ -90,5 +92,30 @@ The user SHALL be able to remove a queued message from `pendingQueue` before it 
 #### Scenario: Cannot remove the actively-streaming turn
 
 - **WHEN** the user attempts to remove the message that is currently streaming (its bubble is no longer a ghost — it has been promoted to a normal user bubble)
-- **THEN** the remove affordance SHALL NOT appear on that bubble; the in-flight turn can only be ended via the future `turn-status-api` cancel surface or by waiting for it to complete
+- **THEN** the remove affordance SHALL NOT appear on that bubble; the in-flight turn can only be ended via the `turn-status-api` cancel surface or by waiting for it to complete
 
+### Requirement: Queue advancement uses authoritative server probe, not byte-level heuristics
+
+When the client suspects an in-flight stream has stalled (silence past the byte heartbeat or the stall threshold in `chat-stream-progress-ux`), it SHALL probe `GET /api/conversations/{id}/turns/{turnId}/status` from `turn-status-api` before deciding whether to advance the queue. The pre-`turn-status-api` behaviour — cancelling streams based on byte-level observation alone — is no longer permitted as the primary trigger; the byte-level watchdog remains only as a final safety net for transport-dead streams.
+
+#### Scenario: Stall probe returns running → client waits, no queue advancement
+
+- **WHEN** the client's stall threshold is crossed and the queue is non-empty
+- **AND** the client probes `.../status` and the response is `state: "running"`
+- **THEN** the client SHALL NOT cancel the stream
+- **THEN** the client SHALL NOT advance the queue
+- **THEN** the in-flight stream continues to be consumed
+
+#### Scenario: Stall probe returns completed → client reconciles, queue advances
+
+- **WHEN** the client probes `.../status` and the response is `state: "completed"`
+- **AND** the client's local view still shows `isSending == true` for this turn
+- **THEN** the client SHALL fetch the conversation to acquire the final message and reconcile state
+- **THEN** the client SHALL advance the queue normally
+
+#### Scenario: User-initiated Skip uses POST cancel, not implicit cancellation
+
+- **WHEN** the user invokes the "Skip" affordance from `chat-stream-progress-ux`
+- **THEN** the client SHALL `POST .../cancel` via the `turn-status-api` surface
+- **THEN** no implicit / heuristic cancellation path SHALL remain in the client as the primary trigger
+- **THEN** the SSE stream's terminal `agent_error` event with `reason: "cancelled"` SHALL drive the client's normal post-turn cleanup and queue advancement, rather than special-casing the cancel response status code
