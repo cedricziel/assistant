@@ -106,7 +106,7 @@ pub use traces::{
     TraceStats, TraceStore, TraceSummary,
 };
 pub use user_store::SqliteUserStore;
-pub use webhooks::{WebhookRecord, WebhookStore};
+pub use webhooks::{InMemoryWebhookStore, SqliteWebhookStore, WebhookRecord, WebhookStore};
 pub use workflows::{
     WorkflowEdge, WorkflowEdgeCondition, WorkflowExecutionLimits, WorkflowGraph, WorkflowNode,
     WorkflowNodeKind, WorkflowRecord, WorkflowRunRecord, WorkflowRunStepRecord, WorkflowStore,
@@ -238,8 +238,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a [`WebhookStore`] backed by this pool.
-    pub fn webhook_store(&self) -> WebhookStore {
-        WebhookStore::new(self.pool.clone())
+    pub fn webhook_store(&self) -> SqliteWebhookStore {
+        SqliteWebhookStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`PushSubscriptionStore`] backed by this pool.
@@ -263,8 +263,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a [`WebhookStore`] scoped to a Persona.
-    pub fn webhook_store_for_agent(&self, agent_id: &str) -> WebhookStore {
-        WebhookStore::for_agent(self.pool.clone(), agent_id)
+    pub fn webhook_store_for_agent(&self, agent_id: &str) -> SqliteWebhookStore {
+        SqliteWebhookStore::for_agent(self.pool.clone(), agent_id)
     }
 }
 

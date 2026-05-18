@@ -8,7 +8,7 @@ use serde_json::Value;
 use sha2::Sha256;
 use tracing::{info, warn};
 
-use assistant_storage::StorageLayer;
+use assistant_storage::{StorageLayer, WebhookStore};
 
 type HmacSha256 = Hmac<Sha256>;
 

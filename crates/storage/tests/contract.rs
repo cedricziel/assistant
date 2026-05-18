@@ -12,4 +12,5 @@ mod contract {
     pub mod push_subscription_store;
     pub mod slack_active_thread_store;
     pub mod trace_store;
+    pub mod webhook_store;
 }
