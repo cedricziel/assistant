@@ -6,10 +6,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_runtime::Orchestrator;
-use assistant_storage::{StorageLayer, registry::SkillRegistry};
+use assistant_core::tool::ToolDispatcher;
+use assistant_runtime::{OrchestrationEngine, Orchestrator};
+use assistant_storage::{SkillCatalog, StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tracing::{info, warn};
 
 use crate::protocol::JsonRpcRequest;
@@ -36,9 +37,41 @@ pub async fn run(
 ) -> Result<()> {
     info!("MCP server ready — reading JSON-RPC from stdin");
 
-    let stdin = tokio::io::stdin();
-    let mut stdout = tokio::io::stdout();
-    let mut reader = BufReader::new(stdin);
+    let reader = BufReader::new(tokio::io::stdin());
+    let writer = tokio::io::stdout();
+
+    run_io(
+        reader,
+        writer,
+        orchestrator,
+        executor,
+        registry.clone(),
+        registry,
+        user_skills_dir,
+    )
+    .await
+}
+
+/// Drives the JSON-RPC loop over arbitrary `AsyncBufRead` / `AsyncWrite`
+/// streams. Extracted from [`run`] so tests can pipe canned input through
+/// the dispatcher without monopolising stdin/stdout.
+///
+/// The `catalog` parameter is the [`SkillCatalog`] used by `resources/list`
+/// and `resources/read`; `install_registry` is the optional concrete
+/// [`SkillRegistry`] used by the `install-skill` tool (None disables it).
+pub async fn run_io<R, W>(
+    mut reader: R,
+    mut writer: W,
+    orchestrator: Arc<dyn OrchestrationEngine>,
+    executor: Arc<dyn ToolDispatcher>,
+    catalog: Arc<dyn SkillCatalog>,
+    install_registry: Arc<SkillRegistry>,
+    user_skills_dir: PathBuf,
+) -> Result<()>
+where
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
     let mut line = String::new();
 
     loop {
@@ -64,26 +97,26 @@ pub async fn run(
                 let err = crate::protocol::JsonRpcResponse::err(None, -32700, "Parse error");
                 let mut json = serde_json::to_vec(&err).unwrap_or_default();
                 json.push(b'\n');
-                stdout.write_all(&json).await.ok();
-                stdout.flush().await.ok();
+                writer.write_all(&json).await.ok();
+                writer.flush().await.ok();
                 continue;
             }
         };
 
         let response = server::handle_request(
             request,
-            registry.clone(),
+            catalog.clone(),
             executor.clone(),
             orchestrator.clone(),
             user_skills_dir.clone(),
-            Some(registry.clone()),
+            Some(install_registry.clone()),
         )
         .await;
 
         let mut json = serde_json::to_vec(&response).unwrap_or_default();
         json.push(b'\n');
-        stdout.write_all(&json).await.ok();
-        stdout.flush().await.ok();
+        writer.write_all(&json).await.ok();
+        writer.flush().await.ok();
     }
 
     info!("MCP server shutting down");
