@@ -66,7 +66,9 @@ pub use auth_state_store::{
 };
 pub use binding_store::SqliteBindingStore;
 pub use catalog_item_store::{SqliteCatalogItemStore, SqliteCatalogSubscriptionStore};
-pub use command_events::{CommandEventRow, CommandEventStore};
+pub use command_events::{
+    CommandEventRow, CommandEventStore, InMemoryCommandEventStore, SqliteCommandEventStore,
+};
 pub use conversation_broadcaster::{
     ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
 };

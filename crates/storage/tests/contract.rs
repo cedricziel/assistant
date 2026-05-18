@@ -6,6 +6,7 @@
 
 mod contract {
     pub mod attachment_store;
+    pub mod command_event_store;
     pub mod conversation_store;
     pub mod log_store;
     pub mod push_subscription_store;

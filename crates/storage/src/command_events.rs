@@ -4,10 +4,12 @@
 //! timeline.  These records are never included in LLM context — the
 //! orchestrator only loads the `messages` table.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
@@ -27,15 +29,30 @@ pub struct CommandEventRow {
     pub created_at: DateTime<Utc>,
 }
 
-/// SQLite-backed store for slash-command events.
-#[derive(Clone)]
-pub struct CommandEventStore {
+/// Trait-based interface for command event persistence.
+#[async_trait]
+pub trait CommandEventStore: Send + Sync {
+    /// Persist a command event.
+    async fn save_event(
+        &self,
+        conversation_id: Uuid,
+        command: &str,
+        payload: Option<&serde_json::Value>,
+        ack_text: &str,
+    ) -> Result<CommandEventRow>;
+
+    /// List all command events for a conversation, ordered by `created_at` ascending.
+    async fn list_events(&self, conversation_id: Uuid) -> Result<Vec<CommandEventRow>>;
+}
+
+/// SQLite-backed command event store.
+pub struct SqliteCommandEventStore {
     pool: SqlitePool,
     /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
     clock: Arc<dyn Clock>,
 }
 
-impl CommandEventStore {
+impl SqliteCommandEventStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -48,9 +65,12 @@ impl CommandEventStore {
         self.clock = clock;
         self
     }
+}
 
+#[async_trait]
+impl CommandEventStore for SqliteCommandEventStore {
     /// Persist a command event.
-    pub async fn save_event(
+    async fn save_event(
         &self,
         conversation_id: Uuid,
         command: &str,
@@ -89,7 +109,7 @@ impl CommandEventStore {
     }
 
     /// List all command events for a conversation, ordered by `created_at` ascending.
-    pub async fn list_events(&self, conversation_id: Uuid) -> Result<Vec<CommandEventRow>> {
+    async fn list_events(&self, conversation_id: Uuid) -> Result<Vec<CommandEventRow>> {
         let conv_str = conversation_id.to_string();
         let rows = sqlx::query(
             "SELECT id, conversation_id, event_type, command, payload, ack_text, created_at \
@@ -125,6 +145,75 @@ impl CommandEventStore {
     }
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+/// In-memory [`CommandEventStore`]. HashMap<conversation_id, Vec<CommandEventRow>>.
+pub struct InMemoryCommandEventStore {
+    state: Arc<Mutex<HashMap<Uuid, Vec<CommandEventRow>>>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl InMemoryCommandEventStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(HashMap::new())),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, Vec<CommandEventRow>>> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryCommandEventStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl CommandEventStore for InMemoryCommandEventStore {
+    async fn save_event(
+        &self,
+        conversation_id: Uuid,
+        command: &str,
+        payload: Option<&serde_json::Value>,
+        ack_text: &str,
+    ) -> Result<CommandEventRow> {
+        let now = self.clock.now();
+        let row = CommandEventRow {
+            id: Uuid::new_v4(),
+            conversation_id,
+            event_type: "command".into(),
+            command: command.into(),
+            payload: payload.cloned(),
+            ack_text: Some(ack_text.into()),
+            created_at: now,
+        };
+        let mut state = self.lock();
+        state.entry(conversation_id).or_default().push(row.clone());
+        Ok(row)
+    }
+
+    async fn list_events(&self, conversation_id: Uuid) -> Result<Vec<CommandEventRow>> {
+        let state = self.lock();
+        let mut out = state.get(&conversation_id).cloned().unwrap_or_default();
+        out.sort_by_key(|r| r.created_at);
+        Ok(out)
+    }
+}
+
 // -- Tests --
 
 #[cfg(test)]
@@ -135,7 +224,7 @@ mod tests {
     #[tokio::test]
     async fn save_and_list_events() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = CommandEventStore::new(storage.pool.clone());
+        let store = SqliteCommandEventStore::new(storage.pool.clone());
 
         let conv_id = Uuid::new_v4();
         let payload = serde_json::json!({"model_name": "claude-opus-4"});
@@ -173,7 +262,7 @@ mod tests {
     #[tokio::test]
     async fn list_events_empty_for_unknown_conversation() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = CommandEventStore::new(storage.pool.clone());
+        let store = SqliteCommandEventStore::new(storage.pool.clone());
 
         let events = store.list_events(Uuid::new_v4()).await.unwrap();
         assert!(events.is_empty());
@@ -182,7 +271,7 @@ mod tests {
     #[tokio::test]
     async fn events_ordered_by_created_at() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let store = CommandEventStore::new(storage.pool.clone());
+        let store = SqliteCommandEventStore::new(storage.pool.clone());
         let conv_id = Uuid::new_v4();
 
         store

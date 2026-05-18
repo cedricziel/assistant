@@ -266,7 +266,7 @@ pub async fn list_command_events(
 mod tests {
     use super::*;
     use assistant_runtime::CommandRegistry;
-    use assistant_storage::CommandEventStore;
+    use assistant_storage::SqliteCommandEventStore;
 
     #[test]
     fn list_commands_returns_all_builtins() {

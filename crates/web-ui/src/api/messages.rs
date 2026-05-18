@@ -1196,7 +1196,7 @@ mod tests {
     use assistant_runtime::CommandRegistry;
     use assistant_storage::{
         CommandEventStore, ConversationStore, InMemoryConversationBroadcaster, RunBroadcaster,
-        SkillRegistry, SqliteConversationStore, StorageLayer,
+        SkillRegistry, SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
     };
 
     use super::super::ApiState;
@@ -1894,7 +1894,7 @@ mod tests {
             run_broadcaster: RunBroadcaster::new(),
             attachment_store: Arc::new(SqliteAttachmentStore::new(sl.pool.clone())),
             command_registry: Arc::new(CommandRegistry::new()),
-            command_event_store: CommandEventStore::new(sl.pool.clone()),
+            command_event_store: Arc::new(SqliteCommandEventStore::new(sl.pool.clone())),
             conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
             conversation_configs: Arc::new(RwLock::new(HashMap::new())),
             orchestrator_ref,
