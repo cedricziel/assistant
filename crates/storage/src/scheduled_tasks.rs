@@ -1,9 +1,11 @@
 //! Scheduled task persistence (cron-style recurring prompts and one-shot tasks).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -23,15 +25,45 @@ pub struct ScheduledTask {
     pub created_at: DateTime<Utc>,
 }
 
+/// Trait-based interface for scheduled task persistence.
+#[async_trait]
+pub trait ScheduledTaskStore: Send + Sync {
+    async fn insert(
+        &self,
+        name: &str,
+        cron_expr: &str,
+        prompt: &str,
+        once: bool,
+        next_run: Option<DateTime<Utc>>,
+    ) -> Result<Uuid>;
+
+    async fn due_tasks(&self, now: DateTime<Utc>) -> Result<Vec<ScheduledTask>>;
+
+    async fn list_all(&self) -> Result<Vec<ScheduledTask>>;
+
+    async fn record_run(
+        &self,
+        id: Uuid,
+        last_run: DateTime<Utc>,
+        next_run: Option<DateTime<Utc>>,
+    ) -> Result<()>;
+
+    async fn disable(&self, id: Uuid) -> Result<bool>;
+
+    async fn delete(&self, id: Uuid) -> Result<bool>;
+
+    async fn find_by_name(&self, name: &str) -> Result<Option<ScheduledTask>>;
+}
+
 /// SQLite-backed store for scheduled tasks.
-pub struct ScheduledTaskStore {
+pub struct SqliteScheduledTaskStore {
     pool: SqlitePool,
     agent_id: String,
     /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
     clock: Arc<dyn Clock>,
 }
 
-impl ScheduledTaskStore {
+impl SqliteScheduledTaskStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -53,9 +85,12 @@ impl ScheduledTaskStore {
         self.clock = clock;
         self
     }
+}
 
+#[async_trait]
+impl ScheduledTaskStore for SqliteScheduledTaskStore {
     /// Insert a new scheduled task.
-    pub async fn insert(
+    async fn insert(
         &self,
         name: &str,
         cron_expr: &str,
@@ -87,7 +122,7 @@ impl ScheduledTaskStore {
     }
 
     /// List all enabled tasks whose next_run is at or before `now`.
-    pub async fn due_tasks(&self, now: DateTime<Utc>) -> Result<Vec<ScheduledTask>> {
+    async fn due_tasks(&self, now: DateTime<Utc>) -> Result<Vec<ScheduledTask>> {
         let rows = sqlx::query(
             "SELECT id, agent_id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
              FROM scheduled_tasks \
@@ -103,7 +138,7 @@ impl ScheduledTaskStore {
     }
 
     /// List all tasks.
-    pub async fn list_all(&self) -> Result<Vec<ScheduledTask>> {
+    async fn list_all(&self) -> Result<Vec<ScheduledTask>> {
         let rows = sqlx::query(
             "SELECT id, agent_id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
              FROM scheduled_tasks WHERE agent_id = ?1 ORDER BY created_at ASC",
@@ -116,7 +151,7 @@ impl ScheduledTaskStore {
     }
 
     /// Update the last_run and next_run timestamps after execution.
-    pub async fn record_run(
+    async fn record_run(
         &self,
         id: Uuid,
         last_run: DateTime<Utc>,
@@ -137,7 +172,7 @@ impl ScheduledTaskStore {
     }
 
     /// Disable a task (set `enabled = FALSE`).
-    pub async fn disable(&self, id: Uuid) -> Result<bool> {
+    async fn disable(&self, id: Uuid) -> Result<bool> {
         let result = sqlx::query(
             "UPDATE scheduled_tasks
              SET enabled = FALSE
@@ -151,7 +186,7 @@ impl ScheduledTaskStore {
     }
 
     /// Delete a task permanently.
-    pub async fn delete(&self, id: Uuid) -> Result<bool> {
+    async fn delete(&self, id: Uuid) -> Result<bool> {
         let result = sqlx::query("DELETE FROM scheduled_tasks WHERE id = ?1 AND agent_id = ?2")
             .bind(id.to_string())
             .bind(&self.agent_id)
@@ -161,7 +196,7 @@ impl ScheduledTaskStore {
     }
 
     /// Find a task by name (case-insensitive).
-    pub async fn find_by_name(&self, name: &str) -> Result<Option<ScheduledTask>> {
+    async fn find_by_name(&self, name: &str) -> Result<Option<ScheduledTask>> {
         let row = sqlx::query(
             "SELECT id, agent_id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
              FROM scheduled_tasks WHERE agent_id = ?1 AND LOWER(name) = LOWER(?2) LIMIT 1",
@@ -191,6 +226,157 @@ fn parse_row(r: sqlx::sqlite::SqliteRow) -> Result<ScheduledTask> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation
+// ---------------------------------------------------------------------------
+
+/// In-memory [`ScheduledTaskStore`]. HashMap<id, ScheduledTask>.
+pub struct InMemoryScheduledTaskStore {
+    state: Arc<Mutex<HashMap<Uuid, ScheduledTask>>>,
+    agent_id: String,
+    clock: Arc<dyn Clock>,
+}
+
+impl InMemoryScheduledTaskStore {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(HashMap::new())),
+            agent_id: "default".to_string(),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn for_agent(agent_id: impl Into<String>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(HashMap::new())),
+            agent_id: agent_id.into(),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, ScheduledTask>> {
+        match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+impl Default for InMemoryScheduledTaskStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ScheduledTaskStore for InMemoryScheduledTaskStore {
+    async fn insert(
+        &self,
+        name: &str,
+        cron_expr: &str,
+        prompt: &str,
+        once: bool,
+        next_run: Option<DateTime<Utc>>,
+    ) -> Result<Uuid> {
+        let id = Uuid::new_v4();
+        let now = self.clock.now();
+        let mut state = self.lock();
+        state.insert(
+            id,
+            ScheduledTask {
+                id,
+                agent_id: self.agent_id.clone(),
+                name: name.to_string(),
+                cron_expr: cron_expr.to_string(),
+                prompt: prompt.to_string(),
+                enabled: true,
+                once,
+                last_run: None,
+                next_run,
+                created_at: now,
+            },
+        );
+        Ok(id)
+    }
+
+    async fn due_tasks(&self, now: DateTime<Utc>) -> Result<Vec<ScheduledTask>> {
+        let state = self.lock();
+        let mut out: Vec<ScheduledTask> = state
+            .values()
+            .filter(|t| t.agent_id == self.agent_id && t.enabled)
+            .filter(|t| t.next_run.is_some_and(|nr| nr <= now))
+            .cloned()
+            .collect();
+        out.sort_by_key(|t| t.next_run);
+        Ok(out)
+    }
+
+    async fn list_all(&self) -> Result<Vec<ScheduledTask>> {
+        let state = self.lock();
+        let mut out: Vec<ScheduledTask> = state
+            .values()
+            .filter(|t| t.agent_id == self.agent_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|t| t.created_at);
+        Ok(out)
+    }
+
+    async fn record_run(
+        &self,
+        id: Uuid,
+        last_run: DateTime<Utc>,
+        next_run: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let mut state = self.lock();
+        if let Some(t) = state.get_mut(&id)
+            && t.agent_id == self.agent_id
+        {
+            t.last_run = Some(last_run);
+            t.next_run = next_run;
+        }
+        Ok(())
+    }
+
+    async fn disable(&self, id: Uuid) -> Result<bool> {
+        let mut state = self.lock();
+        if let Some(t) = state.get_mut(&id)
+            && t.agent_id == self.agent_id
+            && t.enabled
+        {
+            t.enabled = false;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<bool> {
+        let mut state = self.lock();
+        if state
+            .get(&id)
+            .map(|t| t.agent_id == self.agent_id)
+            .unwrap_or(false)
+        {
+            state.remove(&id);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn find_by_name(&self, name: &str) -> Result<Option<ScheduledTask>> {
+        let state = self.lock();
+        Ok(state
+            .values()
+            .find(|t| t.agent_id == self.agent_id && t.name.eq_ignore_ascii_case(name))
+            .cloned())
+    }
+}
+
 // -- Tests ------------------------------------------------------------------
 
 #[cfg(test)]
@@ -199,7 +385,7 @@ mod tests {
     use crate::StorageLayer;
     use chrono::Duration;
 
-    async fn store() -> (StorageLayer, ScheduledTaskStore) {
+    async fn store() -> (StorageLayer, SqliteScheduledTaskStore) {
         let s = StorageLayer::new_in_memory().await.unwrap();
         let ts = s.scheduled_task_store();
         (s, ts)

@@ -1,6 +1,7 @@
 //! Persona-owner identity threading: scheduled tasks must carry the
 //! persona's `owner_user_id` on the resulting `TurnRequest`.
 
+use assistant_storage::ScheduledTaskStore as _;
 use std::sync::Arc;
 
 use assistant_core::{MessageBus, bus_messages, topic};

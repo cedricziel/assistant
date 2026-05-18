@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{ToolHandler, ToolOutput};
+use assistant_storage::ScheduledTaskStore as _;
 use assistant_storage::StorageLayer;
 use async_trait::async_trait;
 use uuid::Uuid;

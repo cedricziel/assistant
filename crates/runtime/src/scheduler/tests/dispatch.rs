@@ -1,6 +1,7 @@
 //! Tests for `run_due_tasks` — cron-driven dispatch into the bus.
 
 use assistant_core::{MessageBus, topic};
+use assistant_storage::ScheduledTaskStore as _;
 use chrono::{Duration, Utc};
 use wiremock::MockServer;
 

@@ -2,6 +2,7 @@
 //! path in `run_due_tasks` when no home channel is configured.
 
 use assistant_core::{MessageBus, topic};
+use assistant_storage::ScheduledTaskStore as _;
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 use wiremock::MockServer;

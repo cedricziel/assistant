@@ -21,7 +21,7 @@ use assistant_core::{
     ChannelContent, ChannelMessage, ChannelUser, PublishRequest, bus_messages, topic,
     types::conversation::ChannelType, types::conversation::Interface,
 };
-use assistant_storage::StorageLayer;
+use assistant_storage::{ScheduledTaskStore, StorageLayer};
 
 use super::SCHEDULER_USER_ID;
 use crate::orchestrator::Orchestrator;

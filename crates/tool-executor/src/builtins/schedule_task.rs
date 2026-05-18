@@ -8,6 +8,7 @@ use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{ToolHandler, ToolOutput};
+use assistant_storage::ScheduledTaskStore as _;
 use assistant_storage::StorageLayer;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
