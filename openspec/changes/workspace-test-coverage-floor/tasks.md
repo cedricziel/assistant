@@ -79,19 +79,31 @@ Each store: failing test → trait in `assistant-core` → `Sqlite*` impl + `InM
 
 ### 5.C — `LogStore`
 
-- [ ] 5.C.1–5.C.6 Same pattern. Both impls in `crates/storage/src/logs.rs` as plain `pub`. Re-export from test-support prelude.
+- [x] 5.C.1–5.C.6 LogStore trait + SqliteLogStore + InMemoryLogStore + contract tests + consumer migration (web-ui/backends/sqlite). Re-exported from test-support prelude. (#843)
 
 ### 5.D — `AttachmentStore`
 
-- [ ] 5.D.1–5.D.6 Same pattern. Both impls in `crates/storage/src/attachments.rs`. `InMemoryAttachmentStore` stores bytes in `HashMap<Uuid, Vec<u8>>` rather than on disk.
+- [x] 5.D.1–5.D.6 AttachmentStore trait + SqliteAttachmentStore + InMemoryAttachmentStore (HashMap<Uuid, Vec<u8>> for bytes, separate HashMap for metas) + 5 contract scenarios + web-ui::ApiState migrated to Arc<dyn AttachmentStore>. (#845)
 
 ### 5.E — `AudioStore` (lives in `assistant-transcription`)
 
-- [ ] 5.E.1–5.E.6 Same pattern; trait lives in `assistant-core` (or `assistant-transcription`'s root if multimodal-specific). Both impls in `crates/transcription/src/audio_store.rs` as plain `pub`.
+- [ ] 5.E.1–5.E.6 Deferred — AudioStore is in assistant-transcription and follows a different ownership model. Phase 5.E in the implemented chain went to PushSubscriptionStore (#851) instead.
 
 ### 5.F — `ConversationEventStore` + `RunBroadcaster`
 
-- [ ] 5.F.1–5.F.6 Same pattern. Both impls in `crates/storage/src/conversation_events.rs`. Note: this is distinct from the existing production `InMemoryConversationBroadcaster` in `conversation_broadcaster.rs` — that one remains a production fallback. The new `InMemoryConversationEventStore` is also `pub` (no gate) but is exempt-listed in the `workspace_test_impls_in_prod.rs` lint when accessed from `FixtureBuilder`.
+- [x] 5.F.1–5.F.6 ConversationEventStore trait (7 methods) + SqliteConversationEventStore + InMemoryConversationEventStore (Vec-backed, Send-safe MutexGuard handling for append_synthetic_terminal) + 7 contract scenarios. RunBroadcaster stays as a single concrete impl (in-memory pub/sub for live SSE; no SQLite analogue needed). ApiState holds Arc<dyn ConversationEventStore>. (#860)
+
+### 5.Phase-5-other-stores (extras shipped as part of the run)
+
+- [x] PushSubscriptionStore trait + Sqlite/InMemory + 4 contract scenarios (#851)
+- [x] CommandEventStore trait + Sqlite/InMemory + 3 contract scenarios. ApiState + channel_runner hold Arc<dyn CommandEventStore>. (#852)
+- [x] SlackActiveThreadStore trait + Sqlite/InMemory + 3 contract scenarios. (#854)
+- [x] WebhookStore trait + Sqlite/InMemory + 7 contract scenarios. (#855)
+- [x] AgentStore trait + Sqlite/InMemory + 4 contract scenarios. (#858)
+- [x] ScheduledTaskStore trait + Sqlite/InMemory + 6 contract scenarios. (#859)
+- [x] MetricsStore trait + Sqlite + InMemory stub (returns empty/zero results — analytics path is populated by OTel exporter, not direct writes). (#862)
+- [x] RefinementsStore trait + Sqlite/InMemory + 5 contract scenarios. (#863)
+- [x] Test-compile hotfix (#856) for the test-only call sites that survived Phase 5.D-H lib-only `make lint` — saved to memory as a checklist item: always run `cargo test --workspace --no-run` before committing store-extraction PRs.
 
 ### 5.G — `InMemoryMessageBus` (MessageBus already a trait)
 
