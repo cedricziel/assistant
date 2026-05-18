@@ -711,7 +711,10 @@ dependencies = [
  "assistant-core",
  "assistant-llm-provider",
  "assistant-storage",
+ "chrono",
+ "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
