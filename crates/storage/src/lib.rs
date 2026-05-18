@@ -84,7 +84,8 @@ pub use logs::{InMemoryLogStore, LogStats, LogStore, RecordedLog, SqliteLogStore
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
 pub use message_bus::SqliteMessageBus;
 pub use metrics::{
-    MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord, TimeSeriesPoint, ToolUsageStats,
+    InMemoryMetricsStore, MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord,
+    SqliteMetricsStore, TimeSeriesPoint, ToolUsageStats,
 };
 pub use org_storage::OrgStorageLayer;
 pub use org_store::SqliteOrgStore;
@@ -231,13 +232,13 @@ impl StorageLayer {
     }
 
     /// Convenience: build a [`MetricsStore`] backed by this pool.
-    pub fn metrics_store(&self) -> MetricsStore {
-        MetricsStore::new(self.pool.clone())
+    pub fn metrics_store(&self) -> SqliteMetricsStore {
+        SqliteMetricsStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`MetricsStore`] scoped to a Persona.
-    pub fn metrics_store_for_agent(&self, agent_id: &str) -> MetricsStore {
-        MetricsStore::for_agent(self.pool.clone(), agent_id)
+    pub fn metrics_store_for_agent(&self, agent_id: &str) -> SqliteMetricsStore {
+        SqliteMetricsStore::for_agent(self.pool.clone(), agent_id)
     }
 
     /// Convenience: build a [`WebhookStore`] backed by this pool.
