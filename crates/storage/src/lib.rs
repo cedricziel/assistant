@@ -88,7 +88,10 @@ pub use org_store::SqliteOrgStore;
 pub use persona_skill_access::PersonaSkillAccessStore;
 pub use personas::{PersonaRecord, PersonaStore};
 pub use pool_factory::OrgPoolFactory;
-pub use push_subscriptions::{PushSubscription, PushSubscriptionStore};
+pub use push_subscriptions::{
+    InMemoryPushSubscriptionStore, PushSubscription, PushSubscriptionStore,
+    SqlitePushSubscriptionStore,
+};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
@@ -236,8 +239,8 @@ impl StorageLayer {
     }
 
     /// Convenience: build a [`PushSubscriptionStore`] backed by this pool.
-    pub fn push_subscription_store(&self) -> PushSubscriptionStore {
-        PushSubscriptionStore::new(self.pool.clone())
+    pub fn push_subscription_store(&self) -> SqlitePushSubscriptionStore {
+        SqlitePushSubscriptionStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`WorkflowStore`] backed by this pool.
