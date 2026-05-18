@@ -49,3 +49,4 @@ app/.packages
 
 # macOS bundle resources — compiled binaries, not committed to source control
 app/macos/Runner/Resources/
+coverage.json
