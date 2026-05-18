@@ -13,6 +13,7 @@ publish = false
 # (Phase 5 — ConversationStore present), orchestration stubs (Phase 7),
 # ScriptedLlmProvider (Phase 5.H).
 assistant-core = { path = "../core" }
+assistant-llm-provider = { path = "../llm-provider" }
 assistant-storage = { path = "../storage" }
 
 [dev-dependencies]
