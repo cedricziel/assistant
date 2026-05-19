@@ -1271,3 +1271,47 @@ mod harden_agent_card_tests {
         assert_eq!(card.security_requirements.len(), req_count);
     }
 }
+
+#[cfg(test)]
+mod nats_reachable_tests {
+    use super::nats_reachable;
+
+    /// A URL pointing at a closed port should return false quickly (within
+    /// the 1-second connect timeout). This exercises the connection-failure
+    /// branch without requiring a real NATS server.
+    #[tokio::test]
+    async fn returns_false_for_unreachable_endpoint() {
+        // Port 1 is privileged and almost always unbindable / connection-refused.
+        let result = nats_reachable("nats://127.0.0.1:1", None).await;
+        assert!(!result, "expected false for unreachable endpoint");
+    }
+
+    #[tokio::test]
+    async fn returns_false_for_unreachable_with_token() {
+        let result = nats_reachable("nats://127.0.0.1:1", Some("secret")).await;
+        assert!(
+            !result,
+            "expected false for unreachable endpoint with token"
+        );
+    }
+
+    #[tokio::test]
+    async fn handles_url_without_nats_prefix() {
+        // The function should also accept bare host:port.
+        let result = nats_reachable("127.0.0.1:1", None).await;
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn handles_url_with_user_password_auth() {
+        // user:pass@host should be parsed without panicking.
+        let result = nats_reachable("nats://user:pass@127.0.0.1:1", None).await;
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn handles_url_with_token_only_auth() {
+        let result = nats_reachable("nats://token@127.0.0.1:1", None).await;
+        assert!(!result);
+    }
+}
