@@ -539,8 +539,10 @@ version = "0.1.162"
 dependencies = [
  "anyhow",
  "assistant-core",
+ "assistant-llm-provider",
  "assistant-runtime",
  "assistant-storage",
+ "assistant-tool-executor",
  "assistant-transcription",
  "async-trait",
  "axum",

@@ -767,4 +767,136 @@ mod tests {
         let result = transcribe_mattermost_files(&payload, &client, &None, &None).await;
         assert!(result.is_none());
     }
+
+    // ── parse_platform_id ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_platform_id_splits_on_slash() {
+        let (channel, root) = parse_platform_id("ch-1/root-post");
+        assert_eq!(channel, "ch-1");
+        assert_eq!(root.as_deref(), Some("root-post"));
+    }
+
+    #[test]
+    fn parse_platform_id_without_slash_returns_no_root() {
+        let (channel, root) = parse_platform_id("ch-1");
+        assert_eq!(channel, "ch-1");
+        assert!(root.is_none());
+    }
+
+    // ── parse_posted_event — additional coverage ──────────────────────────
+
+    #[test]
+    fn parse_posted_event_drops_self_message() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "user_id": "bot",  // matches bot_user_id
+                    "message": "hello",
+                    "root_id": ""
+                }).to_string()
+            }
+        });
+        assert!(parse_posted_event(&payload, "bot", &[], &[]).is_none());
+    }
+
+    #[test]
+    fn parse_posted_event_respects_channel_allowlist() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch-blocked" },
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "user_id": "u1",
+                    "message": "hello",
+                    "root_id": ""
+                }).to_string()
+            }
+        });
+        let allowed = vec!["ch-allowed".to_string()];
+        assert!(parse_posted_event(&payload, "bot", &allowed, &[]).is_none());
+    }
+
+    #[test]
+    fn parse_posted_event_respects_user_allowlist() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "user_id": "u-blocked",
+                    "message": "hello",
+                    "root_id": ""
+                }).to_string()
+            }
+        });
+        let allowed = vec!["u-allowed".to_string()];
+        assert!(parse_posted_event(&payload, "bot", &[], &allowed).is_none());
+    }
+
+    #[test]
+    fn parse_posted_event_thread_reply_uses_root_id_for_thread() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p2",
+                    "user_id": "u1",
+                    "message": "reply",
+                    "root_id": "p1-root"
+                }).to_string()
+            }
+        });
+        let msg = parse_posted_event(&payload, "bot", &[], &[]).unwrap();
+        assert_eq!(msg.thread_id.as_deref(), Some("p1-root"));
+        assert_eq!(msg.sender.platform_id, "ch1/p1-root");
+    }
+
+    #[test]
+    fn parse_posted_event_top_level_post_uses_own_id_as_thread_root() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "user_id": "u1",
+                    "message": "top-level",
+                    "root_id": ""
+                }).to_string()
+            }
+        });
+        let msg = parse_posted_event(&payload, "bot", &[], &[]).unwrap();
+        // top-level posts get their own id as the thread root.
+        assert_eq!(msg.thread_id.as_deref(), Some("p1"));
+        assert_eq!(msg.sender.platform_id, "ch1/p1");
+    }
+
+    #[test]
+    fn parse_posted_event_returns_none_for_malformed_post() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {
+                "post": "not-json-encoded-post-data",
+            }
+        });
+        assert!(parse_posted_event(&payload, "bot", &[], &[]).is_none());
+    }
+
+    #[test]
+    fn parse_posted_event_returns_none_when_post_field_missing() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {}
+        });
+        assert!(parse_posted_event(&payload, "bot", &[], &[]).is_none());
+    }
 }

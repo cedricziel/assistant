@@ -842,6 +842,126 @@ mod tests {
             .expect("remove_reaction should succeed");
     }
 
+    // -- webhook_handler tests ----------------------------------------------
+
+    use crate::nextcloud::signing::sign_request;
+    use axum::body::Bytes;
+    use axum::extract::State;
+    use axum::http::HeaderMap;
+    use tokio::sync::mpsc::channel;
+
+    fn make_webhook_state() -> (
+        Arc<WebhookState>,
+        tokio::sync::mpsc::Receiver<ChannelMessage>,
+    ) {
+        let (tx, rx) = channel(8);
+        let state = Arc::new(WebhookState {
+            secret: SECRET.to_string(),
+            server_url: "http://nextcloud.example".to_string(),
+            allowed_channels: vec![],
+            allowed_users: vec![],
+            tx,
+            transcription: None,
+            transcription_language: None,
+        });
+        (state, rx)
+    }
+
+    fn sign_headers(secret: &str, body: &str) -> HeaderMap {
+        let (random, signature) = sign_request(secret, body).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-nextcloud-talk-signature", signature.parse().unwrap());
+        headers.insert("x-nextcloud-talk-random", random.parse().unwrap());
+        headers
+    }
+
+    #[tokio::test]
+    async fn webhook_handler_returns_401_when_signature_missing() {
+        let (state, _rx) = make_webhook_state();
+        let headers = HeaderMap::new();
+        let body = Bytes::from_static(b"{}");
+        let status = webhook_handler(State(state), headers, body).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn webhook_handler_returns_401_when_random_missing() {
+        let (state, _rx) = make_webhook_state();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-nextcloud-talk-signature", "deadbeef".parse().unwrap());
+        let body = Bytes::from_static(b"{}");
+        let status = webhook_handler(State(state), headers, body).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn webhook_handler_returns_401_when_signature_invalid() {
+        let (state, _rx) = make_webhook_state();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-nextcloud-talk-signature", "deadbeef".parse().unwrap());
+        headers.insert("x-nextcloud-talk-random", "abcdef".parse().unwrap());
+        let body = Bytes::from_static(b"{}");
+        let status = webhook_handler(State(state), headers, body).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn webhook_handler_returns_400_for_malformed_signed_body() {
+        let (state, _rx) = make_webhook_state();
+        let body_str = "not-valid-json";
+        let headers = sign_headers(SECRET, body_str);
+        let status = webhook_handler(State(state), headers, Bytes::from(body_str)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn webhook_handler_ignores_non_create_event() {
+        let (state, _rx) = make_webhook_state();
+        // Valid envelope but `type != "Create"`.
+        let body_str = serde_json::json!({
+            "type": "Update",
+            "actor": { "type": "Person", "id": "users/alice", "name": "Alice" },
+            "object": {
+                "type": "Note",
+                "id": "msg-1",
+                "name": "message",
+                "content": "{}"
+            },
+            "target": { "type": "Collection", "id": TOKEN, "name": "general" },
+        })
+        .to_string();
+        let headers = sign_headers(SECRET, &body_str);
+        let status =
+            webhook_handler(State(state), headers, Bytes::from(body_str.into_bytes())).await;
+        // Non-Create events are silently OK.
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn webhook_handler_ignores_bot_actor() {
+        let (state, _rx) = make_webhook_state();
+        let body_str = serde_json::json!({
+            "type": "Create",
+            "actor": {
+                "type": "Application",
+                "id": "bots/bot-1",
+                "name": "Bot",
+            },
+            "object": {
+                "type": "Note",
+                "id": "msg-1",
+                "name": "message",
+                "content": "{}",
+            },
+            "target": { "type": "Collection", "id": TOKEN, "name": "general" },
+        })
+        .to_string();
+        let headers = sign_headers(SECRET, &body_str);
+        let status =
+            webhook_handler(State(state), headers, Bytes::from(body_str.into_bytes())).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
     // -- Transcription wiring tests -------------------------------------------
 
     #[test]
