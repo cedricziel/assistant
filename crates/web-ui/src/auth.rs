@@ -1236,4 +1236,85 @@ mod tests {
             Some("xyz")
         );
     }
+
+    // ── login_html ──────────────────────────────────────────────────────
+
+    #[test]
+    fn login_html_without_error_omits_error_div() {
+        let Html(body) = login_html(None);
+        assert!(body.contains("<form method=\"POST\" action=\"/login\""));
+        // The class is declared in the CSS style block regardless; we only
+        // care that there's no error <div role="alert">.
+        assert!(!body.contains(r#"role="alert""#));
+        assert!(!body.contains("id=\"login-error\""));
+    }
+
+    #[test]
+    fn login_html_with_error_renders_alert_block() {
+        let Html(body) = login_html(Some("Invalid token."));
+        assert!(body.contains("login-error"));
+        assert!(body.contains("Invalid token."));
+        assert!(body.contains(r#"role="alert""#));
+    }
+
+    // ── parse_host_from_url ─────────────────────────────────────────────
+
+    #[test]
+    fn parse_host_from_url_strips_scheme_and_path() {
+        assert_eq!(
+            parse_host_from_url("https://example.com/path"),
+            Some("example.com".to_string())
+        );
+        assert_eq!(
+            parse_host_from_url("http://localhost:8080/api"),
+            Some("localhost:8080".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_host_from_url_returns_none_for_missing_scheme() {
+        assert!(parse_host_from_url("example.com").is_none());
+        assert!(parse_host_from_url("ftp://example.com").is_none());
+        assert!(parse_host_from_url("").is_none());
+    }
+
+    #[test]
+    fn parse_host_from_url_returns_none_for_scheme_only() {
+        assert!(parse_host_from_url("https://").is_none());
+        assert!(parse_host_from_url("http://").is_none());
+    }
+
+    #[test]
+    fn parse_host_from_url_trims_whitespace_around_input() {
+        assert_eq!(
+            parse_host_from_url("  https://example.com  "),
+            Some("example.com".to_string())
+        );
+    }
+
+    // ── extract_cookie — edge cases ────────────────────────────────────
+
+    #[test]
+    fn extract_cookie_handles_leading_whitespace_in_each_pair() {
+        let cookies = " foo=bar;  baz=qux  ; assistant_session=xyz";
+        assert_eq!(extract_cookie(cookies, "assistant_session"), Some("xyz"));
+        assert_eq!(extract_cookie(cookies, "baz"), Some("qux"));
+        assert_eq!(extract_cookie(cookies, "foo"), Some("bar"));
+    }
+
+    #[test]
+    fn extract_cookie_returns_none_for_empty_cookie_header() {
+        assert!(extract_cookie("", "assistant_session").is_none());
+    }
+
+    #[test]
+    fn extract_cookie_does_not_match_prefix_of_another_name() {
+        // Without the `=` check the function might match `foo_session` for
+        // a query of `foo`. Regression test for the strip_prefix logic.
+        let cookies = "foo_session=xyz; other=val";
+        // Asserting the actual behavior: `foo_session` does NOT match `foo`
+        // because after `strip_prefix("foo")` we get `_session=xyz`, which
+        // starts with `_`, not `=` — so the function returns None for `foo`.
+        assert!(extract_cookie(cookies, "foo").is_none());
+    }
 }

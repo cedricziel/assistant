@@ -261,6 +261,44 @@ fn session_cookie(jwt: &str, secure: bool, max_age_secs: u64) -> Option<HeaderVa
     HeaderValue::try_from(value).ok()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::session_cookie;
+
+    #[test]
+    fn session_cookie_emits_httponly_samesite_lax_cookie() {
+        let cookie = session_cookie("eyJhbGciOiJIUzI1NiJ9.payload.sig", false, 3600).unwrap();
+        let s = cookie.to_str().unwrap();
+        assert!(s.starts_with("assistant_session=eyJ"));
+        assert!(s.contains("HttpOnly"));
+        assert!(s.contains("SameSite=Lax"));
+        assert!(s.contains("Path=/"));
+        assert!(s.contains("Max-Age=3600"));
+    }
+
+    #[test]
+    fn session_cookie_adds_secure_attr_when_secure_true() {
+        let cookie = session_cookie("jwt.value.sig", true, 7200).unwrap();
+        let s = cookie.to_str().unwrap();
+        assert!(s.contains("; Secure"));
+        assert!(s.contains("Max-Age=7200"));
+    }
+
+    #[test]
+    fn session_cookie_omits_secure_attr_when_secure_false() {
+        let cookie = session_cookie("jwt.value.sig", false, 60).unwrap();
+        let s = cookie.to_str().unwrap();
+        assert!(!s.contains("Secure"));
+    }
+
+    #[test]
+    fn session_cookie_returns_none_for_rejected_bytes() {
+        // Newline characters are forbidden in cookie values.
+        let result = session_cookie("bad\nvalue", false, 60);
+        assert!(result.is_none());
+    }
+}
+
 async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::response::Response {
     let device_code = match req.device_code {
         Some(c) => c,

@@ -292,4 +292,57 @@ pub fn api_router() -> Router<ApiState> {
         )
 }
 
+#[cfg(test)]
+mod helper_tests {
+    use super::{empty_string_as_none, internal_error};
+    use axum::http::StatusCode;
+    use serde::Deserialize;
+
+    #[test]
+    fn internal_error_returns_500_with_display_string() {
+        let (status, body) = internal_error("boom");
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body, "boom");
+    }
+
+    #[test]
+    fn internal_error_works_with_anyhow_error() {
+        let err = anyhow::anyhow!("disk full");
+        let (status, body) = internal_error(&err);
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body.contains("disk full"));
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct Wrap {
+        #[serde(default, deserialize_with = "empty_string_as_none")]
+        value: Option<i32>,
+    }
+
+    #[test]
+    fn empty_string_as_none_returns_none_for_missing_field() {
+        let w: Wrap = serde_json::from_str("{}").unwrap();
+        assert_eq!(w.value, None);
+    }
+
+    #[test]
+    fn empty_string_as_none_returns_none_for_empty_string() {
+        let w: Wrap = serde_json::from_str(r#"{"value": ""}"#).unwrap();
+        assert_eq!(w.value, None);
+    }
+
+    #[test]
+    fn empty_string_as_none_parses_non_empty_string() {
+        let w: Wrap = serde_json::from_str(r#"{"value": "42"}"#).unwrap();
+        assert_eq!(w.value, Some(42));
+    }
+
+    #[test]
+    fn empty_string_as_none_errors_on_invalid_value() {
+        let err = serde_json::from_str::<Wrap>(r#"{"value": "abc"}"#).unwrap_err();
+        // Parse error from `i32::from_str` surfaces via serde::de::Error::custom.
+        assert!(err.to_string().contains("invalid"));
+    }
+}
+
 // -- Handlers ----------------------------------------------------------------

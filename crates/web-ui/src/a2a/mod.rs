@@ -6,6 +6,8 @@
 
 pub mod agent_store;
 pub mod handlers;
+#[cfg(test)]
+mod handlers_tests;
 pub mod task_store;
 
 use axum::Router;
@@ -54,4 +56,82 @@ pub fn protected_router() -> Router<A2AState> {
             get(handlers::get_push_notification_config)
                 .delete(handlers::delete_push_notification_config),
         )
+}
+
+#[cfg(test)]
+mod router_tests {
+    use super::*;
+    use crate::a2a::handlers::build_default_agent_card;
+    use crate::a2a::task_store::TaskStore;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    fn make_state() -> A2AState {
+        A2AState {
+            task_store: TaskStore::new(),
+            agent_card: build_default_agent_card("https://example.com"),
+        }
+    }
+
+    #[tokio::test]
+    async fn public_router_serves_well_known_agent_card() {
+        let app = public_router().with_state(make_state());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/agent.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn protected_router_exposes_authenticated_extended_card() {
+        let app = protected_router().with_state(make_state());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/agent/authenticatedExtendedCard")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn protected_router_exposes_tasks_endpoint() {
+        let app = protected_router().with_state(make_state());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn public_router_does_not_expose_protected_paths() {
+        let app = public_router().with_state(make_state());
+        // /tasks is not on the public router; should 404 (no matching route).
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }

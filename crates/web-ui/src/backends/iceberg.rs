@@ -776,6 +776,101 @@ fn bucket_key(ts: &DateTime<Utc>, bucket_minutes: i64) -> String {
         .to_string()
 }
 
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn warehouse_path_uses_explicit_value_when_provided() {
+        let mut cfg = IcebergConfig::default();
+        cfg.warehouse = Some("/custom/path".to_string());
+        assert_eq!(warehouse_path(&cfg), PathBuf::from("/custom/path"));
+    }
+
+    #[test]
+    fn warehouse_path_expands_tilde_prefix() {
+        let mut cfg = IcebergConfig::default();
+        cfg.warehouse = Some("~/warehouse".to_string());
+        let p = warehouse_path(&cfg);
+        // Should NOT still contain a literal tilde once home is known.
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(p, home.join("warehouse"));
+        } else {
+            // No home → falls back to literal path.
+            assert_eq!(p, PathBuf::from("~/warehouse"));
+        }
+    }
+
+    #[test]
+    fn warehouse_path_uses_default_when_unset() {
+        let cfg = IcebergConfig::default();
+        let p = warehouse_path(&cfg);
+        // Default is "~/.assistant/iceberg" — expanded if home exists.
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(p, home.join(".assistant/iceberg"));
+        } else {
+            assert_eq!(p, PathBuf::from("~/.assistant/iceberg"));
+        }
+    }
+
+    #[test]
+    fn bucket_key_rounds_to_60_minute_buckets_by_default() {
+        // 2026-05-19T08:37:12Z with bucket_minutes=60 → 2026-05-19T08:00:00Z
+        let ts: DateTime<Utc> = "2026-05-19T08:37:12Z".parse().unwrap();
+        assert_eq!(bucket_key(&ts, 60), "2026-05-19T08:00:00Z");
+    }
+
+    #[test]
+    fn bucket_key_rounds_to_15_minute_buckets() {
+        let ts: DateTime<Utc> = "2026-05-19T08:47:30Z".parse().unwrap();
+        // 8:47 falls in the 8:45-9:00 bucket.
+        assert_eq!(bucket_key(&ts, 15), "2026-05-19T08:45:00Z");
+    }
+
+    #[test]
+    fn bucket_key_handles_zero_and_negative_bucket_minutes_safely() {
+        let ts: DateTime<Utc> = "2026-05-19T08:00:30Z".parse().unwrap();
+        // .max(1) clamps to 1-minute bucket.
+        assert_eq!(bucket_key(&ts, 0), "2026-05-19T08:00:00Z");
+        assert_eq!(bucket_key(&ts, -5), "2026-05-19T08:00:00Z");
+    }
+
+    #[test]
+    fn collect_parquet_files_returns_empty_for_missing_dir() {
+        let p = std::path::Path::new("/no/such/dir/anywhere");
+        assert!(collect_parquet_files(p).is_empty());
+    }
+
+    #[test]
+    fn collect_parquet_files_ignores_non_parquet_extensions() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("data.txt"), b"hi").unwrap();
+        std::fs::write(tmp.path().join("data.parquet"), b"\x00\x00").unwrap();
+        let files = collect_parquet_files(tmp.path());
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("data.parquet"));
+    }
+
+    #[test]
+    fn collect_parquet_files_recurses_into_subdirectories() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("a/b/c")).unwrap();
+        std::fs::write(tmp.path().join("a/x.parquet"), b"\x00").unwrap();
+        std::fs::write(tmp.path().join("a/b/y.parquet"), b"\x00").unwrap();
+        std::fs::write(tmp.path().join("a/b/c/z.parquet"), b"\x00").unwrap();
+        let files = collect_parquet_files(tmp.path());
+        assert_eq!(files.len(), 3);
+    }
+
+    #[test]
+    fn read_parquet_errors_on_garbage_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("bad.parquet");
+        std::fs::write(&path, b"not parquet data").unwrap();
+        assert!(read_parquet(&path).is_err());
+    }
+}
+
 #[async_trait]
 impl MetricsBackend for IcebergMetricsBackend {
     async fn summary(&self, window_hours: i64, agent_id: &str) -> Result<MetricsSummary> {
