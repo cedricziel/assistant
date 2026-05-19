@@ -245,3 +245,153 @@ pub fn build_mattermost_tools(
         }),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use super::*;
+    use assistant_core::ToolHandler;
+    use assistant_core::types::conversation::{ExecutionContext, Interface};
+    use serde_json::{Value, json};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn ctx() -> ExecutionContext {
+        ExecutionContext {
+            conversation_id: uuid::Uuid::new_v4(),
+            agent_id: "default".into(),
+            turn: 0,
+            interface: Interface::Mattermost,
+            interactive: false,
+            allowed_tools: None,
+            depth: 0,
+            user_id: None,
+            org_id: None,
+            space_id: None,
+        }
+    }
+
+    fn params(pairs: &[(&str, Value)]) -> HashMap<String, Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    async fn make_client(server: &MockServer) -> Arc<MattermostClient> {
+        let client = MattermostClient::new("https://placeholder", "test-token")
+            .unwrap()
+            .with_base_url(&server.uri());
+        Arc::new(client)
+    }
+
+    fn find_tool<'a>(tools: &'a [Arc<dyn ToolHandler>], name: &str) -> &'a Arc<dyn ToolHandler> {
+        tools
+            .iter()
+            .find(|t| t.name() == name)
+            .expect("tool present")
+    }
+
+    #[test]
+    fn build_mattermost_tools_returns_three_tools() {
+        // We don't care about HTTP here, just shape.
+        let client = Arc::new(MattermostClient::new("https://placeholder", "t").unwrap());
+        let tools = build_mattermost_tools(
+            "C1".into(),
+            "P1".into(),
+            Some("R1".into()),
+            "U_BOT".into(),
+            client,
+        );
+        assert_eq!(tools.len(), 3);
+        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
+        assert!(names.contains(&"mattermost-reply"));
+        assert!(names.contains(&"mattermost-react"));
+        assert!(names.contains(&"mattermost-upload"));
+    }
+
+    #[tokio::test]
+    async fn reply_missing_text_returns_error_output() {
+        let client = Arc::new(MattermostClient::new("https://placeholder", "t").unwrap());
+        let tools = build_mattermost_tools("C1".into(), "P1".into(), None, "U_BOT".into(), client);
+        let reply = find_tool(&tools, "mattermost-reply");
+        let out = reply.run(params(&[]), &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("text"));
+    }
+
+    #[tokio::test]
+    async fn reply_posts_message_via_client() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/posts"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(json!({ "id": "post-1", "channel_id": "C1" })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tools = build_mattermost_tools(
+            "C1".into(),
+            "P1".into(),
+            Some("root-1".into()),
+            "U_BOT".into(),
+            make_client(&server).await,
+        );
+        let reply = find_tool(&tools, "mattermost-reply");
+        let out = reply
+            .run(params(&[("text", json!("hello world"))]), &ctx())
+            .await
+            .unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn react_missing_emoji_returns_error_output() {
+        let client = Arc::new(MattermostClient::new("https://placeholder", "t").unwrap());
+        let tools = build_mattermost_tools("C1".into(), "P1".into(), None, "U_BOT".into(), client);
+        let react = find_tool(&tools, "mattermost-react");
+        let out = react.run(params(&[]), &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("emoji"));
+    }
+
+    #[tokio::test]
+    async fn react_adds_reaction_via_client() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/reactions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tools = build_mattermost_tools(
+            "C1".into(),
+            "post-x".into(),
+            None,
+            "U_BOT".into(),
+            make_client(&server).await,
+        );
+        let react = find_tool(&tools, "mattermost-react");
+        let out = react
+            .run(params(&[("emoji", json!("tada"))]), &ctx())
+            .await
+            .unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn upload_missing_filename_returns_error_output() {
+        let client = Arc::new(MattermostClient::new("https://placeholder", "t").unwrap());
+        let tools = build_mattermost_tools("C1".into(), "P1".into(), None, "U_BOT".into(), client);
+        let upload = find_tool(&tools, "mattermost-upload");
+        let out = upload.run(params(&[]), &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("filename"));
+    }
+}

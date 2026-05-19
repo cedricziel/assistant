@@ -229,6 +229,17 @@ Each sub-phase: add failing tests for the lowest-covered files first, then imple
   - `mcp-server` (89.0%) — refactored stdin loop into testable `run_io` +
     12 new dispatch tests covering the auxiliary-resource paths
 
+  Promoted in PR #883 (Phase 9 backfill: llm-provider + runtime/otel/interfaces report-only):
+  - `llm-provider` (80.3%) — pure-function tests across anthropic,
+    openai/oauth (new `new_with_token_path` ctor), chat_completions,
+    ollama
+  - `runtime` (75.8%, still report-only) — compaction + webhook_dispatch
+    - telemetry helpers
+  - `opentelemetry-exporter-sqlite` (59.5%, still report-only) — pure
+    helper tests for severity/AnyValue/Resource serialisation
+  - `interfaces` (66.4%, still report-only) — wiremock-backed Slack
+    client + tools tests
+
   Remaining on `report_only` (gate prints delta but does not fail CI):
 
   | Crate                            | Coverage | Gap to floor |
@@ -237,11 +248,10 @@ Each sub-phase: add failing tests for the lowest-covered files first, then imple
   | `interface-cli`                  | 28.9%    | -51.1%       |
   | `bus-nats`                       | 34.4%    | -45.6%       |
   | `opentelemetry-exporter-iceberg` | 37.5%    | -42.5%       |
-  | `opentelemetry-exporter-sqlite`  | 51.4%    | -28.6%       |
-  | `interfaces`                     | 61.6%    | -18.4%       |
-  | `llm-provider`                   | 70.5%    | -9.5%        |
-  | `runtime`                        | 72.7%    | -7.3%        |
+  | `opentelemetry-exporter-sqlite`  | 59.5%    | -20.5%       |
+  | `interfaces`                     | 66.4%    | -13.6%       |
   | `web-ui`                         | 73.3%    | -6.7%        |
+  | `runtime`                        | 75.8%    | -4.2%        |
 
 - [ ] 11.3 After all crates are enforcing, delete the allowlist mechanism entirely from `tools/check_coverage.sh`. (Deferred — 9 crates remain on `report_only`; allowlist stays until they all promote.)
 - [x] 11.4 Coverage and CI badges added to `README.md` (top of file).

@@ -308,4 +308,61 @@ mod tests {
             );
         }
     }
+
+    // ── escape_xml ────────────────────────────────────────────────────────
+
+    use super::escape_xml;
+
+    #[test]
+    fn escape_xml_handles_all_special_chars() {
+        assert_eq!(escape_xml("a & b"), "a &amp; b");
+        assert_eq!(escape_xml("<tag>"), "&lt;tag&gt;");
+        assert_eq!(escape_xml("\"hi\""), "&quot;hi&quot;");
+        assert_eq!(escape_xml("it's"), "it&apos;s");
+    }
+
+    #[test]
+    fn escape_xml_preserves_safe_text() {
+        assert_eq!(escape_xml(""), "");
+        assert_eq!(escape_xml("plain text"), "plain text");
+        assert_eq!(escape_xml("123abc"), "123abc");
+        // UTF-8 / emoji passes through unchanged.
+        assert_eq!(escape_xml("héllo 🦀"), "héllo 🦀");
+    }
+
+    // ── skill_location_string ─────────────────────────────────────────────
+
+    use super::skill_location_string;
+    use assistant_skills::{SkillDef, SkillSource};
+
+    fn make_skill(dir: std::path::PathBuf) -> SkillDef {
+        SkillDef {
+            name: "test".into(),
+            description: "x".into(),
+            license: None,
+            compatibility: None,
+            allowed_tools: vec![],
+            metadata: Default::default(),
+            body: "body".into(),
+            dir,
+            source: SkillSource::Builtin,
+        }
+    }
+
+    #[test]
+    fn skill_location_returns_path_when_skill_md_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("SKILL.md"), "---\nname: test\n---\n").unwrap();
+        let skill = make_skill(tmp.path().to_path_buf());
+        let loc = skill_location_string(&skill).expect("path should resolve");
+        assert!(loc.ends_with("SKILL.md"), "got: {loc}");
+    }
+
+    #[test]
+    fn skill_location_returns_none_when_skill_md_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill = make_skill(tmp.path().to_path_buf());
+        // No SKILL.md written → returns None.
+        assert!(skill_location_string(&skill).is_none());
+    }
 }

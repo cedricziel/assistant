@@ -782,4 +782,207 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
+
+    // ── Pure helpers ───────────────────────────────────────────────────────
+
+    use super::{compute_signature, generate_secret, is_private_ip, validate_webhook_url};
+
+    #[test]
+    fn generate_secret_is_64_hex_chars() {
+        let s = generate_secret();
+        assert_eq!(s.len(), 64);
+        assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
+        // Sanity: two calls should not collide.
+        assert_ne!(s, generate_secret());
+    }
+
+    #[test]
+    fn compute_signature_is_deterministic_and_64_chars() {
+        let s1 = compute_signature("secret", "body");
+        let s2 = compute_signature("secret", "body");
+        assert_eq!(s1, s2);
+        assert_eq!(s1.len(), 64);
+        assert!(s1.chars().all(|c| c.is_ascii_hexdigit()));
+        // Different inputs produce different signatures.
+        assert_ne!(s1, compute_signature("other", "body"));
+        assert_ne!(s1, compute_signature("secret", "different"));
+    }
+
+    #[test]
+    fn validate_webhook_url_accepts_public_https() {
+        assert!(validate_webhook_url("https://example.com/hook").is_ok());
+        assert!(validate_webhook_url("http://example.com/hook").is_ok());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_loopback_hostnames() {
+        for url in ["http://localhost/x", "http://127.0.0.1/x", "http://[::1]/x"] {
+            assert!(
+                validate_webhook_url(url).is_err(),
+                "{url} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_private_ipv4_ranges() {
+        for url in [
+            "http://10.0.0.1/x",
+            "http://192.168.1.1/x",
+            "http://172.16.0.1/x",
+            "http://169.254.1.1/x", // link-local
+        ] {
+            assert!(
+                validate_webhook_url(url).is_err(),
+                "{url} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_non_http_schemes() {
+        for url in [
+            "ftp://example.com",
+            "file:///tmp/etc",
+            "javascript:alert(1)",
+        ] {
+            assert!(
+                validate_webhook_url(url).is_err(),
+                "{url} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_malformed_urls() {
+        assert!(validate_webhook_url("not-a-url").is_err());
+        // Scheme-only with no host is rejected.
+        assert!(validate_webhook_url("http://").is_err());
+    }
+
+    #[test]
+    fn is_private_ip_classifies_correctly() {
+        use std::net::IpAddr;
+        assert!(is_private_ip("10.0.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_private_ip("192.168.1.1".parse::<IpAddr>().unwrap()));
+        assert!(is_private_ip("127.0.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_private_ip("::1".parse::<IpAddr>().unwrap()));
+        assert!(is_private_ip("fe80::1".parse::<IpAddr>().unwrap())); // link-local v6
+        assert!(is_private_ip("fc00::1".parse::<IpAddr>().unwrap())); // ULA
+        // Public addresses must NOT be classified as private.
+        assert!(!is_private_ip("8.8.8.8".parse::<IpAddr>().unwrap()));
+        assert!(!is_private_ip("2606:4700::1111".parse::<IpAddr>().unwrap()));
+    }
+
+    // ── Webhook CRUD happy paths ──────────────────────────────────────────
+
+    fn create_payload(name: &str, url: &str) -> String {
+        format!(r#"{{"name":"{name}","url":"{url}","event_types":["turn.complete"]}}"#)
+    }
+
+    #[tokio::test]
+    async fn create_webhook_succeeds_and_returns_201() {
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhooks")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(create_payload(
+                        "Hook 1",
+                        "https://example.com/hook",
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["name"], "Hook 1");
+        assert!(json["id"].as_str().is_some());
+        // Secret is exposed at create time.
+        assert!(json["secret"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn create_then_get_then_list_webhook() {
+        let (state, _) = test_state().await;
+        let app1 = app(state.clone());
+        let resp = app1
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhooks")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(create_payload(
+                        "List Me",
+                        "https://example.com/hook",
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let detail = body_json(resp.into_body()).await;
+        let id = detail["id"].as_str().unwrap().to_string();
+
+        // GET
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/webhooks/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got = body_json(resp.into_body()).await;
+        assert_eq!(got["name"], "List Me");
+
+        // LIST
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/webhooks")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let list = body_json(resp.into_body()).await;
+        assert_eq!(list.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn delete_webhook_after_create_returns_204() {
+        let (state, _) = test_state().await;
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhooks")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(create_payload("Bye", "https://example.com/h")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let detail = body_json(resp.into_body()).await;
+        let id = detail["id"].as_str().unwrap().to_string();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/webhooks/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
 }

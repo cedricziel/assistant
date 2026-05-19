@@ -918,6 +918,111 @@ mod tests {
         );
     }
 
+    // ── Pure helpers ────────────────────────────────────────────────────
+
+    #[test]
+    fn value_as_string_returns_string_only() {
+        assert_eq!(
+            value_as_string(&Value::String("x".into())).as_deref(),
+            Some("x")
+        );
+        assert!(value_as_string(&Value::I64(7)).is_none());
+        assert!(value_as_string(&Value::Bool(true)).is_none());
+    }
+
+    #[test]
+    fn non_epoch_time_collapses_unix_epoch_to_none() {
+        assert!(non_epoch_time(None).is_none());
+        assert!(non_epoch_time(Some(std::time::UNIX_EPOCH)).is_none());
+        let now = std::time::SystemTime::now();
+        assert!(non_epoch_time(Some(now)).is_some());
+    }
+
+    #[test]
+    fn otel_value_to_json_maps_scalars() {
+        assert_eq!(
+            otel_value_to_json(&Value::Bool(true)),
+            serde_json::json!(true)
+        );
+        assert_eq!(otel_value_to_json(&Value::I64(42)), serde_json::json!(42));
+        assert_eq!(otel_value_to_json(&Value::F64(1.5)), serde_json::json!(1.5));
+        assert_eq!(
+            otel_value_to_json(&Value::String("x".into())),
+            serde_json::json!("x")
+        );
+    }
+
+    #[test]
+    fn otel_value_to_json_maps_arrays() {
+        let arr = Value::Array(opentelemetry::Array::I64(vec![1, 2, 3]));
+        assert_eq!(otel_value_to_json(&arr), serde_json::json!([1, 2, 3]));
+
+        let strs = Value::Array(opentelemetry::Array::String(vec!["a".into(), "b".into()]));
+        assert_eq!(otel_value_to_json(&strs), serde_json::json!(["a", "b"]));
+
+        let bools = Value::Array(opentelemetry::Array::Bool(vec![true, false]));
+        assert_eq!(otel_value_to_json(&bools), serde_json::json!([true, false]));
+    }
+
+    #[test]
+    fn extract_denormalized_pulls_known_keys() {
+        let attrs = vec![
+            KeyValue::new(GEN_AI_REQUEST_MODEL, "gpt-4o"),
+            KeyValue::new(GEN_AI_PROVIDER_NAME, "openai"),
+            KeyValue::new(GEN_AI_OPERATION_NAME, "chat"),
+            KeyValue::new("skill", "code-review"),
+            KeyValue::new("interface", "cli"),
+            KeyValue::new("agent.id", "my-agent"),
+            KeyValue::new("other", "ignored"),
+        ];
+        let da = extract_denormalized(&attrs);
+        assert_eq!(da.model.as_deref(), Some("gpt-4o"));
+        assert_eq!(da.provider.as_deref(), Some("openai"));
+        assert_eq!(da.operation.as_deref(), Some("chat"));
+        assert_eq!(da.skill.as_deref(), Some("code-review"));
+        assert_eq!(da.interface.as_deref(), Some("cli"));
+        assert_eq!(da.agent_id, "my-agent");
+    }
+
+    #[test]
+    fn extract_denormalized_defaults_agent_id_when_missing() {
+        let da = extract_denormalized(&[]);
+        assert_eq!(da.agent_id, "default");
+        assert!(da.model.is_none());
+        assert!(da.provider.is_none());
+        assert!(da.operation.is_none());
+        assert!(da.skill.is_none());
+        assert!(da.interface.is_none());
+    }
+
+    #[test]
+    fn resource_to_json_emits_object_with_attributes() {
+        let resource = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(SERVICE_NAME, "myservice"),
+                KeyValue::new("custom.key", 42_i64),
+            ])
+            .build();
+        let json_str = resource_to_json(&resource);
+        let value: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(value[SERVICE_NAME], "myservice");
+        assert_eq!(value["custom.key"], 42);
+    }
+
+    #[test]
+    fn keyvalues_to_json_serialises_each_pair() {
+        let attrs = vec![
+            KeyValue::new("a", "x"),
+            KeyValue::new("b", 7_i64),
+            KeyValue::new("c", true),
+        ];
+        let json_str = keyvalues_to_json(&attrs);
+        let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(v["a"], "x");
+        assert_eq!(v["b"], 7);
+        assert_eq!(v["c"], true);
+    }
+
     #[test]
     fn different_resources_get_different_fingerprints() {
         let r1 = Resource::builder_empty()

@@ -581,4 +581,113 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
+
+    async fn seed_space(state: &SpacesApiState, id: &str, name: &str, slug: &str) {
+        let now = chrono::Utc::now();
+        let space = Space {
+            id: SpaceId::from(id),
+            org_id: OrgId::from("org_1"),
+            name: name.into(),
+            slug: slug.into(),
+            created_at: now,
+            updated_at: now,
+        };
+        state
+            .org_storage
+            .space_store()
+            .create_space(&space)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn get_space_returns_summary() {
+        let state = setup_state().await;
+        seed_space(&state, "spc_get", "Spec Get", "get").await;
+        let app = test_app(state, make_admin_ctx());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/orgs/org_1/spaces/spc_get")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let summary: SpaceSummary = serde_json::from_slice(&body).unwrap();
+        assert_eq!(summary.name, "Spec Get");
+    }
+
+    #[tokio::test]
+    async fn get_space_returns_404_when_missing() {
+        let state = setup_state().await;
+        let app = test_app(state, make_admin_ctx());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/orgs/org_1/spaces/spc_ghost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn update_space_renames_via_admin() {
+        let state = setup_state().await;
+        seed_space(&state, "spc_upd", "Old", "old").await;
+        let app = test_app(state, make_admin_ctx());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/orgs/org_1/spaces/spc_upd")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "name": "Renamed"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let summary: SpaceSummary = serde_json::from_slice(&body).unwrap();
+        assert_eq!(summary.name, "Renamed");
+    }
+
+    #[tokio::test]
+    async fn update_space_forbidden_for_member() {
+        let state = setup_state().await;
+        seed_space(&state, "spc_upd2", "Initial", "u2").await;
+        let app = test_app(state, make_member_ctx());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/orgs/org_1/spaces/spc_upd2")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({"name": "Sneaky"})).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
 }

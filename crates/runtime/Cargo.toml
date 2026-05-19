@@ -46,6 +46,7 @@ image = { workspace = true }
 [dev-dependencies]
 wiremock = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
 
 # Panic-free contract: all non-test code in this crate propagates errors
 # via `Result<_, anyhow::Error>`, falls back via `std::future::pending()`

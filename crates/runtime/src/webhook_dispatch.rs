@@ -127,3 +127,138 @@ fn compute_signature(secret: &str, body: &str) -> Result<String> {
 fn payload_count_hint(payload: &Value) -> usize {
     if payload.is_null() { 0 } else { 1 }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_storage::{StorageLayer, WebhookStore};
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn compute_signature_is_deterministic() {
+        let s1 = compute_signature("secret", r#"{"event":"x"}"#).unwrap();
+        let s2 = compute_signature("secret", r#"{"event":"x"}"#).unwrap();
+        assert_eq!(s1, s2);
+        // 32 bytes hex-encoded → 64 chars.
+        assert_eq!(s1.len(), 64);
+    }
+
+    #[test]
+    fn compute_signature_changes_with_secret_or_body() {
+        let s1 = compute_signature("s1", "body").unwrap();
+        let s2 = compute_signature("s2", "body").unwrap();
+        let s3 = compute_signature("s1", "body2").unwrap();
+        assert_ne!(s1, s2);
+        assert_ne!(s1, s3);
+    }
+
+    #[test]
+    fn payload_count_hint_returns_zero_for_null_else_one() {
+        assert_eq!(payload_count_hint(&Value::Null), 0);
+        assert_eq!(payload_count_hint(&serde_json::json!({"a": 1})), 1);
+        assert_eq!(payload_count_hint(&serde_json::json!([1, 2])), 1);
+        assert_eq!(payload_count_hint(&serde_json::json!("text")), 1);
+    }
+
+    #[tokio::test]
+    async fn dispatch_event_returns_zero_when_no_active_subscribers() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let delivered = dispatch_event(
+            &storage,
+            "default",
+            "test.event",
+            serde_json::json!({"x": 1}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(delivered, 0);
+    }
+
+    #[tokio::test]
+    async fn dispatch_event_delivers_to_active_subscribers_with_signature() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/hook"))
+            .and(header("X-Webhook-Event", "test.event"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.webhook_store_for_agent("default");
+        store
+            .create(
+                "wh-1",
+                "test",
+                &format!("{}/hook", server.uri()),
+                "secret",
+                &["test.event".to_string()],
+            )
+            .await
+            .unwrap();
+
+        let delivered = dispatch_event(
+            &storage,
+            "default",
+            "test.event",
+            serde_json::json!({"hello": "world"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(delivered, 1);
+    }
+
+    #[tokio::test]
+    async fn dispatch_event_records_non_success_as_failure() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/hook"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.webhook_store_for_agent("default");
+        store
+            .create(
+                "wh-fail",
+                "test",
+                &format!("{}/hook", server.uri()),
+                "secret",
+                &["evt".to_string()],
+            )
+            .await
+            .unwrap();
+
+        let delivered = dispatch_event(&storage, "default", "evt", serde_json::json!({}))
+            .await
+            .unwrap();
+        // 500 is non-success → not counted as delivered.
+        assert_eq!(delivered, 0);
+    }
+
+    #[tokio::test]
+    async fn dispatch_event_records_transport_error_as_failure() {
+        // No mock mounted → connection fails → request errors out.
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.webhook_store_for_agent("default");
+        store
+            .create(
+                "wh-bad",
+                "test",
+                "http://127.0.0.1:1/never-binds",
+                "secret",
+                &["evt".to_string()],
+            )
+            .await
+            .unwrap();
+
+        let delivered = dispatch_event(&storage, "default", "evt", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(delivered, 0);
+    }
+}

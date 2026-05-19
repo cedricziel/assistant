@@ -673,4 +673,192 @@ mod tests {
         hard_truncate("", &mut history, &[], &c);
         assert_eq!(history.len(), 1, "should keep at least one message");
     }
+
+    // ── maybe_compact end-to-end with ScriptedLlmProvider ───────────────────
+
+    use assistant_core::LlmResponse;
+    use assistant_core::LlmResponseMeta;
+    use assistant_llm_provider::scripted::ScriptedLlmProvider;
+    use assistant_storage::InMemoryConversationStore;
+    use uuid::Uuid;
+
+    fn turn_history() -> Vec<ChatHistoryMessage> {
+        // 3 user turns; keep_recent_turns=1 means turns 1 and 2 get compacted.
+        vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "What is the capital of France?".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "Paris.".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "And Germany?".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "Berlin.".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "Spain?".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "Madrid.".into(),
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn maybe_compact_replaces_old_turns_with_summary() {
+        let llm: Arc<dyn LlmProvider> = Arc::new(ScriptedLlmProvider::new().with_canned_responses(
+            vec![LlmResponse::FinalAnswer(
+                "User asked about capitals of France and Germany; assistant answered Paris and Berlin.".into(),
+                LlmResponseMeta::default(),
+            )],
+        ));
+        let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
+        let mut history = turn_history();
+        let initial_len = history.len();
+
+        let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
+        assert!(compacted);
+        assert!(history.len() < initial_len);
+        // First message after compaction is the summary turn.
+        let summary = match &history[0] {
+            ChatHistoryMessage::Text { role, content } => {
+                assert!(matches!(role, ChatRole::Assistant));
+                content.clone()
+            }
+            _ => panic!("expected first message to be a Text turn"),
+        };
+        assert!(summary.contains("summary"));
+        assert!(summary.contains("Paris"));
+        // Last user message (Spain?) must still be present in the kept tail.
+        let kept_user_content: Vec<_> = history
+            .iter()
+            .filter_map(|m| match m {
+                ChatHistoryMessage::Text {
+                    role: ChatRole::User,
+                    content,
+                } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kept_user_content, vec!["Spain?"]);
+    }
+
+    #[tokio::test]
+    async fn maybe_compact_skips_when_nothing_to_compact() {
+        let llm: Arc<dyn LlmProvider> = Arc::new(ScriptedLlmProvider::new());
+        // keep_recent_turns=10 ≫ available turns in history → split_at == 0 → noop.
+        let cfg = cfg(true, 200_000, 20_000, 30_000, 10);
+        let mut history = turn_history();
+        let before = history.clone();
+        let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
+        assert!(!compacted);
+        assert_eq!(history.len(), before.len());
+    }
+
+    #[tokio::test]
+    async fn maybe_compact_returns_false_when_summary_returns_unexpected_variant() {
+        // The summariser only accepts FinalAnswer; any other variant is
+        // treated as failure → `summarise` returns None → maybe_compact
+        // short-circuits without touching the history layout.
+        let llm: Arc<dyn LlmProvider> =
+            Arc::new(ScriptedLlmProvider::new().with_canned_responses(vec![
+                LlmResponse::Thinking("just reasoning".into(), LlmResponseMeta::default()),
+            ]));
+        let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
+        let mut history = turn_history();
+        let before_len = history.len();
+        let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
+        assert!(!compacted);
+        assert_eq!(
+            history.len(),
+            before_len,
+            "history must remain unchanged on failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn maybe_compact_persists_to_conversation_store() {
+        use assistant_storage::ConversationStore;
+        let llm: Arc<dyn LlmProvider> =
+            Arc::new(ScriptedLlmProvider::new().with_canned_responses(vec![
+                LlmResponse::FinalAnswer("compacted summary".into(), LlmResponseMeta::default()),
+            ]));
+        let store = InMemoryConversationStore::new();
+        let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
+        let conv_id = Uuid::new_v4();
+        let mut history = turn_history();
+
+        let compacted = maybe_compact(&mut history, &llm, &cfg, Some((&store, conv_id))).await;
+        assert!(compacted);
+
+        // The store should now hold the compacted history.
+        let loaded = store.load_history(conv_id).await.unwrap();
+        // Summary turn + kept recent messages → at least 2 rows.
+        assert!(
+            loaded.len() >= 2,
+            "expected persisted history; got {}",
+            loaded.len()
+        );
+    }
+
+    /// History large enough to exceed `CHUNK_CHARS` (12k) forces
+    /// `summarise_messages` into its chunked path: each chunk gets its own
+    /// LLM call, then the merged result gets a final summarisation.
+    #[tokio::test]
+    async fn maybe_compact_uses_chunked_summarisation_for_large_history() {
+        // Build a history whose transcript exceeds 12k chars. 5 turns of
+        // ~3000 chars each + role labels easily clears the threshold.
+        let big = "x".repeat(3000);
+        let mut history: Vec<ChatHistoryMessage> = Vec::new();
+        for i in 0..6 {
+            history.push(ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: format!("Question {i}: {big}"),
+            });
+            history.push(ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: format!("Answer {i}: {big}"),
+            });
+        }
+        // Add a final user turn so keep_recent_turns=1 has something to keep
+        // and the older 6 turns remain to be summarised.
+        history.push(ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "what's next?".into(),
+        });
+
+        // Queue enough chunk summaries + a final merge summary. The exact
+        // number of chunks depends on transcript size; queue 10 generous
+        // FinalAnswer responses — extras are ignored.
+        let mut responses: Vec<LlmResponse> = Vec::new();
+        for i in 0..10 {
+            responses.push(LlmResponse::FinalAnswer(
+                format!("chunk-{i} summary"),
+                LlmResponseMeta::default(),
+            ));
+        }
+        let llm: Arc<dyn LlmProvider> =
+            Arc::new(ScriptedLlmProvider::new().with_canned_responses(responses));
+
+        let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
+        let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
+        assert!(compacted);
+        // First message is the summary turn; last preserves the "what's next?" prompt.
+        let first = match &history[0] {
+            ChatHistoryMessage::Text { content, .. } => content.clone(),
+            _ => panic!("expected first message to be a Text turn"),
+        };
+        assert!(
+            first.contains("summary") || first.contains("chunk"),
+            "first message should contain summary content; got: {first}"
+        );
+    }
 }

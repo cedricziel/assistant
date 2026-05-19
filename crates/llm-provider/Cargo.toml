@@ -28,6 +28,7 @@ url                  = { workspace = true }
 getrandom            = { workspace = true }
 
 [dev-dependencies]
+tempfile             = { workspace = true }
 wiremock             = { workspace = true }
 
 # Panic-free contract: all non-test code in this crate propagates errors
