@@ -214,6 +214,44 @@ pub(crate) async fn build_auth_context_for_user(
 }
 
 #[cfg(test)]
+mod escape_tests {
+    use super::escape_html_attr;
+
+    #[test]
+    fn escape_html_attr_replaces_all_dangerous_chars() {
+        assert_eq!(escape_html_attr("&"), "&amp;");
+        assert_eq!(escape_html_attr("\""), "&quot;");
+        assert_eq!(escape_html_attr("'"), "&#x27;");
+        assert_eq!(escape_html_attr("<"), "&lt;");
+        assert_eq!(escape_html_attr(">"), "&gt;");
+    }
+
+    #[test]
+    fn escape_html_attr_handles_compound_input() {
+        let input = r#"<script>alert("xss & 'pwn'")</script>"#;
+        let escaped = escape_html_attr(input);
+        assert!(!escaped.contains('<'));
+        assert!(!escaped.contains('>'));
+        assert!(!escaped.contains('"'));
+        assert!(!escaped.contains('\''));
+        assert!(escaped.contains("&lt;"));
+        assert!(escaped.contains("&gt;"));
+        assert!(escaped.contains("&amp;"));
+        assert!(escaped.contains("&quot;"));
+        assert!(escaped.contains("&#x27;"));
+    }
+
+    #[test]
+    fn escape_html_attr_preserves_safe_text() {
+        assert_eq!(escape_html_attr(""), "");
+        assert_eq!(escape_html_attr("hello world"), "hello world");
+        assert_eq!(escape_html_attr("0123abc-._~"), "0123abc-._~");
+        // UTF-8 / emoji passes through unchanged.
+        assert_eq!(escape_html_attr("héllo 🦀"), "héllo 🦀");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use axum::body::Body;

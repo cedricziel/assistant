@@ -831,6 +831,103 @@ mod tests {
         assert_eq!(updated.title.as_deref(), Some("New Name"));
     }
 
+    #[tokio::test]
+    async fn patch_conversation_bad_uuid_returns_400() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/conversations/not-a-uuid")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"title":"x"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn patch_conversation_unknown_id_returns_404() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        let id = uuid::Uuid::new_v4();
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/conversations/{id}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"title":"x"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_conversation_bad_uuid_returns_400() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/conversations/not-a-uuid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn create_conversation_with_empty_body_returns_201_with_untitled() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations")
+                    .header("Content-Type", "application/json")
+                    // Completely absent body field — serde defaults kick in.
+                    .body(Body::from(r#"{}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["title"], "Untitled");
+    }
+
+    #[tokio::test]
+    async fn create_conversation_malformed_json_returns_400_or_422() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("{not valid"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_client_error(),
+            "expected 4xx; got {}",
+            resp.status()
+        );
+    }
+
     // -- Runtime agent_id switch -----------------------------------------------
 
     #[tokio::test]
