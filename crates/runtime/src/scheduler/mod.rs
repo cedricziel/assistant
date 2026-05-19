@@ -172,7 +172,7 @@ pub fn spawn_scheduler(
 
 /// Body of the scheduler tokio task. Split out so the loop is testable
 /// without `spawn_scheduler`'s detached task semantics.
-async fn run_scheduler_loop(
+pub(crate) async fn run_scheduler_loop(
     ctx: Arc<SchedulerCtx>,
     tasks: Vec<Box<dyn PeriodicTask>>,
     poll_interval: Duration,

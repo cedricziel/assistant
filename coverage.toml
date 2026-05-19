@@ -52,7 +52,6 @@ crates = [
     "mcp-client",                        # 20.3% (delta -59.7%)
     "opentelemetry-exporter-iceberg",    # 37.5% (delta -42.5%)
     "opentelemetry-exporter-sqlite",     # 51.4% (delta -28.6%)
-    "runtime",                           # 72.7% (delta  -7.3%)
     "web-ui",                            # 73.3% (delta  -6.7%)
 ]
 
@@ -74,6 +73,7 @@ crates = [
 #   skills        (87.2%) — added tests/coverage.rs
 #   mcp-server    (89.0%) — refactored stdin loop into testable run_io + 12 new dispatch tests
 #   llm-provider  (80.3%) — pure-function tests across anthropic, openai/oauth, chat_completions, ollama
+#   runtime       (80.3%) — bootstrap, memory_indexer, scheduler/loop+prune, compaction chunked path, dispatch helpers, title_generator helpers, skill_learner format_history_for_judge, interface_trait default impls
 
 # File path regex patterns excluded from coverage measurement.
 # Passed to `cargo llvm-cov --ignore-filename-regex` as a joined alternation.
