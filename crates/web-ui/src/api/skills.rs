@@ -703,4 +703,80 @@ mod tests {
             "listing skills for another user's persona must be denied"
         );
     }
+
+    #[tokio::test]
+    async fn get_skill_returns_detail_for_existing_skill() {
+        let (state, _) = test_state().await;
+        // Seed via POST /skills.
+        let body = r#"{"name":"detail-skill","description":"D","body":"B"}"#;
+        app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/skills")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/skills/detail-skill")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["name"], "detail-skill");
+        assert_eq!(json["description"], "D");
+        assert_eq!(json["body"], "B");
+        assert_eq!(json["is_builtin"], false);
+    }
+
+    #[tokio::test]
+    async fn update_skill_unknown_returns_404() {
+        let (state, _) = test_state().await;
+        let body = r#"{"description":"x","body":"y"}"#;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/skills/no-such-skill")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::FORBIDDEN,
+            "unknown or non-user skill must 404/403; got {}",
+            resp.status()
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_unknown_skill_returns_404_or_403() {
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/skills/no-such-skill-xyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::FORBIDDEN,
+            "unknown or non-user skill must 404/403; got {}",
+            resp.status()
+        );
+    }
 }

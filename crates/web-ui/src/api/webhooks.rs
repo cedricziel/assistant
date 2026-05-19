@@ -985,4 +985,124 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
+
+    async fn create_webhook_for_state(state: &WebhooksApiState, name: &str) -> String {
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhooks")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(create_payload(name, "https://example.com/h")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let detail = body_json(resp.into_body()).await;
+        detail["id"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn toggle_webhook_flips_active_then_returns_200() {
+        let (state, _) = test_state().await;
+        let id = create_webhook_for_state(&state, "Toggle Me").await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/webhooks/{id}/toggle"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        // Newly created webhook starts active=true; after toggle it should be false.
+        assert_eq!(json["active"], false);
+    }
+
+    #[tokio::test]
+    async fn rotate_secret_for_existing_webhook_returns_200_with_new_secret() {
+        let (state, _) = test_state().await;
+        let id = create_webhook_for_state(&state, "Rotate Me").await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/webhooks/{id}/rotate-secret"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        // Secret should be a 64-char hex string.
+        let secret = json["secret"].as_str().unwrap();
+        assert_eq!(secret.len(), 64);
+        assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn update_webhook_partial_change_keeps_other_fields() {
+        let (state, _) = test_state().await;
+        let id = create_webhook_for_state(&state, "Original").await;
+
+        // PUT with only `name` field — should leave url + event_types intact.
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/webhooks/{id}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"name":"Renamed"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["name"], "Renamed");
+        // URL preserved.
+        assert_eq!(json["url"], "https://example.com/h");
+    }
+
+    #[tokio::test]
+    async fn update_webhook_unknown_id_returns_404() {
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/webhooks/no-such-id")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"name":"x"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn update_webhook_with_invalid_url_returns_400() {
+        let (state, _) = test_state().await;
+        let id = create_webhook_for_state(&state, "Bad URL").await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/webhooks/{id}"))
+                    .header("Content-Type", "application/json")
+                    // Localhost blocked by SSRF check.
+                    .body(Body::from(r#"{"url":"http://localhost/h"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
 }
