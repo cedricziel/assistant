@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.162](https://github.com/cedricziel/assistant/compare/v0.1.161...v0.1.162) (2026-05-19)
+
+
+### Features
+
+* **ci:** promote llm-provider past 80% floor + runtime backfill (Phase 11) ([#883](https://github.com/cedricziel/assistant/issues/883)) ([d376ead](https://github.com/cedricziel/assistant/commit/d376eadefc42e52014a84818b8bc70181768caea))
+* **ci:** promote mcp-server past 80% floor (Phase 11) ([#881](https://github.com/cedricziel/assistant/issues/881)) ([112259e](https://github.com/cedricziel/assistant/commit/112259e1f839cdbdf8ae5cc858c73de5f2a00a87))
+* **ci:** promote runtime past 80% floor (Phase 11) ([#886](https://github.com/cedricziel/assistant/issues/886)) ([f12f005](https://github.com/cedricziel/assistant/commit/f12f005dbc6d3af0244e59ee4ffd8d7d4696880f))
+* **ci:** promote skills past 80% floor (Phase 11) ([#880](https://github.com/cedricziel/assistant/issues/880)) ([69edeac](https://github.com/cedricziel/assistant/commit/69edeac377fd6d690df8dd9f78b8abe544324a44))
+* **ci:** promote tool-executor + transcription past 80% floor (Phase 11) ([#879](https://github.com/cedricziel/assistant/issues/879)) ([ffe8ce8](https://github.com/cedricziel/assistant/commit/ffe8ce8cb1053cf8cbdc019f831a7e81b2ac16bd))
+
 ## [0.1.161](https://github.com/cedricziel/assistant/compare/v0.1.160...v0.1.161) (2026-05-19)
 
 
