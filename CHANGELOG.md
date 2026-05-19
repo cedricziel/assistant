@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.1.161](https://github.com/cedricziel/assistant/compare/v0.1.160...v0.1.161) (2026-05-19)
+
+
+### Features
+
+* **app:** Phase A — currentTurnStatus derived state for in-flight progress ([#822](https://github.com/cedricziel/assistant/issues/822)) ([381e554](https://github.com/cedricziel/assistant/commit/381e554e9b257fc179a342290d48f4cbb26cf14a))
+* **app:** Phase B — TurnProgressCard widget above the chat composer ([#826](https://github.com/cedricziel/assistant/issues/826)) ([b900cf6](https://github.com/cedricziel/assistant/commit/b900cf64c6de058dd6dd7bacbe4c494002f6c820))
+* **app:** Phase C — visible queued ghost bubbles + removeFromQueue ([#828](https://github.com/cedricziel/assistant/issues/828)) ([8a1b633](https://github.com/cedricziel/assistant/commit/8a1b633e79c587ffb2f7f0dc37fd09391b4b1060))
+* **app:** Phase D — reconnect banner during attemptReconnect ([#831](https://github.com/cedricziel/assistant/issues/831)) ([fe6aa5b](https://github.com/cedricziel/assistant/commit/fe6aa5b8b96a0fd2be4a5c828736d0fbc9d409d8))
+* **app:** route initial-stall watchdog through turn-status probe ([#842](https://github.com/cedricziel/assistant/issues/842)) ([3fe4bde](https://github.com/cedricziel/assistant/commit/3fe4bdeb6054e5381990d4695221e48ff6221c58))
+* **auth:** inject Clock into JwtManager, DeviceCodeManager, OAuth2Server ([#827](https://github.com/cedricziel/assistant/issues/827)) ([19a3865](https://github.com/cedricziel/assistant/commit/19a3865b79e0cdbdb744b66c4112b6942fe31998))
+* **ci:** add cargo-llvm-cov coverage measurement (report-only) ([#821](https://github.com/cedricziel/assistant/issues/821)) ([ff4199e](https://github.com/cedricziel/assistant/commit/ff4199e0a94463ae64f247e988cb07cd3d36a3dc))
+* **ci:** flip coverage gate to enforcing for 7 crates (Phase 11) ([#877](https://github.com/cedricziel/assistant/issues/877)) ([adeea27](https://github.com/cedricziel/assistant/commit/adeea27ff03ece6408164516f5849f72b90724d4))
+* **core,tool-executor,storage:** add ToolDispatcher + SkillCatalog trait facades (Phase 7.1-7.5 partial) ([#873](https://github.com/cedricziel/assistant/issues/873)) ([802fd77](https://github.com/cedricziel/assistant/commit/802fd77fff7ced8edc2ea64e1f5c9304bfa03f79))
+* **core:** add Clock trait + SystemClock + FakeClock ([#825](https://github.com/cedricziel/assistant/issues/825)) ([7e5f071](https://github.com/cedricziel/assistant/commit/7e5f07135ab20ea1aed0e25e8baee3288c456730))
+* **llm-provider:** add ScriptedLlmProvider (Phase 5.H) ([#871](https://github.com/cedricziel/assistant/issues/871)) ([fcb63df](https://github.com/cedricziel/assistant/commit/fcb63dfbcd3989dfd79092b5b9ebcfdd3a38e7bc))
+* **runtime,mcp-server:** OrchestrationEngine trait + mcp-server dispatch tests (Phase 7 part 2) ([#874](https://github.com/cedricziel/assistant/issues/874)) ([dc2ea6c](https://github.com/cedricziel/assistant/commit/dc2ea6c68fd8d88b2eab4c716beef943abd5bf63))
+* **runtime:** cancel_turn surface + caller-supplied request_id ([#850](https://github.com/cedricziel/assistant/issues/850)) ([74ba3a2](https://github.com/cedricziel/assistant/commit/74ba3a292e2fdf3ec284f32364d2a3c7acd5fd37))
+* **runtime:** inject Clock into Orchestrator ([#829](https://github.com/cedricziel/assistant/issues/829)) ([74c1dd6](https://github.com/cedricziel/assistant/commit/74c1dd6882dddb82150909479fc74d7b5490f3e9))
+* **storage:** add InMemoryMessageBus (Phase 5.G) ([#870](https://github.com/cedricziel/assistant/issues/870)) ([f30dc5b](https://github.com/cedricziel/assistant/commit/f30dc5b897103b041f626185016a5d7ad14e89c8))
+* **test-support:** scaffold assistant-test-support composition crate ([#824](https://github.com/cedricziel/assistant/issues/824)) ([4d45b56](https://github.com/cedricziel/assistant/commit/4d45b562cde96f21a37c1fbf5595d3618697ffc2))
+* **test-support:** wire FixtureBuilder to in-memory fakes (Phase 5.I) ([#872](https://github.com/cedricziel/assistant/issues/872)) ([0204abe](https://github.com/cedricziel/assistant/commit/0204abec0cd2c480137bc6ab2964e7fa379bafa5))
+* **web-ui:** GET turn status endpoint for stall probing ([#836](https://github.com/cedricziel/assistant/issues/836)) ([320d8c0](https://github.com/cedricziel/assistant/commit/320d8c07e662ebd790f5a0cafde4deff69390de6))
+* **web-ui:** inject reqwest::Client into PushDispatcher (Phase 4.4) ([#838](https://github.com/cedricziel/assistant/issues/838)) ([315ab35](https://github.com/cedricziel/assistant/commit/315ab353ddcd4a98a1ec7bd4918cbc95c7cfad2c))
+* **web-ui:** POST /turns/{turn_id}/cancel + propagate cancellation through SSE ([#853](https://github.com/cedricziel/assistant/issues/853)) ([198b9c0](https://github.com/cedricziel/assistant/commit/198b9c0e26fb0300a5874e027fadc3e08d3f9c0a))
+* **workflow-http:** inject reqwest::Client + add wiremock test suite (Phase 4.1-4.3) ([#837](https://github.com/cedricziel/assistant/issues/837)) ([4494ac4](https://github.com/cedricziel/assistant/commit/4494ac41daf38c7a654ceacc16f56aecd2358f5f))
+* **workspace:** add workspace_clock_lint enforcement (Phase 3.11) ([#835](https://github.com/cedricziel/assistant/issues/835)) ([ff75291](https://github.com/cedricziel/assistant/commit/ff75291bd1012cdc4be7c90bf685aff9675d376e))
+* **workspace:** add workspace_http_client_lint (Phase 4.9) ([#839](https://github.com/cedricziel/assistant/issues/839)) ([f4a50c9](https://github.com/cedricziel/assistant/commit/f4a50c9788c4754994c463db248ae702da774264))
+* **workspace:** inject Clock into bus-nats, storage stores, llm-provider ([#830](https://github.com/cedricziel/assistant/issues/830)) ([07cd8bd](https://github.com/cedricziel/assistant/commit/07cd8bdbd637148a7085b9304d899f16e42f29c6))
+* **workspace:** inject Clock into stragglers (backup, core, workflow, otel, tool-executor, interface-cli) ([#832](https://github.com/cedricziel/assistant/issues/832)) ([60eb212](https://github.com/cedricziel/assistant/commit/60eb2120971bf96dbdffba64792d84468441476d))
+* **workspace:** inject Clock into web-ui + interfaces (Phase 3.10c) ([#834](https://github.com/cedricziel/assistant/issues/834)) ([8760f9d](https://github.com/cedricziel/assistant/commit/8760f9dff27f774a2d2d9095782619acfde0e260))
+
+
+### Bug Fixes
+
+* **app:** suppress onReorder deprecation lint for Flutter 3.44 ([#884](https://github.com/cedricziel/assistant/issues/884)) ([c41fc7a](https://github.com/cedricziel/assistant/commit/c41fc7a79deec86b6d4d2d527b5b5a682472b223))
+* **storage,web-ui:** test-compilation breakage from Phase 5 store extractions ([#856](https://github.com/cedricziel/assistant/issues/856)) ([3c79eb1](https://github.com/cedricziel/assistant/commit/3c79eb17eec216583fd592f92e481effbd0926bf))
+* **storage:** rename InMemoryState → MemoryState ([#844](https://github.com/cedricziel/assistant/issues/844)) ([b28573d](https://github.com/cedricziel/assistant/commit/b28573dd135f6fbff91495a868a99f0778448abb))
+* **storage:** rename remaining InMemory* private state structs ([#861](https://github.com/cedricziel/assistant/issues/861)) ([a8a4c68](https://github.com/cedricziel/assistant/commit/a8a4c68337c7bc0a86f96c04f0488afc5b3e2f81))
+
 ## [0.1.160](https://github.com/cedricziel/assistant/compare/v0.1.159...v0.1.160) (2026-05-17)
 
 
