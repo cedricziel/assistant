@@ -1,6 +1,6 @@
 [package]
 name = "assistant-test-support"
-version = "0.1.160"
+version = "0.1.161"
 edition.workspace = true
 license.workspace = true
 description = "Composition layer for assistant workspace test fixtures. Hosts FixtureBuilder + prelude re-exports of in-memory persistence impls, ScriptedLlmProvider, and orchestration stubs."
