@@ -1,5 +1,8 @@
 # assistant
 
+[![Coverage](https://github.com/cedricziel/assistant/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/cedricziel/assistant/actions/workflows/coverage.yml)
+[![CI](https://github.com/cedricziel/assistant/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cedricziel/assistant/actions/workflows/ci.yml)
+
 A minimalist, self-improving personal AI assistant written in Rust.
 
 - **Local-first** — runs entirely on your machine via [Ollama](https://ollama.com)
