@@ -469,4 +469,123 @@ mod tests {
         // Reference the mock server so the compiler doesn't elide it.
         let _ = server.uri();
     }
+
+    // ── encrypt_payload ──────────────────────────────────────────────────
+
+    #[test]
+    fn encrypt_payload_produces_nonempty_aes128gcm_record() {
+        // Generate a fresh subscriber keypair; the public key is the
+        // 65-byte uncompressed P-256 point.
+        let subscriber_secret =
+            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let subscriber_pub_bytes = subscriber_secret
+            .verifying_key()
+            .to_encoded_point(false)
+            .as_bytes()
+            .to_vec();
+        let auth_secret: [u8; 16] = [0xa5; 16];
+
+        let (encrypted, sender_pub, salt) =
+            encrypt_payload(b"hello world", &subscriber_pub_bytes, &auth_secret).unwrap();
+        // Header: salt (16) + rs (4) + keyid_len (1) + keyid (65) = 86 bytes
+        // followed by ciphertext.
+        assert!(encrypted.len() > 86);
+        assert_eq!(sender_pub.len(), 65, "sender pub must be uncompressed");
+        assert_eq!(salt.len(), 16, "salt must be 16 bytes");
+        // First byte of an uncompressed point is 0x04.
+        assert_eq!(sender_pub[0], 0x04);
+    }
+
+    #[test]
+    fn encrypt_payload_rejects_invalid_subscriber_pub_key() {
+        let auth_secret = [0u8; 16];
+        let result = encrypt_payload(b"hello", b"not-a-key", &auth_secret);
+        assert!(result.is_err(), "invalid sub-pub bytes must Err");
+    }
+
+    #[test]
+    fn encrypt_payload_uses_different_salt_each_call() {
+        let subscriber_secret =
+            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let pub_bytes = subscriber_secret
+            .verifying_key()
+            .to_encoded_point(false)
+            .as_bytes()
+            .to_vec();
+        let auth: [u8; 16] = [0xff; 16];
+        let (_, _, salt1) = encrypt_payload(b"a", &pub_bytes, &auth).unwrap();
+        let (_, _, salt2) = encrypt_payload(b"a", &pub_bytes, &auth).unwrap();
+        assert_ne!(salt1, salt2, "salt must be random per call");
+    }
+
+    // ── build_vapid_jwt ──────────────────────────────────────────────────
+
+    #[test]
+    fn build_vapid_jwt_returns_three_dot_separated_segments() {
+        let (priv_b64, _) = generate_vapid_keypair().unwrap();
+        let pem_bytes = URL_SAFE_NO_PAD.decode(&priv_b64).unwrap();
+        let pem_str = std::str::from_utf8(&pem_bytes).unwrap();
+        use p256::pkcs8::DecodePrivateKey as _;
+        let key = SigningKey::from_pkcs8_pem(pem_str).unwrap();
+        let jwt = build_vapid_jwt(&key, "https://fcm.googleapis.com/fcm/send/abc").unwrap();
+        let parts: Vec<&str> = jwt.split('.').collect();
+        assert_eq!(parts.len(), 3);
+        // All parts must be base64url-decodable.
+        for p in &parts {
+            URL_SAFE_NO_PAD.decode(p).unwrap();
+        }
+    }
+
+    #[test]
+    fn build_vapid_jwt_payload_includes_correct_audience() {
+        let (priv_b64, _) = generate_vapid_keypair().unwrap();
+        let pem_bytes = URL_SAFE_NO_PAD.decode(&priv_b64).unwrap();
+        let pem_str = std::str::from_utf8(&pem_bytes).unwrap();
+        use p256::pkcs8::DecodePrivateKey as _;
+        let key = SigningKey::from_pkcs8_pem(pem_str).unwrap();
+        let jwt = build_vapid_jwt(&key, "https://fcm.googleapis.com/fcm/send/abc").unwrap();
+        let parts: Vec<&str> = jwt.split('.').collect();
+        let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).unwrap();
+        assert_eq!(payload["aud"], "https://fcm.googleapis.com");
+        assert!(payload["exp"].is_u64());
+        assert_eq!(payload["sub"], "mailto:push@assistant.local");
+    }
+
+    #[test]
+    fn build_vapid_jwt_errors_on_invalid_endpoint() {
+        let (priv_b64, _) = generate_vapid_keypair().unwrap();
+        let pem_bytes = URL_SAFE_NO_PAD.decode(&priv_b64).unwrap();
+        let pem_str = std::str::from_utf8(&pem_bytes).unwrap();
+        use p256::pkcs8::DecodePrivateKey as _;
+        let key = SigningKey::from_pkcs8_pem(pem_str).unwrap();
+        let err = build_vapid_jwt(&key, "not a url").unwrap_err();
+        assert!(err.to_string().contains("Invalid push endpoint URL"));
+    }
+
+    // ── signing_key (dispatcher helper) ──────────────────────────────────
+
+    #[tokio::test]
+    async fn signing_key_decodes_round_tripped_pem() {
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap();
+        let store = Arc::new(SqlitePushSubscriptionStore::new(storage.pool.clone()));
+        let (priv_b64, _) = generate_vapid_keypair().unwrap();
+        let dispatcher = PushDispatcher::new(priv_b64, store);
+        assert!(
+            dispatcher.signing_key().is_ok(),
+            "valid PEM must decode back to a signing key"
+        );
+    }
+
+    #[tokio::test]
+    async fn signing_key_errors_on_invalid_base64() {
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap();
+        let store = Arc::new(SqlitePushSubscriptionStore::new(storage.pool.clone()));
+        let dispatcher = PushDispatcher::new("not-base64!@#$".to_string(), store);
+        assert!(dispatcher.signing_key().is_err());
+    }
 }
