@@ -838,4 +838,281 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
+
+    // ── Additional handler coverage ─────────────────────────────────────
+
+    async fn create_and_get_id(state: WorkflowsApiState, name: &str, active: bool) -> String {
+        let body = serde_json::json!({
+            "name": name,
+            "graph": minimal_graph(),
+            "active": active,
+        });
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/workflows")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        json["id"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn list_workflows_returns_created_items() {
+        let (state, _) = test_state().await;
+        let _ = create_and_get_id(state.clone(), "Alpha", false).await;
+        let _ = create_and_get_id(state.clone(), "Beta", true).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/workflows")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        let names: Vec<&str> = arr.iter().map(|w| w["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"Alpha"));
+        assert!(names.contains(&"Beta"));
+    }
+
+    #[tokio::test]
+    async fn get_workflow_returns_detail_with_graph() {
+        let (state, _) = test_state().await;
+        let id = create_and_get_id(state.clone(), "Detailed", false).await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workflows/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["name"], "Detailed");
+        // Graph is serialised back in detail responses.
+        assert!(
+            json["graph"]["nodes"].is_array(),
+            "detail must include graph"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_workflow_renames_via_put() {
+        let (state, _) = test_state().await;
+        let id = create_and_get_id(state.clone(), "Old", false).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/workflows/{id}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "name": "Renamed",
+                            "description": "",
+                            "graph": minimal_graph(),
+                            "active": false,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["name"], "Renamed");
+    }
+
+    #[tokio::test]
+    async fn activate_and_deactivate_workflow_round_trip() {
+        let (state, _) = test_state().await;
+        let id = create_and_get_id(state.clone(), "Toggle", false).await;
+
+        // Activate
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/workflows/{id}/activate"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_success(),
+            "activate must succeed: {}",
+            resp.status()
+        );
+
+        // Re-fetch to confirm active=true
+        let detail_resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workflows/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let detail = body_json(detail_resp.into_body()).await;
+        assert_eq!(detail["active"], true);
+
+        // Deactivate
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/workflows/{id}/deactivate"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(resp.status().is_success());
+
+        let detail_resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workflows/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let detail = body_json(detail_resp.into_body()).await;
+        assert_eq!(detail["active"], false);
+    }
+
+    #[tokio::test]
+    async fn delete_workflow_unknown_returns_404() {
+        let (state, _) = test_state().await;
+        let id = uuid::Uuid::new_v4();
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/workflows/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_workflow_bad_uuid_returns_400() {
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/workflows/not-a-uuid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn create_workflow_invalid_graph_returns_400() {
+        let (state, _) = test_state().await;
+        // Graph missing required fields.
+        let body = serde_json::json!({
+            "name": "Bad",
+            "graph": { "version": 1 },
+            "active": false,
+        });
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/workflows")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn get_runs_for_existing_workflow_returns_empty_array() {
+        let (state, _) = test_state().await;
+        let id = create_and_get_id(state.clone(), "WithRuns", false).await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workflows/{id}/runs"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json, serde_json::json!([]));
+    }
+
+    // ── Pure helpers ─────────────────────────────────────────────────────
+
+    use super::{count_nodes, parse_graph, parse_uuid};
+
+    #[test]
+    fn parse_uuid_accepts_valid_string() {
+        let s = uuid::Uuid::new_v4().to_string();
+        assert!(parse_uuid(&s).is_ok());
+    }
+
+    #[test]
+    fn parse_uuid_rejects_garbage() {
+        let err = parse_uuid("not-a-uuid").unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1.contains("workflow ID"));
+    }
+
+    #[test]
+    fn parse_graph_round_trips_minimal_payload() {
+        let v = serde_json::json!({
+            "version": 1,
+            "nodes": [
+                { "id": "t1", "kind": "trigger", "config": { "type": "manual" } },
+                { "id": "a1", "kind": "action", "config": { "type": "assistant_turn", "prompt": "hi" } },
+            ],
+            "edges": [{ "from": "t1", "to": "a1" }],
+            "execution": { "max_steps": 100, "max_visits_per_node": 10 }
+        });
+        let g = parse_graph(&v).unwrap();
+        assert_eq!(g.nodes.len(), 2);
+        assert_eq!(g.edges.len(), 1);
+        let (triggers, actions) = count_nodes(&g.nodes);
+        assert_eq!(triggers, 1);
+        assert_eq!(actions, 1);
+    }
+
+    #[test]
+    fn parse_graph_rejects_missing_fields() {
+        let v = serde_json::json!({ "version": 1 });
+        let err = parse_graph(&v).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
 }
