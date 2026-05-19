@@ -114,3 +114,120 @@ impl InterfaceRunner for SlackInterface {
         SlackInterface::run(self).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_core::types::channels::SlackConfig;
+
+    fn config_with_tokens(bot: Option<&str>, app: Option<&str>) -> SlackConfig {
+        SlackConfig {
+            bot_token: bot.map(String::from),
+            app_token: app.map(String::from),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn ambient_tools_returns_empty_when_bot_token_missing() {
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap();
+        let storage = Arc::new(storage);
+        // We don't actually need a real Orchestrator for ambient_tools; build one
+        // off the in-memory storage so the struct fields are populated.
+        let orch = make_orchestrator(storage.clone()).await;
+        let iface = SlackInterface::new(config_with_tokens(None, Some("xapp-1")), orch, storage);
+        assert!(iface.ambient_tools().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ambient_tools_returns_empty_when_app_token_missing() {
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap();
+        let storage = Arc::new(storage);
+        let orch = make_orchestrator(storage.clone()).await;
+        let iface = SlackInterface::new(config_with_tokens(Some("xoxb-1"), None), orch, storage);
+        assert!(iface.ambient_tools().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ambient_tools_returns_eight_tools_when_both_tokens_present() {
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap();
+        let storage = Arc::new(storage);
+        let orch = make_orchestrator(storage.clone()).await;
+        let iface = SlackInterface::new(
+            config_with_tokens(Some("xoxb-1"), Some("xapp-1")),
+            orch,
+            storage,
+        );
+        let tools = iface.ambient_tools();
+        assert_eq!(tools.len(), 8, "should expose all 8 ambient skills");
+        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
+        assert!(names.iter().any(|n| n.contains("post")));
+        assert!(names.iter().any(|n| n.contains("react")));
+    }
+
+    #[tokio::test]
+    async fn with_transcription_sets_provider() {
+        use assistant_transcription::{
+            TranscriptionProvider, TranscriptionRequest, TranscriptionResult,
+        };
+
+        #[derive(Debug)]
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl TranscriptionProvider for DummyProvider {
+            fn name(&self) -> &str {
+                "dummy"
+            }
+            async fn transcribe(&self, _req: TranscriptionRequest) -> Result<TranscriptionResult> {
+                Ok(TranscriptionResult {
+                    text: "x".into(),
+                    language: None,
+                    duration_secs: None,
+                })
+            }
+        }
+
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap();
+        let storage = Arc::new(storage);
+        let orch = make_orchestrator(storage.clone()).await;
+        let iface = SlackInterface::new(SlackConfig::default(), orch, storage);
+        assert!(iface.transcription.is_none());
+        let iface = iface.with_transcription(Arc::new(DummyProvider), Some("en".into()));
+        assert!(iface.transcription.is_some());
+        assert_eq!(iface.transcription_language.as_deref(), Some("en"));
+    }
+
+    async fn make_orchestrator(storage: Arc<StorageLayer>) -> Arc<Orchestrator> {
+        use assistant_core::types::agent::AssistantConfig;
+        use assistant_core::{LlmProvider, MessageBus};
+        use assistant_llm_provider::scripted::ScriptedLlmProvider;
+        use assistant_storage::registry::SkillRegistry;
+        use assistant_tool_executor::ToolExecutor;
+        let cfg = AssistantConfig::default();
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(ScriptedLlmProvider::new());
+        let exec = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(cfg.clone()),
+        ));
+        let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+        Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            exec.clone(),
+            registry.clone(),
+            bus,
+            &cfg,
+        ))
+    }
+}

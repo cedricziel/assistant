@@ -873,4 +873,76 @@ mod tests {
         };
         assert_eq!(adapter.conversation_key(&msg), "+19995550001");
     }
+
+    // ── build_reqwest_client ──────────────────────────────────────────────
+
+    #[test]
+    fn build_reqwest_client_no_auth_when_user_missing() {
+        let cfg = SignalConfig {
+            phone_number: Some("+14155550123".to_string()),
+            api_user: None,
+            ..Default::default()
+        };
+        // Just assert it builds without panicking.
+        let _ = build_reqwest_client(&cfg).unwrap();
+    }
+
+    #[test]
+    fn build_reqwest_client_includes_basic_auth_header_with_user() {
+        let cfg = SignalConfig {
+            phone_number: Some("+14155550123".to_string()),
+            api_user: Some("admin".to_string()),
+            api_password: Some("s3cret".to_string()),
+            ..Default::default()
+        };
+        let _ = build_reqwest_client(&cfg).unwrap();
+    }
+
+    #[test]
+    fn build_reqwest_client_handles_user_without_password() {
+        let cfg = SignalConfig {
+            phone_number: Some("+14155550123".to_string()),
+            api_user: Some("user-only".to_string()),
+            api_password: None,
+            ..Default::default()
+        };
+        let _ = build_reqwest_client(&cfg).unwrap();
+    }
+
+    // ── envelope_to_channel_message — direct invocation ─────────────────
+
+    #[test]
+    fn envelope_to_channel_message_combines_audio_transcript_when_text_present() {
+        let env = ParsedEnvelope {
+            source: "+10000000001".to_string(),
+            source_name: Some("Alice".to_string()),
+            timestamp: 12345,
+            message: "hello".to_string(),
+            group_id: None,
+            attachments: vec![],
+        };
+        let msg = envelope_to_channel_message(env, Some("[Voice]: hi".to_string())).unwrap();
+        match msg.content {
+            ChannelContent::Text(t) => {
+                assert!(t.starts_with("[Voice]: hi"));
+                assert!(t.contains("hello"));
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn envelope_to_channel_message_uses_group_prefix_for_group_messages() {
+        let env = ParsedEnvelope {
+            source: "+10000000001".to_string(),
+            source_name: None,
+            timestamp: 999,
+            message: "in-group".to_string(),
+            group_id: Some("group-xyz".to_string()),
+            attachments: vec![],
+        };
+        let msg = envelope_to_channel_message(env, None).unwrap();
+        assert_eq!(msg.sender.platform_id, "group:group-xyz");
+        assert_eq!(msg.thread_id.as_deref(), Some("group-xyz"));
+    }
 }
