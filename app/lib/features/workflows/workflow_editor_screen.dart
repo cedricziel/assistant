@@ -1258,6 +1258,13 @@ class _MobileWorkflowEditor extends StatelessWidget {
           child: ReorderableListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             itemCount: nodes.length,
+            // Flutter 3.44 deprecated `onReorder` in favour of
+            // `onReorderItem` (which adjusts `newIndex` automatically). The
+            // new callback isn't available in Flutter 3.41, so we keep the
+            // manual `newIndex--` adjustment behind a deprecation ignore.
+            // Migrate to `onReorderItem` once the minimum Flutter version
+            // is bumped to >= 3.42.
+            // ignore: deprecated_member_use
             onReorder: (oldIndex, newIndex) {
               if (newIndex > oldIndex) newIndex--;
               final updated = List<EditorNode>.from(nodes);
