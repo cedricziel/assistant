@@ -157,3 +157,92 @@ impl AssistantInterface for Orchestrator {
         self.run_boot(conversation_id, interface).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// Minimal mock that only implements the two required trait methods
+    /// (`submit_turn_with_attachments` + `run_boot`). The other trait
+    /// methods fall back to the trait's default implementations, which is
+    /// what these tests exercise.
+    struct MinimalMock {
+        recorded_prompt: tokio::sync::Mutex<Option<String>>,
+    }
+
+    #[async_trait]
+    impl AssistantInterface for MinimalMock {
+        async fn register_token_sink(
+            &self,
+            _conversation_id: Uuid,
+            _sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
+        ) {
+        }
+
+        async fn submit_turn_with_attachments(
+            &self,
+            prompt: &str,
+            _conversation_id: Uuid,
+            _interface: Interface,
+            _timestamp: Option<chrono::DateTime<chrono::Utc>>,
+            _attachment_ids: Vec<Uuid>,
+        ) -> Result<TurnResult> {
+            *self.recorded_prompt.lock().await = Some(prompt.to_string());
+            Ok(TurnResult {
+                answer: format!("echo: {prompt}"),
+                attachments: vec![],
+                attachment_ids: vec![],
+                message_id: None,
+                had_errors: false,
+            })
+        }
+
+        async fn run_boot(&self, _conversation_id: Uuid, _interface: Interface) -> Result<bool> {
+            Ok(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn default_submit_turn_delegates_to_submit_turn_with_attachments() {
+        let mock = MinimalMock {
+            recorded_prompt: tokio::sync::Mutex::new(None),
+        };
+        let iface: Arc<dyn AssistantInterface> = Arc::new(mock);
+        let result = iface
+            .submit_turn("hello", Uuid::new_v4(), Interface::Cli, None)
+            .await
+            .unwrap();
+        assert_eq!(result.answer, "echo: hello");
+    }
+
+    #[tokio::test]
+    async fn default_submit_turn_with_request_id_delegates() {
+        let mock = MinimalMock {
+            recorded_prompt: tokio::sync::Mutex::new(None),
+        };
+        let iface: Arc<dyn AssistantInterface> = Arc::new(mock);
+        let result = iface
+            .submit_turn_with_request_id(
+                Uuid::new_v4(),
+                "world",
+                Uuid::new_v4(),
+                Interface::Cli,
+                None,
+                vec![],
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.answer, "echo: world");
+    }
+
+    #[tokio::test]
+    async fn default_cancel_turn_returns_false() {
+        let mock = MinimalMock {
+            recorded_prompt: tokio::sync::Mutex::new(None),
+        };
+        let iface: Arc<dyn AssistantInterface> = Arc::new(mock);
+        let cancelled = iface.cancel_turn(Uuid::new_v4()).await;
+        assert!(!cancelled);
+    }
+}

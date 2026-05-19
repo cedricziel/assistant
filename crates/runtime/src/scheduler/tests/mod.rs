@@ -29,6 +29,8 @@ mod dispatch;
 mod heartbeat;
 mod home_channel;
 mod identity;
+mod loop_body;
+mod prune;
 mod reap;
 
 // ── LLM mocking ────────────────────────────────────────────────────────────

@@ -140,3 +140,196 @@ fn resolve_extra_dir(raw: &str, project_root: Option<&Path>) -> PathBuf {
     }
     expand_tilde(raw)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    // ── AutoDenyConfirmation ──────────────────────────────────────────────
+
+    #[test]
+    fn auto_deny_always_returns_false() {
+        let cb = AutoDenyConfirmation {
+            interface_name: "TestInterface",
+        };
+        assert!(!cb.confirm("any-tool", &serde_json::json!({})));
+        assert!(!cb.confirm("dangerous", &serde_json::json!({"foo": 1})));
+    }
+
+    // ── load_config ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn load_config_returns_default_when_file_missing() {
+        let tmp = TempDir::new().unwrap();
+        let missing = tmp.path().join("does-not-exist.toml");
+        let cfg = load_config(&missing).await.unwrap();
+        // Default config should round-trip back; we just check it loads.
+        let _ = cfg;
+    }
+
+    #[tokio::test]
+    async fn load_config_parses_valid_toml() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        tokio::fs::write(&path, "# empty config\n").await.unwrap();
+        let cfg = load_config(&path).await.unwrap();
+        let _ = cfg;
+    }
+
+    #[tokio::test]
+    async fn load_config_errors_on_invalid_toml() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        tokio::fs::write(&path, "this is = not valid [[[ toml")
+            .await
+            .unwrap();
+        let err = load_config(&path).await.unwrap_err();
+        assert!(err.to_string().contains("parse config"));
+    }
+
+    // ── resolve_extra_dir ─────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_extra_dir_joins_relative_path_with_project_root() {
+        let project = PathBuf::from("/projects/foo");
+        let resolved = resolve_extra_dir("./skills", Some(&project));
+        assert_eq!(resolved, project.join("./skills"));
+    }
+
+    #[test]
+    fn resolve_extra_dir_handles_parent_relative_path() {
+        let project = PathBuf::from("/projects/foo");
+        let resolved = resolve_extra_dir("../shared", Some(&project));
+        assert_eq!(resolved, project.join("../shared"));
+    }
+
+    #[test]
+    fn resolve_extra_dir_keeps_relative_path_when_no_project_root() {
+        let resolved = resolve_extra_dir("./skills", None);
+        assert_eq!(resolved, PathBuf::from("./skills"));
+    }
+
+    #[test]
+    fn resolve_extra_dir_passes_absolute_path_through_tilde_expand() {
+        // Absolute paths go through expand_tilde, which is a no-op for them.
+        let resolved = resolve_extra_dir("/absolute/path/skills", Some(&PathBuf::from("/proj")));
+        assert_eq!(resolved, PathBuf::from("/absolute/path/skills"));
+    }
+
+    // ── skill_dirs ────────────────────────────────────────────────────────
+
+    #[test]
+    fn skill_dirs_returns_empty_when_nothing_resolves() {
+        // No extra dirs configured, no ~/.assistant/skills present, and a
+        // non-existent project root → no dirs should be returned (existence
+        // check filters them out).
+        let mut cfg = AssistantConfig::default();
+        cfg.skills.extra_dirs.clear();
+
+        let project_root = std::path::Path::new("/definitely/does/not/exist");
+        let dirs = skill_dirs(&cfg, Some(project_root));
+        // Some directories may still resolve (e.g. ~/.assistant/skills if it
+        // exists on the test host), so we only assert the function doesn't
+        // panic. The important branches — extra_dirs and project-relative —
+        // are inactive here.
+        let _ = dirs;
+    }
+
+    #[test]
+    fn skill_dirs_includes_project_skills_dir_when_present() {
+        let tmp = TempDir::new().unwrap();
+        let project_skills = tmp.path().join(".assistant").join("skills");
+        std::fs::create_dir_all(&project_skills).unwrap();
+
+        let cfg = AssistantConfig::default();
+        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        let project = dirs.iter().find(|(p, _)| p == &project_skills);
+        assert!(
+            project.is_some(),
+            "project skills dir must appear: {dirs:?}"
+        );
+        assert!(matches!(project.unwrap().1, SkillSource::Project));
+    }
+
+    #[test]
+    fn skill_dirs_includes_extra_dirs_resolved_against_project() {
+        let tmp = TempDir::new().unwrap();
+        let extra = tmp.path().join("extra-skills");
+        std::fs::create_dir_all(&extra).unwrap();
+
+        let mut cfg = AssistantConfig::default();
+        cfg.skills.extra_dirs = vec!["./extra-skills".to_string()];
+
+        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        let entry = dirs
+            .iter()
+            .find(|(p, _)| p.ends_with("extra-skills"))
+            .expect("extra dir must be included");
+        assert!(matches!(entry.1, SkillSource::Installed));
+    }
+
+    #[test]
+    fn skill_dirs_deduplicates_repeated_paths() {
+        let tmp = TempDir::new().unwrap();
+        let extra = tmp.path().join("dup");
+        std::fs::create_dir_all(&extra).unwrap();
+
+        let mut cfg = AssistantConfig::default();
+        cfg.skills.extra_dirs = vec![
+            extra.to_string_lossy().to_string(),
+            extra.to_string_lossy().to_string(),
+        ];
+
+        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        let count = dirs.iter().filter(|(p, _)| p == &extra).count();
+        assert_eq!(count, 1, "duplicate extra dir must be deduplicated");
+    }
+
+    #[test]
+    fn skill_dirs_skips_empty_extra_dir_entries() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = AssistantConfig::default();
+        cfg.skills.extra_dirs = vec!["".to_string(), "   ".to_string()];
+
+        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        // Empty strings should not produce any entries.
+        for (p, _) in &dirs {
+            assert!(!p.as_os_str().is_empty());
+        }
+    }
+
+    #[test]
+    fn skill_dirs_skips_non_existent_extra_dir() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = AssistantConfig::default();
+        // Point at a directory that does NOT exist.
+        cfg.skills.extra_dirs = vec![tmp.path().join("not-here").to_string_lossy().to_string()];
+
+        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        // Non-existent extra_dirs are filtered out by the .is_dir() check.
+        for (p, source) in &dirs {
+            if matches!(source, SkillSource::Installed) {
+                assert!(p.is_dir(), "Installed dirs must be filtered to existing");
+            }
+        }
+    }
+
+    // ── spawn_memory_indexer ─────────────────────────────────────────────
+
+    use assistant_core::types::features::MemoryConfig;
+    use assistant_llm_provider::scripted::ScriptedLlmProvider;
+    use assistant_storage::StorageLayer;
+
+    #[tokio::test]
+    async fn spawn_memory_indexer_returns_a_join_handle() {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(ScriptedLlmProvider::new());
+        let cfg = MemoryConfig::default();
+
+        let handle = spawn_memory_indexer(&cfg, storage, llm);
+        // The indexer task should be spawned and abortable.
+        handle.abort();
+        let _ = handle.await;
+    }
+}

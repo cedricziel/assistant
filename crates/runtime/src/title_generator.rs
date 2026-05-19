@@ -1119,4 +1119,115 @@ mod tests {
         assert!(!is_eligible(1, 300, &cfg, false));
         assert!(is_eligible(1, 600, &cfg, false));
     }
+
+    // ── clean_title — additional branch coverage ───────────────────────────
+
+    #[test]
+    fn clean_title_strips_title_prefix_with_capital_t() {
+        assert_eq!(clean_title("Title: Project Alpha"), "Project Alpha");
+    }
+
+    #[test]
+    fn clean_title_strips_title_prefix_lowercase() {
+        assert_eq!(clean_title("title: dinner plans"), "dinner plans");
+    }
+
+    #[test]
+    fn clean_title_strips_curly_quotes() {
+        assert_eq!(clean_title("“Hello World”"), "Hello World");
+        assert_eq!(clean_title("‘Hello World’"), "Hello World");
+    }
+
+    #[test]
+    fn clean_title_strips_straight_single_quotes() {
+        assert_eq!(clean_title("'Hello World'"), "Hello World");
+    }
+
+    #[test]
+    fn clean_title_strips_trailing_period() {
+        assert_eq!(clean_title("Done."), "Done");
+    }
+
+    #[test]
+    fn clean_title_preserves_trailing_ellipsis() {
+        // Two-or-more trailing dots are NOT stripped.
+        assert_eq!(clean_title("To be continued..."), "To be continued...");
+    }
+
+    #[test]
+    fn clean_title_caps_overlong_input() {
+        let long = "x".repeat(500);
+        let out = clean_title(&long);
+        assert!(out.chars().count() <= MAX_TITLE_CHARS);
+    }
+
+    #[test]
+    fn clean_title_trims_surrounding_whitespace() {
+        assert_eq!(clean_title("   spaced   "), "spaced");
+    }
+
+    // ── push_truncated ────────────────────────────────────────────────────
+
+    #[test]
+    fn push_truncated_keeps_short_text_intact() {
+        let mut buf = String::new();
+        push_truncated(&mut buf, "hello");
+        assert_eq!(buf, "hello");
+    }
+
+    #[test]
+    fn push_truncated_caps_long_text_with_ellipsis() {
+        let mut buf = String::new();
+        let long = "x".repeat(MAX_HISTORY_CHARS);
+        push_truncated(&mut buf, &long);
+        // Truncated to MAX_HISTORY_CHARS / 2 chars + '…'.
+        assert!(buf.ends_with('…'));
+        assert!(buf.chars().count() <= MAX_HISTORY_CHARS / 2 + 1);
+    }
+
+    // ── backoff_for_delivery ──────────────────────────────────────────────
+
+    #[test]
+    fn backoff_for_delivery_first_attempt() {
+        // delivery=1 → index 0 → first backoff value in RETRY_BACKOFF.
+        let d = backoff_for_delivery(1);
+        assert_eq!(d, RETRY_BACKOFF[0]);
+    }
+
+    #[test]
+    fn backoff_for_delivery_beyond_table_clamps_to_last() {
+        let last = *RETRY_BACKOFF.last().unwrap();
+        assert_eq!(backoff_for_delivery(999), last);
+    }
+
+    #[test]
+    fn backoff_for_delivery_zero_is_safe() {
+        // delivery=0 saturates to 0 → index 0 → first backoff.
+        let d = backoff_for_delivery(0);
+        assert_eq!(d, RETRY_BACKOFF[0]);
+    }
+
+    // ── message_to_chat_history ──────────────────────────────────────────
+
+    #[test]
+    fn message_to_chat_history_maps_each_role() {
+        use assistant_core::types::conversation::{Message, MessageRole};
+        let conv = uuid::Uuid::new_v4();
+        for (role, expected) in [
+            (MessageRole::User, ChatRole::User),
+            (MessageRole::Assistant, ChatRole::Assistant),
+            (MessageRole::System, ChatRole::System),
+            (MessageRole::Tool, ChatRole::Tool),
+        ] {
+            let m = Message::new(conv, role, "x");
+            let chm = message_to_chat_history(&m);
+            match chm {
+                ChatHistoryMessage::Text { role: r, content } => {
+                    assert_eq!(r, expected);
+                    assert_eq!(content, "x");
+                }
+                _ => panic!("expected Text variant"),
+            }
+        }
+    }
 }

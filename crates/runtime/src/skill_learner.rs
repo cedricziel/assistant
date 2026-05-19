@@ -419,4 +419,89 @@ mod tests {
         let skill = skill.unwrap();
         assert_eq!(skill.description, "Search and summarize codebase patterns");
     }
+
+    // ── format_history_for_judge ─────────────────────────────────────────
+
+    #[test]
+    fn format_history_for_judge_renders_user_and_assistant_text() {
+        let history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "hello".to_string(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "hi there".to_string(),
+            },
+        ];
+        let out = format_history_for_judge(&history);
+        assert!(out.contains("USER: hello"));
+        assert!(out.contains("ASSISTANT: hi there"));
+    }
+
+    #[test]
+    fn format_history_for_judge_skips_system_and_tool_text() {
+        let history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::System,
+                content: "system msg".to_string(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Tool,
+                content: "tool msg".to_string(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "hi".to_string(),
+            },
+        ];
+        let out = format_history_for_judge(&history);
+        assert!(!out.contains("system msg"));
+        assert!(!out.contains("tool msg"));
+        assert!(out.contains("USER: hi"));
+    }
+
+    #[test]
+    fn format_history_for_judge_renders_multimodal_placeholder() {
+        let history = vec![ChatHistoryMessage::MultimodalUser { content: vec![] }];
+        let out = format_history_for_judge(&history);
+        assert_eq!(out, "USER: [multimodal content]");
+    }
+
+    #[test]
+    fn format_history_for_judge_renders_tool_calls_and_results() {
+        use assistant_core::ToolCallItem;
+        let history = vec![
+            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+                name: "shell".to_string(),
+                params: serde_json::json!({"cmd": "ls"}),
+                id: Some("c1".to_string()),
+            }]),
+            ChatHistoryMessage::ToolResult {
+                name: "shell".to_string(),
+                content: "file1\nfile2".to_string(),
+            },
+        ];
+        let out = format_history_for_judge(&history);
+        assert!(out.contains("TOOL_CALL: shell"));
+        assert!(out.contains("\"cmd\":\"ls\""));
+        assert!(out.contains("TOOL_RESULT[shell]:"));
+        assert!(out.contains("file1"));
+    }
+
+    #[test]
+    fn format_history_for_judge_truncates_long_tool_result_to_200_chars() {
+        let big = "x".repeat(1000);
+        let history = vec![ChatHistoryMessage::ToolResult {
+            name: "shell".to_string(),
+            content: big,
+        }];
+        let out = format_history_for_judge(&history);
+        // Output line is "TOOL_RESULT[shell]: " (20 chars) + at most 200 chars of content.
+        let result_chars: usize = out.chars().count();
+        assert!(
+            result_chars <= 20 + 200,
+            "expected result truncated to ~220 chars; got {result_chars}"
+        );
+    }
 }

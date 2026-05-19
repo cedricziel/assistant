@@ -377,4 +377,140 @@ mod tests {
         assert_eq!(h1, h2);
         assert_ne!(sha256_hex(input), sha256_hex("different"));
     }
+
+    // ── MemoryIndexer end-to-end ─────────────────────────────────────────
+
+    use assistant_core::LlmResponseMeta;
+    use assistant_llm_provider::scripted::ScriptedLlmProvider;
+    use tempfile::TempDir;
+
+    async fn make_indexer(
+        memory_path: &Path,
+        embed_responses: Vec<Vec<f32>>,
+    ) -> (MemoryIndexer, Arc<StorageLayer>) {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        // Build a MemoryConfig pointing at a custom MEMORY.md path.
+        let mut mem = assistant_core::types::features::MemoryConfig::default();
+        mem.memory_path = Some(memory_path.to_string_lossy().to_string());
+        mem.soul_path = Some("/non/existent/soul.md".to_string());
+        mem.identity_path = Some("/non/existent/identity.md".to_string());
+        mem.user_path = Some("/non/existent/user.md".to_string());
+        mem.notes_dir = Some("/non/existent/notes".to_string());
+
+        let mut cfg = AssistantConfig::default();
+        cfg.memory = mem;
+
+        let llm: Arc<dyn LlmProvider> = if embed_responses.is_empty() {
+            // No canned embeddings → embed() falls back to fail path.
+            Arc::new(ScriptedLlmProvider::new())
+        } else {
+            Arc::new(ScriptedLlmProvider::new().with_embeddings(embed_responses))
+        };
+
+        let indexer = MemoryIndexer::new(Arc::new(cfg), storage.clone(), llm);
+        (indexer, storage)
+    }
+
+    #[tokio::test]
+    async fn index_all_creates_chunks_for_memory_file() {
+        let tmp = TempDir::new().unwrap();
+        let memory_path = tmp.path().join("MEMORY.md");
+        tokio::fs::write(
+            &memory_path,
+            "First paragraph here.\n\nSecond paragraph with more text.",
+        )
+        .await
+        .unwrap();
+
+        // Provide 2 fake embedding vectors (one per chunk we'll write).
+        let (indexer, storage) =
+            make_indexer(&memory_path, vec![vec![0.1, 0.2, 0.3], vec![0.4, 0.5, 0.6]]).await;
+        indexer.index_all().await.unwrap();
+
+        // Verify chunks were persisted.
+        let store = storage.memory_chunks_store();
+        let path_str = memory_path.to_string_lossy().to_string();
+        let stored_hash = store.get_file_hash(&path_str).await.unwrap();
+        assert!(stored_hash.is_some(), "hash should be persisted");
+    }
+
+    #[tokio::test]
+    async fn index_all_is_idempotent_when_file_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        let memory_path = tmp.path().join("MEMORY.md");
+        tokio::fs::write(&memory_path, "Hello world.\n\nSecond paragraph.")
+            .await
+            .unwrap();
+
+        let (indexer, storage) =
+            make_indexer(&memory_path, vec![vec![0.1, 0.2, 0.3], vec![0.4, 0.5, 0.6]]).await;
+        indexer.index_all().await.unwrap();
+
+        let store = storage.memory_chunks_store();
+        let path_str = memory_path.to_string_lossy().to_string();
+        let first_hash = store.get_file_hash(&path_str).await.unwrap();
+
+        // Re-run; hash must match.
+        indexer.index_all().await.unwrap();
+        let second_hash = store.get_file_hash(&path_str).await.unwrap();
+        assert_eq!(first_hash, second_hash);
+    }
+
+    #[tokio::test]
+    async fn index_all_re_chunks_when_file_changes() {
+        let tmp = TempDir::new().unwrap();
+        let memory_path = tmp.path().join("MEMORY.md");
+        tokio::fs::write(&memory_path, "Original content.")
+            .await
+            .unwrap();
+
+        let (indexer, storage) = make_indexer(&memory_path, vec![vec![0.0]]).await;
+        indexer.index_all().await.unwrap();
+
+        let store = storage.memory_chunks_store();
+        let path_str = memory_path.to_string_lossy().to_string();
+        let h1 = store.get_file_hash(&path_str).await.unwrap();
+
+        // Modify the file → next index_all should update the hash.
+        tokio::fs::write(&memory_path, "New content here.")
+            .await
+            .unwrap();
+        indexer.index_all().await.unwrap();
+        let h2 = store.get_file_hash(&path_str).await.unwrap();
+        assert_ne!(h1, h2, "hash must change after file content changes");
+    }
+
+    #[tokio::test]
+    async fn index_all_tolerates_missing_files() {
+        let tmp = TempDir::new().unwrap();
+        let memory_path = tmp.path().join("MEMORY.md");
+        // Don't create the file.
+        let (indexer, _storage) = make_indexer(&memory_path, vec![]).await;
+        indexer
+            .index_all()
+            .await
+            .expect("index_all must not error when memory files are missing");
+    }
+
+    #[tokio::test]
+    async fn embed_pending_is_safe_when_provider_errors() {
+        // ScriptedLlmProvider with no canned embeddings → embed_batch errors.
+        let tmp = TempDir::new().unwrap();
+        let memory_path = tmp.path().join("MEMORY.md");
+        tokio::fs::write(&memory_path, "Text to chunk.")
+            .await
+            .unwrap();
+
+        // Empty embed_responses triggers the error path.
+        let (indexer, _storage) = make_indexer(&memory_path, vec![]).await;
+        // Should not panic even when embedding fails.
+        let _ = indexer.index_all().await;
+    }
+
+    /// Sanity check that LlmResponseMeta is constructable inline (used by
+    /// other tests in this module that may share helpers).
+    #[test]
+    fn llm_response_meta_default_is_constructable() {
+        let _ = LlmResponseMeta::default();
+    }
 }

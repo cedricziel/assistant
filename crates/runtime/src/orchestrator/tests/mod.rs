@@ -198,6 +198,7 @@ impl ToolHandler for MockExtTool {
 }
 
 mod bus_worker;
+mod dispatch;
 mod end_turn;
 mod history;
 mod misc;
