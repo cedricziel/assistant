@@ -30,7 +30,9 @@ whatlang = { workspace = true }
 stop-words = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+wiremock = { workspace = true }
 
 # Panic-free contract: all non-test code in this crate either propagates
 # errors via `Result<_, anyhow::Error>` / `ToolOutput::error(...)`, or
