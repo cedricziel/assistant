@@ -310,3 +310,244 @@ async fn cancel_turn_via_orchestrator_engine_returns_outcome() {
     let outcome = orch.cancel_turn(req_id).await;
     assert!(matches!(outcome, CancelOutcome::Cancelled));
 }
+
+#[tokio::test]
+async fn tools_call_run_prompt_orchestrator_error_returns_internal_error() {
+    let orch = Arc::new(
+        StubOrchestrationEngine::new().queue_turn(Err(anyhow::anyhow!("backend exploded"))),
+    ) as Arc<dyn OrchestrationEngine>;
+    let (_, e, r) = default_stubs();
+    let resp = call(
+        make_request(
+            14,
+            "tools/call",
+            json!({"name": "run-prompt", "arguments": {"prompt": "hi"}}),
+        ),
+        orch,
+        e,
+        r,
+    )
+    .await;
+    let err = resp.error.expect("orchestrator error must surface");
+    assert_eq!(err.code, -32603);
+    assert!(err.message.contains("backend exploded"));
+}
+
+#[tokio::test]
+async fn tools_call_install_skill_missing_source_returns_invalid_params() {
+    let (o, e, r) = default_stubs();
+    let resp = call(
+        make_request(
+            15,
+            "tools/call",
+            json!({"name": "install-skill", "arguments": {}}),
+        ),
+        o,
+        e,
+        r,
+    )
+    .await;
+    let err = resp.error.expect("missing source must error");
+    assert_eq!(err.code, -32602);
+    assert!(err.message.contains("source"));
+}
+
+#[tokio::test]
+async fn resources_list_includes_auxiliary_files_from_skill_dir() {
+    use std::fs;
+    // Build a skill on disk with a scripts/ and references/ subdir, then
+    // load it through InMemorySkillCatalog so resources/list sees its
+    // auxiliary files.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("foo");
+    fs::create_dir_all(dir.join("scripts")).unwrap();
+    fs::create_dir_all(dir.join("references")).unwrap();
+    fs::write(dir.join("scripts").join("run.sh"), "#!/bin/sh\n").unwrap();
+    fs::write(dir.join("references").join("notes.md"), "notes").unwrap();
+
+    let mut skill = make_skill("foo");
+    skill.dir = dir;
+
+    let (o, e, _) = default_stubs();
+    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![skill])) as Arc<dyn SkillCatalog>;
+    let resp = call(make_request(16, "resources/list", json!({})), o, e, reg).await;
+    assert!(resp.error.is_none(), "{resp:?}");
+    let resources = resp.result.unwrap()["resources"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let uris: Vec<String> = resources
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap().to_string())
+        .collect();
+    assert!(uris.iter().any(|u| u.contains("scripts/run.sh")));
+    assert!(uris.iter().any(|u| u.contains("references/notes.md")));
+}
+
+#[tokio::test]
+async fn resources_read_skills_list_returns_index() {
+    let (o, e, _) = default_stubs();
+    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![
+        make_skill("alpha"),
+        make_skill("beta"),
+    ])) as Arc<dyn SkillCatalog>;
+    let resp = call(
+        make_request(17, "resources/read", json!({"uri": "skills://list"})),
+        o,
+        e,
+        reg,
+    )
+    .await;
+    assert!(resp.error.is_none(), "{resp:?}");
+    let text = resp.result.unwrap()["contents"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(text.contains("alpha"));
+    assert!(text.contains("beta"));
+}
+
+#[tokio::test]
+async fn resources_read_auxiliary_file_returns_contents() {
+    use std::fs;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("foo");
+    fs::create_dir_all(dir.join("scripts")).unwrap();
+    fs::write(dir.join("scripts").join("run.sh"), "echo hello").unwrap();
+
+    let mut skill = make_skill("foo");
+    skill.dir = dir;
+
+    let (o, e, _) = default_stubs();
+    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![skill])) as Arc<dyn SkillCatalog>;
+    let resp = call(
+        make_request(
+            18,
+            "resources/read",
+            json!({"uri": "skills://foo/scripts/run.sh"}),
+        ),
+        o,
+        e,
+        reg,
+    )
+    .await;
+    assert!(resp.error.is_none(), "{resp:?}");
+    let text = resp.result.unwrap()["contents"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(text, "echo hello");
+}
+
+#[tokio::test]
+async fn resources_read_aux_file_missing_returns_error() {
+    use std::fs;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("foo");
+    fs::create_dir_all(&dir).unwrap();
+
+    let mut skill = make_skill("foo");
+    skill.dir = dir;
+
+    let (o, e, _) = default_stubs();
+    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![skill])) as Arc<dyn SkillCatalog>;
+    let resp = call(
+        make_request(
+            19,
+            "resources/read",
+            json!({"uri": "skills://foo/scripts/missing.sh"}),
+        ),
+        o,
+        e,
+        reg,
+    )
+    .await;
+    let err = resp.error.expect("missing aux file must error");
+    assert_eq!(err.code, -32602);
+}
+
+#[tokio::test]
+async fn resources_read_aux_file_for_unknown_skill_returns_error() {
+    let (o, e, r) = default_stubs();
+    let resp = call(
+        make_request(
+            20,
+            "resources/read",
+            json!({"uri": "skills://ghost/scripts/run.sh"}),
+        ),
+        o,
+        e,
+        r,
+    )
+    .await;
+    let err = resp.error.expect("unknown skill must error");
+    assert_eq!(err.code, -32602);
+}
+
+#[tokio::test]
+async fn resources_read_invalid_segments_returns_error() {
+    let (o, e, r) = default_stubs();
+    // 2-segment URI is neither `skills://list`, nor `skills://<name>`,
+    // nor a 3-segment auxiliary path — falls into the catch-all branch.
+    let resp = call(
+        make_request(21, "resources/read", json!({"uri": "skills://foo/bar"})),
+        o,
+        e,
+        r,
+    )
+    .await;
+    let err = resp.error.expect("invalid resource URI must error");
+    assert_eq!(err.code, -32602);
+}
+
+#[tokio::test]
+async fn resources_read_non_skills_uri_returns_error() {
+    let (o, e, r) = default_stubs();
+    let resp = call(
+        make_request(22, "resources/read", json!({"uri": "https://example.com"})),
+        o,
+        e,
+        r,
+    )
+    .await;
+    let err = resp.error.expect("non-skills URI must error");
+    assert_eq!(err.code, -32602);
+    assert!(err.message.contains("Unknown resource URI"));
+}
+
+#[tokio::test]
+async fn unknown_notification_returns_empty_ok() {
+    let (o, e, r) = default_stubs();
+    // Notifications have no id; per JSON-RPC, the server should return
+    // a benign empty result rather than `-32601`.
+    let req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: None,
+        method: "ghost/notify".to_string(),
+        params: json!({}),
+    };
+    let resp = call(req, o, e, r).await;
+    assert!(resp.error.is_none(), "{resp:?}");
+}
+
+#[tokio::test]
+async fn tools_call_dispatcher_error_surfaces_internal_error() {
+    let (o, _, r) = default_stubs();
+    let exec =
+        StubToolDispatcher::new().queue_error("explode", anyhow::anyhow!("dispatcher failed"));
+    let exec_dyn: Arc<dyn ToolDispatcher> = Arc::new(exec);
+    let resp = call(
+        make_request(
+            23,
+            "tools/call",
+            json!({"name": "explode", "arguments": {}}),
+        ),
+        o,
+        exec_dyn,
+        r,
+    )
+    .await;
+    let err = resp.error.expect("dispatcher Err must propagate");
+    assert_eq!(err.code, -32603);
+    assert!(err.message.contains("dispatcher failed"));
+}
