@@ -441,4 +441,64 @@ mod tests {
         assert_eq!(v["k1"], "v1");
         assert_eq!(v["k2"], 42);
     }
+
+    #[test]
+    fn any_value_to_json_handles_double_and_bytes_and_map() {
+        // Double.
+        assert_eq!(
+            any_value_to_json(&AnyValue::Double(1.5)),
+            serde_json::json!(1.5)
+        );
+        // Bytes renders via Debug.
+        let bytes = AnyValue::Bytes(Box::new(vec![1u8, 2, 3]));
+        match any_value_to_json(&bytes) {
+            serde_json::Value::String(s) => assert!(s.contains("1") && s.contains("3")),
+            other => panic!("expected string Debug repr, got {other:?}"),
+        }
+        // Map nests recursively.
+        let map_val = AnyValue::Map(Box::new(
+            vec![("inner".into(), AnyValue::Int(99))]
+                .into_iter()
+                .collect(),
+        ));
+        let v = any_value_to_json(&map_val);
+        assert_eq!(v["inner"], 99);
+    }
+
+    #[test]
+    fn any_value_to_string_handles_bytes_list_map() {
+        let bytes = AnyValue::Bytes(Box::new(vec![1u8, 2]));
+        let s = any_value_to_string(&bytes);
+        assert!(s.contains("1"));
+        let list = AnyValue::ListAny(vec![AnyValue::Int(1), AnyValue::Int(2)].into());
+        let s = any_value_to_string(&list);
+        assert!(s.contains("1"));
+        let map_val = AnyValue::Map(Box::new(
+            vec![("k".into(), AnyValue::Int(1))].into_iter().collect(),
+        ));
+        let s = any_value_to_string(&map_val);
+        assert!(s.contains("k"));
+    }
+
+    #[test]
+    fn severity_to_i32_covers_all_severity_variants() {
+        // Already covers 8 variants in severity_to_i32_maps_across_severity_classes.
+        // Add the remaining intermediate severities to exercise full match arms.
+        assert_eq!(severity_to_i32(Severity::Trace2), 2);
+        assert_eq!(severity_to_i32(Severity::Trace3), 3);
+        assert_eq!(severity_to_i32(Severity::Debug2), 6);
+        assert_eq!(severity_to_i32(Severity::Debug3), 7);
+        assert_eq!(severity_to_i32(Severity::Debug4), 8);
+        assert_eq!(severity_to_i32(Severity::Info2), 10);
+        assert_eq!(severity_to_i32(Severity::Info3), 11);
+        assert_eq!(severity_to_i32(Severity::Info4), 12);
+        assert_eq!(severity_to_i32(Severity::Warn2), 14);
+        assert_eq!(severity_to_i32(Severity::Warn3), 15);
+        assert_eq!(severity_to_i32(Severity::Warn4), 16);
+        assert_eq!(severity_to_i32(Severity::Error2), 18);
+        assert_eq!(severity_to_i32(Severity::Error3), 19);
+        assert_eq!(severity_to_i32(Severity::Error4), 20);
+        assert_eq!(severity_to_i32(Severity::Fatal2), 22);
+        assert_eq!(severity_to_i32(Severity::Fatal3), 23);
+    }
 }
