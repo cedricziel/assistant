@@ -879,6 +879,13 @@ mod tests {
     }
 
     // -- Integration tests (require Docker) ---------------------------------
+    //
+    // These tests opportunistically spin up a NATS JetStream container via
+    // testcontainers. When Docker isn't available (e.g. a contributor laptop
+    // without it running) `start_nats` returns `None` and each test exits
+    // cleanly as a no-op — so `cargo test` still passes locally. On CI
+    // (ubuntu-latest), Docker is present and the tests exercise the real
+    // MessageBus implementation, contributing to the coverage gate.
 
     use testcontainers::core::IntoContainerPort;
     use testcontainers::runners::AsyncRunner;
@@ -887,30 +894,23 @@ mod tests {
 
     const NATS_PORT: u16 = 4222;
 
-    /// Start a NATS container with JetStream enabled, return container handle
-    /// and the connection URL.
-    async fn start_nats() -> (ContainerAsync<Nats>, String) {
+    /// Try to start a NATS container with JetStream enabled.
+    /// Returns `None` when Docker is unavailable so tests can skip cleanly.
+    async fn start_nats() -> Option<(ContainerAsync<Nats>, String)> {
         let cmd = NatsServerCmd::default().with_jetstream();
-        let container = Nats::default()
-            .with_cmd(&cmd)
-            .start()
-            .await
-            .expect("failed to start NATS container");
-
-        let host = container.get_host().await.expect("no container host");
-        let port = container
-            .get_host_port_ipv4(NATS_PORT.tcp())
-            .await
-            .expect("no mapped port");
+        let container = Nats::default().with_cmd(&cmd).start().await.ok()?;
+        let host = container.get_host().await.ok()?;
+        let port = container.get_host_port_ipv4(NATS_PORT.tcp()).await.ok()?;
         let url = format!("nats://{host}:{port}");
-
-        (container, url)
+        Some((container, url))
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker"]
     async fn test_publish_and_claim() {
-        let (_container, url) = start_nats().await;
+        let Some((_container, url)) = start_nats().await else {
+            eprintln!("docker unavailable; skipping");
+            return;
+        };
         let bus = NatsMessageBus::new(&url).await.unwrap();
 
         let payload = serde_json::json!({"action": "greet"});
@@ -932,9 +932,11 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker"]
     async fn test_publish_with_metadata() {
-        let (_container, url) = start_nats().await;
+        let Some((_container, url)) = start_nats().await else {
+            eprintln!("docker unavailable; skipping");
+            return;
+        };
         let bus = NatsMessageBus::new(&url).await.unwrap();
 
         let conv_id = Uuid::new_v4();
@@ -965,9 +967,11 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker"]
     async fn test_claim_filtered_by_batch() {
-        let (_container, url) = start_nats().await;
+        let Some((_container, url)) = start_nats().await else {
+            eprintln!("docker unavailable; skipping");
+            return;
+        };
         let bus = NatsMessageBus::new(&url).await.unwrap();
 
         let batch_a = Uuid::new_v4();
@@ -1018,9 +1022,11 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker"]
     async fn test_ack_nack_fail() {
-        let (_container, url) = start_nats().await;
+        let Some((_container, url)) = start_nats().await else {
+            eprintln!("docker unavailable; skipping");
+            return;
+        };
         let bus = NatsMessageBus::new(&url).await.unwrap();
 
         // Publish three messages
@@ -1058,9 +1064,11 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker"]
     async fn test_claim_returns_none_when_empty() {
-        let (_container, url) = start_nats().await;
+        let Some((_container, url)) = start_nats().await else {
+            eprintln!("docker unavailable; skipping");
+            return;
+        };
         let bus = NatsMessageBus::new(&url).await.unwrap();
 
         let result = bus.claim("empty.topic", "w1").await.unwrap();
@@ -1068,9 +1076,11 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker"]
     async fn consumer_carries_max_deliver_cap() {
-        let (_container, url) = start_nats().await;
+        let Some((_container, url)) = start_nats().await else {
+            eprintln!("docker unavailable; skipping");
+            return;
+        };
         let bus = NatsMessageBus::new(&url).await.unwrap();
 
         let mut consumer = bus.consumer_for("worker", "cap.topic").await.unwrap();
@@ -1086,9 +1096,11 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker"]
     async fn consumer_for_reconciles_legacy_unbounded_config() {
-        let (_container, url) = start_nats().await;
+        let Some((_container, url)) = start_nats().await else {
+            eprintln!("docker unavailable; skipping");
+            return;
+        };
         let bus = NatsMessageBus::new(&url).await.unwrap();
 
         // Pre-create a consumer with the OLD (unbounded) config to simulate

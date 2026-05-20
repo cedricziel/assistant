@@ -46,7 +46,6 @@ crates = [
     # reaches the floor sustainably; one-way ratchet.
     #
     # Last measured (2026-05-18 via `make coverage`):
-    "bus-nats",                          # 34.4% (delta -45.6%)
     "interface-cli",                     # 28.9% (delta -51.1%)
     "mcp-client",                        # 78.7% (delta -1.3%)
 ]
@@ -74,6 +73,7 @@ crates = [
 #   opentelemetry-exporter-iceberg (81.2%) — log + metric e2e exports via SdkMeterProvider/SdkLoggerProvider, partition::granularity_to_partition_int + partition_spec, catalog::warehouse_path + build_file_io + build_catalog + ensure_namespace
 #   opentelemetry-exporter-sqlite (80.5%) — metric e2e exports via SdkMeterProvider over file-backed SQLite + log helper-fn coverage (any_value_to_json/Map/Bytes, all severity variants)
 #   interfaces    (80.9%) — wiremock-driven tests for all 8 slack ambient skills (post/react/delete/update/list/get-history/lookup-user/send-dm), slack per-turn tools (reply/react/upload three-step flow), matrix tools (build_matrix_tools + reply handler), nextcloud runner (new/with_shutdown/with_transcription/run-error paths), mattermost tools success paths (full upload flow + already-exists branch), common.rs (rand_jitter + sleep_backoff cap/early-cancel)
+#   bus-nats      (86.0%) — un-ignored the testcontainers-based JetStream integration tests; start_nats now returns Option so they skip cleanly when Docker is unavailable. CI ubuntu-latest has Docker so these tests exercise publish/claim/claim_filtered/ack/nack/fail/consumer_for/parse_nats_message.
 
 # File path regex patterns excluded from coverage measurement.
 # Passed to `cargo llvm-cov --ignore-filename-regex` as a joined alternation.
