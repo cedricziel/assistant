@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.163](https://github.com/cedricziel/assistant/compare/v0.1.162...v0.1.163) (2026-05-20)
+
+
+### Features
+
+* **ci:** promote opentelemetry-exporter-iceberg past 80% floor (Phase 11) ([#894](https://github.com/cedricziel/assistant/issues/894)) ([c5d0ab3](https://github.com/cedricziel/assistant/commit/c5d0ab35b8db7b5f4e5880a570c9af05548a22e4))
+* **ci:** promote opentelemetry-exporter-sqlite past 80% floor (Phase 11) ([#895](https://github.com/cedricziel/assistant/issues/895)) ([7f5a142](https://github.com/cedricziel/assistant/commit/7f5a1422794834f1002c54949a2dd8e73f04866f))
+* **ci:** promote web-ui past 80% floor (Phase 11) ([#887](https://github.com/cedricziel/assistant/issues/887)) ([d1f02df](https://github.com/cedricziel/assistant/commit/d1f02dfc73b44b28d8c0bcffa0cbe7d9a3cf7597))
+
 ## [0.1.162](https://github.com/cedricziel/assistant/compare/v0.1.161...v0.1.162) (2026-05-19)
 
 
