@@ -29,6 +29,31 @@ fn test_config(warehouse: &str) -> IcebergConfig {
     }
 }
 
+use opentelemetry::logs::{AnyValue, LogRecord as _, Logger as _, LoggerProvider as _, Severity};
+use opentelemetry_exporter_iceberg::IcebergLogExporter;
+use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord, SdkLoggerProvider};
+
+fn new_log_record() -> SdkLogRecord {
+    let provider = SdkLoggerProvider::builder().build();
+    let logger = provider.logger("test");
+    logger.create_log_record()
+}
+
+fn make_log(severity: Severity, body: &str, target: &str) -> (SdkLogRecord, InstrumentationScope) {
+    let mut record = new_log_record();
+    record.set_severity_number(severity);
+    record.set_severity_text(match severity {
+        Severity::Info | Severity::Info2 | Severity::Info3 | Severity::Info4 => "INFO",
+        Severity::Warn | Severity::Warn2 | Severity::Warn3 | Severity::Warn4 => "WARN",
+        Severity::Error | Severity::Error2 | Severity::Error3 | Severity::Error4 => "ERROR",
+        _ => "TRACE",
+    });
+    record.set_body(AnyValue::String(body.to_string().into()));
+    record.set_timestamp(SystemTime::UNIX_EPOCH);
+    record.set_target(target.to_string());
+    (record, InstrumentationScope::builder("test").build())
+}
+
 fn make_span(name: &'static str) -> SpanData {
     let trace_id = TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").unwrap();
     let span_id = SpanId::from_hex("00f067aa0ba902b7").unwrap();
@@ -144,6 +169,103 @@ async fn span_exported_with_day_partition_succeeds() {
         !parquet_files.is_empty(),
         "at least one Parquet file must be written for the partitioned export"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Log exporter tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn log_is_written_and_queryable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let warehouse = dir.path().to_str().unwrap();
+    let config = test_config(warehouse);
+
+    let exporter = IcebergLogExporter::new(config)
+        .await
+        .expect("IcebergLogExporter::new");
+
+    let (record, scope) = make_log(Severity::Info, "hello-log-line", "test-target");
+    let items = vec![(record, scope)];
+    let refs: Vec<(&SdkLogRecord, &InstrumentationScope)> =
+        items.iter().map(|(r, s)| (r, s)).collect();
+    let batch = LogBatch::new(&refs);
+
+    let result: OTelSdkResult = exporter.export(batch).await;
+    assert!(result.is_ok(), "log export must succeed: {result:?}");
+
+    // A Parquet file should have landed in the warehouse.
+    let parquet_files = find_parquet_files(warehouse);
+    assert!(
+        !parquet_files.is_empty(),
+        "at least one Parquet file must be written for the log export"
+    );
+}
+
+#[tokio::test]
+async fn log_with_day_partition_succeeds() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let warehouse = dir.path().to_str().unwrap();
+    let mut config = test_config(warehouse);
+    config.partition = PartitionGranularity::Day;
+
+    let exporter = IcebergLogExporter::new(config)
+        .await
+        .expect("IcebergLogExporter::new");
+
+    let (record, scope) = make_log(Severity::Warn, "disk almost full", "infra::monitor");
+    let items = vec![(record, scope)];
+    let refs: Vec<(&SdkLogRecord, &InstrumentationScope)> =
+        items.iter().map(|(r, s)| (r, s)).collect();
+    let batch = LogBatch::new(&refs);
+    exporter.export(batch).await.expect("log export");
+
+    let parquet_files = find_parquet_files(warehouse);
+    assert!(
+        !parquet_files.is_empty(),
+        "day-partitioned log export must write at least one Parquet file"
+    );
+}
+
+#[tokio::test]
+async fn log_exporter_handles_empty_batch() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let warehouse = dir.path().to_str().unwrap();
+    let config = test_config(warehouse);
+    let exporter = IcebergLogExporter::new(config)
+        .await
+        .expect("IcebergLogExporter::new");
+
+    let items: Vec<(SdkLogRecord, InstrumentationScope)> = vec![];
+    let refs: Vec<(&SdkLogRecord, &InstrumentationScope)> =
+        items.iter().map(|(r, s)| (r, s)).collect();
+    let batch = LogBatch::new(&refs);
+    // Empty batch should not error.
+    let result = exporter.export(batch).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn multiple_log_records_in_one_batch_write_parquet() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let warehouse = dir.path().to_str().unwrap();
+    let config = test_config(warehouse);
+    let exporter = IcebergLogExporter::new(config)
+        .await
+        .expect("IcebergLogExporter::new");
+
+    let items: Vec<(SdkLogRecord, InstrumentationScope)> = vec![
+        make_log(Severity::Info, "first", "app"),
+        make_log(Severity::Warn, "second", "app"),
+        make_log(Severity::Error, "third", "app"),
+    ];
+    let refs: Vec<(&SdkLogRecord, &InstrumentationScope)> =
+        items.iter().map(|(r, s)| (r, s)).collect();
+    let batch = LogBatch::new(&refs);
+    exporter.export(batch).await.expect("export");
+
+    let parquet_files = find_parquet_files(warehouse);
+    assert!(!parquet_files.is_empty());
 }
 
 // ---------------------------------------------------------------------------
