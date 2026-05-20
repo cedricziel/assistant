@@ -50,7 +50,6 @@ crates = [
     "interface-cli",                     # 28.9% (delta -51.1%)
     "interfaces",                        # 61.6% (delta -18.4%)
     "mcp-client",                        # 20.3% (delta -59.7%)
-    "opentelemetry-exporter-iceberg",    # 37.5% (delta -42.5%)
     "opentelemetry-exporter-sqlite",     # 51.4% (delta -28.6%)
 ]
 
@@ -74,6 +73,7 @@ crates = [
 #   llm-provider  (80.3%) — pure-function tests across anthropic, openai/oauth, chat_completions, ollama
 #   runtime       (80.3%) — bootstrap, memory_indexer, scheduler/loop+prune, compaction chunked path, dispatch helpers, title_generator helpers, skill_learner format_history_for_judge, interface_trait default impls
 #   web-ui        (80.1%) — a2a handlers + routers, push.rs crypto (encrypt_payload, build_vapid_jwt, signing_key), oauth session_cookie + escape_html_attr, iceberg pure helpers (warehouse_path, bucket_key, collect_parquet_files), api/webhooks toggle/rotate/update, api/conversations PATCH/DELETE edge cases, api/skills get/update/delete edge cases, auth.rs login_html + parse_host_from_url + extract_cookie edge cases, lib.rs harden_agent_card + nats_reachable + resolve_base_url, api/mod.rs internal_error + empty_string_as_none
+#   opentelemetry-exporter-iceberg (81.2%) — log + metric e2e exports via SdkMeterProvider/SdkLoggerProvider, partition::granularity_to_partition_int + partition_spec, catalog::warehouse_path + build_file_io + build_catalog + ensure_namespace
 
 # File path regex patterns excluded from coverage measurement.
 # Passed to `cargo llvm-cov --ignore-filename-regex` as a joined alternation.

@@ -91,3 +91,74 @@ fn granularity_to_partition_int(micros: i64, granularity: &PartitionGranularity)
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Reference timestamp: 2026-05-19T08:00:00Z = 1779523200 seconds.
+    const REF_MICROS: i64 = 1779523200_000_000;
+
+    #[test]
+    fn granularity_none_returns_zero() {
+        assert_eq!(
+            granularity_to_partition_int(REF_MICROS, &PartitionGranularity::None),
+            0
+        );
+    }
+
+    #[test]
+    fn granularity_hour_divides_by_3600_seconds() {
+        let expected = (REF_MICROS / 3_600_000_000_i64) as i32;
+        assert_eq!(
+            granularity_to_partition_int(REF_MICROS, &PartitionGranularity::Hour),
+            expected
+        );
+    }
+
+    #[test]
+    fn granularity_day_divides_by_86400_seconds() {
+        let expected = (REF_MICROS / 86_400_000_000_i64) as i32;
+        assert_eq!(
+            granularity_to_partition_int(REF_MICROS, &PartitionGranularity::Day),
+            expected
+        );
+    }
+
+    #[test]
+    fn granularity_year_returns_years_since_1970() {
+        // 2026 → 56 years after 1970.
+        assert_eq!(
+            granularity_to_partition_int(REF_MICROS, &PartitionGranularity::Year),
+            56
+        );
+    }
+
+    #[test]
+    fn granularity_month_returns_months_since_jan_1970() {
+        // 2026-05 → 56 years * 12 + (5-1) = 672 + 4 = 676.
+        assert_eq!(
+            granularity_to_partition_int(REF_MICROS, &PartitionGranularity::Month),
+            676
+        );
+    }
+
+    #[test]
+    fn partition_spec_returns_none_for_none_granularity() {
+        let spec = partition_spec(&PartitionGranularity::None, 1, "ts_day").unwrap();
+        assert!(spec.is_none());
+    }
+
+    #[test]
+    fn partition_spec_returns_some_for_each_time_granularity() {
+        for g in [
+            PartitionGranularity::Year,
+            PartitionGranularity::Month,
+            PartitionGranularity::Day,
+            PartitionGranularity::Hour,
+        ] {
+            let spec = partition_spec(&g, 7, "ts_p").unwrap();
+            assert!(spec.is_some(), "{g:?} must produce an UnboundPartitionSpec",);
+        }
+    }
+}

@@ -91,3 +91,60 @@ fn warehouse_path(config: &IcebergConfig) -> String {
             })
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_core::types::observability::PartitionGranularity;
+
+    fn test_config(warehouse: Option<&str>) -> IcebergConfig {
+        IcebergConfig {
+            warehouse: warehouse.map(String::from),
+            namespace: "test".to_string(),
+            partition: PartitionGranularity::None,
+            catalog_uri: None,
+        }
+    }
+
+    #[test]
+    fn warehouse_path_uses_explicit_value() {
+        let cfg = test_config(Some("/custom/wh"));
+        assert_eq!(warehouse_path(&cfg), "/custom/wh");
+    }
+
+    #[test]
+    fn warehouse_path_falls_back_to_assistant_iceberg() {
+        let cfg = test_config(None);
+        // Should resolve to ~/.assistant/iceberg or ./.assistant/iceberg.
+        let p = warehouse_path(&cfg);
+        assert!(p.ends_with(".assistant/iceberg"), "got: {p}");
+    }
+
+    #[test]
+    fn build_file_io_returns_filesystem_backend() {
+        let cfg = test_config(Some("/tmp/wh"));
+        // Smoke test: the function returns successfully and produces a FileIO.
+        let _io = build_file_io(&cfg);
+    }
+
+    #[tokio::test]
+    async fn build_catalog_creates_memory_catalog_when_no_uri() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = test_config(Some(tmp.path().to_str().unwrap()));
+        let catalog = build_catalog(&cfg).await.unwrap();
+
+        let ns = ensure_namespace(catalog.as_ref(), "ns_test").await.unwrap();
+        assert_eq!(ns.to_string(), "ns_test");
+    }
+
+    #[tokio::test]
+    async fn ensure_namespace_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = test_config(Some(tmp.path().to_str().unwrap()));
+        let catalog = build_catalog(&cfg).await.unwrap();
+
+        let first = ensure_namespace(catalog.as_ref(), "ns_dup").await.unwrap();
+        let second = ensure_namespace(catalog.as_ref(), "ns_dup").await.unwrap();
+        assert_eq!(first.to_string(), second.to_string());
+    }
+}
