@@ -67,3 +67,55 @@ impl ToolHandler for SlackDeleteMessageSkill {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slack::skills::test_support::ctx;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn skill_at(base: String) -> SlackDeleteMessageSkill {
+        let client = SlackApiClient::with_base_url("xoxb-t".into(), "xapp-t".into(), base).unwrap();
+        SlackDeleteMessageSkill {
+            client: Arc::new(client),
+        }
+    }
+
+    #[test]
+    fn metadata_marks_mutating_and_requires_confirmation() {
+        let s = skill_at("http://127.0.0.1:0".to_string());
+        assert_eq!(s.name(), "slack-delete-message");
+        assert!(s.is_mutating());
+        assert!(s.requires_confirmation());
+    }
+
+    #[tokio::test]
+    async fn run_deletes_when_params_valid() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.delete"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true})))
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let mut params = HashMap::new();
+        params.insert("channel".into(), json!("C1"));
+        params.insert("ts".into(), json!("1.2"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn run_errors_on_missing_params() {
+        let s = skill_at("http://127.0.0.1:0".to_string());
+        let out = s.run(HashMap::new(), &ctx()).await.unwrap();
+        assert!(!out.success);
+
+        let mut params = HashMap::new();
+        params.insert("channel".into(), json!("C1"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("ts"));
+    }
+}

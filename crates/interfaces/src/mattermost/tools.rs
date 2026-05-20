@@ -394,4 +394,126 @@ mod tests {
         assert!(!out.success);
         assert!(out.content.contains("filename"));
     }
+
+    #[tokio::test]
+    async fn react_treats_already_exists_as_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/reactions"))
+            .respond_with(ResponseTemplate::new(500).set_body_json(
+                json!({"id": "app.reaction.save.exists", "message": "reaction already exists"}),
+            ))
+            .mount(&server)
+            .await;
+
+        let tools = build_mattermost_tools(
+            "C1".into(),
+            "P1".into(),
+            None,
+            "U_BOT".into(),
+            make_client(&server).await,
+        );
+        let react = find_tool(&tools, "mattermost-react");
+        let out = react
+            .run(params(&[("emoji", json!("smile"))]), &ctx())
+            .await
+            .unwrap();
+        assert!(out.success);
+        assert!(out.content.contains("already"));
+    }
+
+    #[tokio::test]
+    async fn react_propagates_non_duplicate_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/reactions"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_json(json!({"id": "app.reaction.save.unknown", "message": "boom"})),
+            )
+            .mount(&server)
+            .await;
+        let tools = build_mattermost_tools(
+            "C1".into(),
+            "P1".into(),
+            None,
+            "U_BOT".into(),
+            make_client(&server).await,
+        );
+        let react = find_tool(&tools, "mattermost-react");
+        let out = react
+            .run(params(&[("emoji", json!("smile"))]), &ctx())
+            .await
+            .unwrap();
+        assert!(!out.success);
+    }
+
+    #[tokio::test]
+    async fn upload_full_flow_posts_message_with_file() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/files"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "file_infos": [{"id": "FID1", "name": "x.txt"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/posts"))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({"id": "P_UP", "channel_id": "C1"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tools = build_mattermost_tools(
+            "C1".into(),
+            "P1".into(),
+            None,
+            "U_BOT".into(),
+            make_client(&server).await,
+        );
+        let upload = find_tool(&tools, "mattermost-upload");
+        let out = upload
+            .run(
+                params(&[
+                    ("filename", json!("x.txt")),
+                    ("content", json!("hello")),
+                    ("message", json!("see attachment")),
+                ]),
+                &ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn upload_error_when_no_file_ids_returned() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/files"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "file_infos": [] })))
+            .mount(&server)
+            .await;
+        let tools = build_mattermost_tools(
+            "C1".into(),
+            "P1".into(),
+            None,
+            "U_BOT".into(),
+            make_client(&server).await,
+        );
+        let upload = find_tool(&tools, "mattermost-upload");
+        let out = upload
+            .run(
+                params(&[("filename", json!("x.txt")), ("content", json!("hello"))]),
+                &ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("no file IDs"));
+    }
 }

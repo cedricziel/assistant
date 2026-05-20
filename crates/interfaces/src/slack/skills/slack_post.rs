@@ -66,3 +66,91 @@ impl ToolHandler for SlackPostSkill {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slack::skills::test_support::ctx;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn skill_with_base(base: String) -> SlackPostSkill {
+        let client = SlackApiClient::with_base_url("xoxb-t".into(), "xapp-t".into(), base).unwrap();
+        SlackPostSkill {
+            client: Arc::new(client),
+        }
+    }
+
+    fn skill(server: &MockServer) -> SlackPostSkill {
+        skill_with_base(server.uri())
+    }
+
+    #[test]
+    fn metadata_and_schema_are_set() {
+        let s = skill_with_base("http://127.0.0.1:0".to_string());
+        assert_eq!(s.name(), "slack-post");
+        assert!(s.is_mutating());
+        assert!(s.description().contains("Slack channel"));
+        assert!(s.params_schema().get("required").is_some());
+    }
+
+    #[tokio::test]
+    async fn run_posts_message_when_params_valid() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.postMessage"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true,"ts":"1.2"})),
+            )
+            .mount(&server)
+            .await;
+        let s = skill(&server);
+        let mut params = HashMap::new();
+        params.insert("channel".into(), json!("C1"));
+        params.insert("message".into(), json!("hello"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+        assert!(out.content.contains("Posted"));
+    }
+
+    #[tokio::test]
+    async fn run_errors_when_channel_missing() {
+        let server = MockServer::start().await;
+        let s = skill(&server);
+        let mut params = HashMap::new();
+        params.insert("message".into(), json!("hello"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("channel"));
+    }
+
+    #[tokio::test]
+    async fn run_errors_when_message_missing() {
+        let server = MockServer::start().await;
+        let s = skill(&server);
+        let mut params = HashMap::new();
+        params.insert("channel".into(), json!("C1"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("message"));
+    }
+
+    #[tokio::test]
+    async fn run_reports_failure_when_client_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.postMessage"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"ok": false, "error": "channel_not_found"})),
+            )
+            .mount(&server)
+            .await;
+        let s = skill(&server);
+        let mut params = HashMap::new();
+        params.insert("channel".into(), json!("CX"));
+        params.insert("message".into(), json!("hello"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(!out.success);
+    }
+}

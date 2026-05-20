@@ -17,3 +17,24 @@ pub use slack_post::SlackPostSkill;
 pub use slack_react::SlackReactSkill;
 pub use slack_send_dm::SlackSendDmSkill;
 pub use slack_update_message::SlackUpdateMessageSkill;
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use assistant_core::types::conversation::{ExecutionContext, Interface};
+    use uuid::Uuid;
+
+    pub fn ctx() -> ExecutionContext {
+        ExecutionContext {
+            conversation_id: Uuid::new_v4(),
+            agent_id: "test".to_string(),
+            turn: 0,
+            interface: Interface::Slack,
+            interactive: false,
+            allowed_tools: None,
+            depth: 0,
+            user_id: None,
+            org_id: None,
+            space_id: None,
+        }
+    }
+}

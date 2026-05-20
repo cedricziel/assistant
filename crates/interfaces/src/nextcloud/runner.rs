@@ -109,6 +109,102 @@ mod tests {
     use tokio::sync::Mutex;
     use uuid::Uuid;
 
+    use super::*;
+    use assistant_storage::StorageLayer;
+
+    async fn make_orchestrator() -> Arc<Orchestrator> {
+        use assistant_core::types::agent::AssistantConfig;
+        use assistant_core::{LlmProvider, MessageBus};
+        use assistant_llm_provider::scripted::ScriptedLlmProvider;
+        use assistant_storage::registry::SkillRegistry;
+        use assistant_tool_executor::ToolExecutor;
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let cfg = AssistantConfig::default();
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(ScriptedLlmProvider::new());
+        let exec = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(cfg.clone()),
+        ));
+        let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+        Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            exec,
+            registry,
+            bus,
+            &cfg,
+        ))
+    }
+
+    #[tokio::test]
+    async fn new_starts_without_shutdown_or_transcription() {
+        let orch = make_orchestrator().await;
+        let iface = NextcloudInterface::new(NextcloudConfig::default(), orch);
+        assert!(iface.shutdown.is_none());
+        assert!(iface.transcription.is_none());
+        assert!(iface.transcription_language.is_none());
+    }
+
+    #[tokio::test]
+    async fn with_shutdown_attaches_token() {
+        let orch = make_orchestrator().await;
+        let token = tokio_util::sync::CancellationToken::new();
+        let iface =
+            NextcloudInterface::new(NextcloudConfig::default(), orch).with_shutdown(token.clone());
+        assert!(iface.shutdown.is_some());
+    }
+
+    #[tokio::test]
+    async fn with_transcription_sets_provider_and_language() {
+        use assistant_transcription::{
+            TranscriptionProvider, TranscriptionRequest, TranscriptionResult,
+        };
+        #[derive(Debug)]
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl TranscriptionProvider for DummyProvider {
+            fn name(&self) -> &str {
+                "dummy"
+            }
+            async fn transcribe(
+                &self,
+                _req: TranscriptionRequest,
+            ) -> anyhow::Result<TranscriptionResult> {
+                Ok(TranscriptionResult {
+                    text: "x".into(),
+                    language: None,
+                    duration_secs: None,
+                })
+            }
+        }
+        let orch = make_orchestrator().await;
+        let iface = NextcloudInterface::new(NextcloudConfig::default(), orch)
+            .with_transcription(Arc::new(DummyProvider), Some("en".into()));
+        assert!(iface.transcription.is_some());
+        assert_eq!(iface.transcription_language.as_deref(), Some("en"));
+    }
+
+    #[tokio::test]
+    async fn run_errors_when_server_url_missing() {
+        let orch = make_orchestrator().await;
+        // SAFETY: tests run with default env; clear any inherited value.
+        unsafe {
+            std::env::remove_var("NEXTCLOUD_SERVER_URL");
+        }
+        let iface = NextcloudInterface::new(
+            NextcloudConfig {
+                server_url: None,
+                ..Default::default()
+            },
+            orch,
+        );
+        let err = iface.run().await.unwrap_err();
+        assert!(err.to_string().contains("server_url"));
+    }
+
     #[test]
     fn conversation_token_mapping_stable() {
         let rt = tokio::runtime::Runtime::new().unwrap();

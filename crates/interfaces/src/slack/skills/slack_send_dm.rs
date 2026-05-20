@@ -101,3 +101,113 @@ impl ToolHandler for SlackSendDmSkill {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slack::skills::test_support::ctx;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn skill_at(base: String) -> SlackSendDmSkill {
+        let client = SlackApiClient::with_base_url("xoxb-t".into(), "xapp-t".into(), base).unwrap();
+        SlackSendDmSkill {
+            client: Arc::new(client),
+        }
+    }
+
+    #[test]
+    fn metadata_is_set() {
+        let s = skill_at("http://127.0.0.1:0".to_string());
+        assert_eq!(s.name(), "slack-send-dm");
+        assert!(s.is_mutating());
+    }
+
+    #[tokio::test]
+    async fn run_errors_on_missing_params() {
+        let s = skill_at("http://127.0.0.1:0".to_string());
+        let out = s.run(HashMap::new(), &ctx()).await.unwrap();
+        assert!(!out.success);
+
+        let mut params = HashMap::new();
+        params.insert("user_id".into(), json!("U1"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("message"));
+    }
+
+    #[tokio::test]
+    async fn run_opens_dm_then_posts_message() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/conversations.open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "channel": {"id": "D1"}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.postMessage"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true,"ts":"5.5"})),
+            )
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let mut params = HashMap::new();
+        params.insert("user_id".into(), json!("U1"));
+        params.insert("message".into(), json!("hi"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+        assert!(out.content.contains("DM sent"));
+    }
+
+    #[tokio::test]
+    async fn run_returns_error_when_conversations_open_fails() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/conversations.open"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"ok": false, "error": "user_not_found"})),
+            )
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let mut params = HashMap::new();
+        params.insert("user_id".into(), json!("UX"));
+        params.insert("message".into(), json!("hi"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("conversations.open"));
+    }
+
+    #[tokio::test]
+    async fn run_returns_error_when_post_message_fails() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/conversations.open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "channel": {"id": "D1"}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.postMessage"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"ok": false, "error": "bad"})),
+            )
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let mut params = HashMap::new();
+        params.insert("user_id".into(), json!("U1"));
+        params.insert("message".into(), json!("hi"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("send DM"));
+    }
+}
