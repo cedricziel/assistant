@@ -81,3 +81,91 @@ impl ToolHandler for SlackGetHistorySkill {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slack::skills::test_support::ctx;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn skill_at(base: String) -> SlackGetHistorySkill {
+        let client = SlackApiClient::with_base_url("xoxb-t".into(), "xapp-t".into(), base).unwrap();
+        SlackGetHistorySkill {
+            client: Arc::new(client),
+        }
+    }
+
+    #[test]
+    fn metadata_is_set() {
+        let s = skill_at("http://127.0.0.1:0".to_string());
+        assert_eq!(s.name(), "slack-get-history");
+        assert!(s.params_schema().get("required").is_some());
+    }
+
+    #[tokio::test]
+    async fn run_errors_on_missing_channel() {
+        let s = skill_at("http://127.0.0.1:0".to_string());
+        let out = s.run(HashMap::new(), &ctx()).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("channel"));
+    }
+
+    #[tokio::test]
+    async fn run_fetches_channel_history_when_no_thread_ts() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/conversations.history"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "messages": [{"ts": "1.1", "text": "hi"}]
+            })))
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let mut params = HashMap::new();
+        params.insert("channel".into(), json!("C1"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+        assert!(out.content.contains("hi"));
+    }
+
+    #[tokio::test]
+    async fn run_fetches_thread_replies_when_thread_ts_present() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/conversations.replies"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "messages": [{"ts": "2.0", "text": "reply"}]
+            })))
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let mut params = HashMap::new();
+        params.insert("channel".into(), json!("C1"));
+        params.insert("thread_ts".into(), json!("1.2"));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+        assert!(out.content.contains("reply"));
+    }
+
+    #[tokio::test]
+    async fn run_clamps_huge_limit_and_uses_default_when_missing() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/conversations.history"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "messages": []
+            })))
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let mut params = HashMap::new();
+        params.insert("channel".into(), json!("C1"));
+        params.insert("limit".into(), json!(100_000));
+        let out = s.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+    }
+}

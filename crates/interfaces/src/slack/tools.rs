@@ -234,3 +234,158 @@ pub fn build_slack_tools(
         }),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slack::skills::test_support::ctx;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn client_at(server: &MockServer) -> Arc<SlackApiClient> {
+        Arc::new(
+            SlackApiClient::with_base_url("xoxb-t".into(), "xapp-t".into(), server.uri()).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn build_slack_tools_returns_three_handlers() {
+        let server = MockServer::start().await;
+        let tools = build_slack_tools(
+            "C1".to_string(),
+            Some("1.1".to_string()),
+            "1.2".to_string(),
+            client_at(&server),
+        );
+        assert_eq!(tools.len(), 3);
+        assert_eq!(tools[0].name(), "reply");
+        assert_eq!(tools[1].name(), "react");
+        assert_eq!(tools[2].name(), "upload");
+        for t in &tools {
+            assert!(t.is_mutating());
+        }
+    }
+
+    #[tokio::test]
+    async fn reply_posts_when_no_update_ts() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.postMessage"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true,"ts":"5"})),
+            )
+            .mount(&server)
+            .await;
+        let h = SlackReplyHandler {
+            channel_id: "C1".into(),
+            thread_ts: None,
+            client: client_at(&server),
+            update_ts: None,
+        };
+        let mut params = HashMap::new();
+        params.insert("text".into(), json!("<think>secret</think>hello"));
+        let out = h.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn reply_updates_existing_message_when_update_ts_set() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.update"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true})))
+            .mount(&server)
+            .await;
+        let h = SlackReplyHandler {
+            channel_id: "C1".into(),
+            thread_ts: None,
+            client: client_at(&server),
+            update_ts: Some("placeholder".into()),
+        };
+        let mut params = HashMap::new();
+        params.insert("text".into(), json!("hello"));
+        let out = h.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn reply_falls_back_to_post_when_update_fails() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.update"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"ok": false, "error": "edit_window_closed"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat.postMessage"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true,"ts":"7"})),
+            )
+            .mount(&server)
+            .await;
+        let h = SlackReplyHandler {
+            channel_id: "C1".into(),
+            thread_ts: Some("1.1".into()),
+            client: client_at(&server),
+            update_ts: Some("placeholder".into()),
+        };
+        let mut params = HashMap::new();
+        params.insert("text".into(), json!("hello"));
+        let out = h.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn react_uses_default_emoji_when_missing() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/reactions.add"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true})))
+            .mount(&server)
+            .await;
+        let h = SlackReactHandler {
+            channel_id: "C1".into(),
+            message_ts: "1.2".into(),
+            client: client_at(&server),
+        };
+        let out = h.run(HashMap::new(), &ctx()).await.unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn upload_calls_three_step_upload_flow() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "upload_url": format!("{}/upload-here", server.uri()),
+                "file_id": "F1"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/upload-here"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/files.completeUploadExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true})))
+            .mount(&server)
+            .await;
+        let h = SlackUploadHandler {
+            channel_id: "C1".into(),
+            thread_ts: Some("1.1".into()),
+            client: client_at(&server),
+        };
+        let mut params = HashMap::new();
+        params.insert("filename".into(), json!("data.txt"));
+        params.insert("content".into(), json!("hello world"));
+        let out = h.run(params, &ctx()).await.unwrap();
+        assert!(out.success);
+    }
+}

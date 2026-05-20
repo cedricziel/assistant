@@ -29,6 +29,57 @@ pub async fn sleep_backoff(
     *backoff = (*backoff * 2).min(BACKOFF_MAX);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rand_jitter_in_unit_interval() {
+        for _ in 0..50 {
+            let v = rand_jitter();
+            assert!((0.0..1.0).contains(&v), "{v} not in [0,1)");
+        }
+    }
+
+    #[tokio::test]
+    async fn sleep_backoff_doubles_within_cap_when_stop_aborts() {
+        // Use a tiny initial backoff + immediate stop so the test doesn't
+        // actually sleep for any meaningful time. We only care about the
+        // doubling side-effect.
+        let mut backoff = Duration::from_secs(1);
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+        tx.send(true).unwrap();
+        sleep_backoff(&mut backoff, &mut rx).await;
+        assert_eq!(backoff, Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn sleep_backoff_returns_early_when_stop_signal_fires() {
+        let mut backoff = Duration::from_secs(60);
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+        // Fire stop signal immediately; the select should pick the stop branch
+        // and return without sleeping the full 60s.
+        tx.send(true).unwrap();
+        let start = std::time::Instant::now();
+        sleep_backoff(&mut backoff, &mut rx).await;
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "expected early cancel"
+        );
+        // Backoff still doubles but is capped at BACKOFF_MAX.
+        assert_eq!(backoff, BACKOFF_MAX);
+    }
+
+    #[tokio::test]
+    async fn sleep_backoff_caps_at_max() {
+        let mut backoff = BACKOFF_MAX;
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+        tx.send(true).unwrap();
+        sleep_backoff(&mut backoff, &mut rx).await;
+        assert_eq!(backoff, BACKOFF_MAX, "must not exceed BACKOFF_MAX");
+    }
+}
+
 /// Simple LCG-based float in `[0, 1)` without pulling in `rand`.
 pub fn rand_jitter() -> f64 {
     // Use wall-clock subsec-nanos as the seed source. This is sufficient

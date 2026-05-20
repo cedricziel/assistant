@@ -78,3 +78,86 @@ impl ToolHandler for SlackListChannelsSkill {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slack::skills::test_support::ctx;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn skill_at(base: String) -> SlackListChannelsSkill {
+        let client = SlackApiClient::with_base_url("xoxb-t".into(), "xapp-t".into(), base).unwrap();
+        SlackListChannelsSkill {
+            client: Arc::new(client),
+        }
+    }
+
+    #[test]
+    fn metadata_is_set() {
+        let s = skill_at("http://127.0.0.1:0".to_string());
+        assert_eq!(s.name(), "slack-list-channels");
+        assert!(s.params_schema().get("properties").is_some());
+    }
+
+    #[tokio::test]
+    async fn run_returns_channel_summaries() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/conversations.list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "channels": [
+                    {"id": "C1", "name": "general", "is_private": false, "num_members": 3},
+                    {"id": "C2", "name": "random", "is_private": false, "num_members": 5}
+                ],
+                "response_metadata": {"next_cursor": ""}
+            })))
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let out = s.run(HashMap::new(), &ctx()).await.unwrap();
+        assert!(out.success);
+        assert!(out.content.contains("general"));
+        assert!(out.content.contains("random"));
+    }
+
+    #[tokio::test]
+    async fn run_marks_truncated_when_cursor_present() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/conversations.list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "channels": [{"id": "C1", "name": "general"}],
+                "response_metadata": {"next_cursor": "next-page"}
+            })))
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let out = s.run(HashMap::new(), &ctx()).await.unwrap();
+        assert!(out.success);
+        assert!(out.content.contains("truncated"));
+    }
+
+    #[tokio::test]
+    async fn run_handles_empty_channels_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/conversations.list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server)
+            .await;
+        let s = skill_at(server.uri());
+        let out = s.run(HashMap::new(), &ctx()).await.unwrap();
+        assert!(out.success);
+    }
+
+    #[tokio::test]
+    async fn run_reports_failure_when_transport_errors() {
+        // Point at an unreachable address so the HTTP call fails.
+        let s = skill_at("http://127.0.0.1:1".to_string());
+        let out = s.run(HashMap::new(), &ctx()).await.unwrap();
+        assert!(!out.success);
+    }
+}
