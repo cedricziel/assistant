@@ -28,7 +28,13 @@ http = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "io-util", "macros"] }
+rmcp = { version = "1.7.0", default-features = false, features = [
+    "client",
+    "server",
+] }
+serde_json = { workspace = true }
+uuid = { workspace = true }
 
 # Panic-free contract: production code propagates errors via `anyhow::Result`.
 # Tests are exempt because `make lint` (`cargo clippy --workspace`) does not
