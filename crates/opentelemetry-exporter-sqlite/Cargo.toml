@@ -21,7 +21,9 @@ uuid = { workspace = true }
 workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+opentelemetry-semantic-conventions = { workspace = true }
+tempfile = { workspace = true }
 
 # Panic-free contract: production code propagates errors via `anyhow::Result`.
 # Tests are exempt because `make lint` (`cargo clippy --workspace`) does not
