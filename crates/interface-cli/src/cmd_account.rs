@@ -253,3 +253,158 @@ pub async fn cmd_account_change_password(
     }
     anyhow::bail!("password change failed ({status}): {body}");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn user_body() -> serde_json::Value {
+        serde_json::json!({
+            "id": "u1",
+            "org_id": "o1",
+            "email": "alice@example.com",
+            "name": "Alice",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        })
+    }
+
+    #[test]
+    fn url_helpers_trim_trailing_slash() {
+        assert_eq!(me_url("http://x/"), "http://x/api/users/me");
+        assert_eq!(
+            me_password_url("http://x/"),
+            "http://x/api/users/me/password"
+        );
+        assert_eq!(org_url("http://x/", "o1"), "http://x/api/orgs/o1");
+    }
+
+    #[tokio::test]
+    async fn fetch_me_parses_user_detail() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/users/me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(user_body()))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let me = fetch_me(&server.uri(), &http, "tok").await.unwrap();
+        assert_eq!(me.email, "alice@example.com");
+        assert_eq!(me.id, "u1");
+    }
+
+    #[tokio::test]
+    async fn fetch_me_errors_on_non_success_status() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/users/me"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("nope"))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        assert!(fetch_me(&server.uri(), &http, "tok").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn fetch_org_auth_mode_returns_value_on_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/orgs/o1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "o1",
+                "name": "Org",
+                "slug": "org",
+                "auth_mode": "password",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            })))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let mode = fetch_org_auth_mode(&server.uri(), &http, "tok", "o1").await;
+        assert_eq!(mode.as_deref(), Some("password"));
+    }
+
+    #[tokio::test]
+    async fn fetch_org_auth_mode_returns_none_on_4xx() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/orgs/o1"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let mode = fetch_org_auth_mode(&server.uri(), &http, "tok", "o1").await;
+        assert!(mode.is_none());
+    }
+
+    #[tokio::test]
+    async fn patch_me_succeeds_with_previous_email_in_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/users/me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "user": user_body(),
+                "previous_email": "old@example.com",
+            })))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        patch_me(&server.uri(), &http, "tok", Some("alice@example.com"), None)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn patch_me_succeeds_when_name_set() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/users/me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "user": user_body(),
+            })))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        patch_me(&server.uri(), &http, "tok", None, Some("Alice"))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn patch_me_bails_with_idp_hint_on_409() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/users/me"))
+            .respond_with(ResponseTemplate::new(409).set_body_json(serde_json::json!({
+                "error": "this user is managed by an external identity provider",
+            })))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let err = patch_me(&server.uri(), &http, "tok", Some("x@y.com"), None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("identity provider"));
+    }
+
+    #[tokio::test]
+    async fn patch_me_bails_with_generic_error_on_other_status() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/users/me"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": "bad request",
+            })))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let err = patch_me(&server.uri(), &http, "tok", Some("x"), None)
+            .await
+            .unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("update failed"), "got: {s}");
+    }
+}

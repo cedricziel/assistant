@@ -46,7 +46,7 @@ crates = [
     # reaches the floor sustainably; one-way ratchet.
     #
     # Last measured (2026-05-18 via `make coverage`):
-    "interface-cli",                     # 28.9% (delta -51.1%)
+    "interface-cli",                     # 59.4% (delta -20.6%)
     "mcp-client",                        # 78.7% (delta -1.3%)
 ]
 

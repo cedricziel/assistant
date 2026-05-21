@@ -219,4 +219,130 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "credentials file should be 0600");
     }
+
+    #[tokio::test]
+    async fn refresh_if_needed_no_op_when_not_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        let mut creds = sample_creds();
+        let original = creds.access_token.clone();
+        save(&path, &creds).unwrap();
+
+        let http = reqwest::Client::new();
+        refresh_if_needed(&path, &mut creds, &http).await.unwrap();
+        assert_eq!(creds.access_token, original);
+    }
+
+    #[tokio::test]
+    async fn refresh_if_needed_swaps_tokens_on_success() {
+        use wiremock::matchers::{method, path as wpath};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(wpath("/oauth/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "new_jwt",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "refresh_token": "new_rt",
+            })))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        let mut creds = sample_creds();
+        creds.server_url = server.uri();
+        creds.expires_at = Utc::now() - Duration::minutes(5);
+
+        let http = reqwest::Client::new();
+        refresh_if_needed(&path, &mut creds, &http).await.unwrap();
+        assert_eq!(creds.access_token, "new_jwt");
+        assert_eq!(creds.refresh_token, "new_rt");
+        assert!(creds.expires_at > Utc::now());
+        // Persisted to disk.
+        let loaded = load(&path).unwrap().expect("creds saved");
+        assert_eq!(loaded.access_token, "new_jwt");
+    }
+
+    #[tokio::test]
+    async fn refresh_if_needed_keeps_old_refresh_token_if_server_omits_it() {
+        use wiremock::matchers::{method, path as wpath};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(wpath("/oauth/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "new_jwt",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            })))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        let mut creds = sample_creds();
+        creds.server_url = server.uri();
+        creds.refresh_token = "keep_me".to_string();
+        creds.expires_at = Utc::now() - Duration::minutes(5);
+
+        let http = reqwest::Client::new();
+        refresh_if_needed(&path, &mut creds, &http).await.unwrap();
+        assert_eq!(creds.refresh_token, "keep_me");
+    }
+
+    #[tokio::test]
+    async fn refresh_if_needed_errors_on_server_failure() {
+        use wiremock::matchers::{method, path as wpath};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(wpath("/oauth/token"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("nope"))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        let mut creds = sample_creds();
+        creds.server_url = server.uri();
+        creds.expires_at = Utc::now() - Duration::minutes(5);
+
+        let http = reqwest::Client::new();
+        let err = refresh_if_needed(&path, &mut creds, &http).await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn refresh_if_needed_errors_on_invalid_response_body() {
+        use wiremock::matchers::{method, path as wpath};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(wpath("/oauth/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        let mut creds = sample_creds();
+        creds.server_url = server.uri();
+        creds.expires_at = Utc::now() - Duration::minutes(5);
+
+        let http = reqwest::Client::new();
+        let err = refresh_if_needed(&path, &mut creds, &http).await;
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn credentials_path_uses_home_directory() {
+        let p = credentials_path().expect("home directory exists");
+        assert!(p.ends_with(".assistant/credentials.json"));
+    }
 }

@@ -135,3 +135,126 @@ pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()>
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn db(root: &std::path::Path) -> PathBuf {
+        root.join("test.db")
+    }
+
+    #[tokio::test]
+    async fn list_runs_against_fresh_db() {
+        let dir = tempfile::tempdir().unwrap();
+        cmd_persona(&db(dir.path()), &PersonaCommand::List)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn skill_mode_set_succeeds_and_skill_add_then_remove_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let dbp = db(dir.path());
+
+        // Set whitelist mode on default persona (ensure_exists is called at
+        // the top of cmd_persona).
+        cmd_persona(
+            &dbp,
+            &PersonaCommand::SkillMode {
+                persona_id: "default".to_string(),
+                mode: "whitelist".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        cmd_persona(
+            &dbp,
+            &PersonaCommand::SkillAdd {
+                persona_id: "default".to_string(),
+                skill_name: "memory-get".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        cmd_persona(
+            &dbp,
+            &PersonaCommand::SkillRemove {
+                persona_id: "default".to_string(),
+                skill_name: "memory-get".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn skill_remove_errors_for_unknown_persona() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = cmd_persona(
+            &db(dir.path()),
+            &PersonaCommand::SkillRemove {
+                persona_id: "no-such-persona".to_string(),
+                skill_name: "anything".to_string(),
+            },
+        )
+        .await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn timeout_set_then_clear_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let dbp = db(dir.path());
+
+        cmd_persona(
+            &dbp,
+            &PersonaCommand::TimeoutSet {
+                persona_id: "default".to_string(),
+                secs: 7200,
+            },
+        )
+        .await
+        .unwrap();
+
+        cmd_persona(
+            &dbp,
+            &PersonaCommand::TimeoutClear {
+                persona_id: "default".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_with_invalid_id_bails() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = cmd_persona(
+            &db(dir.path()),
+            &PersonaCommand::Create {
+                id: "bad id with spaces".to_string(),
+            },
+        )
+        .await;
+        let err = res.err().expect("must bail");
+        assert!(err.to_string().contains("Invalid"));
+    }
+
+    #[tokio::test]
+    async fn use_with_invalid_id_bails() {
+        let dir = tempfile::tempdir().unwrap();
+        let res = cmd_persona(
+            &db(dir.path()),
+            &PersonaCommand::Use {
+                id: "bad id".to_string(),
+            },
+        )
+        .await;
+        let err = res.err().expect("must bail");
+        assert!(err.to_string().contains("Invalid"));
+    }
+}

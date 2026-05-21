@@ -64,6 +64,7 @@ similar = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+wiremock = { workspace = true }
 
 # Panic-free contract: production code propagates errors via `anyhow::Result`.
 # Tests are exempt because `make lint` (`cargo clippy --workspace`) does not

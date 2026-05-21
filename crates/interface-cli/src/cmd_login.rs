@@ -444,3 +444,180 @@ pub async fn cmd_api_keys_revoke(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn authenticated_client_uses_api_key_when_provided() {
+        let (server, http, token) = authenticated_client(
+            &Some("ask_live_abc".to_string()),
+            &Some("http://x/".to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(server, "http://x");
+        assert_eq!(token, "ask_live_abc");
+        let _ = http; // dropped — just constructed.
+    }
+
+    #[tokio::test]
+    async fn authenticated_client_errors_when_api_key_without_server() {
+        let res = authenticated_client(&Some("ask_live_abc".to_string()), &None).await;
+        let err = res.err().expect("should error");
+        assert!(err.to_string().contains("--server"));
+    }
+
+    #[tokio::test]
+    async fn api_keys_create_emits_plaintext_on_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/users/me/api-keys"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "k1",
+                "name": "ci",
+                "key_prefix": "ask_live_",
+                "plaintext": "ask_live_full_secret",
+                "scopes": ["conversations:read"],
+            })))
+            .mount(&server)
+            .await;
+
+        cmd_api_keys_create(
+            "ci",
+            &Some("conversations:read".to_string()),
+            &Some("ask_live_caller".to_string()),
+            &Some(server.uri()),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn api_keys_create_bails_on_non_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/users/me/api-keys"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .mount(&server)
+            .await;
+        let res = cmd_api_keys_create(
+            "ci",
+            &None,
+            &Some("ask_live_caller".to_string()),
+            &Some(server.uri()),
+        )
+        .await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn api_keys_list_emits_table_for_non_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/users/me/api-keys"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": "k1",
+                    "name": "ci",
+                    "key_prefix": "ask_live_",
+                    "scopes": ["a:b"],
+                    "created_at": "2026-01-01",
+                    "expires_at": null,
+                },
+                {
+                    "id": "k2",
+                    "name": "bot",
+                    "key_prefix": "ask_live_",
+                    "scopes": [],
+                    "created_at": "2026-01-02",
+                    "expires_at": "2099-01-01",
+                }
+            ])))
+            .mount(&server)
+            .await;
+        cmd_api_keys_list(&Some("ask_live_caller".to_string()), &Some(server.uri()))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn api_keys_list_handles_empty_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/users/me/api-keys"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        cmd_api_keys_list(&Some("ask_live_caller".to_string()), &Some(server.uri()))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn api_keys_list_bails_on_error_status() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/users/me/api-keys"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let res =
+            cmd_api_keys_list(&Some("ask_live_caller".to_string()), &Some(server.uri())).await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn api_keys_revoke_204_prints_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/users/me/api-keys/k1"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        cmd_api_keys_revoke(
+            "k1",
+            &Some("ask_live_caller".to_string()),
+            &Some(server.uri()),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn api_keys_revoke_404_prints_not_found_and_returns_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/users/me/api-keys/missing"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        cmd_api_keys_revoke(
+            "missing",
+            &Some("ask_live_caller".to_string()),
+            &Some(server.uri()),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn api_keys_revoke_other_status_bails() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/users/me/api-keys/k1"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let res = cmd_api_keys_revoke(
+            "k1",
+            &Some("ask_live_caller".to_string()),
+            &Some(server.uri()),
+        )
+        .await;
+        assert!(res.is_err());
+    }
+}

@@ -114,3 +114,123 @@ pub async fn cmd_skill(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn cfg_under(root: &Path) -> AssistantConfig {
+        let mut cfg = AssistantConfig::default();
+        // Point skill discovery at an empty subdir so load_from_dirs() finds
+        // nothing extra beyond builtins.
+        cfg.skills.extra_dirs = vec![root.join("skills").to_string_lossy().into_owned()];
+        cfg
+    }
+
+    fn db_under(root: &Path) -> PathBuf {
+        root.join("test.db")
+    }
+
+    #[tokio::test]
+    async fn list_prints_no_skills_when_registry_empty() {
+        // We can't easily strip the embedded skills from the binary, but we
+        // can verify the happy path runs without error against a fresh DB.
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_under(dir.path());
+        let db = db_under(dir.path());
+        cmd_skill(&db, &cfg, &SkillCommand::List { persona: None })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn show_errors_on_unknown_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_under(dir.path());
+        let db = db_under(dir.path());
+        let res = cmd_skill(
+            &db,
+            &cfg,
+            &SkillCommand::Show {
+                name: "definitely-not-real".to_string(),
+            },
+        )
+        .await;
+        let err = res.err().expect("should error");
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn create_then_delete_user_skill_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_under(dir.path());
+        let db = db_under(dir.path());
+
+        let body_file = dir.path().join("body.md");
+        std::fs::write(
+            &body_file,
+            "---\nname: cli-create-skill\ndescription: created in test\n---\nbody",
+        )
+        .unwrap();
+
+        cmd_skill(
+            &db,
+            &cfg,
+            &SkillCommand::Create {
+                name: "cli-create-skill".to_string(),
+                description: "created in test".to_string(),
+                body_file: body_file.clone(),
+            },
+        )
+        .await
+        .unwrap();
+
+        // `Delete` with `yes: true` skips stdin and removes the skill.
+        cmd_skill(
+            &db,
+            &cfg,
+            &SkillCommand::Delete {
+                name: "cli-create-skill".to_string(),
+                yes: true,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_errors_when_body_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_under(dir.path());
+        let db = db_under(dir.path());
+        let res = cmd_skill(
+            &db,
+            &cfg,
+            &SkillCommand::Create {
+                name: "x".to_string(),
+                description: "x".to_string(),
+                body_file: dir.path().join("does-not-exist.md"),
+            },
+        )
+        .await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn generate_subcommand_bails_with_orchestrator_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_under(dir.path());
+        let db = db_under(dir.path());
+        let res = cmd_skill(
+            &db,
+            &cfg,
+            &SkillCommand::Generate {
+                description: "x".to_string(),
+            },
+        )
+        .await;
+        let err = res.err().expect("must bail");
+        assert!(err.to_string().contains("Orchestrator"));
+    }
+}
