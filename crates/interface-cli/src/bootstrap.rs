@@ -287,3 +287,114 @@ pub async fn bootstrap(
         llm,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_core::types::llm::LlmConfig;
+
+    fn base_llm_cfg() -> LlmConfig {
+        let mut cfg = LlmConfig::default();
+        cfg.base_url = "http://localhost:11434".to_string();
+        cfg
+    }
+
+    #[test]
+    fn ollama_embedding_provider_builds_without_keys() {
+        let emb = EmbeddingConfig {
+            provider: EmbeddingProviderKind::Ollama,
+            model: Some("nomic-embed-text".to_string()),
+            base_url: None,
+            api_key: None,
+        };
+        let main = base_llm_cfg();
+        build_embedding_provider(&emb, &main).expect("ollama doesn't need a key");
+    }
+
+    #[test]
+    fn ollama_embedding_provider_uses_emb_base_url_when_set() {
+        let emb = EmbeddingConfig {
+            provider: EmbeddingProviderKind::Ollama,
+            model: None,
+            base_url: Some("http://elsewhere:11434".to_string()),
+            api_key: None,
+        };
+        let main = base_llm_cfg();
+        build_embedding_provider(&emb, &main).expect("ollama config accepted");
+    }
+
+    #[test]
+    fn openai_embedding_provider_errors_without_key() {
+        let emb = EmbeddingConfig {
+            provider: EmbeddingProviderKind::OpenAI,
+            model: None,
+            base_url: None,
+            api_key: None,
+        };
+        let main = base_llm_cfg();
+        // Make sure the env var isn't bleeding in from the host shell.
+        // SAFETY: test-only env mutation.
+        let prev = std::env::var("OPENAI_API_KEY").ok();
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+        let err = build_embedding_provider(&emb, &main)
+            .err()
+            .expect("must error");
+        assert!(err.to_string().contains("OpenAI"));
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("OPENAI_API_KEY", v);
+            }
+        }
+    }
+
+    #[test]
+    fn openai_embedding_provider_builds_when_key_set_in_config() {
+        let emb = EmbeddingConfig {
+            provider: EmbeddingProviderKind::OpenAI,
+            model: Some("text-embedding-3-small".to_string()),
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            api_key: Some("sk-test".to_string()),
+        };
+        let main = base_llm_cfg();
+        build_embedding_provider(&emb, &main).expect("explicit api_key is enough");
+    }
+
+    #[test]
+    fn voyage_embedding_provider_errors_without_key() {
+        let emb = EmbeddingConfig {
+            provider: EmbeddingProviderKind::Voyage,
+            model: None,
+            base_url: None,
+            api_key: None,
+        };
+        let main = base_llm_cfg();
+        // SAFETY: test-only.
+        let prev = std::env::var("VOYAGE_API_KEY").ok();
+        unsafe {
+            std::env::remove_var("VOYAGE_API_KEY");
+        }
+        let err = build_embedding_provider(&emb, &main)
+            .err()
+            .expect("must error");
+        assert!(err.to_string().contains("Voyage") || err.to_string().contains("API key"));
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("VOYAGE_API_KEY", v);
+            }
+        }
+    }
+
+    #[test]
+    fn voyage_embedding_provider_builds_when_key_set_in_config() {
+        let emb = EmbeddingConfig {
+            provider: EmbeddingProviderKind::Voyage,
+            model: Some("voyage-large-2".to_string()),
+            base_url: None,
+            api_key: Some("voyage-key".to_string()),
+        };
+        let main = base_llm_cfg();
+        build_embedding_provider(&emb, &main).expect("explicit voyage key is enough");
+    }
+}

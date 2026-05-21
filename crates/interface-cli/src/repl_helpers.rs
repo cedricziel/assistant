@@ -85,3 +85,71 @@ pub fn print_help() {
          Any other input is sent to the AI assistant.\n"
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_core::Attachment;
+
+    #[test]
+    fn deliver_attachments_writes_files_under_attachments_subdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let attach = Attachment::new("photo.png", "image/png", b"binary".to_vec());
+        deliver_attachments(&[attach], dir.path());
+
+        let attach_dir = dir.path().join("attachments");
+        assert!(attach_dir.exists(), "attachments subdir created");
+        let entries: Vec<_> = std::fs::read_dir(&attach_dir).unwrap().collect();
+        assert_eq!(entries.len(), 1);
+
+        let entry = entries.into_iter().next().unwrap().unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        assert!(name.ends_with("_photo.png"), "got: {name}");
+        // Filename starts with an 8-char UUID prefix + underscore.
+        assert!(name.len() > "photo.png".len() + 1);
+        let bytes = std::fs::read(entry.path()).unwrap();
+        assert_eq!(bytes, b"binary");
+    }
+
+    #[test]
+    fn deliver_attachments_unique_names_for_same_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        let a1 = Attachment::new("doc.txt", "text/plain", b"first".to_vec());
+        let a2 = Attachment::new("doc.txt", "text/plain", b"second".to_vec());
+        deliver_attachments(&[a1, a2], dir.path());
+
+        let attach_dir = dir.path().join("attachments");
+        let count = std::fs::read_dir(&attach_dir).unwrap().count();
+        assert_eq!(count, 2, "duplicate filenames must coexist via UUID prefix");
+    }
+
+    #[test]
+    fn deliver_attachments_handles_empty_input() {
+        let dir = tempfile::tempdir().unwrap();
+        // Empty input: function should still create the dir but no files.
+        deliver_attachments(&[], dir.path());
+        let attach_dir = dir.path().join("attachments");
+        assert!(attach_dir.exists());
+        assert_eq!(std::fs::read_dir(&attach_dir).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn print_help_runs_without_panic() {
+        // Just ensures the formatted string compiles + executes.
+        print_help();
+    }
+
+    #[tokio::test]
+    async fn start_token_printer_exits_when_channel_closed() {
+        use assistant_runtime::OrchestratorEvent;
+        let (tx, rx) = mpsc::channel(4);
+        let handle = start_token_printer(rx);
+
+        tx.send(OrchestratorEvent::Token("hi".to_string()))
+            .await
+            .unwrap();
+        // Drop the sender — the task should finish.
+        drop(tx);
+        handle.await.unwrap();
+    }
+}

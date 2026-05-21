@@ -99,3 +99,105 @@ pub fn parse_interface_selection(input: Option<&str>) -> HashSet<String> {
 pub fn interface_selected(selected: &HashSet<String>, interface: &str) -> bool {
     selected.is_empty() || selected.contains(interface)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_worker_interface_canonicalises_known_names() {
+        assert_eq!(normalize_worker_interface("slack"), Some("Slack".into()));
+        assert_eq!(normalize_worker_interface("SLACK"), Some("Slack".into()));
+        assert_eq!(
+            normalize_worker_interface("mattermost"),
+            Some("Mattermost".into())
+        );
+        assert_eq!(
+            normalize_worker_interface("nextcloud"),
+            Some("Nextcloud".into())
+        );
+        assert_eq!(normalize_worker_interface("web"), Some("Web".into()));
+        assert_eq!(normalize_worker_interface("webui"), Some("Web".into()));
+        assert_eq!(normalize_worker_interface("signal"), Some("Signal".into()));
+    }
+
+    #[test]
+    fn normalize_worker_interface_returns_none_for_any_all_or_empty() {
+        assert_eq!(normalize_worker_interface(""), None);
+        assert_eq!(normalize_worker_interface("any"), None);
+        assert_eq!(normalize_worker_interface("all"), None);
+        assert_eq!(normalize_worker_interface("  ALL  "), None);
+    }
+
+    #[test]
+    fn normalize_worker_interface_returns_lowercased_unknown_as_is() {
+        // Unknown interfaces fall through to the lowercase value.
+        assert_eq!(normalize_worker_interface("custom"), Some("custom".into()));
+    }
+
+    #[test]
+    fn parse_interface_selection_splits_and_trims() {
+        let s = parse_interface_selection(Some(" slack , mattermost , web "));
+        assert!(s.contains("slack"));
+        assert!(s.contains("mattermost"));
+        assert!(s.contains("web"));
+        assert_eq!(s.len(), 3);
+    }
+
+    #[test]
+    fn parse_interface_selection_drops_empty_chunks() {
+        let s = parse_interface_selection(Some(" , slack , "));
+        assert_eq!(s.len(), 1);
+        assert!(s.contains("slack"));
+    }
+
+    #[test]
+    fn parse_interface_selection_none_yields_empty() {
+        let s = parse_interface_selection(None);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn interface_selected_empty_means_all_selected() {
+        let empty = HashSet::new();
+        assert!(interface_selected(&empty, "anything"));
+    }
+
+    #[test]
+    fn interface_selected_filters_when_non_empty() {
+        let mut s = HashSet::new();
+        s.insert("slack".to_string());
+        assert!(interface_selected(&s, "slack"));
+        assert!(!interface_selected(&s, "web"));
+    }
+
+    #[test]
+    fn load_config_messages_returns_default_for_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nope.toml");
+        let (cfg, msgs) = load_config_messages(&path);
+        assert_eq!(cfg.agent.id, AssistantConfig::default().agent.id);
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn load_config_messages_warns_on_invalid_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, b"this = is :: invalid ::: toml").unwrap();
+
+        let (_cfg, msgs) = load_config_messages(&path);
+        assert!(msgs.iter().any(|m| matches!(m, ConfigLoadMessage::Warn(_))));
+    }
+
+    #[test]
+    fn load_config_messages_emits_info_on_valid_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[agent]\nid = \"my-agent\"\n").unwrap();
+
+        let (cfg, msgs) = load_config_messages(&path);
+        assert_eq!(cfg.agent.id, "my-agent");
+        assert!(msgs.iter().any(|m| matches!(m, ConfigLoadMessage::Info(_))));
+    }
+}

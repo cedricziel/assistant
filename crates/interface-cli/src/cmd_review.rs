@@ -136,3 +136,17 @@ pub async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Res
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn no_pending_refinements_returns_early() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let registry = SkillRegistry::new(storage.pool.clone()).await.unwrap();
+        // Fresh storage has no pending refinements; the function prints the
+        // "No pending …" message and returns Ok without entering the REPL.
+        cmd_review(&storage, &registry).await.unwrap();
+    }
+}
