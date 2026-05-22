@@ -929,9 +929,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.40.0"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20beddcf5ca07bbe80bf3ee6fd6cf6ed937ff2e0829350fa03edc907f66d03f6"
+checksum = "94f15e9804428450af788f80564d5e4c58855a8ab7dd9051814105707d87f40c"
 dependencies = [
  "async-openai-macros",
  "base64 0.22.1",
@@ -7360,7 +7360,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
