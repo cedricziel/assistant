@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.164](https://github.com/cedricziel/assistant/compare/v0.1.163...v0.1.164) (2026-05-22)
+
+
+### Features
+
+* **ci:** promote assistant-bus-nats past 80% floor (Phase 11) ([#899](https://github.com/cedricziel/assistant/issues/899)) ([df2eec0](https://github.com/cedricziel/assistant/commit/df2eec05cbd13c37df940c257ac912332b0cfb76))
+* **ci:** promote assistant-interfaces past 80% floor (Phase 11) ([#896](https://github.com/cedricziel/assistant/issues/896)) ([05db24c](https://github.com/cedricziel/assistant/commit/05db24c21b40a870243ceecd6e644fe288d2f96f))
+
 ## [0.1.163](https://github.com/cedricziel/assistant/compare/v0.1.162...v0.1.163) (2026-05-20)
 
 
