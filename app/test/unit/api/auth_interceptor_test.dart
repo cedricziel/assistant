@@ -309,8 +309,32 @@ void main() {
 
         final futureA = dio.get<dynamic>('/a');
         final futureB = dio.get<dynamic>('/b');
-        // Yield so both error handlers enter the refresh path before completing.
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+
+        // dio defers the actual request dispatch across several event-loop
+        // turns, so a single wall-clock delay races *ahead* of the requests
+        // and opens the gate before either 401 is even seen — which serialises
+        // the two refreshes instead of overlapping them. Drive the loop
+        // deterministically instead: pump until both requests have hit their
+        // 401 and the single refresh is in flight (parked on the still-closed
+        // gate). Because the gate stays closed throughout, the in-flight
+        // refresh cannot complete and reset the single-flight slot before the
+        // second handler coalesces onto it, so this is order-independent.
+        var pumps = 0;
+        while (refreshCalls < 1 ||
+            adapter.countFor('/a') < 1 ||
+            adapter.countFor('/b') < 1) {
+          expect(
+            pumps++,
+            lessThan(100),
+            reason: 'requests never reached the refresh path',
+          );
+          await Future<void>.delayed(Duration.zero);
+        }
+        // A few more turns so the second 401 handler coalesces onto the
+        // in-flight refresh rather than starting its own.
+        for (var i = 0; i < 5; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
         refreshGate.complete();
 
         final results = await Future.wait([futureA, futureB]);
