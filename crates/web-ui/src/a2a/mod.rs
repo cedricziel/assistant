@@ -8,6 +8,7 @@ pub mod agent_store;
 pub mod handlers;
 #[cfg(test)]
 mod handlers_tests;
+pub mod projection;
 pub mod task_store;
 
 use axum::Router;
