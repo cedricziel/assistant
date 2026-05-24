@@ -158,7 +158,7 @@ async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
         ),
     ];
 
-    for (name, sql) in migrations {
+    for &(name, sql) in migrations {
         let already_applied: bool =
             sqlx::query_scalar("SELECT COUNT(*) > 0 FROM _migrations WHERE name = ?")
                 .bind(name)

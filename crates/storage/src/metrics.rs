@@ -14,6 +14,13 @@ const ASSISTANT_TURN_COUNT: &str = "assistant.turn.count";
 const ASSISTANT_TOOL_INVOCATIONS: &str = "assistant.tool.invocations";
 const ASSISTANT_ERROR_COUNT: &str = "assistant.error.count";
 
+/// JSON path that selects the `gen_ai.token.type` attribute from the
+/// `attributes` column. Built once and passed as a bound parameter (the
+/// attribute key contains dots, so it must be quoted in the JSON path).
+fn token_type_path() -> String {
+    format!("$.\"{GEN_AI_TOKEN_TYPE}\"")
+}
+
 /// Trait-based interface for analytics metric queries.
 #[async_trait]
 pub trait MetricsStore: Send + Sync {
@@ -105,81 +112,90 @@ impl MetricsStore for SqliteMetricsStore {
     /// Overall summary for the last `window_hours` hours.
     async fn summary(&self, window_hours: i64) -> Result<MetricsSummary> {
         let window = format!("-{window_hours} hours");
+        let token_type_path = token_type_path();
 
         // Token counts from gen_ai.client.token.usage histogram.
         // For histograms the `sum` column holds the total value of all
         // observations in the collection interval.
-        let token_in: f64 = sqlx::query_scalar(&format!(
+        let token_in: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(sum), 0) AS REAL) FROM metric_points \
-             WHERE metric_name = '{GEN_AI_CLIENT_TOKEN_USAGE}' \
+             WHERE metric_name = ?3 \
                AND agent_id = ?2 \
-               AND json_extract(attributes, '$.\"{GEN_AI_TOKEN_TYPE}\"') = 'input' \
-                AND recorded_at >= datetime('now', ?1)"
-        ))
+               AND json_extract(attributes, ?4) = 'input' \
+                AND recorded_at >= datetime('now', ?1)",
+        )
         .bind(&window)
         .bind(&self.agent_id)
+        .bind(GEN_AI_CLIENT_TOKEN_USAGE)
+        .bind(&token_type_path)
         .fetch_one(&self.pool)
         .await?;
 
-        let token_out: f64 = sqlx::query_scalar(&format!(
+        let token_out: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(sum), 0) AS REAL) FROM metric_points \
-             WHERE metric_name = '{GEN_AI_CLIENT_TOKEN_USAGE}' \
+             WHERE metric_name = ?3 \
                AND agent_id = ?2 \
-               AND json_extract(attributes, '$.\"{GEN_AI_TOKEN_TYPE}\"') = 'output' \
-                AND recorded_at >= datetime('now', ?1)"
-        ))
+               AND json_extract(attributes, ?4) = 'output' \
+                AND recorded_at >= datetime('now', ?1)",
+        )
         .bind(&window)
         .bind(&self.agent_id)
+        .bind(GEN_AI_CLIENT_TOKEN_USAGE)
+        .bind(&token_type_path)
         .fetch_one(&self.pool)
         .await?;
 
         // Request count (counter).
-        let requests: f64 = sqlx::query_scalar(&format!(
+        let requests: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
-             WHERE metric_name = '{ASSISTANT_TURN_COUNT}' \
+             WHERE metric_name = ?3 \
                AND agent_id = ?2 \
-                AND recorded_at >= datetime('now', ?1)"
-        ))
+                AND recorded_at >= datetime('now', ?1)",
+        )
         .bind(&window)
         .bind(&self.agent_id)
+        .bind(ASSISTANT_TURN_COUNT)
         .fetch_one(&self.pool)
         .await?;
 
         // Tool invocations (counter).
-        let tools: f64 = sqlx::query_scalar(&format!(
+        let tools: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
-             WHERE metric_name = '{ASSISTANT_TOOL_INVOCATIONS}' \
+             WHERE metric_name = ?3 \
                AND agent_id = ?2 \
-                AND recorded_at >= datetime('now', ?1)"
-        ))
+                AND recorded_at >= datetime('now', ?1)",
+        )
         .bind(&window)
         .bind(&self.agent_id)
+        .bind(ASSISTANT_TOOL_INVOCATIONS)
         .fetch_one(&self.pool)
         .await?;
 
         // Weighted-average operation duration (histogram sum / count).
-        let avg_dur: f64 = sqlx::query_scalar(&format!(
+        let avg_dur: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE( \
                  CASE WHEN SUM(count) > 0 THEN SUM(sum) / SUM(count) ELSE 0.0 END, 0) AS REAL) \
              FROM metric_points \
-             WHERE metric_name = '{GEN_AI_CLIENT_OPERATION_DURATION}' \
+             WHERE metric_name = ?3 \
                AND agent_id = ?2 \
-                AND recorded_at >= datetime('now', ?1)"
-        ))
+                AND recorded_at >= datetime('now', ?1)",
+        )
         .bind(&window)
         .bind(&self.agent_id)
+        .bind(GEN_AI_CLIENT_OPERATION_DURATION)
         .fetch_one(&self.pool)
         .await?;
 
         // Error count (counter).
-        let errors: f64 = sqlx::query_scalar(&format!(
+        let errors: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
-             WHERE metric_name = '{ASSISTANT_ERROR_COUNT}' \
+             WHERE metric_name = ?3 \
                AND agent_id = ?2 \
-                AND recorded_at >= datetime('now', ?1)"
-        ))
+                AND recorded_at >= datetime('now', ?1)",
+        )
         .bind(&window)
         .bind(&self.agent_id)
+        .bind(ASSISTANT_ERROR_COUNT)
         .fetch_one(&self.pool)
         .await?;
 
@@ -212,22 +228,23 @@ impl MetricsStore for SqliteMetricsStore {
         window_hours: i64,
         bucket_minutes: i64,
     ) -> Result<Vec<TimeSeriesPoint>> {
-        let rows: Vec<(String, f64)> = sqlx::query_as(&format!(
+        let rows: Vec<(String, f64)> = sqlx::query_as(
             "SELECT \
                  strftime('%Y-%m-%dT%H:', recorded_at) || \
                  printf('%02d', (CAST(strftime('%M', recorded_at) AS INTEGER) / ?1) * ?1) \
                  || ':00Z' AS bucket, \
                  CAST(COALESCE(SUM(sum), 0) AS REAL) AS total \
               FROM metric_points \
-              WHERE metric_name = '{GEN_AI_CLIENT_TOKEN_USAGE}' \
+              WHERE metric_name = ?4 \
                 AND recorded_at >= datetime('now', ?2) \
                 AND agent_id = ?3 \
               GROUP BY bucket \
-              ORDER BY bucket"
-        ))
+              ORDER BY bucket",
+        )
         .bind(bucket_minutes)
         .bind(format!("-{window_hours} hours"))
         .bind(&self.agent_id)
+        .bind(GEN_AI_CLIENT_TOKEN_USAGE)
         .fetch_all(&self.pool)
         .await?;
 
@@ -239,24 +256,26 @@ impl MetricsStore for SqliteMetricsStore {
 
     /// Per-model token-usage breakdown.
     async fn model_comparison(&self, window_hours: i64) -> Result<Vec<ModelTokenUsage>> {
-        let rows: Vec<(String, f64, f64, f64, f64)> = sqlx::query_as(&format!(
+        let rows: Vec<(String, f64, f64, f64, f64)> = sqlx::query_as(
             "SELECT \
                  COALESCE(model, 'unknown') AS m, \
-                 CAST(COALESCE(SUM(CASE WHEN json_extract(attributes, '$.\"{GEN_AI_TOKEN_TYPE}\"') = 'input' \
+                 CAST(COALESCE(SUM(CASE WHEN json_extract(attributes, ?4) = 'input' \
                      THEN sum ELSE 0 END), 0) AS REAL) AS input_tok, \
-                 CAST(COALESCE(SUM(CASE WHEN json_extract(attributes, '$.\"{GEN_AI_TOKEN_TYPE}\"') = 'output' \
+                 CAST(COALESCE(SUM(CASE WHEN json_extract(attributes, ?4) = 'output' \
                      THEN sum ELSE 0 END), 0) AS REAL) AS output_tok, \
                  CAST(COALESCE(SUM(count), 0) AS REAL) AS req_count, \
                  0.0 AS avg_dur \
               FROM metric_points \
-              WHERE metric_name = '{GEN_AI_CLIENT_TOKEN_USAGE}' \
+              WHERE metric_name = ?3 \
                  AND recorded_at >= datetime('now', ?1) \
                  AND agent_id = ?2 \
               GROUP BY m \
-              ORDER BY input_tok + output_tok DESC"
-        ))
+              ORDER BY input_tok + output_tok DESC",
+        )
         .bind(format!("-{window_hours} hours"))
         .bind(&self.agent_id)
+        .bind(GEN_AI_CLIENT_TOKEN_USAGE)
+        .bind(token_type_path())
         .fetch_all(&self.pool)
         .await?;
 
@@ -274,7 +293,7 @@ impl MetricsStore for SqliteMetricsStore {
 
     /// Tool-usage stats for the operational dashboard.
     async fn tool_usage(&self, window_hours: i64) -> Result<Vec<ToolUsageStats>> {
-        let rows: Vec<(String, f64, f64)> = sqlx::query_as(&format!(
+        let rows: Vec<(String, f64, f64)> = sqlx::query_as(
             "SELECT \
                  COALESCE( \
                      json_extract(attributes, '$.\"span.name\"'), \
@@ -284,14 +303,15 @@ impl MetricsStore for SqliteMetricsStore {
                  CAST(COALESCE(SUM(value), 0) AS REAL) AS invocations, \
                  0.0 AS avg_dur \
                FROM metric_points \
-              WHERE metric_name = '{ASSISTANT_TOOL_INVOCATIONS}' \
+              WHERE metric_name = ?3 \
                  AND recorded_at >= datetime('now', ?1) \
                  AND agent_id = ?2 \
               GROUP BY tn \
-              ORDER BY invocations DESC"
-        ))
+              ORDER BY invocations DESC",
+        )
         .bind(format!("-{window_hours} hours"))
         .bind(&self.agent_id)
+        .bind(ASSISTANT_TOOL_INVOCATIONS)
         .fetch_all(&self.pool)
         .await?;
 
@@ -311,22 +331,23 @@ impl MetricsStore for SqliteMetricsStore {
         window_hours: i64,
         bucket_minutes: i64,
     ) -> Result<Vec<TimeSeriesPoint>> {
-        let rows: Vec<(String, f64)> = sqlx::query_as(&format!(
+        let rows: Vec<(String, f64)> = sqlx::query_as(
             "SELECT \
                  strftime('%Y-%m-%dT%H:', recorded_at) || \
                  printf('%02d', (CAST(strftime('%M', recorded_at) AS INTEGER) / ?1) * ?1) \
                  || ':00Z' AS bucket, \
                  CAST(COALESCE(SUM(value), 0) AS REAL) AS total \
               FROM metric_points \
-              WHERE metric_name = '{ASSISTANT_TURN_COUNT}' \
+              WHERE metric_name = ?4 \
                  AND recorded_at >= datetime('now', ?2) \
                  AND agent_id = ?3 \
               GROUP BY bucket \
-              ORDER BY bucket"
-        ))
+              ORDER BY bucket",
+        )
         .bind(bucket_minutes)
         .bind(format!("-{window_hours} hours"))
         .bind(&self.agent_id)
+        .bind(ASSISTANT_TURN_COUNT)
         .fetch_all(&self.pool)
         .await?;
 
@@ -342,22 +363,23 @@ impl MetricsStore for SqliteMetricsStore {
         window_hours: i64,
         bucket_minutes: i64,
     ) -> Result<Vec<TimeSeriesPoint>> {
-        let rows: Vec<(String, f64)> = sqlx::query_as(&format!(
+        let rows: Vec<(String, f64)> = sqlx::query_as(
             "SELECT \
                  strftime('%Y-%m-%dT%H:', recorded_at) || \
                  printf('%02d', (CAST(strftime('%M', recorded_at) AS INTEGER) / ?1) * ?1) \
                  || ':00Z' AS bucket, \
                  CAST(COALESCE(SUM(value), 0) AS REAL) AS total \
               FROM metric_points \
-              WHERE metric_name = '{ASSISTANT_ERROR_COUNT}' \
+              WHERE metric_name = ?4 \
                  AND recorded_at >= datetime('now', ?2) \
                  AND agent_id = ?3 \
               GROUP BY bucket \
-              ORDER BY bucket"
-        ))
+              ORDER BY bucket",
+        )
         .bind(bucket_minutes)
         .bind(format!("-{window_hours} hours"))
         .bind(&self.agent_id)
+        .bind(ASSISTANT_ERROR_COUNT)
         .fetch_all(&self.pool)
         .await?;
 
@@ -529,72 +551,79 @@ mod tests {
         let (rid, sid) = seed_parents(&pool).await;
 
         // Insert token usage (histogram: sum + count are the key fields).
-        sqlx::query(&format!(
+        sqlx::query(
             "INSERT INTO metric_points \
              (resource_id, scope_id, metric_name, metric_kind, \
               sum, count, attributes, model, recorded_at) \
-             VALUES (?1, ?2, '{GEN_AI_CLIENT_TOKEN_USAGE}', 'histogram', \
-                     150, 3, '{{\"{GEN_AI_TOKEN_TYPE}\": \"input\"}}', 'test-model', \
-                     strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        ))
+             VALUES (?1, ?2, ?3, 'histogram', \
+                     150, 3, ?4, 'test-model', \
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
         .bind(rid)
         .bind(sid)
+        .bind(GEN_AI_CLIENT_TOKEN_USAGE)
+        .bind(format!("{{\"{GEN_AI_TOKEN_TYPE}\": \"input\"}}"))
         .execute(&pool)
         .await
         .unwrap();
 
-        sqlx::query(&format!(
+        sqlx::query(
             "INSERT INTO metric_points \
              (resource_id, scope_id, metric_name, metric_kind, \
               sum, count, attributes, model, recorded_at) \
-             VALUES (?1, ?2, '{GEN_AI_CLIENT_TOKEN_USAGE}', 'histogram', \
-                     80, 2, '{{\"{GEN_AI_TOKEN_TYPE}\": \"output\"}}', 'test-model', \
-                     strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        ))
+             VALUES (?1, ?2, ?3, 'histogram', \
+                     80, 2, ?4, 'test-model', \
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
         .bind(rid)
         .bind(sid)
+        .bind(GEN_AI_CLIENT_TOKEN_USAGE)
+        .bind(format!("{{\"{GEN_AI_TOKEN_TYPE}\": \"output\"}}"))
         .execute(&pool)
         .await
         .unwrap();
 
         // Insert turn count (counter: value column).
-        sqlx::query(&format!(
+        sqlx::query(
             "INSERT INTO metric_points \
              (resource_id, scope_id, metric_name, metric_kind, \
               value, attributes, recorded_at) \
-             VALUES (?1, ?2, '{ASSISTANT_TURN_COUNT}', 'counter', \
-                     5, '{{}}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        ))
+             VALUES (?1, ?2, ?3, 'counter', \
+                     5, '{}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
         .bind(rid)
         .bind(sid)
+        .bind(ASSISTANT_TURN_COUNT)
         .execute(&pool)
         .await
         .unwrap();
 
         // Insert tool invocation.
-        sqlx::query(&format!(
+        sqlx::query(
             "INSERT INTO metric_points \
              (resource_id, scope_id, metric_name, metric_kind, \
               value, attributes, recorded_at) \
-             VALUES (?1, ?2, '{ASSISTANT_TOOL_INVOCATIONS}', 'counter', \
-                     7, '{{\"tool.name\": \"file-read\"}}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        ))
+             VALUES (?1, ?2, ?3, 'counter', \
+                     7, '{\"tool.name\": \"file-read\"}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
         .bind(rid)
         .bind(sid)
+        .bind(ASSISTANT_TOOL_INVOCATIONS)
         .execute(&pool)
         .await
         .unwrap();
 
         // Insert operation duration (histogram).
-        sqlx::query(&format!(
+        sqlx::query(
             "INSERT INTO metric_points \
              (resource_id, scope_id, metric_name, metric_kind, \
               sum, count, attributes, recorded_at) \
-             VALUES (?1, ?2, '{GEN_AI_CLIENT_OPERATION_DURATION}', 'histogram', \
-                     12, 4, '{{}}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        ))
+             VALUES (?1, ?2, ?3, 'histogram', \
+                     12, 4, '{}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
         .bind(rid)
         .bind(sid)
+        .bind(GEN_AI_CLIENT_OPERATION_DURATION)
         .execute(&pool)
         .await
         .unwrap();

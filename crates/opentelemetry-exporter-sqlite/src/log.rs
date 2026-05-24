@@ -283,8 +283,10 @@ mod tests {
     }
 
     async fn row_count(pool: &SqlitePool, table: &str) -> i64 {
-        let q = format!("SELECT COUNT(*) AS cnt FROM {table}");
-        sqlx::query_scalar::<_, i64>(&q)
+        // The table name is an identifier (not bindable); callers pass only
+        // hard-coded literals, so the interpolation is safe to assert.
+        let q = sqlx::AssertSqlSafe(format!("SELECT COUNT(*) AS cnt FROM {table}"));
+        sqlx::query_scalar::<_, i64>(q)
             .fetch_one(pool)
             .await
             .unwrap()
