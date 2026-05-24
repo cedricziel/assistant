@@ -19,7 +19,7 @@ use super::handlers::{
     A2AState, build_default_agent_card, cancel_task, create_push_notification_config,
     delete_push_notification_config, get_agent_card_well_known, get_extended_agent_card,
     get_push_notification_config, get_task, list_push_notification_configs, list_tasks,
-    send_message,
+    send_message, send_message_streaming,
 };
 
 async fn make_state(base_url: &str) -> A2AState {
@@ -37,6 +37,7 @@ fn make_app(state: A2AState) -> Router {
             get(get_extended_agent_card),
         )
         .route("/message/send", post(send_message))
+        .route("/message/stream", post(send_message_streaming))
         .route("/tasks/{id}", get(get_task))
         .route("/tasks", get(list_tasks))
         .route("/tasks/{id}/cancel", post(cancel_task))
@@ -444,4 +445,28 @@ async fn send_message_without_conversations_write_scope_returns_403() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn send_message_streaming_emits_completed_task() {
+    let app = make_app(make_state("https://example.com").await);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/message/stream")
+                .header("Content-Type", "application/json")
+                .body(Body::from(user_message("stream please").to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Drain the SSE body; it should carry the completed task with the echo
+    // answer and a terminal [DONE] marker.
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("echo: stream please"), "got: {text}");
+    assert!(text.contains("[DONE]"), "missing terminal marker: {text}");
 }

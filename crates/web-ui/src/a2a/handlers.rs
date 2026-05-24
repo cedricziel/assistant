@@ -14,7 +14,6 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use futures::StreamExt;
-use futures::stream::Stream;
 use sqlx::SqlitePool;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
@@ -26,6 +25,7 @@ use assistant_a2a_json_schema::types::*;
 use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::Interface;
 use assistant_runtime::AssistantInterface;
+use assistant_runtime::projection::StreamProjector;
 use assistant_storage::{ConversationStore, SqliteConversationStore};
 
 use super::task_store::A2aTaskStore;
@@ -251,101 +251,118 @@ pub async fn send_message(
         (status = 200, description = "Streaming SSE response; each event is a JSON-encoded StreamResponse",
          content_type = "text/event-stream", body = StreamResponse),
         (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized")
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Missing conversations:write scope")
     ),
     tag = "messages",
     security(("bearer_token" = []))
 )]
 pub async fn send_message_streaming(
     State(state): State<A2AState>,
+    Extension(auth): Extension<AuthContext>,
     Json(req): Json<SendMessageRequest>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let context_id = req.message.context_id.clone();
-    let task = state.task_store.create_task(context_id).await;
-    let task_id = task.id.clone();
+) -> Response {
+    if !caller_can_post(&auth) {
+        return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
+    }
 
-    // Record incoming message.
+    let user_text: String = req
+        .message
+        .parts
+        .iter()
+        .filter_map(|p| p.text.as_deref())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let conv_store = SqliteConversationStore::for_agent(state.pool.clone(), &state.agent_id);
+    let conv_id = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await;
+
+    let task = state
+        .task_store
+        .create_task(Some(conv_id.to_string()))
+        .await;
+    let task_id = task.id.clone();
+    let ctx = task.context_id.clone();
     let mut user_msg = req.message.clone();
     user_msg.task_id = Some(task_id.clone());
     state.task_store.append_history(&task_id, user_msg).await;
+    state
+        .task_store
+        .update_status(&task_id, TaskState::TaskStateWorking, None)
+        .await;
 
-    // Subscribe before starting work so we don't miss events.
-    let rx = state.task_store.subscribe(&task_id).await;
+    // SSE output channel + orchestrator event sink.
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::unbounded_channel::<Result<Event, Infallible>>();
+    let (event_tx, mut event_rx) =
+        tokio::sync::mpsc::channel::<assistant_runtime::OrchestratorEvent>(64);
+    state
+        .orchestrator
+        .register_token_sink(conv_id, event_tx)
+        .await;
 
-    // Spawn background work.
-    let store = state.task_store.clone();
-    let parts = req.message.parts.clone();
-    let ctx_id = task.context_id.clone();
+    // Run the turn; capture the final result via a oneshot.
+    let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+    let orchestrator = state.orchestrator.clone();
+    let turn_auth = auth.clone();
+    let turn_text = user_text.clone();
     tokio::spawn(async move {
-        // Transition to Working.
-        store
-            .update_status(&task_id, TaskState::TaskStateWorking, None)
+        let r = orchestrator
+            .submit_turn(&turn_auth, &turn_text, conv_id, Interface::A2a, None)
             .await;
-
-        // Simulate processing.
-        // TODO: Wire to Orchestrator for real LLM streaming.
-        let user_text: String = parts
-            .iter()
-            .filter_map(|p| p.text.as_deref())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let reply_text = format!(
-            "Received your message ({} chars). Processing is not yet wired to the LLM backend.",
-            user_text.len()
-        );
-        let agent_msg = Message {
-            message_id: Uuid::new_v4().to_string(),
-            context_id: Some(ctx_id),
-            task_id: Some(task_id.clone()),
-            role: Role::RoleAgent,
-            parts: vec![Part::text(reply_text)],
-            metadata: None,
-            extensions: vec![],
-            reference_task_ids: vec![],
-        };
-
-        store.append_history(&task_id, agent_msg.clone()).await;
-
-        store
-            .update_status(&task_id, TaskState::TaskStateCompleted, Some(agent_msg))
-            .await;
-
-        store.cleanup_subscribers(&task_id).await;
+        let _ = result_tx.send(r);
     });
 
-    // Stream task snapshots as SSE events.
-    let stream = match rx {
-        Some(rx) => {
-            let stream = UnboundedReceiverStream::new(rx);
-            stream
-                .map(|task_snapshot| {
-                    let resp = StreamResponse::from_task(task_snapshot);
-                    let data = serde_json::to_string(&resp).unwrap_or_default();
-                    Ok(Event::default().data(data))
-                })
-                .chain(futures::stream::once(async {
-                    Ok(Event::default().data("[DONE]"))
-                }))
-                .boxed()
+    // Drain orchestrator events -> A2A StreamResponse frames -> SSE, then persist
+    // the final answer and emit the terminal task snapshot.
+    let projector = crate::a2a::projection::A2aProjector::new(task_id.clone(), ctx.clone());
+    let task_store = state.task_store.clone();
+    tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            for frame in projector.project(&event) {
+                let data = serde_json::to_string(&frame).unwrap_or_default();
+                if sse_tx.send(Ok(Event::default().data(data))).is_err() {
+                    return;
+                }
+            }
         }
-        None => {
-            // Task already terminal or doesn't exist -- send current state.
-            let task_snapshot = state.task_store.get_task(&task.id).await;
-            futures::stream::once(async move {
-                let data = match task_snapshot {
-                    Some(t) => {
-                        serde_json::to_string(&StreamResponse::from_task(t)).unwrap_or_default()
-                    }
-                    None => "[DONE]".to_string(),
-                };
-                Ok::<_, Infallible>(Event::default().data(data))
-            })
-            .boxed()
-        }
-    };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+        // The turn finished (its event sink was dropped). Finalize the task.
+        match result_rx.await {
+            Ok(Ok(turn)) => {
+                let agent_msg = Message {
+                    message_id: Uuid::new_v4().to_string(),
+                    context_id: Some(ctx.clone()),
+                    task_id: Some(task_id.clone()),
+                    role: Role::RoleAgent,
+                    parts: vec![Part::text(turn.answer)],
+                    metadata: None,
+                    extensions: vec![],
+                    reference_task_ids: vec![],
+                };
+                task_store.append_history(&task_id, agent_msg.clone()).await;
+                task_store
+                    .update_status(&task_id, TaskState::TaskStateCompleted, Some(agent_msg))
+                    .await;
+            }
+            _ => {
+                task_store
+                    .update_status(&task_id, TaskState::TaskStateFailed, None)
+                    .await;
+            }
+        }
+
+        if let Some(final_task) = task_store.get_task(&task_id).await {
+            let data =
+                serde_json::to_string(&StreamResponse::from_task(final_task)).unwrap_or_default();
+            let _ = sse_tx.send(Ok(Event::default().data(data)));
+        }
+        let _ = sse_tx.send(Ok(Event::default().data("[DONE]")));
+        task_store.cleanup_subscribers(&task_id).await;
+    });
+
+    Sse::new(UnboundedReceiverStream::new(sse_rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 // -- Task operations --

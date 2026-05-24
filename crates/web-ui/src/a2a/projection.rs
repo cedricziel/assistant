@@ -19,16 +19,12 @@ use uuid::Uuid;
 ///
 /// Constructed per task so it can stamp the `task_id` / `context_id` onto each
 /// emitted frame.
-// `allow(dead_code)`: consumed by `send_message_streaming` in a later commit of
-// this change (a2a-orchestrator-wiring). Removed once the handler uses it.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct A2aProjector {
     task_id: String,
     context_id: String,
 }
 
-#[allow(dead_code)] // see note on the struct; removed when the handler uses these
 impl A2aProjector {
     /// Create a projector bound to a task and its context.
     pub fn new(task_id: impl Into<String>, context_id: impl Into<String>) -> Self {
