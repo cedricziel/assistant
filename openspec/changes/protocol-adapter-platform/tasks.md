@@ -23,13 +23,13 @@
 
 > Decision resolved (2026-05-23): adopt AG-UI **fully**, incl. community SDKs.
 
-- [ ] Create child change `a2a-orchestrator-wiring`
-  - [ ] Replace `web-ui/src/a2a/handlers.rs` stub with a real adapter over the
+- [x] Create child change `a2a-orchestrator-wiring`
+  - [x] Replace `web-ui/src/a2a/handlers.rs` stub with a real adapter over the
         Orchestrator via the Phase 0 projector
-  - [ ] Add `AuthContext`/org/space to `A2AState`; reject unauthenticated calls
-  - [ ] Persist tasks via the storage layer (retire the in-memory `TaskStore`
-        or back it with SQLite)
-  - [ ] Ship A2A operator/developer docs in `docs/`
+  - [x] Add `AuthContext` to `A2AState`; reject unauthenticated/under-scoped
+        calls (org/space re-scoping deferred per Phase 0)
+  - [x] Persist tasks via the storage layer (`SqliteA2aTaskStore` + migration 042)
+  - [x] Ship A2A operator/developer docs in `docs/`
 - [ ] Create child change `ag-ui-stream-schema` (full SDK adoption)
   - [ ] **Spike (throwaway, go/no-go gate)**: drive one real turn end-to-end
         through the community Rust + `ag_ui` Dart SDKs; assert every

@@ -35,8 +35,8 @@ use super::{ApiState, sse_response};
 /// Whether the caller may post a message / start a turn — gated on the
 /// `conversations:write` scope, with org admins bypassing. Trusted local callers
 /// carry this via [`AuthContext::system`]; network callers resolve a real
-/// `AuthContext` from the request.
-fn caller_can_post(auth: &AuthContext) -> bool {
+/// `AuthContext` from the request. Shared with the A2A handlers.
+pub(crate) fn caller_can_post(auth: &AuthContext) -> bool {
     auth.is_org_admin()
         || auth
             .scopes

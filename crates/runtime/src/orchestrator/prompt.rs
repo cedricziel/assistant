@@ -222,6 +222,12 @@ fn output_capabilities(interface: &Interface) -> &'static str {
              You are running as a background scheduled task. Your output may be logged or \
              forwarded. Use plain text. Do not use ```svg or ```mermaid."
         }
+        Interface::A2a => {
+            "## Output capabilities\n\
+             \n\
+             Your responses are consumed by another agent over the A2A protocol. Return \
+             structured, well-formatted text. Do not use ```svg or ```mermaid."
+        }
     }
 }
 
@@ -299,6 +305,7 @@ mod tests {
             Interface::Web,
             Interface::Scheduler,
             Interface::Matrix,
+            Interface::A2a,
         ];
         for iface in &interfaces {
             let caps = output_capabilities(iface);

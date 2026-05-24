@@ -6,13 +6,15 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::Arc;
 
+use axum::Extension;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use futures::StreamExt;
-use futures::stream::Stream;
+use sqlx::SqlitePool;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 
@@ -20,8 +22,14 @@ use assistant_a2a_json_schema::agent_card::*;
 use assistant_a2a_json_schema::requests::*;
 use assistant_a2a_json_schema::responses::*;
 use assistant_a2a_json_schema::types::*;
+use assistant_core::auth::AuthContext;
+use assistant_core::types::conversation::Interface;
+use assistant_runtime::AssistantInterface;
+use assistant_runtime::projection::StreamProjector;
+use assistant_storage::{ConversationStore, SqliteConversationStore};
 
-use super::task_store::TaskStore;
+use super::task_store::A2aTaskStore;
+use crate::api::messages::caller_can_post;
 use crate::openapi::ApiErrorResponse;
 
 // -- Shared state --
@@ -29,10 +37,54 @@ use crate::openapi::ApiErrorResponse;
 /// Shared state for all A2A handlers.
 #[derive(Clone)]
 pub struct A2AState {
-    /// In-memory task store.
-    pub task_store: TaskStore,
+    /// Durable A2A task store, scoped to the active agent's space db.
+    pub task_store: Arc<dyn A2aTaskStore>,
     /// The agent card describing this agent.
     pub agent_card: AgentCard,
+    /// Orchestrator used to run real turns for A2A messages.
+    pub orchestrator: Arc<dyn AssistantInterface>,
+    /// Space db pool, for resolving/creating conversations.
+    pub pool: SqlitePool,
+    /// The active agent id (space scope) for conversation resolution.
+    pub agent_id: String,
+}
+
+/// Resolve the conversation for an A2A message. A returned `context_id` is the
+/// conversation UUID we previously surfaced, so reuse it when it parses and
+/// exists; otherwise start a fresh conversation. Returns `None` if a new
+/// conversation cannot be created — callers MUST surface that as an error rather
+/// than dispatch a turn against a non-existent conversation.
+async fn resolve_conversation(
+    store: &SqliteConversationStore,
+    context_id: Option<&str>,
+) -> Option<Uuid> {
+    if let Some(ctx) = context_id
+        && let Ok(id) = Uuid::parse_str(ctx)
+        && matches!(store.get_conversation(id).await, Ok(Some(_)))
+    {
+        return Some(id);
+    }
+    match store.create_conversation(None).await {
+        Ok(conv) => Some(conv.id),
+        Err(e) => {
+            tracing::error!("a2a: failed to create conversation: {e}");
+            None
+        }
+    }
+}
+
+/// Build an agent-authored A2A message scoped to a task.
+fn agent_message(task: &Task, text: impl Into<String>) -> Message {
+    Message {
+        message_id: Uuid::new_v4().to_string(),
+        context_id: Some(task.context_id.clone()),
+        task_id: Some(task.id.clone()),
+        role: Role::RoleAgent,
+        parts: vec![Part::text(text)],
+        metadata: None,
+        extensions: vec![],
+        reference_task_ids: vec![],
+    }
 }
 
 // -- Error helper --
@@ -58,6 +110,16 @@ fn bad_request(msg: impl Into<String>) -> Response {
         message: msg.into(),
     };
     (StatusCode::BAD_REQUEST, Json(body)).into_response()
+}
+
+/// Maps a task-store / persistence failure to a 500, logging the cause.
+fn internal_error(e: anyhow::Error) -> Response {
+    tracing::error!("a2a: {e:#}");
+    let body = A2AError {
+        code: 500,
+        message: "Internal error".to_string(),
+    };
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
 }
 
 // -- Agent Card --
@@ -110,30 +172,21 @@ pub async fn get_extended_agent_card(State(state): State<A2AState>) -> Json<Agen
         (status = 200, description = "Task created and completed", body = SendMessageResponse,
          content_type = "application/json"),
         (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized")
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Missing conversations:write scope")
     ),
     tag = "messages",
     security(("bearer_token" = []))
 )]
 pub async fn send_message(
     State(state): State<A2AState>,
+    Extension(auth): Extension<AuthContext>,
     Json(req): Json<SendMessageRequest>,
 ) -> Response {
-    let context_id = req.message.context_id.clone();
-    let task = state.task_store.create_task(context_id).await;
+    if !caller_can_post(&auth) {
+        return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
+    }
 
-    // Record the incoming user message in history.
-    let mut user_msg = req.message.clone();
-    user_msg.task_id = Some(task.id.clone());
-    state.task_store.append_history(&task.id, user_msg).await;
-
-    // Transition to Working.
-    state
-        .task_store
-        .update_status(&task.id, TaskState::TaskStateWorking, None)
-        .await;
-
-    // Extract the user's text content for processing.
     let user_text: String = req
         .message
         .parts
@@ -142,52 +195,95 @@ pub async fn send_message(
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Build an agent reply.
-    // TODO: Wire to Orchestrator for real LLM processing.
-    let reply_text = format!(
-        "Received your message ({} chars). Processing is not yet wired to the LLM backend.",
-        user_text.len()
-    );
-    let agent_msg = Message {
-        message_id: Uuid::new_v4().to_string(),
-        context_id: Some(task.context_id.clone()),
-        task_id: Some(task.id.clone()),
-        role: Role::RoleAgent,
-        parts: vec![Part::text(reply_text)],
-        metadata: None,
-        extensions: vec![],
-        reference_task_ids: vec![],
-    };
-
-    state
-        .task_store
-        .append_history(&task.id, agent_msg.clone())
-        .await;
-
-    // Transition to Completed.
-    state
-        .task_store
-        .update_status(&task.id, TaskState::TaskStateCompleted, Some(agent_msg))
-        .await;
-
-    let Some(final_task) = state.task_store.get_task(&task.id).await else {
-        // We just created and updated the task on the previous lines; the
-        // store dropping it between the update and the get would only happen
-        // under a concurrent eviction race that the in-memory store does not
-        // perform. Treat as a 500 rather than panicking the worker.
+    // Resolve (or create) the conversation, then key the task to it so the
+    // client can reuse the returned context_id for follow-up turns.
+    let conv_store = SqliteConversationStore::for_agent(state.pool.clone(), &state.agent_id);
+    let Some(conv_id) = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await
+    else {
         return (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "task disappeared after creation"})),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve conversation",
         )
             .into_response();
     };
 
-    let resp = SendMessageResponse {
-        task: Some(final_task),
-        message: None,
+    let task = match state
+        .task_store
+        .create_task(Some(conv_id.to_string()))
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => return internal_error(e),
+    };
+    let mut user_msg = req.message.clone();
+    user_msg.task_id = Some(task.id.clone());
+    if let Err(e) = state.task_store.append_history(&task.id, user_msg).await {
+        return internal_error(e);
+    }
+    if let Err(e) = state
+        .task_store
+        .update_status(&task.id, TaskState::TaskStateWorking, None)
+        .await
+    {
+        return internal_error(e);
+    }
+
+    // Run the real turn through the Orchestrator.
+    let result = state
+        .orchestrator
+        .submit_turn(&auth, &user_text, conv_id, Interface::A2a, None)
+        .await;
+
+    let answer = match result {
+        Ok(turn) => turn.answer,
+        Err(e) => {
+            let err_msg = agent_message(&task, format!("Turn failed: {e}"));
+            let _ = state
+                .task_store
+                .update_status(&task.id, TaskState::TaskStateFailed, Some(err_msg))
+                .await;
+            let failed = state.task_store.get_task(&task.id).await.ok().flatten();
+            return Json(SendMessageResponse {
+                task: failed,
+                message: None,
+            })
+            .into_response();
+        }
     };
 
-    Json(resp).into_response()
+    let agent_msg = agent_message(&task, answer);
+    if let Err(e) = state
+        .task_store
+        .append_history(&task.id, agent_msg.clone())
+        .await
+    {
+        return internal_error(e);
+    }
+    if let Err(e) = state
+        .task_store
+        .update_status(&task.id, TaskState::TaskStateCompleted, Some(agent_msg))
+        .await
+    {
+        return internal_error(e);
+    }
+
+    let final_task = match state.task_store.get_task(&task.id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "task disappeared after creation"})),
+            )
+                .into_response();
+        }
+        Err(e) => return internal_error(e),
+    };
+
+    Json(SendMessageResponse {
+        task: Some(final_task),
+        message: None,
+    })
+    .into_response()
 }
 
 /// `POST /message/stream` -- Sends a message with streaming response (SSE).
@@ -200,101 +296,143 @@ pub async fn send_message(
         (status = 200, description = "Streaming SSE response; each event is a JSON-encoded StreamResponse",
          content_type = "text/event-stream", body = StreamResponse),
         (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized")
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Missing conversations:write scope")
     ),
     tag = "messages",
     security(("bearer_token" = []))
 )]
 pub async fn send_message_streaming(
     State(state): State<A2AState>,
+    Extension(auth): Extension<AuthContext>,
     Json(req): Json<SendMessageRequest>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let context_id = req.message.context_id.clone();
-    let task = state.task_store.create_task(context_id).await;
-    let task_id = task.id.clone();
+) -> Response {
+    if !caller_can_post(&auth) {
+        return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
+    }
 
-    // Record incoming message.
-    let mut user_msg = req.message.clone();
-    user_msg.task_id = Some(task_id.clone());
-    state.task_store.append_history(&task_id, user_msg).await;
+    let user_text: String = req
+        .message
+        .parts
+        .iter()
+        .filter_map(|p| p.text.as_deref())
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    // Subscribe before starting work so we don't miss events.
-    let rx = state.task_store.subscribe(&task_id).await;
-
-    // Spawn background work.
-    let store = state.task_store.clone();
-    let parts = req.message.parts.clone();
-    let ctx_id = task.context_id.clone();
-    tokio::spawn(async move {
-        // Transition to Working.
-        store
-            .update_status(&task_id, TaskState::TaskStateWorking, None)
-            .await;
-
-        // Simulate processing.
-        // TODO: Wire to Orchestrator for real LLM streaming.
-        let user_text: String = parts
-            .iter()
-            .filter_map(|p| p.text.as_deref())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let reply_text = format!(
-            "Received your message ({} chars). Processing is not yet wired to the LLM backend.",
-            user_text.len()
-        );
-        let agent_msg = Message {
-            message_id: Uuid::new_v4().to_string(),
-            context_id: Some(ctx_id),
-            task_id: Some(task_id.clone()),
-            role: Role::RoleAgent,
-            parts: vec![Part::text(reply_text)],
-            metadata: None,
-            extensions: vec![],
-            reference_task_ids: vec![],
-        };
-
-        store.append_history(&task_id, agent_msg.clone()).await;
-
-        store
-            .update_status(&task_id, TaskState::TaskStateCompleted, Some(agent_msg))
-            .await;
-
-        store.cleanup_subscribers(&task_id).await;
-    });
-
-    // Stream task snapshots as SSE events.
-    let stream = match rx {
-        Some(rx) => {
-            let stream = UnboundedReceiverStream::new(rx);
-            stream
-                .map(|task_snapshot| {
-                    let resp = StreamResponse::from_task(task_snapshot);
-                    let data = serde_json::to_string(&resp).unwrap_or_default();
-                    Ok(Event::default().data(data))
-                })
-                .chain(futures::stream::once(async {
-                    Ok(Event::default().data("[DONE]"))
-                }))
-                .boxed()
-        }
-        None => {
-            // Task already terminal or doesn't exist -- send current state.
-            let task_snapshot = state.task_store.get_task(&task.id).await;
-            futures::stream::once(async move {
-                let data = match task_snapshot {
-                    Some(t) => {
-                        serde_json::to_string(&StreamResponse::from_task(t)).unwrap_or_default()
-                    }
-                    None => "[DONE]".to_string(),
-                };
-                Ok::<_, Infallible>(Event::default().data(data))
-            })
-            .boxed()
-        }
+    let conv_store = SqliteConversationStore::for_agent(state.pool.clone(), &state.agent_id);
+    let Some(conv_id) = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await
+    else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve conversation",
+        )
+            .into_response();
     };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    let task = match state
+        .task_store
+        .create_task(Some(conv_id.to_string()))
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => return internal_error(e),
+    };
+    let task_id = task.id.clone();
+    let ctx = task.context_id.clone();
+    let mut user_msg = req.message.clone();
+    user_msg.task_id = Some(task_id.clone());
+    if let Err(e) = state.task_store.append_history(&task_id, user_msg).await {
+        return internal_error(e);
+    }
+    if let Err(e) = state
+        .task_store
+        .update_status(&task_id, TaskState::TaskStateWorking, None)
+        .await
+    {
+        return internal_error(e);
+    }
+
+    // SSE output channel + orchestrator event sink.
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::unbounded_channel::<Result<Event, Infallible>>();
+    let (event_tx, mut event_rx) =
+        tokio::sync::mpsc::channel::<assistant_runtime::OrchestratorEvent>(64);
+    state
+        .orchestrator
+        .register_token_sink(conv_id, event_tx)
+        .await;
+
+    // Run the turn; capture the final result via a oneshot.
+    let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+    let orchestrator = state.orchestrator.clone();
+    let turn_auth = auth.clone();
+    let turn_text = user_text.clone();
+    tokio::spawn(async move {
+        let r = orchestrator
+            .submit_turn(&turn_auth, &turn_text, conv_id, Interface::A2a, None)
+            .await;
+        let _ = result_tx.send(r);
+    });
+
+    // Drain orchestrator events -> A2A StreamResponse frames -> SSE, then persist
+    // the final answer and emit the terminal task snapshot.
+    let projector = crate::a2a::projection::A2aProjector::new(task_id.clone(), ctx.clone());
+    let task_store = state.task_store.clone();
+    tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            for frame in projector.project(&event) {
+                let data = serde_json::to_string(&frame).unwrap_or_default();
+                if sse_tx.send(Ok(Event::default().data(data))).is_err() {
+                    return;
+                }
+            }
+        }
+
+        // The turn finished (its event sink was dropped). Finalize the task.
+        match result_rx.await {
+            Ok(Ok(turn)) => {
+                let agent_msg = Message {
+                    message_id: Uuid::new_v4().to_string(),
+                    context_id: Some(ctx.clone()),
+                    task_id: Some(task_id.clone()),
+                    role: Role::RoleAgent,
+                    parts: vec![Part::text(turn.answer)],
+                    metadata: None,
+                    extensions: vec![],
+                    reference_task_ids: vec![],
+                };
+                // Post-response: errors can only be logged, not returned.
+                if let Err(e) = task_store.append_history(&task_id, agent_msg.clone()).await {
+                    tracing::error!("a2a: {e:#}");
+                }
+                if let Err(e) = task_store
+                    .update_status(&task_id, TaskState::TaskStateCompleted, Some(agent_msg))
+                    .await
+                {
+                    tracing::error!("a2a: {e:#}");
+                }
+            }
+            _ => {
+                if let Err(e) = task_store
+                    .update_status(&task_id, TaskState::TaskStateFailed, None)
+                    .await
+                {
+                    tracing::error!("a2a: {e:#}");
+                }
+            }
+        }
+
+        if let Ok(Some(final_task)) = task_store.get_task(&task_id).await {
+            let data =
+                serde_json::to_string(&StreamResponse::from_task(final_task)).unwrap_or_default();
+            let _ = sse_tx.send(Ok(Event::default().data(data)));
+        }
+        let _ = sse_tx.send(Ok(Event::default().data("[DONE]")));
+        let _ = task_store.cleanup_subscribers(&task_id).await;
+    });
+
+    Sse::new(UnboundedReceiverStream::new(sse_rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 // -- Task operations --
@@ -323,8 +461,9 @@ pub async fn get_task(
     Query(_query): Query<GetTaskQuery>,
 ) -> Response {
     match state.task_store.get_task(&id).await {
-        Some(task) => Json(task).into_response(),
-        None => not_found(format!("Task '{id}' not found")),
+        Ok(Some(task)) => Json(task).into_response(),
+        Ok(None) => not_found(format!("Task '{id}' not found")),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -361,13 +500,17 @@ pub struct GetTaskQuery {
 pub async fn list_tasks(
     State(state): State<A2AState>,
     Query(query): Query<ListTasksRequest>,
-) -> Json<ListTasksResponse> {
+) -> Response {
     let limit = query.page_size.unwrap_or(50).clamp(1, 100) as usize;
 
-    let tasks = state
+    let tasks = match state
         .task_store
         .list_tasks(query.context_id.as_deref(), query.status, limit)
-        .await;
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => return internal_error(e),
+    };
 
     let total_size = tasks.len() as i32;
     Json(ListTasksResponse {
@@ -376,6 +519,7 @@ pub async fn list_tasks(
         page_size: limit as i32,
         total_size,
     })
+    .into_response()
 }
 
 /// `POST /tasks/:id/cancel` -- Cancels a task.
@@ -404,8 +548,9 @@ pub async fn cancel_task(
 ) -> Response {
     let _ = body; // body fields are available for future use (e.g. metadata)
     match state.task_store.cancel_task(&id).await {
-        Some(task) => Json(task).into_response(),
-        None => not_found(format!("Task '{id}' not found")),
+        Ok(Some(task)) => Json(task).into_response(),
+        Ok(None) => not_found(format!("Task '{id}' not found")),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -429,7 +574,10 @@ pub async fn cancel_task(
     security(("bearer_token" = []))
 )]
 pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<String>) -> Response {
-    let rx = state.task_store.subscribe(&id).await;
+    let rx = match state.task_store.subscribe(&id).await {
+        Ok(r) => r,
+        Err(e) => return internal_error(e),
+    };
 
     match rx {
         Some(rx) => {
@@ -452,7 +600,7 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
             tokio::spawn(async move {
                 // Wait a bit for stream to settle then clean up.
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                cleanup_store.cleanup_subscribers(&cleanup_id).await;
+                let _ = cleanup_store.cleanup_subscribers(&cleanup_id).await;
             });
 
             Sse::new(stream)
@@ -461,13 +609,13 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
         }
         None => {
             // Task doesn't exist or is already terminal.
-            let task = state.task_store.get_task(&id).await;
-            match task {
-                Some(t) if t.status.state.is_terminal() => bad_request(format!(
+            match state.task_store.get_task(&id).await {
+                Ok(Some(t)) if t.status.state.is_terminal() => bad_request(format!(
                     "Task '{id}' is already in terminal state: {:?}",
                     t.status.state
                 )),
-                _ => not_found(format!("Task '{id}' not found")),
+                Ok(_) => not_found(format!("Task '{id}' not found")),
+                Err(e) => internal_error(e),
             }
         }
     }
@@ -503,8 +651,9 @@ pub async fn create_push_notification_config(
         .create_push_config(&task_id, req.config)
         .await
     {
-        Some(config) => (StatusCode::CREATED, Json(config)).into_response(),
-        None => not_found(format!("Task '{task_id}' not found")),
+        Ok(Some(config)) => (StatusCode::CREATED, Json(config)).into_response(),
+        Ok(None) => not_found(format!("Task '{task_id}' not found")),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -531,10 +680,11 @@ pub async fn get_push_notification_config(
     Path((task_id, config_id)): Path<(String, String)>,
 ) -> Response {
     match state.task_store.get_push_config(&task_id, &config_id).await {
-        Some(config) => Json(config).into_response(),
-        None => not_found(format!(
+        Ok(Some(config)) => Json(config).into_response(),
+        Ok(None) => not_found(format!(
             "Push notification config '{config_id}' not found for task '{task_id}'"
         )),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -568,12 +718,16 @@ pub async fn list_push_notification_configs(
     State(state): State<A2AState>,
     Path(task_id): Path<String>,
     Query(_query): Query<ListPushConfigsQuery>,
-) -> Json<ListTaskPushNotificationConfigsResponse> {
-    let configs = state.task_store.list_push_configs(&task_id).await;
+) -> Response {
+    let configs = match state.task_store.list_push_configs(&task_id).await {
+        Ok(c) => c,
+        Err(e) => return internal_error(e),
+    };
     Json(ListTaskPushNotificationConfigsResponse {
         configs,
         next_page_token: None,
     })
+    .into_response()
 }
 
 /// `DELETE /tasks/:task_id/pushNotificationConfigs/:config_id`
@@ -597,16 +751,16 @@ pub async fn delete_push_notification_config(
     State(state): State<A2AState>,
     Path((task_id, config_id)): Path<(String, String)>,
 ) -> Response {
-    if state
+    match state
         .task_store
         .delete_push_config(&task_id, &config_id)
         .await
     {
-        StatusCode::NO_CONTENT.into_response()
-    } else {
-        not_found(format!(
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_found(format!(
             "Push notification config '{config_id}' not found for task '{task_id}'"
-        ))
+        )),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -654,5 +808,75 @@ pub fn build_default_agent_card(base_url: &str) -> AgentCard {
         }],
         signatures: vec![],
         icon_url: None,
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    //! Shared helpers for the A2A handler/router tests: a no-op orchestrator and
+    //! an `A2AState` backed by in-memory storage.
+    use std::sync::Arc;
+
+    use assistant_core::auth::AuthContext;
+    use assistant_core::types::conversation::Interface;
+    use assistant_runtime::{AssistantInterface, OrchestratorEvent, TurnResult};
+    use async_trait::async_trait;
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
+
+    use super::{A2AState, build_default_agent_card};
+    use crate::a2a::task_store::InMemoryA2aTaskStore;
+
+    /// Minimal `AssistantInterface` that echoes the prompt as the answer.
+    pub struct EchoInterface;
+
+    #[async_trait]
+    impl AssistantInterface for EchoInterface {
+        async fn register_token_sink(
+            &self,
+            _conversation_id: Uuid,
+            _sink: mpsc::Sender<OrchestratorEvent>,
+        ) {
+        }
+
+        async fn submit_turn_with_attachments(
+            &self,
+            _auth: &AuthContext,
+            prompt: &str,
+            _conversation_id: Uuid,
+            _interface: Interface,
+            _timestamp: Option<chrono::DateTime<chrono::Utc>>,
+            _attachment_ids: Vec<Uuid>,
+        ) -> anyhow::Result<TurnResult> {
+            Ok(TurnResult {
+                answer: format!("echo: {prompt}"),
+                attachments: vec![],
+                attachment_ids: vec![],
+                message_id: None,
+                had_errors: false,
+            })
+        }
+
+        async fn run_boot(
+            &self,
+            _conversation_id: Uuid,
+            _interface: Interface,
+        ) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    /// Build an `A2AState` backed by in-memory storage + an echo orchestrator.
+    pub async fn test_state(base_url: &str) -> A2AState {
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .expect("in-memory storage");
+        A2AState {
+            task_store: Arc::new(InMemoryA2aTaskStore::new()),
+            agent_card: build_default_agent_card(base_url),
+            orchestrator: Arc::new(EchoInterface),
+            pool: storage.pool.clone(),
+            agent_id: "default".to_string(),
+        }
     }
 }
