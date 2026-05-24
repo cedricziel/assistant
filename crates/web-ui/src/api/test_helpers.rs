@@ -191,7 +191,18 @@ pub(crate) async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
 }
 
 pub(crate) fn app(state: ApiState) -> axum::Router {
-    api_router().with_state(state)
+    // Inject a trusted system AuthContext so handlers behind the auth seam
+    // (e.g. the streaming message handlers) receive an `Extension<AuthContext>`.
+    app_with_auth(state, assistant_core::auth::AuthContext::system())
+}
+
+/// Like [`app`] but with a caller-supplied [`AuthContext`], so tests can
+/// exercise the authorization gate (e.g. a context lacking `conversations:write`).
+pub(crate) fn app_with_auth(
+    state: ApiState,
+    auth: assistant_core::auth::AuthContext,
+) -> axum::Router {
+    api_router().layer(axum::Extension(auth)).with_state(state)
 }
 
 pub(crate) async fn body_bytes(body: Body) -> Vec<u8> {

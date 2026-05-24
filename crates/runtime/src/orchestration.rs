@@ -12,6 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::Interface;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -25,6 +26,7 @@ pub trait OrchestrationEngine: Send + Sync {
     /// Submit a single prompt and return the assistant's final response.
     async fn submit_turn(
         &self,
+        auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
@@ -39,12 +41,14 @@ pub trait OrchestrationEngine: Send + Sync {
 impl OrchestrationEngine for crate::Orchestrator {
     async fn submit_turn(
         &self,
+        auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
-        crate::Orchestrator::submit_turn(self, prompt, conversation_id, interface, timestamp).await
+        crate::Orchestrator::submit_turn(self, auth, prompt, conversation_id, interface, timestamp)
+            .await
     }
 
     async fn cancel_turn(&self, request_id: Uuid) -> CancelOutcome {
@@ -129,6 +133,7 @@ impl Default for StubOrchestrationEngine {
 impl OrchestrationEngine for StubOrchestrationEngine {
     async fn submit_turn(
         &self,
+        _auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
@@ -184,7 +189,13 @@ mod tests {
             had_errors: false,
         }));
         let r = stub
-            .submit_turn("hi", Uuid::new_v4(), Interface::Mcp, None)
+            .submit_turn(
+                &AuthContext::system(),
+                "hi",
+                Uuid::new_v4(),
+                Interface::Mcp,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(r.answer, "hello");
@@ -198,7 +209,13 @@ mod tests {
     async fn stub_empty_queue_returns_benign_result() {
         let stub = StubOrchestrationEngine::new();
         let r = stub
-            .submit_turn("hi", Uuid::new_v4(), Interface::Cli, None)
+            .submit_turn(
+                &AuthContext::system(),
+                "hi",
+                Uuid::new_v4(),
+                Interface::Cli,
+                None,
+            )
             .await
             .unwrap();
         assert!(r.answer.contains("stub"));

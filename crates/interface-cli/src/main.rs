@@ -347,7 +347,13 @@ async fn main() -> Result<()> {
 
         let result = bs
             .orchestrator
-            .submit_turn(&prompt, conversation_id, Interface::Cli, None)
+            .submit_turn(
+                &assistant_core::auth::AuthContext::system(),
+                &prompt,
+                conversation_id,
+                Interface::Cli,
+                None,
+            )
             .await?;
         println!("{}", result.answer);
         return Ok(());
@@ -948,8 +954,14 @@ async fn main() -> Result<()> {
                 let prompt = input.to_string();
                 let msg_ts = SystemClock.now();
                 let submit = tokio::spawn(async move {
-                    orch.submit_turn(&prompt, conversation_id, Interface::Cli, Some(msg_ts))
-                        .await
+                    orch.submit_turn(
+                        &assistant_core::auth::AuthContext::system(),
+                        &prompt,
+                        conversation_id,
+                        Interface::Cli,
+                        Some(msg_ts),
+                    )
+                    .await
                 });
 
                 // Await the submit result first — if it fails, abort the

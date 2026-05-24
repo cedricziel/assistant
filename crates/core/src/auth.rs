@@ -38,6 +38,32 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
+    /// A trusted, non-network identity for local/system callers — the scheduler,
+    /// BOOT hooks, the CLI, MCP stdio, and messenger adapters — that do not carry
+    /// an OAuth token or API key.
+    ///
+    /// Network-facing adapters (web, A2A) MUST resolve a real `AuthContext` from
+    /// the request instead of using this. It exists so the turn-dispatch seam can
+    /// require an `AuthContext` everywhere without a silent default: trusted local
+    /// callers name `system()` explicitly at the call site.
+    pub fn system() -> Self {
+        let mut space_roles = HashMap::new();
+        space_roles.insert(SpaceId::from("default"), Role::OrgAdmin);
+        Self {
+            user_id: UserId::from("system"),
+            org_id: OrgId::from("default"),
+            email: "system@localhost".to_string(),
+            space_roles,
+            scopes: vec![
+                Scope::new(ResourceKind::Conversations, Action::Write),
+                Scope::new(ResourceKind::Conversations, Action::Read),
+                Scope::new(ResourceKind::Messages, Action::Execute),
+                Scope::new(ResourceKind::Personas, Action::Read),
+            ],
+            client_id: "system".to_string(),
+        }
+    }
+
     /// Returns `true` if this context carries the `OrgAdmin` role in any space,
     /// or has the `org:manage` scope.
     pub fn is_org_admin(&self) -> bool {

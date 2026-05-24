@@ -46,18 +46,24 @@ seam, instead of multiplying these gaps.
 ## Impact
 
 - **Code touched**: new `crates/runtime/src/projection/` module;
-  `crates/web-ui/src/api/messages.rs` (consume projector + auth seam);
-  `crates/interface-cli/src/{main,repl_helpers}.rs` (consume projector);
-  workspace conformance test(s).
-- **Tests**: totality test, SSE wire-parity golden test, auth-seam conformance
-  test.
-- **Behavior change**: none intended. SSE wire stays byte-identical; no route
-  shape change, so **no `openapi.json` or Flutter client regeneration**.
+  `crates/web-ui/src/api/messages.rs` (consume projector + auth seam + 403 gate);
+  `crates/runtime/src/{orchestrator/worker,interface_trait,orchestration}.rs`
+  and `crates/core/src/auth.rs` (the `&AuthContext` seam + `AuthContext::system`);
+  `crates/{mcp-server,interface-cli,web-ui}` call sites; conformance + 403 tests.
+- **Tests**: SSE/CLI totality + wire-parity tests, the compiler seam (turn
+  dispatch won't build without an `AuthContext`), and a web 403-gate test.
+- **Behavior change**: the main streaming wire stays byte-identical. The voice
+  handler's subagent events drop a redundant `event_type` field as both handlers
+  unify on one projector (see `design.md` Decision 7) — the Flutter client never
+  read that field. The streaming handlers now return `403` when the caller lacks
+  `conversations:write`. **`openapi.json` is regenerated** to add those `403`
+  responses, and the Flutter client is regenerated (README only — error
+  responses don't change generated models).
 - **Non-goals**:
   - Re-scoping the turn from `AuthContext` (replacing `state.agent_id` with
     org/space-derived routing) — deferred; it entails multi-org turn routing.
   - Wiring A2A to the Orchestrator (Phase 1 `a2a-orchestrator-wiring`).
   - Any AG-UI/ACP projector (later phases).
-  - Changing `OrchestratorEvent` variants or the SSE wire vocabulary.
+  - Changing `OrchestratorEvent` variants or the main SSE wire vocabulary.
 - **User-facing documentation needed**: No. Internal refactor + test
   guardrails; no user-visible behavior change.

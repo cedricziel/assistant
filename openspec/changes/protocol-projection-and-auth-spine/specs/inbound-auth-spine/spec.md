@@ -1,27 +1,37 @@
 ## ADDED Requirements
 
-### Requirement: Inbound turn dispatch requires a resolved AuthContext
+### Requirement: Turn dispatch requires an AuthContext (compiler-enforced)
 
-Every inbound adapter that dispatches a turn to the Orchestrator SHALL first
-resolve an `AuthContext`. The requirement MUST be enforced, not merely
-conventional: either by a dispatch seam that takes `&AuthContext` (so dispatch
-without one does not compile), or by a conformance test that fails when an
-inbound turn-accepting handler does not resolve `AuthContext`. An inbound
-turn-accepting handler MUST NOT submit a turn when no `AuthContext` is
-available.
+Every turn-submission entry point SHALL require an `AuthContext` as a parameter,
+so that dispatching a turn without one does not compile. This MUST hold across
+all three submission surfaces — the inherent `Orchestrator::submit_turn*`
+methods, the `AssistantInterface` trait, and the `OrchestrationEngine` trait —
+and their implementations. There MUST be no turn-submission path that defaults
+the caller identity silently.
+
+Network-facing adapters (the `/api` handlers, and A2A in a later phase) MUST
+pass an `AuthContext` resolved from the request. Trusted local/non-network
+callers (the scheduler, BOOT hooks, the CLI, MCP stdio, messenger adapters,
+tests) MUST pass `AuthContext::system()` explicitly at the call site.
 
 #### Scenario: Streaming handler resolves AuthContext before dispatch
 
 - **WHEN** the `/api` streaming message handler is invoked
-- **THEN** it SHALL resolve an `AuthContext` (via `AuthExtractor`) before
-  submitting the turn
+- **THEN** it SHALL resolve an `AuthContext` (via the `Extension<AuthContext>`
+  populated by the auth middleware) before submitting the turn
 
 #### Scenario: A future adapter cannot skip the contract
 
-- **WHEN** a new inbound turn-accepting handler is added without resolving
+- **WHEN** a new turn-accepting caller is added without supplying an
   `AuthContext`
-- **THEN** the enforcement (compiler seam or conformance test) SHALL reject it
-  (build or test failure)
+- **THEN** the workspace SHALL fail to compile until one is supplied (either a
+  request-resolved context or an explicit `AuthContext::system()`)
+
+#### Scenario: Trusted local callers name a system identity explicitly
+
+- **WHEN** a non-network caller (scheduler, CLI, MCP, BOOT hook) submits a turn
+- **THEN** it SHALL pass `AuthContext::system()` rather than relying on any
+  silent default
 
 ### Requirement: The resolved AuthContext gates message posting
 

@@ -12,6 +12,7 @@ pub mod metrics;
 pub mod orchestration;
 pub mod orchestrator;
 pub(crate) mod otel_spans;
+pub mod projection;
 pub mod scheduler;
 pub mod skill_improver;
 pub(crate) mod skill_learner;

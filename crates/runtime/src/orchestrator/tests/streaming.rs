@@ -8,6 +8,7 @@ use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::{Interface, TurnIdentity};
 
 use super::super::OrchestratorEvent;
@@ -162,7 +163,13 @@ async fn worker_routes_ext_plus_sink_to_streaming_path() {
 
     // submit_turn triggers the worker which should pick up both registrations.
     let _ = orch
-        .submit_turn("stream please", conv_id, Interface::Slack, None)
+        .submit_turn(
+            &AuthContext::system(),
+            "stream please",
+            conv_id,
+            Interface::Slack,
+            None,
+        )
         .await;
 
     // Allow any in-flight sends to the channel to complete.

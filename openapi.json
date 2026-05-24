@@ -1149,6 +1149,9 @@
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "Missing conversations:write scope"
+          },
           "404": {
             "description": "Conversation not found"
           }
@@ -1276,6 +1279,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing conversations:write scope"
           },
           "503": {
             "description": "Voice not configured"
@@ -4708,6 +4714,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing conversations:write scope"
           },
           "500": {
             "description": "Internal server error"

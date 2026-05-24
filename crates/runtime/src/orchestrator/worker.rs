@@ -10,7 +10,8 @@ use std::time::Duration;
 use anyhow::Result;
 use assistant_core::{
     ClaimFilter, ContentBlock, MAX_TURN_REDELIVERIES, OrgId, PublishRequest, SpaceId, ToolHandler,
-    UserId, bus_messages, topic, types::conversation::Interface, types::conversation::TurnIdentity,
+    UserId, auth::AuthContext, bus_messages, topic, types::conversation::Interface,
+    types::conversation::TurnIdentity,
 };
 use chrono::{DateTime, Local, Utc};
 use opentelemetry::{
@@ -601,6 +602,7 @@ impl Orchestrator {
     ///   the prompt by the worker)
     pub async fn submit_turn(
         &self,
+        auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
@@ -613,7 +615,7 @@ impl Orchestrator {
             timestamp,
             HashMap::new(),
             vec![],
-            TurnIdentity::default(),
+            TurnIdentity::from_auth(auth),
             None,
         )
         .await
@@ -622,6 +624,7 @@ impl Orchestrator {
     /// Submit a turn with user-provided attachment IDs.
     pub async fn submit_turn_with_attachments(
         &self,
+        auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
@@ -635,7 +638,7 @@ impl Orchestrator {
             timestamp,
             HashMap::new(),
             attachment_ids,
-            TurnIdentity::default(),
+            TurnIdentity::from_auth(auth),
             None,
         )
         .await
@@ -671,8 +674,10 @@ impl Orchestrator {
     /// invoke [`Self::cancel_turn`] with the same id they already observe in
     /// the `run_started` event. Behaviour is otherwise identical to
     /// [`Self::submit_turn_with_attachments`].
+    #[allow(clippy::too_many_arguments)]
     pub async fn submit_turn_with_request_id(
         &self,
+        auth: &AuthContext,
         request_id: Uuid,
         prompt: &str,
         conversation_id: Uuid,
@@ -687,7 +692,7 @@ impl Orchestrator {
             timestamp,
             HashMap::new(),
             attachment_ids,
-            TurnIdentity::default(),
+            TurnIdentity::from_auth(auth),
             Some(request_id),
         )
         .await

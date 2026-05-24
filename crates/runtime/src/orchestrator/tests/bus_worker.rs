@@ -9,6 +9,7 @@ use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use assistant_core::auth::AuthContext;
 use assistant_core::types::agent::AssistantConfig;
 use assistant_core::types::conversation::{Interface, TurnIdentity};
 use assistant_core::{LlmProvider, MessageBus, PublishRequest, bus_messages, topic};
@@ -127,7 +128,13 @@ async fn submit_turn_publishes_and_waits_for_result() {
 
     let conv_id = Uuid::new_v4();
     let result = orch
-        .submit_turn("hello via submit", conv_id, Interface::Cli, None)
+        .submit_turn(
+            &AuthContext::system(),
+            "hello via submit",
+            conv_id,
+            Interface::Cli,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(result.answer, "submitted answer");
@@ -231,7 +238,13 @@ async fn submit_turn_with_worker_returns_result() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let result = orch
-        .submit_turn("test message", conv_id, Interface::Slack, None)
+        .submit_turn(
+            &AuthContext::system(),
+            "test message",
+            conv_id,
+            Interface::Slack,
+            None,
+        )
         .await;
 
     assert!(
@@ -254,7 +267,13 @@ async fn submit_turn_without_worker_times_out() {
     // No worker spawned — simulates the bug condition.
     let result = tokio::time::timeout(
         Duration::from_secs(2),
-        orch.submit_turn("test message", conv_id, Interface::Slack, None),
+        orch.submit_turn(
+            &AuthContext::system(),
+            "test message",
+            conv_id,
+            Interface::Slack,
+            None,
+        ),
     )
     .await;
 
@@ -307,7 +326,13 @@ async fn with_submit_timeout_respected() {
     // inner deadline is accidentally the 3-hour default.
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        orch.submit_turn("test message", conv_id, Interface::Slack, None),
+        orch.submit_turn(
+            &AuthContext::system(),
+            "test message",
+            conv_id,
+            Interface::Slack,
+            None,
+        ),
     )
     .await;
     let elapsed = start.elapsed();
@@ -419,7 +444,13 @@ async fn timeout_cancels_in_flight_worker_turn() {
     let conv_id = Uuid::new_v4();
     let start = std::time::Instant::now();
     let result = orch
-        .submit_turn("slow task", conv_id, Interface::Slack, None)
+        .submit_turn(
+            &AuthContext::system(),
+            "slow task",
+            conv_id,
+            Interface::Slack,
+            None,
+        )
         .await;
     let elapsed = start.elapsed();
 
@@ -599,6 +630,7 @@ async fn cancel_turn_aborts_inflight_submit() {
     let handle = tokio::spawn(async move {
         orch_for_submit
             .submit_turn_with_request_id(
+                &AuthContext::system(),
                 request_id,
                 "say hi",
                 conv_id,
