@@ -162,6 +162,8 @@ pub enum Interface {
     Scheduler,
     /// Matrix messaging interface.
     Matrix,
+    /// Agent-to-Agent (A2A) protocol interface.
+    A2a,
 }
 
 /// Identifies the messaging platform for a `ChannelAdapter`.
