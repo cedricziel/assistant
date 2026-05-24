@@ -52,9 +52,10 @@ real consumer of both — converting an orphaned door into a real one.
   `StorageLayer::new_in_memory()`).
 - **Behavior change**: A2A `message/send` and `message/stream` now return real
   assistant output instead of the stub string and **persist tasks across
-  restart**; unauthenticated/under-scoped callers get `401`/`403`. No route or
-  response-body shape change (still `SendMessageResponse` / `StreamResponse`), so
-  **no `openapi.json` regeneration**.
+  restart**; unauthenticated/under-scoped callers get `401`/`403`. Response
+  bodies are unchanged (still `SendMessageResponse` / `StreamResponse`). The A2A
+  endpoints stay exposed in `openapi.json` (intentional); it is regenerated only
+  to document the new `403` responses (the Dart client is unaffected).
 - **Non-goals**:
   - Org/space turn re-scoping (still via `state.agent_id`, per Phase 0).
   - AG-UI / ACP adapters (other Phase 1+ changes).

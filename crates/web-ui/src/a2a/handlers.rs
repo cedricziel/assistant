@@ -154,7 +154,8 @@ pub async fn get_extended_agent_card(State(state): State<A2AState>) -> Json<Agen
         (status = 200, description = "Task created and completed", body = SendMessageResponse,
          content_type = "application/json"),
         (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized")
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Missing conversations:write scope")
     ),
     tag = "messages",
     security(("bearer_token" = []))

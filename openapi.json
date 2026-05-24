@@ -6238,6 +6238,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing conversations:write scope"
           }
         },
         "security": [
@@ -6280,6 +6283,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing conversations:write scope"
           }
         },
         "security": [

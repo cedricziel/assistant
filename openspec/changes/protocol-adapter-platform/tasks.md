@@ -23,7 +23,7 @@
 
 > Decision resolved (2026-05-23): adopt AG-UI **fully**, incl. community SDKs.
 
-- [ ] Create child change `a2a-orchestrator-wiring`
+- [x] Create child change `a2a-orchestrator-wiring`
   - [ ] Replace `web-ui/src/a2a/handlers.rs` stub with a real adapter over the
         Orchestrator via the Phase 0 projector
   - [ ] Add `AuthContext`/org/space to `A2AState`; reject unauthenticated calls
