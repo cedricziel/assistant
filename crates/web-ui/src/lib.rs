@@ -65,7 +65,7 @@ use auth::WebAuthConfig;
 
 use a2a::agent_store::AgentStore;
 use a2a::handlers::{A2AState, build_default_agent_card};
-use a2a::task_store::TaskStore;
+use a2a::task_store::SqliteA2aTaskStore;
 use api::push::{PushApiState, push_api_router};
 use push::PushDispatcher;
 
@@ -633,8 +633,14 @@ async fn run_with_args(args: Args) -> Result<()> {
     harden_agent_card(&mut agent_card);
 
     let a2a_state = A2AState {
-        task_store: TaskStore::new(),
+        task_store: std::sync::Arc::new(SqliteA2aTaskStore::new(
+            storage.pool.clone(),
+            selected_agent.clone(),
+        )),
         agent_card,
+        orchestrator: orchestrator.clone(),
+        pool: storage.pool.clone(),
+        agent_id: selected_agent.clone(),
     };
 
     let workflows_api_state = api::workflows::WorkflowsApiState {

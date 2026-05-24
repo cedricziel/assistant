@@ -62,22 +62,18 @@ pub fn protected_router() -> Router<A2AState> {
 #[cfg(test)]
 mod router_tests {
     use super::*;
-    use crate::a2a::handlers::build_default_agent_card;
-    use crate::a2a::task_store::TaskStore;
+    use crate::a2a::handlers::test_support::test_state;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    fn make_state() -> A2AState {
-        A2AState {
-            task_store: TaskStore::new(),
-            agent_card: build_default_agent_card("https://example.com"),
-        }
+    async fn make_state() -> A2AState {
+        test_state("https://example.com").await
     }
 
     #[tokio::test]
     async fn public_router_serves_well_known_agent_card() {
-        let app = public_router().with_state(make_state());
+        let app = public_router().with_state(make_state().await);
         let resp = app
             .oneshot(
                 Request::builder()
@@ -92,7 +88,7 @@ mod router_tests {
 
     #[tokio::test]
     async fn protected_router_exposes_authenticated_extended_card() {
-        let app = protected_router().with_state(make_state());
+        let app = protected_router().with_state(make_state().await);
         let resp = app
             .oneshot(
                 Request::builder()
@@ -107,7 +103,7 @@ mod router_tests {
 
     #[tokio::test]
     async fn protected_router_exposes_tasks_endpoint() {
-        let app = protected_router().with_state(make_state());
+        let app = protected_router().with_state(make_state().await);
         let resp = app
             .oneshot(
                 Request::builder()
@@ -122,7 +118,7 @@ mod router_tests {
 
     #[tokio::test]
     async fn public_router_does_not_expose_protected_paths() {
-        let app = public_router().with_state(make_state());
+        let app = public_router().with_state(make_state().await);
         // /tasks is not on the public router; should 404 (no matching route).
         let resp = app
             .oneshot(

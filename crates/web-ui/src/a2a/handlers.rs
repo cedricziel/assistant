@@ -6,13 +6,16 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::Arc;
 
+use axum::Extension;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use futures::StreamExt;
 use futures::stream::Stream;
+use sqlx::SqlitePool;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 
@@ -20,8 +23,13 @@ use assistant_a2a_json_schema::agent_card::*;
 use assistant_a2a_json_schema::requests::*;
 use assistant_a2a_json_schema::responses::*;
 use assistant_a2a_json_schema::types::*;
+use assistant_core::auth::AuthContext;
+use assistant_core::types::conversation::Interface;
+use assistant_runtime::AssistantInterface;
+use assistant_storage::{ConversationStore, SqliteConversationStore};
 
-use super::task_store::TaskStore;
+use super::task_store::A2aTaskStore;
+use crate::api::messages::caller_can_post;
 use crate::openapi::ApiErrorResponse;
 
 // -- Shared state --
@@ -29,10 +37,46 @@ use crate::openapi::ApiErrorResponse;
 /// Shared state for all A2A handlers.
 #[derive(Clone)]
 pub struct A2AState {
-    /// In-memory task store.
-    pub task_store: TaskStore,
+    /// Durable A2A task store, scoped to the active agent's space db.
+    pub task_store: Arc<dyn A2aTaskStore>,
     /// The agent card describing this agent.
     pub agent_card: AgentCard,
+    /// Orchestrator used to run real turns for A2A messages.
+    pub orchestrator: Arc<dyn AssistantInterface>,
+    /// Space db pool, for resolving/creating conversations.
+    pub pool: SqlitePool,
+    /// The active agent id (space scope) for conversation resolution.
+    pub agent_id: String,
+}
+
+/// Resolve the conversation for an A2A message. A returned `context_id` is the
+/// conversation UUID we previously surfaced, so reuse it when it parses and
+/// exists; otherwise start a fresh conversation.
+async fn resolve_conversation(store: &SqliteConversationStore, context_id: Option<&str>) -> Uuid {
+    if let Some(ctx) = context_id
+        && let Ok(id) = Uuid::parse_str(ctx)
+        && matches!(store.get_conversation(id).await, Ok(Some(_)))
+    {
+        return id;
+    }
+    match store.create_conversation(None).await {
+        Ok(conv) => conv.id,
+        Err(_) => Uuid::new_v4(),
+    }
+}
+
+/// Build an agent-authored A2A message scoped to a task.
+fn agent_message(task: &Task, text: impl Into<String>) -> Message {
+    Message {
+        message_id: Uuid::new_v4().to_string(),
+        context_id: Some(task.context_id.clone()),
+        task_id: Some(task.id.clone()),
+        role: Role::RoleAgent,
+        parts: vec![Part::text(text)],
+        metadata: None,
+        extensions: vec![],
+        reference_task_ids: vec![],
+    }
 }
 
 // -- Error helper --
@@ -117,23 +161,13 @@ pub async fn get_extended_agent_card(State(state): State<A2AState>) -> Json<Agen
 )]
 pub async fn send_message(
     State(state): State<A2AState>,
+    Extension(auth): Extension<AuthContext>,
     Json(req): Json<SendMessageRequest>,
 ) -> Response {
-    let context_id = req.message.context_id.clone();
-    let task = state.task_store.create_task(context_id).await;
+    if !caller_can_post(&auth) {
+        return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
+    }
 
-    // Record the incoming user message in history.
-    let mut user_msg = req.message.clone();
-    user_msg.task_id = Some(task.id.clone());
-    state.task_store.append_history(&task.id, user_msg).await;
-
-    // Transition to Working.
-    state
-        .task_store
-        .update_status(&task.id, TaskState::TaskStateWorking, None)
-        .await;
-
-    // Extract the user's text content for processing.
     let user_text: String = req
         .message
         .parts
@@ -142,52 +176,69 @@ pub async fn send_message(
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Build an agent reply.
-    // TODO: Wire to Orchestrator for real LLM processing.
-    let reply_text = format!(
-        "Received your message ({} chars). Processing is not yet wired to the LLM backend.",
-        user_text.len()
-    );
-    let agent_msg = Message {
-        message_id: Uuid::new_v4().to_string(),
-        context_id: Some(task.context_id.clone()),
-        task_id: Some(task.id.clone()),
-        role: Role::RoleAgent,
-        parts: vec![Part::text(reply_text)],
-        metadata: None,
-        extensions: vec![],
-        reference_task_ids: vec![],
+    // Resolve (or create) the conversation, then key the task to it so the
+    // client can reuse the returned context_id for follow-up turns.
+    let conv_store = SqliteConversationStore::for_agent(state.pool.clone(), &state.agent_id);
+    let conv_id = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await;
+
+    let task = state
+        .task_store
+        .create_task(Some(conv_id.to_string()))
+        .await;
+    let mut user_msg = req.message.clone();
+    user_msg.task_id = Some(task.id.clone());
+    state.task_store.append_history(&task.id, user_msg).await;
+    state
+        .task_store
+        .update_status(&task.id, TaskState::TaskStateWorking, None)
+        .await;
+
+    // Run the real turn through the Orchestrator.
+    let result = state
+        .orchestrator
+        .submit_turn(&auth, &user_text, conv_id, Interface::A2a, None)
+        .await;
+
+    let answer = match result {
+        Ok(turn) => turn.answer,
+        Err(e) => {
+            let err_msg = agent_message(&task, format!("Turn failed: {e}"));
+            state
+                .task_store
+                .update_status(&task.id, TaskState::TaskStateFailed, Some(err_msg))
+                .await;
+            let failed = state.task_store.get_task(&task.id).await;
+            return Json(SendMessageResponse {
+                task: failed,
+                message: None,
+            })
+            .into_response();
+        }
     };
 
+    let agent_msg = agent_message(&task, answer);
     state
         .task_store
         .append_history(&task.id, agent_msg.clone())
         .await;
-
-    // Transition to Completed.
     state
         .task_store
         .update_status(&task.id, TaskState::TaskStateCompleted, Some(agent_msg))
         .await;
 
     let Some(final_task) = state.task_store.get_task(&task.id).await else {
-        // We just created and updated the task on the previous lines; the
-        // store dropping it between the update and the get would only happen
-        // under a concurrent eviction race that the in-memory store does not
-        // perform. Treat as a 500 rather than panicking the worker.
         return (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "task disappeared after creation"})),
         )
             .into_response();
     };
 
-    let resp = SendMessageResponse {
+    Json(SendMessageResponse {
         task: Some(final_task),
         message: None,
-    };
-
-    Json(resp).into_response()
+    })
+    .into_response()
 }
 
 /// `POST /message/stream` -- Sends a message with streaming response (SSE).
@@ -654,5 +705,75 @@ pub fn build_default_agent_card(base_url: &str) -> AgentCard {
         }],
         signatures: vec![],
         icon_url: None,
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    //! Shared helpers for the A2A handler/router tests: a no-op orchestrator and
+    //! an `A2AState` backed by in-memory storage.
+    use std::sync::Arc;
+
+    use assistant_core::auth::AuthContext;
+    use assistant_core::types::conversation::Interface;
+    use assistant_runtime::{AssistantInterface, OrchestratorEvent, TurnResult};
+    use async_trait::async_trait;
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
+
+    use super::{A2AState, build_default_agent_card};
+    use crate::a2a::task_store::InMemoryA2aTaskStore;
+
+    /// Minimal `AssistantInterface` that echoes the prompt as the answer.
+    pub struct EchoInterface;
+
+    #[async_trait]
+    impl AssistantInterface for EchoInterface {
+        async fn register_token_sink(
+            &self,
+            _conversation_id: Uuid,
+            _sink: mpsc::Sender<OrchestratorEvent>,
+        ) {
+        }
+
+        async fn submit_turn_with_attachments(
+            &self,
+            _auth: &AuthContext,
+            prompt: &str,
+            _conversation_id: Uuid,
+            _interface: Interface,
+            _timestamp: Option<chrono::DateTime<chrono::Utc>>,
+            _attachment_ids: Vec<Uuid>,
+        ) -> anyhow::Result<TurnResult> {
+            Ok(TurnResult {
+                answer: format!("echo: {prompt}"),
+                attachments: vec![],
+                attachment_ids: vec![],
+                message_id: None,
+                had_errors: false,
+            })
+        }
+
+        async fn run_boot(
+            &self,
+            _conversation_id: Uuid,
+            _interface: Interface,
+        ) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    /// Build an `A2AState` backed by in-memory storage + an echo orchestrator.
+    pub async fn test_state(base_url: &str) -> A2AState {
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .expect("in-memory storage");
+        A2AState {
+            task_store: Arc::new(InMemoryA2aTaskStore::new()),
+            agent_card: build_default_agent_card(base_url),
+            orchestrator: Arc::new(EchoInterface),
+            pool: storage.pool.clone(),
+            agent_id: "default".to_string(),
+        }
     }
 }

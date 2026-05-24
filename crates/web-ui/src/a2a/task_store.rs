@@ -19,16 +19,18 @@ use assistant_a2a_json_schema::types::{
     Message, PushNotificationConfig, Task, TaskPushNotificationConfig, TaskState, TaskStatus,
 };
 
-/// Back-compat alias: the default in-memory store. New code should depend on the
-/// [`A2aTaskStore`] trait (e.g. `Arc<dyn A2aTaskStore>`).
-pub type TaskStore = InMemoryA2aTaskStore;
-
 /// Thread-safe in-memory store for A2A tasks.
+///
+/// The in-memory half of the [`A2aTaskStore`] trait pair: used by tests (and
+/// available as a non-persistent fallback). Production wires
+/// [`SqliteA2aTaskStore`], so this is `allow(dead_code)` for non-test builds.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct InMemoryA2aTaskStore {
     inner: Arc<RwLock<TaskStoreInner>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct TaskStoreInner {
     /// Tasks keyed by task ID.
@@ -41,6 +43,7 @@ struct TaskStoreInner {
     subscribers: HashMap<String, Vec<tokio::sync::mpsc::UnboundedSender<Task>>>,
 }
 
+#[allow(dead_code)] // in-memory trait-pair impl; constructed in tests
 impl InMemoryA2aTaskStore {
     /// Creates a new empty task store.
     pub fn new() -> Self {
@@ -290,9 +293,6 @@ impl Default for InMemoryA2aTaskStore {
 
 /// Persistence + lifecycle surface for A2A tasks. Implemented in-memory
 /// ([`InMemoryA2aTaskStore`]) and SQLite-backed ([`SqliteA2aTaskStore`]).
-// `allow(dead_code)`: consumed via `Arc<dyn A2aTaskStore>` in `A2AState` in a
-// later commit of this change (a2a-orchestrator-wiring).
-#[allow(dead_code)]
 #[async_trait]
 pub trait A2aTaskStore: Send + Sync {
     async fn create_task(&self, context_id: Option<String>) -> Task;
@@ -379,7 +379,6 @@ impl A2aTaskStore for InMemoryA2aTaskStore {
 
 /// Process-local state shared by [`SqliteA2aTaskStore`]: live SSE subscribers
 /// and push-notification configs. Not persisted.
-#[allow(dead_code)] // wired into A2AState in a later commit of this change
 #[derive(Default)]
 struct Ephemeral {
     subscribers: HashMap<String, Vec<tokio::sync::mpsc::UnboundedSender<Task>>>,
@@ -388,7 +387,6 @@ struct Ephemeral {
 
 /// SQLite-backed A2A task store. Tasks persist in the `a2a_tasks` table of the
 /// space db (scoped by `agent_id`); subscribers and push configs stay in memory.
-#[allow(dead_code)] // constructed in lib.rs A2AState wiring in a later commit
 #[derive(Clone)]
 pub struct SqliteA2aTaskStore {
     pool: SqlitePool,
@@ -396,7 +394,6 @@ pub struct SqliteA2aTaskStore {
     ephemeral: Arc<RwLock<Ephemeral>>,
 }
 
-#[allow(dead_code)] // inherent helpers used by the trait impl; struct wired later
 impl SqliteA2aTaskStore {
     /// Create a store scoped to an agent's tasks in the given space pool.
     pub fn new(pool: SqlitePool, agent_id: impl Into<String>) -> Self {
@@ -651,7 +648,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_get_task() {
-        let store = TaskStore::new();
+        let store = InMemoryA2aTaskStore::new();
         let task = store.create_task(Some("ctx-1".to_string())).await;
         assert_eq!(task.context_id, "ctx-1");
         assert_eq!(task.status.state, TaskState::TaskStateSubmitted);
@@ -662,7 +659,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_status() {
-        let store = TaskStore::new();
+        let store = InMemoryA2aTaskStore::new();
         let task = store.create_task(None).await;
 
         store
@@ -675,7 +672,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancel_task() {
-        let store = TaskStore::new();
+        let store = InMemoryA2aTaskStore::new();
         let task = store.create_task(None).await;
 
         let canceled = store.cancel_task(&task.id).await.unwrap();
@@ -688,7 +685,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_tasks_filter() {
-        let store = TaskStore::new();
+        let store = InMemoryA2aTaskStore::new();
         let t1 = store.create_task(Some("ctx-a".to_string())).await;
         let _t2 = store.create_task(Some("ctx-b".to_string())).await;
 
@@ -710,7 +707,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_history() {
-        let store = TaskStore::new();
+        let store = InMemoryA2aTaskStore::new();
         let task = store.create_task(None).await;
 
         let msg = Message {
@@ -732,7 +729,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_push_config_crud() {
-        let store = TaskStore::new();
+        let store = InMemoryA2aTaskStore::new();
         let task = store.create_task(None).await;
 
         let config = PushNotificationConfig {
