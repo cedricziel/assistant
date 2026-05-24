@@ -51,17 +51,25 @@ pub struct A2AState {
 
 /// Resolve the conversation for an A2A message. A returned `context_id` is the
 /// conversation UUID we previously surfaced, so reuse it when it parses and
-/// exists; otherwise start a fresh conversation.
-async fn resolve_conversation(store: &SqliteConversationStore, context_id: Option<&str>) -> Uuid {
+/// exists; otherwise start a fresh conversation. Returns `None` if a new
+/// conversation cannot be created — callers MUST surface that as an error rather
+/// than dispatch a turn against a non-existent conversation.
+async fn resolve_conversation(
+    store: &SqliteConversationStore,
+    context_id: Option<&str>,
+) -> Option<Uuid> {
     if let Some(ctx) = context_id
         && let Ok(id) = Uuid::parse_str(ctx)
         && matches!(store.get_conversation(id).await, Ok(Some(_)))
     {
-        return id;
+        return Some(id);
     }
     match store.create_conversation(None).await {
-        Ok(conv) => conv.id,
-        Err(_) => Uuid::new_v4(),
+        Ok(conv) => Some(conv.id),
+        Err(e) => {
+            tracing::error!("a2a: failed to create conversation: {e}");
+            None
+        }
     }
 }
 
@@ -180,7 +188,14 @@ pub async fn send_message(
     // Resolve (or create) the conversation, then key the task to it so the
     // client can reuse the returned context_id for follow-up turns.
     let conv_store = SqliteConversationStore::for_agent(state.pool.clone(), &state.agent_id);
-    let conv_id = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await;
+    let Some(conv_id) = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await
+    else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve conversation",
+        )
+            .into_response();
+    };
 
     let task = state
         .task_store
@@ -276,7 +291,14 @@ pub async fn send_message_streaming(
         .join("\n");
 
     let conv_store = SqliteConversationStore::for_agent(state.pool.clone(), &state.agent_id);
-    let conv_id = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await;
+    let Some(conv_id) = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await
+    else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve conversation",
+        )
+            .into_response();
+    };
 
     let task = state
         .task_store

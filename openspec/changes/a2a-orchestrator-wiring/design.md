@@ -32,9 +32,10 @@ agent_card: AgentCard }`. Built at `crates/web-ui/src/lib.rs:635`, where the
 
 **Non-Goals:**
 
-- SQLite task persistence (stacked `a2a-task-persistence`).
 - Org/space turn re-scoping (still `state.agent_id`, per Phase 0).
 - AG-UI / ACP.
+
+(SQLite task persistence **is** in scope — see Decision 6.)
 
 ## Decisions
 

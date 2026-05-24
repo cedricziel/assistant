@@ -305,6 +305,7 @@ mod tests {
             Interface::Web,
             Interface::Scheduler,
             Interface::Matrix,
+            Interface::A2a,
         ];
         for iface in &interfaces {
             let caps = output_capabilities(iface);

@@ -62,7 +62,8 @@ RED before production code. Chunks ≤ ~2h.
 ## 7. Finalize
 
 - [x] 7.1 Confirm no inline `OrchestratorEvent` match remains in A2A handlers;
-      confirm `openapi.json` unchanged (no route/response-shape change).
+      regenerate `openapi.json` to document the new `403` responses on
+      `message/send` + `message/stream` (response-body shape unchanged).
 - [x] 7.2 Write A2A developer/operator docs in `docs/` (driving the assistant
       via `message/send` + `message/stream`; note tasks now persist across
       restart).
