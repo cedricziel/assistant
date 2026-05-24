@@ -112,6 +112,16 @@ fn bad_request(msg: impl Into<String>) -> Response {
     (StatusCode::BAD_REQUEST, Json(body)).into_response()
 }
 
+/// Maps a task-store / persistence failure to a 500, logging the cause.
+fn internal_error(e: anyhow::Error) -> Response {
+    tracing::error!("a2a: {e:#}");
+    let body = A2AError {
+        code: 500,
+        message: "Internal error".to_string(),
+    };
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+}
+
 // -- Agent Card --
 
 /// `GET /.well-known/agent.json` -- Returns the public agent card.
@@ -197,17 +207,26 @@ pub async fn send_message(
             .into_response();
     };
 
-    let task = state
+    let task = match state
         .task_store
         .create_task(Some(conv_id.to_string()))
-        .await;
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => return internal_error(e),
+    };
     let mut user_msg = req.message.clone();
     user_msg.task_id = Some(task.id.clone());
-    state.task_store.append_history(&task.id, user_msg).await;
-    state
+    if let Err(e) = state.task_store.append_history(&task.id, user_msg).await {
+        return internal_error(e);
+    }
+    if let Err(e) = state
         .task_store
         .update_status(&task.id, TaskState::TaskStateWorking, None)
-        .await;
+        .await
+    {
+        return internal_error(e);
+    }
 
     // Run the real turn through the Orchestrator.
     let result = state
@@ -219,11 +238,11 @@ pub async fn send_message(
         Ok(turn) => turn.answer,
         Err(e) => {
             let err_msg = agent_message(&task, format!("Turn failed: {e}"));
-            state
+            let _ = state
                 .task_store
                 .update_status(&task.id, TaskState::TaskStateFailed, Some(err_msg))
                 .await;
-            let failed = state.task_store.get_task(&task.id).await;
+            let failed = state.task_store.get_task(&task.id).await.ok().flatten();
             return Json(SendMessageResponse {
                 task: failed,
                 message: None,
@@ -233,21 +252,31 @@ pub async fn send_message(
     };
 
     let agent_msg = agent_message(&task, answer);
-    state
+    if let Err(e) = state
         .task_store
         .append_history(&task.id, agent_msg.clone())
-        .await;
-    state
+        .await
+    {
+        return internal_error(e);
+    }
+    if let Err(e) = state
         .task_store
         .update_status(&task.id, TaskState::TaskStateCompleted, Some(agent_msg))
-        .await;
+        .await
+    {
+        return internal_error(e);
+    }
 
-    let Some(final_task) = state.task_store.get_task(&task.id).await else {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "task disappeared after creation"})),
-        )
-            .into_response();
+    let final_task = match state.task_store.get_task(&task.id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "task disappeared after creation"})),
+            )
+                .into_response();
+        }
+        Err(e) => return internal_error(e),
     };
 
     Json(SendMessageResponse {
@@ -300,19 +329,28 @@ pub async fn send_message_streaming(
             .into_response();
     };
 
-    let task = state
+    let task = match state
         .task_store
         .create_task(Some(conv_id.to_string()))
-        .await;
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => return internal_error(e),
+    };
     let task_id = task.id.clone();
     let ctx = task.context_id.clone();
     let mut user_msg = req.message.clone();
     user_msg.task_id = Some(task_id.clone());
-    state.task_store.append_history(&task_id, user_msg).await;
-    state
+    if let Err(e) = state.task_store.append_history(&task_id, user_msg).await {
+        return internal_error(e);
+    }
+    if let Err(e) = state
         .task_store
         .update_status(&task_id, TaskState::TaskStateWorking, None)
-        .await;
+        .await
+    {
+        return internal_error(e);
+    }
 
     // SSE output channel + orchestrator event sink.
     let (sse_tx, sse_rx) = tokio::sync::mpsc::unbounded_channel::<Result<Event, Infallible>>();
@@ -362,25 +400,34 @@ pub async fn send_message_streaming(
                     extensions: vec![],
                     reference_task_ids: vec![],
                 };
-                task_store.append_history(&task_id, agent_msg.clone()).await;
-                task_store
+                // Post-response: errors can only be logged, not returned.
+                if let Err(e) = task_store.append_history(&task_id, agent_msg.clone()).await {
+                    tracing::error!("a2a: {e:#}");
+                }
+                if let Err(e) = task_store
                     .update_status(&task_id, TaskState::TaskStateCompleted, Some(agent_msg))
-                    .await;
+                    .await
+                {
+                    tracing::error!("a2a: {e:#}");
+                }
             }
             _ => {
-                task_store
+                if let Err(e) = task_store
                     .update_status(&task_id, TaskState::TaskStateFailed, None)
-                    .await;
+                    .await
+                {
+                    tracing::error!("a2a: {e:#}");
+                }
             }
         }
 
-        if let Some(final_task) = task_store.get_task(&task_id).await {
+        if let Ok(Some(final_task)) = task_store.get_task(&task_id).await {
             let data =
                 serde_json::to_string(&StreamResponse::from_task(final_task)).unwrap_or_default();
             let _ = sse_tx.send(Ok(Event::default().data(data)));
         }
         let _ = sse_tx.send(Ok(Event::default().data("[DONE]")));
-        task_store.cleanup_subscribers(&task_id).await;
+        let _ = task_store.cleanup_subscribers(&task_id).await;
     });
 
     Sse::new(UnboundedReceiverStream::new(sse_rx))
@@ -414,8 +461,9 @@ pub async fn get_task(
     Query(_query): Query<GetTaskQuery>,
 ) -> Response {
     match state.task_store.get_task(&id).await {
-        Some(task) => Json(task).into_response(),
-        None => not_found(format!("Task '{id}' not found")),
+        Ok(Some(task)) => Json(task).into_response(),
+        Ok(None) => not_found(format!("Task '{id}' not found")),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -452,13 +500,17 @@ pub struct GetTaskQuery {
 pub async fn list_tasks(
     State(state): State<A2AState>,
     Query(query): Query<ListTasksRequest>,
-) -> Json<ListTasksResponse> {
+) -> Response {
     let limit = query.page_size.unwrap_or(50).clamp(1, 100) as usize;
 
-    let tasks = state
+    let tasks = match state
         .task_store
         .list_tasks(query.context_id.as_deref(), query.status, limit)
-        .await;
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => return internal_error(e),
+    };
 
     let total_size = tasks.len() as i32;
     Json(ListTasksResponse {
@@ -467,6 +519,7 @@ pub async fn list_tasks(
         page_size: limit as i32,
         total_size,
     })
+    .into_response()
 }
 
 /// `POST /tasks/:id/cancel` -- Cancels a task.
@@ -495,8 +548,9 @@ pub async fn cancel_task(
 ) -> Response {
     let _ = body; // body fields are available for future use (e.g. metadata)
     match state.task_store.cancel_task(&id).await {
-        Some(task) => Json(task).into_response(),
-        None => not_found(format!("Task '{id}' not found")),
+        Ok(Some(task)) => Json(task).into_response(),
+        Ok(None) => not_found(format!("Task '{id}' not found")),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -520,7 +574,10 @@ pub async fn cancel_task(
     security(("bearer_token" = []))
 )]
 pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<String>) -> Response {
-    let rx = state.task_store.subscribe(&id).await;
+    let rx = match state.task_store.subscribe(&id).await {
+        Ok(r) => r,
+        Err(e) => return internal_error(e),
+    };
 
     match rx {
         Some(rx) => {
@@ -543,7 +600,7 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
             tokio::spawn(async move {
                 // Wait a bit for stream to settle then clean up.
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                cleanup_store.cleanup_subscribers(&cleanup_id).await;
+                let _ = cleanup_store.cleanup_subscribers(&cleanup_id).await;
             });
 
             Sse::new(stream)
@@ -552,13 +609,13 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
         }
         None => {
             // Task doesn't exist or is already terminal.
-            let task = state.task_store.get_task(&id).await;
-            match task {
-                Some(t) if t.status.state.is_terminal() => bad_request(format!(
+            match state.task_store.get_task(&id).await {
+                Ok(Some(t)) if t.status.state.is_terminal() => bad_request(format!(
                     "Task '{id}' is already in terminal state: {:?}",
                     t.status.state
                 )),
-                _ => not_found(format!("Task '{id}' not found")),
+                Ok(_) => not_found(format!("Task '{id}' not found")),
+                Err(e) => internal_error(e),
             }
         }
     }
@@ -594,8 +651,9 @@ pub async fn create_push_notification_config(
         .create_push_config(&task_id, req.config)
         .await
     {
-        Some(config) => (StatusCode::CREATED, Json(config)).into_response(),
-        None => not_found(format!("Task '{task_id}' not found")),
+        Ok(Some(config)) => (StatusCode::CREATED, Json(config)).into_response(),
+        Ok(None) => not_found(format!("Task '{task_id}' not found")),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -622,10 +680,11 @@ pub async fn get_push_notification_config(
     Path((task_id, config_id)): Path<(String, String)>,
 ) -> Response {
     match state.task_store.get_push_config(&task_id, &config_id).await {
-        Some(config) => Json(config).into_response(),
-        None => not_found(format!(
+        Ok(Some(config)) => Json(config).into_response(),
+        Ok(None) => not_found(format!(
             "Push notification config '{config_id}' not found for task '{task_id}'"
         )),
+        Err(e) => internal_error(e),
     }
 }
 
@@ -659,12 +718,16 @@ pub async fn list_push_notification_configs(
     State(state): State<A2AState>,
     Path(task_id): Path<String>,
     Query(_query): Query<ListPushConfigsQuery>,
-) -> Json<ListTaskPushNotificationConfigsResponse> {
-    let configs = state.task_store.list_push_configs(&task_id).await;
+) -> Response {
+    let configs = match state.task_store.list_push_configs(&task_id).await {
+        Ok(c) => c,
+        Err(e) => return internal_error(e),
+    };
     Json(ListTaskPushNotificationConfigsResponse {
         configs,
         next_page_token: None,
     })
+    .into_response()
 }
 
 /// `DELETE /tasks/:task_id/pushNotificationConfigs/:config_id`
@@ -688,16 +751,16 @@ pub async fn delete_push_notification_config(
     State(state): State<A2AState>,
     Path((task_id, config_id)): Path<(String, String)>,
 ) -> Response {
-    if state
+    match state
         .task_store
         .delete_push_config(&task_id, &config_id)
         .await
     {
-        StatusCode::NO_CONTENT.into_response()
-    } else {
-        not_found(format!(
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_found(format!(
             "Push notification config '{config_id}' not found for task '{task_id}'"
-        ))
+        )),
+        Err(e) => internal_error(e),
     }
 }
 

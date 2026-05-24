@@ -169,7 +169,7 @@ async fn cancel_task_unknown_id_returns_404() {
 #[tokio::test]
 async fn get_task_returns_created_task_when_present() {
     let state = make_state("https://example.com").await;
-    let task = state.task_store.create_task(None).await;
+    let task = state.task_store.create_task(None).await.unwrap();
     let id = task.id.clone();
     let app = make_app(state);
     let resp = app
@@ -189,7 +189,7 @@ async fn get_task_returns_created_task_when_present() {
 #[tokio::test]
 async fn cancel_task_existing_returns_200() {
     let state = make_state("https://example.com").await;
-    let task = state.task_store.create_task(None).await;
+    let task = state.task_store.create_task(None).await.unwrap();
     let id = task.id.clone();
     let app = make_app(state);
     let resp = app
@@ -288,7 +288,7 @@ async fn delete_push_config_unknown_returns_404() {
 #[tokio::test]
 async fn create_then_get_then_list_then_delete_push_config_round_trip() {
     let state = make_state("https://example.com").await;
-    let task = state.task_store.create_task(None).await;
+    let task = state.task_store.create_task(None).await.unwrap();
     let task_id = task.id.clone();
     let app = make_app(state);
 
