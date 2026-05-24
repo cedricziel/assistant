@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::SqlitePool;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 /// A single stored chunk from a memory file.
 pub struct StoredChunk {
@@ -166,17 +166,23 @@ impl MemoryChunkStore for SqliteMemoryChunkStore {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let sql = format!(
-            "SELECT id, file_path, chunk_index, content, embedding, file_hash
-             FROM memory_chunks
-             WHERE id IN ({placeholders}) AND embedding IS NOT NULL"
+        // Build `... WHERE id IN (?, ?, …)` with one bound parameter per id.
+        // `QueryBuilder::push_bind` emits the placeholders, so no id value is
+        // ever interpolated into the SQL string.
+        let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(
+            "SELECT id, file_path, chunk_index, content, embedding, file_hash \
+             FROM memory_chunks WHERE id IN (",
         );
-        let mut q = sqlx::query_as::<_, ChunkRow>(&sql);
+        let mut separated = builder.separated(", ");
         for id in ids {
-            q = q.bind(*id);
+            separated.push_bind(*id);
         }
-        let rows = q.fetch_all(&self.0).await?;
+        separated.push_unseparated(") AND embedding IS NOT NULL");
+
+        let rows = builder
+            .build_query_as::<ChunkRow>()
+            .fetch_all(&self.0)
+            .await?;
         Ok(rows.into_iter().map(decode_chunk).collect())
     }
 
@@ -501,5 +507,69 @@ impl MemoryChunkStore for InMemoryMemoryChunkStore {
     async fn count(&self) -> Result<i64> {
         let state = self.lock();
         Ok(state.chunks.len() as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StorageLayer;
+
+    /// Seed three chunks, embed only the first and third, and confirm
+    /// `get_embeddings_by_ids` returns exactly the requested *embedded* rows.
+    /// Guards the dynamic `IN (?, ?, …)` clause and the `IS NOT NULL` filter.
+    #[tokio::test]
+    async fn get_embeddings_by_ids_returns_only_embedded_matches() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = SqliteMemoryChunkStore::new(storage.pool.clone());
+
+        let id0 = store
+            .upsert_chunk("notes.md", "hash", 0, "first")
+            .await
+            .unwrap();
+        let id1 = store
+            .upsert_chunk("notes.md", "hash", 1, "second")
+            .await
+            .unwrap();
+        let id2 = store
+            .upsert_chunk("notes.md", "hash", 2, "third")
+            .await
+            .unwrap();
+
+        store.update_embedding(id0, &[1.0, 2.0, 3.0]).await.unwrap();
+        store.update_embedding(id2, &[7.0, 8.0]).await.unwrap();
+
+        // Request all three; only id0 and id2 are embedded.
+        let mut found = store.get_embeddings_by_ids(&[id0, id1, id2]).await.unwrap();
+        found.sort_by_key(|c| c.id);
+
+        assert_eq!(found.len(), 2, "only embedded rows should be returned");
+        assert_eq!(found[0].id, id0);
+        assert_eq!(found[0].embedding.as_deref(), Some(&[1.0, 2.0, 3.0][..]));
+        assert_eq!(found[1].id, id2);
+        assert_eq!(found[1].embedding.as_deref(), Some(&[7.0, 8.0][..]));
+    }
+
+    #[tokio::test]
+    async fn get_embeddings_by_ids_empty_input_returns_empty() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = SqliteMemoryChunkStore::new(storage.pool.clone());
+
+        let found = store.get_embeddings_by_ids(&[]).await.unwrap();
+        assert!(found.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_embeddings_by_ids_skips_unembedded_ids() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = SqliteMemoryChunkStore::new(storage.pool.clone());
+
+        let id = store
+            .upsert_chunk("notes.md", "hash", 0, "unembedded")
+            .await
+            .unwrap();
+
+        let found = store.get_embeddings_by_ids(&[id]).await.unwrap();
+        assert!(found.is_empty(), "unembedded chunk must be excluded");
     }
 }

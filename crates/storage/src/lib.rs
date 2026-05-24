@@ -482,7 +482,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         ),
     ];
 
-    for (name, sql) in migrations {
+    for &(name, sql) in migrations {
         let already_applied: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM _migrations WHERE name = ?")
                 .bind(name)
@@ -621,7 +621,7 @@ mod tests {
             ),
         ];
 
-        for (name, sql) in seed_migrations {
+        for &(name, sql) in seed_migrations {
             sqlx::raw_sql(sql).execute(&pool).await?;
             sqlx::query("INSERT INTO _migrations(name) VALUES (?)")
                 .bind(name)
@@ -633,8 +633,11 @@ mod tests {
     }
 
     async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> Result<bool> {
-        let query = format!("PRAGMA table_info({table})");
-        let rows = sqlx::query(&query).fetch_all(pool).await?;
+        // `PRAGMA table_info(...)` cannot take a bound parameter for the table
+        // name, so the identifier must be interpolated. The table names are
+        // hard-coded test fixtures, never user input — safe to assert.
+        let query = sqlx::AssertSqlSafe(format!("PRAGMA table_info({table})"));
+        let rows = sqlx::query(query).fetch_all(pool).await?;
         Ok(rows.iter().any(|row| {
             row.try_get::<String, _>("name")
                 .is_ok_and(|name| name == column)

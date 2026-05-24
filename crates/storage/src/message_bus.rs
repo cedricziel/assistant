@@ -15,7 +15,7 @@ use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -103,64 +103,47 @@ impl MessageBus for SqliteMessageBus {
     ) -> Result<Option<BusMessage>> {
         let now = self.clock.now();
 
-        // Build the inner SELECT with optional filter predicates.
-        let mut where_clauses = vec!["topic = ?3".to_string(), "status = 'pending'".to_string()];
-        // Track bind index — first 3 are: claimed_at, claimed_by, topic
-        let mut next_bind: u32 = 4;
-        let mut extra_binds: Vec<String> = Vec::new();
-
-        if let Some(ref agent) = filter.agent_id {
-            where_clauses.push(format!("agent_id = ?{next_bind}"));
-            extra_binds.push(agent.clone());
-            next_bind += 1;
-        }
-        if let Some(ref user) = filter.user_id {
-            where_clauses.push(format!("user_id = ?{next_bind}"));
-            extra_binds.push(user.clone());
-            next_bind += 1;
-        }
-        if let Some(ref conv) = filter.conversation_id {
-            where_clauses.push(format!("conversation_id = ?{next_bind}"));
-            extra_binds.push(conv.to_string());
-            next_bind += 1;
-        }
-        if let Some(ref batch) = filter.batch_id {
-            where_clauses.push(format!("batch_id = ?{next_bind}"));
-            extra_binds.push(batch.to_string());
-            next_bind += 1;
-        }
-        if let Some(ref iface) = filter.interface {
-            where_clauses.push(format!("interface = ?{next_bind}"));
-            extra_binds.push(iface.clone());
-            // next_bind not needed after last, but keep for consistency
-            let _ = next_bind;
-        }
-
-        let where_sql = where_clauses.join(" AND ");
-        let sql = format!(
-            "UPDATE bus_messages \
-             SET status = 'claimed', claimed_at = ?1, claimed_by = ?2 \
-             WHERE id = ( \
-                 SELECT id FROM bus_messages \
-                 WHERE {where_sql} \
-                 ORDER BY created_at ASC \
-                 LIMIT 1 \
-             ) \
-             RETURNING {SELECT_COLS}"
-        );
-
         let mut tx = self.pool.begin().await?;
         sqlx::query("PRAGMA busy_timeout = 5000;")
             .execute(&mut *tx)
             .await?;
 
-        let mut query = sqlx::query(&sql).bind(now).bind(worker_id).bind(topic);
+        // Claim the oldest pending message matching the optional routing
+        // filters. Every value is emitted via `push_bind`; only the constant
+        // `SELECT_COLS` column list is pushed as raw SQL.
+        let mut builder: QueryBuilder<Sqlite> =
+            QueryBuilder::new("UPDATE bus_messages SET status = 'claimed', claimed_at = ");
+        builder.push_bind(now);
+        builder.push(", claimed_by = ");
+        builder.push_bind(worker_id);
+        builder.push(" WHERE id = ( SELECT id FROM bus_messages WHERE topic = ");
+        builder.push_bind(topic);
+        builder.push(" AND status = 'pending'");
 
-        for val in &extra_binds {
-            query = query.bind(val);
+        if let Some(ref agent) = filter.agent_id {
+            builder.push(" AND agent_id = ").push_bind(agent);
+        }
+        if let Some(ref user) = filter.user_id {
+            builder.push(" AND user_id = ").push_bind(user);
+        }
+        if let Some(ref conv) = filter.conversation_id {
+            builder
+                .push(" AND conversation_id = ")
+                .push_bind(conv.to_string());
+        }
+        if let Some(ref batch) = filter.batch_id {
+            builder
+                .push(" AND batch_id = ")
+                .push_bind(batch.to_string());
+        }
+        if let Some(ref iface) = filter.interface {
+            builder.push(" AND interface = ").push_bind(iface);
         }
 
-        let row = query.fetch_optional(&mut *tx).await?;
+        builder.push(" ORDER BY created_at ASC LIMIT 1 ) RETURNING ");
+        builder.push(SELECT_COLS);
+
+        let row = builder.build().fetch_optional(&mut *tx).await?;
         tx.commit().await?;
 
         match row {
@@ -209,34 +192,19 @@ impl MessageBus for SqliteMessageBus {
         status: Option<MessageStatus>,
         limit: u32,
     ) -> Result<Vec<BusMessage>> {
-        let rows = match status {
-            Some(s) => {
-                let sql = format!(
-                    "SELECT {SELECT_COLS} FROM bus_messages \
-                     WHERE topic = ?1 AND status = ?2 \
-                     ORDER BY created_at ASC LIMIT ?3"
-                );
-                sqlx::query(&sql)
-                    .bind(topic)
-                    .bind(s.to_string())
-                    .bind(limit)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            None => {
-                let sql = format!(
-                    "SELECT {SELECT_COLS} FROM bus_messages \
-                     WHERE topic = ?1 \
-                     ORDER BY created_at ASC LIMIT ?2"
-                );
-                sqlx::query(&sql)
-                    .bind(topic)
-                    .bind(limit)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-        };
+        // The constant column list is pushed raw; topic, status, and limit are
+        // all bound parameters.
+        let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT ");
+        builder.push(SELECT_COLS);
+        builder.push(" FROM bus_messages WHERE topic = ");
+        builder.push_bind(topic);
+        if let Some(s) = status {
+            builder.push(" AND status = ").push_bind(s.to_string());
+        }
+        builder.push(" ORDER BY created_at ASC LIMIT ");
+        builder.push_bind(limit);
 
+        let rows = builder.build().fetch_all(&self.pool).await?;
         rows.into_iter().map(parse_row).collect()
     }
 
