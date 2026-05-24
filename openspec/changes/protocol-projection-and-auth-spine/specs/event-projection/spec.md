@@ -26,21 +26,34 @@ batching, framing) remain in the adapter.
 
 Every projector SHALL handle every `OrchestratorEvent` variant. Projector match
 expressions MUST NOT use a catch-all `_` arm, so that adding a new variant fails
-to compile until the variant is explicitly projected. A conformance test SHALL
-construct a sample of every variant — including a nested `SubagentEvent` — and
-assert each yields a non-empty projection.
+to compile until the variant is explicitly projected. The SSE projector SHALL
+additionally yield a non-empty projection for every variant (including a nested
+`SubagentEvent`), asserted by a conformance test. A projector for a wire that
+intentionally surfaces only a subset of events (e.g. the CLI, which renders only
+tokens) MAY project an ignored variant to no frames; its totality is enforced by
+the compiler (no `_` arm) rather than by a non-empty assertion.
 
 #### Scenario: New variant fails to compile until projected
 
 - **WHEN** a new variant is added to `OrchestratorEvent`
-- **THEN** the projector SHALL fail to compile until the variant is handled
+- **THEN** every projector SHALL fail to compile until the variant is handled
   (no `_` arm absorbs it)
+
+#### Scenario: SSE projection yields a frame for every variant
+
+- **WHEN** any `OrchestratorEvent` variant is projected by the SSE projector
+- **THEN** the projection SHALL be non-empty
 
 #### Scenario: Nested subagent event is projected recursively
 
-- **WHEN** a `SubagentEvent` wrapping an inner `Token` is projected
+- **WHEN** a `SubagentEvent` wrapping an inner `Token` is projected to SSE
 - **THEN** the projector SHALL produce at least one frame derived from the inner
   event, scoped to the subagent's `agent_id`
+
+#### Scenario: CLI projector ignores non-token events
+
+- **WHEN** a non-token event (e.g. `Status`) is projected by the CLI projector
+- **THEN** the projection MAY be empty, preserving the REPL's tokens-only output
 
 ### Requirement: SSE wire output is byte-identical after extraction
 

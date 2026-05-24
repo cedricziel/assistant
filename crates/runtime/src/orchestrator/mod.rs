@@ -433,7 +433,13 @@ impl Orchestrator {
 
         info!(path = %boot_path.display(), "Running BOOT.md startup hook");
         match self
-            .submit_turn(&stripped, conversation_id, interface, None)
+            .submit_turn(
+                &assistant_core::auth::AuthContext::system(),
+                &stripped,
+                conversation_id,
+                interface,
+                None,
+            )
             .await
         {
             Ok(turn) => {

@@ -10,6 +10,7 @@
 //! coerced to `Arc<dyn AssistantInterface>` at construction sites.
 
 use anyhow::Result;
+use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::Interface;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -37,18 +38,27 @@ pub trait AssistantInterface: Send + Sync {
     /// Submit a user turn and wait for the assistant's reply.
     async fn submit_turn(
         &self,
+        auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
         timestamp: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<TurnResult> {
-        self.submit_turn_with_attachments(prompt, conversation_id, interface, timestamp, vec![])
-            .await
+        self.submit_turn_with_attachments(
+            auth,
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            vec![],
+        )
+        .await
     }
 
     /// Submit a user turn with image attachment IDs.
     async fn submit_turn_with_attachments(
         &self,
+        auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
@@ -63,8 +73,10 @@ pub trait AssistantInterface: Send + Sync {
     /// Default implementation ignores the `request_id` and delegates to
     /// [`submit_turn_with_attachments`] — sufficient for test mocks that
     /// don't exercise cancellation.
+    #[allow(clippy::too_many_arguments)]
     async fn submit_turn_with_request_id(
         &self,
+        auth: &AuthContext,
         _request_id: Uuid,
         prompt: &str,
         conversation_id: Uuid,
@@ -73,6 +85,7 @@ pub trait AssistantInterface: Send + Sync {
         attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         self.submit_turn_with_attachments(
+            auth,
             prompt,
             conversation_id,
             interface,
@@ -110,6 +123,7 @@ impl AssistantInterface for Orchestrator {
 
     async fn submit_turn_with_attachments(
         &self,
+        auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
@@ -117,6 +131,7 @@ impl AssistantInterface for Orchestrator {
         attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         self.submit_turn_with_attachments(
+            auth,
             prompt,
             conversation_id,
             interface,
@@ -126,8 +141,10 @@ impl AssistantInterface for Orchestrator {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn submit_turn_with_request_id(
         &self,
+        auth: &AuthContext,
         request_id: Uuid,
         prompt: &str,
         conversation_id: Uuid,
@@ -136,6 +153,7 @@ impl AssistantInterface for Orchestrator {
         attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         self.submit_turn_with_request_id(
+            auth,
             request_id,
             prompt,
             conversation_id,
@@ -182,6 +200,7 @@ mod tests {
 
         async fn submit_turn_with_attachments(
             &self,
+            _auth: &AuthContext,
             prompt: &str,
             _conversation_id: Uuid,
             _interface: Interface,
@@ -210,7 +229,13 @@ mod tests {
         };
         let iface: Arc<dyn AssistantInterface> = Arc::new(mock);
         let result = iface
-            .submit_turn("hello", Uuid::new_v4(), Interface::Cli, None)
+            .submit_turn(
+                &AuthContext::system(),
+                "hello",
+                Uuid::new_v4(),
+                Interface::Cli,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(result.answer, "echo: hello");
@@ -224,6 +249,7 @@ mod tests {
         let iface: Arc<dyn AssistantInterface> = Arc::new(mock);
         let result = iface
             .submit_turn_with_request_id(
+                &AuthContext::system(),
                 Uuid::new_v4(),
                 "world",
                 Uuid::new_v4(),

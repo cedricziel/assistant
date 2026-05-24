@@ -11,6 +11,7 @@
 use assistant_storage::PersonaStore as _;
 use std::convert::Infallible;
 
+use axum::Extension;
 use axum::Json;
 use axum::extract::{Multipart, Path, State};
 use axum::http::{StatusCode, header};
@@ -21,12 +22,27 @@ use tokio::sync::mpsc;
 use tracing::warn;
 use uuid::Uuid;
 
+use assistant_core::auth::AuthContext;
+use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::types::conversation::Interface;
 use assistant_runtime::OrchestratorEvent;
+use assistant_runtime::projection::{SseProjector, StreamProjector};
 use assistant_storage::{ConversationStore, SqliteConversationStore};
 use assistant_transcription::TranscriptionRequest;
 
 use super::{ApiState, sse_response};
+
+/// Whether the caller may post a message / start a turn — gated on the
+/// `conversations:write` scope, with org admins bypassing. Trusted local callers
+/// carry this via [`AuthContext::system`]; network callers resolve a real
+/// `AuthContext` from the request.
+fn caller_can_post(auth: &AuthContext) -> bool {
+    auth.is_org_admin()
+        || auth
+            .scopes
+            .iter()
+            .any(|s| s.covers(&ResourceKind::Conversations, &Action::Write, None))
+}
 
 /// Body for `POST /api/conversations/{id}/messages`.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -81,15 +97,20 @@ pub struct QuickMessageResponse {
          content_type = "text/event-stream"),
         (status = 400, description = "Invalid ID or empty message"),
         (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Missing conversations:write scope"),
         (status = 404, description = "Conversation not found"),
     ),
     security(("bearer_token" = []))
 )]
 pub async fn send_message(
     State(state): State<ApiState>,
+    Extension(auth): Extension<AuthContext>,
     Path(id): Path<String>,
     Json(body): Json<SendMessageRequest>,
 ) -> Response {
+    if !caller_can_post(&auth) {
+        return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
+    }
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
@@ -142,6 +163,7 @@ pub async fn send_message(
         tokio::spawn(async move {
             let result = orchestrator
                 .submit_turn_with_request_id(
+                    &auth,
                     submit_request_id,
                     &content,
                     conv_id,
@@ -201,8 +223,15 @@ pub async fn send_message(
         const THINKING_BATCH_SIZE: usize = 20;
 
         while let Some(orch_event) = event_rx.recv().await {
+            // Serialization is owned by the shared projection layer; this loop
+            // keeps only transport concerns (batching, persistence, push, seq).
+            // A single OrchestratorEvent yields exactly one SSE frame today.
+            let Some(frame) = SseProjector.project(&orch_event).into_iter().next() else {
+                continue;
+            };
+            let is_thinking = frame.event == "thinking";
+
             // Flush accumulated thinking buffer before non-thinking events.
-            let is_thinking = matches!(orch_event, OrchestratorEvent::Thinking(_));
             if !is_thinking && !thinking_buf.is_empty() {
                 let p = serde_json::json!({"content": thinking_buf});
                 if let Err(e) = event_store
@@ -222,191 +251,89 @@ pub async fn send_message(
                 thinking_token_count = 0;
             }
 
-            let (event_type, payload, sse_event) = match orch_event {
-                OrchestratorEvent::Token(ref token) => {
-                    full_text.push_str(token);
-                    let p = serde_json::json!({"token": token});
-                    let e = Event::default().event("token").data(token.clone());
-                    ("token", p, e)
+            // -- Side effects keyed off the projected frame (no enum match) --
+
+            // Accumulate the assistant's visible text from token frames.
+            if frame.event == "token" {
+                full_text.push_str(&frame.sse_data);
+            }
+
+            // Fire push notifications for skill / error frames.
+            if frame.event == "skill_complete"
+                && let Some(ref dispatcher) = push_dispatcher_for_sse
+            {
+                let success = frame.log_payload["success"].as_bool().unwrap_or(false);
+                let title = if success {
+                    "Skill complete"
+                } else {
+                    "Skill failed"
+                };
+                let skill_name = frame.log_payload["skill_name"].as_str().unwrap_or_default();
+                let summary = frame.log_payload["summary"].as_str().unwrap_or_default();
+                let body = format!("{skill_name}: {summary}");
+                let cid = conv_id_str.clone();
+                let d = dispatcher.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = d.send_to_all(title, &body, Some(&cid)).await {
+                        warn!("Push (skill) failed: {e}");
+                    }
+                });
+            } else if frame.event == "agent_error"
+                && let Some(ref dispatcher) = push_dispatcher_for_sse
+            {
+                // `sse_data` is the raw error text for agent_error frames.
+                let body = frame.sse_data.chars().take(80).collect::<String>();
+                let cid = conv_id_str.clone();
+                let d = dispatcher.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = d.send_to_all("Assistant error", &body, Some(&cid)).await {
+                        warn!("Push (agent error) failed: {e}");
+                    }
+                });
+            }
+
+            // Thinking frames stream immediately and persist in batches.
+            if is_thinking {
+                let e = Event::default()
+                    .event("thinking")
+                    .data(frame.sse_data.clone());
+                if sse_tx.send(Ok(e)).await.is_err() {
+                    break;
                 }
-                OrchestratorEvent::Status {
-                    ref message,
-                    ref tool_call_id,
-                } => {
-                    let mut p = serde_json::json!({"message": message});
-                    if let Some(id) = tool_call_id {
-                        p["tool_call_id"] = serde_json::Value::String(id.clone());
-                    }
-                    let e = Event::default().event("status").data(p.to_string());
-                    ("status", p, e)
-                }
-                OrchestratorEvent::ToolResult {
-                    ref tool_name,
-                    ref status,
-                    ref arguments,
-                    ref result,
-                    ref tool_call_id,
-                } => {
-                    let mut p = serde_json::json!({"tool_name": tool_name, "status": status});
-                    if let Some(args) = arguments {
-                        p["arguments"] = args.clone();
-                    }
-                    if let Some(res) = result {
-                        p["result"] = serde_json::Value::String(res.clone());
-                    }
-                    if let Some(id) = tool_call_id {
-                        p["tool_call_id"] = serde_json::Value::String(id.clone());
-                    }
-                    let e = Event::default().event("tool_result").data(p.to_string());
-                    ("tool_result", p, e)
-                }
-                OrchestratorEvent::SkillComplete {
-                    ref skill_name,
-                    success,
-                    ref summary,
-                } => {
-                    if let Some(ref dispatcher) = push_dispatcher_for_sse {
-                        let title = if success {
-                            "Skill complete"
-                        } else {
-                            "Skill failed"
-                        };
-                        let body = format!("{skill_name}: {summary}");
-                        let cid = conv_id_str.clone();
-                        let d = dispatcher.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = d.send_to_all(title, &body, Some(&cid)).await {
-                                warn!("Push (skill) failed: {e}");
-                            }
-                        });
-                    }
-                    let p = serde_json::json!({"skill_name": skill_name, "success": success, "summary": summary});
-                    let e = Event::default().event("skill_complete").data(p.to_string());
-                    ("skill_complete", p, e)
-                }
-                OrchestratorEvent::AgentError { ref message } => {
-                    if let Some(ref dispatcher) = push_dispatcher_for_sse {
-                        let body = message.chars().take(80).collect::<String>();
-                        let cid = conv_id_str.clone();
-                        let d = dispatcher.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) =
-                                d.send_to_all("Assistant error", &body, Some(&cid)).await
-                            {
-                                warn!("Push (agent error) failed: {e}");
-                            }
-                        });
-                    }
-                    let p = serde_json::json!({"message": message});
-                    let e = Event::default().event("agent_error").data(message.clone());
-                    ("agent_error", p, e)
-                }
-                OrchestratorEvent::Thinking(ref content) => {
-                    // Send SSE immediately for real-time rendering.
-                    let p = serde_json::json!({"content": content});
-                    let e = Event::default().event("thinking").data(p.to_string());
-                    if sse_tx.send(Ok(e)).await.is_err() {
-                        break;
-                    }
-                    // Accumulate for batched persistence.
+                if let Some(content) = frame.log_payload["content"].as_str() {
                     thinking_buf.push_str(content);
-                    thinking_token_count += 1;
-                    if thinking_token_count >= THINKING_BATCH_SIZE {
-                        let batch_p = serde_json::json!({"content": thinking_buf});
-                        if let Err(e) = event_store
-                            .append_event(&run_id_str, &conv_id_str, seq, "thinking", &batch_p)
-                            .await
-                        {
-                            warn!(
-                                "Failed to persist thinking batch seq={seq} for run {run_id}: {e}"
-                            );
-                        }
-                        let live = assistant_storage::LiveEvent {
-                            sequence: seq,
-                            event_type: "thinking".to_string(),
-                            payload: batch_p,
-                        };
-                        let _ = broadcast_tx.send(live);
-                        seq += 1;
-                        thinking_buf.clear();
-                        thinking_token_count = 0;
+                }
+                thinking_token_count += 1;
+                if thinking_token_count >= THINKING_BATCH_SIZE {
+                    let batch_p = serde_json::json!({"content": thinking_buf});
+                    if let Err(e) = event_store
+                        .append_event(&run_id_str, &conv_id_str, seq, "thinking", &batch_p)
+                        .await
+                    {
+                        warn!("Failed to persist thinking batch seq={seq} for run {run_id}: {e}");
                     }
-                    continue;
-                }
-                OrchestratorEvent::SubagentStarted {
-                    ref agent_id,
-                    ref task,
-                } => {
-                    let p = serde_json::json!({"agent_id": agent_id, "task": task});
-                    let e = Event::default()
-                        .event("subagent_started")
-                        .data(p.to_string());
-                    ("subagent_started", p, e)
-                }
-                OrchestratorEvent::SubagentCompleted {
-                    ref agent_id,
-                    ref status,
-                    ref summary,
-                } => {
-                    let p = serde_json::json!({"agent_id": agent_id, "status": status, "summary": summary});
-                    let e = Event::default()
-                        .event("subagent_completed")
-                        .data(p.to_string());
-                    ("subagent_completed", p, e)
-                }
-                OrchestratorEvent::SubagentEvent {
-                    ref agent_id,
-                    ref inner,
-                } => {
-                    let (event_name, inner_data) = match inner.as_ref() {
-                        OrchestratorEvent::Token(t) => {
-                            ("subagent_token", serde_json::json!({"content": t}))
-                        }
-                        OrchestratorEvent::Thinking(t) => {
-                            ("subagent_thinking", serde_json::json!({"content": t}))
-                        }
-                        OrchestratorEvent::Status {
-                            message,
-                            tool_call_id,
-                        } => {
-                            let mut d = serde_json::json!({"message": message});
-                            if let Some(id) = tool_call_id {
-                                d["tool_call_id"] = serde_json::Value::String(id.clone());
-                            }
-                            ("subagent_status", d)
-                        }
-                        OrchestratorEvent::ToolResult {
-                            tool_name,
-                            status,
-                            arguments,
-                            result,
-                            tool_call_id,
-                        } => {
-                            let mut d = serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result});
-                            if let Some(id) = tool_call_id {
-                                d["tool_call_id"] = serde_json::Value::String(id.clone());
-                            }
-                            ("subagent_tool_result", d)
-                        }
-                        other => (
-                            "subagent_event",
-                            serde_json::json!({"type": format!("{other:?}")}),
-                        ),
+                    let live = assistant_storage::LiveEvent {
+                        sequence: seq,
+                        event_type: "thinking".to_string(),
+                        payload: batch_p,
                     };
-                    let p = serde_json::json!({"agent_id": agent_id, "data": inner_data});
-                    let e = Event::default().event(event_name).data(p.to_string());
-                    (event_name, p, e)
+                    let _ = broadcast_tx.send(live);
+                    seq += 1;
+                    thinking_buf.clear();
+                    thinking_token_count = 0;
                 }
-                OrchestratorEvent::AudioReady { ref audio_id } => {
-                    let p = serde_json::json!({"audio_id": audio_id, "auto_play": true});
-                    let e = Event::default().event("audio_ready").data(p.to_string());
-                    ("audio_ready", p, e)
-                }
-            };
+                continue;
+            }
 
             // Persist to durable log.
             if let Err(e) = event_store
-                .append_event(&run_id_str, &conv_id_str, seq, event_type, &payload)
+                .append_event(
+                    &run_id_str,
+                    &conv_id_str,
+                    seq,
+                    &frame.event,
+                    &frame.log_payload,
+                )
                 .await
             {
                 warn!("Failed to persist event seq={seq} for run {run_id}: {e}");
@@ -414,11 +341,14 @@ pub async fn send_message(
             // Broadcast to live tail subscribers.
             let live = assistant_storage::LiveEvent {
                 sequence: seq,
-                event_type: event_type.to_string(),
-                payload: payload.clone(),
+                event_type: frame.event.clone(),
+                payload: frame.log_payload.clone(),
             };
             let _ = broadcast_tx.send(live);
-            let sse_event = sse_event.id(seq.to_string());
+            let sse_event = Event::default()
+                .event(frame.event.clone())
+                .data(frame.sse_data)
+                .id(seq.to_string());
             seq += 1;
 
             if sse_tx.send(Ok(sse_event)).await.is_err() {
@@ -823,14 +753,19 @@ pub async fn stream_run_events(
         (status = 201, description = "Message processed, conversation created", body = QuickMessageResponse),
         (status = 400, description = "Empty message"),
         (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Missing conversations:write scope"),
         (status = 500, description = "Internal server error"),
     ),
     security(("bearer_token" = []))
 )]
 pub async fn quick_message(
     State(state): State<ApiState>,
+    Extension(auth): Extension<AuthContext>,
     Json(body): Json<QuickMessageRequest>,
 ) -> Response {
+    if !caller_can_post(&auth) {
+        return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
+    }
     let content = body.message.trim().to_string();
     if content.is_empty() {
         return (
@@ -881,7 +816,7 @@ pub async fn quick_message(
     // Submit the turn and await the full result (synchronous).
     let result = state
         .orchestrator
-        .submit_turn(&prompt, conv.id, Interface::Web, None)
+        .submit_turn(&auth, &prompt, conv.id, Interface::Web, None)
         .await;
 
     match result {
@@ -938,15 +873,20 @@ struct VoiceUploadForm {
         (status = 200, description = "SSE stream of assistant response", content_type = "text/event-stream"),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Missing conversations:write scope"),
         (status = 503, description = "Voice not configured"),
     ),
     security(("bearer_token" = []))
 )]
 pub async fn send_voice_message(
     State(state): State<ApiState>,
+    Extension(auth): Extension<AuthContext>,
     Path(id): Path<String>,
     mut multipart: Multipart,
 ) -> Response {
+    if !caller_can_post(&auth) {
+        return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
+    }
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
@@ -1052,7 +992,7 @@ pub async fn send_voice_message(
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
             let result = orchestrator
-                .submit_turn(&content, conv_id, Interface::Web, None)
+                .submit_turn(&auth, &content, conv_id, Interface::Web, None)
                 .await;
             let _ = tx.send(result);
         });
@@ -1073,123 +1013,16 @@ pub async fn send_voice_message(
         let mut full_text = String::new();
 
         while let Some(orch_event) = event_rx.recv().await {
-            let sse_event = match orch_event {
-                OrchestratorEvent::Token(token) => {
-                    full_text.push_str(&token);
-                    Event::default().event("token").data(token)
-                }
-                OrchestratorEvent::Status {
-                    message,
-                    tool_call_id,
-                } => {
-                    let mut data = serde_json::json!({"message": message});
-                    if let Some(id) = tool_call_id {
-                        data["tool_call_id"] = serde_json::Value::String(id);
-                    }
-                    Event::default().event("status").data(data.to_string())
-                }
-                OrchestratorEvent::ToolResult {
-                    tool_name,
-                    status,
-                    arguments,
-                    result,
-                    tool_call_id,
-                } => {
-                    let mut data = serde_json::json!({
-                        "tool_name": tool_name,
-                        "status": status,
-                    });
-                    if let Some(args) = arguments {
-                        data["arguments"] = args;
-                    }
-                    if let Some(res) = result {
-                        data["result"] = serde_json::Value::String(res);
-                    }
-                    if let Some(id) = tool_call_id {
-                        data["tool_call_id"] = serde_json::Value::String(id);
-                    }
-                    Event::default().event("tool_result").data(data.to_string())
-                }
-                OrchestratorEvent::SkillComplete {
-                    skill_name,
-                    success,
-                    summary,
-                } => {
-                    let data = serde_json::json!({
-                        "skill_name": skill_name,
-                        "success": success,
-                        "summary": summary,
-                    });
-                    Event::default()
-                        .event("skill_complete")
-                        .data(data.to_string())
-                }
-                OrchestratorEvent::AgentError { message } => {
-                    Event::default().event("agent_error").data(message)
-                }
-                OrchestratorEvent::Thinking(content) => {
-                    let data = serde_json::json!({"content": content});
-                    Event::default().event("thinking").data(data.to_string())
-                }
-                OrchestratorEvent::SubagentStarted { agent_id, task } => {
-                    let data = serde_json::json!({"agent_id": agent_id, "task": task});
-                    Event::default()
-                        .event("subagent_started")
-                        .data(data.to_string())
-                }
-                OrchestratorEvent::SubagentCompleted {
-                    agent_id,
-                    status,
-                    summary,
-                } => {
-                    let data = serde_json::json!({"agent_id": agent_id, "status": status, "summary": summary});
-                    Event::default()
-                        .event("subagent_completed")
-                        .data(data.to_string())
-                }
-                OrchestratorEvent::SubagentEvent { agent_id, inner } => {
-                    let (inner_type, inner_data) = match inner.as_ref() {
-                        OrchestratorEvent::Token(t) => ("token", serde_json::json!({"content": t})),
-                        OrchestratorEvent::Thinking(t) => {
-                            ("thinking", serde_json::json!({"content": t}))
-                        }
-                        OrchestratorEvent::Status {
-                            message,
-                            tool_call_id,
-                        } => {
-                            let mut d = serde_json::json!({"message": message});
-                            if let Some(id) = tool_call_id {
-                                d["tool_call_id"] = serde_json::Value::String(id.clone());
-                            }
-                            ("status", d)
-                        }
-                        OrchestratorEvent::ToolResult {
-                            tool_name,
-                            status,
-                            arguments,
-                            result,
-                            tool_call_id,
-                        } => {
-                            let mut d = serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result});
-                            if let Some(id) = tool_call_id {
-                                d["tool_call_id"] = serde_json::Value::String(id.clone());
-                            }
-                            ("tool_result", d)
-                        }
-                        other => ("event", serde_json::json!({"type": format!("{other:?}")})),
-                    };
-                    let event_type = format!("subagent_{inner_type}");
-                    let data = serde_json::json!({"agent_id": agent_id, "event_type": inner_type, "data": inner_data});
-                    Event::default().event(&event_type).data(data.to_string())
-                }
-                OrchestratorEvent::AudioReady { audio_id } => {
-                    let data = serde_json::json!({
-                        "audio_id": audio_id,
-                        "auto_play": true,
-                    });
-                    Event::default().event("audio_ready").data(data.to_string())
-                }
+            // Shared projection layer owns serialization — unified with the main
+            // streaming handler. The voice path neither persists nor batches, so
+            // every frame (including thinking) streams straight through.
+            let Some(frame) = SseProjector.project(&orch_event).into_iter().next() else {
+                continue;
             };
+            if frame.event == "token" {
+                full_text.push_str(&frame.sse_data);
+            }
+            let sse_event = Event::default().event(frame.event).data(frame.sse_data);
             if sse_tx.send(Ok(sse_event)).await.is_err() {
                 return;
             }
@@ -1257,6 +1090,39 @@ mod tests {
     use super::super::test_helpers::*;
 
     // -- POST /conversations/{id}/messages — error paths ----------------------
+
+    #[tokio::test]
+    async fn send_message_without_conversations_write_scope_returns_403() {
+        use assistant_core::auth::AuthContext;
+        use assistant_core::identity::{Action, ResourceKind, Scope};
+
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        // A caller with neither an admin role nor the conversations:write scope.
+        let restricted = AuthContext {
+            user_id: "u1".into(),
+            org_id: "default".into(),
+            email: "u@example.com".into(),
+            space_roles: HashMap::new(),
+            scopes: vec![Scope::new(ResourceKind::Personas, Action::Read)],
+            client_id: "test".into(),
+        };
+
+        let resp = app_with_auth(state, restricted)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{}/messages", Uuid::new_v4()))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"hi"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
 
     #[tokio::test]
     async fn send_message_bad_uuid_returns_400() {

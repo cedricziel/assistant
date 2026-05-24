@@ -182,7 +182,13 @@ impl AssistantTurnClient for OrchestratorTurnClient {
     async fn submit_turn(&self, prompt: &str, conversation_id: Uuid) -> Result<String> {
         let result = self
             .orchestrator
-            .submit_turn(prompt, conversation_id, Interface::Scheduler, None)
+            .submit_turn(
+                &assistant_core::auth::AuthContext::system(),
+                prompt,
+                conversation_id,
+                Interface::Scheduler,
+                None,
+            )
             .await?;
         Ok(result.answer)
     }

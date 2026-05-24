@@ -53,11 +53,11 @@ pub fn start_token_printer(
     mut rx: mpsc::Receiver<assistant_runtime::OrchestratorEvent>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        use assistant_runtime::OrchestratorEvent;
+        use assistant_runtime::projection::{CliProjector, StreamProjector};
         let mut stdout = io::stdout();
         while let Some(event) = rx.recv().await {
-            if let OrchestratorEvent::Token(token) = event {
-                print!("{token}");
+            for line in CliProjector.project(&event) {
+                print!("{line}");
                 let _ = stdout.flush();
             }
         }

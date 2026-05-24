@@ -90,21 +90,28 @@ event names + serialized payload JSON match the pre-refactor output exactly. The
 refactor is rejected if any byte differs. (`token` and `agent_error` keep their
 current raw-text data form; all others keep their JSON object form.)
 
-### 5. Auth seam: prefer compiler enforcement, fall back to source scan
+### 5. Auth seam: full compiler enforcement across all three submission surfaces
 
-Preferred: a single inbound dispatch function that takes `&AuthContext`, so no
-inbound adapter can reach the Orchestrator without one — illegal states made
-unrepresentable. If wrapping `submit_turn*` (called by web, CLI, messengers,
-A2A) proves too invasive for Phase 0, fall back to a source-scanning
-conformance test modeled on `tests/workspace_lint_policy.rs`: inbound
-turn-accepting handlers must resolve `AuthContext`/`AuthExtractor`. The spec
-states the outcome; the task list spikes the compiler seam first and downgrades
-only if it balloons.
+Decision (revised during implementation, at the user's direction): rather than a
+contained chokepoint, require `&AuthContext` on **every** turn-submission entry
+point — illegal states made unrepresentable everywhere. `submit_turn` exists at
+three layers, all updated:
 
-Phase 0 threads `AuthExtractor` into the `/api` streaming handlers and uses the
-context for an authorization check (caller must hold the message-posting scope),
-so the resolved context is genuinely used — not dead — while full org/space
-re-scoping stays deferred per Non-Goals.
+- inherent `Orchestrator::submit_turn` / `_with_attachments` / `_with_request_id`
+  (derive `TurnIdentity::from_auth`),
+- the `AssistantInterface` trait + its `Orchestrator` impl and test mocks,
+- the `OrchestrationEngine` trait + its `Orchestrator` impl and `Stub` mock.
+
+A new `AuthContext::system()` constructor gives trusted local/non-network callers
+(scheduler, BOOT hook, CLI, MCP, messengers, tests) an explicit identity to pass
+at the call site — no silent default survives. Network adapters pass a
+request-resolved context: the `/api` streaming handlers take
+`Extension<AuthContext>` (populated by the existing `require_auth` middleware).
+
+The resolved context is genuinely used: the `/api` handlers gate posting on the
+`conversations:write` scope (`caller_can_post`, returning `403`), and identity
+flows into `TurnIdentity`. Full org/space turn _re-scoping_ (replacing
+`state.agent_id`) stays deferred per Non-Goals.
 
 ### 6. No `_` discovery hidden: this is not a pure refactor end-to-end
 
@@ -112,3 +119,16 @@ The projection extraction is behavior-preserving. The auth seam is a _new
 guardrail_ and a _minor authz tightening_ (scope check on the streaming
 handler). This is intended and called out so reviewers expect a new 403 path,
 not just moved code.
+
+### 7. Two streaming handlers, two drifted subagent wires — unified (discovered)
+
+Implementation surfaced a **second** streaming handler (the voice/audio path in
+`messages.rs`) with a divergent subagent wire: its `data` carried a redundant
+`"event_type"` field and a different inner fallback. The Flutter client
+(`app/lib/api/api_client.dart`) parses only `agent_id` and `data` — it never
+reads `event_type` — so the field was dead weight. Decision: route the voice
+handler through `SseProjector` too, dropping the redundant field and unifying
+both handlers on one wire. The SSE _bytes_ for voice subagent events change, but
+there is **no observable client behavior change**, and no `openapi.json` /
+Flutter client regeneration is needed (SSE bodies are not in the OpenAPI spec).
+This converts unintentional drift into a single source of truth.
