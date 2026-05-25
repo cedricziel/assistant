@@ -371,14 +371,14 @@ dependencies = [
 
 [[package]]
 name = "assistant"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "assistant-a2a-json-schema"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "chrono",
  "serde",
@@ -388,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-auth"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "argon2",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-backup"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-bus-nats"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-cli"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-backup",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-core"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-integration-tests"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-auth",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interfaces"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-llm-provider"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -599,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-client"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-server"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-runtime"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-skills"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "gray_matter",
@@ -690,7 +690,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-storage"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-auth",
@@ -714,7 +714,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-test-support"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "assistant-core",
  "assistant-llm-provider",
@@ -728,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-tool-executor"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-transcription"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-web-ui"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-workflow"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -851,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-workflow-http"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "assistant-workflow",
@@ -4020,7 +4020,7 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-exporter-iceberg"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -4045,7 +4045,7 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-exporter-sqlite"
-version = "0.1.164"
+version = "0.1.165"
 dependencies = [
  "assistant-core",
  "chrono",
@@ -5733,9 +5733,9 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "similar"
-version = "3.1.1"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6505efef05804732ed8a3f2d4f279429eb485bd69d5b0cc6b19cc02005cda16"
+checksum = "04d93e861ede2e497b47833469b8ec9d5c07fa4c78ce7a00f6eb7dd8168b4b3f"
 dependencies = [
  "bstr",
 ]

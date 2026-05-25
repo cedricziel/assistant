@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.165](https://github.com/cedricziel/assistant/compare/v0.1.164...v0.1.165) (2026-05-25)
+
+
+### Features
+
+* **runtime:** event-projection layer + inbound auth spine (Phase 0) ([#909](https://github.com/cedricziel/assistant/issues/909)) ([448f0d8](https://github.com/cedricziel/assistant/commit/448f0d88bd54ddd39917aa80276b4ec6a4ccc6e4))
+* wire A2A to the Orchestrator + persist tasks (Phase 1) ([#911](https://github.com/cedricziel/assistant/issues/911)) ([992427e](https://github.com/cedricziel/assistant/commit/992427e50f4bbe562ecb0f82becf8ca2401ed6fe))
+
 ## [0.1.164](https://github.com/cedricziel/assistant/compare/v0.1.163...v0.1.164) (2026-05-22)
 
 
