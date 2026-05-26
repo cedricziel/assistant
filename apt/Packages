@@ -1,0 +1,32 @@
+Package: assistant
+Version: 0.1.165
+Architecture: amd64
+Maintainer: Cedric Ziel <cedric@cedric-ziel.com>
+Installed-Size: 124135
+Depends: ffmpeg
+Suggests: nats-server
+Filename: ./assistant_0.1.165_amd64.deb
+Size: 45188246
+MD5sum: 9f59b813213d37c42f81ae12f3ce5e87
+SHA1: 84d696b82342122283966c4620ce3fd03fbee50d
+SHA256: 8c76b1d51d84319083f05aabb7743e9deee2baaef8b2db1785fd5af6648797c1
+Priority: optional
+Homepage: https://github.com/cedricziel/assistant
+Description: Local self-improving AI assistant (unified: orchestrator + worker + webui + MCP + interfaces)
+
+Package: assistant
+Version: 0.1.165
+Architecture: arm64
+Maintainer: Cedric Ziel <cedric@cedric-ziel.com>
+Installed-Size: 116625
+Depends: ffmpeg
+Suggests: nats-server
+Filename: ./assistant_0.1.165_arm64.deb
+Size: 44216636
+MD5sum: 932d08079243761aa831833b5b52e683
+SHA1: 23d5985a302037c543f16ea3d486e88c47ee3f80
+SHA256: 615e2d424e47343c562c0f9b6e672cb83acf0d464e544401546fd52b6e75c490
+Priority: optional
+Homepage: https://github.com/cedricziel/assistant
+Description: Local self-improving AI assistant (unified: orchestrator + worker + webui + MCP + interfaces)
+
