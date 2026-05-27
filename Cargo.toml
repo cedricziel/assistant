@@ -158,7 +158,7 @@ hkdf = "0.13"
 # Lossless TOML editing (preserves comments and whitespace)
 toml_edit = "0.25"
 # NATS message bus
-async-nats = "0.48"
+async-nats = "0.49"
 # Integration testing
 testcontainers = "0.27"
 # OpenAPI spec generation
