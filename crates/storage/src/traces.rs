@@ -827,7 +827,8 @@ fn take_limit(mut v: Vec<TraceSummary>, limit: i64) -> Vec<TraceSummary> {
 
 /// Trait for querying skill-scoped execution statistics from trace storage.
 ///
-/// Implementations exist for both SQLite (`TraceStore`) and Iceberg backends.
+/// `SqliteTraceStore` is the built-in implementation; the trait is the seam
+/// for sourcing the same stats from an external telemetry backend later.
 #[async_trait::async_trait]
 pub trait SkillStatsProvider: Send + Sync {
     /// Return aggregate stats for spans tagged with `active_skill = skill_name`

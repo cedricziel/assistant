@@ -22,7 +22,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use assistant_core::LlmProvider;
 use assistant_core::types::llm::LlmProviderKind;
-use assistant_core::types::observability::OtelExporter;
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
     MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
@@ -46,8 +45,8 @@ use axum::{
     routing::{get, post},
 };
 use backends::{
-    IcebergLogBackend, IcebergMetricsBackend, IcebergTraceBackend, LogBackend, MetricsBackend,
-    SqliteLogBackend, SqliteMetricsBackend, SqliteTraceBackend, TraceBackend,
+    LogBackend, MetricsBackend, SqliteLogBackend, SqliteMetricsBackend, SqliteTraceBackend,
+    TraceBackend,
 };
 use clap::Parser;
 use serde_json::json;
@@ -415,25 +414,18 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let registry = Arc::new(registry);
 
+    // The built-in viewers read from the local SQLite telemetry store. When
+    // `exporter = "none"` these backends simply return empty results — the
+    // real data lives in whatever OTLP backend the deployment points at.
     let (trace_backend, log_backend, metrics_backend): (
         Arc<dyn TraceBackend>,
         Arc<dyn LogBackend>,
         Arc<dyn MetricsBackend>,
-    ) = match config.observability.exporter {
-        OtelExporter::Iceberg => {
-            let iceberg_cfg = config.observability.iceberg.clone();
-            (
-                Arc::new(IcebergTraceBackend::new(iceberg_cfg.clone())),
-                Arc::new(IcebergLogBackend::new(iceberg_cfg.clone())),
-                Arc::new(IcebergMetricsBackend::new(iceberg_cfg)),
-            )
-        }
-        _ => (
-            Arc::new(SqliteTraceBackend::new(storage.pool.clone())),
-            Arc::new(SqliteLogBackend::new(storage.pool.clone())),
-            Arc::new(SqliteMetricsBackend::new(storage.pool.clone())),
-        ),
-    };
+    ) = (
+        Arc::new(SqliteTraceBackend::new(storage.pool.clone())),
+        Arc::new(SqliteLogBackend::new(storage.pool.clone())),
+        Arc::new(SqliteMetricsBackend::new(storage.pool.clone())),
+    );
 
     // -- Push dispatcher (built here so AppState can hold a reference) -------
     let push_store_for_state = Arc::new(storage.push_subscription_store());

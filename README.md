@@ -324,27 +324,34 @@ ASSISTANT_WEB_TOKEN=changeme cargo run -p assistant-cli -- webui serve --listen 
 ## Observability
 
 The runtime emits OpenTelemetry **traces, logs, and metrics** for every
-conversation turn, LLM call, and tool invocation. All three signals are
-persisted to a local SQLite database (powering the built-in web UI) and can
-optionally be exported to any OTLP-compatible collector.
+conversation turn, LLM call, and tool invocation. Real observability lives
+outside the assistant: export via OTLP to your own stack and query it there.
+A small local SQLite store powers the built-in web UI viewers for single-node
+debugging, and can be switched off with `[observability] exporter = "none"`.
 
 ```sh
-# Send all signals to an OTLP collector (Jaeger, Tempo, Grafana, Honeycomb, …)
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 assistant
+# Send all signals to an OTLP collector (Tempo, Grafana, Honeycomb, …)
+# Note: OTLP over HTTP — the :4318 port, not the gRPC :4317.
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 assistant
 
-# Per-signal endpoints
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://tempo:4317 \
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:4317 \
+# Per-signal endpoints (used verbatim — include the full path)
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://tempo:4318/v1/traces \
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:4318/v1/logs \
   assistant
 
 # Auth headers for managed backends
 OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer token" assistant
+
+# Disable telemetry entirely
+OTEL_SDK_DISABLED=true assistant
 ```
 
 The `opentelemetry-otlp` crate reads the standard `OTEL_EXPORTER_OTLP_*` env
-vars (endpoint, headers, timeout, compression) with per-signal overrides — see
-[docs/opentelemetry.md](docs/opentelemetry.md) for the full reference of
-emitted spans, metrics, and supported environment variables.
+vars (endpoint, protocol, headers, timeout, compression) with per-signal
+overrides — see [docs/opentelemetry.md](docs/opentelemetry.md) for the full
+reference of emitted spans, metrics, and supported environment variables, and
+[ADR-0010](docs/adr/adr-0010-external-observability.md) for why the built-in
+analytics stack was removed.
 
 ### Pre-commit hooks
 

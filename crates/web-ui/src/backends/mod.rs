@@ -1,13 +1,15 @@
 //! Query backend abstraction for trace and log data.
 //!
-//! The web-UI can read observability data from different storage backends
-//! depending on the configured [`OtelExporter`]:
+//! [`SqliteTraceBackend`], [`SqliteLogBackend`], and [`SqliteMetricsBackend`]
+//! read from the local `distributed_traces`, `logs`, and `metric_points`
+//! tables written by the SQLite OTel exporters. That store is deliberately
+//! small: it exists to power the built-in viewers, not to be a long-term
+//! telemetry warehouse. Deployments that need retention, aggregation, or
+//! cross-service correlation export via OTLP to a real observability stack
+//! and query it there (TraceQL, PromQL, LogQL, …).
 //!
-//! - [`SqliteTraceBackend`] / [`SqliteLogBackend`] — default; reads from the
-//!   `distributed_traces` and `logs` SQLite tables.
-//! - [`IcebergTraceBackend`] / [`IcebergLogBackend`] — used when
-//!   `exporter = "iceberg"`; scans Parquet files written by the Iceberg
-//!   exporter directly from the warehouse directory.
+//! The traits remain as a seam so an external-query backend can be added
+//! later without touching the handlers.
 //!
 //! Handlers receive the active backend via [`AppState`] and call these trait
 //! methods instead of constructing `TraceStore`/`LogStore` directly.
@@ -21,10 +23,8 @@ use assistant_storage::{
     ToolUsageStats, TraceFilter, TraceSummary,
 };
 
-pub mod iceberg;
 pub mod sqlite;
 
-pub use iceberg::{IcebergLogBackend, IcebergMetricsBackend, IcebergTraceBackend};
 pub use sqlite::{SqliteLogBackend, SqliteMetricsBackend, SqliteTraceBackend};
 
 // -- TraceBackend -------------------------------------------------------------
@@ -34,8 +34,7 @@ pub use sqlite::{SqliteLogBackend, SqliteMetricsBackend, SqliteTraceBackend};
 pub trait TraceBackend: Send + Sync {
     /// Return the `limit` most-recent traces, optionally filtered.
     ///
-    /// `agent_id` is used by the SQLite backend for per-agent scoping and
-    /// ignored by the Iceberg backend.
+    /// `agent_id` scopes the query to a single agent workspace.
     async fn list_recent_traces(
         &self,
         limit: i64,
@@ -45,8 +44,7 @@ pub trait TraceBackend: Send + Sync {
 
     /// Return all spans belonging to a single trace.
     ///
-    /// `agent_id` is used by the SQLite backend for per-agent scoping and
-    /// ignored by the Iceberg backend.
+    /// `agent_id` scopes the query to a single agent workspace.
     async fn get_trace(&self, trace_id: &str, agent_id: &str) -> Result<Vec<RecordedSpan>>;
 }
 
@@ -92,8 +90,7 @@ pub trait MetricsBackend: Send + Sync {
 pub trait LogBackend: Send + Sync {
     /// Return the `limit` most-recent log records, optionally filtered.
     ///
-    /// `agent_id` is used by the SQLite backend for per-agent scoping and
-    /// ignored by the Iceberg backend.
+    /// `agent_id` scopes the query to a single agent workspace.
     #[allow(clippy::too_many_arguments)]
     async fn list_recent_logs(
         &self,

@@ -10,7 +10,6 @@ assistant-core = { path = "../core" }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-storage = { path = "../storage" }
 opentelemetry-exporter-sqlite = { path = "../opentelemetry-exporter-sqlite" }
-opentelemetry-exporter-iceberg = { path = "../opentelemetry-exporter-iceberg" }
 assistant-skills = { path = "../skills" }
 assistant-tool-executor = { path = "../tool-executor" }
 assistant-transcription = { path = "../transcription" }

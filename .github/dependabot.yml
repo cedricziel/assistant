@@ -11,11 +11,6 @@ updates:
       reqwest:
         patterns:
           - "reqwest*"
-      arrow-iceberg:
-        patterns:
-          - "arrow*"
-          - "parquet"
-          - "iceberg*"
 
   - package-ecosystem: pub
     directory: /app

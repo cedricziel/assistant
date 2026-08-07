@@ -28,12 +28,16 @@ Implement a three-phase autonomous learning pipeline, gated behind
 
 Tag every OTel span with an `active_skill` attribute when a skill is
 loaded via the `load-skill` tool. This attribute propagates through
-the span tree for that turn and is persisted to both the SQLite and
-Iceberg trace backends via a new `active_skill` column.
+the span tree for that turn and is persisted to the SQLite trace store
+via a new `active_skill` column.
 
-A `SkillStatsProvider` trait abstracts querying skill-scoped statistics
-across backends, enabling the same analysis logic regardless of whether
-traces are stored in SQLite or Iceberg.
+A `SkillStatsProvider` trait abstracts querying skill-scoped statistics,
+keeping the analysis logic independent of where traces are stored.
+
+> **Superseded in part by ADR-0010.** The Iceberg trace backend that
+> originally implemented `SkillStatsProvider` alongside SQLite was
+> removed; the trait remains as the seam for a future external-query
+> implementation.
 
 ### Phase 2: Post-Turn Skill Creation
 

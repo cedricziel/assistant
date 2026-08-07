@@ -140,7 +140,6 @@ Multiple crates under `crates/`, one root crate. Edition 2024, resolver 2.
 | `assistant-workflow`             | `crates/workflow`                       | Workflow run engine and action executor abstractions                                                                                            |
 | `assistant-workflow-http`        | `crates/workflow-http`                  | HTTP action node executor for assistant-workflow                                                                                                |
 | `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite`  | SQLite exporter for OpenTelemetry spans/logs                                                                                                    |
-| `opentelemetry-exporter-iceberg` | `crates/opentelemetry-exporter-iceberg` | Apache Iceberg exporter for OpenTelemetry spans, logs, and metrics                                                                              |
 | `assistant-integration-tests`    | `crates/integration-tests`              | End-to-end smoke tests                                                                                                                          |
 
 Dependency order (no cycles):
@@ -206,7 +205,7 @@ Currently ratcheted to `deny`:
   `assistant-mcp-server`, `assistant-runtime`, `assistant-skills`,
   `assistant-storage`, `assistant-tool-executor`, `assistant-transcription`,
   `assistant-web-ui`, `assistant-workflow`, `assistant-workflow-http`,
-  `opentelemetry-exporter-iceberg`, `opentelemetry-exporter-sqlite`.
+  `opentelemetry-exporter-sqlite`.
 
 All non-tests-only crates are now panic-free at `deny`. The only crate
 still on the workspace `warn` baseline is `assistant-integration-tests`,

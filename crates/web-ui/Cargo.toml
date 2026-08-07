@@ -58,9 +58,6 @@ utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true }
 rust-embed = { workspace = true }
 mime_guess = { workspace = true }
-arrow-array = { workspace = true }
-parquet = { workspace = true }
-iceberg = { workspace = true }
 urlencoding.workspace = true
 
 [dev-dependencies]

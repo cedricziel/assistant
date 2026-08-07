@@ -12,6 +12,13 @@ license: MIT
 Use this skill when you need to diagnose behavior via telemetry in this
 repository.
 
+The SQLite tables below are the _local_ telemetry store — a debugging
+convenience for a single-node install, populated by the SQLite OTel exporters
+and enabled by default (`[observability] exporter = "sqlite"`). Anything
+beyond that lives in an external backend reached over OTLP; query it there
+with TraceQL/LogQL/PromQL rather than expecting long-term history here. See
+`docs/opentelemetry.md` and `docs/adr/adr-0010-external-observability.md`.
+
 ## Telemetry Storage Tables
 
 - Traces: `distributed_traces`
