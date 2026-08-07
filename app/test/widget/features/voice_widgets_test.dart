@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:record/record.dart';
 
 import 'package:assistant_app/api/connectivity_provider.dart';
 import 'package:assistant_app/features/chat/audio_player_widget.dart';
@@ -161,30 +162,42 @@ void _clearRecordChannelMock() {
       );
 }
 
-/// Mocks the record channel for a full recording cycle.
+/// Fake [AudioRecorder] driving a full recording cycle without native calls.
 ///
 /// Permission is granted, all encoders report as supported, [start] succeeds,
 /// and [stop] returns [stopPath] (the file the caller pre-populated with test
 /// bytes).
-void _setFullRecordChannelMock(String stopPath) {
-  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(
-        const MethodChannel('com.llfbandit.record/messages'),
-        (call) async {
-          switch (call.method) {
-            case 'hasPermission':
-              return true;
-            case 'isEncoderSupported':
-              return true;
-            case 'start':
-              return null;
-            case 'stop':
-              return stopPath;
-            default:
-              return null;
-          }
-        },
-      );
+///
+/// This injects through [VoiceRecorderButton.audioRecorder] rather than mocking
+/// `com.llfbandit.record/messages`. As of record 7.x, `start()` also subscribes
+/// to a per-instance `EventChannel` (`com.llfbandit.record/events/<uuid>`) whose
+/// name is not known ahead of time, so it cannot be mocked by channel name — a
+/// method-channel mock alone leaves that stream unhandled and start() throws
+/// MissingPluginException.
+class _FakeAudioRecorder implements AudioRecorder {
+  _FakeAudioRecorder(this.stopPath);
+
+  final String stopPath;
+
+  @override
+  Future<bool> hasPermission({bool request = true}) async => true;
+
+  @override
+  Future<bool> isEncoderSupported(AudioEncoder encoder) async => true;
+
+  @override
+  Future<void> start(RecordConfig config, {required String path}) async {}
+
+  @override
+  Future<String?> stop() async => stopPath;
+
+  @override
+  Future<void> dispose() async {}
+
+  // Any other member of AudioRecorder is unused by VoiceRecorderButton; reaching
+  // one is a bug in the test rather than something to silently return null for.
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 // ---------------------------------------------------------------------------
@@ -462,12 +475,15 @@ void main() {
       );
       await tester.runAsync(() => stubFile.writeAsBytes([1, 2, 3]));
 
-      _setFullRecordChannelMock(stubFile.path);
       _setPathProviderMock();
 
       await tester.pumpWidget(
         wrapWithProviders(
-          VoiceRecorderButton(onRecordingComplete: (_, _) {}, onError: (_) {}),
+          VoiceRecorderButton(
+            onRecordingComplete: (_, _) {},
+            onError: (_) {},
+            audioRecorder: _FakeAudioRecorder(stubFile.path),
+          ),
         ),
       );
 
@@ -500,7 +516,6 @@ void main() {
       );
       await tester.runAsync(() => audioFile.writeAsBytes(expectedBytes));
 
-      _setFullRecordChannelMock(audioFile.path);
       _setPathProviderMock();
 
       Uint8List? capturedBytes;
@@ -514,6 +529,7 @@ void main() {
               capturedMime = mime;
             },
             onError: (_) {},
+            audioRecorder: _FakeAudioRecorder(audioFile.path),
           ),
         ),
       );
