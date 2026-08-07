@@ -85,7 +85,7 @@ impl ToolHandler for SelfAnalyzeHandler {
 
         let window: i64 = params.get("window").and_then(|v| v.as_i64()).unwrap_or(50);
 
-        // Fetch aggregate stats via the SkillStatsProvider (SQLite trace store).
+        // Fetch aggregate stats via the configured SkillStatsProvider.
         let stats = match self
             .stats_provider
             .stats_for_active_skill(&skill_name, window)

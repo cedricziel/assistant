@@ -24,10 +24,13 @@ assistant
 # Send all signals to an OTLP collector
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 assistant
 
-# Per-signal endpoints (traces to Tempo, logs to Loki, metrics to Mimir)
+# Per-signal endpoints, straight at the backends (no collector in between).
+# These are used verbatim, so each needs that backend's own port and path —
+# they are not interchangeable, and `:4318` is a collector port, not a
+# universal one.
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://tempo:4318/v1/traces \
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:4318/v1/logs \
-OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://mimir:4318/v1/metrics \
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:3100/otlp/v1/logs \
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://mimir:8080/otlp/v1/metrics \
   assistant
 
 # Auth header for a managed backend (e.g. Grafana Cloud, Honeycomb)
@@ -144,8 +147,15 @@ exporter = "sqlite"    # "sqlite" (default) or "none"
 trace_content = false  # Capture full LLM message content in spans (default: false)
 ```
 
-`exporter` controls **only** the local SQLite store. OTLP export is
-independent and always additive — the two run side by side.
+`exporter` controls **only** the local SQLite store, and only its **write**
+side. OTLP export is independent and always additive, so with
+`exporter = "sqlite"` the two destinations run side by side.
+
+With `exporter = "none"`, new telemetry goes to OTLP alone. The built-in
+viewers keep working and keep serving whatever rows were written to SQLite
+earlier — the local store is no longer appended to, not emptied. Delete the
+`distributed_traces`, `logs`, and `metric_points` tables if you want the
+history gone too.
 
 > The removed `"iceberg"` and `"both"` values are rejected at parse time
 > rather than silently downgraded, so a stale config fails loudly. See
@@ -293,7 +303,9 @@ Every signal carries a shared OTel `Resource`:
        viewers Jaeger   viewers  ...   viewers  ...
 ```
 
-Both destinations run side by side when OTLP env vars are set. The SQLite
-exporters power the built-in web UI viewers; the OTLP exporters send data
-to your collector of choice — which is where anything beyond local
-debugging should live.
+With `exporter = "sqlite"` (the default) and OTLP env vars set, both
+destinations run side by side. The SQLite exporters power the built-in web UI
+viewers; the OTLP exporters send data to your collector of choice — which is
+where anything beyond local debugging should live. `exporter = "none"` drops
+the left-hand branch: new signals then go only to OTLP, though the viewers
+still read any rows SQLite already holds.

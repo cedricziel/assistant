@@ -334,9 +334,11 @@ debugging, and can be switched off with `[observability] exporter = "none"`.
 # Note: OTLP over HTTP — the :4318 port, not the gRPC :4317.
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 assistant
 
-# Per-signal endpoints (used verbatim — include the full path)
+# Per-signal endpoints, straight at the backends. Used verbatim, so each
+# needs that backend's own port and path (Loki's OTLP route is /otlp/v1/logs
+# on :3100, not the collector's :4318/v1/logs).
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://tempo:4318/v1/traces \
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:4318/v1/logs \
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:3100/otlp/v1/logs \
   assistant
 
 # Auth headers for managed backends

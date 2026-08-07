@@ -41,16 +41,16 @@ The SQLite OTel span exporter SHALL extract the `active_skill` attribute from sp
 
 ### Requirement: Stats query uses active_skill column
 
-The `stats_for_skill()` function SHALL query traces by the `active_skill` column (not `tool_name`) to aggregate skill-level performance statistics.
+The `SkillStatsProvider::stats_for_active_skill()` method SHALL query traces by the `active_skill` column (not `tool_name`) to aggregate skill-level performance statistics.
 
 #### Scenario: Query stats for a skill with execution history
 
-- **WHEN** `stats_for_skill("coding-agent", 50)` is called and there are 20 spans with `active_skill = "coding-agent"`
+- **WHEN** `stats_for_active_skill("coding-agent", 50)` is called and there are 20 spans with `active_skill = "coding-agent"`
 - **THEN** the returned `TraceStats` SHALL reflect aggregates over those 20 spans
 
 #### Scenario: Query stats for a skill with no history
 
-- **WHEN** `stats_for_skill("new-skill", 50)` is called and no spans have `active_skill = "new-skill"`
+- **WHEN** `stats_for_active_skill("new-skill", 50)` is called and no spans have `active_skill = "new-skill"`
 - **THEN** the returned `TraceStats` SHALL have `total = 0`
 
 ### Requirement: SkillStatsProvider trait abstracts backend

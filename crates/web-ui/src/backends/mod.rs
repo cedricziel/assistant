@@ -34,7 +34,9 @@ pub use sqlite::{SqliteLogBackend, SqliteMetricsBackend, SqliteTraceBackend};
 pub trait TraceBackend: Send + Sync {
     /// Return the `limit` most-recent traces, optionally filtered.
     ///
-    /// `agent_id` scopes the query to a single agent workspace.
+    /// `agent_id` scopes the query to a single agent workspace. An empty
+    /// string is the sentinel for the unscoped, top-level view and must
+    /// omit the agent filter entirely rather than match a literal `""` id.
     async fn list_recent_traces(
         &self,
         limit: i64,
@@ -44,7 +46,9 @@ pub trait TraceBackend: Send + Sync {
 
     /// Return all spans belonging to a single trace.
     ///
-    /// `agent_id` scopes the query to a single agent workspace.
+    /// `agent_id` scopes the query to a single agent workspace. An empty
+    /// string is the sentinel for the unscoped, top-level view and must
+    /// omit the agent filter entirely rather than match a literal `""` id.
     async fn get_trace(&self, trace_id: &str, agent_id: &str) -> Result<Vec<RecordedSpan>>;
 }
 
@@ -90,7 +94,9 @@ pub trait MetricsBackend: Send + Sync {
 pub trait LogBackend: Send + Sync {
     /// Return the `limit` most-recent log records, optionally filtered.
     ///
-    /// `agent_id` scopes the query to a single agent workspace.
+    /// `agent_id` scopes the query to a single agent workspace. An empty
+    /// string is the sentinel for the unscoped, top-level view and must
+    /// omit the agent filter entirely rather than match a literal `""` id.
     #[allow(clippy::too_many_arguments)]
     async fn list_recent_logs(
         &self,

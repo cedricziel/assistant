@@ -414,9 +414,12 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let registry = Arc::new(registry);
 
-    // The built-in viewers read from the local SQLite telemetry store. When
-    // `exporter = "none"` these backends simply return empty results — the
-    // real data lives in whatever OTLP backend the deployment points at.
+    // The built-in viewers always read from the local SQLite telemetry store.
+    // `[observability] exporter` gates the *write* side only: with
+    // `exporter = "none"` no new spans/logs/metrics are persisted here, but
+    // rows written earlier stay queryable and keep showing up in the viewers.
+    // Fresh telemetry in that configuration lives solely in whatever OTLP
+    // backend the deployment points at.
     let (trace_backend, log_backend, metrics_backend): (
         Arc<dyn TraceBackend>,
         Arc<dyn LogBackend>,

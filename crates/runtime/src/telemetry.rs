@@ -88,6 +88,8 @@ pub(crate) fn otel_log_bridge_filter() -> Targets {
 /// endpoints are the `:4318`-style HTTP ones. gRPC (`:4317`) would pull the
 /// whole tonic stack in and is deliberately not built; `http/json` is left
 /// out because enabling it would silently become the default protocol.
+/// `OTEL_EXPORTER_OTLP_COMPRESSION` accepts `gzip` or `none`; `zstd` is not
+/// compiled in (it would add a C toolchain dependency via `zstd-sys`).
 ///
 /// Additional SDK-level variables honoured here or by the SDK itself:
 /// `OTEL_SDK_DISABLED`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`,
