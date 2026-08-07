@@ -128,7 +128,7 @@ impl IcebergMetricExporter {
         let schema_ref =
             arc(metrics_schema().map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?);
 
-        let location_gen = DefaultLocationGenerator::new(table.metadata().clone())
+        let location_gen = DefaultLocationGenerator::new(table.metadata())
             .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
         let filename_gen =
             DefaultFileNameGenerator::new("part".to_string(), None, DataFileFormat::Parquet);
