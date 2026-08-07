@@ -30,7 +30,7 @@ import 'notification_service_web_stub.dart'
 ///   backend so the server can send pushes.
 /// - **Other platforms**: graceful no-op.
 class NotificationService {
-  NotificationService({required Ref ref}) : _ref = ref;
+  NotificationService({required this._ref});
 
   final Ref _ref;
   final _plugin = FlutterLocalNotificationsPlugin();

@@ -15,8 +15,8 @@ const Set<String> _allowedSchemes = {'http', 'https', 'mailto'};
 class MarkdownLinkHandler {
   MarkdownLinkHandler({
     required this.context,
-    UrlLauncher launcher = _defaultLauncher,
-  }) : _launcher = launcher;
+    this._launcher = _defaultLauncher,
+  });
 
   final BuildContext context;
   final UrlLauncher _launcher;
