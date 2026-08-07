@@ -2,11 +2,16 @@
 //!
 //! Provides a [`MetricsRecorder`] that the orchestrator uses to record
 //! observations against the global `MeterProvider`.
+// The `gen_ai.*` constants from opentelemetry-semantic-conventions are deprecated
+// pending migration to the new opentelemetry-semantic-conventions-genai crate.
+// Allow their use until that crate is published on crates.io.
+#![allow(deprecated)]
 
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
+use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 use opentelemetry_semantic_conventions::attribute::{
-    ERROR_TYPE, GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL, GEN_AI_TOKEN_TYPE,
+    GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL, GEN_AI_TOKEN_TYPE,
 };
 use opentelemetry_semantic_conventions::metric::{
     GEN_AI_CLIENT_OPERATION_DURATION, GEN_AI_CLIENT_TOKEN_USAGE,

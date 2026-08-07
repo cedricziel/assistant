@@ -17,7 +17,7 @@ use opentelemetry::{
     Context as OtelContext, KeyValue, global,
     trace::{Span as _, TraceContextExt, Tracer as _},
 };
-use opentelemetry_semantic_conventions::attribute::ERROR_MESSAGE;
+use opentelemetry_semantic_conventions::attribute::EXCEPTION_MESSAGE;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, info_span, warn};
@@ -269,7 +269,7 @@ impl SubagentRunner for Orchestrator {
                     Ok(r) => r,
                     Err(e) => {
                         llm_span.set_attribute(KeyValue::new("error", true));
-                        llm_span.set_attribute(KeyValue::new(ERROR_MESSAGE, e.to_string()));
+                        llm_span.set_attribute(KeyValue::new(EXCEPTION_MESSAGE, e.to_string()));
                         llm_span.end();
                         crate::history::persist_error_recovery(&conv_store, conversation_id)
                             .instrument(iteration_span.clone())

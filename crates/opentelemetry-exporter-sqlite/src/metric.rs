@@ -3,6 +3,10 @@
 //! Resources and instrumentation scopes are normalized into dedicated
 //! join tables (`resources`, `metric_scopes`) to avoid duplicating
 //! identical metadata on every data-point row.
+// The `gen_ai.*` constants from opentelemetry-semantic-conventions are deprecated
+// pending migration to the new opentelemetry-semantic-conventions-genai crate.
+// Allow their use until that crate is published on crates.io.
+#![allow(deprecated)]
 
 use assistant_core::clock::{Clock, SystemClock};
 use chrono::{DateTime, Utc};

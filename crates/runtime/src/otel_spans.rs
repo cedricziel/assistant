@@ -2,6 +2,10 @@
 //!
 //! These are pure functions that create and enrich OTel spans for
 //! LLM calls, tool executions, and conversation-level contexts.
+// The `gen_ai.*` constants from opentelemetry-semantic-conventions are deprecated
+// pending migration to the new opentelemetry-semantic-conventions-genai crate.
+// Allow their use until that crate is published on crates.io.
+#![allow(deprecated)]
 
 use std::collections::HashMap;
 
