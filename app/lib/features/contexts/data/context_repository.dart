@@ -58,12 +58,10 @@ class FlutterSecureStorageAdapter implements SecureKeyValueStorage {
 /// (platform keychain / secure enclave).
 class ContextRepository {
   ContextRepository({
-    required SharedPreferences prefs,
-    required SecureKeyValueStorage secureStorage,
-    String? appleTeamPrefix,
-  }) : _prefs = prefs,
-       _secureStorage = secureStorage,
-       _appleTeamPrefix = appleTeamPrefix;
+    required this._prefs,
+    required this._secureStorage,
+    this._appleTeamPrefix,
+  });
 
   final SharedPreferences _prefs;
   final SecureKeyValueStorage _secureStorage;
