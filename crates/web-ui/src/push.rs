@@ -21,10 +21,7 @@ use assistant_core::clock::{Clock, SystemClock};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use aes_gcm::{
-    Aes128Gcm, Key, Nonce,
-    aead::{AeadMutInPlace, KeyInit},
-};
+use aes_gcm::{AeadInOut, Aes128Gcm, Key, Nonce, aead::KeyInit};
 use anyhow::{Context, Result};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
@@ -343,7 +340,7 @@ fn encrypt_payload(
     buf.push(0x02); // record delimiter
 
     let key: &Key<Aes128Gcm> = (&cek).into();
-    let mut cipher = Aes128Gcm::new(key);
+    let cipher = Aes128Gcm::new(key);
     let nonce = Nonce::from(nonce_bytes);
 
     cipher
