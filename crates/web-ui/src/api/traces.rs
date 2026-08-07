@@ -123,7 +123,7 @@ pub async fn list_traces(
         ..Default::default()
     };
 
-    // Use the pluggable backend (SQLite or Iceberg) with an empty agent_id
+    // Use the pluggable trace backend with an empty agent_id
     // so all traces are visible in the top-level view.
     match state
         .trace_backend

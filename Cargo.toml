@@ -29,7 +29,6 @@ members = [
     "crates/web-ui",
     "crates/a2a-json-schema",
     "crates/opentelemetry-exporter-sqlite",
-    "crates/opentelemetry-exporter-iceberg",
     "crates/bus-nats",
     "crates/backup",
     "crates/test-support",
@@ -93,7 +92,24 @@ rustls = { version = "0.23", features = ["ring"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 opentelemetry = { version = "0.32", features = ["trace", "logs", "metrics"] }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-json", "reqwest-client", "trace", "logs", "metrics"] }
+# OTLP over HTTP with protobuf payloads — the OTel default protocol and the
+# one every collector accepts. `grpc-tonic` is deliberately omitted (it pulls
+# in the whole tonic/hyper stack), and so is `http-json`: enabling it would
+# silently *become* the default protocol (the crate's feature priority is
+# http-json > http-proto), which is not what OTEL_EXPORTER_OTLP_PROTOCOL
+# users expect.
+#
+# `reqwest-blocking-client`, NOT `reqwest-client`: the SDK's default
+# BatchSpanProcessor / BatchLogProcessor / PeriodicReader run exports on a
+# plain background thread via `futures_executor::block_on`. An async client
+# has no reactor there and panics with "there is no reactor running", so every
+# export is silently dropped. The blocking client is the combination the SDK
+# documents as supported with `tokio::main`. Client selection priority inside
+# opentelemetry-otlp is reqwest-client > hyper-client > reqwest-blocking-client,
+# so `reqwest-client` must stay off for this to take effect — do not add it
+# back without also moving to the experimental async-runtime processors.
+# Covered by crates/runtime/tests/otlp_env_config.rs.
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-proto", "gzip-http", "reqwest-blocking-client", "trace", "logs", "metrics"] }
 opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "logs", "metrics", "rt-tokio"] }
 opentelemetry-appender-tracing = "0.32"
 opentelemetry-semantic-conventions = { version = "0.32", features = ["semconv_experimental"] }
@@ -180,12 +196,6 @@ tower-http = { version = "0.6", features = ["trace", "cors"] }
 http-body-util = "0.1"
 # URL percent-encoding
 urlencoding = "2"
-# Apache Iceberg
-iceberg = "0.10"
-iceberg-catalog-rest = "0.10"
-arrow-array = "58.3"
-arrow-schema = "58.3"
-parquet = { version = "58.3", default-features = false, features = ["arrow", "async"] }
 # Authentication
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 argon2 = { version = "0.5", features = ["std"] }
@@ -206,7 +216,7 @@ split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
 # Compile third-party deps at opt-level 1; dramatically speeds up first build
-# of heavy crates (arrow, parquet, iceberg, tonic) without hurting iteration speed
+# of heavy crates without hurting iteration speed
 opt-level = 1
 
 [profile.release]

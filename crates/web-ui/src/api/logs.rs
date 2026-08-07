@@ -121,7 +121,7 @@ pub async fn list_logs(
     let trace_id = params.trace_id.as_deref();
     let conversation_id = params.conversation.as_deref();
 
-    // Use the pluggable backend (SQLite or Iceberg) with an empty agent_id
+    // Use the pluggable log backend with an empty agent_id
     // so all logs are visible in the top-level view.
     match state
         .log_backend

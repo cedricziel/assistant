@@ -1,7 +1,7 @@
 //! End-to-end metric export tests for `SqliteMetricExporter`.
 //!
 //! Uses the same `SdkMeterProvider` + `PeriodicReader` pattern as the
-//! sibling iceberg exporter's metric tests. Forces a synchronous flush
+//! metric tests. Forces a synchronous flush
 //! via `provider.shutdown()` and validates rows land in the
 //! `metric_points` SQLite table.
 

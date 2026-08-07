@@ -98,9 +98,11 @@ tool or the `/review` CLI command to inspect and accept/reject them.
 ## Observability
 
 Skill-scoped execution data is tracked via OpenTelemetry spans. Each
-span carries an `active_skill` attribute when a skill is loaded. This
-data feeds into the improvement analysis regardless of whether you use
-the SQLite or Iceberg trace backend.
+span carries an `active_skill` attribute when a skill is loaded. The
+improvement analysis reads these stats through the `SkillStatsProvider`
+trait, backed by the local SQLite trace store. The trait is the seam for
+sourcing the same stats from an external telemetry backend (TraceQL /
+PromQL) later — see `docs/adr/adr-0010-external-observability.md`.
 
 ## Disabling
 

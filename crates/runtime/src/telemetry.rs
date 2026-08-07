@@ -2,9 +2,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::types::observability::{ObservabilityConfig, OtelExporter};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::{Key, KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_exporter_iceberg::build_exporters;
 use opentelemetry_exporter_sqlite::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry_sdk::{
     Resource,
@@ -64,23 +63,37 @@ pub(crate) fn otel_log_bridge_filter() -> Targets {
 
 /// Install tracing subscribers and OpenTelemetry exporters.
 ///
-/// `enable_sqlite_export` controls whether spans, logs, and metrics are
-/// persisted locally via SQLite exporters.
+/// Two independent destinations exist, and they can run side by side — each
+/// OTel provider simply gets multiple processors/readers:
 ///
-/// Setting **any** `OTEL_EXPORTER_OTLP_*` environment variable wires up
-/// remote OTLP exporters for all three signals (traces, logs, metrics).
-/// The `opentelemetry-otlp` crate reads the standard env vars internally,
-/// so all of the following are supported without additional code:
+/// 1. **Local SQLite** (`[observability] exporter = "sqlite"`, the default).
+///    A small on-disk store that powers the built-in trace/log/metric viewers.
+///    Set `exporter = "none"` to turn it off.
+/// 2. **OTLP**, enabled by setting *any* non-empty `OTEL_EXPORTER_OTLP_*`
+///    environment variable. This is the supported path to a real
+///    observability stack (Grafana/Tempo/Loki/Mimir, Honeycomb, SignalDB, …).
+///
+/// The `opentelemetry-otlp` crate reads the standard env vars internally, so
+/// all of the following are supported without additional code:
 ///
 /// | Variable | Per-signal overrides |
 /// |----------|---------------------|
 /// | `OTEL_EXPORTER_OTLP_ENDPOINT` | `_TRACES_ENDPOINT`, `_LOGS_ENDPOINT`, `_METRICS_ENDPOINT` |
+/// | `OTEL_EXPORTER_OTLP_PROTOCOL` | `_TRACES_PROTOCOL`, `_LOGS_PROTOCOL`, `_METRICS_PROTOCOL` |
 /// | `OTEL_EXPORTER_OTLP_HEADERS` | `_TRACES_HEADERS`, `_LOGS_HEADERS`, `_METRICS_HEADERS` |
 /// | `OTEL_EXPORTER_OTLP_TIMEOUT` | `_TRACES_TIMEOUT`, `_LOGS_TIMEOUT`, `_METRICS_TIMEOUT` |
 /// | `OTEL_EXPORTER_OTLP_COMPRESSION` | `_TRACES_COMPRESSION`, `_LOGS_COMPRESSION`, `_METRICS_COMPRESSION` |
 ///
-/// Both SQLite and OTLP backends can run side-by-side — each OTel
-/// provider simply gets multiple processors/readers.
+/// Only `http/protobuf` — the OTel default protocol — is compiled in, so
+/// endpoints are the `:4318`-style HTTP ones. gRPC (`:4317`) would pull the
+/// whole tonic stack in and is deliberately not built; `http/json` is left
+/// out because enabling it would silently become the default protocol.
+/// `OTEL_EXPORTER_OTLP_COMPRESSION` accepts `gzip` or `none`; `zstd` is not
+/// compiled in (it would add a C toolchain dependency via `zstd-sys`).
+///
+/// Additional SDK-level variables honoured here or by the SDK itself:
+/// `OTEL_SDK_DISABLED`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`,
+/// `OTEL_METRIC_EXPORT_INTERVAL`.
 ///
 /// The OTel log bridge uses a dedicated per-layer filter (see
 /// [`otel_log_bridge_filter`]) that suppresses all `sqlx` targets. Without
@@ -96,25 +109,26 @@ pub async fn init_tracing(
     // -- Shared resource (used by traces, logs, and metrics) --
     let resource = build_resource();
 
-    let enable_sqlite = matches!(
-        observability.exporter,
-        OtelExporter::Sqlite | OtelExporter::Both
-    );
-    let enable_iceberg = matches!(
-        observability.exporter,
-        OtelExporter::Iceberg | OtelExporter::Both
-    );
+    // `OTEL_SDK_DISABLED=true` is the spec-defined kill switch: no providers,
+    // no exporters, console logging only.
+    let disabled = sdk_disabled(std::env::var(OTEL_SDK_DISABLED).ok().as_deref());
+
+    let enable_sqlite = !disabled && matches!(observability.exporter, OtelExporter::Sqlite);
 
     // Detect whether the user wants OTLP export by checking for any of the
     // standard `OTEL_EXPORTER_OTLP_*` env vars.  We intentionally do NOT
-    // read the endpoint value ourselves — the crate resolves per-signal
-    // overrides, timeouts, headers, and compression internally.
-    let enable_otlp = otlp_env_is_set();
-    let need_otel = enable_sqlite || enable_iceberg || enable_otlp;
+    // read the values ourselves — the crate resolves per-signal overrides,
+    // protocol, timeouts, headers, and compression internally.
+    let enable_otlp = !disabled && otlp_configured(std::env::vars());
+    let need_otel = enable_sqlite || enable_otlp;
+
+    if disabled {
+        info!("{OTEL_SDK_DISABLED} is set — OpenTelemetry export is disabled");
+    }
 
     if enable_otlp {
         info!(
-            "OTLP export enabled — the opentelemetry-otlp crate will read endpoint, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars"
+            "OTLP export enabled — the opentelemetry-otlp crate will read endpoint, protocol, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars"
         );
     }
 
@@ -134,11 +148,10 @@ pub async fn init_tracing(
     }
 
     if enable_otlp {
-        // Let the crate resolve OTEL_EXPORTER_OTLP_TRACES_ENDPOINT (or the
-        // generic fallback), headers, timeout, and compression from env vars.
-        let otlp_exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_http()
-            .build()?;
+        // `build()` without an explicit transport lets the crate resolve the
+        // protocol from OTEL_EXPORTER_OTLP_TRACES_PROTOCOL (or the generic
+        // fallback), along with endpoint, headers, timeout, and compression.
+        let otlp_exporter = opentelemetry_otlp::SpanExporter::builder().build()?;
         trace_provider_builder = trace_provider_builder.with_batch_exporter(otlp_exporter);
         have_trace_exporter = true;
     }
@@ -150,7 +163,7 @@ pub async fn init_tracing(
     let mut meter_provider: Option<SdkMeterProvider> = None;
 
     if need_otel {
-        // Logs — attach SQLite, Iceberg, and/or OTLP processors to the same provider.
+        // Logs — attach SQLite and/or OTLP processors to the same provider.
         let mut log_builder = SdkLoggerProvider::builder().with_resource(resource.clone());
 
         if enable_sqlite {
@@ -160,13 +173,11 @@ pub async fn init_tracing(
         }
 
         if enable_otlp {
-            let otlp_log_exporter = opentelemetry_otlp::LogExporter::builder()
-                .with_http()
-                .build()?;
+            let otlp_log_exporter = opentelemetry_otlp::LogExporter::builder().build()?;
             log_builder = log_builder.with_batch_exporter(otlp_log_exporter);
         }
 
-        // Metrics — attach SQLite, Iceberg, and/or OTLP readers to the same provider.
+        // Metrics — attach SQLite and/or OTLP readers to the same provider.
         let mut meter_builder = SdkMeterProvider::builder().with_resource(resource);
 
         if enable_sqlite {
@@ -178,35 +189,12 @@ pub async fn init_tracing(
         }
 
         if enable_otlp {
-            let otlp_metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-                .with_http()
-                .build()?;
-            let reader = PeriodicReader::builder(otlp_metric_exporter)
-                .with_interval(Duration::from_secs(60))
-                .build();
+            let otlp_metric_exporter = opentelemetry_otlp::MetricExporter::builder().build()?;
+            // No explicit interval — `PeriodicReader` picks up
+            // `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds) and falls back to
+            // 60s. Setting one here would override the env var.
+            let reader = PeriodicReader::builder(otlp_metric_exporter).build();
             meter_builder = meter_builder.with_reader(reader);
-        }
-
-        // Iceberg exporters for all three signals — must be added before building providers.
-        if enable_iceberg {
-            match build_exporters(observability.iceberg.clone()).await {
-                Ok((iceberg_span_exp, iceberg_log_exp, iceberg_metric_exp)) => {
-                    let proc = BatchSpanProcessor::builder(iceberg_span_exp).build();
-                    trace_provider_builder = trace_provider_builder.with_span_processor(proc);
-                    have_trace_exporter = true;
-
-                    let proc = BatchLogProcessor::builder(iceberg_log_exp).build();
-                    log_builder = log_builder.with_log_processor(proc);
-
-                    let reader = PeriodicReader::builder(iceberg_metric_exp)
-                        .with_interval(Duration::from_secs(60))
-                        .build();
-                    meter_builder = meter_builder.with_reader(reader);
-                }
-                Err(e) => {
-                    tracing::warn!("Iceberg exporter failed to initialise, skipping: {e:#}");
-                }
-            }
         }
 
         let log_prov = log_builder.build();
@@ -249,27 +237,71 @@ pub async fn init_tracing(
     }
 }
 
-/// Returns `true` when any `OTEL_EXPORTER_OTLP_*` env var is set, indicating
-/// the user wants remote OTLP export.
-fn otlp_env_is_set() -> bool {
-    std::env::vars_os().any(|(key, value)| {
-        key.to_string_lossy().starts_with("OTEL_EXPORTER_OTLP_") && !value.is_empty()
-    })
+/// Prefix shared by every standard OTLP exporter environment variable.
+const OTLP_ENV_PREFIX: &str = "OTEL_EXPORTER_OTLP_";
+
+/// Spec-defined kill switch that disables the OpenTelemetry SDK entirely.
+const OTEL_SDK_DISABLED: &str = "OTEL_SDK_DISABLED";
+
+/// Returns `true` when any non-empty `OTEL_EXPORTER_OTLP_*` variable is
+/// present, indicating the user wants remote OTLP export.
+///
+/// Takes the environment as an iterator so the decision can be tested without
+/// mutating the process environment.
+fn otlp_configured(vars: impl Iterator<Item = (String, String)>) -> bool {
+    vars.into_iter()
+        .any(|(key, value)| key.starts_with(OTLP_ENV_PREFIX) && !value.trim().is_empty())
+}
+
+/// Returns `true` when `OTEL_SDK_DISABLED` requests that telemetry be off.
+///
+/// Per the OpenTelemetry specification only the literal `true` (case
+/// insensitive) disables the SDK; every other value — including unrecognised
+/// ones — leaves it enabled.
+fn sdk_disabled(value: Option<&str>) -> bool {
+    value.is_some_and(|v| v.trim().eq_ignore_ascii_case("true"))
+}
+
+/// Service name used when nothing in the environment supplies one.
+const DEFAULT_SERVICE_NAME: &str = "assistant";
+
+/// Prefix of the SDK's spec-mandated placeholder when no service name is
+/// configured (`unknown_service` or `unknown_service:<executable>`).
+const SDK_UNKNOWN_SERVICE_PREFIX: &str = "unknown_service";
+
+/// Decide whether to replace the service name the SDK detectors resolved.
+///
+/// The SDK already implements the specified precedence — `OTEL_SERVICE_NAME`,
+/// then `service.name` inside `OTEL_RESOURCE_ATTRIBUTES`, then an
+/// `unknown_service` placeholder. Overriding unconditionally (as this code
+/// previously did) would discard a `service.name` set via
+/// `OTEL_RESOURCE_ATTRIBUTES`, so only the placeholder is replaced.
+///
+/// Returns `Some(name)` to force a name, or `None` to keep what was detected.
+fn service_name_override(detected: Option<&str>) -> Option<&'static str> {
+    match detected {
+        Some(name) if !name.starts_with(SDK_UNKNOWN_SERVICE_PREFIX) => None,
+        _ => Some(DEFAULT_SERVICE_NAME),
+    }
 }
 
 /// Build a shared OTel [`Resource`] with service, OS, process, and SDK
 /// attributes.  The same resource is attached to traces, logs, and metrics
 /// so all signals can be correlated.
+///
+/// `Resource::builder()` runs the SDK's default detectors, which pick up
+/// `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` on their own.
 fn build_resource() -> Resource {
-    let attrs = vec![
-        KeyValue::new(
-            SERVICE_NAME,
-            std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "assistant".to_string()),
-        ),
-        KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-    ];
+    let detected_name = Resource::builder()
+        .build()
+        .get(&Key::from_static_str(SERVICE_NAME))
+        .map(|value| value.to_string());
 
-    // Set explicit resource attributes for this application.
+    let mut attrs = vec![KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION"))];
+    if let Some(name) = service_name_override(detected_name.as_deref()) {
+        attrs.push(KeyValue::new(SERVICE_NAME, name));
+    }
+
     Resource::builder().with_attributes(attrs).build()
 }
 
@@ -417,6 +449,120 @@ mod tests {
             assert!(
                 !filter.would_enable(target, &tracing::Level::ERROR),
                 "{target} ERROR must be blocked"
+            );
+        }
+    }
+
+    // -- OTLP env-var gating --------------------------------------------
+
+    fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    /// Any non-empty `OTEL_EXPORTER_OTLP_*` variable turns OTLP export on.
+    #[test]
+    fn otlp_enabled_by_any_exporter_var() {
+        for key in [
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+        ] {
+            assert!(
+                otlp_configured(vars(&[(key, "x")]).into_iter()),
+                "{key} must enable OTLP export"
+            );
+        }
+    }
+
+    /// Empty values and unrelated OTEL variables must not enable OTLP.
+    #[test]
+    fn otlp_not_enabled_by_unrelated_or_empty_vars() {
+        assert!(
+            !otlp_configured(vars(&[("OTEL_EXPORTER_OTLP_ENDPOINT", "")]).into_iter()),
+            "an empty endpoint must not enable OTLP"
+        );
+        assert!(
+            !otlp_configured(
+                vars(&[
+                    ("OTEL_SERVICE_NAME", "assistant"),
+                    ("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=dev"),
+                    ("OTEL_METRIC_EXPORT_INTERVAL", "5000"),
+                ])
+                .into_iter()
+            ),
+            "resource/SDK variables alone must not enable OTLP"
+        );
+        assert!(
+            !otlp_configured(std::iter::empty()),
+            "no variables means no OTLP"
+        );
+    }
+
+    // -- OTEL_SDK_DISABLED ----------------------------------------------
+
+    /// The spec-defined `OTEL_SDK_DISABLED=true` kill switch must be honoured,
+    /// case-insensitively and tolerant of surrounding whitespace.
+    #[test]
+    fn sdk_disabled_recognises_truthy_values() {
+        for value in ["true", "TRUE", "True", " true "] {
+            assert!(
+                sdk_disabled(Some(value)),
+                "OTEL_SDK_DISABLED={value:?} must disable the SDK"
+            );
+        }
+    }
+
+    /// Anything other than `true` leaves the SDK enabled — per the OTel spec,
+    /// unrecognised values fall back to the default (`false`).
+    #[test]
+    fn sdk_enabled_for_other_values() {
+        for value in ["false", "", "0", "1", "yes", "no"] {
+            assert!(
+                !sdk_disabled(Some(value)),
+                "OTEL_SDK_DISABLED={value:?} must leave the SDK enabled"
+            );
+        }
+        assert!(!sdk_disabled(None), "unset must leave the SDK enabled");
+    }
+
+    // -- service.name precedence ----------------------------------------
+
+    /// When the SDK detectors resolved a real service name — from
+    /// `OTEL_SERVICE_NAME` or from `service.name` inside
+    /// `OTEL_RESOURCE_ATTRIBUTES` — we must leave it alone. Forcing our own
+    /// default here would silently discard the operator's configuration.
+    #[test]
+    fn detected_service_name_is_not_overridden() {
+        for detected in ["my-assistant", "assistant-prod", "unknown-but-explicit"] {
+            assert_eq!(
+                service_name_override(Some(detected)),
+                None,
+                "a configured service.name ({detected:?}) must survive untouched"
+            );
+        }
+    }
+
+    /// When nothing configured a service name the SDK falls back to
+    /// `unknown_service` / `unknown_service:<exe>`. That is when — and only
+    /// when — we substitute our own default.
+    #[test]
+    fn sdk_fallback_service_name_is_replaced_with_default() {
+        for detected in [
+            None,
+            Some("unknown_service"),
+            Some("unknown_service:assistant"),
+            Some("unknown_service:some-test-binary"),
+        ] {
+            assert_eq!(
+                service_name_override(detected),
+                Some(DEFAULT_SERVICE_NAME),
+                "the SDK fallback ({detected:?}) must become {DEFAULT_SERVICE_NAME:?}"
             );
         }
     }

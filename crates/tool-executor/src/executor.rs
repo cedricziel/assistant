@@ -33,7 +33,11 @@ impl ToolExecutor {
         executor
     }
 
-    /// Create a `ToolExecutor` with a custom `SkillStatsProvider` (e.g. Iceberg backend).
+    /// Create a `ToolExecutor` with a custom `SkillStatsProvider`.
+    ///
+    /// The default (`new`) reads skill statistics from the local SQLite trace
+    /// store. This seam exists so stats can later be sourced from an external
+    /// telemetry backend (TraceQL/PromQL query) without touching the tools.
     pub fn with_stats_provider(
         storage: Arc<StorageLayer>,
         llm: Arc<dyn LlmProvider>,

@@ -39,39 +39,30 @@ The SQLite OTel span exporter SHALL extract the `active_skill` attribute from sp
 - **WHEN** a span without an `active_skill` attribute is exported
 - **THEN** the `distributed_traces` row SHALL have `active_skill = NULL`
 
-### Requirement: Iceberg exporter persists active_skill
-
-The Iceberg OTel span exporter SHALL extract the `active_skill` attribute and write it as a string column in the `assistant_spans` Parquet table.
-
-#### Scenario: Span with active_skill exported to Iceberg
-
-- **WHEN** a span with attribute `active_skill = "coding-agent"` is exported to Iceberg
-- **THEN** the Parquet row SHALL contain `active_skill = "coding-agent"`
-
 ### Requirement: Stats query uses active_skill column
 
-The `stats_for_skill()` function SHALL query traces by the `active_skill` column (not `tool_name`) to aggregate skill-level performance statistics.
+The `SkillStatsProvider::stats_for_active_skill()` method SHALL query traces by the `active_skill` column (not `tool_name`) to aggregate skill-level performance statistics.
 
 #### Scenario: Query stats for a skill with execution history
 
-- **WHEN** `stats_for_skill("coding-agent", 50)` is called and there are 20 spans with `active_skill = "coding-agent"`
+- **WHEN** `stats_for_active_skill("coding-agent", 50)` is called and there are 20 spans with `active_skill = "coding-agent"`
 - **THEN** the returned `TraceStats` SHALL reflect aggregates over those 20 spans
 
 #### Scenario: Query stats for a skill with no history
 
-- **WHEN** `stats_for_skill("new-skill", 50)` is called and no spans have `active_skill = "new-skill"`
+- **WHEN** `stats_for_active_skill("new-skill", 50)` is called and no spans have `active_skill = "new-skill"`
 - **THEN** the returned `TraceStats` SHALL have `total = 0`
 
 ### Requirement: SkillStatsProvider trait abstracts backend
 
-The system SHALL provide a `SkillStatsProvider` trait with implementations for both SQLite and Iceberg backends, allowing the learning subsystem to query skill stats regardless of configured exporter.
+The system SHALL provide a `SkillStatsProvider` trait so the learning subsystem queries skill stats through an abstraction rather than a concrete store. The trait is the seam for sourcing the same statistics from an external telemetry backend (TraceQL / PromQL) in future — see `docs/adr/adr-0010-external-observability.md`.
 
 #### Scenario: SQLite backend configured
 
-- **WHEN** `exporter = "sqlite"` and skill stats are requested
-- **THEN** the system SHALL query the `distributed_traces` SQLite table
+- **WHEN** skill stats are requested
+- **THEN** the system SHALL query the `distributed_traces` SQLite table via `SqliteTraceStore`
 
-#### Scenario: Iceberg backend configured
+#### Scenario: Alternative provider injected
 
-- **WHEN** `exporter = "iceberg"` and skill stats are requested
-- **THEN** the system SHALL scan Parquet files from the warehouse directory
+- **WHEN** a `ToolExecutor` is constructed via `with_stats_provider` with a non-SQLite `SkillStatsProvider`
+- **THEN** the `self-analyze` tool SHALL obtain its statistics from that provider without any change to the tool itself
