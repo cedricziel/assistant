@@ -183,9 +183,9 @@ urlencoding = "2"
 # Apache Iceberg
 iceberg = "0.10"
 iceberg-catalog-rest = "0.10"
-arrow-array = "58.3"
-arrow-schema = "58.3"
-parquet = { version = "58.3", default-features = false, features = ["arrow", "async"] }
+arrow-array = "59.1"
+arrow-schema = "59.1"
+parquet = { version = "59.1", default-features = false, features = ["arrow", "async"] }
 # Authentication
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 argon2 = { version = "0.5", features = ["std"] }
