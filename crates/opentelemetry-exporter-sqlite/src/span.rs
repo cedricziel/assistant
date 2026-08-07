@@ -1,3 +1,8 @@
+// The `gen_ai.*` constants from opentelemetry-semantic-conventions are deprecated
+// pending migration to the new opentelemetry-semantic-conventions-genai crate.
+// Allow their use until that crate is published on crates.io.
+#![allow(deprecated)]
+
 use chrono::{DateTime, Utc};
 use opentelemetry::trace::SpanId;
 use opentelemetry::{Key, KeyValue, Value};
