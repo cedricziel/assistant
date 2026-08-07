@@ -44,6 +44,8 @@ image = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }
+# Decompress gzipped OTLP payloads in tests/otlp_env_config.rs.
+flate2 = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 

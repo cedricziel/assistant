@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::types::observability::{ObservabilityConfig, OtelExporter};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::{Key, KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_exporter_sqlite::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry_sdk::{
@@ -260,19 +260,46 @@ fn sdk_disabled(value: Option<&str>) -> bool {
     value.is_some_and(|v| v.trim().eq_ignore_ascii_case("true"))
 }
 
+/// Service name used when nothing in the environment supplies one.
+const DEFAULT_SERVICE_NAME: &str = "assistant";
+
+/// Prefix of the SDK's spec-mandated placeholder when no service name is
+/// configured (`unknown_service` or `unknown_service:<executable>`).
+const SDK_UNKNOWN_SERVICE_PREFIX: &str = "unknown_service";
+
+/// Decide whether to replace the service name the SDK detectors resolved.
+///
+/// The SDK already implements the specified precedence — `OTEL_SERVICE_NAME`,
+/// then `service.name` inside `OTEL_RESOURCE_ATTRIBUTES`, then an
+/// `unknown_service` placeholder. Overriding unconditionally (as this code
+/// previously did) would discard a `service.name` set via
+/// `OTEL_RESOURCE_ATTRIBUTES`, so only the placeholder is replaced.
+///
+/// Returns `Some(name)` to force a name, or `None` to keep what was detected.
+fn service_name_override(detected: Option<&str>) -> Option<&'static str> {
+    match detected {
+        Some(name) if !name.starts_with(SDK_UNKNOWN_SERVICE_PREFIX) => None,
+        _ => Some(DEFAULT_SERVICE_NAME),
+    }
+}
+
 /// Build a shared OTel [`Resource`] with service, OS, process, and SDK
 /// attributes.  The same resource is attached to traces, logs, and metrics
 /// so all signals can be correlated.
+///
+/// `Resource::builder()` runs the SDK's default detectors, which pick up
+/// `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` on their own.
 fn build_resource() -> Resource {
-    let attrs = vec![
-        KeyValue::new(
-            SERVICE_NAME,
-            std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "assistant".to_string()),
-        ),
-        KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-    ];
+    let detected_name = Resource::builder()
+        .build()
+        .get(&Key::from_static_str(SERVICE_NAME))
+        .map(|value| value.to_string());
 
-    // Set explicit resource attributes for this application.
+    let mut attrs = vec![KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION"))];
+    if let Some(name) = service_name_override(detected_name.as_deref()) {
+        attrs.push(KeyValue::new(SERVICE_NAME, name));
+    }
+
     Resource::builder().with_attributes(attrs).build()
 }
 
@@ -500,6 +527,42 @@ mod tests {
             );
         }
         assert!(!sdk_disabled(None), "unset must leave the SDK enabled");
+    }
+
+    // -- service.name precedence ----------------------------------------
+
+    /// When the SDK detectors resolved a real service name — from
+    /// `OTEL_SERVICE_NAME` or from `service.name` inside
+    /// `OTEL_RESOURCE_ATTRIBUTES` — we must leave it alone. Forcing our own
+    /// default here would silently discard the operator's configuration.
+    #[test]
+    fn detected_service_name_is_not_overridden() {
+        for detected in ["my-assistant", "assistant-prod", "unknown-but-explicit"] {
+            assert_eq!(
+                service_name_override(Some(detected)),
+                None,
+                "a configured service.name ({detected:?}) must survive untouched"
+            );
+        }
+    }
+
+    /// When nothing configured a service name the SDK falls back to
+    /// `unknown_service` / `unknown_service:<exe>`. That is when — and only
+    /// when — we substitute our own default.
+    #[test]
+    fn sdk_fallback_service_name_is_replaced_with_default() {
+        for detected in [
+            None,
+            Some("unknown_service"),
+            Some("unknown_service:assistant"),
+            Some("unknown_service:some-test-binary"),
+        ] {
+            assert_eq!(
+                service_name_override(detected),
+                Some(DEFAULT_SERVICE_NAME),
+                "the SDK fallback ({detected:?}) must become {DEFAULT_SERVICE_NAME:?}"
+            );
+        }
     }
 
     /// `build_resource` injects SERVICE_NAME and SERVICE_VERSION from env / Cargo.

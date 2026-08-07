@@ -65,11 +65,49 @@ tonic/hyper stack this ADR exists to avoid. `http-json` is also not enabled,
 because the crate's feature priority is `http-json > http-proto` — turning it
 on would silently make JSON the default wire format.
 
+`gzip-http` **is** enabled, so `OTEL_EXPORTER_OTLP_COMPRESSION=gzip` works.
+Without it the exporter fails to build at startup with "gzip compression
+requested but gzip-http feature not enabled" — a hard error from a variable
+the documentation advertised as supported.
+
+#### The HTTP client must be blocking
+
+The single most important constraint here, and the one that silently
+invalidated OTLP export before this change:
+
+The SDK's default `BatchSpanProcessor`, `BatchLogProcessor`, and
+`PeriodicReader` all run exports on a **plain background thread** using
+`futures_executor::block_on`. That thread has no Tokio reactor. Pairing them
+with an async HTTP client (`reqwest-client`, `hyper-client`) makes every
+export panic on the exporter thread with:
+
+```
+thread 'OpenTelemetry.Traces.BatchProcessor' panicked:
+there is no reactor running, must be called from the context of a Tokio 1.x runtime
+```
+
+Nothing surfaces in the application: the panic is confined to the exporter
+thread, `init_tracing` returns a healthy-looking guard, and **not one span
+reaches the collector**. The workspace shipped `reqwest-client` and was in
+exactly this state.
+
+The fix is `reqwest-blocking-client`, the combination the SDK documents as
+supported alongside `tokio::main`. Client selection priority inside
+`opentelemetry-otlp` is `reqwest-client > hyper-client >
+reqwest-blocking-client`, so re-enabling `reqwest-client` anywhere in the
+feature-unified graph would silently reintroduce the bug. The alternative —
+the `*_with_async_runtime` processor variants — is still marked experimental
+and was not worth the risk for this.
+
+`crates/runtime/tests/otlp_env_config.rs` is the regression test: it asserts
+a span actually arrives at an HTTP server, which is the only assertion that
+catches this class of failure.
+
 ### Environment variables
 
 The `opentelemetry-otlp` and `opentelemetry_sdk` crates resolve the standard
-variables themselves; the runtime's job is to not get in their way. Two bugs
-fixed here were exactly that:
+variables themselves; the runtime's job is mostly to not get in their way.
+Several bugs fixed here were exactly that:
 
 - `PeriodicReader` reads `OTEL_METRIC_EXPORT_INTERVAL`, but the runtime
   called `.with_interval(60s)` unconditionally, overriding it. The explicit
@@ -77,9 +115,20 @@ fixed here were exactly that:
 - The exporters were built with `.with_http()`, which pins the transport and
   bypasses `OTEL_EXPORTER_OTLP_PROTOCOL`. They are now built with a bare
   `.build()` so the env var is honoured.
+- `build_resource()` unconditionally set `service.name` from
+  `OTEL_SERVICE_NAME` or the `assistant` default, which clobbered a
+  `service.name` supplied through `OTEL_RESOURCE_ATTRIBUTES`. The SDK
+  detectors already implement the specified precedence, so the runtime now
+  only substitutes its default when the SDK fell back to its
+  `unknown_service` placeholder.
 
 `OTEL_SDK_DISABLED=true` is now honoured as a hard kill switch (spec-defined:
 only the literal `true`, case-insensitive, disables the SDK).
+
+Sampling (`OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG`) and batch tuning
+(`OTEL_BSP_*`, `OTEL_BLRP_*`) were verified to work through the SDK's own
+`Config::default()` and processor builders — no runtime change needed, but
+they are now documented in `docs/opentelemetry.md`.
 
 ## Self-learning
 
@@ -109,6 +158,10 @@ follow-up — implement the trait against an HTTP query client and pass it to
 - Observability concerns leave the runtime. The assistant emits signals; the
   backend stores and queries them.
 - OTLP configuration now actually follows the OTel specification.
+- **OTLP export works at all.** It did not before: the async HTTP client was
+  incompatible with the batch processors driving it, so every export panicked
+  on a background thread and was silently discarded. Covered by a regression
+  test that asserts a span reaches a real HTTP server.
 
 **Bad / accepted**
 

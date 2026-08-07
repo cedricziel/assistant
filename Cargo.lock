@@ -454,6 +454,7 @@ dependencies = [
  "chrono",
  "cron",
  "dirs",
+ "flate2",
  "futures",
  "hex",
  "hmac 0.13.0",
@@ -3427,6 +3428,7 @@ version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9966929966d17620d7c316c643ba62631826e10021409357772d5eea84f62c35"
 dependencies = [
+ "flate2",
  "http",
  "opentelemetry",
  "opentelemetry-http",
@@ -4164,6 +4166,7 @@ checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",

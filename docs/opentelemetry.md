@@ -75,7 +75,7 @@ takes precedence (signal-specific > generic > default).
 Headers use `key=value` pairs separated by commas:
 `OTEL_EXPORTER_OTLP_HEADERS="api-key=secret,tenant=prod"`.
 
-Compression values: `gzip` or `none`.
+Compression values: `gzip` or `none`. (`zstd` is not compiled in.)
 
 `OTEL_EXPORTER_OTLP_PROTOCOL` accepts only `http/protobuf` here — `grpc` and
 `http/json` are not compiled in and setting them is an error at startup.
@@ -92,6 +92,47 @@ Compression values: `gzip` or `none`.
 
 Per the OTel specification, only the literal `true` (case-insensitive)
 disables the SDK; any other value leaves it enabled.
+
+`service.name` follows the specified precedence: `OTEL_SERVICE_NAME`, then
+`service.name` inside `OTEL_RESOURCE_ATTRIBUTES`, then the built-in
+`assistant` default. Setting either variable wins over the default.
+
+### Sampling
+
+| Variable                  | Purpose                       | Default                 |
+| ------------------------- | ----------------------------- | ----------------------- |
+| `OTEL_TRACES_SAMPLER`     | Sampler selection             | `parentbased_always_on` |
+| `OTEL_TRACES_SAMPLER_ARG` | Sampler argument (e.g. ratio) | _(none)_                |
+
+Supported samplers: `always_on`, `always_off`, `traceidratio`,
+`parentbased_always_on`, `parentbased_always_off`,
+`parentbased_traceidratio`. Sample 10% of traces with:
+
+```sh
+OTEL_TRACES_SAMPLER=parentbased_traceidratio \
+OTEL_TRACES_SAMPLER_ARG=0.1 \
+  assistant
+```
+
+### Batching
+
+Spans and logs are buffered and exported in batches. Defaults follow the
+OTel specification; tune them if you are dropping telemetry under load.
+
+| Spans                            | Logs                              | Default   |
+| -------------------------------- | --------------------------------- | --------- |
+| `OTEL_BSP_SCHEDULE_DELAY`        | `OTEL_BLRP_SCHEDULE_DELAY`        | `5000`ms  |
+| `OTEL_BSP_MAX_QUEUE_SIZE`        | `OTEL_BLRP_MAX_QUEUE_SIZE`        | `2048`    |
+| `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` | `512`     |
+| `OTEL_BSP_EXPORT_TIMEOUT`        | `OTEL_BLRP_EXPORT_TIMEOUT`        | `30000`ms |
+
+### Test coverage
+
+`crates/runtime/tests/otlp_env_config.rs` exercises the endpoint, headers,
+protocol, compression, and resource-attribute variables end to end against a
+real HTTP server; `otlp_sdk_disabled.rs` covers the kill switch. Both are
+integration tests because `init_tracing` installs global state and the tests
+mutate the process environment.
 
 ### Config file
 
