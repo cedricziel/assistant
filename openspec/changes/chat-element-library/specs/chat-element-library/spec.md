@@ -1,13 +1,18 @@
 ## ADDED Requirements
 
-### Requirement: Element package carries no state-management dependency
+### Requirement: Element package is pure — no state management, no I/O
 
-The `assistant_ui` package SHALL declare no dependency on `flutter_riverpod` or `assistant_api`. Every widget it exports SHALL receive its data through constructor parameters or an inherited scope defined within the package, and SHALL emit user intent through callbacks. No exported widget may read application providers.
+The `assistant_ui` package SHALL depend only on `flutter` and `flutter_smooth_markdown`. It SHALL NOT depend on or import state management (`flutter_riverpod`), the API client (`assistant_api`), or any I/O facility (`dart:io`, `record`, `file_picker`, `desktop_drop`). Every widget it exports SHALL receive its data through constructor parameters or an inherited scope defined within the package, and SHALL emit user intent through callbacks. No exported widget may read application providers.
 
-#### Scenario: Package manifest excludes state management
+#### Scenario: Package manifest matches the closed allowlist
 
 - **WHEN** `app/packages/assistant_ui/pubspec.yaml` is inspected
-- **THEN** its `dependencies` SHALL NOT include `flutter_riverpod` or `assistant_api`
+- **THEN** its `dependencies` SHALL contain only `flutter` and `flutter_smooth_markdown`
+
+#### Scenario: Package source imports no I/O facility
+
+- **WHEN** every Dart source file under `app/packages/assistant_ui/lib/` is scanned for import directives
+- **THEN** none SHALL import `dart:io`, `package:record`, `package:file_picker`, `package:desktop_drop`, `package:flutter_riverpod`, or `package:assistant_api`
 
 #### Scenario: Elements render without a ProviderScope
 
@@ -64,27 +69,35 @@ The `assistant_ui` package SHALL declare no dependency on `flutter_riverpod` or 
 - **WHEN** the scope is rebuilt providing `TimelineDensity.expanded`
 - **THEN** descendant elements that depend on density SHALL rebuild
 
-### Requirement: Reasoning panel renders discrete steps with elapsed time
+### Requirement: Reasoning panel renders a collapsible section with total elapsed time
 
-`ReasoningPanel` SHALL render streamed reasoning as a collapsible sequence of discrete steps, each showing elapsed time, rather than as a single undifferentiated text blob.
+`ReasoningPanel` SHALL render streamed reasoning as a collapsible section showing the elapsed time of the reasoning block as a whole. It SHALL consume the existing flat `thinkingContent` / `thinkingTokenStream` inputs and SHALL NOT infer step boundaries from token arrival.
 
-#### Scenario: Multiple reasoning steps render separately
+A per-step reasoning timeline is explicitly out of scope: the runtime emits `Thinking(String)` as an undifferentiated stream with no delimiters and no per-step clock. That element is deferred behind prerequisite P5 in `ELEMENTS.md`.
 
-- **GIVEN** a reasoning entry containing more than one step
+#### Scenario: Reasoning content renders inside a collapsible section
+
+- **GIVEN** a reasoning entry with non-empty `thinkingContent`
 - **WHEN** `ReasoningPanel` renders it expanded
-- **THEN** each step SHALL be individually visible
+- **THEN** the reasoning text SHALL be visible AND collapsing the section SHALL hide it
 
-#### Scenario: Elapsed time is shown while reasoning is active
+#### Scenario: Total elapsed time is shown while reasoning is active
 
-- **GIVEN** a `ReasoningPanel` in `EntryState.active`
+- **GIVEN** a `ReasoningPanel` in `EntryState.active` with a start time
 - **WHEN** it renders
-- **THEN** it SHALL display an elapsed-time indication for the in-progress step
+- **THEN** it SHALL display the elapsed time for the reasoning block as a whole
 
 #### Scenario: Empty reasoning renders nothing
 
-- **GIVEN** a reasoning entry with no steps
+- **GIVEN** a reasoning entry whose `thinkingContent` is null or empty and whose token stream has produced nothing
 - **WHEN** `ReasoningPanel` renders it
 - **THEN** it SHALL render no visible panel
+
+#### Scenario: Step boundaries are not invented
+
+- **GIVEN** a reasoning entry whose content arrived as multiple token chunks
+- **WHEN** `ReasoningPanel` renders it
+- **THEN** it SHALL render one continuous reasoning body AND SHALL NOT render per-chunk step divisions
 
 ### Requirement: Thread viewport anchors scrolling and offers recovery
 
@@ -112,10 +125,17 @@ The `assistant_ui` package SHALL declare no dependency on `flutter_riverpod` or 
 
 The `app/widgetbook/` application SHALL provide a runnable entry for every widget exported by `assistant_ui`. For elements that vary by density and entry state, it SHALL expose the full `EntryState` × `TimelineDensity` matrix.
 
-#### Scenario: Every exported element has a gallery entry
+Because Dart cannot enumerate barrel exports at runtime, the package SHALL expose an explicit `kAssistantUiElements` registry naming every exported element. That registry SHALL be the single source of truth consumed by both the gallery-coverage check and the index-coverage check, so neither can be satisfied by hand-editing one side.
 
-- **WHEN** the exports of `assistant_ui` are compared against the gallery's registered entries
-- **THEN** every exported widget SHALL have at least one entry
+#### Scenario: Registry lists every exported element
+
+- **WHEN** `assistant_ui.dart`'s export directives are compared against `kAssistantUiElements`
+- **THEN** every exported widget SHALL appear in the registry
+
+#### Scenario: Every registered element has a gallery entry
+
+- **WHEN** `kAssistantUiElements` is compared against the gallery's registered use-cases
+- **THEN** every registry entry SHALL have at least one use-case
 
 #### Scenario: Timeline entries expose the full state matrix
 
@@ -192,6 +212,11 @@ The package SHALL carry `ELEMENTS.md` recording, for each of the 59 assistant-ui
 
 #### Scenario: Adopted elements are reflected in the index
 
-- **GIVEN** a widget exported from `assistant_ui`
-- **WHEN** the index is compared against the package exports
-- **THEN** the corresponding element SHALL carry an Adopt or Adopt (have) verdict
+- **GIVEN** an entry in the `kAssistantUiElements` registry
+- **WHEN** the index is compared against that registry
+- **THEN** the corresponding element SHALL carry an Adopt, Adopt (scoped), or Adopt (have) verdict
+
+#### Scenario: The tally matches the rows
+
+- **WHEN** the verdict rows are counted
+- **THEN** each count in the Tally table SHALL equal the number of rows carrying that verdict AND the total SHALL be 59

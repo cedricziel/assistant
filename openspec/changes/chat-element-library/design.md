@@ -4,7 +4,7 @@
 
 assistant-ui Elements is a React + Tailwind registry distributed shadcn-style. There is no mechanical port path to Flutter: no shared runtime, no Tailwind, no registry convention. What transfers is the **vocabulary** (which pieces an assistant conversation is made of) and the **gallery model** (every element demoable in isolation, in every state).
 
-This change adopts both for the display half of the vocabulary — shell, thinking, streaming, display. It deliberately excludes the composer and everything that requires a client→server return channel.
+This change adopts both for the display half of the vocabulary — shell, thinking, streaming, display — **and the composer**. It excludes everything that requires a client→server return channel, and everything with no data behind it today. `elements.md` carries the per-element verdict.
 
 ## How assistant-ui composes, and the Flutter translation
 
@@ -41,6 +41,24 @@ The rule is not merely "no state management" — it is **no I/O**. The package r
 | `flutter_smooth_markdown`     | **package** | Pure rendering. `MessageBody`/`ThinkingBody` need it for streaming markdown. |
 | `record`                      | app         | Microphone I/O.                                                              |
 | `file_picker`, `desktop_drop` | app         | File-system and platform-channel I/O.                                        |
+
+**The allowlist is closed**: `flutter` and `flutter_smooth_markdown`, nothing else. `proposal.md`, this document and the spec all state that same list; the boundary test in task 1.1 enforces it in both directions — forbidden entries in `pubspec.yaml`, and forbidden `import` statements (`dart:io`, `record`, `file_picker`, `desktop_drop`) anywhere in package source. A manifest check alone would not catch a transitively-available I/O import.
+
+## Reasoning: what the data actually supports
+
+`ReasoningPanel` was initially specified as a step timeline with per-step elapsed time. It cannot be, and the reason is worth recording rather than quietly dropping.
+
+```
+runtime          OrchestratorEvent::Thinking(String)   ← undifferentiated tokens
+client model     ChatMessage.thinkingContent: String?  ← flat
+                 ChatMessage.thinkingTokenStream       ← Stream<String>
+```
+
+There is no step delimiter anywhere in the chain and no per-step clock. Deriving boundaries from token arrival times would invent structure the model never expressed — the panel would show step divisions that correspond to network chunking, not to reasoning.
+
+**Decision: ship the collapsible section, defer the timeline.** `ReasoningPanel` takes `thinkingContent`/`thinkingTokenStream` and a single `elapsed` for the whole reasoning block — all of which exist today — and renders a collapsible section with total elapsed time. This keeps task 2.1's "move the models unchanged" intact.
+
+The per-step timeline is **P5** in `elements.md`. Unblocking it means either delimited steps on the wire or a package-owned `ReasoningStep` model with defined boundary and timing semantics — a decision about the protocol, not about a widget, and therefore not one to make inside a refactor.
 
 ## Composer
 

@@ -8,11 +8,11 @@ The widgets that render an agentic turn are already mostly pure — `streaming_t
 
 ## What Changes
 
-- New package `app/packages/assistant_ui/`, depending on `flutter` only — **not** `flutter_riverpod`, **not** `assistant_api`. The compiler enforces element purity; `TurnProgressCard`'s 3 `ref.watch` calls are the existing leak this closes.
+- New package `app/packages/assistant_ui/` on a closed allowlist: `flutter` and `flutter_smooth_markdown`, nothing else. No state management (`flutter_riverpod`), no API client (`assistant_api`), and no I/O (`record`, `file_picker`, `desktop_drop`, `dart:io`). The compiler enforces element purity; `TurnProgressCard` — today a `ConsumerStatefulWidget` with no constructor parameters at all — is the existing leak this closes.
 - Split `StreamingTimelineEntry` into `TimelineEntryShell` (density, expand/pin, auto-collapse, stale) plus stateless bodies (`MessageBody`, `ThinkingBody`, `ToolCallBody`, `SubagentBody`, `CommandBody`). `ChatTimelineSection` duplicates that same state machine today and collapses into the shell.
 - Move the render-facing models (`ChatMessage`, `ChatAttachment`, `ToolCallRecord`, `MessageStatus`, `ToolCallStatus`, `TimelineEntryType`) into the package. They are already pure data classes.
 - `TimelineDensity` becomes an inherited `ThreadDensityScope` instead of a param threaded through every level.
-- New elements: `ReasoningPanel` — a collapsible timeline of reasoning steps with elapsed time, replacing today's flat thinking blob; `ThreadViewport` — scroll anchoring with a "jump to latest" recovery pill for when the user has scrolled away mid-stream.
+- New elements: `ReasoningPanel` — a collapsible reasoning section showing total elapsed time. **Scoped deliberately**: the runtime emits `Thinking(String)` as an undifferentiated stream and `thinkingContent` is a flat `String?`, so a per-step timeline has no data behind it and is deferred behind P5 in `elements.md` rather than faked from token arrival. `ThreadViewport` — scroll anchoring with a "jump to latest" recovery pill for when the user has scrolled away mid-stream.
 - The composer moves too: `_InputRow` is already the cleanest element in the codebase — 13 constructor parameters, every interaction a callback, zero `ref` reads — and becomes `Composer`, with `SlashCommandMenu`, `AttachmentTray` and `ComposerVoiceButton` alongside it.
 - New `app/widgetbook/` app: every element × every state (`active`/`complete`/`stale` × `compact`/`normal`/`expanded`), runnable via `flutter run -d chrome`.
 - `ChatScreen` keeps every `ref.watch` and becomes a thin adapter over the package.

@@ -18,7 +18,8 @@ changing its verdict here first.
 | **Defer**        | Wanted, blocked on a named prerequisite.                                   |
 | **Decline**      | Not wanted. Reason given.                                                  |
 
-Three prerequisites are referenced repeatedly:
+Five prerequisites are referenced repeatedly. Each names a specific missing
+capability, so a Defer says _what would unblock it_ rather than merely "no":
 
 - **P1 — tool structured data.** `ToolOutput.data` exists on every tool but is
   dropped at `OrchestratorEvent::ToolResult`, which carries only a truncated
@@ -32,18 +33,28 @@ Three prerequisites are referenced repeatedly:
 - **P3 — agent-composed block vocabulary.** A closed, versioned set of semantic
   blocks a tool can return, degrading to text for the CLI/Slack/Matrix/Signal
   interfaces. Depends on P1 and P2.
+- **P4 — live per-conversation token usage.** Token counts exist only as
+  analytics aggregates (`token_usage_over_time`, `total_tokens_in/out`). No
+  stream event reports usage for the conversation in flight, so nothing can
+  render a fill level or a proximity-to-limit warning.
+- **P5 — reasoning step boundaries.** The runtime emits `Thinking(String)` as an
+  undifferentiated token stream, and `ChatMessage.thinkingContent` is a flat
+  `String?`. There is no step delimiter and no per-step clock, so a reasoning
+  _timeline_ cannot be rendered without inventing boundaries. Unblocking means
+  either delimited steps on the wire or a `ReasoningStep` model with defined
+  boundary and timing semantics.
 
 ---
 
 ## Reasoning (5)
 
-| #   | Element            | Verdict      | Flutter element    | Note                                                                                    |
-| --- | ------------------ | ------------ | ------------------ | --------------------------------------------------------------------------------------- |
-| 1   | Loading state      | Adopt (have) | `TurnProgressCard` | Drops its 3 `ref` reads.                                                                |
-| 2   | Thinking indicator | Adopt (have) | `TurnStatusLabel`  |                                                                                         |
-| 3   | Reasoning panel    | **Adopt**    | `ReasoningPanel`   | New. Today's thinking render is a flat blob; this is a step sequence with elapsed time. |
-| 4   | Streaming text     | Adopt (have) | `MessageBody`      | Via `flutter_smooth_markdown`.                                                          |
-| 5   | Typing indicator   | Adopt (have) | `TypingIndicator`  | Extracted from `_Dot` in `chat_screen.dart`.                                            |
+| #   | Element            | Verdict            | Flutter element    | Note                                                                                                                                                                                                                                                        |
+| --- | ------------------ | ------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Loading state      | Adopt (have)       | `TurnProgressCard` | Drops its 3 `ref` reads.                                                                                                                                                                                                                                    |
+| 2   | Thinking indicator | Adopt (have)       | `TurnStatusLabel`  |                                                                                                                                                                                                                                                             |
+| 3   | Reasoning panel    | **Adopt (scoped)** | `ReasoningPanel`   | New, but **not** the step timeline: `thinkingContent` is a flat `String?` and the runtime emits undifferentiated `Thinking(String)`. Adopted as a collapsible reasoning section with _total_ elapsed time. The per-step timeline is deferred behind **P5**. |
+| 4   | Streaming text     | Adopt (have)       | `MessageBody`      | Via `flutter_smooth_markdown`.                                                                                                                                                                                                                              |
+| 5   | Typing indicator   | Adopt (have)       | `TypingIndicator`  | Extracted from `_Dot` in `chat_screen.dart`.                                                                                                                                                                                                                |
 
 ## Messages (5)
 
@@ -93,15 +104,15 @@ Three prerequisites are referenced repeatedly:
 
 ## Composer (7)
 
-| #   | Element              | Verdict        | Flutter element       | Note                                                                                                                     |
-| --- | -------------------- | -------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| 27  | Composer             | Adopt (have)   | `Composer`            | From `_InputRow` — already 13 constructor params, all callbacks out, zero `ref`.                                         |
-| 28  | Slash commands       | Adopt (have)   | `SlashCommandMenu`    | From `command_autocomplete.dart`. Command list supplied by the app.                                                      |
-| 29  | Mentions             | **Decline**    | —                     | No mentionable-entity concept: `grep -rn "mention"` over `app/lib` and `crates/web-ui` returns nothing.                  |
-| 30  | Attachments          | Adopt (have)   | `AttachmentTray`      | Presentation only — `file_picker` / `desktop_drop` I/O stays in the app.                                                 |
-| 31  | Model picker         | **Decline**    | —                     | Persona switching already exists in the nav bar. Moving it into the composer is a UX change, not an extraction.          |
-| 32  | Voice                | Adopt (have)   | `ComposerVoiceButton` | Presentation split from I/O: mic affordance, countdown and stop live in the package; `record` stays in the app.          |
-| 33  | Context (token ring) | **Defer — P1** | —                     | Token counts exist only as analytics aggregates (`token_usage_over_time`). No per-conversation live usage in the stream. |
+| #   | Element              | Verdict        | Flutter element       | Note                                                                                                                                                         |
+| --- | -------------------- | -------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 27  | Composer             | Adopt (have)   | `Composer`            | From `_InputRow` — already 13 constructor params, all callbacks out, zero `ref`.                                                                             |
+| 28  | Slash commands       | Adopt (have)   | `SlashCommandMenu`    | From `command_autocomplete.dart`. Command list supplied by the app.                                                                                          |
+| 29  | Mentions             | **Decline**    | —                     | No mentionable-entity concept: `grep -rn "mention"` over `app/lib` and `crates/web-ui` returns nothing.                                                      |
+| 30  | Attachments          | Adopt (have)   | `AttachmentTray`      | Presentation only — `file_picker` / `desktop_drop` I/O stays in the app.                                                                                     |
+| 31  | Model picker         | **Decline**    | —                     | Persona switching already exists in the nav bar. Moving it into the composer is a UX change, not an extraction.                                              |
+| 32  | Voice                | Adopt (have)   | `ComposerVoiceButton` | Presentation split from I/O: mic affordance, countdown and stop live in the package; `record` stays in the app.                                              |
+| 33  | Context (token ring) | **Defer — P4** | —                     | Not tool output data: this needs live per-conversation usage on the stream. Today token counts exist only as analytics aggregates (`token_usage_over_time`). |
 
 ## Thread (4)
 
@@ -131,8 +142,16 @@ dialog · task creation · software purchase
 |                                        | Count  |
 | -------------------------------------- | ------ |
 | Adopt (new)                            | 3      |
-| Adopt (have — packaged by this change) | 15     |
-| Defer — P1 (tool structured data)      | 7      |
-| Defer — P2 (return channel)            | 2      |
-| Decline                                | 32     |
+| Adopt (have — packaged by this change) | 18     |
+| Defer — P1 (tool structured data)      | 6      |
+| Defer — P2 / P2+P3 (return channel)    | 2      |
+| Defer — P4 (live token usage)          | 1      |
+| Decline                                | 29     |
 | **Total**                              | **59** |
+
+Of the 3 new adoptions, one (`ReasoningPanel`) is scoped: the collapsible
+section ships, the per-step timeline is held behind **P5**. Decline covers 7
+individual elements plus the 22-element generative category.
+
+This table is derived from the rows above and must be recomputed whenever a
+verdict changes — task 13.2 reconciles it before the change is archived.

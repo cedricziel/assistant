@@ -1,6 +1,6 @@
 # Tasks — chat-element-library
 
-Sequenced as four stacked PRs. Each PR is independently reviewable and leaves
+Sequenced as five stacked PRs. Each PR is independently reviewable and leaves
 `main` shippable. PR boundaries are marked; phases within a PR are ≤ 2h chunks.
 
 ---
@@ -9,8 +9,8 @@ Sequenced as four stacked PRs. Each PR is independently reviewable and leaves
 
 ### 1. Package boundary (TDD red first)
 
-- [ ] 1.1 Add `app/test/unit/assistant_ui_boundary_test.dart`: read `app/packages/assistant_ui/pubspec.yaml` and assert its `dependencies` contain neither `flutter_riverpod` nor `assistant_api`. Run `flutter test` — confirm RED (the package does not exist).
-- [ ] 1.2 Scaffold `app/packages/assistant_ui/` with `pubspec.yaml` (deps: `flutter`, `flutter_smooth_markdown` only), `lib/assistant_ui.dart` barrel, and `lib/src/`. Add the path dependency to `app/pubspec.yaml`. Confirm 1.1 GREEN.
+- [ ] 1.1 Add `app/test/unit/assistant_ui_boundary_test.dart` enforcing the purity rule in **both** directions: (a) read `app/packages/assistant_ui/pubspec.yaml` and assert `dependencies` contains only the allowlist `{flutter, flutter_smooth_markdown}`; (b) scan every Dart file under `app/packages/assistant_ui/lib/` for import directives and assert none reference `dart:io`, `package:record`, `package:file_picker`, `package:desktop_drop`, `package:flutter_riverpod`, or `package:assistant_api`. A manifest check alone would not catch a transitively-available I/O import. Run `flutter test` — confirm RED (the package does not exist).
+- [ ] 1.2 Scaffold `app/packages/assistant_ui/` with `pubspec.yaml` (allowlist deps only), `lib/assistant_ui.dart` barrel, and `lib/src/`. Add the path dependency to `app/pubspec.yaml`. Confirm 1.1 GREEN.
 - [ ] 1.3 Write `app/packages/assistant_ui/README.md`: the purity rule (no state management, **no I/O**), why the package boundary exists rather than a folder, and the constructor-slots-plus-density-scope composition rule from design.md.
 - [ ] 1.4 Move `openspec/changes/chat-element-library/elements.md` to `app/packages/assistant_ui/ELEMENTS.md`. Link it from the README as the standing index. From here on, every task that adopts an element also updates its row.
 
@@ -44,10 +44,11 @@ Sequenced as four stacked PRs. Each PR is independently reviewable and leaves
 
 ### 6. Close the Riverpod leak
 
-- [ ] 6.1 Add a widget test pumping `TurnProgressCard` with literal arguments and **no** `ProviderScope`. Confirm RED.
-- [ ] 6.2 Convert `TurnProgressCard` to take turn status by constructor parameter; move it into the package; have `ChatScreen` supply the value via `ref.watch`. Confirm GREEN.
-- [ ] 6.3 `flutter analyze --fatal-infos` → 0; `flutter test` → green.
-- [ ] 6.4 PR: `refactor(app): split timeline entry shell from entry bodies`.
+- [ ] 6.1 Add widget tests pumping `TurnProgressCard` with literal arguments and **no** `ProviderScope`: (a) a null status renders nothing; (b) an active status renders its activity label; (c) a status older than the stall threshold renders the stall label and, with skip visible, invoking the skip affordance fires `onSkip`. Confirm RED.
+- [ ] 6.2 Move the card's full contract into the package, not just the widget: `TurnEventKind`, `TurnStatusSnapshot`, `turnStatusLabel`, `stalledTurnStatusLabel` and `kTurnStallThreshold`. The card today is `const TurnProgressCard({super.key})` — no parameters at all — so it gains a nullable `status`, a `showSkip` flag and an `onSkip` callback. Its 1-second `Timer` stays inside (local widget state, not I/O). Confirm GREEN.
+- [ ] 6.3 `ChatScreen` retains `ref.watch(chatProvider)`, the `kSkipButtonEnabled` flag and the call to `requestCancelTurn()`, feeding the card by parameter.
+- [ ] 6.4 `flutter analyze --fatal-infos` → 0; `flutter test` → green.
+- [ ] 6.5 PR: `refactor(app): split timeline entry shell from entry bodies`.
 
 ---
 
@@ -55,15 +56,16 @@ Sequenced as four stacked PRs. Each PR is independently reviewable and leaves
 
 ### 7. Reasoning panel (TDD red first)
 
-- [ ] 7.1 Add `app/packages/assistant_ui/test/reasoning_panel_test.dart` for the three spec scenarios: multiple steps render separately; elapsed time shows while active; empty reasoning renders nothing. Confirm RED.
-- [ ] 7.2 Implement `ReasoningPanel` as a step sequence with per-step elapsed time, replacing the flat thinking blob in `ThinkingBody`. Confirm GREEN.
+- [ ] 7.1 Add `app/packages/assistant_ui/test/reasoning_panel_test.dart` for the four spec scenarios: content renders in a collapsible section; total elapsed time shows while active; empty reasoning renders nothing; multi-chunk content renders as one continuous body with **no** per-chunk step divisions. Confirm RED.
+- [ ] 7.2 Implement `ReasoningPanel` over the existing flat inputs — `thinkingContent`, `thinkingTokenStream` and a single block-level `elapsed`. Do **not** add a `ReasoningStep` model and do **not** infer boundaries from token arrival: the runtime emits `Thinking(String)` undelimited, so inferred steps would reflect network chunking rather than reasoning (design.md). The per-step timeline is P5 in `ELEMENTS.md`. This keeps task 2.1's "move the models unchanged" intact. Confirm GREEN.
 
 ### 8. Thread viewport scroll anchor (TDD red first)
 
 - [ ] 8.1 Add `app/packages/assistant_ui/test/thread_viewport_test.dart` for the three spec scenarios: at-bottom stays pinned; scrolled-away offset does not change; recovery pill appears, returns to bottom, then hides. Confirm RED.
-- [ ] 8.2 Implement `ThreadViewport` owning `_atBottom` / scroll-to-bottom / recovery pill. Remove the equivalent logic and the `ref.listen(chatProvider)` scroll hook from `_ChatScreenState`. Confirm GREEN.
-- [ ] 8.3 Update the `ReasoningPanel` and `ThreadViewport` rows in `ELEMENTS.md` from Adopt to Adopt (have).
-- [ ] 8.4 PR: `feat(app): reasoning panel and thread scroll anchor`.
+- [ ] 8.2 Implement `ThreadViewport` owning `_atBottom` / scroll-to-bottom / recovery pill. It cannot watch a provider, so it takes an explicit change signal — a `revision` counter or `onItemsChanged` — as the trigger for both auto-scroll and pill visibility; `ChatScreen` supplies it from `ref.watch`. Confirm GREEN.
+- [ ] 8.3 Only once 8.2 is green, delete the equivalent `_atBottom` / `_scrollToBottom` logic and the `ref.listen(chatProvider)` scroll hook from `_ChatScreenState`. Removing them first would leave the thread unanchored between tasks.
+- [ ] 8.4 Update the `ReasoningPanel` and `ThreadViewport` rows in `ELEMENTS.md` from Adopt / Adopt (scoped) to Adopt (have), keeping the P5 note on the reasoning row. Recompute the Tally.
+- [ ] 8.5 PR: `feat(app): reasoning panel and thread scroll anchor`.
 
 ---
 
@@ -94,8 +96,8 @@ Sequenced as four stacked PRs. Each PR is independently reviewable and leaves
 
 - [ ] 11.1 Scaffold `app/widgetbook/` as a Flutter app depending on `assistant_ui` only. Verify it is excluded from `flutter build web` for the embedded SPA.
 - [ ] 11.2 Register a use-case for every exported element, composer included. For timeline entries, expose the full `EntryState` × `TimelineDensity` matrix as knobs; for `ComposerVoiceButton`, expose `isRecording` and elapsed duration.
-- [ ] 11.3 Add a test asserting every `assistant_ui` export has at least one registered gallery entry, so the gallery cannot silently fall behind.
-- [ ] 11.4 Add a test asserting every `assistant_ui` export carries an Adopt or Adopt (have) row in `ELEMENTS.md`, so the index cannot silently fall behind either.
+- [ ] 11.3 Add `kAssistantUiElements` to the package — an explicit registry naming every exported element. Dart cannot enumerate barrel exports at runtime, so without it the coverage tests below can be satisfied by hand-editing one side and still miss an export. Add a test parsing the `export` directives in `assistant_ui.dart` and asserting each appears in the registry, so the registry itself cannot drift.
+- [ ] 11.4 Add two tests consuming that single registry: every entry has at least one gallery use-case, and every entry carries an Adopt / Adopt (scoped) / Adopt (have) row in `ELEMENTS.md`.
 
 ### 12. Chat screen becomes an adapter
 
