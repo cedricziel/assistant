@@ -76,7 +76,7 @@ async-trait = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 # Encoding
-base64 = "0.22"
+base64 = "0.23"
 # HTTP client
 reqwest = { version = "0.13", features = ["json", "stream", "rustls", "multipart", "form"], default-features = false }
 # Force vendored OpenSSL for static linking when cross-compiling (e.g. musl targets).
