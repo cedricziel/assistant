@@ -38,7 +38,7 @@ dependencies:
   flutter_smooth_markdown: ^0.8.1
   google_fonts: ^8.2.1
   pwa_install: 0.0.6
-  flutter_local_notifications: ^22.2.0
+  flutter_local_notifications: ^22.3.0
   web: ^1.1.1
   record: ^7.1.1
   audioplayers: ^6.8.1
