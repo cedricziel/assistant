@@ -1,0 +1,69 @@
+# assistant on TrueNAS SCALE (Electric Eel 24.10+ / Fangtooth 25.04+)
+#
+# Two containers share one data directory, as required by docs/web-ui.md:
+#
+#   webui        — thin HTTP/SSE/UI server. Publishes chat turns to the bus.
+#   orchestrator — scheduler, message bus and the turn-processing worker pool.
+#
+# Running runtime workers in BOTH processes makes them race for every bus
+# claim ("claim failed" warnings every second), so `webui serve` deliberately
+# starts no workers and the orchestrator must run alongside it.
+#
+# The image runs as uid 100 / gid 101 (user `assistant`, home /home/assistant).
+# The host dataset must be owned by 100:101 — see docs/operations/truenas-deploy.md.
+
+name: assistant
+
+x-assistant: &assistant
+  image: ghcr.io/cedricziel/assistant/assistant:${ASSISTANT_TAG:-latest}
+  user: "100:101"
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  volumes:
+    # Host dataset -> the whole ~/.assistant runtime tree (server.toml, orgs/, *.db).
+    - ${ASSISTANT_DATA:-/mnt/tank/apps/assistant}:/home/assistant/.assistant
+
+x-assistant-env: &assistant-env
+  # The image ships no HOME. `dirs::home_dir()` would fall back to getpwuid
+  # (which happens to be right), but pinning it here keeps the data path
+  # independent of the image's /etc/passwd.
+  HOME: /home/assistant
+
+services:
+  orchestrator:
+    <<: *assistant
+    container_name: assistant-orchestrator
+    command: orchestrator run --no-repl
+    environment:
+      <<: *assistant-env
+      # Comma-separated messenger adapters, e.g. "slack,matrix".
+      # Empty = scheduler + bus + web worker only.
+      ASSISTANT_INTERFACES: ${ASSISTANT_INTERFACES:-}
+
+  webui:
+    <<: *assistant
+    container_name: assistant-webui
+    # ASSISTANT_WEBUI_ARGS carries --no-secure-cookie for plain-HTTP LAN access.
+    # Drop it when a reverse proxy terminates TLS in front of this container.
+    command: webui serve --listen 0.0.0.0:8080 ${ASSISTANT_WEBUI_ARGS:-}
+    environment:
+      <<: *assistant-env
+      # Legacy single-token auth. Leave empty once multi-user mode is set up
+      # (it activates automatically as soon as orgs/<slug>/org.db exists).
+      ASSISTANT_WEB_TOKEN: ${ASSISTANT_WEB_TOKEN:-}
+      # External URL when behind a reverse proxy. Used as the OAuth issuer and
+      # in the A2A agent card; without it both advertise http://0.0.0.0:8080.
+      ASSISTANT_PUBLIC_URL: ${ASSISTANT_PUBLIC_URL:-}
+    ports:
+      - "${ASSISTANT_PORT:-8080}:8080"
+    depends_on:
+      - orchestrator
+    healthcheck:
+      # /ready is a public route and additionally pings SQLite; /health is a
+      # bare 200. Both bypass auth (see crates/web-ui/src/lib.rs public_routes).
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

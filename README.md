@@ -425,32 +425,38 @@ systemctl --user disable --now assistant-slack
 
 ## Docker
 
-The Docker image uses `assistant` as the primary entrypoint for all runtime
-modes, including Web UI serving via `assistant webui serve`:
+The `assistant` binary is the image `ENTRYPOINT` and covers every runtime
+mode, so pass only its arguments:
 
 ```sh
 # Interactive REPL (default)
 docker run ghcr.io/cedricziel/assistant/assistant
 
 # MCP server
-docker run ghcr.io/cedricziel/assistant/assistant assistant mcp
+docker run ghcr.io/cedricziel/assistant/assistant mcp
 
 # Slack bot
-docker run ghcr.io/cedricziel/assistant/assistant assistant orchestrator run --interfaces slack --no-repl
+docker run ghcr.io/cedricziel/assistant/assistant orchestrator run --interfaces slack --no-repl
 
 # Mattermost bot
-docker run ghcr.io/cedricziel/assistant/assistant assistant orchestrator run --interfaces mattermost --no-repl
+docker run ghcr.io/cedricziel/assistant/assistant orchestrator run --interfaces mattermost --no-repl
 
 # Web UI
-docker run ghcr.io/cedricziel/assistant/assistant assistant webui serve --listen 0.0.0.0:8080 --auth-token changeme
+docker run ghcr.io/cedricziel/assistant/assistant webui serve --listen 0.0.0.0:8080 --auth-token changeme
 ```
 
-Mount your config at runtime:
+Mount your runtime tree at `~/.assistant` — the container user is
+`assistant` (uid 100, gid 101) with home `/home/assistant`, and the config
+is read from `~/.assistant/config.toml`. `/etc/assistant/config.toml.example`
+in the image is a template only; it is never read at runtime.
 
 ```sh
-docker run -v ~/.assistant/config.toml:/etc/assistant/config.toml \
+docker run -v /srv/assistant:/home/assistant/.assistant \
   ghcr.io/cedricziel/assistant/assistant
 ```
+
+For a two-container deployment (web UI + orchestrator) see
+[docs/operations/truenas-deploy.md](docs/operations/truenas-deploy.md).
 
 ## Signal interface
 
@@ -472,6 +478,7 @@ See `crates/interface-signal/README.md` for setup and device linking details.
 | [OpenAI provider](docs/openai.md)              | API key and OAuth PKCE auth, Azure/vLLM compatibility |
 | [Moonshot provider](docs/moonshot.md)          | Kimi K2/K2.5 models, regional endpoints               |
 | [Web UI](docs/web-ui.md)                       | Trace analysis dashboard and A2A protocol server      |
+| [TrueNAS deploy](docs/operations/truenas-deploy.md) | Two-container Docker Compose setup on TrueNAS SCALE |
 | [Authentication](docs/authentication.md)       | Web UI token auth, cookie flow, and A2A security      |
 | [Message bus](docs/messaging.md)               | Durable topic-based message bus architecture          |
 | [Voice transcription](docs/transcription.md)   | Whisper, Ollama, and Deepgram transcription providers |
