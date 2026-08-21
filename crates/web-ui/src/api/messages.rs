@@ -1792,14 +1792,10 @@ mod tests {
             Arc::new(config.clone()),
         ));
         let bus = Arc::new(sl.message_bus());
-        let orchestrator = Arc::new(Orchestrator::new(
-            llm,
-            sl.clone(),
-            executor,
-            registry,
-            bus,
-            &config,
-        ));
+        let orchestrator = Arc::new(
+            Orchestrator::new(llm, sl.clone(), executor, registry, bus, &config)
+                .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
+        );
         let orchestrator_ref = orchestrator.clone();
         let default_model = orchestrator_ref.llm.model_name().to_string();
         let state = ApiState {
