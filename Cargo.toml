@@ -140,7 +140,7 @@ askama = "0.15"
 # SQL persistence
 sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }
 # cron expression parsing
-cron = "0.16"
+cron = "0.17"
 # HTML parsing for web-fetch builtin
 scraper = { version = "0.27", default-features = false }
 # Glob pattern matching for file-glob builtin

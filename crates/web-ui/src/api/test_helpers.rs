@@ -29,6 +29,16 @@ use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, Trans
 
 use super::{ApiState, api_router};
 
+/// Upper bound for `submit_turn` in tests.
+///
+/// The production default is 3 hours (`submit_timeout_secs: 10_800`), which is
+/// right for real agent turns but catastrophic in CI: a turn that the spawned
+/// worker never picks up keeps the whole test binary blocked for three hours
+/// before the handler gives up. Every fixture here talks to a mock LLM and
+/// completes in milliseconds, so anything past this bound is a hung worker —
+/// fail fast and surface it.
+pub(crate) const TEST_SUBMIT_TIMEOUT_SECS: u64 = 30;
+
 // -- Stubs ---------------------------------------------------------------------
 
 /// Stub transcription provider that returns a fixed transcript.
@@ -93,14 +103,13 @@ pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
         Arc::new(config.clone()),
     ));
     let bus = Arc::new(storage.message_bus());
-    let orchestrator = Arc::new(Orchestrator::new(
-        llm,
-        storage.clone(),
-        executor,
-        registry,
-        bus,
-        &config,
-    ));
+    // Cap the submit timeout: the production default is 3 hours, so a turn
+    // that never gets picked up by the worker would keep a test — and the CI
+    // job around it — blocked for that long instead of failing fast.
+    let orchestrator = Arc::new(
+        Orchestrator::new(llm, storage.clone(), executor, registry, bus, &config)
+            .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
+    );
 
     // Spawn the turn-processing worker so submit_turn requests are handled.
     let worker_orch = orchestrator.clone();
@@ -157,14 +166,13 @@ pub(crate) async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
         Arc::new(config.clone()),
     ));
     let bus = Arc::new(storage.message_bus());
-    let orchestrator = Arc::new(Orchestrator::new(
-        llm,
-        storage.clone(),
-        executor,
-        registry,
-        bus,
-        &config,
-    ));
+    // Cap the submit timeout: the production default is 3 hours, so a turn
+    // that never gets picked up by the worker would keep a test — and the CI
+    // job around it — blocked for that long instead of failing fast.
+    let orchestrator = Arc::new(
+        Orchestrator::new(llm, storage.clone(), executor, registry, bus, &config)
+            .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
+    );
     // NOTE: No worker task spawned — avoids contention on the single in-memory connection.
     let orchestrator_ref = orchestrator.clone();
     let default_model = orchestrator_ref.llm.model_name().to_string();
