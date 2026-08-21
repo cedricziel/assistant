@@ -3,8 +3,10 @@
 //! Stores the `Peer<RoleClient>` for sending requests and the
 //! `RunningService` for lifecycle management.
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
-use rmcp::model::{CallToolRequestParams, CallToolResult, Tool};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ServerPeerInfo, Tool};
 use rmcp::service::{Peer, RoleClient, RunningService};
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -82,17 +84,22 @@ impl McpClient {
         !self.peer.is_transport_closed()
     }
 
-    /// Server capabilities (available after initialization).
-    pub fn server_info(&self) -> Option<&rmcp::model::InitializeResult> {
+    /// Snapshot of the server's handshake info (available after initialization).
+    ///
+    /// rmcp hands out an owned `Arc` snapshot rather than a borrow, so the
+    /// caller keeps the info alive independently of this session.
+    pub fn server_info(&self) -> Option<Arc<ServerPeerInfo>> {
         self.peer.peer_info()
     }
 
     /// Whether the server advertised tool-list-changed notifications.
     pub fn supports_tool_list_changed(&self) -> bool {
-        self.peer
-            .peer_info()
-            .and_then(|info| info.capabilities.tools.as_ref())
-            .is_some_and(|t| t.list_changed.unwrap_or(false))
+        self.peer.peer_info().is_some_and(|info| {
+            info.capabilities
+                .tools
+                .as_ref()
+                .is_some_and(|t| t.list_changed.unwrap_or(false))
+        })
     }
 
     /// Gracefully shut down the MCP session.

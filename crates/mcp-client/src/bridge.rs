@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use rmcp::model::{Content, RawContent, Tool};
+use rmcp::model::{ContentBlock, Tool};
 use tracing::debug;
 
 use assistant_core::types::conversation::ExecutionContext;
@@ -123,10 +123,10 @@ impl ToolHandler for McpToolHandler {
             Ok(result) => {
                 let is_error = result.is_error.unwrap_or(false);
 
-                // Collect text content from Content items.
+                // Collect text content from ContentBlock items.
                 let text = extract_text(&result.content);
 
-                // Collect image attachments from Content items.
+                // Collect image attachments from ContentBlock items.
                 let attachments = extract_image_attachments(&result.content);
 
                 if is_error {
@@ -157,23 +157,23 @@ impl ToolHandler for McpToolHandler {
     }
 }
 
-/// Extract text content from rmcp `Content` items.
-fn extract_text(content: &[Content]) -> String {
+/// Extract text content from rmcp `ContentBlock` items.
+fn extract_text(content: &[ContentBlock]) -> String {
     content
         .iter()
-        .filter_map(|c| match &c.raw {
-            RawContent::Text(t) => Some(t.text.as_str()),
+        .filter_map(|c| match c {
+            ContentBlock::Text(t) => Some(t.text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// Extract image attachments from rmcp `Content` items.
-fn extract_image_attachments(content: &[Content]) -> Vec<assistant_core::Attachment> {
+/// Extract image attachments from rmcp `ContentBlock` items.
+fn extract_image_attachments(content: &[ContentBlock]) -> Vec<assistant_core::Attachment> {
     let mut attachments = Vec::new();
     for item in content {
-        if let RawContent::Image(img) = &item.raw
+        if let ContentBlock::Image(img) = item
             && let Ok(bytes) =
                 base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &img.data)
         {

@@ -17,8 +17,8 @@ use assistant_mcp_client::client::McpClient;
 use rmcp::handler::server::router::tool::{ToolRoute, ToolRouter};
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, ListToolsResult, PaginatedRequestParams,
-    ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ListToolsResult,
+    PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::{MaybeSendFuture, RequestContext};
 use rmcp::{RoleServer, ServerHandler, ServiceExt};
@@ -50,9 +50,9 @@ impl TestServer {
                         .and_then(|v| v.as_str())
                         .unwrap_or("default")
                         .to_string();
-                    Ok(CallToolResult::success(vec![Content::text(format!(
-                        "echo:{input}"
-                    ))]))
+                    Ok(CallToolResponse::from(CallToolResult::success(vec![
+                        ContentBlock::text(format!("echo:{input}")),
+                    ])))
                 })
             },
         ));
@@ -60,13 +60,17 @@ impl TestServer {
         router.add_route(ToolRoute::new_dyn(
             Tool::new("boom", "Always returns an error", schema.clone()),
             |_ctx| {
-                Box::pin(async { Ok(CallToolResult::error(vec![Content::text("intentional")])) })
+                Box::pin(async {
+                    Ok(CallToolResponse::from(CallToolResult::error(vec![
+                        ContentBlock::text("intentional"),
+                    ])))
+                })
             },
         ));
 
         router.add_route(ToolRoute::new_dyn(
             Tool::new("empty", "Returns no content", schema.clone()),
-            |_ctx| Box::pin(async { Ok(CallToolResult::success(vec![])) }),
+            |_ctx| Box::pin(async { Ok(CallToolResponse::from(CallToolResult::success(vec![]))) }),
         ));
 
         router.add_route(ToolRoute::new_dyn(
@@ -78,10 +82,10 @@ impl TestServer {
             |_ctx| {
                 Box::pin(async {
                     // 1-byte payload encoded as base64 = "AA=="
-                    Ok(CallToolResult::success(vec![
-                        Content::text("textual"),
-                        Content::image("AA==", "image/png"),
-                    ]))
+                    Ok(CallToolResponse::from(CallToolResult::success(vec![
+                        ContentBlock::text("textual"),
+                        ContentBlock::image("AA==", "image/png"),
+                    ])))
                 })
             },
         ));
@@ -121,8 +125,9 @@ impl ServerHandler for TestServer {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<CallToolResult, rmcp::ErrorData>> + MaybeSendFuture + '_
-    {
+    ) -> impl std::future::Future<Output = Result<CallToolResponse, rmcp::ErrorData>>
+    + MaybeSendFuture
+    + '_ {
         async move {
             let router = self.router.read().await;
             let tcc = ToolCallContext::new(self, request, context);
@@ -213,8 +218,8 @@ async fn call_tool_succeeds_and_returns_text_content() {
     let text = result
         .content
         .iter()
-        .find_map(|c| match &c.raw {
-            rmcp::model::RawContent::Text(t) => Some(t.text.clone()),
+        .find_map(|c| match c {
+            ContentBlock::Text(t) => Some(t.text.clone()),
             _ => None,
         })
         .unwrap();
@@ -228,8 +233,8 @@ async fn call_tool_no_arguments_dispatches_without_args() {
     let text = result
         .content
         .iter()
-        .find_map(|c| match &c.raw {
-            rmcp::model::RawContent::Text(t) => Some(t.text.clone()),
+        .find_map(|c| match c {
+            ContentBlock::Text(t) => Some(t.text.clone()),
             _ => None,
         })
         .unwrap();
