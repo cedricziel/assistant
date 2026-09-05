@@ -1,4 +1,15 @@
 {
+  "extraKnownMarketplaces": {
+    "cedricziel": {
+      "source": {
+        "source": "github",
+        "repo": "cedricziel/claude-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "oss@cedricziel": true
+  },
   "hooks": {
     "WorktreeCreate": [
       {
