@@ -14,11 +14,11 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.9
   cupertino_sidebar: ^1.0.1
-  flutter_riverpod: ^3.4.2
-  go_router: ^17.5.0
+  flutter_riverpod: ^3.4.3
+  go_router: ^18.0.1
   flutter_secure_storage: ^10.3.1
   http: ^1.6.0
-  dio: ^5.11.0
+  dio: ^5.11.1
   fresh_dio: ^0.6.0
   native_dio_adapter: ^1.8.0
   uuid: ^4.6.0
@@ -29,7 +29,7 @@ dependencies:
   path_provider: ^2.1.6
   url_launcher: ^6.3.2
   package_info_plus: ^9.0.1
-  built_value: ^8.12.7
+  built_value: ^8.13.0
   built_collection: ^5.1.1
   assistant_api:
     path: packages/assistant_api
@@ -44,7 +44,7 @@ dependencies:
   audioplayers: ^6.8.1
   file_picker: ^11.0.3
   cached_network_image: ^3.4.1
-  desktop_drop: ^0.7.1
+  desktop_drop: ^0.8.4
   super_clipboard: ^0.9.1
   connectivity_plus: ^7.3.1
   share_plus: ^12.0.2
