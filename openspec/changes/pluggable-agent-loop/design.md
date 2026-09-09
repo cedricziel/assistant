@@ -1,0 +1,315 @@
+## Context
+
+`assistant-runtime` is the monolithic home of the ReAct loop, conversation persistence, skill injection, interface adapters (`ChannelRunner`, `InterfaceRunner`), metrics, scheduling, and memory indexing. This coupling makes the loop non-reusable and non-extensible.
+
+The no-BC design deletes `assistant-runtime` entirely and replaces it with `assistant-agent-loop` — a loop library with zero storage/skill/interface dependencies. Storage and skill concerns become opt-in plugins. All interface crates are updated to use the new API directly.
+
+Reference: pi (badlogic/pi-mono) and opencode (sst/opencode) — both achieve rich extensibility by keeping the core loop pure and offloading cross-cutting concerns to a plugin/hook layer.
+
+## Goals / Non-Goals
+
+**Goals:**
+
+- `assistant-agent-loop` compiles without `assistant-storage`, `assistant-skills`, or any interface crate.
+- `AgentLoop` is the single loop entry point; `AgentBus` is the single event channel.
+- `Plugin` trait covers all meaningful interception points — tool gate, result mutation, context transform, LLM request/response, session/turn lifecycle.
+- Storage and skill injection are `Plugin` implementations, not loop internals.
+- All 7 interface/UI crates compile against the new crate with no `assistant-runtime` dependency.
+- The loop is fully testable with a mock `LlmProvider` and in-process `ToolExecutor` — no SQLite, no filesystem.
+
+**Non-Goals:**
+
+- Backward compatibility with `Orchestrator`, `OrchestratorEvent`, `ChannelRunner`, or `InterfaceRunner`.
+- Dynamic plugin loading from `.so`/`.dylib`.
+- A JavaScript plugin host.
+- Parallel hook dispatch (sequential for determinism).
+
+## Decisions
+
+### D1: Delete `assistant-runtime`; new crate is the replacement
+
+**Decision:** `crates/runtime/` is deleted after migration. `crates/agent-loop/` (`assistant-agent-loop`) is the replacement. The workspace `members` array is updated accordingly.
+
+**Rationale:** A thin wrapper that re-exports the old API defeats the purpose. Keeping the old crate alive adds maintenance surface and tempts future code to shortcut through it. A clean break forces every interface crate to adopt the new API, which is the goal.
+
+**Alternatives considered:**
+
+- _Keep `assistant-runtime` as a compatibility shim_: Rejected — the shim becomes permanent technical debt and negates the architectural improvement.
+
+---
+
+### D2: `AgentBus` is required in `AgentLoopConfig`; mpsc sender is removed; lifetime is caller-determined
+
+**Decision:** `AgentBus` is a required field (not `Option<AgentBus>`). The old `mpsc::Sender<OrchestratorEvent>` parameter on `run()` is gone. Interface crates call `bus.subscribe()` to receive events. The lifetime of `AgentLoop` (and therefore `AgentBus`) is determined by the caller — not mandated by the library.
+
+- **Messenger interfaces** (Slack, Mattermost, etc.) construct one `AgentLoop` + `AgentBus` **per inbound turn**, tear them down on `TurnCompleted`. The bus is turn-scoped; each conversation's subscriber receives only its own events with no cross-conversation noise.
+- **Web-ui / CLI** MAY use a longer-lived `AgentLoop` and filter the shared bus by `session_id`.
+
+This is the critical difference from the previous design: `AgentLoop` is cheap to construct (all heavy deps are `Arc`-shared via the config) so per-turn construction adds negligible overhead while eliminating cross-session event routing complexity.
+
+```rust
+pub struct AgentLoopConfig {
+    pub provider:  Arc<dyn LlmProvider>,
+    pub tools:     Arc<ToolExecutor>,
+    pub plugins:   PluginRegistry,   // Arc-shared plugin instances
+    pub bus:       AgentBus,
+    pub max_turns: u32,
+    pub tool_mode: ToolMode,
+    pub cancel:    CancellationToken,
+    pub depth:     u32,
+}
+```
+
+---
+
+### D3: `AgentEvent` unifies `OrchestratorEvent` and the old streaming channel — with full parity
+
+**Decision:** A single `AgentEvent` enum covers all events previously split across `OrchestratorEvent` variants and the mpsc streaming channel, with full parity so no interface loses capability:
+
+```rust
+pub enum AgentEvent {
+    SessionStarted   { session_id: Uuid },
+    SessionEnded     { session_id: Uuid },
+    TurnStarted      { session_id: Uuid, turn: u32 },
+    TurnCompleted    { session_id: Uuid, turn: u32, answer: String, attachments: Vec<Attachment> },
+    ToolCallStarted  { session_id: Uuid, tool: String, call_id: String },
+    ToolCallCompleted{ session_id: Uuid, tool: String, call_id: String, status: ToolCallStatus },
+    MessageChunk     { session_id: Uuid, chunk: String },
+    StatusUpdate     { session_id: Uuid, message: String },
+    SkillCompleted   { session_id: Uuid, skill_name: String, success: bool, summary: String },
+    LoopError        { session_id: Uuid, error: String },
+}
+
+pub enum ToolCallStatus { Ok, Error, Denied }
+```
+
+Key additions over the first design:
+
+- **`TurnCompleted`** (not `TurnEnded`) carries `answer` + `attachments` — messenger interfaces need the final answer to send a reply; there is no other place to get it without inspecting full history.
+- **`StatusUpdate`** — maps 1:1 to `OrchestratorEvent::Status`; consumed by web-ui to render "Calling tool: web-search…" indicators.
+- **`SkillCompleted`** — maps to `OrchestratorEvent::SkillComplete`; consumed by web-ui push-notification hook. Emitted by `SkillPlugin` via `after_tool_call` when it detects a `file-read` of a skill path.
+- **`ToolCallStatus::Denied`** — surfaces blocked tool calls distinctly from errors.
+
+**Rationale:** The first design dropped three `OrchestratorEvent` variants that active consumers depend on (`Status`, `SkillComplete`, `ToolResult` detail). A clean break must still be complete; partial parity forces interfaces to maintain parallel state tracking to compensate.
+
+**Alternatives considered:**
+
+- _Keep `OrchestratorEvent` alongside `AgentEvent`_: Two enums for the same concept — rejected.
+- _Omit `TurnCompleted.answer` and let callers reconstruct from `MessageChunk`s_: Requires callers to buffer chunks, handle tool-call interleaving, and strip non-text content — fragile. `TurnCompleted` is the authoritative answer.
+
+---
+
+### D4: `StoragePlugin` and `SkillPlugin` live in `assistant-agent-loop` as optional feature-gated modules
+
+**Decision:** `StoragePlugin` (wraps `ConversationStore`) and `SkillPlugin` (wraps `SkillRegistry`) are implemented in sub-modules of `assistant-agent-loop` behind Cargo feature flags `storage-plugin` and `skill-plugin`. The base crate has no storage/skill deps; enabling the features adds them.
+
+```toml
+[features]
+default = []
+storage-plugin = ["dep:assistant-storage"]
+skill-plugin   = ["dep:assistant-skills"]
+```
+
+**Rationale:** Keeps the base crate dependency-light. Callers that want persistence just enable the feature. Feature gates are preferable to separate crates for functionality this tightly coupled to the loop API.
+
+**Alternatives considered:**
+
+- _Separate crates `assistant-storage-plugin` and `assistant-skills-plugin`_: More granular but adds two more crate names to the workspace; overkill for functionality that is always used together.
+
+---
+
+### D5: `Plugin` trait gains optional `tools()` method; skills are instructions loaded via file-read — `load-skill`/`list-skills` tools and `SkillRegistry` are deleted
+
+**Decision:** `SkillPlugin` owns skill discovery (filesystem scan, no SQLite) and catalog injection via `transform_context`. The model activates skills by calling its existing `file-read` tool on the `<location>` path in the catalog — no dedicated activation tool is needed or registered. `LoadSkillHandler` and `ListSkillsHandler` are deleted from `assistant-tool-executor`. `SkillRegistry` (SQLite-backed) is deleted from `assistant-storage`.
+
+The agentskills.io spec defines three tiers: (1) catalog in context, (2) model reads `SKILL.md` via file-read, (3) scripts/references loaded on demand the same way. Skills are context/instructions — not tool invocations.
+
+`SkillPlugin::new(scan_dirs: Vec<PathBuf>, persona_filter: Option<PersonaFilter>) -> Self`. `StoragePlugin::new(store: Arc<ConversationStore>)` is unchanged.
+
+**Rationale:** Registering `load-skill` as a builtin tool conflates instructions (skills) with capabilities (tools). The `ToolExecutor` should have zero knowledge of skills. `list-skills` is redundant with the catalog. SQLite-backed `SkillRegistry` makes skills opaque to the filesystem and breaks cross-client interoperability (`~/.agents/skills/` convention). Filesystem-first discovery with in-memory caching is the correct model.
+
+**Alternatives considered:**
+
+- _Keep `load-skill` as an `activate_skill`-style dedicated tool_: Valid per spec but unnecessary when the model has `file-read` and the catalog includes `<location>`. Adds a tool call round-trip for no benefit.
+- _Keep `SkillRegistry` in SQLite as a cache_: The cache becomes stale, adds migration burden, and the filesystem is always authoritative anyway. Scan at session start instead.
+
+---
+
+### D6: Subagents are in-process child `AgentLoop` instances spawned via a `task` tool registered by `SubagentPlugin`
+
+**Decision:** `SubagentPlugin` holds an `Arc<dyn AgentLoopFactory>` and contributes a `task` `ToolHandler` via a new optional `Plugin::tools()` method. The `AgentLoop` merges plugin-contributed tools into the session tool list at startup. When the LLM calls `task`, the handler calls `factory.build_child(parent_config, task_id)`, runs the child `AgentLoop` in-process (no subprocess), and returns the final answer + `task_id` as the tool result.
+
+`AgentLoopConfig` gains a `depth: u32` field (default 0). The factory increments it. When `depth >= MAX_AGENT_DEPTH` (5, reusing the existing `DEFAULT_MAX_AGENT_DEPTH` constant from `assistant-core`) the tool returns an error without spawning.
+
+`task_id` (a `Uuid`) is always returned in the tool result. When provided on a subsequent call, `StoragePlugin`'s conversation store is queried to load prior messages — resuming the child session. Without `StoragePlugin`, resumption returns an error rather than silently starting fresh.
+
+Child events are emitted on a **separate child `AgentBus`** — not the parent's. The parent bus sees only `ToolCallStarted`/`ToolCallCompleted` for the `task` tool call, not the child's internal turn/chunk events.
+
+**Rationale:** In-process is simpler and faster than spawning OS subprocesses (pi's approach). The `task_id` resumption pattern (from opencode) is the key improvement over the existing `SubagentRunner` implementation in `assistant-runtime`, which creates a fresh conversation every time. `AgentLoopFactory` as an injected trait avoids a circular dependency between `SubagentPlugin` and `AgentLoop`. The `Plugin::tools()` extension method keeps the pattern consistent — plugins are the only extension point; no separate tool-registration API is needed.
+
+**Alternatives considered:**
+
+- _Subprocess spawning (pi-style)_: Process isolation is appealing but adds spawn latency, IPC complexity, and breaks shared in-process state (e.g. OpenTelemetry context propagation). In-process with depth guard is sufficient.
+- _`canTask` flag on agent config (opencode-style)_: Replaced by the numeric `depth` guard, which is already present in `assistant-core` and is more precise than a boolean.
+- _Registering `task` as a global builtin in `ToolExecutor`_: Would require `ToolExecutor` to know about `AgentLoop`, creating a circular dep. Plugin-contributed tools via `Plugin::tools()` avoids this cleanly.
+
+---
+
+### D7: `ChannelRunner` is retained and updated — not deleted
+
+**Decision:** `ChannelRunner` is NOT deleted. It is updated in-place to construct a per-turn `AgentLoopConfig` + `AgentBus` instead of calling `Orchestrator::run_turn_with_tools`. The `ChannelAdapter` lifecycle hooks (`on_turn_start`, `on_turn_success`, `on_turn_error`) are driven from bus events:
+
+```
+bus subscribe
+AgentEvent::SessionStarted → adapter.on_turn_start()
+AgentEvent::MessageChunk   → adapter.send_typing() (optional)
+AgentEvent::TurnCompleted  → adapter.on_turn_success(answer, attachments)
+                           → adapter.send(user, answer)
+AgentEvent::LoopError      → adapter.on_turn_error()
+```
+
+The per-conversation UUID mapping (`LruCache<String, Uuid>`) and turn serialisation (`conv_locks: HashMap<Uuid, Arc<Mutex<()>>>`) are unchanged — they are interface-agnostic plumbing that every messenger adapter needs and should not be duplicated across 5 crates.
+
+`ChannelRunner` loses its `Arc<Orchestrator>` field and gains an `Arc<AgentLoopConfigTemplate>` — a struct holding the `Arc`-shared deps (`provider`, `tools`, `plugins`) from which per-turn `AgentLoopConfig`s are cloned cheaply.
+
+**Rationale:** Deleting `ChannelRunner` would force all 5 messenger crates to re-implement the same dispatch loop, conversation-key mapping, and turn-serialisation logic. The runner's value is in this shared plumbing; only the `Orchestrator` call in `dispatch()` needs to change.
+
+**Alternatives considered:**
+
+- _Delete `ChannelRunner`, each messenger crate re-implements dispatch_: Pure but creates 5 copies of the same loop. Rejected.
+- _`ChannelRunner` spawns a long-lived `AgentLoop` shared across conversations_: Forces subscribers to filter by `session_id`, adds broadcast noise. Per-turn construction is cleaner.
+
+---
+
+### D8: Interface crates own their `AgentLoopConfigTemplate` construction
+
+**Decision:** Each interface crate constructs its own `AgentLoopConfigTemplate` holding `Arc`-shared deps, registers the plugins it needs, and passes it to `ChannelRunner` (messengers) or constructs `AgentLoopConfig` directly (CLI, web-ui). There is no shared runtime factory. `assistant-cli` uses `StoragePlugin + SkillPlugin + SubagentPlugin`; messenger crates use whatever subset fits their platform.
+
+**Rationale:** Eliminates the implicit shared-state problem in `assistant-runtime` where all interfaces shared one `Orchestrator`. Each interface is now fully self-contained.
+
+---
+
+### D9: Modules from `assistant-runtime` that are not loop concerns move to appropriate crates
+
+| Old module                       | Destination                                                       |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `channel_runner.rs`              | **Stays** — updated to use `AgentLoopConfigTemplate` per-turn     |
+| `interface_runner.rs`            | **Stays** — pure trait, no Orchestrator dep                       |
+| `scheduler.rs`                   | `assistant-cli` (CLI-specific) or new `assistant-scheduler` crate |
+| `memory_indexer/`                | `assistant-storage` or a plugin                                   |
+| `telemetry.rs` / `otel_spans.rs` | `assistant-cli` or shared init util in `assistant-core`           |
+| `webhook_dispatch.rs`            | `assistant-web-ui`                                                |
+| `metrics.rs`                     | Each interface crate registers its own metrics                    |
+| `bootstrap.rs`                   | `assistant-cli`                                                   |
+
+### D10: `MemoryPlugin` ships in the base crate (no feature flag); `MemoryIndexer` stays a background task
+
+**Decision:** `MemoryPlugin` (wraps `MemoryLoader` from `assistant-core`) lives in the base `assistant-agent-loop` crate with no Cargo feature gate. `MemoryLoader` performs pure filesystem I/O — reading SOUL.md, IDENTITY.md, USER.md, MEMORY.md, AGENTS.md, TOOLS.md, and daily notes — with no database or embedding dependencies. Making it always-available keeps the default loop useful out of the box.
+
+`MemoryIndexer` (chunking memory files, computing SHA-256 hashes, embedding into SQLite via `LlmProvider::embed()`) is NOT converted to a plugin. It retains its current background `tokio::spawn` pattern and is relocated from `crates/runtime/src/memory_indexer/` to `crates/storage/src/memory_indexer/`. The plugin pipeline has zero dependency on the indexer.
+
+```rust
+pub struct MemoryPlugin {
+    loader: MemoryLoader,
+}
+
+impl MemoryPlugin {
+    pub fn new(loader: MemoryLoader) -> Self { Self { loader } }
+}
+```
+
+`on_session_start` performs two actions:
+
+1. Checks for BOOTSTRAP.md — if present, notes it will appear in assembled content (handled by `MemoryLoader`) and deletes the file so it is not shown again.
+2. Reads BOOT.md — if non-empty after stripping HTML comments, runs it as a loop turn. Failure is non-fatal: `warn!` is logged and the session continues.
+
+`transform_context` calls `loader.load_system_prompt()`. If the result is non-empty, a `System`-role `ChatHistoryMessage` is prepended to the message list. If empty, the list is returned unmodified — no empty System message is injected.
+
+**Rationale:** Memory content shapes every turn's context — it belongs in the plugin that fires on every `transform_context` call, not as a one-time injection at session start. Keeping it in the base crate (not feature-gated) ensures the default loop is immediately useful for the primary CLI use case without requiring callers to opt in.
+
+The `MemoryIndexer` separation is deliberate: indexing is a write-heavy background operation with a heavy dep chain (`assistant-storage`, `assistant-llm`). Pulling it into the plugin pipeline would drag those dependencies into the base crate, violating the slim-core principle.
+
+**Alternatives considered:**
+
+- _Feature-gate `MemoryPlugin` like `StoragePlugin` and `SkillPlugin`_: `MemoryLoader` has no heavy deps, so the gate buys nothing except boilerplate. Rejected.
+- _`MemoryIndexer` as a plugin firing on `on_turn_end`_: Would introduce `assistant-storage` + `assistant-llm` into the base crate's dep tree. Rejected — background task pattern is sufficient.
+
+---
+
+### D11: `TurnDispatcher` decouples turn submission from execution; `TurnWorker` enables durable bus-backed execution
+
+**Decision:** A `TurnDispatcher` trait is added to `assistant-agent-loop` (base crate, no feature flag). `ChannelRunner` holds `Arc<dyn TurnDispatcher>` rather than `Arc<AgentLoopConfigTemplate>` directly. Two implementations ship:
+
+- **`LocalTurnDispatcher`** (base crate): calls `AgentLoop::run()` inline. Zero dependencies beyond the loop itself. Default for single-host deployments.
+- **`BusTurnDispatcher`** + **`TurnWorker`** (feature `bus-worker`, depends on `assistant-core::MessageBus`): `BusTurnDispatcher` publishes a `TurnRequest` envelope to the existing `topic::TURN_REQUEST` topic; `TurnWorker` is the claim-loop counterpart that picks it up, runs `AgentLoop::run()`, and publishes a `TurnResult`. This replaces `Orchestrator::run_worker`.
+
+`TurnWorker` also spawns a subscriber on the internal `AgentBus` that forwards each `AgentEvent` to `topic::TURN_STATUS` on the `MessageBus`. This allows web-ui SSE endpoints or other distributed observers to receive streaming events from a remote worker. Forwarding is best-effort — failures are logged and skipped; the loop is never interrupted.
+
+`AgentLoop` itself has no dependency on `MessageBus`. The bus is an infrastructure concern that wraps the loop.
+
+```
+Interface (Slack/CLI/web-ui)
+    └─ ChannelRunner (Arc<dyn TurnDispatcher>)
+           ├─ LocalTurnDispatcher  ──→  AgentLoop::run() [inline]
+           └─ BusTurnDispatcher ──→ MessageBus publish
+                                          └─ TurnWorker::claim()
+                                                  └─ AgentLoop::run() [remote]
+                                                          └─ AgentBus events
+                                                                  └─ forwarded to topic::TURN_STATUS
+```
+
+**Rationale:** The existing `MessageBus` trait (`assistant-core`) + NATS JetStream backend (`bus-nats`) already provides at-least-once delivery, claim/ack semantics, and `ack_wait`-based retry. The only missing piece was a clean integration point between the bus and the new `AgentLoop`. `TurnDispatcher` is that point — it keeps the loop pure and lets interface crates choose local or distributed execution without changing their own code.
+
+**Alternatives considered:**
+
+- _Make `AgentLoop` aware of `MessageBus` directly_: Drags `assistant-core` bus types into every loop path including tests. Rejected — `AgentLoop` must remain dep-free of bus infrastructure.
+- _Separate `assistant-agent-loop-worker` crate_: More modular but adds another crate name for functionality that is tightly coupled to the loop config. Feature gate is sufficient.
+- _`Plugin` for durable execution_: The `Plugin` trait covers per-turn behaviour. Durable execution is infrastructure that wraps the loop, not a per-turn hook. Wrong abstraction.
+
+---
+
+### D12: Compaction is a first-class Plugin lifecycle event; `CompactionPlugin` handles in-context history; `MemoryPlugin` handles memory file compaction and reflection
+
+**Decision:** The `Plugin` trait gains `before_compact` (cancellable, returns `CompactionOutcome`) and `on_compact` (notification, receives summary + retained messages). This mirrors pi-mono's `before_compact` / `compact` session lifecycle events. `CompactionPlugin` (base crate, no feature flag — `LlmProvider` is already a base dep) implements context history compaction in `transform_context` and contributes a `compact` slash-command via `Plugin::tools()`. `MemoryPlugin` optionally compacts oversized memory files and extracts session learnings via opt-in builder methods (`with_compaction(provider)`, `with_reflection(provider)`).
+
+Three distinct compaction concerns and where they live:
+
+| Concern                                      | Where                                 | Trigger                                           |
+| -------------------------------------------- | ------------------------------------- | ------------------------------------------------- |
+| In-context history compaction                | `CompactionPlugin::transform_context` | `messages.len() > threshold` or manual `/compact` |
+| Memory file compaction (MEMORY.md too large) | `MemoryPlugin::on_session_end`        | Truncation detected during `load_system_prompt()` |
+| Session reflection / write-back to memory    | `MemoryPlugin::on_session_end`        | Every session end (if `with_reflection` enabled)  |
+
+Two new `AgentEvent` variants are added: `CompactionStarted { messages_compacted }` and `CompactionCompleted { summary, messages_retained }`. These let web-ui show a "Compacting context…" indicator (matching pi's `/compact` UX).
+
+`StoragePlugin` persists the full pre-compaction history — no conversation history is permanently lost. Compaction only affects what is in-context for the LLM. This directly matches pi-mono's approach of keeping full JSONL history on disk while summarising for context.
+
+**Rationale:** Making compaction a first-class lifecycle event (not a hidden transform) lets other plugins react — e.g. `StoragePlugin` can flush unwritten messages before the compacted view replaces them. The cancellable `before_compact` follows pi's pattern and is necessary for correctness when persistence is async. Memory file compaction and session reflection are `MemoryPlugin` responsibilities (not `CompactionPlugin`) because they write to the filesystem and only make sense alongside `MemoryLoader`.
+
+**Alternatives considered:**
+
+- _Compaction purely inside `transform_context` with no lifecycle events_: Hides the operation from other plugins and the event bus. Rejected — pi's experience shows compaction events are needed for UX indicators and flush coordination.
+- _Reflection as a separate `ReflectionPlugin`_: More modular but splits the memory concern across two plugins. `MemoryPlugin` already owns `MemoryLoader` and its write-back API (`update_file`, `append_daily_note`). Keeping it there avoids a second plugin needing its own `MemoryLoader` reference.
+
+---
+
+## Risks / Trade-offs
+
+- **[Risk] Large migration surface — 7 interface crates must update** → Mitigation: migrate mechanically crate-by-crate; keep old `crates/runtime/` on a feature branch until all crates compile against the new API.
+- **[Risk] `broadcast` channel overflow for slow subscribers** → Mitigation: capacity 1024; document that `AgentBus` is best-effort for observers; no correctness dependency on delivery.
+- **[Risk] Feature-gated `StoragePlugin` complicates CI** → Mitigation: `make test` runs `--all-features`; the CI matrix already handles feature combinations.
+- **[Risk] `scheduler`, `memory_indexer`, `telemetry` displacement creates temporary churn** → Mitigation: move these modules in a preparatory commit before deleting `assistant-runtime`, so the deletion PR is clean.
+
+## Migration Plan
+
+1. **Prep**: move `scheduler`, `memory_indexer`, `telemetry`, `webhook_dispatch`, `bootstrap` to their destination crates. Keep `assistant-runtime` compiling throughout.
+2. **Create** `crates/agent-loop/` with `AgentLoop`, `Plugin`, `PluginRegistry`, `AgentBus`, `AgentLoopConfig`, `StoragePlugin` (feature-gated), `SkillPlugin` (feature-gated). Full unit test coverage.
+3. **Migrate interfaces** one at a time: update each crate's `Cargo.toml` and replace `assistant-runtime` imports with `assistant-agent-loop`. Start with `interface-cli` (most complete example), then the messenger crates, then `web-ui`.
+4. **Delete** `crates/runtime/` and remove from workspace once all crates compile.
+5. **Run** `make test` and `make test-integration` to validate.
+
+## Open Questions
+
+- Should `MetricsPlugin` be a first-class plugin shipped in `assistant-agent-loop`? (Likely yes — instrument all interfaces uniformly.)
+- Does `memory_indexer` move to `assistant-storage` or become a plugin? (Leaning plugin — it reacts to turn completion.)
+- Should `AgentBus` expose a `drain()` helper for tests that want to collect all events synchronously?
