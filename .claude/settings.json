@@ -3,7 +3,8 @@
     "cedricziel": {
       "source": {
         "source": "github",
-        "repo": "cedricziel/claude-plugins"
+        "repo": "cedricziel/claude-plugins",
+        "sha": "1a48515e819772e33a4ac8caa1719ced66eb5b93"
       }
     }
   },
@@ -30,6 +31,16 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format.sh",
             "statusMessage": "Formatting..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/install-claude-plugins.sh"
           }
         ]
       }
