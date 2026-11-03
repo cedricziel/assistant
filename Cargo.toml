@@ -91,7 +91,7 @@ rustls = { version = "0.23", features = ["ring"] }
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = { version = "0.32", features = ["trace", "logs", "metrics"] }
+opentelemetry = { version = "0.33", features = ["trace", "logs", "metrics"] }
 # OTLP over HTTP with protobuf payloads — the OTel default protocol and the
 # one every collector accepts. `grpc-tonic` is deliberately omitted (it pulls
 # in the whole tonic/hyper stack), and so is `http-json`: enabling it would
@@ -109,10 +109,10 @@ opentelemetry = { version = "0.32", features = ["trace", "logs", "metrics"] }
 # so `reqwest-client` must stay off for this to take effect — do not add it
 # back without also moving to the experimental async-runtime processors.
 # Covered by crates/runtime/tests/otlp_env_config.rs.
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-proto", "gzip-http", "reqwest-blocking-client", "trace", "logs", "metrics"] }
-opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "logs", "metrics", "rt-tokio"] }
-opentelemetry-appender-tracing = "0.32"
-opentelemetry-semantic-conventions = { version = "0.32", features = ["semconv_experimental"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-proto", "gzip-http", "reqwest-blocking-client", "trace", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "logs", "metrics", "rt-tokio"] }
+opentelemetry-appender-tracing = "0.33"
+opentelemetry-semantic-conventions = { version = "0.33", features = ["semconv_experimental"] }
 # CLI / config
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
