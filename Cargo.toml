@@ -186,7 +186,7 @@ tempfile = "3"
 # Cross-platform process inspection (used by `assistant migrate finalize`).
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # LRU cache (bounded conversation map in ChannelRunner)
-lru = "0.18"
+lru = "0.19"
 # WebSocket client (used by Slack, Mattermost, Matrix, Signal adapters)
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
