@@ -62,6 +62,12 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 ```
 
+### Pinned toolchains
+
+Flutter is pinned to an exact version (`flutter-version: "3.47.9"`) in every workflow, never `3.x`. A floating version breaks `flutter analyze --fatal-infos` as soon as a new stable release adds deprecations (3.50 deprecated `package:flutter/material.dart`). Bump it in all workflows at once, together with the code changes the new release needs.
+
+`visual-regression` runs on `ubuntu-24.04` because Playwright has no Chromium build for Ubuntu 26.04. Move it back to `ubuntu-latest` only after upgrading Playwright to a version that supports it, and expect screenshot baselines to change.
+
 ### Soft failures
 
 `visual-regression` and `integration` use `continue-on-error: true` — they are informational and depend on external services (Ollama, Playwright). Do not make them blocking.
