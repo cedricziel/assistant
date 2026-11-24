@@ -79,11 +79,7 @@ export NEXTCLOUD_TALK_SECRET=<shared-secret>
 ### Standalone mode
 
 ```sh
-# Via make
-make run-nextcloud
-
-# Via cargo
-cargo run -p assistant-cli --features nextcloud -- orchestrator run --interfaces nextcloud --no-repl
+cargo run -p assistant-cli -- orchestrator run --interfaces nextcloud --no-repl
 ```
 
 ### Background mode (REPL + Nextcloud)
@@ -100,10 +96,10 @@ If installed via the `.deb` or `.rpm` package:
 
 ```sh
 # Enable and start
-systemctl --user enable --now assistant-nextcloud
+systemctl --user enable --now assistant-orchestrator
 
 # View logs
-journalctl --user -u assistant-nextcloud -f
+journalctl --user -u assistant-orchestrator -f
 
 # Persist across reboots (even when not logged in)
 loginctl enable-linger $USER

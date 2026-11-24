@@ -1,7 +1,7 @@
 # OpenAI Provider
 
-Connects the assistant to OpenAI's Chat Completions and Embeddings APIs
-via the `assistant-provider-openai` crate.  Supports two authentication
+Connects the assistant to OpenAI's Responses and Embeddings APIs
+via the `openai` module of the `assistant-llm-provider` crate.  Supports two authentication
 modes: standard **API key** (pay-per-use) and **OAuth PKCE** (Codex /
 ChatGPT subscription).
 
@@ -55,12 +55,12 @@ in `~/.assistant/config.toml`.
 | Key | Env var | Default | Description |
 |-----|---------|---------|-------------|
 | `provider` | | `"ollama"` | Set to `"openai"` to use this provider |
-| `model` | | `"gpt-4o"` | OpenAI model ID (`gpt-4o`, `gpt-4.1`, `o3-mini`, ...) |
+| `model` | | `"qwen2.5:7b"` (Ollama default; set it) | OpenAI model ID (`gpt-4o`, `gpt-4.1`, `o3-mini`, ...) |
 | `api_key` | `OPENAI_API_KEY` | *(required in api-key mode)* | API key; env var takes precedence |
-| `base_url` | | `"https://api.openai.com/v1"` | API base URL (for proxies or Azure-compatible endpoints) |
+| `base_url` | | `"http://localhost:11434"` (rewritten to `https://api.openai.com/v1`) | API base URL (for proxies or Azure-compatible endpoints) |
 | `max_iterations` | | `80` | Max tool-calling iterations per turn |
 | `timeout_secs` | | `120` | Timeout for each LLM call (seconds) |
-| `embedding_model` | | `"text-embedding-3-small"` | Model used for `embed()` calls |
+| `embedding_model` | | `"nomic-embed-text"` (Ollama default; set it, for example `text-embedding-3-small`) | Model used for `embed()` calls |
 
 ### `[llm.openai]` section
 
@@ -68,7 +68,7 @@ in `~/.assistant/config.toml`.
 |-----|---------|-------------|
 | `auth_mode` | `"api-key"` | `"api-key"` or `"oauth"` |
 | `oauth_client_id` | *(none)* | Required when `auth_mode = "oauth"` |
-| `max_tokens` | `8192` | `max_completion_tokens` sent per request |
+| `max_tokens` | `8192` | `max_output_tokens` sent per request |
 
 ## Authentication modes
 
@@ -172,11 +172,11 @@ The OpenAI provider reports the following capabilities to the runtime:
 |------------|-------|
 | Tool calling | Native (always) |
 | Streaming | Yes |
-| Embeddings | Yes (`text-embedding-3-small` default) |
+| Embeddings | Yes (uses `embedding_model`) |
 
 ## Models
 
-Any model available through the OpenAI Chat Completions API works.
+Any model available through the OpenAI Responses API works.
 Common choices:
 
 | Model | Context | Notes |
@@ -232,14 +232,14 @@ max_tokens      = 8192
 ## Architecture
 
 ```
-assistant-provider-openai
-  src/
-    lib.rs        # Module exports
+assistant-llm-provider
+  src/openai/
+    mod.rs        # Module exports
     provider.rs   # OpenAIProvider (LlmProvider trait impl)
     oauth.rs      # OAuthManager (PKCE flow, token storage, refresh)
 ```
 
-The provider uses `async-openai` (v0.33.0) for HTTP transport.  In
+The provider uses `async-openai` (v0.41) for HTTP transport.  In
 API-key mode a single `Client` is created at startup.  In OAuth mode
 the `Client` is held behind a `tokio::sync::RwLock` and recreated
 whenever the access token is refreshed, since the underlying

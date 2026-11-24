@@ -1,6 +1,6 @@
 # Matrix Interface
 
-Connects the assistant to a [Matrix](https://matrix.org) homeserver. The bot joins rooms it is invited to and responds to messages via the matrix-sdk sync loop — no public URL required.
+Connects the assistant to a [Matrix](https://matrix.org) homeserver. The bot joins rooms it is invited to and responds to messages through a long-poll `/sync` loop on the Matrix client-server API — no public URL required.
 
 ## Setup
 
@@ -50,10 +50,6 @@ access_token   = "syt_abc123..."          # preferred
 
 # Optional: restrict to specific Matrix user IDs
 # allowed_users = ["@alice:example.com"]
-
-# Optional: custom path for the matrix-sdk SQLite state store
-# Defaults to ~/.assistant/matrix-state/
-# state_store_path = "/var/lib/assistant/matrix-state"
 ```
 
 Environment variables take precedence over config file values:
@@ -71,8 +67,6 @@ export MATRIX_ACCESS_TOKEN="syt_abc123..."
 
 ```sh
 assistant matrix
-# or:
-make run-matrix
 ```
 
 **Alongside other interfaces** (REPL + Matrix + any other configured interface):
@@ -81,10 +75,10 @@ make run-matrix
 assistant orchestrator run --interfaces matrix
 ```
 
-The bot logs in, starts the sync loop, and is ready once you see:
+The bot authenticates and starts the sync loop. Authentication succeeded once you see:
 
 ```text
-INFO assistant_interface_matrix::runner: Matrix bot ready bot_user_id=@assistant:example.com
+INFO Matrix: authenticated user_id=@assistant:example.com
 ```
 
 ## Authentication
@@ -94,9 +88,9 @@ Two authentication paths are supported, tried in this order:
 | Method         | When to use                 | How                                                                                                         |
 | -------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Access token   | Production / always-on bots | Set `access_token` in config or `MATRIX_ACCESS_TOKEN`                                                       |
-| Password login | Initial setup or testing    | Set `username` + `password`; session is persisted to the state store so subsequent restarts are token-based |
+| Password login | Initial setup or testing    | Set `username` + `password`; the bot logs in again on every start |
 
-> The state store (`~/.assistant/matrix-state/` by default) holds the sync token and session data. Deleting it forces a full re-sync on next start.
+> The sync token is stored in `~/.assistant/matrix-next-batch-<user>.txt`, where `<user>` is the bot user ID with `:`, `@` and `.` replaced by `_`. Deleting the file resets the sync position on next start.
 
 ## Security
 
@@ -112,4 +106,4 @@ Direct messages are regular Matrix rooms, so per-DM context isolation is automat
 
 ## Reconnection
 
-If the homeserver becomes unreachable, the bot retries with exponential backoff starting at 1 second and capping at 60 seconds. No manual intervention is required.
+If the homeserver becomes unreachable, the bot retries the `/sync` request every 5 seconds. No manual intervention is required.

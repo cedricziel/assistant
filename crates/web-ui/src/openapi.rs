@@ -97,16 +97,16 @@ struct SecuritySchemesAddon;
 impl Modify for SecuritySchemesAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         if let Some(components) = openapi.components.as_mut() {
-            // HTTP Bearer — legacy token or JWT issued by any flow.
+            // HTTP Bearer — OAuth2 access token (JWT) or API key.
             components.add_security_scheme(
                 "bearer_token",
                 SecurityScheme::Http(
                     HttpBuilder::new()
                         .scheme(HttpAuthScheme::Bearer)
                         .description(Some(
-                            "Bearer token. Pass the token issued by the server via \
-                             `Authorization: Bearer <token>`. \
-                             Configure it with `--auth-token` / `ASSISTANT_WEB_TOKEN`.",
+                            "Bearer token. Pass an OAuth2 access token issued by the server's \
+                             `/oauth/token` endpoint, or an API key (`ask_live_...`), via \
+                             `Authorization: Bearer <token>`.",
                         ))
                         .build(),
                 ),
@@ -189,7 +189,7 @@ pub struct ApiErrorResponse {
         version = env!("CARGO_PKG_VERSION"),
         description = "AI assistant API — A2A protocol (Agent-to-Agent), chat, and workflow management.\n\n\
                        **Authentication**: protected endpoints require `Authorization: Bearer <token>`.\n\
-                       The token is set via `--auth-token` / `ASSISTANT_WEB_TOKEN` on the server.",
+                       The token is an OAuth2 access token issued by `/oauth/token`, or an API key (`ask_live_...`).",
         license(name = "MIT", identifier = "MIT"),
     ),
     modifiers(&SecuritySchemesAddon),
