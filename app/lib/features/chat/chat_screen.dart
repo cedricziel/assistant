@@ -253,7 +253,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    final result = await FilePicker.pickFiles(
+    final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: [
         'png',
@@ -269,38 +269,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         'csv',
         'json',
       ],
-      allowMultiple: true,
-      withData: true,
     );
-    if (result == null) return;
     final notifier = ref.read(pendingAttachmentsProvider.notifier);
-    for (final file in result.files) {
-      if (file.bytes != null) {
-        final mime = mimeFromExtension(file.extension);
-        if (isImageMimeType(mime) || mime == 'image/heic') {
-          // Image files may need HEIC→PNG conversion.
-          final (bytes, filename, normalizedMime) = await normalizeImage(
-            file.bytes!,
-            file.name,
-            file.extension,
-          );
-          notifier.add(
-            PendingAttachment(
-              bytes: bytes,
-              filename: filename,
-              mimeType: normalizedMime,
-            ),
-          );
-        } else {
-          // Non-image files: add directly.
-          notifier.add(
-            PendingAttachment(
-              bytes: file.bytes!,
-              filename: file.name,
-              mimeType: mime,
-            ),
-          );
-        }
+    for (final file in files) {
+      final fileBytes = await file.readAsBytes();
+      final mime = mimeFromExtension(file.extension);
+      if (isImageMimeType(mime) || mime == 'image/heic') {
+        // Image files may need HEIC→PNG conversion.
+        final (bytes, filename, normalizedMime) = await normalizeImage(
+          fileBytes,
+          file.name,
+          file.extension,
+        );
+        notifier.add(
+          PendingAttachment(
+            bytes: bytes,
+            filename: filename,
+            mimeType: normalizedMime,
+          ),
+        );
+      } else {
+        notifier.add(
+          PendingAttachment(
+            bytes: fileBytes,
+            filename: file.name,
+            mimeType: mime,
+          ),
+        );
       }
     }
   }
