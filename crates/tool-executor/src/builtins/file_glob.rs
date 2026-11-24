@@ -3,22 +3,28 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionContext};
+use assistant_core::permission::{glob_literal_dir, resolve_real_path};
+use assistant_core::{
+    ToolHandler, ToolOutput, expand_tilde, types::conversation::ExecutionContext,
+};
 use async_trait::async_trait;
 
 const DEFAULT_LIMIT: usize = 200;
 
-pub struct FileGlobHandler;
+#[derive(Default)]
+pub struct FileGlobHandler {
+    extra_roots: Vec<String>,
+}
 
 impl FileGlobHandler {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
-}
 
-impl Default for FileGlobHandler {
-    fn default() -> Self {
-        Self::new()
+    /// Allow access to these directories in addition to the persona workspace.
+    pub fn with_extra_roots(mut self, roots: Vec<String>) -> Self {
+        self.extra_roots = roots;
+        self
     }
 }
 
@@ -29,7 +35,7 @@ impl ToolHandler for FileGlobHandler {
     }
 
     fn description(&self) -> &str {
-        "Find files and directories matching a glob pattern. Returns a newline-separated list of matching paths."
+        "Find files and directories inside the workspace matching a glob pattern. Returns a newline-separated list of matching paths."
     }
 
     fn params_schema(&self) -> serde_json::Value {
@@ -64,7 +70,7 @@ impl ToolHandler for FileGlobHandler {
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let pattern_raw = match params.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p.to_string(),
@@ -77,16 +83,16 @@ impl ToolHandler for FileGlobHandler {
             .map(|n| n as usize)
             .unwrap_or(DEFAULT_LIMIT);
 
-        // Expand ~ in the pattern prefix (before any glob metacharacter).
-        let pattern = if let Some(rest) = pattern_raw.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
-                format!("{}/{}", home.display(), rest)
-            } else {
-                pattern_raw
-            }
-        } else {
-            pattern_raw
-        };
+        // The literal prefix (before any glob metacharacter) must lie inside the
+        // workspace roots; matches are re-checked below.
+        let roots = super::confine::roots(ctx, &self.extra_roots);
+        let prefix = glob_literal_dir(&pattern_raw);
+        if let Err(outside) = roots.confine(&prefix) {
+            return Ok(ToolOutput::error(format!(
+                "{outside}; file tools are confined to the workspace roots"
+            )));
+        }
+        let pattern = expand_tilde(&pattern_raw).to_string_lossy().into_owned();
 
         let entries = match glob::glob(&pattern) {
             Ok(paths) => paths,
@@ -107,7 +113,11 @@ impl ToolHandler for FileGlobHandler {
                 break;
             }
             match entry {
-                Ok(path) => results.push(path.display().to_string()),
+                Ok(path) => {
+                    if roots.contains(&resolve_real_path(&path.to_string_lossy(), None)) {
+                        results.push(path.display().to_string());
+                    }
+                }
                 Err(e) => results.push(format!("[error reading entry: {}]", e)),
             }
         }

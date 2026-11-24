@@ -3,6 +3,7 @@ pub mod agent_status;
 pub mod agent_terminate;
 pub mod bash;
 pub mod cancel_task;
+pub(crate) mod confine;
 pub mod file_edit;
 pub mod file_glob;
 pub mod file_read;

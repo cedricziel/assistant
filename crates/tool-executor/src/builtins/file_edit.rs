@@ -8,19 +8,20 @@ use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionCont
 use async_trait::async_trait;
 use tracing::debug;
 
-use super::file_read::expand_tilde;
-
-pub struct FileEditHandler;
+#[derive(Default)]
+pub struct FileEditHandler {
+    extra_roots: Vec<String>,
+}
 
 impl FileEditHandler {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
-}
 
-impl Default for FileEditHandler {
-    fn default() -> Self {
-        Self::new()
+    /// Allow access to these directories in addition to the persona workspace.
+    pub fn with_extra_roots(mut self, roots: Vec<String>) -> Self {
+        self.extra_roots = roots;
+        self
     }
 }
 
@@ -53,7 +54,7 @@ impl ToolHandler for FileEditHandler {
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let path_str = match params.get("path").and_then(|v| v.as_str()) {
             Some(p) => p.to_string(),
@@ -70,7 +71,10 @@ impl ToolHandler for FileEditHandler {
             None => return Ok(ToolOutput::error("Missing required parameter 'new_string'")),
         };
 
-        let path = expand_tilde(&path_str);
+        let path = match super::confine::confine(ctx, &self.extra_roots, &path_str) {
+            Ok(p) => p,
+            Err(refusal) => return Ok(refusal),
+        };
         debug!(path = %path.display(), "file-edit access");
 
         let content = match fs::read_to_string(&path) {

@@ -1,27 +1,28 @@
-//! Builtin handler for file-read tool — reads any file from disk.
-
-use std::collections::HashMap;
-use std::path::PathBuf;
+//! Builtin handler for file-read tool — reads a file inside the workspace roots.
 
 use anyhow::Result;
 use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionContext};
 use async_trait::async_trait;
+use std::collections::HashMap;
 use tokio::io::AsyncReadExt;
 use tracing::debug;
 
 const DEFAULT_LIMIT: usize = 8_000;
 
-pub struct FileReadHandler;
+#[derive(Default)]
+pub struct FileReadHandler {
+    extra_roots: Vec<String>,
+}
 
 impl FileReadHandler {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
-}
 
-impl Default for FileReadHandler {
-    fn default() -> Self {
-        Self::new()
+    /// Allow access to these directories in addition to the persona workspace.
+    pub fn with_extra_roots(mut self, roots: Vec<String>) -> Self {
+        self.extra_roots = roots;
+        self
     }
 }
 
@@ -32,7 +33,7 @@ impl ToolHandler for FileReadHandler {
     }
 
     fn description(&self) -> &str {
-        "Read the contents of any file from disk. Returns text content, optionally truncated to a character limit."
+        "Read the contents of a file inside the workspace. Returns text content, optionally truncated to a character limit."
     }
 
     fn params_schema(&self) -> serde_json::Value {
@@ -49,7 +50,7 @@ impl ToolHandler for FileReadHandler {
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let path_str = match params.get("path").and_then(|v| v.as_str()) {
             Some(p) => p.to_string(),
@@ -62,7 +63,10 @@ impl ToolHandler for FileReadHandler {
             .map(|n| n as usize)
             .unwrap_or(DEFAULT_LIMIT);
 
-        let path = expand_tilde(&path_str);
+        let path = match super::confine::confine(ctx, &self.extra_roots, &path_str) {
+            Ok(p) => p,
+            Err(refusal) => return Ok(refusal),
+        };
         debug!(path = %path.display(), "file-read access");
 
         // Read asynchronously, capping at limit bytes + 1 to detect truncation.
@@ -113,13 +117,4 @@ impl ToolHandler for FileReadHandler {
         };
         Ok(ToolOutput::success(output))
     }
-}
-
-pub(crate) fn expand_tilde(s: &str) -> PathBuf {
-    if let Some(rest) = s.strip_prefix("~/")
-        && let Some(home) = dirs::home_dir()
-    {
-        return home.join(rest);
-    }
-    PathBuf::from(s)
 }

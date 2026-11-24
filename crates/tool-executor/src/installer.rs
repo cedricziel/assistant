@@ -12,7 +12,7 @@ use assistant_skills::{SkillSource, parse_skill_dir};
 use assistant_storage::SkillRegistry;
 use tracing::{debug, info};
 
-use crate::builtins::file_read::expand_tilde;
+use assistant_core::expand_tilde;
 
 /// Install a skill from `source` into `skills_dir` and register it in `registry`.
 ///
