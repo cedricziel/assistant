@@ -132,8 +132,6 @@ foreground / background pairs meet WCAG AA on both light and dark themes
 | `--auth-token`       | `ASSISTANT_WEB_TOKEN`       | _(required)_                | Token used for Bearer auth                                |
 | `--listen`           |                             | `127.0.0.1:8080`            | Address to bind                                           |
 | `--db-path`          |                             | `~/.assistant/assistant.db` | Path to the SQLite database                               |
-| `--trace-limit`      |                             | `200`                       | Max traces returned by `GET /api/traces`                  |
-| `--log-limit`        |                             | `500`                       | Max log entries returned by `GET /api/logs`               |
 | `--cors-origin`      | `ASSISTANT_WEB_CORS_ORIGIN` | _(wildcard)_                | Restrict CORS to a specific origin (e.g. macOS app URL)   |
 | `--no-secure-cookie` |                             | `false`                     | Disable `Secure` attribute on session cookies (see below) |
 

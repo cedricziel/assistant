@@ -51,9 +51,6 @@ use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::{
     account::{ChangePasswordRequest, UpdateCurrentUserRequest, UpdateCurrentUserResponse},
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
-    analytics::{
-        AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
-    },
     api_keys::{ApiKeySummary, CreateApiKeyRequest, CreateApiKeyResponse},
     bindings::{BindingResponse, CreateBindingRequest},
     catalog::{
@@ -64,7 +61,6 @@ use crate::api::{
         CommandArgResponse, CommandDefResponse, CommandEventResponse, ExecuteCommandRequest,
     },
     interfaces::{CreateInterfaceInstanceRequest, InterfaceInstanceResponse},
-    logs::LogEntryResponse,
     members::{AddMemberRequest, MemberEntry, UpdateMemberRequest},
     orgs::{CreateOrgRequest, OrgDetail, OrgSummary, UpdateOrgRequest},
     personas::{
@@ -78,7 +74,6 @@ use crate::api::{
         CreateFromTemplateRequest, OnboardingStatusResponse, PersonaFromTemplateResponse,
         TemplateResponse,
     },
-    traces::{SpanEntryResponse, TraceDetailResponse, TraceSummaryResponse},
     users::{CreateUserRequest, UpdateUserRequest, UserDetail, UserSummary},
     webhooks::{
         CreateWebhookRequest, RotateSecretResponse, UpdateWebhookRequest, VerifyWebhookResponse,
@@ -230,9 +225,6 @@ pub struct ApiErrorResponse {
         crate::api::skills::get_skill,
         crate::api::skills::update_skill,
         crate::api::skills::delete_skill,
-        crate::api::traces::list_traces,
-        crate::api::traces::get_trace,
-        crate::api::logs::list_logs,
         crate::api::webhooks::list_webhooks,
         crate::api::webhooks::create_webhook,
         crate::api::webhooks::get_webhook,
@@ -247,7 +239,6 @@ pub struct ApiErrorResponse {
         crate::api::agents::update_agent,
         crate::api::agents::delete_agent,
         crate::api::agents::set_default_agent,
-        crate::api::analytics::get_analytics,
         crate::api::workflows::list_workflows,
         crate::api::workflows::create_workflow,
         crate::api::workflows::get_workflow,
@@ -416,10 +407,6 @@ pub struct ApiErrorResponse {
             SkillDetail,
             CreateSkillRequest,
             UpdateSkillRequest,
-            TraceSummaryResponse,
-            SpanEntryResponse,
-            TraceDetailResponse,
-            LogEntryResponse,
             // Webhook API types
             WebhookResponse,
             CreateWebhookRequest,
@@ -431,11 +418,6 @@ pub struct ApiErrorResponse {
             AgentDetail,
             RegisterAgentRequest,
             UpdateAgentRequest,
-            // Analytics API types
-            AnalyticsSummaryResponse,
-            ModelUsageResponse,
-            ToolUsageResponse,
-            TimeSeriesResponse,
             // Workflow API types
             WorkflowSummary,
             WorkflowDetail,
@@ -553,8 +535,6 @@ pub struct ApiErrorResponse {
          description = "Webhook management — create, configure, verify, and rotate secrets"),
         (name = "agents",
          description = "A2A agent registry — register and manage remote agents"),
-        (name = "analytics",
-         description = "Usage analytics — token consumption, model usage, and tool metrics"),
         (name = "workflows",
          description = "Workflow management — create, update, activate, and run workflows"),
         (name = "attachments",
@@ -589,3 +569,40 @@ pub struct ApiErrorResponse {
     )
 )]
 pub struct ApiDoc;
+
+#[cfg(test)]
+mod tests {
+    use utoipa::OpenApi;
+
+    use super::ApiDoc;
+
+    /// Telemetry is emitted over OTLP only; the REST API must not expose
+    /// local trace, log or analytics viewers.
+    #[test]
+    fn spec_has_no_local_telemetry_endpoints() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let paths = spec["paths"].as_object().expect("paths object");
+        for banned in ["/api/traces", "/api/logs", "/api/analytics"] {
+            let offenders: Vec<_> = paths.keys().filter(|p| p.starts_with(banned)).collect();
+            assert!(
+                offenders.is_empty(),
+                "{banned} must not be documented, found {offenders:?}"
+            );
+        }
+        let schemas = spec["components"]["schemas"]
+            .as_object()
+            .expect("schemas object");
+        for banned in [
+            "TraceSummaryResponse",
+            "TraceDetailResponse",
+            "SpanEntryResponse",
+            "LogEntryResponse",
+            "AnalyticsSummaryResponse",
+        ] {
+            assert!(
+                !schemas.contains_key(banned),
+                "schema {banned} must be removed"
+            );
+        }
+    }
+}
