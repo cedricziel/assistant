@@ -121,11 +121,8 @@ pub fn is_transient_error_message(msg: &str) -> bool {
         return false;
     }
 
-    // Check for numeric status codes embedded in the error message.
-    for code in ["408", "429", "500", "502", "503", "504", "529"] {
-        if msg.contains(code) {
-            return true;
-        }
+    if contains_transient_status_code(msg) {
+        return true;
     }
 
     // Check for common transient-error keywords.
@@ -139,6 +136,16 @@ pub fn is_transient_error_message(msg: &str) -> bool {
         || lower.contains("timeout")
         || lower.contains("connection reset")
         || lower.contains("connection refused")
+}
+
+/// Returns `true` when `msg` contains a transient HTTP status code as a
+/// standalone token. Digits inside identifiers such as UUIDs (`529ce9e8-…`)
+/// or numbers (`1500ms`) do not count.
+fn contains_transient_status_code(msg: &str) -> bool {
+    msg.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|token| token.len() == 3)
+        .filter_map(|token| token.parse::<u16>().ok())
+        .any(is_transient_status)
 }
 
 // ── Generic async retry helper ───────────────────────────────────────────────
@@ -282,6 +289,28 @@ mod tests {
         assert!(!is_transient_error_message("Invalid API key"));
         assert!(!is_transient_error_message("400 Bad Request"));
         assert!(!is_transient_error_message("permission denied"));
+    }
+
+    #[test]
+    fn status_code_digits_inside_identifiers_are_not_transient() {
+        let msg = "conversation 529ce9e8-d204-40c8-8975-dc64b0aee0d8 belongs to agent \
+                   'reviewer' (requested 'default')";
+        assert!(
+            !is_transient_error_message(msg),
+            "a UUID containing '529' must not mark a permanent error as transient"
+        );
+        assert!(!is_transient_error_message("message 1a2b5003 not found"));
+        assert!(!is_transient_error_message("took 1500ms"));
+        assert!(!is_transient_error_message(
+            "message 8d82c1b9-0529-40c8-8975-dc64b0aee0d8 not found"
+        ));
+    }
+
+    #[test]
+    fn status_codes_delimited_by_punctuation_remain_transient() {
+        assert!(is_transient_error_message("HTTP status: 502"));
+        assert!(is_transient_error_message("upstream returned (529)"));
+        assert!(is_transient_error_message("status=504, body empty"));
     }
 
     #[test]
