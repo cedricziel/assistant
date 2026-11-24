@@ -178,8 +178,8 @@ async-nats = "0.49"
 # Integration testing
 testcontainers = "0.27"
 # OpenAPI spec generation
-utoipa = { version = "5.5", features = ["chrono", "uuid"] }
-utoipa-swagger-ui = { version = "9.0", features = ["axum", "vendored"] }
+utoipa = { version = "6.0", features = ["chrono", "uuid"] }
+utoipa-swagger-ui = { version = "10.0", features = ["axum", "vendored"] }
 testcontainers-modules = { version = "0.15", features = ["nats"] }
 wiremock = "0.6"
 tempfile = "3"
