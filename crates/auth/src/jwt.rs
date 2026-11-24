@@ -552,4 +552,60 @@ mod tests {
         // Sanity: chrono should agree the FakeClock advanced.
         let _ = chrono::Utc.timestamp_opt(claims2.iat, 0); // exercise TimeZone import
     }
+
+    #[test]
+    fn empty_secret_is_rejected() {
+        assert!(
+            JwtKeyPair::from_secret(b"").is_err(),
+            "an empty HMAC secret must not produce a key pair"
+        );
+    }
+
+    #[test]
+    fn rejects_token_signed_with_different_algorithm() {
+        let secret = generate_secret();
+        let mgr = JwtManager::new(
+            JwtKeyPair::from_secret(&secret).unwrap(),
+            "https://test.local".into(),
+            "https://test.local".into(),
+        );
+        let token = mgr.sign(&make_test_context(), "acme", "Alice").unwrap();
+        let claims = mgr.validate(&token).unwrap();
+
+        let hs384 = encode(
+            &Header::new(Algorithm::HS384),
+            &claims,
+            &EncodingKey::from_secret(&secret).unwrap(),
+        )
+        .unwrap();
+
+        assert!(
+            mgr.validate(&hs384).is_err(),
+            "HS384 token signed with the right secret must be rejected; only HS256 is allowed"
+        );
+    }
+
+    #[test]
+    fn rejects_alg_none_token() {
+        use base64::Engine;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+        let mgr = JwtManager::new(
+            JwtKeyPair::generate().unwrap(),
+            "https://test.local".into(),
+            "https://test.local".into(),
+        );
+        let token = mgr.sign(&make_test_context(), "acme", "Alice").unwrap();
+        let payload = token.split('.').nth(1).unwrap();
+        let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
+
+        assert!(
+            mgr.validate(&format!("{header}.{payload}.")).is_err(),
+            "alg:none token with empty signature must be rejected"
+        );
+        assert!(
+            mgr.validate(&format!("{header}.{payload}")).is_err(),
+            "alg:none token without signature segment must be rejected"
+        );
+    }
 }
