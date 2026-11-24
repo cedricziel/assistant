@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../shared/theme/assistant_spacing.dart';
 import 'span_classifier.dart';

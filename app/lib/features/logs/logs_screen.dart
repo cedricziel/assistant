@@ -104,9 +104,9 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
                           ? Text(
                               'No logs matching "${state.searchQuery}"',
                               style: TextStyle(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                             )
                           : const _EmptyView(),

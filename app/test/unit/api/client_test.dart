@@ -343,9 +343,8 @@ void main() {
         },
       ]);
       final sse = 'event: snapshot\ndata: $payload\n\n';
-      final events = await parseConversationSseByteStream(
-        _sseBytes(sse),
-      ).toList();
+      final events = await parseConversationSseByteStream(_sseBytes(sse))
+          .toList();
 
       expect(events.length, equals(1));
       expect(events.first, isA<ConversationSnapshotEvent>());
@@ -363,9 +362,8 @@ void main() {
         'updated_at': '2026-01-02T00:00:00Z',
       });
       final sse = 'event: upserted\ndata: $payload\n\n';
-      final events = await parseConversationSseByteStream(
-        _sseBytes(sse),
-      ).toList();
+      final events = await parseConversationSseByteStream(_sseBytes(sse))
+          .toList();
 
       expect(events.length, equals(1));
       expect(events.first, isA<ConversationUpsertedEvent>());
@@ -377,9 +375,8 @@ void main() {
     test('emits ConversationDeletedEvent from deleted SSE event', () async {
       final payload = jsonEncode({'conversation_id': 'c3'});
       final sse = 'event: deleted\ndata: $payload\n\n';
-      final events = await parseConversationSseByteStream(
-        _sseBytes(sse),
-      ).toList();
+      final events = await parseConversationSseByteStream(_sseBytes(sse))
+          .toList();
 
       expect(events.length, equals(1));
       expect(events.first, isA<ConversationDeletedEvent>());
@@ -410,9 +407,8 @@ void main() {
           'event: upserted\ndata: $upserted\n\n'
           'event: deleted\ndata: $deleted\n\n';
 
-      final events = await parseConversationSseByteStream(
-        _sseBytes(sse),
-      ).toList();
+      final events = await parseConversationSseByteStream(_sseBytes(sse))
+          .toList();
 
       expect(events.length, equals(3));
       expect(events[0], isA<ConversationSnapshotEvent>());
@@ -422,9 +418,8 @@ void main() {
 
     test('ignores unknown event types without crashing', () async {
       const sse = 'event: unknown\ndata: {}\n\n';
-      final events = await parseConversationSseByteStream(
-        _sseBytes(sse),
-      ).toList();
+      final events = await parseConversationSseByteStream(_sseBytes(sse))
+          .toList();
       expect(events, isEmpty);
     });
 

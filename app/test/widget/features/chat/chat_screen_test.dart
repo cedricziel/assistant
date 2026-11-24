@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:assistant_app/shared/platform/adaptive_app.dart';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/capabilities_provider.dart';
@@ -14,7 +15,7 @@ import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
 import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -87,7 +88,10 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
           capabilitiesProvider.overrideWith((ref) async => capabilities),
         ],
       ],
-      child: const MaterialApp(home: ChatScreen()),
+      child: MaterialApp(
+        home: const ChatScreen(),
+        builder: (_, child) => LegacyDesignBridge(child: child!),
+      ),
     ),
   );
 
@@ -397,8 +401,7 @@ void main() {
         expect(
           find.byType(AudioPlayerWidget),
           findsOneWidget,
-          reason:
-              'Inline audio player should appear when audioId is set regardless of voiceReceive',
+          reason: 'Inline audio player should appear when audioId is set regardless of voiceReceive',
         );
       },
     );
@@ -449,8 +452,7 @@ void main() {
         expect(
           find.byKey(const Key('read_aloud_action')),
           findsOneWidget,
-          reason:
-              'Read aloud should appear for assistant messages when voiceReceive is enabled',
+          reason: 'Read aloud should appear for assistant messages when voiceReceive is enabled',
         );
       },
     );
@@ -935,8 +937,7 @@ void main() {
         expect(
           find.byType(StreamingTimelineEntry),
           findsOneWidget,
-          reason:
-              'Tool call must render as StreamingTimelineEntry, not a chip in the bubble',
+          reason: 'Tool call must render as StreamingTimelineEntry, not a chip in the bubble',
         );
         expect(
           find.text('web-search'),
@@ -1016,8 +1017,7 @@ void main() {
             (w) => w is SizedBox && w.height == 16 && w.width == 40,
           ),
           findsOneWidget,
-          reason:
-              'Dots indicator must show before first token even when tokenStream is set',
+          reason: 'Dots indicator must show before first token even when tokenStream is set',
         );
       },
     );

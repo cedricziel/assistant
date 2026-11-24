@@ -1,6 +1,5 @@
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
 import '../theme/assistant_theme.dart';
@@ -46,17 +45,15 @@ class AdaptiveApp extends StatelessWidget {
         ),
         routerConfig: routerConfig,
         debugShowCheckedModeBanner: false,
-        localizationsDelegates: const [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         builder: (context, child) {
           return Theme(
             data: materialTheme,
             child: Material(
               type: MaterialType.transparency,
-              child: child ?? const SizedBox.shrink(),
+              child: LegacyDesignBridge(
+                child: child ?? const SizedBox.shrink(),
+              ),
             ),
           );
         },
@@ -70,6 +67,30 @@ class AdaptiveApp extends StatelessWidget {
       darkTheme: assistantDarkTheme(),
       routerConfig: routerConfig,
       debugShowCheckedModeBanner: false,
+      builder: (context, child) =>
+          LegacyDesignBridge(child: child ?? const SizedBox.shrink()),
+    );
+  }
+}
+
+/// Exposes the app's theme and localizations to dependencies that still
+/// build on `package:flutter/material.dart` and `package:flutter/cupertino.dart`
+/// (flutter_smooth_markdown, go_router, cupertino_sidebar, window_manager, …).
+/// Without it they resolve the framework's default theme.
+///
+/// Remove once those dependencies have migrated to material_ui/cupertino_ui.
+class LegacyDesignBridge extends StatelessWidget {
+  const LegacyDesignBridge({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    // The bridges are deprecated only to mark them as temporary.
+    // ignore: deprecated_member_use
+    return MaterialUiCompatibilityBridge(
+      // ignore: deprecated_member_use
+      child: CupertinoUiCompatibilityBridge(child: child),
     );
   }
 }

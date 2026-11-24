@@ -1,6 +1,6 @@
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'platform/platform.dart';
 
@@ -82,9 +82,8 @@ class _ErrorContent extends StatelessWidget {
             ],
             Text(
               _userMessage(details),
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(color: colorScheme.onSurface),
+              style: Theme.of(context).textTheme.bodyLarge
+                  ?.copyWith(color: colorScheme.onSurface),
             ),
             if (kDebugMode || kProfileMode) ...[
               const SizedBox(height: 24),

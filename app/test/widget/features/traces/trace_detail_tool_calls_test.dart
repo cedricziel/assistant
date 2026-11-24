@@ -1,7 +1,7 @@
 import 'package:assistant_api/assistant_api.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:built_value/json_object.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -70,9 +70,8 @@ Widget _harness(TraceDetailResponse detail) {
   );
   return ProviderScope(
     overrides: [
-      traceDetailProvider(
-        'trace-1',
-      ).overrideWith(() => _StubNotifier(TraceDetailState(detail: detail))),
+      traceDetailProvider('trace-1')
+          .overrideWith(() => _StubNotifier(TraceDetailState(detail: detail))),
     ],
     child: MaterialApp.router(routerConfig: router),
   );

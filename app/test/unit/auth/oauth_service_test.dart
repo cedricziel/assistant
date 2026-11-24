@@ -292,8 +292,7 @@ void main() {
           respond: const MockResponse(
             statusCode: 302,
             headers: {
-              'location':
-                  'http://localhost/cb?error=access_denied&error_description=Bad+creds',
+              'location': 'http://localhost/cb?error=access_denied&error_description=Bad+creds',
             },
           ),
         );

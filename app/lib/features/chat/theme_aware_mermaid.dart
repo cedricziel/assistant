@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 
 /// Derives a [MermaidStyle] from a Flutter [ColorScheme] so that Mermaid

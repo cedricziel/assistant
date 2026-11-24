@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -222,9 +222,9 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                                 vertical: 8,
                               ),
                               decoration: BoxDecoration(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.errorContainer,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .errorContainer,
                                 border: Border.all(
                                   color: Theme.of(context).colorScheme.error,
                                 ),
@@ -234,9 +234,9 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                                 children: [
                                   Icon(
                                     Icons.error_outline,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onErrorContainer,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onErrorContainer,
                                     size: 18,
                                   ),
                                   const SizedBox(width: 8),
@@ -245,9 +245,9 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                                       _error!,
                                       key: const Key('error_message'),
                                       style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onErrorContainer,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onErrorContainer,
                                       ),
                                     ),
                                   ),

@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'platform.dart';
 
@@ -23,9 +23,8 @@ void showAdaptiveSnackBar(
     _showCupertinoToast(context, message, duration);
     return;
   }
-  ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text(message), duration: duration));
+  ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(message), duration: duration));
 }
 
 void _showCupertinoToast(

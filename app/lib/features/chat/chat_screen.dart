@@ -11,6 +11,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'svg_builder.dart';
+
 import 'package:go_router/go_router.dart';
 
 import '../../shared/platform/widgets.dart';
@@ -32,6 +33,7 @@ import 'commands_provider.dart';
 import 'conversation_list.dart';
 import '../../shared/theme/assistant_colors.dart';
 import '../../shared/theme/assistant_spacing.dart';
+import '../../shared/theme/legacy_theme.dart';
 import 'image_utils.dart';
 import 'markdown_link_handler.dart';
 import 'queued_message_bubble.dart';
@@ -445,9 +447,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             children: [
                               Icon(
                                 Icons.warning_amber_outlined,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onErrorContainer,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer,
                                 size: 18,
                               ),
                               const SizedBox(width: 8),
@@ -455,9 +457,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 child: Text(
                                   chatState.error!,
                                   style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onErrorContainer,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onErrorContainer,
                                   ),
                                 ),
                               ),
@@ -762,7 +764,7 @@ class _MessageBubble extends StatelessWidget {
                           stream: message.tokenStream!,
                           styleSheet:
                               MarkdownStyleSheet.fromTheme(
-                                Theme.of(context),
+                                legacyThemeOf(context),
                               ).copyWith(
                                 paragraphStyle: TextStyle(
                                   color: colorScheme.onSurface,
@@ -793,7 +795,7 @@ class _MessageBubble extends StatelessWidget {
                           data: message.content,
                           styleSheet:
                               MarkdownStyleSheet.fromTheme(
-                                Theme.of(context),
+                                legacyThemeOf(context),
                               ).copyWith(
                                 paragraphStyle: TextStyle(
                                   color: colorScheme.onSurface,
@@ -1269,9 +1271,8 @@ class _MessageBubble extends StatelessWidget {
                   child: Icon(
                     Icons.broken_image,
                     size: 64,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: 0.7),
+                    color: Theme.of(context).colorScheme.onSurface
+                        .withValues(alpha: 0.7),
                   ),
                 ),
               ),
@@ -1975,9 +1976,8 @@ class _InputRowState extends State<_InputRow> {
                 VoiceRecorderButton(
                   onRecordingComplete: widget.onVoiceRecorded,
                   onError: (err) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text(err)));
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(err)));
                   },
                 ),
               if (!widget.isSending) const SizedBox(width: 4),

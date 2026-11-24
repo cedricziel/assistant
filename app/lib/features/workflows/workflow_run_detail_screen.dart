@@ -1,5 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -369,9 +369,9 @@ class _StepTileState extends State<_StepTile> {
                               '#${step.stepIndex}',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                             ),
                             if (hasOutput || hasNote)
@@ -380,9 +380,9 @@ class _StepTileState extends State<_StepTile> {
                                     ? Icons.keyboard_arrow_up
                                     : Icons.keyboard_arrow_down,
                                 size: 14,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                           ],
                         ),
@@ -392,9 +392,9 @@ class _StepTileState extends State<_StepTile> {
                             step.note!,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -406,9 +406,8 @@ class _StepTileState extends State<_StepTile> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurface.withValues(alpha: 0.04),
+                              color: Theme.of(context).colorScheme.onSurface
+                                  .withValues(alpha: 0.04),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: SelectableText(

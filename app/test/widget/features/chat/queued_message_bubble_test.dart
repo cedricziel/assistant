@@ -6,7 +6,7 @@
 // Specified by: openspec/changes/chat-stream-progress-ux/specs/.../
 //   chat-message-queue/spec.md
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -92,11 +92,9 @@ void main() {
         await tester.tap(find.text('Remove from queue'));
         await tester.pumpAndSettle();
 
-        expect(
-          notifier.removedIndices,
-          [3],
-          reason: 'remove action must call removeFromQueue(index) once',
-        );
+        expect(notifier.removedIndices, [
+          3,
+        ], reason: 'remove action must call removeFromQueue(index) once');
       },
     );
   });
