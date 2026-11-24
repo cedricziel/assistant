@@ -345,16 +345,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         onPressed: () => showPersonaPicker(context),
       ),
       IconButton(
-        icon: const Icon(Icons.timeline_outlined),
-        tooltip: 'Traces',
-        onPressed: () => context.go('/traces'),
-      ),
-      IconButton(
-        icon: const Icon(Icons.article_outlined),
-        tooltip: 'Logs',
-        onPressed: () => context.go('/logs'),
-      ),
-      IconButton(
         icon: const Icon(Icons.extension_outlined),
         tooltip: 'Skills',
         onPressed: () => context.go('/skills'),

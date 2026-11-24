@@ -23,14 +23,6 @@ Widget _buildNavShell({required String initialLocation}) {
             builder: (_, _) => const Scaffold(body: Text('Chat page')),
           ),
           GoRoute(
-            path: '/traces',
-            builder: (_, _) => const Scaffold(body: Text('Traces content')),
-          ),
-          GoRoute(
-            path: '/logs',
-            builder: (_, _) => const Scaffold(body: Text('Logs content')),
-          ),
-          GoRoute(
             path: '/contexts',
             builder: (_, _) => const Scaffold(body: Text('Personas content')),
           ),
@@ -49,10 +41,6 @@ Widget _buildNavShell({required String initialLocation}) {
           GoRoute(
             path: '/agents',
             builder: (_, _) => const Scaffold(body: Text('Agents content')),
-          ),
-          GoRoute(
-            path: '/analytics',
-            builder: (_, _) => const Scaffold(body: Text('Analytics content')),
           ),
           GoRoute(
             path: '/settings',
@@ -111,11 +99,8 @@ void main() {
         // Contexts switcher must appear first in the sheet
         expect(find.text('Contexts'), findsOneWidget);
         // Overflow destinations also present
-        expect(find.text('Traces'), findsOneWidget);
-        expect(find.text('Logs'), findsOneWidget);
         expect(find.text('Webhooks'), findsOneWidget);
         expect(find.text('Agents'), findsOneWidget);
-        expect(find.text('Analytics'), findsOneWidget);
         // Settings is at the bottom, separated by a divider
         expect(find.text('Settings'), findsOneWidget);
       },
@@ -149,20 +134,20 @@ void main() {
     });
 
     testWidgets(
-      '5.4 "More" destination is selected (index 3) when route is /traces',
+      '5.4 "More" destination is selected (index 3) when route is /webhooks',
       (tester) async {
         tester.view.physicalSize = const Size(375, 800);
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.reset);
 
-        await tester.pumpWidget(_buildNavShell(initialLocation: '/traces'));
+        await tester.pumpWidget(_buildNavShell(initialLocation: '/webhooks'));
         await tester.pumpAndSettle();
 
         final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
         expect(
           navBar.selectedIndex,
           3,
-          reason: '"More" (index 3) should be selected when on /traces',
+          reason: '"More" (index 3) should be selected when on /webhooks',
         );
       },
     );
@@ -185,11 +170,8 @@ void main() {
         'Skills',
         'Workflows',
         'Personas',
-        'Traces',
-        'Logs',
         'Webhooks',
         'Agents',
-        'Analytics',
       ]) {
         expect(
           find.text(label),

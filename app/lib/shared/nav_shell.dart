@@ -120,18 +120,6 @@ const List<_NavDest> _overflowDestinations = [
     label: 'Personas',
   ),
   _NavDest(
-    path: '/traces',
-    icon: Icons.timeline_outlined,
-    selectedIcon: Icons.timeline,
-    label: 'Traces',
-  ),
-  _NavDest(
-    path: '/logs',
-    icon: Icons.article_outlined,
-    selectedIcon: Icons.article,
-    label: 'Logs',
-  ),
-  _NavDest(
     path: '/webhooks',
     icon: Icons.webhook_outlined,
     selectedIcon: Icons.webhook,
@@ -142,12 +130,6 @@ const List<_NavDest> _overflowDestinations = [
     icon: Icons.smart_toy_outlined,
     selectedIcon: Icons.smart_toy,
     label: 'Agents',
-  ),
-  _NavDest(
-    path: '/analytics',
-    icon: Icons.bar_chart_outlined,
-    selectedIcon: Icons.bar_chart,
-    label: 'Analytics',
   ),
   _NavDest(
     path: '/admin',

@@ -42,24 +42,12 @@ Widget _buildNavShell({required String initialLocation}) {
             builder: (_, _) => const Scaffold(body: Text('Personas content')),
           ),
           GoRoute(
-            path: '/traces',
-            builder: (_, _) => const Scaffold(body: Text('Traces content')),
-          ),
-          GoRoute(
-            path: '/logs',
-            builder: (_, _) => const Scaffold(body: Text('Logs content')),
-          ),
-          GoRoute(
             path: '/webhooks',
             builder: (_, _) => const Scaffold(body: Text('Webhooks content')),
           ),
           GoRoute(
             path: '/agents',
             builder: (_, _) => const Scaffold(body: Text('Agents content')),
-          ),
-          GoRoute(
-            path: '/analytics',
-            builder: (_, _) => const Scaffold(body: Text('Analytics content')),
           ),
           GoRoute(
             path: '/settings',
@@ -131,11 +119,8 @@ void main() {
 
         // All overflow destinations visible in the sheet
         expect(find.text('Personas'), findsOneWidget);
-        expect(find.text('Traces'), findsOneWidget);
-        expect(find.text('Logs'), findsOneWidget);
         expect(find.text('Webhooks'), findsOneWidget);
         expect(find.text('Agents'), findsOneWidget);
-        expect(find.text('Analytics'), findsOneWidget);
         expect(find.text('Settings'), findsOneWidget);
 
         debugDefaultTargetPlatformOverride = null;
@@ -154,13 +139,13 @@ void main() {
       await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
       await tester.pumpAndSettle();
 
-      // Tap More → Traces
+      // Tap More → Webhooks
       await tester.tap(find.text('More'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Traces'));
+      await tester.tap(find.text('Webhooks'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Traces content'), findsOneWidget);
+      expect(find.text('Webhooks content'), findsOneWidget);
 
       debugDefaultTargetPlatformOverride = null;
     });
@@ -191,11 +176,8 @@ void main() {
         'Skills',
         'Workflows',
         'Personas',
-        'Traces',
-        'Logs',
         'Webhooks',
         'Agents',
-        'Analytics',
         'Settings',
       ]) {
         expect(

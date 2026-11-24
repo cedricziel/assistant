@@ -332,22 +332,6 @@ test.describe("Authenticated pages", () => {
     });
   });
 
-  test("traces page (empty state)", async ({ page }) => {
-    await navigateAndSettle(page, "/traces");
-    await expect(page).toHaveScreenshot("traces-empty.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
-    });
-  });
-
-  test("logs page (empty state)", async ({ page }) => {
-    await navigateAndSettle(page, "/logs");
-    await expect(page).toHaveScreenshot("logs-empty.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
-    });
-  });
-
   test("skills list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/skills");
     await expect(page).toHaveScreenshot("skills-empty.png", {
@@ -358,14 +342,6 @@ test.describe("Authenticated pages", () => {
 
   // NOTE: /contexts is hidden on web (redirects to /chat) — managed via the
   // native app's context switcher only.
-
-  test("analytics screen (empty state)", async ({ page }) => {
-    await navigateAndSettle(page, "/analytics");
-    await expect(page).toHaveScreenshot("analytics-empty.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
-    });
-  });
 
   test("agents list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/agents");
@@ -624,13 +600,10 @@ test.describe("Authenticated pages", () => {
   });
 
   test("core routes avoid viewport horizontal overflow", async ({ page }) => {
-    // 11 routes × ~5 s each (3 s settle + navigation) — extend the default 30 s limit.
+    // 8 routes × ~5 s each (3 s settle + navigation) — extend the default 30 s limit.
     test.setTimeout(90_000);
     const routes = [
       "/chat",
-      "/traces",
-      "/logs",
-      "/analytics",
       "/agents",
       "/webhooks",
       "/workflows",

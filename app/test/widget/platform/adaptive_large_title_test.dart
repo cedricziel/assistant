@@ -10,12 +10,9 @@ import 'package:assistant_app/features/pwa/pwa_provider.dart';
 import 'package:assistant_app/features/settings/settings_screen.dart';
 import 'package:assistant_app/features/skills/skills_screen.dart';
 import 'package:assistant_app/features/personas/personas_screen.dart';
-import 'package:assistant_app/features/traces/traces_screen.dart';
-import 'package:assistant_app/features/logs/logs_screen.dart';
 import 'package:assistant_app/features/contexts/screens/context_switcher_screen.dart';
 import 'package:assistant_app/features/webhooks/webhooks_screen.dart';
 import 'package:assistant_app/features/agents/agents_screen.dart';
-import 'package:assistant_app/features/analytics/analytics_screen.dart';
 import 'package:assistant_app/features/workflows/workflows_screen.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
 
@@ -75,12 +72,9 @@ void main() {
   final screenMatrix = <String, Widget>{
     'Skills': const SkillsScreen(),
     'Personas': const PersonasScreen(),
-    'Traces': const TracesScreen(),
-    'Logs': const LogsScreen(),
     'Contexts': const ContextSwitcherScreen(),
     'Webhooks': const WebhooksScreen(),
     'Agents': const AgentsScreen(),
-    'Analytics': const AnalyticsScreen(),
     'Workflows': const WorkflowsScreen(),
   };
 
