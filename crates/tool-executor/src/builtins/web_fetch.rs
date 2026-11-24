@@ -88,6 +88,7 @@ impl ToolHandler for WebFetchHandler {
             }
         };
 
+        let final_url = response.url().to_string();
         let status = response.status();
         if !status.is_success() {
             return Ok(ToolOutput::error(format!(
@@ -136,9 +137,9 @@ impl ToolHandler for WebFetchHandler {
         };
 
         let output = if let Some(t) = title {
-            format!("Title: {}\nURL: {}\n\n{}", t, url, truncated)
+            format!("Title: {}\nURL: {}\n\n{}", t, final_url, truncated)
         } else {
-            format!("URL: {}\n\n{}", url, truncated)
+            format!("URL: {}\n\n{}", final_url, truncated)
         };
 
         Ok(ToolOutput::success(output))
