@@ -4,6 +4,7 @@ pub mod channel_runner;
 pub mod command_registry;
 pub(crate) mod compaction;
 pub(crate) mod conversation_indexer;
+pub mod decision_model;
 pub(crate) mod history;
 pub mod interface_runner;
 pub mod interface_trait;
