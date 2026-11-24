@@ -173,3 +173,96 @@ async fn tools_requiring_confirmation_are_denied_when_nobody_can_be_asked() {
         .unwrap_err();
     assert!(err.contains("requires confirmation"), "{err}");
 }
+
+// -- decision model end to end --
+
+use assistant_core::permission::PermissionPolicy;
+use assistant_core::types::permissions::DecisionModelConfig;
+
+use crate::decision_model::JevDecider;
+
+async fn jev_server(reversible: f64) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/decisions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "answers": {
+                "reversible": { "noul": reversible },
+                "serves_task": { "noul": reversible },
+            }
+        })))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// Run a turn whose `bash` call is undecided by static rules, with a Jev
+/// decider pointed at `jev`.
+async fn run_with_model(jev: &MockServer, command: &str) -> Vec<(String, String)> {
+    let llm = MockServer::start().await;
+    mount_bash_call(&llm, command).await;
+    let policy = PermissionPolicy::from_config(&config(&[]).permissions).with_model(
+        std::sync::Arc::new(JevDecider::new(
+            DecisionModelConfig {
+                enabled: true,
+                base_url: format!("{}/decisions", jev.uri()),
+                ..Default::default()
+            },
+            "k".into(),
+        )),
+    );
+    let (orch, _) = build_customized(&llm.uri(), config(&[]), |o| {
+        o.with_permission_policy(policy)
+    })
+    .await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<OrchestratorEvent>(64);
+    orch.run_turn_with_tools_streaming(
+        "do it",
+        Uuid::new_v4(),
+        Interface::Slack,
+        vec![],
+        None,
+        vec![],
+        tx,
+        vec![],
+        TurnIdentity::default(),
+    )
+    .await
+    .unwrap();
+    let mut results = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        if let OrchestratorEvent::ToolResult { status, result, .. } = event {
+            results.push((status, result.unwrap_or_default()));
+        }
+    }
+    results
+}
+
+#[tokio::test]
+async fn model_approval_lets_an_undecided_call_run_on_a_non_interactive_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("marker");
+    let jev = jev_server(0.97).await;
+    run_with_model(&jev, &format!("touch {}", marker.display())).await;
+    assert!(marker.exists());
+    assert_eq!(jev.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn model_low_confidence_means_denied_on_a_non_interactive_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("marker");
+    let jev = jev_server(0.4).await;
+    let results = run_with_model(&jev, &format!("touch {}", marker.display())).await;
+    assert!(!marker.exists());
+    assert_eq!(results[0].0, "denied");
+    assert!(results[0].1.contains("threshold"), "{}", results[0].1);
+}
+
+#[tokio::test]
+async fn hard_denied_calls_never_reach_the_model() {
+    let jev = jev_server(0.99).await;
+    let results = run_with_model(&jev, "sudo touch /tmp/never").await;
+    assert_eq!(results[0].0, "denied");
+    assert!(jev.received_requests().await.unwrap().is_empty());
+}

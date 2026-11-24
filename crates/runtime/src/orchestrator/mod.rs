@@ -295,9 +295,7 @@ impl Orchestrator {
             bus,
             max_iterations: config.llm.max_iterations,
             confirmation_callback: None,
-            permission_policy: assistant_core::permission::PermissionPolicy::from_config(
-                &config.permissions,
-            ),
+            permission_policy: Self::build_permission_policy(&config.permissions),
             memory_loader,
             trace_content: config.observability.trace_content,
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
@@ -384,6 +382,26 @@ impl Orchestrator {
     pub fn with_audio_store(mut self, store: Arc<AudioStore>) -> Self {
         self.audio_store = Some(store);
         self
+    }
+
+    /// Static rules from config, plus the decision model when it is enabled.
+    /// A decision model that cannot be built (e.g. missing API key) is
+    /// reported and left out: undecided calls then fall back to a human or a
+    /// denial, so this fails closed.
+    fn build_permission_policy(
+        cfg: &assistant_core::types::permissions::PermissionsConfig,
+    ) -> assistant_core::permission::PermissionPolicy {
+        let policy = assistant_core::permission::PermissionPolicy::from_config(cfg);
+        if !cfg.decision_model.enabled {
+            return policy;
+        }
+        match crate::decision_model::JevDecider::from_config(&cfg.decision_model) {
+            Ok(model) => policy.with_model(Arc::new(model)),
+            Err(e) => {
+                tracing::error!("permission decision model disabled: {e}");
+                policy
+            }
+        }
     }
 
     /// Replace the permission policy (e.g. to attach a decision model).
