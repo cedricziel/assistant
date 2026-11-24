@@ -352,6 +352,7 @@ mod tests {
             ask: rules(ask),
             allow: rules(allow),
             workspace_roots: roots.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
         }
     }
 

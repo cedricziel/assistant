@@ -24,6 +24,39 @@ pub struct PermissionsConfig {
     /// Extra directories (besides the persona workspace) file tools may use.
     #[serde(default)]
     pub workspace_roots: Vec<String>,
+    /// Resource limits for `bash` and `process`.
+    #[serde(default)]
+    pub limits: LimitsConfig,
+}
+
+/// Resource limits enforced by the `bash` and `process` tools
+/// (`[permissions.limits]`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LimitsConfig {
+    /// Upper bound for `bash` `timeout_secs`; larger requests are clamped.
+    pub bash_max_timeout_secs: u64,
+    /// Characters of stdout/stderr `bash` keeps (the tail); the rest is dropped
+    /// while the command runs.
+    pub bash_max_output_chars: usize,
+    /// A `process` session idle this long is killed and forgotten.
+    pub process_ttl_secs: u64,
+    /// Maximum number of running `process` sessions.
+    pub process_max_sessions: usize,
+    /// Stored `process` output lines are truncated to this many characters.
+    pub process_max_line_chars: usize,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
+            bash_max_timeout_secs: 600,
+            bash_max_output_chars: 200_000,
+            process_ttl_secs: 3_600,
+            process_max_sessions: 16,
+            process_max_line_chars: 4_000,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -54,6 +87,14 @@ workspace_roots = ["~/scratch"]
             err.contains("bash(oops"),
             "error should name the rule: {err}"
         );
+    }
+
+    #[test]
+    fn limits_default_and_override() {
+        let cfg: PermissionsConfig =
+            toml::from_str("[limits]\nbash_max_timeout_secs = 30").unwrap();
+        assert_eq!(cfg.limits.bash_max_timeout_secs, 30);
+        assert_eq!(cfg.limits.process_max_sessions, 16);
     }
 
     #[test]
