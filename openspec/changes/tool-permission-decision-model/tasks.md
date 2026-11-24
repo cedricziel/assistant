@@ -34,11 +34,11 @@ TDD throughout: failing test first, confirm RED, then GREEN. One PR per section.
 
 ## 4. Jev decision-model decider (PR d)
 
-- [ ] 4.1 RED/GREEN: `DecisionModelDecider` against a wiremock server —
+- [x] 4.1 RED/GREEN: `DecisionModelDecider` against a wiremock server —
       approve ≥ threshold, below threshold, HTTP error, timeout, malformed body.
-- [ ] 4.2 Config validation: reject unpinned / `latest` model ids.
-- [ ] 4.3 Wire from `[permissions.decision_model]` into the orchestrator
+- [x] 4.2 Config validation: reject unpinned / `latest` model ids.
+- [x] 4.3 Wire from `[permissions.decision_model]` into the orchestrator
       builder; docs + ADR update.
-- [ ] 4.4 RED/GREEN: destination context (host, `private` flag, best-effort
+- [x] 4.4 RED/GREEN: destination context (host, `private` flag, best-effort
       resolution) in the decision request for `web-fetch` / `workflow-http`;
       `web-fetch` reports the final URL after redirects.

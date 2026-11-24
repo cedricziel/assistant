@@ -18,7 +18,8 @@ Checks run in this order. The first one that decides wins.
 2. **Confinement.** For `file-read`, `file-write`, `file-edit` and `file-glob`, a path outside the workspace roots is denied. No allow rule overrides this. To open another directory, add it to `workspace_roots`.
 3. **Ask rules.** Your `ask` rules. A match sends the call to a human.
 4. **Allow rules.** Built-in allow rules, then your `allow` rules. A match allows the call.
-5. **No rule matched.** The call goes to a human.
+5. **Decision model.** A call no rule decided goes to the decision model when `[permissions.decision_model] enabled = true`. A call whose tool flags it as requiring confirmation skips the model and goes to a human. The model can approve a call and nothing else.
+6. **Human.** Anything still undecided goes to a human. This is also the path when no model is configured.
 
 "Goes to a human" resolves like this:
 
@@ -31,9 +32,70 @@ The final outcome is `allow`, `deny` or `ask`. `ask` is the label for "a human d
 
 Config rules add to the built-in rules. They cannot remove a built-in deny.
 
-### Coming next
+## Decision model
 
-A decision model, pinned to one version, will be added in a follow-up. It will run between allow rules and the human fallback, and can only approve a call or pass it on. Deny stays a static-rule decision. Until then there is no `decision_model` key, and `[permissions]` rejects unknown keys.
+The decision model is off by default. When enabled, it sees the calls that static rules leave open and approves the ones that look safe, so a human is asked less often. It never denies. A call it does not approve goes to the human step above.
+
+```toml
+[permissions.decision_model]
+enabled = true
+model = "typesafe/jev-1.13"
+threshold = 0.9
+timeout_secs = 8
+base_url = "https://openrouter.ai/api/alpha/decisions"
+api_key_env = "OPENROUTER_API_KEY"
+```
+
+| Key            | Default                                     | Meaning                                                               |
+| -------------- | ------------------------------------------- | --------------------------------------------------------------------- |
+| `enabled`      | `false`                                     | Turns the model on.                                                   |
+| `model`        | `typesafe/jev-1.13`                         | Model id. It must carry a version.                                    |
+| `threshold`    | `0.9`                                       | Score every asked question must reach. Must be above 0 and at most 1. |
+| `timeout_secs` | `8`                                         | Request timeout. A timeout means "not approved".                      |
+| `base_url`     | `https://openrouter.ai/api/alpha/decisions` | Decisions endpoint.                                                   |
+| `api_key_env`  | `OPENROUTER_API_KEY`                        | Name of the environment variable that holds the API key.              |
+
+`model` must be pinned to a version. `latest` aliases and ids without a version make the config fail to load, so approval behavior never changes without a config change.
+
+If `enabled` is true and the key variable is not set, the model is left out and an error is logged. Undecided calls then go to a human, or are denied on turns that cannot prompt.
+
+### What the model is sent
+
+- The tool call, rendered as one command string and cut at 2,000 characters. For `bash` this is the `command`. For other tools it is the tool name and the parameters as JSON.
+- The working directory.
+- The agent id.
+- The first 1,000 characters of the user's latest message, when there is one.
+
+It asks two questions and gets a score from 0 to 1 for each:
+
+- `reversible`: the call only reads or changes files inside the working directory, or makes read-only requests, and any change can be undone.
+- `serves_task`: the call is a reasonable next step toward the user's message. This is asked only when there is task text.
+
+The model is not sent tool output, fetched content or earlier assistant text. Text from those sources cannot argue for its own approval.
+
+### When a call is approved
+
+Every asked question must score at least `threshold`. These outcomes all mean "not approved":
+
+- a score below the threshold,
+- an HTTP error,
+- a timeout,
+- a response that cannot be read,
+- a score that is missing or outside 0 to 1.
+
+Not approved goes to a human on an interactive turn and is denied on any other turn. Each undecided call costs one request, so put hot paths under narrow allow rules.
+
+### Network tools
+
+For `web-fetch`, the rendered call includes the URL, the destination host, and whether the host resolves to a private address. Loopback, private, link-local, unique-local, unspecified and CGNAT (`100.64.0.0/10`) ranges count as `private network address`. A host that does not resolve in 2 seconds is `address unknown`. Anything else is `public address`.
+
+This is context for the model. Nothing is blocked on it.
+
+`web-fetch` results report the final URL after redirects, as `URL: <final url>`.
+
+### Limits of the model
+
+Crafted arguments can steer the score. Keep deny rules and file confinement as the boundary, and treat the model as a way to cut prompts. Use narrow allow rules for calls you make often. They are faster and do not depend on a score.
 
 ## Configuration
 
@@ -61,8 +123,9 @@ workspace_roots = ["~/notes"]
 | `allow`           | list of rules | Allow, unless a deny, confinement or ask check fires first.    |
 | `workspace_roots` | list of paths | Directories file tools may use, besides the Persona workspace. |
 | `limits`          | table         | Resource limits for `bash` and `process` (below).              |
+| `decision_model`  | table         | Decision model (above).                                        |
 
-A rule that does not parse, such as `bash(oops`, stops the config from loading, and the error names the rule. An unknown key under `[permissions]` does too.
+A rule that does not parse, such as `bash(oops`, stops the config from loading, and the error names the rule. An unknown key under `[permissions]` does too, as does an unpinned `decision_model.model` or a `threshold` outside (0, 1].
 
 ### Rule grammar
 
@@ -186,20 +249,20 @@ allow = ["web-fetch(http://homeassistant.local:8123/**)"]
 deny = ["web-fetch(*169.254.169.254*)"]
 ```
 
-Rules match the URL string as the LLM wrote it. A hostname that resolves to a blocked address, or a redirect to one, does not match a deny rule on the IP. Prefer narrow allow rules over a broad allow plus a few denies.
+Rules match the URL string as the LLM wrote it. A hostname that resolves to a blocked address, or a redirect to one, does not match a deny rule on the IP. Prefer narrow allow rules over a broad allow plus a few denies. When the decision model is on, it also sees whether the host is a private address (see Decision model).
 
 ## Audit events
 
 Each decision logs one `tracing` event at `info` level on the target `assistant::permission`, with the message `tool permission decision`.
 
-| Field         | Value                                                                |
-| ------------- | -------------------------------------------------------------------- |
-| `tool`        | Tool name.                                                           |
-| `decider`     | Which stage decided. Today always `static-rules`.                    |
-| `rule`        | The matching rule text, `workspace-roots` for confinement, or empty. |
-| `confidence`  | Unset until a decision model exists.                                 |
-| `outcome`     | `allow`, `deny` or `ask`.                                            |
-| `interactive` | Whether the turn could prompt a user.                                |
+| Field         | Value                                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------- |
+| `tool`        | Tool name.                                                                                              |
+| `decider`     | Which stage decided. `static-rules` or `decision-model`.                                                |
+| `rule`        | The matching rule text, `workspace-roots` for confinement, the model id for `decision-model`, or empty. |
+| `confidence`  | The lowest score from the decision model. Unset for static rules and when the model failed.             |
+| `outcome`     | `allow`, `deny` or `ask`.                                                                               |
+| `interactive` | Whether the turn could prompt a user.                                                                   |
 
 `outcome` is the pipeline result before the human step. An `ask` event does not record whether the user then agreed or the call was denied for lack of a prompt. Arguments are not logged.
 

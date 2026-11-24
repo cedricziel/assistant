@@ -48,23 +48,19 @@ A rule is `tool` or `tool(pattern)`. `*` and `**` match any run of characters, i
 
 Matching is conservative in both directions. Allow rules for `bash` never match a command containing shell metacharacters. Deny and ask rules match the whole command and every segment split at those characters. File paths are resolved, with `..` applied and symlinks followed, before they are matched or confined.
 
-Configuration lives in `[permissions]` in `config.toml`. See `docs/tool-permissions.md` for the user guide. The decision model adds a `[permissions.decision_model]` table with `enabled`, `model`, `threshold`, `timeout_secs`, `base_url` and `api_key_env`. `model` must be a pinned version. Any value containing `latest` is rejected when the config loads.
+Configuration lives in `[permissions]` in `config.toml`. See `docs/tool-permissions.md` for the user guide. The decision model adds a `[permissions.decision_model]` table with `enabled`, `model`, `threshold`, `timeout_secs`, `base_url` and `api_key_env`. `model` must be a pinned version. A value containing `latest`, or one that does not end in a version number, is rejected when the config loads.
 
 ### The decision model never sees untrusted output
 
-The model receives the tool name, the arguments as quoted data, and the user's task text. It never receives tool output, fetched content or earlier assistant text. Because a score can still be steered, every deterministic deny sits upstream of it and the threshold is high.
+The model receives the tool call as one command string, the working directory, the agent id, and the first 1,000 characters of the user's latest message. It never receives tool output, fetched content or earlier assistant text. Because a score can still be steered, every deterministic deny sits upstream of it and the threshold is high.
 
 ### Audit
 
-Each decision emits one `tracing` event on target `assistant::permission` with the fields `tool`, `decider`, `rule`, `confidence`, `outcome` and `interactive`. Arguments and task text are not logged.
+Each decision emits one `tracing` event on target `assistant::permission` with the fields `tool`, `decider`, `rule`, `confidence`, `outcome` and `interactive`. Arguments and task text are not logged. For a model decision, `decider` is `decision-model`, `rule` is the model id and `confidence` is the lowest score.
 
 ### No compatibility mode
 
 With no `[permissions]` section, calls that no rule allows are denied on non-interactive turns. The implicit "non-interactive turns skip confirmation" behaviour is removed, not shimmed.
-
-### Staging
-
-This is delivered in steps. The first change ships the pipeline, static rules, workspace confinement, the dispatch and Subagent Process integration, and the fallback. The pinned decision model follows and slots in between static rules and the fallback. Until it lands there is no `decision_model` key.
 
 ## Consequences
 
@@ -78,7 +74,7 @@ This is delivered in steps. The first change ships the pipeline, static rules, w
 **Bad / accepted**
 
 - Scheduled tasks, messenger turns and Subagent Processes that use `bash`, `web-fetch` or `process` fail until the owner adds allow rules. This is intended.
-- Once the model ships, every undecided call pays a network round trip, bounded by `timeout_secs` (default 8). Static allow rules are the fast path.
+- When the model is enabled, every undecided call pays a network round trip, bounded by `timeout_secs` (default 8). Static allow rules are the fast path.
 - The model is steerable. It reduces how often a human is asked. It is not the security boundary.
 - The MCP server entry point (`crates/mcp-server`) calls the tool executor directly and is not behind the pipeline. It stays a known gap and a follow-up.
 - Network destinations are not filtered. Rules match the URL string the LLM wrote, so a hostname that resolves to a sensitive address, or a redirect to one, is not caught by a deny rule on the IP.
