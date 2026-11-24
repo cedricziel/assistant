@@ -1,5 +1,6 @@
 ---
 name: ci-organization
+model: sonnet
 description: >
   CI organization principles and workflow structure for this project. Use whenever modifying,
   adding, or reviewing GitHub Actions workflows — including adding jobs, changing job order,
