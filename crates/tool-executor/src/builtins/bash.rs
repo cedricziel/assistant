@@ -1,42 +1,68 @@
 //! Builtin handler for the `bash` tool — runs a bash command as a subprocess.
 //!
-//! Output is capped at [`MAX_OUTPUT_CHARS`] per stream (stdout / stderr).
-//! When truncation is necessary the **tail** of the output is kept (matching
-//! the approach used by OpenClaw) because the most recent output — error
-//! messages, final status lines — is almost always the most relevant part.
+//! Output is capped per stream (stdout / stderr) while the command runs, so a
+//! chatty command never buffers more than twice the cap. When truncation is
+//! necessary the **tail** of the output is kept (matching the approach used by
+//! OpenClaw) because the most recent output — error messages, final status
+//! lines — is almost always the most relevant part.
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use anyhow::Result;
+use assistant_core::permission::{WorkspaceRoots, resolve_real_path};
 use assistant_core::{
     Attachment, ToolHandler, ToolOutput, runtime_workspace_dir,
-    types::conversation::ExecutionContext,
+    types::conversation::ExecutionContext, types::permissions::LimitsConfig,
 };
 use async_trait::async_trait;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::time::Duration;
 use tracing::debug;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
-/// Maximum number of characters to keep from stdout/stderr.
-/// Output beyond this limit is truncated so it does not blow up the
-/// conversation context window.  Value chosen to stay well within the
-/// LLM context limit (~200 K tokens ≈ 800 K chars).
-const MAX_OUTPUT_CHARS: usize = 200_000;
+/// Keeps the last `cap` bytes of a stream without holding more than `2 * cap`.
+struct TailBuffer {
+    cap: usize,
+    buf: Vec<u8>,
+    total: usize,
+}
 
-/// Truncate `s` to at most `max` characters, keeping the **tail**.
-/// Returns the (possibly shortened) string, its original length, and
-/// whether truncation occurred.
-fn truncate_tail(s: &str, max: usize) -> (String, usize, bool) {
-    let original_len = s.len();
-    if original_len <= max {
-        return (s.to_string(), original_len, false);
+impl TailBuffer {
+    fn new(cap: usize) -> Self {
+        Self {
+            cap,
+            buf: Vec::new(),
+            total: 0,
+        }
     }
-    // Find a char boundary at or after (len - max).
-    let start = original_len - max;
-    let start = s.ceil_char_boundary(start);
-    (s[start..].to_string(), original_len, true)
+
+    fn push(&mut self, chunk: &[u8]) {
+        self.total += chunk.len();
+        self.buf.extend_from_slice(chunk);
+        if self.buf.len() > self.cap.saturating_mul(2) {
+            self.buf.drain(..self.buf.len() - self.cap);
+        }
+    }
+
+    /// The kept tail as text, the total bytes seen, and whether bytes were dropped.
+    fn finish(self) -> (String, usize, bool) {
+        let start = self.buf.len().saturating_sub(self.cap);
+        let text = String::from_utf8_lossy(&self.buf[start..]).into_owned();
+        (text, self.total, self.total > self.cap)
+    }
+}
+
+async fn read_tail<R: AsyncRead + Unpin>(mut reader: R, cap: usize) -> TailBuffer {
+    let mut tail = TailBuffer::new(cap);
+    let mut chunk = [0u8; 8192];
+    while let Ok(n) = reader.read(&mut chunk).await {
+        if n == 0 {
+            break;
+        }
+        tail.push(&chunk[..n]);
+    }
+    tail
 }
 
 /// Image file extensions we recognise for automatic attachment.
@@ -54,9 +80,9 @@ const IMAGE_EXTENSIONS: &[(&str, &str)] = &[
 const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Scan stdout for absolute file paths that point to images on disk.
-/// Returns a list of [`Attachment`]s for each file that exists and is
-/// within the size limit.
-async fn collect_image_attachments(text: &str) -> Vec<Attachment> {
+/// Returns a list of [`Attachment`]s for each file that exists, is within the
+/// size limit and resolves (symlinks included) to a location inside `roots`.
+async fn collect_image_attachments(text: &str, roots: &WorkspaceRoots) -> Vec<Attachment> {
     let mut attachments = Vec::new();
     for token in text.split_whitespace() {
         // Only consider tokens that look like absolute paths.
@@ -64,7 +90,11 @@ async fn collect_image_attachments(text: &str) -> Vec<Attachment> {
         if !token.starts_with('/') {
             continue;
         }
-        let path = Path::new(token);
+        let resolved = resolve_real_path(token, None);
+        if !roots.contains(&resolved) {
+            continue;
+        }
+        let path = resolved.as_path();
         let ext = match path.extension().and_then(|e| e.to_str()) {
             Some(e) => e.to_lowercase(),
             None => continue,
@@ -93,17 +123,27 @@ async fn collect_image_attachments(text: &str) -> Vec<Attachment> {
     attachments
 }
 
-pub struct BashHandler;
+#[derive(Default)]
+pub struct BashHandler {
+    limits: LimitsConfig,
+    extra_roots: Vec<String>,
+}
 
 impl BashHandler {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
-}
 
-impl Default for BashHandler {
-    fn default() -> Self {
-        Self::new()
+    /// Timeout and output limits (`[permissions.limits]`).
+    pub fn with_limits(mut self, limits: LimitsConfig) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Directories, besides the persona workspace, whose images may be auto-attached.
+    pub fn with_extra_roots(mut self, roots: Vec<String>) -> Self {
+        self.extra_roots = roots;
+        self
     }
 }
 
@@ -148,7 +188,7 @@ impl ToolHandler for BashHandler {
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let command = match params.get("command").and_then(|v| v.as_str()) {
             Some(c) => c.to_string(),
@@ -166,7 +206,8 @@ impl ToolHandler for BashHandler {
         let timeout_secs = params
             .get("timeout_secs")
             .and_then(|v| v.as_u64())
-            .unwrap_or(DEFAULT_TIMEOUT_SECS);
+            .unwrap_or(DEFAULT_TIMEOUT_SECS)
+            .min(self.limits.bash_max_timeout_secs);
 
         debug!(
             "bash: running command: {} (timeout: {}s)",
@@ -184,32 +225,48 @@ impl ToolHandler for BashHandler {
         }
 
         let timeout = Duration::from_secs(timeout_secs);
+        let cap = self.limits.bash_max_output_chars;
 
-        let result = tokio::time::timeout(timeout, async {
-            let child = cmd.spawn()?;
-            child.wait_with_output().await.map_err(anyhow::Error::from)
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                return Ok(ToolOutput::error(format!(
+                    "Failed to spawn command '{}': {}",
+                    command, e
+                )));
+            }
+        };
+        let (Some(stdout_pipe), Some(stderr_pipe)) = (child.stdout.take(), child.stderr.take())
+        else {
+            return Ok(ToolOutput::error("spawned command has no piped output"));
+        };
+
+        let finished = tokio::time::timeout(timeout, async {
+            let (status, stdout, stderr) = tokio::join!(
+                child.wait(),
+                read_tail(stdout_pipe, cap),
+                read_tail(stderr_pipe, cap)
+            );
+            (status, stdout, stderr)
         })
         .await;
 
-        match result {
-            Err(_elapsed) => Ok(ToolOutput::error(format!(
-                "Command timed out after {} seconds: {}",
-                timeout_secs, command
-            ))),
-            Ok(Err(e)) => Ok(ToolOutput::error(format!(
-                "Failed to spawn command '{}': {}",
+        match finished {
+            Err(_elapsed) => {
+                let _ = child.kill().await;
+                Ok(ToolOutput::error(format!(
+                    "Command timed out after {} seconds: {}",
+                    timeout_secs, command
+                )))
+            }
+            Ok((Err(e), _, _)) => Ok(ToolOutput::error(format!(
+                "Failed to run command '{}': {}",
                 command, e
             ))),
-            Ok(Ok(output)) => {
-                let stdout_raw = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr_raw = String::from_utf8_lossy(&output.stderr).to_string();
-                let exit_code = output.status.code().unwrap_or(-1);
-
-                let (stdout, stdout_total, stdout_truncated) =
-                    truncate_tail(&stdout_raw, MAX_OUTPUT_CHARS);
-                let (stderr, stderr_total, stderr_truncated) =
-                    truncate_tail(&stderr_raw, MAX_OUTPUT_CHARS);
-
+            Ok((Ok(status), stdout_tail, stderr_tail)) => {
+                let exit_code = status.code().unwrap_or(-1);
+                let (stdout, stdout_total, stdout_truncated) = stdout_tail.finish();
+                let (stderr, stderr_total, stderr_truncated) = stderr_tail.finish();
                 let mut parts: Vec<String> = Vec::new();
                 parts.push(format!("Exit code: {}", exit_code));
 
@@ -217,7 +274,7 @@ impl ToolHandler for BashHandler {
                     if stdout_truncated {
                         parts.push(format!(
                             "[stdout truncated — showing last {} of {} chars]",
-                            MAX_OUTPUT_CHARS, stdout_total,
+                            cap, stdout_total,
                         ));
                     }
                     parts.push(format!("stdout:\n{}", stdout.trim_end()));
@@ -226,7 +283,7 @@ impl ToolHandler for BashHandler {
                     if stderr_truncated {
                         parts.push(format!(
                             "[stderr truncated — showing last {} of {} chars]",
-                            MAX_OUTPUT_CHARS, stderr_total,
+                            cap, stderr_total,
                         ));
                     }
                     parts.push(format!("stderr:\n{}", stderr.trim_end()));
@@ -244,7 +301,8 @@ impl ToolHandler for BashHandler {
                 // Auto-attach images referenced by path in stdout so they
                 // flow to the user via the interface (Slack upload, etc.)
                 // without polluting the conversation context.
-                let images = collect_image_attachments(&stdout_raw).await;
+                let roots = WorkspaceRoots::for_agent(&ctx.agent_id, &self.extra_roots);
+                let images = collect_image_attachments(&stdout, &roots).await;
 
                 let mut result = ToolOutput::success(parts.join("\n\n")).with_data(data);
                 if !images.is_empty() {
