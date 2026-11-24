@@ -59,3 +59,8 @@ pub mod observability;
 // Moved to the `features` submodule. Import via
 // `use assistant_core::types::features::{MemoryConfig, CompactionConfig, ...};`
 pub mod features;
+
+// ── Tool-permission configuration ─────────────────────────────────────────────
+//
+// Import via `use assistant_core::types::permissions::PermissionsConfig;`
+pub mod permissions;
