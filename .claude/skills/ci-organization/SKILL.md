@@ -14,6 +14,7 @@ description: >
 | `.github/workflows/ci.yml`             | push/PR to `main`   | Check, test, lint, format, visual regression, integration smoke          |
 | `.github/workflows/docker.yml`         | `workflow_dispatch` | Manual Docker build from source (dev/tag builds)                         |
 | `.github/workflows/release-please.yml` | push to `main`      | Release automation → binary matrix → Docker → OS packages → package repo |
+| `.github/workflows/supply-chain.yml`   | push/PR/weekly      | `cargo deny --workspace check`, `cargo machete --with-metadata`, OSV scan of `app/pubspec.lock` |
 
 ## CI Job Structure (`ci.yml`)
 
@@ -119,7 +120,7 @@ release-please → build-binaries (matrix, 6 targets) → build-docker → build
 
 ## Action Version Pins
 
-Always use these versions when adding new steps:
+Every `uses:` is pinned to a full commit SHA with the version as a trailing comment (`uses: actions/checkout@<sha> # v7`). Resolve the SHA of the tag when adding or bumping an action; Dependabot keeps the comment in sync. The versions below are the tags to resolve:
 
 | Action                       | Version   |
 | ---------------------------- | --------- |
