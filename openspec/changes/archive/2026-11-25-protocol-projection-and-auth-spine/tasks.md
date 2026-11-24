@@ -37,9 +37,9 @@ confirmed RED before any production code is written. Chunks are ≤ ~2h.
 
 ## 4. CLI projector (red first)
 
-- [ ] 4.1 RED: add a `CliProjector` (`Frame = String`) test asserting rendered
+- [x] 4.1 RED: add a `CliProjector` (`Frame = String`) test asserting rendered
       lines for representative variants. Confirm RED.
-- [ ] 4.2 GREEN: implement `CliProjector` (exhaustive, no `_` arm); move the
+- [x] 4.2 GREEN: implement `CliProjector` (exhaustive, no `_` arm); move the
       inline rendering in `crates/interface-cli/src/{main,repl_helpers}.rs`
       behind it. Pass; confirm REPL output unchanged manually.
 

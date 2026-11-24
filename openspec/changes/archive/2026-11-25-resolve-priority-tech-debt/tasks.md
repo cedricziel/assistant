@@ -95,4 +95,4 @@ single-call-site bug fix.
 - [x] 4.1 Run `make precommit` on the merged worktree — all checks green (765/765 Flutter tests pass, Rust fmt + clippy + machete all clean).
 - [ ] 4.2 Run `make test-integration` (Ollama-dependent; `continue-on-error: true` is acceptable).
 - [x] 4.3 Update `AGENTS.md` to remove the stale claim that `matrix-sdk` remains in `Cargo.toml` (already fully removed). The line lived in `AGENTS.md` (referenced from `CLAUDE.md`), not in `CLAUDE.md` itself.
-- [ ] 4.4 Archive this OpenSpec change with `/opsx:archive resolve-priority-tech-debt` once all three slices have shipped.
+- [x] 4.4 Archive this OpenSpec change with `/opsx:archive resolve-priority-tech-debt` once all three slices have shipped.
