@@ -130,8 +130,7 @@ class EmbeddedServerService {
     _process?.kill(ProcessSignal.sigkill);
     _process = null;
     yield EmbeddedServerError(
-      message:
-          'Embedded server failed to become ready after 10 health-check attempts.',
+      message: 'Embedded server failed to become ready after 10 health-check attempts.',
     );
   }
 

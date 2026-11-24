@@ -185,43 +185,40 @@ void main() {
       expect(chips[1].toolCalls.single.result, '404');
     });
 
-    test(
-      'tool-only assistant row WITH attachments keeps the bubble for thumbnails',
-      () {
-        // Edge case: the model invoked a tool AND produced an image attachment
-        // but no reply text. The bubble must remain so the attachment renders.
-        final history = [
-          _msg(
-            id: 'a1',
-            role: 'assistant',
-            content: '',
-            toolCalls: [(name: 'image-gen', status: 'ok', result: 'ok')],
-            attachments: [
-              (
-                id: 'att1',
-                filename: 'render.png',
-                mimeType: 'image/png',
-                url: 'https://example/render.png',
-              ),
-            ],
-          ),
-        ];
+    test('tool-only assistant row WITH attachments keeps the bubble for thumbnails', () {
+      // Edge case: the model invoked a tool AND produced an image attachment
+      // but no reply text. The bubble must remain so the attachment renders.
+      final history = [
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [(name: 'image-gen', status: 'ok', result: 'ok')],
+          attachments: [
+            (
+              id: 'att1',
+              filename: 'render.png',
+              mimeType: 'image/png',
+              url: 'https://example/render.png',
+            ),
+          ],
+        ),
+      ];
 
-        final mapped = chatMessagesFromHistory(history);
-        final bubbles = mapped
-            .where((m) => m.timelineType == TimelineEntryType.message)
-            .toList();
-        expect(bubbles, hasLength(1));
-        expect(bubbles.single.role, 'assistant');
-        expect(bubbles.single.content, '');
-        expect(bubbles.single.attachments, hasLength(1));
-        expect(bubbles.single.attachments.single.filename, 'render.png');
-        expect(
-          mapped.where((m) => m.timelineType == TimelineEntryType.toolCall),
-          hasLength(1),
-        );
-      },
-    );
+      final mapped = chatMessagesFromHistory(history);
+      final bubbles = mapped
+          .where((m) => m.timelineType == TimelineEntryType.message)
+          .toList();
+      expect(bubbles, hasLength(1));
+      expect(bubbles.single.role, 'assistant');
+      expect(bubbles.single.content, '');
+      expect(bubbles.single.attachments, hasLength(1));
+      expect(bubbles.single.attachments.single.filename, 'render.png');
+      expect(
+        mapped.where((m) => m.timelineType == TimelineEntryType.toolCall),
+        hasLength(1),
+      );
+    });
 
     test('pending tool-call status round-trips (not coerced to ok)', () {
       // A persisted row could carry a non-terminal status if the orchestrator
@@ -236,9 +233,9 @@ void main() {
         ),
       ];
 
-      final chips = chatMessagesFromHistory(
-        history,
-      ).where((m) => m.timelineType == TimelineEntryType.toolCall).toList();
+      final chips = chatMessagesFromHistory(history)
+          .where((m) => m.timelineType == TimelineEntryType.toolCall)
+          .toList();
       expect(chips, hasLength(1));
       expect(chips.single.toolCalls.single.status, ToolCallStatus.pending);
     });

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Background + foreground colour pair for a log-level chip.
 typedef LogSeverityColors = ({Color bg, Color fg});

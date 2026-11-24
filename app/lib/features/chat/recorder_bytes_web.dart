@@ -2,6 +2,7 @@
 import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
+
 import 'dart:js_interop';
 
 /// Reads the recorded output from a blob URL (returned by record.stop() on web).

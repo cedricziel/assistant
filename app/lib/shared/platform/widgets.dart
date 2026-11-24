@@ -2,8 +2,8 @@
 ///
 /// Feature code under `app/lib/features/**` and `app/lib/shared/**`
 /// (excluding `app/lib/shared/platform/**` itself) SHOULD import this file
-/// rather than `package:flutter/cupertino.dart` or
-/// `package:flutter/material.dart` directly.
+/// rather than `package:cupertino_ui/cupertino_ui.dart` or
+/// `package:material_ui/material_ui.dart` directly.
 ///
 /// The Phase 4 lint rule will forbid direct cupertino.dart and material.dart
 /// imports outside the allowlist (`lib/shared/platform/**` and `lib/main.dart`).
@@ -41,7 +41,7 @@ library;
 export 'package:flutter/widgets.dart';
 
 // 2. Curated Material subset.
-export 'package:flutter/material.dart'
+export 'package:material_ui/material_ui.dart'
     show
         // Surface primitives without iOS equivalents.
         Card,
@@ -174,7 +174,7 @@ export 'package:flutter/material.dart'
         DefaultMaterialLocalizations;
 
 // 3. Cupertino constants only — never Cupertino widget classes.
-export 'package:flutter/cupertino.dart' show CupertinoIcons;
+export 'package:cupertino_ui/cupertino_ui.dart' show CupertinoIcons;
 
 // 4. Façade wrappers and platform helpers.
 export 'adaptive_action_sheet.dart';

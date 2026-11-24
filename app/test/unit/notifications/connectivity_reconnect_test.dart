@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -102,8 +102,7 @@ void main() {
       expect(
         mockChat.reconnectCallCount,
         0,
-        reason:
-            'attemptReconnect should not be called on wifi→wifi (no offline transition)',
+        reason: 'attemptReconnect should not be called on wifi→wifi (no offline transition)',
       );
     });
 

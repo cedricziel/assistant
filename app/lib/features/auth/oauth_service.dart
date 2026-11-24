@@ -81,9 +81,8 @@ class OAuthService {
     if (state != null) params['state'] = state;
     if (scope != null) params['scope'] = scope;
 
-    return Uri.parse(
-      serverUrl,
-    ).replace(path: '/oauth/authorize', queryParameters: params);
+    return Uri.parse(serverUrl)
+        .replace(path: '/oauth/authorize', queryParameters: params);
   }
 
   /// Exchanges an authorization code for tokens.

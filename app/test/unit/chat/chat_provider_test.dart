@@ -8,7 +8,7 @@ import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -2608,22 +2608,19 @@ void main() {
       unawaited(notifier.sendMessage('c'));
       await tester.pump();
 
-      expect(
-        notifier.state.value!.pendingQueue.map((p) => p.text).toList(),
-        ['b', 'c'],
-        reason: 'precondition: a is streaming, b and c are queued in order',
-      );
+      expect(notifier.state.value!.pendingQueue.map((p) => p.text).toList(), [
+        'b',
+        'c',
+      ], reason: 'precondition: a is streaming, b and c are queued in order');
 
       // Remove the middle of the queue (index 0 in the visible queue,
       // since `a` is no longer in pendingQueue — it's actively streaming).
       notifier.removeFromQueue(0);
       await tester.pump();
 
-      expect(
-        notifier.state.value!.pendingQueue.map((p) => p.text).toList(),
-        ['c'],
-        reason: 'removeFromQueue(0) drops "b" but leaves "c"',
-      );
+      expect(notifier.state.value!.pendingQueue.map((p) => p.text).toList(), [
+        'c',
+      ], reason: 'removeFromQueue(0) drops "b" but leaves "c"');
 
       await ctrl1.close();
       await tester.pumpAndSettle();

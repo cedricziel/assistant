@@ -1,5 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -80,9 +80,8 @@ class _PersonaFileEditorScreenState
           _dirty = false;
           _saving = false;
         });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Saved')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Saved')));
       }
     } catch (e) {
       if (mounted) {

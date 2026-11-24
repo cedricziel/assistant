@@ -49,17 +49,15 @@ void main() {
     // -----------------------------------------------------------------------
 
     test('accepts Stream<Uint8List> without type error', () async {
-      final events = await parseSseByteStream(
-        _uint8Stream(singleToken),
-      ).toList();
+      final events = await parseSseByteStream(_uint8Stream(singleToken))
+          .toList();
       expect(events, hasLength(1));
       expect(events.first, isA<TokenEvent>());
     });
 
     test('accepts Stream<List<int>>', () async {
-      final events = await parseSseByteStream(
-        _listIntStream(singleToken),
-      ).toList();
+      final events = await parseSseByteStream(_listIntStream(singleToken))
+          .toList();
       expect(events, hasLength(1));
       expect(events.first, isA<TokenEvent>());
     });
@@ -69,9 +67,8 @@ void main() {
     // -----------------------------------------------------------------------
 
     test('emits TokenEvent with correct token', () async {
-      final events = await parseSseByteStream(
-        _uint8Stream(singleToken),
-      ).toList();
+      final events = await parseSseByteStream(_uint8Stream(singleToken))
+          .toList();
       expect((events.first as TokenEvent).token, equals('hello'));
     });
 
@@ -114,9 +111,8 @@ void main() {
     // -----------------------------------------------------------------------
 
     test('emits multiple events in order', () async {
-      final events = await parseSseByteStream(
-        _uint8Stream(multiChunk),
-      ).toList();
+      final events = await parseSseByteStream(_uint8Stream(multiChunk))
+          .toList();
       expect(events, hasLength(3));
       expect(events[0], isA<TokenEvent>());
       expect((events[0] as TokenEvent).token, equals('foo'));
@@ -198,9 +194,8 @@ void main() {
     // -----------------------------------------------------------------------
 
     test('empty stream yields no events', () async {
-      final events = await parseSseByteStream(
-        const Stream<Uint8List>.empty(),
-      ).toList();
+      final events = await parseSseByteStream(const Stream<Uint8List>.empty())
+          .toList();
       expect(events, isEmpty);
     });
   });
