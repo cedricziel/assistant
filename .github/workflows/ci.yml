@@ -51,19 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust toolchain
-        run: rustup show
-
-      - name: Install mold linker
-        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
-
-      - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: ./.github/actions/setup-rust
         with:
-          shared-key: "check"
+          cache-key: "check"
 
       - name: cargo check
         run: cargo check --workspace --all-features
@@ -75,19 +65,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust toolchain
-        run: rustup show
-
-      - name: Install mold linker
-        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
-
-      - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: ./.github/actions/setup-rust
         with:
-          shared-key: "test"
+          cache-key: "test"
 
       - name: cargo test
         run: cargo test --workspace
@@ -99,19 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust toolchain
-        run: rustup show
-
-      - name: Install mold linker
-        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
-
-      - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: ./.github/actions/setup-rust
         with:
-          shared-key: "check"
+          cache-key: "check"
 
       - name: cargo clippy
         run: cargo clippy --workspace -- -D warnings
@@ -137,25 +107,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust toolchain
-        run: rustup show
-
-      - name: Install mold linker
-        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
-
-      - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
-
       - name: Download Flutter web build
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: flutter-web-build
           path: app/build/web/
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: ./.github/actions/setup-rust
         with:
-          shared-key: "build"
+          cache-key: "build"
 
       - name: Build unified assistant binary (embeds Flutter web)
         run: cargo build -p assistant-cli
@@ -462,16 +422,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust toolchain
-        run: rustup show
-
-      - name: Install mold linker
-        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: ./.github/actions/setup-rust
         with:
-          shared-key: "test"
+          cache-key: "test"
+          system-deps: "false"
 
       - name: Pull Ollama smoke-test model
         run: |

@@ -1,0 +1,30 @@
+name: Set up Rust
+description: Rust toolchain from rust-toolchain.toml, mold linker, optional apt packages, and a shared cargo cache.
+
+inputs:
+  cache-key:
+    description: Shared cache key for Swatinem/rust-cache.
+    required: true
+  system-deps:
+    description: Install protobuf-compiler and ffmpeg (needed by --all-features builds).
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      shell: bash
+      run: rustup show
+
+    - name: Install mold linker
+      uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
+
+    - name: Install system dependencies
+      if: inputs.system-deps == 'true'
+      shell: bash
+      run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
+
+    - name: Cache cargo
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
