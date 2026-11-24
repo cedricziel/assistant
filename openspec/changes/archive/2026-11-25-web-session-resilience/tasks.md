@@ -56,4 +56,4 @@
 - [x] 7.6 Open PR titled `fix(app): web session resilience — corruption detection, banner, persistence, SW versioning`. Body links the four scenarios.
 - [x] 7.7 Merge after CI green.
 - [ ] 7.8 Deploy to schorschvm. Have the operator: clear browser cache once → log in → hard-refresh → confirm space selection persists. Then simulate decrypt failure (manually delete the `IndexedDB` entry for `flutter_secure_storage` via DevTools) → reload → confirm landing on `/login?reason=session-ended` with the banner visible. Then re-login → confirm context is reused (same context id), credentials refreshed, selection re-discovered.
-- [ ] 7.9 Archive: `openspec archive web-session-resilience`.
+- [x] 7.9 Archive: `openspec archive web-session-resilience`.
