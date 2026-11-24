@@ -150,10 +150,9 @@ limit guards in the tools are enforced regardless of the verdict.
 ### D6. Observability
 
 One `tracing` event per decision on target `assistant::permission`, fields
-`tool`, `decider`, `rule`, `confidence`, `outcome`, `interface`,
-`interactive`. The existing OTel tool span gets `permission.outcome` and
-`permission.decider` attributes. Task context and arguments are not logged
-(PII); only the rule text / model id is.
+`tool`, `decider`, `rule`, `confidence`, `outcome`, `interactive`. A denial also
+marks the existing OTel tool span (`tool_status = denied`, `tool_error`). Task
+context and arguments are not logged (PII); only the rule text / model id is.
 
 ### D7. No compatibility
 

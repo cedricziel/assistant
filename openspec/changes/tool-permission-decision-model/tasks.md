@@ -4,19 +4,19 @@ TDD throughout: failing test first, confirm RED, then GREEN. One PR per section.
 
 ## 1. Core pipeline, static rules, dispatch integration (PR a)
 
-- [ ] 1.1 RED/GREEN: `assistant_core::permission` types (`PermissionRequest`,
+- [x] 1.1 RED/GREEN: `assistant_core::permission` types (`PermissionRequest`,
       `Verdict`, `Decision`, `Outcome`, `ToolDecider`).
-- [ ] 1.2 RED/GREEN: rule parser (`tool(pattern)`) and wildcard matcher, primary
+- [x] 1.2 RED/GREEN: rule parser (`tool(pattern)`) and wildcard matcher, primary
       argument extraction per tool.
-- [ ] 1.3 RED/GREEN: `StaticRules` evaluation order (deny > ask > allow),
+- [x] 1.3 RED/GREEN: `StaticRules` evaluation order (deny > ask > allow),
       built-in hard-deny lists (dangerous shell commands, credential paths); no network-destination deny,
       built-in safe allow defaults.
-- [ ] 1.4 RED/GREEN: `PermissionPolicy` pipeline with a scripted decider.
-- [ ] 1.5 `PermissionsConfig` in `AssistantConfig` (`[permissions]`).
-- [ ] 1.6 RED/GREEN: wire into `dispatch_global_tool` and the subagent loop;
+- [x] 1.4 RED/GREEN: `PermissionPolicy` pipeline with a scripted decider.
+- [x] 1.5 `PermissionsConfig` in `AssistantConfig` (`[permissions]`).
+- [x] 1.6 RED/GREEN: wire into `dispatch_global_tool` and the subagent loop;
       non-interactive `Ask` → `ToolOutput::error`-style denial returned to the
-      LLM; decision tracing event + OTel span attributes.
-- [ ] 1.7 Docs (`docs/tool-permissions.md`) and ADR.
+      LLM; decision tracing event; denial marks the OTel tool span.
+- [x] 1.7 Docs (`docs/tool-permissions.md`) and ADR.
 
 ## 2. File-tool workspace confinement (PR b)
 
