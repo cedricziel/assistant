@@ -25,7 +25,6 @@ import 'package:assistant_api/src/model/agent_interface.dart';
 import 'package:assistant_api/src/model/agent_provider.dart';
 import 'package:assistant_api/src/model/agent_skill.dart';
 import 'package:assistant_api/src/model/agent_summary.dart';
-import 'package:assistant_api/src/model/analytics_summary_response.dart';
 import 'package:assistant_api/src/model/api_error_response.dart';
 import 'package:assistant_api/src/model/api_key_security_scheme.dart';
 import 'package:assistant_api/src/model/api_key_summary.dart';
@@ -70,12 +69,10 @@ import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
 import 'package:assistant_api/src/model/interface_instance_response.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
 import 'package:assistant_api/src/model/list_tasks_response.dart';
-import 'package:assistant_api/src/model/log_entry_response.dart';
 import 'package:assistant_api/src/model/member_entry.dart';
 import 'package:assistant_api/src/model/message.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
-import 'package:assistant_api/src/model/model_usage_response.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
 import 'package:assistant_api/src/model/o_auth2_security_scheme.dart';
 import 'package:assistant_api/src/model/o_auth_error_response.dart';
@@ -111,7 +108,6 @@ import 'package:assistant_api/src/model/skill_detail.dart';
 import 'package:assistant_api/src/model/skill_entry_response.dart';
 import 'package:assistant_api/src/model/space_detail.dart';
 import 'package:assistant_api/src/model/space_summary.dart';
-import 'package:assistant_api/src/model/span_entry_response.dart';
 import 'package:assistant_api/src/model/sse_status_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_completed_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_started_event.dart';
@@ -134,12 +130,8 @@ import 'package:assistant_api/src/model/task_state.dart';
 import 'package:assistant_api/src/model/task_status.dart';
 import 'package:assistant_api/src/model/task_status_update_event.dart';
 import 'package:assistant_api/src/model/template_response.dart';
-import 'package:assistant_api/src/model/time_series_response.dart';
 import 'package:assistant_api/src/model/token_response.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
-import 'package:assistant_api/src/model/tool_usage_response.dart';
-import 'package:assistant_api/src/model/trace_detail_response.dart';
-import 'package:assistant_api/src/model/trace_summary_response.dart';
 import 'package:assistant_api/src/model/turn_state.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
 import 'package:assistant_api/src/model/unsubscribe_request.dart';
@@ -183,7 +175,6 @@ part 'serializers.g.dart';
   AgentProvider,
   AgentSkill,
   AgentSummary,
-  AnalyticsSummaryResponse,
   ApiErrorResponse,
   ApiKeySecurityScheme,
   ApiKeySummary,
@@ -228,12 +219,10 @@ part 'serializers.g.dart';
   InterfaceInstanceResponse,
   ListTaskPushNotificationConfigsResponse,
   ListTasksResponse,
-  LogEntryResponse,
   MemberEntry,
   Message,
   MessageSummary,
   ModelPart,
-  ModelUsageResponse,
   MutualTlsSecurityScheme,
   OAuth2SecurityScheme,
   OAuthErrorResponse,
@@ -269,7 +258,6 @@ part 'serializers.g.dart';
   SkillEntryResponse,
   SpaceDetail,
   SpaceSummary,
-  SpanEntryResponse,
   SseStatusEvent,
   SseSubagentCompletedEvent,
   SseSubagentStartedEvent,
@@ -292,12 +280,8 @@ part 'serializers.g.dart';
   TaskStatus,
   TaskStatusUpdateEvent,
   TemplateResponse,
-  TimeSeriesResponse,
   TokenResponse,
   ToolCallSummary,
-  ToolUsageResponse,
-  TraceDetailResponse,
-  TraceSummaryResponse,
   TurnState,
   TurnStatusResponse,
   UnsubscribeRequest,
@@ -361,10 +345,6 @@ Serializers serializers = (_$serializers.toBuilder()
         () => ListBuilder<InterfaceInstanceResponse>(),
       )
       ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(LogEntryResponse)]),
-        () => ListBuilder<LogEntryResponse>(),
-      )
-      ..addBuilderFactory(
         const FullType(BuiltList, [FullType(TemplateResponse)]),
         () => ListBuilder<TemplateResponse>(),
       )
@@ -379,10 +359,6 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(PersonaSummary)]),
         () => ListBuilder<PersonaSummary>(),
-      )
-      ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(TraceSummaryResponse)]),
-        () => ListBuilder<TraceSummaryResponse>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(SubscriptionResponse)]),

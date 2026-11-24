@@ -15,8 +15,6 @@ doc/AgentProvider.md
 doc/AgentSkill.md
 doc/AgentSummary.md
 doc/AgentsApi.md
-doc/AnalyticsApi.md
-doc/AnalyticsSummaryResponse.md
 doc/ApiErrorResponse.md
 doc/ApiKeySecurityScheme.md
 doc/ApiKeySummary.md
@@ -69,15 +67,12 @@ doc/InterfaceInstanceResponse.md
 doc/InterfacesApi.md
 doc/ListTaskPushNotificationConfigsResponse.md
 doc/ListTasksResponse.md
-doc/LogEntryResponse.md
-doc/LogsApi.md
 doc/MemberEntry.md
 doc/MembersApi.md
 doc/Message.md
 doc/MessageSummary.md
 doc/MessagesApi.md
 doc/ModelPart.md
-doc/ModelUsageResponse.md
 doc/MutualTlsSecurityScheme.md
 doc/OAuth2SecurityScheme.md
 doc/OAuthErrorResponse.md
@@ -119,7 +114,6 @@ doc/SkillsApi.md
 doc/SpaceDetail.md
 doc/SpaceSummary.md
 doc/SpacesApi.md
-doc/SpanEntryResponse.md
 doc/SseStatusEvent.md
 doc/SseSubagentCompletedEvent.md
 doc/SseSubagentStartedEvent.md
@@ -144,13 +138,8 @@ doc/TaskStatusUpdateEvent.md
 doc/TasksApi.md
 doc/TemplateResponse.md
 doc/TemplatesApi.md
-doc/TimeSeriesResponse.md
 doc/TokenResponse.md
 doc/ToolCallSummary.md
-doc/ToolUsageResponse.md
-doc/TraceDetailResponse.md
-doc/TraceSummaryResponse.md
-doc/TracesApi.md
 doc/TurnState.md
 doc/TurnStatusResponse.md
 doc/UnsubscribeRequest.md
@@ -188,7 +177,6 @@ lib/src/api.dart
 lib/src/api/account_api.dart
 lib/src/api/agent_card_api.dart
 lib/src/api/agents_api.dart
-lib/src/api/analytics_api.dart
 lib/src/api/api_keys_api.dart
 lib/src/api/attachments_api.dart
 lib/src/api/bindings_api.dart
@@ -197,7 +185,6 @@ lib/src/api/catalog_api.dart
 lib/src/api/commands_api.dart
 lib/src/api/conversations_api.dart
 lib/src/api/interfaces_api.dart
-lib/src/api/logs_api.dart
 lib/src/api/members_api.dart
 lib/src/api/messages_api.dart
 lib/src/api/oauth_api.dart
@@ -208,7 +195,6 @@ lib/src/api/skills_api.dart
 lib/src/api/spaces_api.dart
 lib/src/api/tasks_api.dart
 lib/src/api/templates_api.dart
-lib/src/api/traces_api.dart
 lib/src/api/users_api.dart
 lib/src/api/web_push_api.dart
 lib/src/api/webhooks_api.dart
@@ -231,7 +217,6 @@ lib/src/model/agent_interface.dart
 lib/src/model/agent_provider.dart
 lib/src/model/agent_skill.dart
 lib/src/model/agent_summary.dart
-lib/src/model/analytics_summary_response.dart
 lib/src/model/api_error_response.dart
 lib/src/model/api_key_security_scheme.dart
 lib/src/model/api_key_summary.dart
@@ -277,12 +262,10 @@ lib/src/model/implicit_o_auth_flow.dart
 lib/src/model/interface_instance_response.dart
 lib/src/model/list_task_push_notification_configs_response.dart
 lib/src/model/list_tasks_response.dart
-lib/src/model/log_entry_response.dart
 lib/src/model/member_entry.dart
 lib/src/model/message.dart
 lib/src/model/message_summary.dart
 lib/src/model/model_part.dart
-lib/src/model/model_usage_response.dart
 lib/src/model/mutual_tls_security_scheme.dart
 lib/src/model/o_auth2_security_scheme.dart
 lib/src/model/o_auth_error_response.dart
@@ -318,7 +301,6 @@ lib/src/model/skill_detail.dart
 lib/src/model/skill_entry_response.dart
 lib/src/model/space_detail.dart
 lib/src/model/space_summary.dart
-lib/src/model/span_entry_response.dart
 lib/src/model/sse_status_event.dart
 lib/src/model/sse_subagent_completed_event.dart
 lib/src/model/sse_subagent_started_event.dart
@@ -341,12 +323,8 @@ lib/src/model/task_state.dart
 lib/src/model/task_status.dart
 lib/src/model/task_status_update_event.dart
 lib/src/model/template_response.dart
-lib/src/model/time_series_response.dart
 lib/src/model/token_response.dart
 lib/src/model/tool_call_summary.dart
-lib/src/model/tool_usage_response.dart
-lib/src/model/trace_detail_response.dart
-lib/src/model/trace_summary_response.dart
 lib/src/model/turn_state.dart
 lib/src/model/turn_status_response.dart
 lib/src/model/unsubscribe_request.dart
