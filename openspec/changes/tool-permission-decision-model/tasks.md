@@ -20,10 +20,10 @@ TDD throughout: failing test first, confirm RED, then GREEN. One PR per section.
 
 ## 2. File-tool workspace confinement (PR b)
 
-- [ ] 2.1 `PathGuard` (canonicalize, symlink resolution, root check) in core.
-- [ ] 2.2 RED/GREEN: `file-read`, `file-write`, `file-edit`, `file-glob` refuse
+- [x] 2.1 `PathGuard` (canonicalize, symlink resolution, root check) in core.
+- [x] 2.2 RED/GREEN: `file-read`, `file-write`, `file-edit`, `file-glob` refuse
       paths outside roots (`..`, absolute, `~`, symlink escape).
-- [ ] 2.3 `<workspace>` expansion in rules uses the same roots.
+- [x] 2.3 `<workspace>` expansion in rules uses the same roots.
 
 ## 3. bash / process limits (PR c)
 

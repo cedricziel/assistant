@@ -104,7 +104,7 @@ File tools may touch the workspace roots and nothing else. The roots are:
 - the Persona's workspace,
 - every entry in `workspace_roots`.
 
-Before a path is matched or checked, it is resolved: `~/` is expanded, relative paths are made absolute, `..` is applied, and symlinks are followed. A symlink inside the workspace that points outside it resolves to the outside location and is denied. A path that does not exist yet keeps its missing parts as written, so `file-write` to a new file works.
+The file tools enforce the same roots themselves, so the limit also holds for callers that bypass the permission check (see Known gap). `workspace_roots` is the only way to widen it. Before a path is matched or checked, it is resolved: `~/` is expanded, relative paths are made absolute, `..` is applied, and symlinks are followed. A symlink inside the workspace that points outside it resolves to the outside location and is denied. A path that does not exist yet keeps its missing parts as written, so `file-write` to a new file works.
 
 ## Built-in rules
 
