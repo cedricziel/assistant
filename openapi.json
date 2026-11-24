@@ -6883,10 +6883,10 @@
             "schema": {
               "oneOf": [
                 {
-                  "type": "null"
+                  "$ref": "#/components/schemas/TaskState"
                 },
                 {
-                  "$ref": "#/components/schemas/TaskState"
+                  "type": "null"
                 }
               ]
             }
@@ -7585,11 +7585,11 @@
           "provider": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/AgentProvider",
                 "description": "The service provider of the agent."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -9462,55 +9462,55 @@
           "authorizationCode": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/AuthorizationCodeOAuthFlow",
                 "description": "Configuration for the OAuth Authorization Code flow."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "clientCredentials": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ClientCredentialsOAuthFlow",
                 "description": "Configuration for the OAuth Client Credentials flow."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "deviceCode": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/DeviceCodeOAuthFlow",
                 "description": "Configuration for the OAuth Device Code flow."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "implicit": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ImplicitOAuthFlow",
                 "description": "Deprecated: Use Authorization Code + PKCE instead."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "password": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/PasswordOAuthFlow",
                 "description": "Deprecated: Use Authorization Code + PKCE or Device Code."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -9854,11 +9854,11 @@
           "authentication": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/AuthenticationInfo",
                 "description": "Authentication information required to send the notification."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -10023,55 +10023,55 @@
           "apiKeySecurityScheme": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ApiKeySecurityScheme",
                 "description": "API key-based authentication."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "httpAuthSecurityScheme": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/HttpAuthSecurityScheme",
                 "description": "HTTP authentication (Basic, Bearer, etc.)."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "mtlsSecurityScheme": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/MutualTlsSecurityScheme",
                 "description": "Mutual TLS authentication."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "oauth2SecurityScheme": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/OAuth2SecurityScheme",
                 "description": "OAuth 2.0 authentication."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "openIdConnectSecurityScheme": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/OpenIdConnectSecurityScheme",
                 "description": "OpenID Connect authentication."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -10103,11 +10103,11 @@
           "pushNotificationConfig": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/PushNotificationConfig",
                 "description": "Push notification configuration for task updates."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -10123,11 +10123,11 @@
           "configuration": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/SendMessageConfiguration",
                 "description": "Configuration for the send request."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -10159,22 +10159,22 @@
           "message": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Message",
                 "description": "A message from the agent."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "task": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Task",
                 "description": "The task created or updated by the message."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -10604,44 +10604,44 @@
           "artifactUpdate": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TaskArtifactUpdateEvent",
                 "description": "An event indicating a task artifact update."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "message": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Message",
                 "description": "A Message object containing a message from the agent."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "statusUpdate": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TaskStatusUpdateEvent",
                 "description": "An event indicating a task status update."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "task": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Task",
                 "description": "A Task object containing the current state of the task."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -10849,11 +10849,11 @@
           "message": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Message",
                 "description": "A message associated with the status."
+              },
+              {
+                "type": "null"
               }
             ]
           },
