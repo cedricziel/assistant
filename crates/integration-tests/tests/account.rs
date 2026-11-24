@@ -124,12 +124,12 @@ async fn setup() -> TestEnv {
     // JwtKeyPair is not Clone, so we build two from the same shared secret:
     // one for the auth middleware to validate, one for us to sign with.
     let jwt_validate = Arc::new(JwtManager::new(
-        JwtKeyPair::from_secret(JWT_SECRET),
+        JwtKeyPair::from_secret(JWT_SECRET).unwrap(),
         "https://test.local".into(),
         "https://test.local".into(),
     ));
     let jwt_sign = JwtManager::new(
-        JwtKeyPair::from_secret(JWT_SECRET),
+        JwtKeyPair::from_secret(JWT_SECRET).unwrap(),
         "https://test.local".into(),
         "https://test.local".into(),
     );

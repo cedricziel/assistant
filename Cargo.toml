@@ -197,7 +197,7 @@ http-body-util = "0.1"
 # URL percent-encoding
 urlencoding = "2"
 # Authentication
-jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", features = ["aws_lc_rs"] }
 argon2 = { version = "0.5", features = ["std"] }
 rand = "0.10"
 # Constant-time comparison (API key verification)
