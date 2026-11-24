@@ -123,7 +123,7 @@ api_key_env = "OPENROUTER_API_KEY"
 The model sees: tool name, arguments, and the user's task text. It never sees
 tool outputs, fetched content, or prior assistant text. Arguments are sent as
 quoted data. Because the score is steerable, (a) every deterministic deny stays
-upstream of it, (b) the threshold is high, and (c) the SSRF / confinement /
+upstream of it, (b) the threshold is high, and (c) the confinement /
 limit guards in the tools are enforced regardless of the verdict.
 
 ### D5. Tool-level guards (independent of the pipeline)
@@ -131,12 +131,16 @@ limit guards in the tools are enforced regardless of the verdict.
 - **File tools** resolve the path through one core `PathGuard`
   (canonicalize + symlink resolution + root check) and refuse outside the
   roots. Roots: persona workspace + `permissions.workspace_roots`.
-- **SSRF guard** in `tool-executor` and `workflow-http`: resolve host, reject
-  loopback, private (10/8, 172.16/12, 192.168/16), link-local (169.254/16,
-  fe80::/10 — covers cloud metadata), ULA (fc00::/7), unspecified, multicast,
-  IPv4-mapped IPv6 of any of those; connect to the *resolved* address (no
-  re-resolve → no DNS rebinding); disable automatic redirects and re-check each
-  hop manually, capped at 5.
+- **No SSRF deny-list (owner decision).** This is a self-hosted assistant whose
+  core use case includes reaching local services (Home Assistant, NAS, LAN
+  APIs, localhost tools). `web-fetch` / `workflow-http` therefore do not block
+  loopback/private/link-local destinations. A destination is just another tool
+  argument: user `web-fetch(<url-pattern>)` rules decide first, then the
+  decision model, then ask/deny. The model request carries the destination host
+  and a `private` flag (resolved best-effort; failure = "unknown") as context.
+  Redirects are not blocked; `web-fetch` reports the final URL. Cloud-metadata
+  endpoints are *not* special-cased; an operator on a cloud host who wants that
+  adds `deny = ["web-fetch(*://169.254.169.254*)"]`.
 - **bash**: `timeout_secs` clamped to `permissions.limits.bash_max_timeout_secs`;
   stdout/stderr read incrementally and truncated at the cap while the child is
   still running; image auto-attach only for files inside workspace roots.
@@ -172,8 +176,8 @@ that rely on ungated execution are migrated, not shimmed.
 
 Stack of PRs (each green on its own): (a) core pipeline + static rules +
 dispatch/subagent integration + non-interactive deny; (b) file-tool
-confinement; (c) SSRF guard; (d) bash/process limits; (e) decision-model
-decider. No data migration. Rollback = revert the PR; no persisted state.
+confinement; (c) bash/process limits; (d) decision-model decider (incl.
+destination context for network tools). No data migration. Rollback = revert the PR; no persisted state.
 
 ## Open Questions
 
