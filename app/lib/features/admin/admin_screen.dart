@@ -1,5 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'admin_providers.dart';
@@ -219,9 +219,8 @@ class _SpacesTab extends ConsumerWidget {
         children: [
           Text(
             'Spaces',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-            ),
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(color: Theme.of(context).colorScheme.primary),
           ),
           const SizedBox(height: 8),
           spacesAsync.when(
@@ -250,9 +249,8 @@ class _SpacesTab extends ConsumerWidget {
           const SizedBox(height: 24),
           Text(
             'Members',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-            ),
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(color: Theme.of(context).colorScheme.primary),
           ),
           const SizedBox(height: 8),
           membersAsync.when(
@@ -496,9 +494,8 @@ class _InviteUserDialogState extends State<_InviteUserDialog> {
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to invite user: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed to invite user: $e')));
         Navigator.of(context).pop();
       }
     } finally {
@@ -681,9 +678,8 @@ class _PublishCatalogDialogState extends State<_PublishCatalogDialog> {
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to publish: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed to publish: $e')));
         Navigator.of(context).pop();
       }
     } finally {

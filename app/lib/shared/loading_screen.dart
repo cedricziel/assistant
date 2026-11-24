@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Full-screen loading scaffold shown while async providers (e.g.
 /// [activeContextProvider]) are still initialising on cold start.

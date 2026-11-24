@@ -1,6 +1,7 @@
-import 'package:flutter/cupertino.dart';
+import 'package:assistant_app/shared/platform/adaptive_app.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -70,7 +71,10 @@ Widget _buildNavShell({required String initialLocation}) {
   );
   return ProviderScope(
     overrides: [pwaInstallProvider.overrideWith(_FakePwaNotifier.new)],
-    child: MaterialApp.router(routerConfig: router),
+    child: MaterialApp.router(
+      routerConfig: router,
+      builder: (_, child) => LegacyDesignBridge(child: child!),
+    ),
   );
 }
 

@@ -55,8 +55,7 @@ void main() {
       expect(
         html,
         contains('sizes="32x32"'),
-        reason:
-            'index.html must declare sizes="32x32" so modern browsers select favicon-32.png',
+        reason: 'index.html must declare sizes="32x32" so modern browsers select favicon-32.png',
       );
     });
   });
@@ -122,9 +121,8 @@ void main() {
     test('maskable variants differ from their standard counterparts', () {
       for (final size in [192, 512]) {
         final standard = File('web/icons/Icon-$size.png').readAsBytesSync();
-        final maskable = File(
-          'web/icons/Icon-maskable-$size.png',
-        ).readAsBytesSync();
+        final maskable = File('web/icons/Icon-maskable-$size.png')
+            .readAsBytesSync();
         final stdHash = sha256.convert(standard).toString();
         final mskHash = sha256.convert(maskable).toString();
         expect(

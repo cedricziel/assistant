@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
     hide ToolCallStatus;
 
 import 'chat_provider.dart';
+import '../../shared/theme/legacy_theme.dart';
 import 'markdown_link_handler.dart';
 
 /// Display density for timeline entries, derived from viewport width.
@@ -180,13 +181,14 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
         isActive: true,
         child: StreamMarkdown(
           stream: stream,
-          styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-            paragraphStyle: TextStyle(
-              fontSize: 12,
-              color: colorScheme.onSurfaceVariant,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
+          styleSheet: MarkdownStyleSheet.fromTheme(legacyThemeOf(context))
+              .copyWith(
+                paragraphStyle: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
           onTapLink: (url) => MarkdownLinkHandler(context: context).onTap(url),
         ),
       );

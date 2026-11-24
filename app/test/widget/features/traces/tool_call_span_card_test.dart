@@ -1,6 +1,6 @@
 import 'package:assistant_api/assistant_api.dart';
 import 'package:built_value/json_object.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:assistant_app/features/traces/tool_call_span_card.dart';

@@ -1,6 +1,6 @@
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -84,8 +84,7 @@ void main() {
       expect(
         find.byType(CupertinoActivityIndicator),
         findsOneWidget,
-        reason:
-            'CircularProgressIndicator.adaptive should render CupertinoActivityIndicator on iOS',
+        reason: 'CircularProgressIndicator.adaptive should render CupertinoActivityIndicator on iOS',
       );
 
       debugDefaultTargetPlatformOverride = null;
@@ -105,8 +104,7 @@ void main() {
       expect(
         find.byType(CupertinoActivityIndicator),
         findsNothing,
-        reason:
-            'CircularProgressIndicator.adaptive should NOT render CupertinoActivityIndicator on Android',
+        reason: 'CircularProgressIndicator.adaptive should NOT render CupertinoActivityIndicator on Android',
       );
 
       debugDefaultTargetPlatformOverride = null;

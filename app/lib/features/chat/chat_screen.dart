@@ -11,6 +11,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'svg_builder.dart';
+
 import 'package:go_router/go_router.dart';
 
 import '../../shared/platform/widgets.dart';
@@ -32,6 +33,7 @@ import 'commands_provider.dart';
 import 'conversation_list.dart';
 import '../../shared/theme/assistant_colors.dart';
 import '../../shared/theme/assistant_spacing.dart';
+import '../../shared/theme/legacy_theme.dart';
 import 'image_utils.dart';
 import 'markdown_link_handler.dart';
 import 'queued_message_bubble.dart';
@@ -253,7 +255,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    final result = await FilePicker.pickFiles(
+    final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: [
         'png',
@@ -269,38 +271,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         'csv',
         'json',
       ],
-      allowMultiple: true,
-      withData: true,
     );
-    if (result == null) return;
     final notifier = ref.read(pendingAttachmentsProvider.notifier);
-    for (final file in result.files) {
-      if (file.bytes != null) {
-        final mime = mimeFromExtension(file.extension);
-        if (isImageMimeType(mime) || mime == 'image/heic') {
-          // Image files may need HEIC→PNG conversion.
-          final (bytes, filename, normalizedMime) = await normalizeImage(
-            file.bytes!,
-            file.name,
-            file.extension,
-          );
-          notifier.add(
-            PendingAttachment(
-              bytes: bytes,
-              filename: filename,
-              mimeType: normalizedMime,
-            ),
-          );
-        } else {
-          // Non-image files: add directly.
-          notifier.add(
-            PendingAttachment(
-              bytes: file.bytes!,
-              filename: file.name,
-              mimeType: mime,
-            ),
-          );
-        }
+    for (final file in files) {
+      final fileBytes = await file.readAsBytes();
+      final mime = mimeFromExtension(file.extension);
+      if (isImageMimeType(mime) || mime == 'image/heic') {
+        // Image files may need HEIC→PNG conversion.
+        final (bytes, filename, normalizedMime) = await normalizeImage(
+          fileBytes,
+          file.name,
+          file.extension,
+        );
+        notifier.add(
+          PendingAttachment(
+            bytes: bytes,
+            filename: filename,
+            mimeType: normalizedMime,
+          ),
+        );
+      } else {
+        notifier.add(
+          PendingAttachment(
+            bytes: fileBytes,
+            filename: file.name,
+            mimeType: mime,
+          ),
+        );
       }
     }
   }
@@ -450,9 +447,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             children: [
                               Icon(
                                 Icons.warning_amber_outlined,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onErrorContainer,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer,
                                 size: 18,
                               ),
                               const SizedBox(width: 8),
@@ -460,9 +457,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 child: Text(
                                   chatState.error!,
                                   style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onErrorContainer,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onErrorContainer,
                                   ),
                                 ),
                               ),
@@ -767,7 +764,7 @@ class _MessageBubble extends StatelessWidget {
                           stream: message.tokenStream!,
                           styleSheet:
                               MarkdownStyleSheet.fromTheme(
-                                Theme.of(context),
+                                legacyThemeOf(context),
                               ).copyWith(
                                 paragraphStyle: TextStyle(
                                   color: colorScheme.onSurface,
@@ -798,7 +795,7 @@ class _MessageBubble extends StatelessWidget {
                           data: message.content,
                           styleSheet:
                               MarkdownStyleSheet.fromTheme(
-                                Theme.of(context),
+                                legacyThemeOf(context),
                               ).copyWith(
                                 paragraphStyle: TextStyle(
                                   color: colorScheme.onSurface,
@@ -1274,9 +1271,8 @@ class _MessageBubble extends StatelessWidget {
                   child: Icon(
                     Icons.broken_image,
                     size: 64,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: 0.7),
+                    color: Theme.of(context).colorScheme.onSurface
+                        .withValues(alpha: 0.7),
                   ),
                 ),
               ),
@@ -1980,9 +1976,8 @@ class _InputRowState extends State<_InputRow> {
                 VoiceRecorderButton(
                   onRecordingComplete: widget.onVoiceRecorded,
                   onError: (err) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text(err)));
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(err)));
                   },
                 ),
               if (!widget.isSending) const SizedBox(width: 4),

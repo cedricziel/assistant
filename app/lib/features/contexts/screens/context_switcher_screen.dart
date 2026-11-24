@@ -129,9 +129,8 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 16),
           Text(
             'No contexts yet. Tap + to add one.',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: Theme.of(context).colorScheme.outline,
-            ),
+            style: Theme.of(context).textTheme.bodyLarge
+                ?.copyWith(color: Theme.of(context).colorScheme.outline),
           ),
         ],
       ),

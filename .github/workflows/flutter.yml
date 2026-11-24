@@ -18,8 +18,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.x"
-          channel: stable
+          flutter-version-file: app/pubspec.yaml
           cache: true
 
       - name: Install dependencies
@@ -40,8 +39,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.x"
-          channel: stable
+          flutter-version-file: app/pubspec.yaml
           cache: true
 
       - name: Disable code signing
@@ -83,8 +81,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.x"
-          channel: stable
+          flutter-version-file: app/pubspec.yaml
           cache: true
 
       - name: Install dependencies

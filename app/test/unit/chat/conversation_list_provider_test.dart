@@ -181,71 +181,67 @@ void main() {
     // Stream-driven upsert and delete
     // -----------------------------------------------------------------------
 
-    test(
-      'replaces title in-place when an upserted event arrives for an existing conversation',
-      () async {
-        // This is the contract the title-generator worker depends on:
-        // when the backend writes a new title (via `update_title`) and
-        // broadcasts an Upserted event, the conversation list must
-        // re-render with the new title without a manual refresh.
-        final controller = StreamController<ConversationListEvent>.broadcast();
-        final client = _FakeApiClient(streamController: controller);
-        final container = _makeContainer(client: client);
-        addTearDown(container.dispose);
-        addTearDown(controller.close);
-        final sub = _keepAlive(container);
-        addTearDown(sub.close);
+    test('replaces title in-place when an upserted event arrives for an existing conversation', () async {
+      // This is the contract the title-generator worker depends on:
+      // when the backend writes a new title (via `update_title`) and
+      // broadcasts an Upserted event, the conversation list must
+      // re-render with the new title without a manual refresh.
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
 
-        await container.read(conversationListProvider.future);
+      await container.read(conversationListProvider.future);
 
-        // Snapshot: an "Untitled" conversation lands.
-        controller.add(
-          ConversationSnapshotEvent([
-            _makeEntry(
-              id: 'c1',
-              title: 'Untitled',
-              updatedAt: DateTime(2024, 1, 1),
-            ),
-          ]),
-        );
-        await Future<void>.delayed(Duration.zero);
-
-        // Sanity: list shows the placeholder title.
-        var state = container.read(conversationListProvider).value!;
-        expect(state.conversations.single.title, 'Untitled');
-
-        // Worker writes a generated title — server broadcasts the same id
-        // with a newer updatedAt and the resolved title.
-        controller.add(
-          ConversationUpsertedEvent(
-            _makeEntry(
-              id: 'c1',
-              title: 'Dinner Brainstorm',
-              updatedAt: DateTime(2024, 1, 2),
-            ),
+      // Snapshot: an "Untitled" conversation lands.
+      controller.add(
+        ConversationSnapshotEvent([
+          _makeEntry(
+            id: 'c1',
+            title: 'Untitled',
+            updatedAt: DateTime(2024, 1, 1),
           ),
-        );
-        await _waitForDebounce();
+        ]),
+      );
+      await Future<void>.delayed(Duration.zero);
 
-        state = container.read(conversationListProvider).value!;
-        expect(
-          state.conversations.length,
-          1,
-          reason:
-              'upserting an existing id must update in place, not append a duplicate',
-        );
-        expect(
-          state.conversations.single.id,
-          'c1',
-          reason: 'id must be preserved across the title update',
-        );
-        expect(
-          state.conversations.single.title,
-          'Dinner Brainstorm',
-          reason: 'title must reflect the worker-written value',
-        );
-      },
-    );
+      // Sanity: list shows the placeholder title.
+      var state = container.read(conversationListProvider).value!;
+      expect(state.conversations.single.title, 'Untitled');
+
+      // Worker writes a generated title — server broadcasts the same id
+      // with a newer updatedAt and the resolved title.
+      controller.add(
+        ConversationUpsertedEvent(
+          _makeEntry(
+            id: 'c1',
+            title: 'Dinner Brainstorm',
+            updatedAt: DateTime(2024, 1, 2),
+          ),
+        ),
+      );
+      await _waitForDebounce();
+
+      state = container.read(conversationListProvider).value!;
+      expect(
+        state.conversations.length,
+        1,
+        reason: 'upserting an existing id must update in place, not append a duplicate',
+      );
+      expect(
+        state.conversations.single.id,
+        'c1',
+        reason: 'id must be preserved across the title update',
+      );
+      expect(
+        state.conversations.single.title,
+        'Dinner Brainstorm',
+        reason: 'title must reflect the worker-written value',
+      );
+    });
 
     test('applies upserted events from the stream', () async {
       final controller = StreamController<ConversationListEvent>.broadcast();
@@ -409,52 +405,55 @@ void main() {
     // REGRESSION: race condition — null → non-null rebuild
     // -----------------------------------------------------------------------
 
-    test('REGRESSION: rebuilds and subscribes when apiClientProvider transitions '
-        'from null (context loading) to non-null (context ready)', () async {
-      final container = ProviderContainer(
-        overrides: [
-          apiClientProvider.overrideWith(
-            (ref) => ref.watch(_apiClientHolderProvider),
-          ),
-        ],
-      );
-      addTearDown(container.dispose);
-      final sub = _keepAlive(container);
-      addTearDown(sub.close);
+    test(
+      'REGRESSION: rebuilds and subscribes when apiClientProvider transitions '
+      'from null (context loading) to non-null (context ready)',
+      () async {
+        final container = ProviderContainer(
+          overrides: [
+            apiClientProvider.overrideWith(
+              (ref) => ref.watch(_apiClientHolderProvider),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        final sub = _keepAlive(container);
+        addTearDown(sub.close);
 
-      // Phase 1: no client — empty state.
-      await container.read(conversationListProvider.future);
-      expect(
-        container.read(conversationListProvider).value?.conversations,
-        isEmpty,
-        reason: 'no conversations expected while apiClientProvider is null',
-      );
+        // Phase 1: no client — empty state.
+        await container.read(conversationListProvider.future);
+        expect(
+          container.read(conversationListProvider).value?.conversations,
+          isEmpty,
+          reason: 'no conversations expected while apiClientProvider is null',
+        );
 
-      // Phase 2: client becomes available — notifier should rebuild and subscribe.
-      final controller = StreamController<ConversationListEvent>.broadcast();
-      addTearDown(controller.close);
-      final client = _FakeApiClient(streamController: controller);
-      container.read(_apiClientHolderProvider.notifier).set(client);
-      await Future<void>.delayed(Duration.zero);
-      await container.read(conversationListProvider.future);
+        // Phase 2: client becomes available — notifier should rebuild and subscribe.
+        final controller = StreamController<ConversationListEvent>.broadcast();
+        addTearDown(controller.close);
+        final client = _FakeApiClient(streamController: controller);
+        container.read(_apiClientHolderProvider.notifier).set(client);
+        await Future<void>.delayed(Duration.zero);
+        await container.read(conversationListProvider.future);
 
-      // Emit snapshot via the stream.
-      controller.add(ConversationSnapshotEvent([_makeEntry(id: 'c-loaded')]));
-      await Future<void>.delayed(Duration.zero);
+        // Emit snapshot via the stream.
+        controller.add(ConversationSnapshotEvent([_makeEntry(id: 'c-loaded')]));
+        await Future<void>.delayed(Duration.zero);
 
-      expect(
-        container
-            .read(conversationListProvider)
-            .value
-            ?.conversations
-            .map((c) => c.id),
-        contains('c-loaded'),
-        reason:
-            'conversations must be loaded after apiClientProvider becomes '
-            'non-null; this regresses if ref.watch() is replaced with '
-            'ref.read() in build()',
-      );
-    });
+        expect(
+          container
+              .read(conversationListProvider)
+              .value
+              ?.conversations
+              .map((c) => c.id),
+          contains('c-loaded'),
+          reason:
+              'conversations must be loaded after apiClientProvider becomes '
+              'non-null; this regresses if ref.watch() is replaced with '
+              'ref.read() in build()',
+        );
+      },
+    );
 
     // -----------------------------------------------------------------------
     // refresh()

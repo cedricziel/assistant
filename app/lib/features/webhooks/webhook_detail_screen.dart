@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -208,8 +208,7 @@ class _WebhookDetailBody extends StatelessWidget {
         Text('Actions', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         Tooltip(
-          message:
-              'Sends a test ping to your endpoint to confirm it responds correctly.',
+          message: 'Sends a test ping to your endpoint to confirm it responds correctly.',
           child: OutlinedButton.icon(
             onPressed: onVerify,
             icon: const Icon(Icons.verified_outlined),

@@ -1,6 +1,7 @@
-import 'package:flutter/cupertino.dart';
+import 'package:assistant_app/shared/platform/adaptive_app.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:assistant_app/shared/platform/adaptive_context_menu.dart';
@@ -8,6 +9,7 @@ import 'package:assistant_app/shared/platform/adaptive_context_menu.dart';
 Widget _harness(Widget child) {
   return MaterialApp(
     home: Scaffold(body: Center(child: child)),
+    builder: (_, child) => LegacyDesignBridge(child: child!),
   );
 }
 

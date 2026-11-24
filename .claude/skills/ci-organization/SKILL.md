@@ -1,5 +1,6 @@
 ---
 name: ci-organization
+model: sonnet
 description: >
   CI organization principles and workflow structure for this project. Use whenever modifying,
   adding, or reviewing GitHub Actions workflows — including adding jobs, changing job order,
@@ -61,6 +62,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 ```
+
+### Pinned toolchains
+
+Flutter is pinned to an exact version in one place: `environment.flutter` in `app/pubspec.yaml` (for example `flutter: 3.50.1`, never a range). Every `subosito/flutter-action` step reads it with `flutter-version-file: app/pubspec.yaml`; do not add `flutter-version` or `channel` next to it, because the action rejects a version together with a version file. A floating version breaks `flutter analyze --fatal-infos` as soon as a new stable release adds deprecations (3.50 deprecated `package:flutter/material.dart`). To upgrade, change the pubspec pin together with the code changes the new release needs.
+
+`visual-regression` runs on `ubuntu-24.04` because Playwright has no Chromium build for Ubuntu 26.04. Move it back to `ubuntu-latest` only after upgrading Playwright to a version that supports it, and expect screenshot baselines to change.
 
 ### Soft failures
 

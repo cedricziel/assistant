@@ -4,7 +4,7 @@
 // Spec: openspec/changes/web-session-resilience/specs/web-session-resilience/spec.md
 //   "Login screen surfaces the session-ended banner"
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';

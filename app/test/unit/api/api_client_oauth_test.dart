@@ -208,55 +208,52 @@ void main() {
       );
     });
 
-    test(
-      'refresh throwing RevokeTokenException fires onAuthExpired and clears credentials',
-      () async {
-        final valid = _creds(
-          accessToken: 'looks-valid',
-          expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
-        );
-        final storage = ContextTokenStorage(
-          contextId: 'ctx-1',
-          repository: repo,
-          initial: valid,
-        );
+    test('refresh throwing RevokeTokenException fires onAuthExpired and clears credentials', () async {
+      final valid = _creds(
+        accessToken: 'looks-valid',
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      );
+      final storage = ContextTokenStorage(
+        contextId: 'ctx-1',
+        repository: repo,
+        initial: valid,
+      );
 
-        var expiredCalls = 0;
-        final expiredFired = Completer<void>();
-        final client = ApiClient.oauth2(
-          baseUrl: 'http://localhost',
-          tokenStorage: storage,
-          refreshToken: (old, _) async {
-            throw RevokeTokenException();
-          },
-          onAuthExpired: () async {
-            expiredCalls++;
-            if (!expiredFired.isCompleted) expiredFired.complete();
-          },
-        );
+      var expiredCalls = 0;
+      final expiredFired = Completer<void>();
+      final client = ApiClient.oauth2(
+        baseUrl: 'http://localhost',
+        tokenStorage: storage,
+        refreshToken: (old, _) async {
+          throw RevokeTokenException();
+        },
+        onAuthExpired: () async {
+          expiredCalls++;
+          if (!expiredFired.isCompleted) expiredFired.complete();
+        },
+      );
 
-        final adapter = _SequencedAdapter({
-          '/api/personas': [
-            const _Reply(statusCode: 401, body: {'error': 'expired upstream'}),
-          ],
-        });
-        client.dioForTesting.httpClientAdapter = adapter;
-        client.refreshDioForTesting?.httpClientAdapter = adapter;
+      final adapter = _SequencedAdapter({
+        '/api/personas': [
+          const _Reply(statusCode: 401, body: {'error': 'expired upstream'}),
+        ],
+      });
+      client.dioForTesting.httpClientAdapter = adapter;
+      client.refreshDioForTesting?.httpClientAdapter = adapter;
 
-        Object? caught;
-        try {
-          await client.dioForTesting.get<dynamic>('/api/personas');
-        } on DioException catch (e) {
-          caught = e;
-        }
+      Object? caught;
+      try {
+        await client.dioForTesting.get<dynamic>('/api/personas');
+      } on DioException catch (e) {
+        caught = e;
+      }
 
-        // Wait for the unauthenticated status stream to flush.
-        await expiredFired.future.timeout(const Duration(seconds: 1));
+      // Wait for the unauthenticated status stream to flush.
+      await expiredFired.future.timeout(const Duration(seconds: 1));
 
-        expect(caught, isA<DioException>());
-        expect(expiredCalls, greaterThanOrEqualTo(1));
-        expect(await storage.read(), isNull, reason: 'fresh_dio cleared cache');
-      },
-    );
+      expect(caught, isA<DioException>());
+      expect(expiredCalls, greaterThanOrEqualTo(1));
+      expect(await storage.read(), isNull, reason: 'fresh_dio cleared cache');
+    });
   });
 }

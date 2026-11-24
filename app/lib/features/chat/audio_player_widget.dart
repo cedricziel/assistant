@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A compact play/stop button that fetches and plays audio on demand.
 ///

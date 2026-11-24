@@ -158,20 +158,18 @@ void main() {
           serverUrl: 'http://localhost:8080',
           token: 'v1',
         );
-        final firstId =
-            (container.read(oauthLoginProvider) as OAuthLoginSuccess)
-                .context
-                .id;
+        final firstId = (container.read(
+          oauthLoginProvider,
+        ) as OAuthLoginSuccess).context.id;
 
         // Second login to same URL.
         await notifier.legacyLogin(
           serverUrl: 'http://localhost:8080',
           token: 'v2',
         );
-        final secondId =
-            (container.read(oauthLoginProvider) as OAuthLoginSuccess)
-                .context
-                .id;
+        final secondId = (container.read(
+          oauthLoginProvider,
+        ) as OAuthLoginSuccess).context.id;
 
         // Same context was updated (same ID), not duplicated.
         expect(firstId, secondId);

@@ -1,3 +1,4 @@
+import 'package:assistant_app/shared/platform/adaptive_app.dart';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
@@ -5,7 +6,7 @@ import 'package:assistant_app/features/chat/command_event_tile.dart';
 import 'package:assistant_app/features/chat/commands_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -59,7 +60,10 @@ void main() {
             apiClientProvider.overrideWithValue(null),
             commandsProvider.overrideWith((ref) async => []),
           ],
-          child: const MaterialApp(home: ChatScreen()),
+          child: MaterialApp(
+            home: const ChatScreen(),
+            builder: (_, child) => LegacyDesignBridge(child: child!),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -109,7 +113,10 @@ void main() {
             apiClientProvider.overrideWithValue(null),
             commandsProvider.overrideWith((ref) async => []),
           ],
-          child: const MaterialApp(home: ChatScreen()),
+          child: MaterialApp(
+            home: const ChatScreen(),
+            builder: (_, child) => LegacyDesignBridge(child: child!),
+          ),
         ),
       );
       await tester.pumpAndSettle();

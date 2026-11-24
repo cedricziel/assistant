@@ -1,5 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -176,9 +176,8 @@ class _CreateApiKeyDialogState extends State<_CreateApiKeyDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to create key: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed to create key: $e')));
         Navigator.of(context).pop();
       }
     } finally {
