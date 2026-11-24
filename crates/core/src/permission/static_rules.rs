@@ -9,7 +9,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use super::path::{WorkspaceRoots, resolve_real_path};
+use super::path::{WorkspaceRoots, glob_literal_dir, resolve_real_path};
 use super::rule::wildcard_match;
 use super::{Decision, PermissionRequest, Rule, Verdict};
 use crate::types::permissions::PermissionsConfig;
@@ -184,18 +184,7 @@ fn bash_subjects(command: &str, mode: Mode) -> Vec<String> {
 /// The path (or literal glob prefix) a file tool operates on.
 fn file_subject(tool: &str, params: &Value) -> Option<String> {
     if tool == "file-glob" {
-        let pattern = str_param(params, "pattern")?;
-        let end = pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len());
-        let literal = &pattern[..end];
-        let dir = match literal.rfind('/') {
-            Some(i) if end < pattern.len() => &literal[..=i],
-            _ => literal,
-        };
-        return Some(if dir.is_empty() {
-            ".".to_string()
-        } else {
-            dir.to_string()
-        });
+        return str_param(params, "pattern").map(glob_literal_dir);
     }
     str_param(params, "path").map(str::to_string)
 }

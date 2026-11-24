@@ -56,6 +56,23 @@ fn resolve_components(path: &Path, mut out: PathBuf, hops: &mut usize) -> PathBu
     out
 }
 
+/// The directory (or literal path) a glob pattern is rooted at: everything
+/// before the first glob metacharacter, cut back to the last `/`. `"."` when
+/// nothing literal precedes the first metacharacter.
+pub fn glob_literal_dir(pattern: &str) -> String {
+    let end = pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len());
+    let literal = &pattern[..end];
+    let dir = match literal.rfind('/') {
+        Some(i) if end < pattern.len() => &literal[..=i],
+        _ => literal,
+    };
+    if dir.is_empty() {
+        ".".to_string()
+    } else {
+        dir.to_string()
+    }
+}
+
 /// The set of directories file tools may touch.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkspaceRoots {
@@ -176,6 +193,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = canon(dir.path());
         assert_eq!(resolve_real_path("n.txt", Some(&root)), root.join("n.txt"));
+    }
+
+    #[test]
+    fn glob_literal_dir_stops_at_the_first_metacharacter() {
+        assert_eq!(glob_literal_dir("/a/b/**/*.rs"), "/a/b/");
+        assert_eq!(glob_literal_dir("/a/b/file?.txt"), "/a/b/");
+        assert_eq!(glob_literal_dir("/a/b/c.txt"), "/a/b/c.txt");
+        assert_eq!(glob_literal_dir("**/*.rs"), ".");
+        assert_eq!(glob_literal_dir("src/*.rs"), "src/");
     }
 
     #[test]
