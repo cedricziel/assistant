@@ -27,10 +27,10 @@ TDD throughout: failing test first, confirm RED, then GREEN. One PR per section.
 
 ## 3. bash / process limits (PR c)
 
-- [ ] 3.1 RED/GREEN: `timeout_secs` clamped to config max.
-- [ ] 3.2 RED/GREEN: streaming output cap (child not fully buffered).
-- [ ] 3.3 RED/GREEN: image auto-attach restricted to workspace roots.
-- [ ] 3.4 RED/GREEN: `process` TTL, session cap, per-line cap.
+- [x] 3.1 RED/GREEN: `timeout_secs` clamped to config max.
+- [x] 3.2 RED/GREEN: streaming output cap (child not fully buffered).
+- [x] 3.3 RED/GREEN: image auto-attach restricted to workspace roots.
+- [x] 3.4 RED/GREEN: `process` TTL, session cap, per-line cap.
 
 ## 4. Jev decision-model decider (PR d)
 

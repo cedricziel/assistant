@@ -60,6 +60,7 @@ workspace_roots = ["~/notes"]
 | `ask`             | list of rules | Always send to a human.                                        |
 | `allow`           | list of rules | Allow, unless a deny, confinement or ask check fires first.    |
 | `workspace_roots` | list of paths | Directories file tools may use, besides the Persona workspace. |
+| `limits`          | table         | Resource limits for `bash` and `process` (below).              |
 
 A rule that does not parse, such as `bash(oops`, stops the config from loading, and the error names the rule. An unknown key under `[permissions]` does too.
 
@@ -105,6 +106,29 @@ File tools may touch the workspace roots and nothing else. The roots are:
 - every entry in `workspace_roots`.
 
 The file tools enforce the same roots themselves, so the limit also holds for callers that bypass the permission check (see Known gap). `workspace_roots` is the only way to widen it. Before a path is matched or checked, it is resolved: `~/` is expanded, relative paths are made absolute, `..` is applied, and symlinks are followed. A symlink inside the workspace that points outside it resolves to the outside location and is denied. A path that does not exist yet keeps its missing parts as written, so `file-write` to a new file works.
+
+## Resource limits
+
+The `bash` and `process` tools enforce these limits themselves, whatever the permission check decided. Set them under `[permissions.limits]`.
+
+```toml
+[permissions.limits]
+bash_max_timeout_secs = 600
+bash_max_output_chars = 200000
+process_ttl_secs = 3600
+process_max_sessions = 16
+process_max_line_chars = 4000
+```
+
+| Key                      | Default  | Meaning                                                                                                              |
+| ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `bash_max_timeout_secs`  | `600`    | Upper bound for the `timeout_secs` argument of `bash`. Larger values are clamped.                                    |
+| `bash_max_output_chars`  | `200000` | Output kept per stream. `bash` reads output as the command runs and keeps the tail, so memory stays near this value. |
+| `process_ttl_secs`       | `3600`   | A `process` session with no `poll`, `log`, `write`, `kill` call for this long is killed and removed.                 |
+| `process_max_sessions`   | `16`     | Maximum number of running `process` sessions. `start` fails at the limit.                                            |
+| `process_max_line_chars` | `4000`   | Stored output lines longer than this are cut and end with `[line truncated]`.                                        |
+
+`bash` attaches an image to the reply only when its path, with symlinks resolved, lies inside a workspace root. Before this change it attached any image path printed to stdout.
 
 ## Built-in rules
 
