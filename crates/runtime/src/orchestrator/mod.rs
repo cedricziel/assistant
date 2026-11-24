@@ -119,7 +119,7 @@ pub(crate) enum FinalAnswerOutcome {
 
 /// Outcome of dispatching a single global (executor) tool call.
 pub(crate) enum DispatchOutcome {
-    /// The user denied execution via the confirmation gate.
+    /// The permission gate (or the user, via confirmation) denied the call.
     Denied,
     /// The tool was executed and its result finalized.
     Executed { had_error: bool },
@@ -209,6 +209,8 @@ pub struct Orchestrator {
     pub(crate) bus: Arc<dyn MessageBus>,
     pub(crate) max_iterations: usize,
     pub(crate) confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
+    /// Gate evaluated before every tool call (static rules, decision model).
+    pub(crate) permission_policy: assistant_core::permission::PermissionPolicy,
     /// Memory loader used to rebuild the system prompt at the start of every
     /// turn so that writes made by memory tools are reflected immediately.
     pub(crate) memory_loader: MemoryLoader,
@@ -293,6 +295,9 @@ impl Orchestrator {
             bus,
             max_iterations: config.llm.max_iterations,
             confirmation_callback: None,
+            permission_policy: assistant_core::permission::PermissionPolicy::from_config(
+                &config.permissions,
+            ),
             memory_loader,
             trace_content: config.observability.trace_content,
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
@@ -378,6 +383,15 @@ impl Orchestrator {
     /// tool is included in `TurnResult::attachments`.
     pub fn with_audio_store(mut self, store: Arc<AudioStore>) -> Self {
         self.audio_store = Some(store);
+        self
+    }
+
+    /// Replace the permission policy (e.g. to attach a decision model).
+    pub fn with_permission_policy(
+        mut self,
+        policy: assistant_core::permission::PermissionPolicy,
+    ) -> Self {
+        self.permission_policy = policy;
         self
     }
 

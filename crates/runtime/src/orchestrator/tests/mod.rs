@@ -63,16 +63,34 @@ async fn mount_answer(server: &MockServer, text: &str) {
         .await;
 }
 
+/// Orchestrator plumbing tests drive arbitrary mock tools; the permission
+/// policy itself is covered in `permission.rs`. Built-in hard denies still
+/// apply.
+fn allow_all_tools(config: &mut AssistantConfig) {
+    config.permissions.allow = vec!["*".parse().expect("valid rule")];
+}
+
 /// Build an [`Orchestrator`] wired to `base_url` with a fresh in-memory DB.
 async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
     let mut config = AssistantConfig::default();
     config.memory.enabled = false;
+    allow_all_tools(&mut config);
     build_with_config(base_url, config).await
 }
 
 async fn build_with_config(
     base_url: &str,
     config: AssistantConfig,
+) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
+    build_customized(base_url, config, |o| o).await
+}
+
+/// Like [`build_with_config`], but lets the test adjust the orchestrator
+/// (e.g. attach a confirmation callback) before it is shared.
+async fn build_customized(
+    base_url: &str,
+    config: AssistantConfig,
+    customize: impl FnOnce(Orchestrator) -> Orchestrator,
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
@@ -92,14 +110,14 @@ async fn build_with_config(
         Arc::new(config.clone()),
     ));
     let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
-    let orch = Arc::new(Orchestrator::new(
+    let orch = Arc::new(customize(Orchestrator::new(
         llm,
         storage.clone(),
         executor.clone(),
         registry.clone(),
         bus,
         &config,
-    ));
+    )));
     executor.set_subagent_runner(orch.clone());
     (orch, storage)
 }
@@ -111,6 +129,7 @@ async fn build_with_executor(
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>, Arc<ToolExecutor>) {
     let mut config = AssistantConfig::default();
     config.memory.enabled = false;
+    allow_all_tools(&mut config);
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
     let llm: Arc<dyn LlmProvider> = Arc::new(
@@ -203,6 +222,7 @@ mod end_turn;
 mod history;
 mod misc;
 mod multimodal;
+mod permission;
 mod sanitize;
 mod streaming;
 mod subagent;

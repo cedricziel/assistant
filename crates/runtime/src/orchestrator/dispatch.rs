@@ -1,13 +1,16 @@
 //! Tool dispatch and result finalization for the orchestrator.
 //!
-//! Contains the confirmation gate, tool execution through the global executor,
+//! Contains the permission gate, tool execution through the global executor,
 //! result recording (metrics, OTel, persistence), and tool-call history helpers.
 
 use std::sync::Arc;
 
 use assistant_core::{
-    Attachment, Capabilities, ChatHistoryMessage, HostedTool, ToolCallItem, ToolHandler, ToolSpec,
-    types::conversation::ExecutionContext, types::conversation::Message,
+    Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ToolCallItem, ToolHandler,
+    ToolSpec,
+    permission::{Outcome, PermissionRequest},
+    types::conversation::ExecutionContext,
+    types::conversation::Message,
     types::conversation::MessageRole,
 };
 use assistant_storage::AttachmentStore as _AttachmentStoreTrait;
@@ -310,10 +313,58 @@ impl Orchestrator {
         FinalizedTool { had_error }
     }
 
-    /// Dispatch a single tool call through the global executor, applying the
-    /// confirmation gate when required.
+    /// Run the permission pipeline for one tool call.
     ///
-    /// Checks whether the tool requires user confirmation, records the denial
+    /// `Ok(())` means the call may execute. `Err(observation)` carries the
+    /// text to return to the LLM in place of a tool result. Undecided calls
+    /// defer to the confirmation callback on interactive turns and are denied
+    /// on every other turn.
+    pub(crate) async fn authorize_tool_call(
+        &self,
+        name: &str,
+        params: &serde_json::Value,
+        ctx: &ExecutionContext,
+        requires_confirmation: bool,
+        task_context: Option<&str>,
+    ) -> Result<(), String> {
+        let resolution = self
+            .permission_policy
+            .evaluate(&PermissionRequest {
+                tool_name: name,
+                params,
+                ctx,
+                requires_confirmation,
+                task_context,
+            })
+            .await;
+
+        match resolution.outcome {
+            Outcome::Allow => Ok(()),
+            Outcome::Deny => Err(format!(
+                "Permission denied for '{name}': {}",
+                resolution.decision.reason
+            )),
+            Outcome::Ask => match &self.confirmation_callback {
+                Some(cb) if ctx.interactive => {
+                    if cb.confirm(name, params) {
+                        Ok(())
+                    } else {
+                        Err(format!("User denied execution of '{name}'."))
+                    }
+                }
+                _ => Err(format!(
+                    "Permission denied for '{name}': approval is required but this turn cannot \
+                     prompt a user ({}). Ask the owner to add an allow rule for this call.",
+                    resolution.decision.reason
+                )),
+            },
+        }
+    }
+
+    /// Dispatch a single tool call through the global executor, applying the
+    /// permission gate.
+    ///
+    /// Runs the permission pipeline, records a denial
     /// in OTel/history/DB when refused, and otherwise executes and finalizes
     /// the result.
     #[allow(clippy::too_many_arguments)]
@@ -334,19 +385,16 @@ impl Orchestrator {
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
     ) -> DispatchOutcome {
-        // Confirmation gate.
         let requires_confirm = tool_handlers
             .iter()
             .find(|h| h.name() == name)
             .map(|h| h.requires_confirmation())
             .unwrap_or(false);
 
-        if requires_confirm
-            && ctx.interactive
-            && let Some(cb) = &self.confirmation_callback
-            && !cb.confirm(name, params)
-        {
-            let observation = format!("User denied execution of '{name}'.");
+        let authorization = self
+            .authorize_tool_call(name, params, ctx, requires_confirm, task_context(history))
+            .await;
+        if let Err(observation) = authorization {
             info!(%observation);
             otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
             otel_span.set_attribute(KeyValue::new("tool_error", observation.clone()));
@@ -415,5 +463,25 @@ impl Orchestrator {
         DispatchOutcome::Executed {
             had_error: result.had_error,
         }
+    }
+}
+
+/// The user's most recent message, truncated: the task the permission
+/// pipeline weighs a tool call against.
+pub(crate) fn task_context(history: &[ChatHistoryMessage]) -> Option<&str> {
+    const MAX_CHARS: usize = 1_000;
+    history.iter().rev().find_map(|m| match m {
+        ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content,
+        } => Some(truncate_chars(content, MAX_CHARS)),
+        _ => None,
+    })
+}
+
+fn truncate_chars(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((i, _)) => &s[..i],
+        None => s,
     }
 }
