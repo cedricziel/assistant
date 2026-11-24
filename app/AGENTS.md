@@ -2,7 +2,7 @@
 
 ### State Management
 
-Riverpod 2.x (`flutter_riverpod`). Providers live in `*_provider.dart` files alongside their screens. All async providers use `AsyncNotifier` / `AutoDisposeAsyncNotifier`.
+Riverpod 3.x (`flutter_riverpod ^3.5.0`). Providers live in `*_provider.dart` files alongside their screens. All async providers use `AsyncNotifier` (Riverpod 3 merged the `AutoDispose*` variants into the base classes).
 
 ### CORS
 

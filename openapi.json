@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Assistant API",
-    "description": "AI assistant API — A2A protocol (Agent-to-Agent), chat, and workflow management.\n\n**Authentication**: protected endpoints require `Authorization: Bearer <token>`.\nThe token is set via `--auth-token` / `ASSISTANT_WEB_TOKEN` on the server.",
+    "description": "AI assistant API — A2A protocol (Agent-to-Agent), chat, and workflow management.\n\n**Authentication**: protected endpoints require `Authorization: Bearer <token>`.\nThe token is an OAuth2 access token issued by `/oauth/token`, or an API key (`ask_live_...`).",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -11830,7 +11830,7 @@
       "bearer_token": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Bearer token. Pass the token issued by the server via `Authorization: Bearer <token>`. Configure it with `--auth-token` / `ASSISTANT_WEB_TOKEN`."
+        "description": "Bearer token. Pass an OAuth2 access token issued by the server's `/oauth/token` endpoint, or an API key (`ask_live_...`), via `Authorization: Bearer <token>`."
       },
       "oauth2": {
         "type": "oauth2",

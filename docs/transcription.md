@@ -68,18 +68,21 @@ Ogg/Opus, MP3, M4A, WAV, FLAC, WebM, AAC. File size limit is 25 MB (matches the 
 1. An interface (Slack, Signal, ...) receives a message with audio file attachments.
 2. The audio bytes are downloaded and passed to the configured `TranscriptionProvider`.
 3. The provider returns the transcript text.
-4. The transcript is prepended to the user's message as `[Voice transcription]: <text>`.
+4. The transcript is prepended to the user's message (Slack uses `[Voice transcription]: <text>`; Signal uses `[Voice message]: <text>`).
 5. The agent processes the combined text normally.
 
-If transcription fails, a `[Voice message: transcription failed]` placeholder is inserted instead — the message is never silently dropped.
+If transcription fails, the Slack interface inserts a `[Voice message: transcription failed]` placeholder instead — the message is never silently dropped.
 
 ## Interface support
 
 | Interface  | Status                                           |
 | ---------- | ------------------------------------------------ |
 | Slack      | Supported — voice messages and audio file shares |
-| Signal     | Planned                                          |
-| Mattermost | Planned                                          |
+| Signal     | Supported                                        |
+| Mattermost | Supported                                        |
+| Matrix     | Supported                                        |
+| Nextcloud  | Supported                                        |
+| Web        | Supported — `POST /api/conversations/{id}/voice` |
 | CLI        | N/A                                              |
 
 ## Architecture

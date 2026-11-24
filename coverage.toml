@@ -1,6 +1,6 @@
 # Workspace coverage configuration consumed by `make coverage` and
 # `tools/check_coverage.sh`. Specified by the openspec change
-# `workspace-test-coverage-floor` (see openspec/changes/).
+# `workspace-test-coverage-floor` (see openspec/changes/archive/2026-05-21-workspace-test-coverage-floor/).
 
 # Per-crate line-coverage floor (percent). Crates not in `excluded_crates`
 # or `report_only` must meet or exceed this number on every PR.
@@ -34,7 +34,7 @@ crates = [
 # it below 80% will fail.
 #
 # Seeded with every non-excluded workspace member. As crates clear the
-# floor (tracked in openspec/changes/workspace-test-coverage-floor/tasks.md
+# floor (tracked in openspec/changes/archive/2026-05-21-workspace-test-coverage-floor/tasks.md
 # Phase 11), they are removed from this list.
 #
 # Identifiers are workspace directory names under `crates/`, NOT Cargo
