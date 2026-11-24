@@ -27,6 +27,70 @@ pub struct PermissionsConfig {
     /// Resource limits for `bash` and `process`.
     #[serde(default)]
     pub limits: LimitsConfig,
+    /// Decision model consulted for calls the static rules leave undecided.
+    #[serde(default)]
+    pub decision_model: DecisionModelConfig,
+}
+
+/// The decision model (`[permissions.decision_model]`).
+///
+/// Disabled by default. When enabled, calls no static rule decides are sent to
+/// a Jev model; a call is approved only if every answer scores at least
+/// `threshold`. Anything else (low score, error, timeout) falls back to the
+/// human / deny path.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct DecisionModelConfig {
+    pub enabled: bool,
+    /// Pinned model id, e.g. `typesafe/jev-1.13`. `latest` aliases are rejected.
+    #[serde(deserialize_with = "deserialize_pinned_model")]
+    pub model: String,
+    /// Minimum score (0 < t <= 1) every answer must reach to approve.
+    #[serde(deserialize_with = "deserialize_threshold")]
+    pub threshold: f32,
+    /// Request timeout; a timeout counts as "not approved".
+    pub timeout_secs: u64,
+    /// Decisions endpoint.
+    pub base_url: String,
+    /// Environment variable holding the API key.
+    pub api_key_env: String,
+}
+
+impl Default for DecisionModelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: "typesafe/jev-1.13".to_string(),
+            threshold: 0.9,
+            timeout_secs: 8,
+            base_url: "https://openrouter.ai/api/alpha/decisions".to_string(),
+            api_key_env: "OPENROUTER_API_KEY".to_string(),
+        }
+    }
+}
+
+fn deserialize_pinned_model<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let model = String::deserialize(d)?;
+    let version = model.rsplit('-').next().unwrap_or("");
+    if model.to_ascii_lowercase().contains("latest")
+        || !version.starts_with(|c: char| c.is_ascii_digit())
+    {
+        return Err(serde::de::Error::custom(format!(
+            "decision_model.model '{model}' is not pinned to a version (expected e.g. typesafe/jev-1.13)"
+        )));
+    }
+    Ok(model)
+}
+
+fn deserialize_threshold<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    let t = f32::deserialize(d)?;
+    if t > 0.0 && t <= 1.0 {
+        Ok(t)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "decision_model.threshold {t} must be in (0, 1]"
+        )))
+    }
 }
 
 /// Resource limits enforced by the `bash` and `process` tools
@@ -95,6 +159,49 @@ workspace_roots = ["~/scratch"]
             toml::from_str("[limits]\nbash_max_timeout_secs = 30").unwrap();
         assert_eq!(cfg.limits.bash_max_timeout_secs, 30);
         assert_eq!(cfg.limits.process_max_sessions, 16);
+    }
+
+    #[test]
+    fn decision_model_is_disabled_and_pinned_by_default() {
+        let cfg = PermissionsConfig::default().decision_model;
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.model, "typesafe/jev-1.13");
+        assert_eq!(cfg.threshold, 0.9);
+    }
+
+    #[test]
+    fn decision_model_parses_overrides() {
+        let cfg: PermissionsConfig = toml::from_str(
+            "[decision_model]\nenabled = true\nmodel = \"typesafe/jev-2.0\"\nthreshold = 0.8\ntimeout_secs = 3",
+        )
+        .unwrap();
+        assert!(cfg.decision_model.enabled);
+        assert_eq!(cfg.decision_model.model, "typesafe/jev-2.0");
+        assert_eq!(cfg.decision_model.timeout_secs, 3);
+    }
+
+    #[test]
+    fn unpinned_model_ids_are_rejected() {
+        for bad in [
+            "typesafe/jev-latest",
+            "typesafe/JEV-LATEST",
+            "typesafe/jev",
+            "jev-",
+        ] {
+            let toml = format!("[decision_model]\nmodel = \"{bad}\"");
+            let err = toml::from_str::<PermissionsConfig>(&toml)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("not pinned"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn out_of_range_thresholds_are_rejected() {
+        for bad in ["0", "1.5", "-0.1"] {
+            let toml = format!("[decision_model]\nthreshold = {bad}");
+            assert!(toml::from_str::<PermissionsConfig>(&toml).is_err(), "{bad}");
+        }
     }
 
     #[test]
