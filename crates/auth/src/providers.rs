@@ -550,7 +550,7 @@ mod tests {
         Arc<TestUserStore>,
     ) {
         let secret = b"test-secret-for-jwt-signing-32b!";
-        let kp = JwtKeyPair::from_secret(secret);
+        let kp = JwtKeyPair::from_secret(secret).unwrap();
         let jwt_manager = Arc::new(JwtManager::new(
             kp,
             "https://test.local".into(),

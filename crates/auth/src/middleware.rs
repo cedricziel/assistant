@@ -220,8 +220,8 @@ mod tests {
         // We need another JwtManager for the state since JwtKeyPair isn't Clone.
         // Generate a shared secret and build two managers from it.
         let secret = b"test-secret-that-is-long-enough!!";
-        let kp_state = JwtKeyPair::from_secret(secret);
-        let kp_sign = JwtKeyPair::from_secret(secret);
+        let kp_state = JwtKeyPair::from_secret(secret).unwrap();
+        let kp_sign = JwtKeyPair::from_secret(secret).unwrap();
         let jwt_state = JwtManager::new(
             kp_state,
             "https://test.local".into(),
@@ -432,7 +432,7 @@ mod tests {
         let (state, _jwt_sign) = test_auth_state();
 
         // Sign with a different secret so validation fails.
-        let other_kp = JwtKeyPair::from_secret(b"other-secret-that-is-long-enough");
+        let other_kp = JwtKeyPair::from_secret(b"other-secret-that-is-long-enough").unwrap();
         let other_mgr = JwtManager::new(
             other_kp,
             "https://test.local".into(),

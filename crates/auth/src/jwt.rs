@@ -70,17 +70,17 @@ impl JwtKeyPair {
     pub fn generate() -> Result<Self> {
         let secret = generate_secret();
         Ok(Self {
-            encoding: EncodingKey::from_secret(&secret),
-            decoding: DecodingKey::from_secret(&secret),
+            encoding: EncodingKey::from_secret(&secret)?,
+            decoding: DecodingKey::from_secret(&secret)?,
         })
     }
 
     /// Create a key pair from a shared secret (HS256).
-    pub fn from_secret(secret: &[u8]) -> Self {
-        Self {
-            encoding: EncodingKey::from_secret(secret),
-            decoding: DecodingKey::from_secret(secret),
-        }
+    pub fn from_secret(secret: &[u8]) -> Result<Self> {
+        Ok(Self {
+            encoding: EncodingKey::from_secret(secret)?,
+            decoding: DecodingKey::from_secret(secret)?,
+        })
     }
 
     /// Load a key pair from a secret file, or generate and persist one.
@@ -88,7 +88,7 @@ impl JwtKeyPair {
         if path.exists() {
             let secret =
                 std::fs::read(path).with_context(|| format!("reading JWT secret from {path:?}"))?;
-            Ok(Self::from_secret(&secret))
+            Self::from_secret(&secret)
         } else {
             let secret = generate_secret();
             if let Some(parent) = path.parent() {
@@ -115,7 +115,7 @@ impl JwtKeyPair {
                 std::fs::write(path, &secret)
                     .with_context(|| format!("writing JWT secret to {path:?}"))?;
             }
-            Ok(Self::from_secret(&secret))
+            Self::from_secret(&secret)
         }
     }
 }
@@ -406,8 +406,8 @@ mod tests {
 
     #[test]
     fn wrong_secret_is_rejected() {
-        let kp1 = JwtKeyPair::from_secret(b"secret-one-that-is-long-enough!!");
-        let kp2 = JwtKeyPair::from_secret(b"secret-two-that-is-long-enough!!");
+        let kp1 = JwtKeyPair::from_secret(b"secret-one-that-is-long-enough!!").unwrap();
+        let kp2 = JwtKeyPair::from_secret(b"secret-two-that-is-long-enough!!").unwrap();
 
         let mgr1 = JwtManager::new(
             kp1,
@@ -432,8 +432,8 @@ mod tests {
         let kp = JwtKeyPair::generate().unwrap();
         // Sign with issuer A.
         let secret = generate_secret();
-        let kp_sign = JwtKeyPair::from_secret(&secret);
-        let kp_verify = JwtKeyPair::from_secret(&secret);
+        let kp_sign = JwtKeyPair::from_secret(&secret).unwrap();
+        let kp_verify = JwtKeyPair::from_secret(&secret).unwrap();
 
         let mgr_sign = JwtManager::new(kp_sign, "https://a.local".into(), "https://a.local".into());
         let mgr_verify = JwtManager::new(
@@ -466,6 +466,15 @@ mod tests {
         assert!(parse_scope("invalid").is_err());
         assert!(parse_scope("unknown:read").is_err());
         assert!(parse_scope("personas:unknown").is_err());
+    }
+
+    #[test]
+    fn load_or_generate_rejects_empty_secret_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jwt.secret");
+        std::fs::write(&path, b"").unwrap();
+
+        assert!(JwtKeyPair::load_or_generate(&path).is_err());
     }
 
     #[test]
@@ -511,7 +520,7 @@ mod tests {
         let fake = Arc::new(FakeClock::new(seed));
 
         let secret = generate_secret();
-        let kp = JwtKeyPair::from_secret(&secret);
+        let kp = JwtKeyPair::from_secret(&secret).unwrap();
         let mgr = JwtManager::new(kp, "https://test.local".into(), "https://test.local".into())
             .with_clock(fake.clone() as Arc<dyn Clock>);
 

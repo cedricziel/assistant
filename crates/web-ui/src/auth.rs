@@ -501,8 +501,8 @@ mod tests {
     /// JWT secret so we can sign tokens in tests.
     fn test_config() -> (WebAuthConfig, Arc<JwtManager>) {
         let secret = b"test-secret-that-is-long-enough!!";
-        let kp_state = JwtKeyPair::from_secret(secret);
-        let kp_sign = JwtKeyPair::from_secret(secret);
+        let kp_state = JwtKeyPair::from_secret(secret).unwrap();
+        let kp_sign = JwtKeyPair::from_secret(secret).unwrap();
 
         let jwt_state = Arc::new(JwtManager::new(
             kp_state,
@@ -808,7 +808,7 @@ mod tests {
         let app = test_app(config);
 
         // Sign a JWT with a different secret so it fails signature validation.
-        let other_kp = JwtKeyPair::from_secret(b"other-secret-that-is-long-enough");
+        let other_kp = JwtKeyPair::from_secret(b"other-secret-that-is-long-enough").unwrap();
         let other_mgr = JwtManager::new(
             other_kp,
             "https://test.local".into(),
@@ -838,7 +838,7 @@ mod tests {
     #[tokio::test]
     async fn expired_session_cookie_returns_401() {
         // Build a JwtManager with a negative TTL so the token is already expired.
-        let kp = JwtKeyPair::from_secret(b"test-secret-key-for-unit-tests!");
+        let kp = JwtKeyPair::from_secret(b"test-secret-key-for-unit-tests!").unwrap();
         let expired_mgr =
             JwtManager::new(kp, "https://test.local".into(), "https://test.local".into())
                 .with_access_ttl(chrono::Duration::seconds(-120));
@@ -848,7 +848,7 @@ mod tests {
 
         // The auth config uses the same secret so signature is valid, but the
         // token is expired.
-        let verify_kp = JwtKeyPair::from_secret(b"test-secret-key-for-unit-tests!");
+        let verify_kp = JwtKeyPair::from_secret(b"test-secret-key-for-unit-tests!").unwrap();
         let verify_mgr = Arc::new(JwtManager::new(
             verify_kp,
             "https://test.local".into(),
