@@ -101,14 +101,11 @@ class ShareService {
     Uint8List bytes, {
     required String filename,
   }) async {
-    final path = await FilePicker.saveFile(
+    final savedTo = await FilePicker.saveFile(
       dialogTitle: 'Save As',
       fileName: filename,
+      bytes: bytes,
     );
-    if (path == null) return false;
-
-    final file = File(path);
-    await file.writeAsBytes(bytes);
-    return true;
+    return savedTo != null;
   }
 }
