@@ -70,6 +70,12 @@ Flutter is pinned to an exact version in one place: `environment.flutter` in `ap
 
 `visual-regression` runs on `ubuntu-24.04` because Playwright has no Chromium build for Ubuntu 26.04. Move it back to `ubuntu-latest` only after upgrading Playwright to a version that supports it, and expect screenshot baselines to change.
 
+### Setup composite action and path-gated required checks
+
+Rust jobs in `ci.yml` share `.github/actions/setup-rust` (toolchain, mold, apt deps, `Swatinem/rust-cache`); pass `cache-key`, and `system-deps: "false"` to skip apt. Add new Rust jobs through it instead of repeating the steps.
+
+`Analyze & Test` in `flutter.yml` is a required check, so the workflow has no `paths:` filter. The job always runs; `dorny/paths-filter` decides whether its steps and the macOS/iOS jobs run. Keep the job name unchanged and never add a workflow-level `paths:` filter there.
+
 ### Soft failures
 
 `visual-regression` and `integration` use `continue-on-error: true` — they are informational and depend on external services (Ollama, Playwright). Do not make them blocking.

@@ -6,34 +6,59 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
+  # "Analyze & Test" is a required check, so the job always runs and reports
+  # success; a workflow-level `paths:` filter would leave it pending forever on
+  # PRs that do not touch Flutter. The expensive steps and the macOS/iOS jobs
+  # are gated on the filter output instead.
   analyze-and-test:
     name: Analyze & Test
     runs-on: ubuntu-latest
+    outputs:
+      flutter: ${{ steps.filter.outputs.flutter }}
     defaults:
       run:
         working-directory: app
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Detect Flutter-relevant changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            flutter:
+              - 'app/**'
+              - 'openapi.json'
+              - '.github/workflows/flutter.yml'
+
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        if: steps.filter.outputs.flutter == 'true'
         with:
           flutter-version-file: app/pubspec.yaml
           cache: true
 
       - name: Install dependencies
+        if: steps.filter.outputs.flutter == 'true'
         run: flutter pub get
 
       - name: Analyze (zero issues)
+        if: steps.filter.outputs.flutter == 'true'
         run: flutter analyze --fatal-infos
 
       - name: Run tests
+        if: steps.filter.outputs.flutter == 'true'
         run: flutter test
 
   build-macos-bundle:
     name: Build macOS Bundle (no-codesign)
     runs-on: macos-26
     needs: analyze-and-test
+    if: needs.analyze-and-test.outputs.flutter == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -73,6 +98,7 @@ jobs:
     name: Build iOS (no-codesign)
     runs-on: macos-26
     needs: analyze-and-test
+    if: needs.analyze-and-test.outputs.flutter == 'true'
     defaults:
       run:
         working-directory: app
