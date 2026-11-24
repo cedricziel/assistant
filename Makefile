@@ -1,4 +1,4 @@
-.PHONY: all build test lint lint-signal lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal build-macos-binary build-macos-bundle test-flutter precommit icons coverage
+.PHONY: all build test lint lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-macos-binary build-macos-bundle test-flutter precommit icons coverage
 
 all: build
 
@@ -30,9 +30,6 @@ coverage:
 
 lint:
 	cargo clippy --workspace -- -D warnings
-
-lint-signal:
-	cargo clippy -p assistant-interface-signal --features signal -- -D warnings
 
 format:
 	cargo fmt --all
@@ -79,23 +76,23 @@ run-mcp:
 
 # Run only the Slack interface (no interactive REPL)
 run-slack:
-	cargo run -p assistant-cli --features slack -- orchestrator run --interfaces slack --no-repl
+	cargo run -p assistant-cli -- orchestrator run --interfaces slack --no-repl
 
 # Run only the Mattermost interface (no interactive REPL)
 run-mattermost:
-	cargo run -p assistant-cli --features mattermost -- orchestrator run --interfaces mattermost --no-repl
+	cargo run -p assistant-cli -- orchestrator run --interfaces mattermost --no-repl
 
 # Run only the Matrix interface (no interactive REPL)
 run-matrix:
-	cargo run -p assistant-cli --features matrix -- orchestrator run --interfaces matrix --no-repl
+	cargo run -p assistant-cli -- orchestrator run --interfaces matrix --no-repl
 
 # Run only the Nextcloud Talk interface (no interactive REPL)
 run-nextcloud:
-	cargo run -p assistant-cli --features nextcloud -- orchestrator run --interfaces nextcloud --no-repl
+	cargo run -p assistant-cli -- orchestrator run --interfaces nextcloud --no-repl
 
 # Run only the Signal interface (no interactive REPL)
 run-signal:
-	cargo run -p assistant-cli --features signal -- orchestrator run --interfaces signal --no-repl
+	cargo run -p assistant-cli -- orchestrator run --interfaces signal --no-repl
 
 # Run the web UI from the unified assistant binary
 run-webui:
@@ -104,11 +101,6 @@ run-webui:
 # Run a dedicated turn worker process
 run-worker:
 	cargo run -p assistant-cli -- worker --interface any --id local-worker
-
-# Build the Signal interface binary with the presage integration.
-# Requires presage git deps to be resolvable (see crates/interface-signal/README.md).
-build-signal:
-	cargo build -p assistant-interface-signal --features signal
 
 # ── macOS app bundle ─────────────────────────────────────────────────────────
 
