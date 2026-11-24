@@ -147,7 +147,10 @@ mod tests {
         let emb = cfg.llm.embeddings.expect("embeddings should be Some");
         assert_eq!(emb.provider, EmbeddingProviderKind::OpenAI);
         assert_eq!(emb.model.as_deref(), Some("text-embedding-3-small"));
-        assert_eq!(emb.api_key.as_deref(), Some("sk-openai-test"));
+        assert_eq!(
+            emb.api_key.as_ref().map(crate::secret::Secret::expose),
+            Some("sk-openai-test")
+        );
     }
 
     #[test]

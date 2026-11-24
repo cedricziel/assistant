@@ -415,7 +415,8 @@ async fn run_with_args(args: Args) -> Result<()> {
         nats_token: config
             .bus
             .token
-            .clone()
+            .as_ref()
+            .map(|token| token.expose().to_owned())
             .or_else(|| std::env::var("NATS_TOKEN").ok()),
         push_dispatcher: push_dispatcher_for_state,
     };

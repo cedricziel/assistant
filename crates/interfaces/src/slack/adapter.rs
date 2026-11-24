@@ -957,8 +957,7 @@ mod tests {
 
     fn make_adapter(server: &MockServer) -> SlackAdapter {
         let client = Arc::new(
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap(),
+            SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap(),
         );
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         SlackAdapter {
@@ -1079,9 +1078,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         let event = serde_json::json!({
             "files": [{
@@ -1201,9 +1198,7 @@ mod tests {
     #[tokio::test]
     async fn extract_image_skips_non_image_files() {
         let server = MockServer::start().await;
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         let event = serde_json::json!({
             "files": [{

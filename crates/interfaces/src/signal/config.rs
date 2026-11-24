@@ -5,6 +5,7 @@
 //! re-exports it and adds runtime helpers (e.g. `resolved_api_url`) that
 //! resolve defaults and environment-variable overrides.
 
+pub use assistant_core::Secret;
 pub use assistant_core::types::channels::SignalConfig;
 
 /// Extension methods for [`SignalConfig`].
@@ -22,7 +23,7 @@ pub trait SignalConfigExt {
     fn resolved_api_user(&self) -> Option<String>;
 
     /// Return the HTTP Basic Auth password, if configured.
-    fn resolved_api_password(&self) -> Option<String>;
+    fn resolved_api_password(&self) -> Option<Secret>;
 }
 
 impl SignalConfigExt for SignalConfig {
@@ -40,7 +41,7 @@ impl SignalConfigExt for SignalConfig {
         self.api_user.clone()
     }
 
-    fn resolved_api_password(&self) -> Option<String> {
+    fn resolved_api_password(&self) -> Option<Secret> {
         self.api_password.clone()
     }
 }

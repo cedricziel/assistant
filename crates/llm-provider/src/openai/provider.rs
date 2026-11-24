@@ -26,6 +26,7 @@ use serde_json::Value;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, warn};
 
+use assistant_core::Secret;
 use assistant_core::types::llm::LlmConfig;
 use assistant_core::types::llm::OpenAIUserLocation;
 use assistant_core::{
@@ -155,14 +156,14 @@ impl OpenAIProvider {
                 let api_key = cfg
                     .api_key
                     .clone()
-                    .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                    .or_else(|| std::env::var("OPENAI_API_KEY").ok().map(Secret::from))
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "OpenAI API key not found. Set api_key in [llm] config or \
                              OPENAI_API_KEY environment variable."
                         )
                     })?;
-                Self::new(provider_cfg, &api_key)
+                Self::new(provider_cfg, api_key.expose())
             }
             assistant_core::types::llm::OpenAIAuthMode::OAuth => {
                 let client_id = cfg.openai.oauth_client_id.clone().unwrap_or_default();

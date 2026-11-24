@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::secret::Secret;
+
 // ── Signal ────────────────────────────────────────────────────────────────────
 
 /// Configuration for the Signal messenger interface.
@@ -24,7 +26,7 @@ pub struct SignalConfig {
     pub api_user: Option<String>,
 
     /// HTTP Basic Auth password for signal-cli-rest-api (optional).
-    pub api_password: Option<String>,
+    pub api_password: Option<Secret>,
 }
 
 // ── Slack ─────────────────────────────────────────────────────────────────────
@@ -48,9 +50,9 @@ pub enum SlackListenMode {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SlackConfig {
     /// Bot OAuth token (`xoxb-…`) for sending messages via the Web API.
-    pub bot_token: Option<String>,
+    pub bot_token: Option<Secret>,
     /// App-level token (`xapp-…`) for Socket Mode connections.
-    pub app_token: Option<String>,
+    pub app_token: Option<Secret>,
     /// If non-empty, only dispatch messages from these channel IDs.
     #[serde(default)]
     pub allowed_channels: Vec<String>,
@@ -70,7 +72,7 @@ pub struct MattermostConfig {
     /// Base URL of the Mattermost server (e.g. `"https://mattermost.example.com"`).
     pub server_url: Option<String>,
     /// Personal access token or bot token for authentication.
-    pub token: Option<String>,
+    pub token: Option<Secret>,
     /// If non-empty, only dispatch messages from these channel IDs.
     #[serde(default)]
     pub allowed_channels: Vec<String>,
@@ -90,9 +92,9 @@ pub struct MatrixConfig {
     pub username: Option<String>,
     /// Bot account password (used for initial login; session persisted to disk).
     /// Prefer `access_token` for production deployments.
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     /// Pre-issued Matrix access token (skips password login on every start).
-    pub access_token: Option<String>,
+    pub access_token: Option<Secret>,
     /// Device ID for session restoration. Auto-generated on first login if omitted.
     pub device_id: Option<String>,
     /// Path for the matrix-sdk SQLite state store.
@@ -129,7 +131,7 @@ pub struct NextcloudConfig {
     pub server_url: Option<String>,
     /// Shared secret configured when registering the bot via `occ talk:bot:install`.
     /// Also checked via `NEXTCLOUD_TALK_SECRET` env var.
-    pub secret: Option<String>,
+    pub secret: Option<Secret>,
     /// Socket address the webhook HTTP server listens on (default: `"0.0.0.0:8080"`).
     #[serde(default = "default_nextcloud_listen_addr")]
     pub listen_addr: String,

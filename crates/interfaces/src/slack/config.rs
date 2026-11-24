@@ -5,30 +5,31 @@
 //! re-exports it and adds runtime helpers that resolve tokens from
 //! environment variables when not explicitly configured.
 
+pub use assistant_core::Secret;
 pub use assistant_core::types::channels::SlackConfig;
 
 /// Extension methods for [`SlackConfig`] that resolve tokens from the environment.
 pub trait SlackConfigExt {
     /// Return the bot token, falling back to the `SLACK_BOT_TOKEN` environment
     /// variable if no token is configured in `config.toml`.
-    fn resolved_bot_token(&self) -> Option<String>;
+    fn resolved_bot_token(&self) -> Option<Secret>;
 
     /// Return the app-level token, falling back to the `SLACK_APP_TOKEN`
     /// environment variable if no token is configured in `config.toml`.
-    fn resolved_app_token(&self) -> Option<String>;
+    fn resolved_app_token(&self) -> Option<Secret>;
 }
 
 impl SlackConfigExt for SlackConfig {
-    fn resolved_bot_token(&self) -> Option<String> {
+    fn resolved_bot_token(&self) -> Option<Secret> {
         self.bot_token
             .clone()
-            .or_else(|| std::env::var("SLACK_BOT_TOKEN").ok())
+            .or_else(|| std::env::var("SLACK_BOT_TOKEN").ok().map(Secret::from))
     }
 
-    fn resolved_app_token(&self) -> Option<String> {
+    fn resolved_app_token(&self) -> Option<Secret> {
         self.app_token
             .clone()
-            .or_else(|| std::env::var("SLACK_APP_TOKEN").ok())
+            .or_else(|| std::env::var("SLACK_APP_TOKEN").ok().map(Secret::from))
     }
 }
 
@@ -39,12 +40,18 @@ mod tests {
     #[test]
     fn explicit_tokens_are_used_verbatim() {
         let cfg = SlackConfig {
-            bot_token: Some("xoxb-test-bot".to_string()),
-            app_token: Some("xapp-test-app".to_string()),
+            bot_token: Some("xoxb-test-bot".into()),
+            app_token: Some("xapp-test-app".into()),
             ..Default::default()
         };
-        assert_eq!(cfg.resolved_bot_token().as_deref(), Some("xoxb-test-bot"));
-        assert_eq!(cfg.resolved_app_token().as_deref(), Some("xapp-test-app"));
+        assert_eq!(
+            cfg.resolved_bot_token().as_ref().map(Secret::expose),
+            Some("xoxb-test-bot")
+        );
+        assert_eq!(
+            cfg.resolved_app_token().as_ref().map(Secret::expose),
+            Some("xapp-test-app")
+        );
     }
 
     #[test]
@@ -68,8 +75,8 @@ mod tests {
             allowed_users = ["U001"]
         "#;
         let cfg: SlackConfig = toml::from_str(toml_str).expect("parse");
-        assert_eq!(cfg.bot_token.as_deref(), Some("xoxb-123"));
-        assert_eq!(cfg.app_token.as_deref(), Some("xapp-456"));
+        assert_eq!(cfg.bot_token.as_ref().map(Secret::expose), Some("xoxb-123"));
+        assert_eq!(cfg.app_token.as_ref().map(Secret::expose), Some("xapp-456"));
         assert_eq!(cfg.allowed_channels, ["C001", "C002"]);
         assert_eq!(cfg.allowed_users, ["U001"]);
     }
@@ -84,7 +91,10 @@ mod tests {
         let cfg: assistant_core::types::agent::AssistantConfig =
             toml::from_str(toml_str).expect("parse");
         let slack = cfg.slack.expect("slack section present");
-        assert_eq!(slack.bot_token.as_deref(), Some("xoxb-abc"));
+        assert_eq!(
+            slack.bot_token.as_ref().map(Secret::expose),
+            Some("xoxb-abc")
+        );
         assert_eq!(slack.allowed_channels, ["CGENERAL"]);
     }
 

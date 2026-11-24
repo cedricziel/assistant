@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use assistant_core::Secret;
 use assistant_core::types::llm::{
     AnthropicUserLocation, AnthropicWebFetchOptions, AnthropicWebSearchOptions, LlmConfig,
 };
@@ -22,7 +23,7 @@ pub struct AnthropicConfig {
     /// Model ID, e.g. `"claude-opus-4-6"`.
     pub model: String,
     /// Anthropic API key.  Falls back to `ANTHROPIC_API_KEY` env var at construction time.
-    pub api_key: String,
+    pub api_key: Secret,
     /// Base URL (default: `"https://api.anthropic.com"`).
     pub base_url: String,
     /// Request timeout in seconds.
@@ -39,7 +40,7 @@ impl Default for AnthropicConfig {
     fn default() -> Self {
         Self {
             model: "claude-opus-4-6".to_string(),
-            api_key: String::new(),
+            api_key: Secret::new(""),
             base_url: "https://api.anthropic.com".to_string(),
             timeout_secs: 120,
             max_tokens: 8192,
@@ -57,7 +58,7 @@ impl AnthropicConfig {
         let api_key = cfg
             .api_key
             .clone()
-            .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
+            .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok().map(Secret::from))
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "Anthropic API key not found. Set api_key in [llm] config or \
@@ -446,7 +447,7 @@ impl AnthropicProvider {
         let resp = self
             .http
             .post(&url)
-            .header("x-api-key", &self.config.api_key)
+            .header("x-api-key", self.config.api_key.expose())
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
             .json(&body)
@@ -508,7 +509,7 @@ impl AnthropicProvider {
         let resp = self
             .http
             .post(&url)
-            .header("x-api-key", &self.config.api_key)
+            .header("x-api-key", self.config.api_key.expose())
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
             .json(&body)

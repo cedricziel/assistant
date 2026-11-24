@@ -12,6 +12,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use assistant_core::Secret;
 use assistant_core::{
     ChatHistoryMessage, LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse,
     ToolSpec,
@@ -33,7 +34,7 @@ pub use tools::{extract_chat_meta, parse_tool_calls, tool_spec_to_chat};
 pub struct ChatCompletionsConfig {
     pub model: String,
     pub base_url: String,
-    pub api_key: String,
+    pub api_key: Secret,
     pub timeout_secs: u64,
     pub max_tokens: u32,
     /// Extra HTTP headers injected into every request.
@@ -61,7 +62,7 @@ impl ChatCompletionsProvider {
     /// Create a new Chat Completions provider from configuration.
     pub fn new(config: ChatCompletionsConfig) -> anyhow::Result<Self> {
         let mut oai_cfg = AsyncOpenAIConfig::new()
-            .with_api_key(&config.api_key)
+            .with_api_key(config.api_key.expose())
             .with_api_base(&config.base_url);
 
         for (key, value) in &config.extra_headers {
@@ -327,7 +328,10 @@ impl ChatCompletionsProvider {
         let resp = self
             .http_client
             .post(url)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.config.api_key.expose()),
+            )
             .header("Content-Type", "application/json")
             .json(body)
             .send()

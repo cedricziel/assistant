@@ -78,7 +78,7 @@ impl SignalAdapter {
     fn basic_auth_header(&self) -> Option<String> {
         let user = self.config.resolved_api_user()?;
         let pass = self.config.resolved_api_password().unwrap_or_default();
-        let encoded = B64_STANDARD.encode(format!("{user}:{pass}"));
+        let encoded = B64_STANDARD.encode(format!("{user}:{}", pass.expose()));
         Some(format!("Basic {encoded}"))
     }
 }
@@ -618,7 +618,7 @@ fn build_reqwest_client(config: &SignalConfig) -> Result<reqwest::Client> {
     let mut headers = reqwest::header::HeaderMap::new();
     if let Some(user) = config.resolved_api_user() {
         let pass = config.resolved_api_password().unwrap_or_default();
-        let encoded = B64_STANDARD.encode(format!("{user}:{pass}"));
+        let encoded = B64_STANDARD.encode(format!("{user}:{}", pass.expose()));
         let auth_value = reqwest::header::HeaderValue::from_str(&format!("Basic {encoded}"))?;
         headers.insert(reqwest::header::AUTHORIZATION, auth_value);
     }
@@ -892,10 +892,26 @@ mod tests {
         let cfg = SignalConfig {
             phone_number: Some("+14155550123".to_string()),
             api_user: Some("admin".to_string()),
-            api_password: Some("s3cret".to_string()),
+            api_password: Some("s3cret".into()),
             ..Default::default()
         };
         let _ = build_reqwest_client(&cfg).unwrap();
+    }
+
+    #[test]
+    fn basic_auth_header_encodes_the_real_password() {
+        let adapter = SignalAdapter::new(SignalConfig {
+            phone_number: Some("+14155550123".to_string()),
+            api_user: Some("admin".to_string()),
+            api_password: Some("s3cret".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            adapter.basic_auth_header().as_deref(),
+            Some(format!("Basic {}", B64_STANDARD.encode("admin:s3cret")).as_str()),
+            "the redacting Display must not leak into the credential"
+        );
     }
 
     #[test]

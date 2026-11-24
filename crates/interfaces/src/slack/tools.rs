@@ -243,9 +243,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn client_at(server: &MockServer) -> Arc<SlackApiClient> {
-        Arc::new(
-            SlackApiClient::with_base_url("xoxb-t".into(), "xapp-t".into(), server.uri()).unwrap(),
-        )
+        Arc::new(SlackApiClient::with_base_url("xoxb-t", "xapp-t", server.uri()).unwrap())
     }
 
     #[tokio::test]

@@ -9,30 +9,35 @@
 //! - `files.getUploadURLExternal` + `files.completeUploadExternal` — upload files
 
 use anyhow::{Context, Result, bail};
+use assistant_core::Secret;
 use serde::Deserialize;
 use tracing::debug;
 
 /// Thin Slack API client backed by `reqwest`.
 #[derive(Clone)]
 pub struct SlackApiClient {
-    pub(crate) bot_token: String,
-    pub(crate) app_token: String,
+    pub(crate) bot_token: Secret,
+    pub(crate) app_token: Secret,
     client: reqwest::Client,
     base_url: String,
 }
 
 impl SlackApiClient {
-    pub fn new(bot_token: String, app_token: String) -> Result<Self> {
+    pub fn new(bot_token: impl Into<Secret>, app_token: impl Into<Secret>) -> Result<Self> {
         Self::with_base_url(bot_token, app_token, "https://slack.com".to_string())
     }
 
-    pub fn with_base_url(bot_token: String, app_token: String, base_url: String) -> Result<Self> {
+    pub fn with_base_url(
+        bot_token: impl Into<Secret>,
+        app_token: impl Into<Secret>,
+        base_url: String,
+    ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .build()
             .context("failed to build Slack reqwest client")?;
         Ok(Self {
-            bot_token,
-            app_token,
+            bot_token: bot_token.into(),
+            app_token: app_token.into(),
             client,
             base_url,
         })
@@ -52,7 +57,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .post(format!("{}/api/apps.connections.open", self.base_url))
-            .bearer_auth(&self.app_token)
+            .bearer_auth(self.app_token.expose())
             .send()
             .await
             .context("apps.connections.open request failed")?
@@ -83,7 +88,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .post(format!("{}/api/auth.test", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .send()
             .await
             .context("auth.test request failed")?
@@ -132,7 +137,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .post(format!("{}/api/chat.postMessage", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .json(&body)
             .send()
             .await
@@ -164,7 +169,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .post(format!("{}/api/chat.update", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .json(&body)
             .send()
             .await
@@ -192,7 +197,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .post(format!("{}/api/chat.delete", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .json(&body)
             .send()
             .await
@@ -226,7 +231,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .post(format!("{}/api/reactions.add", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .json(&body)
             .send()
             .await
@@ -266,7 +271,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .get(format!("{}/api/conversations.replies", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .query(&[
                 ("channel", channel.to_string()),
                 ("ts", ts.to_string()),
@@ -306,7 +311,7 @@ impl SlackApiClient {
 
         self.client
             .get(format!("{}/api/conversations.list", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .query(&params)
             .send()
             .await
@@ -326,7 +331,7 @@ impl SlackApiClient {
     ) -> Result<serde_json::Value> {
         self.client
             .get(format!("{}/api/conversations.history", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .query(&[
                 ("channel", channel.to_string()),
                 ("limit", limit.to_string()),
@@ -345,7 +350,7 @@ impl SlackApiClient {
     pub async fn users_info(&self, user_id: &str) -> Result<serde_json::Value> {
         self.client
             .get(format!("{}/api/users.info", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .query(&[("user", user_id)])
             .send()
             .await
@@ -365,7 +370,7 @@ impl SlackApiClient {
         let resp = self
             .client
             .get(url)
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .timeout(std::time::Duration::from_secs(15))
             .send()
             .await
@@ -419,7 +424,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .post(format!("{}/api/reactions.remove", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .json(&body)
             .send()
             .await
@@ -471,7 +476,7 @@ impl SlackApiClient {
         let resp: Resp = self
             .client
             .post(format!("{}/api/assistant.threads.setStatus", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .json(&body)
             .send()
             .await
@@ -500,7 +505,7 @@ impl SlackApiClient {
     ) -> anyhow::Result<T> {
         self.client
             .post(format!("{}{}", self.base_url, path))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .json(body)
             .send()
             .await
@@ -532,7 +537,7 @@ impl SlackApiClient {
         let url_resp: UrlResp = self
             .client
             .get(format!("{}/api/files.getUploadURLExternal", self.base_url))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .query(&[
                 ("filename", filename.to_string()),
                 ("length", data.len().to_string()),
@@ -589,7 +594,7 @@ impl SlackApiClient {
                 "{}/api/files.completeUploadExternal",
                 self.base_url
             ))
-            .bearer_auth(&self.bot_token)
+            .bearer_auth(self.bot_token.expose())
             .json(&body)
             .send()
             .await
@@ -628,9 +633,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         let ts = client
             .post_message("C123", "hello", None)
@@ -652,9 +655,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         let ts = client
             .post_message("C123", "reply", Some("111.222"))
@@ -675,9 +676,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         client
             .set_agent_status(
@@ -703,9 +702,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         let result = client
             .set_agent_status("C123", "111.222", "Thinking...", &[])
@@ -726,9 +723,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         // no_reaction should be treated as Ok (already removed)
         client
@@ -750,9 +745,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         // should NOT error
         client
@@ -764,7 +757,7 @@ mod tests {
     // ── Additional client method coverage ───────────────────────────────────
 
     fn make_client(server: &MockServer) -> SlackApiClient {
-        SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri()).unwrap()
+        SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap()
     }
 
     #[tokio::test]
@@ -962,8 +955,7 @@ mod tools_tests {
     async fn make_mock_client() -> (MockServer, Arc<SlackApiClient>) {
         let server = MockServer::start().await;
         let client = Arc::new(
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap(),
+            SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap(),
         );
         (server, client)
     }
@@ -1139,7 +1131,7 @@ mod tools_tests {
     #[test]
     fn build_slack_tools_returns_three_tools() {
         // Use a noop client — build_slack_tools doesn't call into it.
-        let client = Arc::new(SlackApiClient::new("xoxb-test".into(), "xapp-test".into()).unwrap());
+        let client = Arc::new(SlackApiClient::new("xoxb-test", "xapp-test").unwrap());
         let tools = build_slack_tools("C1".into(), Some("100.200".into()), "msg-1".into(), client);
         assert_eq!(tools.len(), 3);
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();

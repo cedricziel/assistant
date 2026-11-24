@@ -5,6 +5,7 @@
 //! re-exports it and adds runtime helpers that depend on the `dirs` crate,
 //! which is not a dependency of `assistant-core`.
 
+pub use assistant_core::Secret;
 pub use assistant_core::types::channels::MattermostConfig;
 
 /// Extension methods for [`MattermostConfig`] that require the `dirs` crate.
@@ -15,7 +16,7 @@ pub trait MattermostConfigExt {
 
     /// Return the access token, falling back to the `MATTERMOST_TOKEN`
     /// environment variable if not configured in `config.toml`.
-    fn resolved_token(&self) -> Option<String>;
+    fn resolved_token(&self) -> Option<Secret>;
 }
 
 impl MattermostConfigExt for MattermostConfig {
@@ -25,10 +26,10 @@ impl MattermostConfigExt for MattermostConfig {
             .or_else(|| std::env::var("MATTERMOST_SERVER_URL").ok())
     }
 
-    fn resolved_token(&self) -> Option<String> {
+    fn resolved_token(&self) -> Option<Secret> {
         self.token
             .clone()
-            .or_else(|| std::env::var("MATTERMOST_TOKEN").ok())
+            .or_else(|| std::env::var("MATTERMOST_TOKEN").ok().map(Secret::from))
     }
 }
 
@@ -40,14 +41,17 @@ mod tests {
     fn explicit_values_are_used_verbatim() {
         let cfg = MattermostConfig {
             server_url: Some("https://mm.example.com".to_string()),
-            token: Some("tok-abc".to_string()),
+            token: Some("tok-abc".into()),
             ..Default::default()
         };
         assert_eq!(
             cfg.resolved_server_url().as_deref(),
             Some("https://mm.example.com")
         );
-        assert_eq!(cfg.resolved_token().as_deref(), Some("tok-abc"));
+        assert_eq!(
+            cfg.resolved_token().as_ref().map(Secret::expose),
+            Some("tok-abc")
+        );
     }
 
     #[test]
@@ -72,7 +76,7 @@ mod tests {
         "#;
         let cfg: MattermostConfig = toml::from_str(toml_str).expect("parse");
         assert_eq!(cfg.server_url.as_deref(), Some("https://mm.example.com"));
-        assert_eq!(cfg.token.as_deref(), Some("tok-xyz"));
+        assert_eq!(cfg.token.as_ref().map(Secret::expose), Some("tok-xyz"));
         assert_eq!(cfg.allowed_channels, ["town-square", "bot-test"]);
         assert_eq!(cfg.allowed_users, ["alice"]);
     }
@@ -88,7 +92,7 @@ mod tests {
             toml::from_str(toml_str).expect("parse");
         let mm = cfg.mattermost.expect("mattermost section present");
         assert_eq!(mm.server_url.as_deref(), Some("https://mm.example.com"));
-        assert_eq!(mm.token.as_deref(), Some("tok-abc"));
+        assert_eq!(mm.token.as_ref().map(Secret::expose), Some("tok-abc"));
     }
 
     #[test]

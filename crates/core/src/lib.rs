@@ -12,6 +12,7 @@ pub mod context;
 pub mod identity;
 pub mod llm;
 pub mod memory;
+pub mod secret;
 pub mod store;
 pub mod subagent;
 pub mod text;
@@ -69,6 +70,7 @@ pub use llm::types::{
 pub use memory::{
     MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,
 };
+pub use secret::Secret;
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput};

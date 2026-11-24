@@ -15,7 +15,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use assistant_core::types::channels::NextcloudConfig;
 use assistant_core::{
-    Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, ToolHandler,
+    Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, Secret, ToolHandler,
     types::conversation::ChannelType,
 };
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
@@ -44,7 +44,7 @@ const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
 pub struct NextcloudAdapter {
     config: NextcloudConfig,
     server_url: String,
-    secret: String,
+    secret: Secret,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
     /// Stores pending ⏳ message IDs keyed by conversation_token.
@@ -92,7 +92,7 @@ impl NextcloudAdapter {
 // ── Shared axum state ────────────────────────────────────────────────────────
 
 struct WebhookState {
-    secret: String,
+    secret: Secret,
     server_url: String,
     allowed_channels: Vec<String>,
     allowed_users: Vec<String>,
@@ -158,7 +158,7 @@ impl ChannelAdapter for NextcloudAdapter {
             ChannelContent::Text(text) => {
                 http_post_message(
                     &self.server_url,
-                    &self.secret,
+                    self.secret.expose(),
                     conversation_token,
                     &text,
                     None,
@@ -195,7 +195,7 @@ impl ChannelAdapter for NextcloudAdapter {
                 let reply_to: Option<i64> = thread_id.parse().ok();
                 http_post_message(
                     &self.server_url,
-                    &self.secret,
+                    self.secret.expose(),
                     conversation_token,
                     &text,
                     reply_to,
@@ -259,7 +259,7 @@ impl ChannelAdapter for NextcloudAdapter {
         // Add ⏳ reaction (best-effort; Talk < 17 returns 404, which we ignore).
         if let Err(e) = http_add_reaction(
             &self.server_url,
-            &self.secret,
+            self.secret.expose(),
             &conversation_token,
             &message_id,
             "⏳",
@@ -284,14 +284,20 @@ impl ChannelAdapter for NextcloudAdapter {
         if let Some(mid) = message_id {
             let _ = http_remove_reaction(
                 &self.server_url,
-                &self.secret,
+                self.secret.expose(),
                 conversation_token,
                 &mid,
                 "⏳",
             )
             .await;
         }
-        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, true).await;
+        let _ = http_send_typing(
+            &self.server_url,
+            self.secret.expose(),
+            conversation_token,
+            true,
+        )
+        .await;
         Ok(())
     }
 
@@ -303,7 +309,13 @@ impl ChannelAdapter for NextcloudAdapter {
         attachments: &[Attachment],
     ) -> Result<()> {
         let conversation_token = &user.platform_id;
-        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, false).await;
+        let _ = http_send_typing(
+            &self.server_url,
+            self.secret.expose(),
+            conversation_token,
+            false,
+        )
+        .await;
         if attachments.is_empty() {
             return Ok(());
         }
@@ -324,7 +336,7 @@ impl ChannelAdapter for NextcloudAdapter {
         );
         let _ = http_post_message(
             &self.server_url,
-            &self.secret,
+            self.secret.expose(),
             conversation_token,
             &notice,
             None,
@@ -335,10 +347,16 @@ impl ChannelAdapter for NextcloudAdapter {
 
     async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
         let conversation_token = &user.platform_id;
-        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, false).await;
+        let _ = http_send_typing(
+            &self.server_url,
+            self.secret.expose(),
+            conversation_token,
+            false,
+        )
+        .await;
         let _ = http_post_message(
             &self.server_url,
-            &self.secret,
+            self.secret.expose(),
             conversation_token,
             &format!("Sorry, something went wrong: {err}"),
             None,
@@ -376,7 +394,7 @@ async fn webhook_handler(
         }
     };
 
-    if !verify_signature(&state.secret, &random, &body, &signature) {
+    if !verify_signature(state.secret.expose(), &random, &body, &signature) {
         warn!("Nextcloud: invalid webhook signature");
         return StatusCode::UNAUTHORIZED;
     }
@@ -401,7 +419,7 @@ async fn webhook_handler(
     let audio_transcript = transcribe_webhook_audio(
         &event,
         &state.server_url,
-        &state.secret,
+        state.secret.expose(),
         &state.transcription,
         &state.transcription_language,
     )
@@ -856,7 +874,7 @@ mod tests {
     ) {
         let (tx, rx) = channel(8);
         let state = Arc::new(WebhookState {
-            secret: SECRET.to_string(),
+            secret: SECRET.into(),
             server_url: "http://nextcloud.example".to_string(),
             allowed_channels: vec![],
             allowed_users: vec![],
@@ -993,7 +1011,7 @@ mod tests {
 
         let config = NextcloudConfig {
             server_url: Some("http://localhost".to_string()),
-            secret: Some("s3cret".to_string()),
+            secret: Some("s3cret".into()),
             ..Default::default()
         };
         let adapter = NextcloudAdapter::new(config)

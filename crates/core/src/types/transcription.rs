@@ -5,6 +5,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::secret::Secret;
+
 // ── Speech-to-text ────────────────────────────────────────────────────────────
 
 /// Which transcription backend to use.
@@ -43,7 +45,7 @@ pub struct TranscriptionConfig {
     pub base_url: Option<String>,
     /// API key (also checked via provider-specific env vars:
     /// `OPENAI_API_KEY` for Whisper, `DEEPGRAM_API_KEY` for Deepgram).
-    pub api_key: Option<String>,
+    pub api_key: Option<Secret>,
     /// Optional BCP-47 language hint (e.g. `"en"`, `"de"`).
     pub language: Option<String>,
 }
@@ -82,7 +84,7 @@ pub struct TtsConfig {
     pub base_url: Option<String>,
     /// API key (also checked via provider-specific env vars: `OPENAI_API_KEY` for OpenAI,
     /// `DEEPGRAM_API_KEY` for Deepgram).
-    pub api_key: Option<String>,
+    pub api_key: Option<Secret>,
     /// Per-language voice overrides (Deepgram only).
     ///
     /// ```toml

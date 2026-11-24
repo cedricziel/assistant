@@ -7,6 +7,7 @@
 //! - `POST /join/<room>` for auto-accepting invites
 
 use anyhow::{Context, Result};
+use assistant_core::Secret;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::Value;
@@ -16,7 +17,7 @@ use uuid::Uuid;
 /// Thin async Matrix client.
 pub struct MatrixClient {
     #[allow(dead_code)]
-    access_token: String,
+    access_token: Secret,
     pub(crate) homeserver_url: String,
     /// The bot's own MXID, populated after login or set directly.
     pub(crate) user_id: String,
@@ -43,7 +44,7 @@ impl MatrixClient {
             .build()
             .context("failed to build reqwest client")?;
         Ok(Self {
-            access_token,
+            access_token: Secret::new(access_token),
             homeserver_url,
             user_id: user_id.into(),
             client,

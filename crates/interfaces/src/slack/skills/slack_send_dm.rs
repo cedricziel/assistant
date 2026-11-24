@@ -110,7 +110,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn skill_at(base: String) -> SlackSendDmSkill {
-        let client = SlackApiClient::with_base_url("xoxb-t".into(), "xapp-t".into(), base).unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-t", "xapp-t", base).unwrap();
         SlackSendDmSkill {
             client: Arc::new(client),
         }

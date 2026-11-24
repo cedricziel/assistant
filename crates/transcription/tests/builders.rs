@@ -33,7 +33,7 @@ fn is_audio_mime_rejects_non_audio() {
 fn build_tts_openai_uses_api_key_from_config() {
     let config = TtsConfig {
         provider: TtsProviderKind::OpenAI,
-        api_key: Some("sk-test".to_string()),
+        api_key: Some("sk-test".into()),
         base_url: Some("https://example.com".to_string()),
         model: Some("tts-1".to_string()),
         voice: Some("alloy".to_string()),
@@ -57,7 +57,7 @@ fn build_tts_deepgram_uses_api_key_from_config() {
     voices.insert("en".to_string(), "aura-asteria-en".to_string());
     let config = TtsConfig {
         provider: TtsProviderKind::Deepgram,
-        api_key: Some("dg-test".to_string()),
+        api_key: Some("dg-test".into()),
         base_url: None,
         model: Some("aura-asteria-en".to_string()),
         voice: None,
@@ -77,7 +77,7 @@ fn build_tts_deepgram_uses_api_key_from_config() {
 fn build_transcription_whisper_uses_api_key_from_config() {
     let config = TranscriptionConfig {
         provider: TranscriptionProviderKind::Whisper,
-        api_key: Some("sk-test".to_string()),
+        api_key: Some("sk-test".into()),
         base_url: None,
         model: None,
         language: None,
@@ -107,7 +107,7 @@ fn build_transcription_ollama_constructs_without_api_key() {
 fn build_transcription_deepgram_uses_api_key_from_config() {
     let config = TranscriptionConfig {
         provider: TranscriptionProviderKind::Deepgram,
-        api_key: Some("dg-test".to_string()),
+        api_key: Some("dg-test".into()),
         base_url: None,
         model: None,
         language: None,

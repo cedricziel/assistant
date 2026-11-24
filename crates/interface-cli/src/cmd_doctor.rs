@@ -731,7 +731,7 @@ mod tests {
     fn check_llm_anthropic_ok_with_config_key() {
         let mut config = default_config();
         config.llm.provider = LlmProviderKind::Anthropic;
-        config.llm.api_key = Some("sk-ant-test".to_string());
+        config.llm.api_key = Some("sk-ant-test".into());
         let r = check_llm_provider(&config);
         assert_eq!(r.status, CheckStatus::Ok);
     }

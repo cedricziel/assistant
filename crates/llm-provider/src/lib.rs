@@ -49,6 +49,7 @@ pub fn create_provider(config: &LlmConfig) -> anyhow::Result<Arc<dyn LlmProvider
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assistant_core::Secret;
 
     #[test]
     fn factory_creates_ollama_provider() {
@@ -64,7 +65,7 @@ mod tests {
     fn factory_creates_anthropic_provider_with_key() {
         let config = LlmConfig {
             provider: LlmProviderKind::Anthropic,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             ..LlmConfig::default()
         };
         let provider = create_provider(&config).expect("Anthropic provider should succeed");
@@ -94,7 +95,7 @@ mod tests {
     fn factory_creates_openai_provider_with_key() {
         let config = LlmConfig {
             provider: LlmProviderKind::OpenAI,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             ..LlmConfig::default()
         };
         let provider = create_provider(&config).expect("OpenAI provider should succeed");
@@ -105,7 +106,7 @@ mod tests {
     fn factory_creates_moonshot_provider_with_key() {
         let config = LlmConfig {
             provider: LlmProviderKind::Moonshot,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             ..LlmConfig::default()
         };
         let provider = create_provider(&config).expect("Moonshot provider should succeed");
@@ -116,7 +117,7 @@ mod tests {
     fn factory_creates_openrouter_provider_with_key() {
         let config = LlmConfig {
             provider: LlmProviderKind::OpenRouter,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             ..LlmConfig::default()
         };
         let provider = create_provider(&config).expect("OpenRouter provider should succeed");

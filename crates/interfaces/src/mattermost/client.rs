@@ -4,6 +4,7 @@
 //! `GET /users/me`, `POST /posts`, `POST /reactions`, and `POST /files`.
 
 use anyhow::{Context, Result};
+use assistant_core::Secret;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,7 @@ use tracing::debug;
 
 /// Thin async Mattermost REST client.
 pub struct MattermostClient {
-    pub(crate) token: String,
+    pub(crate) token: Secret,
     pub(crate) server_url: String,
     client: reqwest::Client,
 }
@@ -34,7 +35,7 @@ impl MattermostClient {
             .build()
             .context("failed to build reqwest client")?;
         Ok(Self {
-            token,
+            token: Secret::new(token),
             server_url,
             client,
         })

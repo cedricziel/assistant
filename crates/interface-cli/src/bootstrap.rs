@@ -11,7 +11,7 @@ use assistant_core::types::agent::AssistantConfig;
 use assistant_core::types::llm::{EmbeddingConfig, EmbeddingProviderKind};
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
-    EmbeddingProvider, LlmEmbedder, LlmProvider, MessageBus, WithEmbeddingOverride,
+    EmbeddingProvider, LlmEmbedder, LlmProvider, MessageBus, Secret, WithEmbeddingOverride,
 };
 use assistant_llm_provider::{
     OllamaConfig, OllamaProvider, OpenAIProvider, OpenAIProviderConfig, VoyageConfig,
@@ -51,7 +51,7 @@ fn build_embedding_provider(
             let api_key = emb_cfg
                 .api_key
                 .clone()
-                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok().map(Secret::from))
                 .ok_or_else(|| {
                     anyhow::anyhow!(
                         "OpenAI embedding provider requires an API key. \
@@ -72,7 +72,7 @@ fn build_embedding_provider(
                     .unwrap_or_else(|| "text-embedding-3-small".to_string()),
                 web_search: None,
             };
-            let provider = OpenAIProvider::new(provider_cfg, &api_key)
+            let provider = OpenAIProvider::new(provider_cfg, api_key.expose())
                 .context("Failed to create OpenAI embedding provider")?;
             Ok(Arc::new(LlmEmbedder(Arc::new(provider))))
         }
@@ -80,7 +80,7 @@ fn build_embedding_provider(
             let api_key = emb_cfg
                 .api_key
                 .clone()
-                .or_else(|| std::env::var("VOYAGE_API_KEY").ok())
+                .or_else(|| std::env::var("VOYAGE_API_KEY").ok().map(Secret::from))
                 .ok_or_else(|| {
                     anyhow::anyhow!(
                         "Voyage AI embedding provider requires an API key. \
@@ -355,7 +355,7 @@ mod tests {
             provider: EmbeddingProviderKind::OpenAI,
             model: Some("text-embedding-3-small".to_string()),
             base_url: Some("https://api.openai.com/v1".to_string()),
-            api_key: Some("sk-test".to_string()),
+            api_key: Some("sk-test".into()),
         };
         let main = base_llm_cfg();
         build_embedding_provider(&emb, &main).expect("explicit api_key is enough");
@@ -392,7 +392,7 @@ mod tests {
             provider: EmbeddingProviderKind::Voyage,
             model: Some("voyage-large-2".to_string()),
             base_url: None,
-            api_key: Some("voyage-key".to_string()),
+            api_key: Some("voyage-key".into()),
         };
         let main = base_llm_cfg();
         build_embedding_provider(&emb, &main).expect("explicit voyage key is enough");

@@ -4,6 +4,7 @@
 //! it can be embedded in `AssistantConfig`.  This module adds an extension
 //! trait with runtime helpers (env-var fallbacks).
 
+pub use assistant_core::Secret;
 pub use assistant_core::types::channels::NextcloudConfig;
 
 /// Extension methods for [`NextcloudConfig`] that provide env-var fallbacks.
@@ -18,7 +19,7 @@ pub trait NextcloudConfigExt {
     /// `NEXTCLOUD_TALK_SECRET` environment variable.
     ///
     /// Returns `None` if the value is blank or whitespace-only.
-    fn resolved_secret(&self) -> Option<String>;
+    fn resolved_secret(&self) -> Option<Secret>;
 }
 
 /// Filter out blank/whitespace-only strings so empty config values and
@@ -33,9 +34,11 @@ impl NextcloudConfigExt for NextcloudConfig {
             .or_else(|| non_blank(std::env::var("NEXTCLOUD_SERVER_URL").ok()))
     }
 
-    fn resolved_secret(&self) -> Option<String> {
-        non_blank(self.secret.clone())
-            .or_else(|| non_blank(std::env::var("NEXTCLOUD_TALK_SECRET").ok()))
+    fn resolved_secret(&self) -> Option<Secret> {
+        self.secret
+            .clone()
+            .filter(|secret| !secret.is_blank())
+            .or_else(|| non_blank(std::env::var("NEXTCLOUD_TALK_SECRET").ok()).map(Secret::from))
     }
 }
 
@@ -47,14 +50,17 @@ mod tests {
     fn config_with_explicit_values() {
         let cfg = NextcloudConfig {
             server_url: Some("https://nc.example.com".to_string()),
-            secret: Some("s3cret".to_string()),
+            secret: Some("s3cret".into()),
             ..Default::default()
         };
         assert_eq!(
             cfg.resolved_server_url().as_deref(),
             Some("https://nc.example.com")
         );
-        assert_eq!(cfg.resolved_secret().as_deref(), Some("s3cret"));
+        assert_eq!(
+            cfg.resolved_secret().as_ref().map(Secret::expose),
+            Some("s3cret")
+        );
     }
 
     #[test]
@@ -73,7 +79,7 @@ mod tests {
     fn blank_values_treated_as_none() {
         let cfg = NextcloudConfig {
             server_url: Some("".to_string()),
-            secret: Some("   ".to_string()),
+            secret: Some("   ".into()),
             ..Default::default()
         };
         assert!(cfg.resolved_server_url().is_none());

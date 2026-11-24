@@ -19,6 +19,7 @@ use serde_json::json;
 use tracing::debug;
 
 use assistant_core::EmbeddingProvider;
+use assistant_core::Secret;
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ pub const DEFAULT_VOYAGE_MODEL: &str = "voyage-3-lite";
 #[derive(Debug, Clone)]
 pub struct VoyageConfig {
     /// Voyage AI API key.
-    pub api_key: String,
+    pub api_key: Secret,
     /// Base URL (default: `"https://api.voyageai.com"`).
     pub base_url: String,
     /// Model name (default: `"voyage-3-lite"`).
@@ -43,9 +44,9 @@ pub struct VoyageConfig {
 
 impl VoyageConfig {
     /// Create a new config with the given API key and sensible defaults.
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: impl Into<Secret>) -> Self {
         Self {
-            api_key,
+            api_key: api_key.into(),
             base_url: DEFAULT_VOYAGE_BASE_URL.to_string(),
             model: DEFAULT_VOYAGE_MODEL.to_string(),
         }
@@ -109,7 +110,10 @@ impl EmbeddingProvider for VoyageEmbedder {
         let resp = self
             .http
             .post(&url)
-            .header("authorization", format!("Bearer {}", self.config.api_key))
+            .header(
+                "authorization",
+                format!("Bearer {}", self.config.api_key.expose()),
+            )
             .header("content-type", "application/json")
             .json(&body)
             .send()

@@ -149,7 +149,7 @@ impl ChannelAdapter for MattermostAdapter {
                 let auth = serde_json::json!({
                     "seq": 1,
                     "action": "authentication_challenge",
-                    "data": { "token": client.token }
+                    "data": { "token": client.token.expose() }
                 })
                 .to_string();
                 if ws_write.send(WsMessage::Text(auth.into())).await.is_err() {
