@@ -33,6 +33,7 @@ class ConversationsApi {
   /// Parameters:
   /// * [conversationId] - Conversation UUID
   /// * [turnId] - Turn (run) UUID — matches the SSE run_id
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -45,6 +46,7 @@ class ConversationsApi {
   Future<Response<TurnStatusResponse>> cancelTurn({
     required String conversationId,
     required String turnId,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -65,6 +67,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -125,6 +128,7 @@ class ConversationsApi {
   ///
   /// Parameters:
   /// * [createConversationRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -136,6 +140,7 @@ class ConversationsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<ConversationSummary>> createConversation({
     required CreateConversationRequest createConversationRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -147,6 +152,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -227,6 +233,7 @@ class ConversationsApi {
   ///
   /// Parameters:
   /// * [quickMessageRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -238,6 +245,7 @@ class ConversationsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<QuickMessageResponse>> createQuickMessage({
     required QuickMessageRequest quickMessageRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -249,6 +257,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -329,6 +338,7 @@ class ConversationsApi {
   ///
   /// Parameters:
   /// * [id] - Conversation ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -340,6 +350,7 @@ class ConversationsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> deleteConversation({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -354,6 +365,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -385,6 +397,7 @@ class ConversationsApi {
   ///
   /// Parameters:
   /// * [id] - Audio blob ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -396,6 +409,7 @@ class ConversationsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> getAudio({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -410,6 +424,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -441,6 +456,7 @@ class ConversationsApi {
   ///
   /// Parameters:
   /// * [id] - Conversation ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -452,6 +468,7 @@ class ConversationsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<ConversationDetail>> getConversation({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -466,6 +483,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -526,6 +544,7 @@ class ConversationsApi {
   ///
   /// Parameters:
   /// * [id] - Message ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -537,6 +556,7 @@ class ConversationsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> getMessageAudio({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -551,6 +571,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -583,6 +604,7 @@ class ConversationsApi {
   /// Parameters:
   /// * [conversationId] - Conversation UUID
   /// * [turnId] - Turn (run) UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -595,6 +617,7 @@ class ConversationsApi {
   Future<Response<TurnStatusResponse>> getTurnStatus({
     required String conversationId,
     required String turnId,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -615,6 +638,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -674,6 +698,7 @@ class ConversationsApi {
   ///
   ///
   /// Parameters:
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -684,6 +709,7 @@ class ConversationsApi {
   /// Returns a [Future] containing a [Response] with a [BuiltList<ConversationSummary>] as data
   /// Throws [DioException] if API call or serialization fails
   Future<Response<BuiltList<ConversationSummary>>> listConversations({
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -695,6 +721,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -757,6 +784,7 @@ class ConversationsApi {
   /// Parameters:
   /// * [id] - Conversation ID
   /// * [apiSendMessageRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -769,6 +797,7 @@ class ConversationsApi {
   Future<Response<void>> sendMessage({
     required String id,
     required ApiSendMessageRequest apiSendMessageRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -783,6 +812,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -835,6 +865,7 @@ class ConversationsApi {
   /// Parameters:
   /// * [id] - Conversation ID
   /// * [audio] - Raw audio bytes (opus/aac/webm/wav …).
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -847,6 +878,7 @@ class ConversationsApi {
   Future<Response<void>> sendVoiceMessage({
     required String id,
     required BuiltList<int> audio,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -861,6 +893,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -913,6 +946,7 @@ class ConversationsApi {
   ///
   /// Parameters:
   /// * [agentId] - Filter events to a single agent. If omitted, events for all agents are streamed.
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -924,6 +958,7 @@ class ConversationsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> streamConversations({
     String? agentId,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -935,6 +970,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -975,6 +1011,7 @@ class ConversationsApi {
   /// * [id] - Conversation UUID
   /// * [runId] - Run UUID from run_started event
   /// * [since] - Replay from this sequence number (default 0)
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -988,6 +1025,7 @@ class ConversationsApi {
     required String id,
     required String runId,
     int? since,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -1007,6 +1045,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -1046,6 +1085,7 @@ class ConversationsApi {
   /// Parameters:
   /// * [id] - Conversation ID
   /// * [updateConversationRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -1058,6 +1098,7 @@ class ConversationsApi {
   Future<Response<ConversationSummary>> updateConversation({
     required String id,
     required UpdateConversationRequest updateConversationRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -1072,6 +1113,7 @@ class ConversationsApi {
     final _options = Options(
       method: r'PATCH',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{

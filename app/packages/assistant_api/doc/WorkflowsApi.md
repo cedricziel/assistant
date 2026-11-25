@@ -24,7 +24,7 @@ Method | HTTP request | Description
 
 
 # **activateWorkflow**
-> WorkflowDetail activateWorkflow(id)
+> WorkflowDetail activateWorkflow(id, xSpaceId)
 
 `POST /api/workflows/{id}/activate` — activate a workflow.
 
@@ -34,9 +34,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.activateWorkflow(id);
+    final response = api.activateWorkflow(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->activateWorkflow: $e\n');
@@ -48,6 +49,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -65,7 +67,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createWorkflow**
-> WorkflowDetail createWorkflow(workflowUpsertRequest)
+> WorkflowDetail createWorkflow(workflowUpsertRequest, xSpaceId)
 
 `POST /api/workflows` — create a new workflow.
 
@@ -75,9 +77,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
 final WorkflowUpsertRequest workflowUpsertRequest = ; // WorkflowUpsertRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.createWorkflow(workflowUpsertRequest);
+    final response = api.createWorkflow(workflowUpsertRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->createWorkflow: $e\n');
@@ -89,6 +92,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **workflowUpsertRequest** | [**WorkflowUpsertRequest**](WorkflowUpsertRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -106,7 +110,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deactivateWorkflow**
-> WorkflowDetail deactivateWorkflow(id)
+> WorkflowDetail deactivateWorkflow(id, xSpaceId)
 
 `POST /api/workflows/{id}/deactivate` — deactivate a workflow.
 
@@ -116,9 +120,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.deactivateWorkflow(id);
+    final response = api.deactivateWorkflow(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->deactivateWorkflow: $e\n');
@@ -130,6 +135,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -147,7 +153,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deleteWorkflow**
-> deleteWorkflow(id)
+> deleteWorkflow(id, xSpaceId)
 
 `DELETE /api/workflows/{id}` — delete a workflow.
 
@@ -157,9 +163,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.deleteWorkflow(id);
+    api.deleteWorkflow(id, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->deleteWorkflow: $e\n');
 }
@@ -170,6 +177,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -187,7 +195,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getWorkflow**
-> WorkflowDetail getWorkflow(id)
+> WorkflowDetail getWorkflow(id, xSpaceId)
 
 `GET /api/workflows/{id}` — fetch a workflow.
 
@@ -197,9 +205,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getWorkflow(id);
+    final response = api.getWorkflow(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->getWorkflow: $e\n');
@@ -211,6 +220,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -228,7 +238,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getWorkflowRun**
-> WorkflowRunDetail getWorkflowRun(id, runId)
+> WorkflowRunDetail getWorkflowRun(id, runId, xSpaceId)
 
 `GET /api/workflows/{id}/runs/{run_id}` — workflow run detail with steps.
 
@@ -239,9 +249,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
 final String runId = runId_example; // String | Run UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getWorkflowRun(id, runId);
+    final response = api.getWorkflowRun(id, runId, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->getWorkflowRun: $e\n');
@@ -254,6 +265,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
  **runId** | **String**| Run UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -271,7 +283,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getWorkflowWebhookSecrets**
-> WorkflowWebhookSecrets getWorkflowWebhookSecrets(id)
+> WorkflowWebhookSecrets getWorkflowWebhookSecrets(id, xSpaceId)
 
 `GET /api/workflows/{id}/webhook-secrets` — reveal webhook URL and token.
 
@@ -281,9 +293,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getWorkflowWebhookSecrets(id);
+    final response = api.getWorkflowWebhookSecrets(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->getWorkflowWebhookSecrets: $e\n');
@@ -295,6 +308,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -312,7 +326,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listWorkflowRuns**
-> BuiltList<WorkflowRunSummary> listWorkflowRuns(id)
+> BuiltList<WorkflowRunSummary> listWorkflowRuns(id, xSpaceId)
 
 `GET /api/workflows/{id}/runs` — list recent runs (up to 50).
 
@@ -322,9 +336,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listWorkflowRuns(id);
+    final response = api.listWorkflowRuns(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->listWorkflowRuns: $e\n');
@@ -336,6 +351,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -353,7 +369,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listWorkflows**
-> BuiltList<WorkflowSummary> listWorkflows()
+> BuiltList<WorkflowSummary> listWorkflows(xSpaceId)
 
 `GET /api/workflows` — list all workflows.
 
@@ -362,9 +378,10 @@ Name | Type | Description  | Notes
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listWorkflows();
+    final response = api.listWorkflows(xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->listWorkflows: $e\n');
@@ -372,7 +389,10 @@ try {
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -441,7 +461,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **testRunWorkflow**
-> WorkflowRunPreview testRunWorkflow(id)
+> WorkflowRunPreview testRunWorkflow(id, xSpaceId)
 
 `POST /api/workflows/{id}/test-run` — queue a manual test run.
 
@@ -451,9 +471,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.testRunWorkflow(id);
+    final response = api.testRunWorkflow(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->testRunWorkflow: $e\n');
@@ -465,6 +486,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -482,7 +504,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateWorkflow**
-> WorkflowDetail updateWorkflow(id, workflowUpsertRequest)
+> WorkflowDetail updateWorkflow(id, workflowUpsertRequest, xSpaceId)
 
 `PUT /api/workflows/{id}` — update a workflow.
 
@@ -493,9 +515,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getWorkflowsApi();
 final String id = id_example; // String | Workflow UUID
 final WorkflowUpsertRequest workflowUpsertRequest = ; // WorkflowUpsertRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.updateWorkflow(id, workflowUpsertRequest);
+    final response = api.updateWorkflow(id, workflowUpsertRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WorkflowsApi->updateWorkflow: $e\n');
@@ -508,6 +531,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Workflow UUID | 
  **workflowUpsertRequest** | [**WorkflowUpsertRequest**](WorkflowUpsertRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

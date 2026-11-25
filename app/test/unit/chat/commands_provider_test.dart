@@ -20,6 +20,7 @@ class _FakeCommandsApi extends CommandsApi {
 
   @override
   Future<Response<BuiltList<CommandDefResponse>>> listCommands({
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,

@@ -32,6 +32,7 @@ class WorkflowsApi {
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -43,6 +44,7 @@ class WorkflowsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WorkflowDetail>> activateWorkflow({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -57,6 +59,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -117,6 +120,7 @@ class WorkflowsApi {
   ///
   /// Parameters:
   /// * [workflowUpsertRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -128,6 +132,7 @@ class WorkflowsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WorkflowDetail>> createWorkflow({
     required WorkflowUpsertRequest workflowUpsertRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -139,6 +144,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -219,6 +225,7 @@ class WorkflowsApi {
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -230,6 +237,7 @@ class WorkflowsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WorkflowDetail>> deactivateWorkflow({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -244,6 +252,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -304,6 +313,7 @@ class WorkflowsApi {
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -315,6 +325,7 @@ class WorkflowsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> deleteWorkflow({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -329,6 +340,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -360,6 +372,7 @@ class WorkflowsApi {
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -371,6 +384,7 @@ class WorkflowsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WorkflowDetail>> getWorkflow({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -385,6 +399,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -446,6 +461,7 @@ class WorkflowsApi {
   /// Parameters:
   /// * [id] - Workflow UUID
   /// * [runId] - Run UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -458,6 +474,7 @@ class WorkflowsApi {
   Future<Response<WorkflowRunDetail>> getWorkflowRun({
     required String id,
     required String runId,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -477,6 +494,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -537,6 +555,7 @@ class WorkflowsApi {
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -548,6 +567,7 @@ class WorkflowsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WorkflowWebhookSecrets>> getWorkflowWebhookSecrets({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -562,6 +582,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -622,6 +643,7 @@ class WorkflowsApi {
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -633,6 +655,7 @@ class WorkflowsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<BuiltList<WorkflowRunSummary>>> listWorkflowRuns({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -647,6 +670,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -707,6 +731,7 @@ class WorkflowsApi {
   ///
   ///
   /// Parameters:
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -717,6 +742,7 @@ class WorkflowsApi {
   /// Returns a [Future] containing a [Response] with a [BuiltList<WorkflowSummary>] as data
   /// Throws [DioException] if API call or serialization fails
   Future<Response<BuiltList<WorkflowSummary>>> listWorkflows({
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -728,6 +754,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -908,6 +935,7 @@ class WorkflowsApi {
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -919,6 +947,7 @@ class WorkflowsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WorkflowRunPreview>> testRunWorkflow({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -933,6 +962,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -994,6 +1024,7 @@ class WorkflowsApi {
   /// Parameters:
   /// * [id] - Workflow UUID
   /// * [workflowUpsertRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -1006,6 +1037,7 @@ class WorkflowsApi {
   Future<Response<WorkflowDetail>> updateWorkflow({
     required String id,
     required WorkflowUpsertRequest workflowUpsertRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -1020,6 +1052,7 @@ class WorkflowsApi {
     final _options = Options(
       method: r'PUT',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{

@@ -15,7 +15,7 @@ Method | HTTP request | Description
 
 
 # **subscribe**
-> subscribe(subscribeRequest)
+> subscribe(subscribeRequest, xSpaceId)
 
 `POST /api/push/subscribe`
 
@@ -27,9 +27,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebPushApi();
 final SubscribeRequest subscribeRequest = ; // SubscribeRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.subscribe(subscribeRequest);
+    api.subscribe(subscribeRequest, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling WebPushApi->subscribe: $e\n');
 }
@@ -40,6 +41,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **subscribeRequest** | [**SubscribeRequest**](SubscribeRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -57,7 +59,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **unsubscribe**
-> unsubscribe(unsubscribeRequest)
+> unsubscribe(unsubscribeRequest, xSpaceId)
 
 `DELETE /api/push/subscribe`
 
@@ -69,9 +71,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebPushApi();
 final UnsubscribeRequest unsubscribeRequest = ; // UnsubscribeRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.unsubscribe(unsubscribeRequest);
+    api.unsubscribe(unsubscribeRequest, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling WebPushApi->unsubscribe: $e\n');
 }
@@ -82,6 +85,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **unsubscribeRequest** | [**UnsubscribeRequest**](UnsubscribeRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -99,7 +103,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **vapidPublicKey**
-> VapidKeyResponse vapidPublicKey()
+> VapidKeyResponse vapidPublicKey(xSpaceId)
 
 `GET /api/push/vapid-public-key`
 
@@ -110,9 +114,10 @@ Returns the server's VAPID public key as a base64url-encoded string. The Flutter
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebPushApi();
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.vapidPublicKey();
+    final response = api.vapidPublicKey(xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WebPushApi->vapidPublicKey: $e\n');
@@ -120,7 +125,10 @@ try {
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

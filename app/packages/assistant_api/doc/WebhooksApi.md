@@ -20,7 +20,7 @@ Method | HTTP request | Description
 
 
 # **createWebhook**
-> WebhookResponse createWebhook(createWebhookRequest)
+> WebhookResponse createWebhook(createWebhookRequest, xSpaceId)
 
 `POST /api/webhooks` — create a new webhook.
 
@@ -30,9 +30,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebhooksApi();
 final CreateWebhookRequest createWebhookRequest = ; // CreateWebhookRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.createWebhook(createWebhookRequest);
+    final response = api.createWebhook(createWebhookRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WebhooksApi->createWebhook: $e\n');
@@ -44,6 +45,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **createWebhookRequest** | [**CreateWebhookRequest**](CreateWebhookRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -61,7 +63,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deleteWebhook**
-> deleteWebhook(id)
+> deleteWebhook(id, xSpaceId)
 
 `DELETE /api/webhooks/{id}` — delete a webhook.
 
@@ -71,9 +73,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebhooksApi();
 final String id = id_example; // String | Webhook ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.deleteWebhook(id);
+    api.deleteWebhook(id, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling WebhooksApi->deleteWebhook: $e\n');
 }
@@ -84,6 +87,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Webhook ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -101,7 +105,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getWebhook**
-> WebhookResponse getWebhook(id)
+> WebhookResponse getWebhook(id, xSpaceId)
 
 `GET /api/webhooks/{id}` — get a webhook by ID.
 
@@ -111,9 +115,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebhooksApi();
 final String id = id_example; // String | Webhook ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getWebhook(id);
+    final response = api.getWebhook(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WebhooksApi->getWebhook: $e\n');
@@ -125,6 +130,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Webhook ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -142,7 +148,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listWebhooks**
-> BuiltList<WebhookResponse> listWebhooks()
+> BuiltList<WebhookResponse> listWebhooks(xSpaceId)
 
 `GET /api/webhooks` — list all webhooks.
 
@@ -151,9 +157,10 @@ Name | Type | Description  | Notes
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebhooksApi();
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listWebhooks();
+    final response = api.listWebhooks(xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WebhooksApi->listWebhooks: $e\n');
@@ -161,7 +168,10 @@ try {
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -179,7 +189,7 @@ This endpoint does not need any parameter.
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **rotateSecret**
-> RotateSecretResponse rotateSecret(id)
+> RotateSecretResponse rotateSecret(id, xSpaceId)
 
 `POST /api/webhooks/{id}/rotate-secret` — regenerate a webhook's signing secret.
 
@@ -189,9 +199,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebhooksApi();
 final String id = id_example; // String | Webhook ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.rotateSecret(id);
+    final response = api.rotateSecret(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WebhooksApi->rotateSecret: $e\n');
@@ -203,6 +214,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Webhook ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -220,7 +232,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **toggleWebhook**
-> WebhookResponse toggleWebhook(id)
+> WebhookResponse toggleWebhook(id, xSpaceId)
 
 `POST /api/webhooks/{id}/toggle` — toggle a webhook's active state.
 
@@ -230,9 +242,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebhooksApi();
 final String id = id_example; // String | Webhook ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.toggleWebhook(id);
+    final response = api.toggleWebhook(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WebhooksApi->toggleWebhook: $e\n');
@@ -244,6 +257,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Webhook ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -261,7 +275,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateWebhook**
-> WebhookResponse updateWebhook(id, updateWebhookRequest)
+> WebhookResponse updateWebhook(id, updateWebhookRequest, xSpaceId)
 
 `PATCH /api/webhooks/{id}` — update a webhook.
 
@@ -272,9 +286,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getWebhooksApi();
 final String id = id_example; // String | Webhook ID
 final UpdateWebhookRequest updateWebhookRequest = ; // UpdateWebhookRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.updateWebhook(id, updateWebhookRequest);
+    final response = api.updateWebhook(id, updateWebhookRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WebhooksApi->updateWebhook: $e\n');
@@ -287,6 +302,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Webhook ID | 
  **updateWebhookRequest** | [**UpdateWebhookRequest**](UpdateWebhookRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -304,7 +320,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **verifyWebhook**
-> VerifyWebhookResponse verifyWebhook(id)
+> VerifyWebhookResponse verifyWebhook(id, xSpaceId)
 
 `POST /api/webhooks/{id}/verify` — send a signed test payload to the webhook URL.
 
@@ -316,9 +332,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getWebhooksApi();
 final String id = id_example; // String | Webhook ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.verifyWebhook(id);
+    final response = api.verifyWebhook(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling WebhooksApi->verifyWebhook: $e\n');
@@ -330,6 +347,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Webhook ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

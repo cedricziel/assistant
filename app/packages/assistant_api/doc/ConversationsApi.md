@@ -26,7 +26,7 @@ Method | HTTP request | Description
 
 
 # **cancelTurn**
-> TurnStatusResponse cancelTurn(conversationId, turnId)
+> TurnStatusResponse cancelTurn(conversationId, turnId, xSpaceId)
 
 `POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`
 
@@ -39,9 +39,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getConversationsApi();
 final String conversationId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation UUID
 final String turnId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Turn (run) UUID — matches the SSE run_id
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.cancelTurn(conversationId, turnId);
+    final response = api.cancelTurn(conversationId, turnId, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->cancelTurn: $e\n');
@@ -54,6 +55,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **conversationId** | **String**| Conversation UUID | 
  **turnId** | **String**| Turn (run) UUID — matches the SSE run_id | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -71,7 +73,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createConversation**
-> ConversationSummary createConversation(createConversationRequest)
+> ConversationSummary createConversation(createConversationRequest, xSpaceId)
 
 `POST /api/conversations` — create a new conversation.
 
@@ -81,9 +83,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
 final CreateConversationRequest createConversationRequest = ; // CreateConversationRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.createConversation(createConversationRequest);
+    final response = api.createConversation(createConversationRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->createConversation: $e\n');
@@ -95,6 +98,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **createConversationRequest** | [**CreateConversationRequest**](CreateConversationRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -112,7 +116,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createQuickMessage**
-> QuickMessageResponse createQuickMessage(quickMessageRequest)
+> QuickMessageResponse createQuickMessage(quickMessageRequest, xSpaceId)
 
 `POST /api/quick-message` — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
 
@@ -124,9 +128,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
 final QuickMessageRequest quickMessageRequest = ; // QuickMessageRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.createQuickMessage(quickMessageRequest);
+    final response = api.createQuickMessage(quickMessageRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->createQuickMessage: $e\n');
@@ -138,6 +143,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **quickMessageRequest** | [**QuickMessageRequest**](QuickMessageRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -155,7 +161,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deleteConversation**
-> deleteConversation(id)
+> deleteConversation(id, xSpaceId)
 
 `DELETE /api/conversations/{id}` — delete a conversation and all its messages.
 
@@ -165,9 +171,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.deleteConversation(id);
+    api.deleteConversation(id, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->deleteConversation: $e\n');
 }
@@ -178,6 +185,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Conversation ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -195,7 +203,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getAudio**
-> getAudio(id)
+> getAudio(id, xSpaceId)
 
 `GET /api/audio/{id}` — serve a synthesized audio blob from the in-memory store.
 
@@ -205,9 +213,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Audio blob ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.getAudio(id);
+    api.getAudio(id, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->getAudio: $e\n');
 }
@@ -218,6 +227,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Audio blob ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -235,7 +245,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getConversation**
-> ConversationDetail getConversation(id)
+> ConversationDetail getConversation(id, xSpaceId)
 
 `GET /api/conversations/{id}` — get a conversation and its message history.
 
@@ -245,9 +255,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getConversation(id);
+    final response = api.getConversation(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->getConversation: $e\n');
@@ -259,6 +270,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Conversation ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -276,7 +288,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getMessageAudio**
-> getMessageAudio(id)
+> getMessageAudio(id, xSpaceId)
 
 `GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant message and return it as `audio/mpeg`.
 
@@ -286,9 +298,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Message ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.getMessageAudio(id);
+    api.getMessageAudio(id, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->getMessageAudio: $e\n');
 }
@@ -299,6 +312,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Message ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -316,7 +330,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getTurnStatus**
-> TurnStatusResponse getTurnStatus(conversationId, turnId)
+> TurnStatusResponse getTurnStatus(conversationId, turnId, xSpaceId)
 
 `GET /api/conversations/{conversation_id}/turns/{turn_id}/status`
 
@@ -329,9 +343,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getConversationsApi();
 final String conversationId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation UUID
 final String turnId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Turn (run) UUID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getTurnStatus(conversationId, turnId);
+    final response = api.getTurnStatus(conversationId, turnId, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->getTurnStatus: $e\n');
@@ -344,6 +359,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **conversationId** | **String**| Conversation UUID | 
  **turnId** | **String**| Turn (run) UUID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -361,7 +377,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listConversations**
-> BuiltList<ConversationSummary> listConversations()
+> BuiltList<ConversationSummary> listConversations(xSpaceId)
 
 `GET /api/conversations` — list all conversations, newest first.
 
@@ -370,9 +386,10 @@ Name | Type | Description  | Notes
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listConversations();
+    final response = api.listConversations(xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->listConversations: $e\n');
@@ -380,7 +397,10 @@ try {
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -398,7 +418,7 @@ This endpoint does not need any parameter.
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **sendMessage**
-> sendMessage(id, apiSendMessageRequest)
+> sendMessage(id, apiSendMessageRequest, xSpaceId)
 
 `POST /api/conversations/{id}/messages` — send a message and stream the response.
 
@@ -411,9 +431,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
 final ApiSendMessageRequest apiSendMessageRequest = ; // ApiSendMessageRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.sendMessage(id, apiSendMessageRequest);
+    api.sendMessage(id, apiSendMessageRequest, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->sendMessage: $e\n');
 }
@@ -425,6 +446,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Conversation ID | 
  **apiSendMessageRequest** | [**ApiSendMessageRequest**](ApiSendMessageRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -442,7 +464,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **sendVoiceMessage**
-> sendVoiceMessage(id, audio)
+> sendVoiceMessage(id, audio, xSpaceId)
 
 `POST /api/conversations/{id}/voice` — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
 
@@ -453,9 +475,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
 final BuiltList<int> audio = ; // BuiltList<int> | Raw audio bytes (opus/aac/webm/wav …).
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.sendVoiceMessage(id, audio);
+    api.sendVoiceMessage(id, audio, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->sendVoiceMessage: $e\n');
 }
@@ -467,6 +490,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Conversation ID | 
  **audio** | [**BuiltList&lt;int&gt;**](int.md)| Raw audio bytes (opus/aac/webm/wav …). | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -484,7 +508,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **streamConversations**
-> streamConversations(agentId)
+> streamConversations(agentId, xSpaceId)
 
 `GET /api/conversations/stream` — SSE stream of conversation list changes.
 
@@ -496,9 +520,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
 final String agentId = agentId_example; // String | Filter events to a single agent. If omitted, events for all agents are streamed.
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.streamConversations(agentId);
+    api.streamConversations(agentId, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->streamConversations: $e\n');
 }
@@ -509,6 +534,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **agentId** | **String**| Filter events to a single agent. If omitted, events for all agents are streamed. | [optional] 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -526,7 +552,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **streamRunEvents**
-> streamRunEvents(id, runId, since)
+> streamRunEvents(id, runId, since, xSpaceId)
 
 `GET /api/conversations/{id}/runs/{run_id}/events/stream`
 
@@ -540,9 +566,10 @@ final api = AssistantApi().getConversationsApi();
 final String id = id_example; // String | Conversation UUID
 final String runId = runId_example; // String | Run UUID from run_started event
 final int since = 789; // int | Replay from this sequence number (default 0)
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.streamRunEvents(id, runId, since);
+    api.streamRunEvents(id, runId, since, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->streamRunEvents: $e\n');
 }
@@ -555,6 +582,7 @@ Name | Type | Description  | Notes
  **id** | **String**| Conversation UUID | 
  **runId** | **String**| Run UUID from run_started event | 
  **since** | **int**| Replay from this sequence number (default 0) | [optional] 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -572,7 +600,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateConversation**
-> ConversationSummary updateConversation(id, updateConversationRequest)
+> ConversationSummary updateConversation(id, updateConversationRequest, xSpaceId)
 
 `PATCH /api/conversations/{id}` — update a conversation's title.
 
@@ -583,9 +611,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
 final UpdateConversationRequest updateConversationRequest = ; // UpdateConversationRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.updateConversation(id, updateConversationRequest);
+    final response = api.updateConversation(id, updateConversationRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->updateConversation: $e\n');
@@ -598,6 +627,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Conversation ID | 
  **updateConversationRequest** | [**UpdateConversationRequest**](UpdateConversationRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

@@ -15,7 +15,7 @@ Method | HTTP request | Description
 
 
 # **executeCommand**
-> CommandEventResponse executeCommand(id, executeCommandRequest)
+> CommandEventResponse executeCommand(id, executeCommandRequest, xSpaceId)
 
 `POST /api/conversations/{id}/command` — execute a slash command.
 
@@ -26,9 +26,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getCommandsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
 final ExecuteCommandRequest executeCommandRequest = ; // ExecuteCommandRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.executeCommand(id, executeCommandRequest);
+    final response = api.executeCommand(id, executeCommandRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling CommandsApi->executeCommand: $e\n');
@@ -41,6 +42,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Conversation ID | 
  **executeCommandRequest** | [**ExecuteCommandRequest**](ExecuteCommandRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -58,7 +60,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listCommands**
-> BuiltList<CommandDefResponse> listCommands()
+> BuiltList<CommandDefResponse> listCommands(xSpaceId)
 
 `GET /api/commands` — list all registered commands.
 
@@ -67,9 +69,10 @@ Name | Type | Description  | Notes
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getCommandsApi();
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listCommands();
+    final response = api.listCommands(xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling CommandsApi->listCommands: $e\n');
@@ -77,7 +80,10 @@ try {
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -95,7 +101,7 @@ This endpoint does not need any parameter.
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listConversationEvents**
-> BuiltList<CommandEventResponse> listConversationEvents(id)
+> BuiltList<CommandEventResponse> listConversationEvents(id, xSpaceId)
 
 `GET /api/conversations/{id}/events` — list command events for the timeline.
 
@@ -105,9 +111,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getCommandsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listConversationEvents(id);
+    final response = api.listConversationEvents(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling CommandsApi->listConversationEvents: $e\n');
@@ -119,6 +126,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Conversation ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

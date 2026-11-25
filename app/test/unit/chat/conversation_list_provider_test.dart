@@ -47,6 +47,7 @@ class _FakeConversationsApi extends ConversationsApi {
   @override
   Future<Response<void>> deleteConversation({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
