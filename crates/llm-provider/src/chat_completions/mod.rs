@@ -156,6 +156,7 @@ impl ChatCompletionsProvider {
                     items,
                     meta,
                     thinking: None,
+                    provider_state: None,
                 }));
             }
         }
@@ -311,6 +312,7 @@ impl ChatCompletionsProvider {
                     items,
                     meta,
                     thinking: None,
+                    provider_state: None,
                 }));
             }
         }

@@ -507,7 +507,7 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                 }));
             }
 
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 // Each tool call becomes a FunctionCall item that we feed back
                 // as input for conversation context.
                 for call in calls {
@@ -685,6 +685,7 @@ fn parse_response(response: Response) -> anyhow::Result<LlmResponse> {
             items: tool_calls,
             meta,
             thinking: None,
+            provider_state: None,
         }));
     }
 
@@ -845,11 +846,14 @@ mod tests {
     #[test]
     fn build_input_items_tool_calls_and_results() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "my-tool".to_string(),
-                params: serde_json::json!({"key": "val"}),
-                id: Some("call_123".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "my-tool".to_string(),
+                    params: serde_json::json!({"key": "val"}),
+                    id: Some("call_123".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "my-tool".to_string(),
                 content: "result".to_string(),

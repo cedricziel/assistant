@@ -20,10 +20,10 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 3. Provider state refactor (no behavior change)
 
-- [ ] 3.1 Write a failing storage test: a message saved with `provider_state_json` round-trips, and older rows read back as `None`. Confirm red.
-- [ ] 3.2 Add the nullable `messages.provider_state_json` migration and the store field. Verify 3.1 with `cargo test -p assistant-storage`.
-- [ ] 3.3 Write a failing `history.rs` test: a stored provider state is restored onto `AssistantToolCalls`. Confirm red.
-- [ ] 3.4 Change `AssistantToolCalls` to `{ items, provider_state }`, add `provider_state` to `ToolCallResponse`, update all match sites, persist the state in the orchestrator, and restore it in `history.rs`. Verify with `cargo test --workspace`.
+- [x] 3.1 Write a failing storage test: a message saved with `provider_state_json` round-trips, and older rows read back as `None`. Confirm red.
+- [x] 3.2 Add the nullable `messages.provider_state_json` migration and the store field. Verify 3.1 with `cargo test -p assistant-storage`.
+- [x] 3.3 Write a failing `history.rs` test: a stored provider state is restored onto `AssistantToolCalls`. Confirm red.
+- [x] 3.4 Change `AssistantToolCalls` to `{ items, provider_state }`, add `provider_state` to `ToolCallResponse`, update all match sites, persist the state in the orchestrator, and restore it in `history.rs`. Verify with `cargo test --workspace`.
 
 ## 4. Per-call context and per-turn context window
 

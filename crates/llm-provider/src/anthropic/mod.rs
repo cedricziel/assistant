@@ -302,7 +302,7 @@ fn build_anthropic_messages(history: &[ChatHistoryMessage]) -> (Vec<Value>, Vec<
                 messages.push(json!({"role": "user", "content": blocks}));
             }
 
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 // Start a new batch; previous pending_ids from older rounds are consumed
                 // by ToolResult messages, so only the current batch goes here.
                 pending_ids.clear();
@@ -614,6 +614,7 @@ impl AnthropicProvider {
                     } else {
                         Some(thinking_buf.clone())
                     },
+                    provider_state: None,
                 }));
             }
         }
@@ -891,6 +892,7 @@ fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<Ll
             } else {
                 Some(thinking_parts.join(""))
             },
+            provider_state: None,
         }));
     }
     if !thinking_parts.is_empty() {
@@ -1218,11 +1220,14 @@ mod tests {
 
     #[test]
     fn assistant_tool_calls_emit_tool_use_blocks_with_ids() {
-        let history = vec![ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-            name: "shell".to_string(),
-            params: serde_json::json!({"cmd": "ls"}),
-            id: Some("toolu_123".to_string()),
-        }])];
+        let history = vec![ChatHistoryMessage::AssistantToolCalls {
+            items: vec![ToolCallItem {
+                name: "shell".to_string(),
+                params: serde_json::json!({"cmd": "ls"}),
+                id: Some("toolu_123".to_string()),
+            }],
+            provider_state: None,
+        }];
         let (messages, _) = build_anthropic_messages(&history);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["role"], "assistant");
@@ -1236,11 +1241,14 @@ mod tests {
 
     #[test]
     fn assistant_tool_calls_without_id_synthesise_one() {
-        let history = vec![ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-            name: "shell".to_string(),
-            params: serde_json::json!({}),
-            id: None,
-        }])];
+        let history = vec![ChatHistoryMessage::AssistantToolCalls {
+            items: vec![ToolCallItem {
+                name: "shell".to_string(),
+                params: serde_json::json!({}),
+                id: None,
+            }],
+            provider_state: None,
+        }];
         let (messages, _) = build_anthropic_messages(&history);
         let blocks = messages[0]["content"].as_array().unwrap();
         let id = blocks[0]["id"].as_str().unwrap();
@@ -1250,11 +1258,14 @@ mod tests {
     #[test]
     fn tool_result_pairs_with_matching_pending_call() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "shell".to_string(),
-                params: serde_json::json!({}),
-                id: Some("call_a".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "shell".to_string(),
+                    params: serde_json::json!({}),
+                    id: Some("call_a".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "shell".to_string(),
                 content: "ok".to_string(),
