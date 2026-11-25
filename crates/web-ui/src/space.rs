@@ -8,7 +8,8 @@
 //!
 //! Unknown spaces, spaces of another org, and spaces the caller holds no role
 //! in all produce the same `403`, so the response cannot be used to enumerate
-//! spaces. See `openspec/changes/multi-tenant-data-plane/design.md`.
+//! spaces. See `openspec/specs/web-data-plane-tenancy/spec.md` and
+//! `docs/adr/adr-0013-per-space-runtimes.md`.
 
 use std::sync::Arc;
 
@@ -93,6 +94,11 @@ pub struct SpaceResolver {
 impl SpaceResolver {
     pub fn new(org_storage: Arc<OrgStorageLayer>, pools: Arc<OrgPoolFactory>) -> Self {
         Self { org_storage, pools }
+    }
+
+    /// The pool cache this resolver opens spaces from.
+    pub fn pools(&self) -> &Arc<OrgPoolFactory> {
+        &self.pools
     }
 
     /// Bind `auth` to one space. `selector` is the raw space id, if the client

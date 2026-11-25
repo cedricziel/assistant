@@ -5,6 +5,7 @@
 //! accepts and returns the canonical JSON types from `assistant_a2a_json_schema`.
 
 pub mod agent_store;
+pub mod backend;
 pub mod handlers;
 #[cfg(test)]
 mod handlers_tests;
@@ -103,7 +104,9 @@ mod router_tests {
 
     #[tokio::test]
     async fn protected_router_exposes_tasks_endpoint() {
-        let app = protected_router().with_state(make_state().await);
+        let app = protected_router()
+            .layer(axum::Extension(assistant_core::auth::AuthContext::system()))
+            .with_state(make_state().await);
         let resp = app
             .oneshot(
                 Request::builder()

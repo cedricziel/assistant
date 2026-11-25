@@ -17,6 +17,8 @@ pub mod projection;
 pub mod scheduler;
 pub mod skill_improver;
 pub(crate) mod skill_learner;
+pub mod space_runtime;
+pub mod space_supervisor;
 pub mod telemetry;
 pub mod title_generator;
 pub mod webhook_dispatch;
@@ -35,6 +37,8 @@ pub use orchestrator::{
 };
 pub use otel_spans::start_conversation_context;
 pub use scheduler::spawn_scheduler;
+pub use space_runtime::{SpaceRuntime, SpaceRuntimes};
+pub use space_supervisor::{SpaceRef, SpaceSupervisor, SpaceTaskSpawner};
 pub use telemetry::{OtelGuard, init_tracing};
 pub use title_generator::{TitleGeneratorWorker, spawn_title_generator_worker};
 pub use worker_plan::{BinaryRole, CoreWorkerPlan, CoreWorkerSpec, core_worker_plan};

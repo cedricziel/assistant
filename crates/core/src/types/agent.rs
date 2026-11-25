@@ -11,7 +11,7 @@ use super::llm::LlmConfig;
 use super::observability::ObservabilityConfig;
 use super::permissions::PermissionsConfig;
 use super::skills_mcp::{McpConfig, MirrorConfig, SkillsConfig};
-use super::storage::{BusConfig, StorageConfig};
+use super::storage::BusConfig;
 use super::transcription::{TranscriptionConfig, TtsConfig};
 
 /// Top-level assistant configuration
@@ -19,8 +19,6 @@ use super::transcription::{TranscriptionConfig, TtsConfig};
 pub struct AssistantConfig {
     #[serde(default)]
     pub llm: LlmConfig,
-    #[serde(default)]
-    pub storage: StorageConfig,
     #[serde(default)]
     pub bus: BusConfig,
     #[serde(default)]

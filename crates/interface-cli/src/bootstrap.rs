@@ -17,9 +17,9 @@ use assistant_llm_provider::{
     OllamaConfig, OllamaProvider, OpenAIProvider, OpenAIProviderConfig, VoyageConfig,
     VoyageEmbedder,
 };
-use assistant_runtime::{Orchestrator, orchestrator::ConfirmationCallback};
-use assistant_skills::SkillSource;
-use assistant_storage::{PersonaStore as _, StorageLayer, registry::SkillRegistry};
+use assistant_runtime::{Orchestrator, SpaceRuntimes, orchestrator::ConfirmationCallback};
+use assistant_storage::migration::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
+use assistant_storage::{OrgPoolFactory, StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 
 /// Build a dedicated [`EmbeddingProvider`] from an [`EmbeddingConfig`].
@@ -103,68 +103,47 @@ fn build_embedding_provider(
 
 // ── Common bootstrap ──────────────────────────────────────────────────────────
 
+/// This process's runtimes: one per space, built on demand, plus the default
+/// space's stack for the REPL, one-shot turns and the MCP server.
 pub struct Bootstrap {
     pub config: AssistantConfig,
+    pub runtimes: Arc<SpaceRuntimes>,
     pub storage: Arc<StorageLayer>,
     pub registry: Arc<SkillRegistry>,
     pub executor: Arc<ToolExecutor>,
     pub orchestrator: Arc<Orchestrator>,
     pub user_skills_dir: PathBuf,
-    pub llm: Arc<dyn LlmProvider>,
+}
+
+/// The broker shared by every space, when `[bus] kind = "nats"`; otherwise each
+/// space uses the SQLite bus in its own database.
+async fn shared_nats_bus(config: &AssistantConfig) -> Result<Option<Arc<dyn MessageBus>>> {
+    if config.bus.kind != BusKind::Nats {
+        return Ok(None);
+    }
+    #[cfg(feature = "nats")]
+    {
+        info!("Using NATS message bus");
+        let bus = assistant_bus_nats::NatsMessageBus::connect(&config.bus)
+            .await
+            .context("failed to connect to NATS")?;
+        Ok(Some(Arc::new(bus)))
+    }
+    #[cfg(not(feature = "nats"))]
+    {
+        anyhow::bail!(
+            "[bus] kind = \"nats\" configured but this binary was built without the `nats` feature"
+        )
+    }
 }
 
 pub async fn bootstrap(
     home: &Path,
     confirmation_cb: Arc<dyn ConfirmationCallback>,
-    storage: Arc<StorageLayer>,
+    pools: Arc<OrgPoolFactory>,
     config: AssistantConfig,
 ) -> Result<Bootstrap> {
-    let assistant_dir = home.join(".assistant");
-    let user_skills_dir = assistant_dir.join("skills");
-
-    // Build skill registry.
-    let registry = SkillRegistry::new(storage.pool.clone())
-        .await
-        .context("Failed to create skill registry")?;
-
-    let project_root = std::env::current_dir().ok();
-    let dirs_to_scan = assistant_runtime::bootstrap::skill_dirs(&config, project_root.as_deref());
-    let dirs_ref: Vec<(&Path, SkillSource)> = dirs_to_scan
-        .iter()
-        .map(|(p, s)| (p.as_path(), s.clone()))
-        .collect();
-
-    registry
-        .load_embedded()
-        .await
-        .context("Failed to load embedded builtin skills")?;
-
-    // Sync embedded builtin skills to ~/.assistant/skills/ so on-disk copies
-    // stay in sync with the binary.  Stale or missing files are overwritten;
-    // user skills with different names are never touched.
-    if let Some(home) = dirs::home_dir() {
-        let builtin_target = home.join(".assistant").join("skills");
-        match registry.sync_builtins_to_disk(&builtin_target) {
-            Ok(updated) if !updated.is_empty() => {
-                tracing::info!(
-                    "Synced {} built-in skill(s) to disk: {}",
-                    updated.len(),
-                    updated.join(", ")
-                );
-            }
-            Err(e) => {
-                tracing::warn!("Failed to sync built-in skills to disk: {e}");
-            }
-            _ => {}
-        }
-    }
-
-    registry
-        .load_from_dirs(&dirs_ref)
-        .await
-        .context("Failed to load skills from directories")?;
-
-    let registry = Arc::new(registry);
+    let user_skills_dir = home.join(".assistant").join("skills");
 
     // Build LLM client — dispatch on configured provider.
     let llm: Arc<dyn LlmProvider> = assistant_llm_provider::create_provider(&config.llm)
@@ -184,80 +163,29 @@ pub async fn bootstrap(
         llm
     };
 
-    // Build tool executor.
-    let executor = Arc::new(ToolExecutor::new(
-        storage.clone(),
-        llm.clone(),
-        registry.clone(),
+    // With the `nats` feature and `[bus] kind = "nats"`, turns travel over NATS
+    // JetStream (namespaced per space) to avoid SQLite write-lock contention
+    // between the bus and the rest of the storage layer.
+    let mut runtimes = SpaceRuntimes::new(
+        pools.clone(),
         Arc::new(config.clone()),
-    ));
+        llm.clone(),
+        confirmation_cb,
+    )
+    .with_audio_store(Arc::new(assistant_transcription::AudioStore::new()));
+    if let Some(bus) = shared_nats_bus(&config).await? {
+        runtimes = runtimes.with_shared_bus(bus);
+    }
+    let runtimes = Arc::new(runtimes);
 
-    // Build message bus.
-    // When the `nats` feature is enabled and `[bus] kind = "nats"` is
-    // configured, use NATS JetStream to avoid SQLite write-lock contention
-    // between the bus and the rest of the storage layer.  Otherwise fall
-    // back to the SQLite-backed bus.
-    let bus: Arc<dyn MessageBus> = {
-        #[cfg(feature = "nats")]
-        {
-            if config.bus.kind == BusKind::Nats {
-                info!("Using NATS message bus");
-                Arc::new(
-                    assistant_bus_nats::NatsMessageBus::connect(&config.bus)
-                        .await
-                        .context("failed to connect to NATS")?,
-                )
-            } else {
-                Arc::new(storage.message_bus())
-            }
-        }
-        #[cfg(not(feature = "nats"))]
-        {
-            if config.bus.kind == BusKind::Nats {
-                anyhow::bail!(
-                    "[bus] kind = \"nats\" configured but this binary was built without the `nats` feature"
-                );
-            }
-            Arc::new(storage.message_bus())
-        }
-    };
-
-    // Build orchestrator, applying the per-persona turn timeout if set.
-    let persona_timeout = storage
-        .persona_store()
-        .get(&config.agent.id)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|p| p.turn_timeout_secs);
-    let audio_store = Arc::new(assistant_transcription::AudioStore::new());
-    let orchestrator = Arc::new({
-        let mut o = Orchestrator::new(
-            llm,
-            storage.clone(),
-            executor.clone(),
-            registry.clone(),
-            bus,
-            &config,
-        )
-        .with_confirmation_callback(confirmation_cb)
-        .with_audio_store(audio_store.clone());
-        if let Some(secs) = persona_timeout {
-            o = o.with_submit_timeout(secs);
-        }
-        o
-    });
-
-    // Wire up subagent support (breaks the init-time circular dep).
-    executor.set_subagent_runner(orchestrator.clone());
-
-    // Connect to configured external MCP servers and register their tools.
+    // Connect to configured external MCP servers and register their tools in
+    // every space.
     if !config.mcp.servers.is_empty() {
         let mcp_manager =
             Arc::new(assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?);
         let mcp_tools = mcp_manager.tool_handlers().await;
         for handler in &mcp_tools {
-            executor.register_ambient_tool(handler.clone());
+            runtimes.register_ambient_tool(handler.clone());
         }
         info!(
             servers = mcp_manager.server_count().await,
@@ -266,25 +194,27 @@ pub async fn bootstrap(
         );
 
         // Spawn background health-check loop for reconnection.
-        let exec_register = executor.clone();
-        let exec_unregister = executor.clone();
+        let register = runtimes.clone();
+        let unregister = runtimes.clone();
         mcp_manager.spawn_health_loop(
-            Arc::new(move |h| exec_register.register_ambient_tool(h)),
-            Arc::new(move |prefix| exec_unregister.unregister_tools_by_prefix(prefix)),
+            Arc::new(move |h| register.register_ambient_tool(h)),
+            Arc::new(move |prefix| unregister.unregister_tools_by_prefix(prefix)),
         );
     }
 
-    // Keep a reference to the LLM for the memory indexer.
-    let llm = orchestrator.llm.clone();
+    let default_space = runtimes
+        .get(DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG)
+        .await
+        .context("Failed to open the default space runtime")?;
 
     Ok(Bootstrap {
         config,
-        storage,
-        registry,
-        executor,
-        orchestrator,
+        runtimes,
+        storage: default_space.storage.clone(),
+        registry: default_space.registry.clone(),
+        executor: default_space.executor.clone(),
+        orchestrator: default_space.orchestrator.clone(),
         user_skills_dir,
-        llm,
     })
 }
 

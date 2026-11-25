@@ -229,7 +229,11 @@ pub async fn cancel_turn(
     // Fire the cancellation signal. Outcome is intentionally not surfaced —
     // the endpoint is idempotent and the authoritative reply is whatever
     // the event store shows after the worker reacts.
-    let _outcome = state.orchestrator.cancel_turn(turn_id).await;
+    let orchestrator = match state.runtime(&ctx).await {
+        Ok(runtime) => runtime.orchestrator.clone(),
+        Err(response) => return response,
+    };
+    let _outcome = orchestrator.cancel_turn(turn_id).await;
 
     // Return the current status. The transition from `running` →
     // `errored` (via the synthetic `agent_error` event from the SSE

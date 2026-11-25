@@ -77,6 +77,20 @@ pub fn skill_dirs(
     config: &AssistantConfig,
     project_root: Option<&Path>,
 ) -> Vec<(PathBuf, SkillSource)> {
+    skill_dirs_in(
+        dirs::home_dir().map(|h| h.join(".assistant")).as_deref(),
+        config,
+        project_root,
+    )
+}
+
+/// [`skill_dirs`] with the install root named explicitly, so its `skills/`
+/// directory is the user skill directory.
+pub fn skill_dirs_in(
+    install_root: Option<&Path>,
+    config: &AssistantConfig,
+    project_root: Option<&Path>,
+) -> Vec<(PathBuf, SkillSource)> {
     let mut dirs: Vec<(PathBuf, SkillSource)> = Vec::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
 
@@ -99,8 +113,8 @@ pub fn skill_dirs(
         push_dir(resolved, SkillSource::Installed);
     }
 
-    if let Some(home) = dirs::home_dir() {
-        push_dir(home.join(".assistant").join("skills"), SkillSource::User);
+    if let Some(root) = install_root {
+        push_dir(root.join("skills"), SkillSource::User);
     }
 
     if let Some(project) = resolved_project_root.as_ref() {

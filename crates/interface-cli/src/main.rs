@@ -16,6 +16,8 @@ mod dispatch;
 mod messengers;
 mod repl_helpers;
 mod skill_diff;
+mod space_binding;
+mod space_tasks;
 mod wiring;
 
 use args::{Cli, Command, MigrateCommand, OrchestratorCommand, SkillCommand};
@@ -43,11 +45,15 @@ use assistant_core::{
     validate_agent_id,
 };
 use assistant_runtime::{
-    CommandContext, CommandRegistry, init_tracing, orchestrator::ConfirmationCallback,
-    spawn_memory_indexer, spawn_scheduler, start_conversation_context,
+    BinaryRole, CommandContext, CommandRegistry, SpaceSupervisor, init_tracing,
+    orchestrator::ConfirmationCallback, start_conversation_context,
 };
-use assistant_storage::{OrgPoolFactory, PersonaStore as _, StorageLayer};
+use assistant_storage::OrgPoolFactory;
+use assistant_storage::migration::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
 use assistant_tool_executor::install_skill_from_source;
+
+/// How often the orchestrator service looks for spaces that were created or deleted.
+const SPACE_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub fn home_agent_root(agent_id: &str) -> Result<PathBuf> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
@@ -135,21 +141,10 @@ async fn main() -> Result<()> {
         );
     }
 
-    // Resolve the runtime database path. Production hosts use the per-space
-    // path under `orgs/default/spaces/default/space.db` (multi-org layout);
-    // `config.storage.db_path` is preserved as a deprecated dev/test override.
-    let db_path: PathBuf = match config.storage.db_path.as_deref() {
-        Some(p) => {
-            warn!(
-                path = p,
-                "config.storage.db_path is deprecated — runtime should use the per-space \
-                 database under orgs/default/spaces/default/space.db. This override is kept \
-                 for tests and dev-mode only and will be removed in a future release."
-            );
-            PathBuf::from(p)
-        }
-        None => OrgPoolFactory::new(assistant_dir.clone()).space_db_path("default", "default"),
-    };
+    // Every space database lives under the install root; one-shot commands
+    // work on the default space.
+    let pools = Arc::new(OrgPoolFactory::new(assistant_dir.clone()));
+    let db_path: PathBuf = pools.space_db_path(DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG);
 
     // 3. One-shot subcommands do not need the heavy runtime.
     if let Some(result) = dispatch::run_one_shot(&cli, &config_path, &db_path, &config).await {
@@ -181,7 +176,7 @@ async fn main() -> Result<()> {
     //    See `assistant_runtime::worker_plan` for the rules and their unit tests.
     let binary_role =
         wiring::select_binary_role(cli.command.as_ref(), orchestrator_interface_filtered);
-    let worker_plan = assistant_runtime::core_worker_plan(binary_role);
+    let worker_plan = assistant_runtime::core_worker_plan(binary_role.clone());
 
     let confirmation_cb: Arc<dyn ConfirmationCallback> =
         if wiring::uses_auto_deny_confirmation(cli.command.as_ref(), orchestrator_no_repl) {
@@ -192,19 +187,6 @@ async fn main() -> Result<()> {
             Arc::new(CliConfirmation)
         };
 
-    if let Some(parent) = db_path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_context(|| format!("creating db parent directory {}", parent.display()))?;
-    }
-    let storage = Arc::new(
-        StorageLayer::new(&db_path)
-            .await
-            .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
-    );
-    let personas = storage.persona_store();
-    personas.ensure_exists(&selected_persona).await?;
-
     let _otel_guard = init_tracing()?;
     for msg in config_logs {
         match msg {
@@ -213,7 +195,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let bs = bootstrap::bootstrap(&home, confirmation_cb, storage.clone(), config).await?;
+    let bs = bootstrap::bootstrap(&home, confirmation_cb, pools.clone(), config).await?;
 
     // 5a. Skill generate — one-shot turn, print result, exit.
     if let Some(Command::Skill {
@@ -269,23 +251,6 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 5b. Spawn the unfiltered main turn worker if the plan asks for it.
-    // The plan rules live in `assistant_runtime::worker_plan` and are unit
-    // tested there. Interface-filtered workers (scheduler-worker, web-worker)
-    // are spawned later in this function for the orchestrator-filtered role.
-    let mut _spawned_workers = Vec::new();
-    if let Some(spec) = worker_plan
-        .workers
-        .iter()
-        .find(|w| w.interface_filter.is_none())
-    {
-        let worker_orch = bs.orchestrator.clone();
-        let id = spec.worker_id;
-        _spawned_workers.push(tokio::spawn(async move {
-            worker_orch.run_worker(id).await;
-        }));
-    }
-
     // 6. MCP mode — run the stdio JSON-RPC server and exit.
     #[cfg(feature = "mcp")]
     if let Some(Command::Mcp) = &cli.command {
@@ -300,14 +265,47 @@ async fn main() -> Result<()> {
         .await;
     }
 
-    // 7. Start the background scheduler (polls every 60 seconds).
-    //    Spawned before interface-specific branches so that scheduled tasks
-    //    fire regardless of the active interface (Slack, Mattermost, REPL).
-    let _scheduler = spawn_scheduler(
-        bs.storage.clone(),
-        bs.orchestrator.clone(),
-        Duration::from_secs(60),
+    // 7. Org database and the space tasks.
+    //
+    //    Every space has its own turn queue, so the orchestrator service
+    //    supervises all spaces in `org.db` and runs the worker plan once per
+    //    space. Other roles run it for the one space they serve: the default
+    //    space, or the one a dedicated messenger is bound to.
+    let org_storage = Arc::new(pools.org_storage().await.context("Failed to open org.db")?);
+    let default_space = assistant_web_ui::install::ensure_default_space(&org_storage)
+        .await
+        .context("Failed to seed the default org and space")?;
+    let messenger_deps = messengers::MessengerDeps {
+        config: &bs.config,
+        runtimes: bs.runtimes.clone(),
+        org_storage: org_storage.clone(),
+        default_space: default_space.clone(),
+        transcription: None,
+        transcription_language: None,
+    };
+    let spawn_space_tasks = space_tasks::space_task_spawner(
+        worker_plan,
+        Arc::new(bs.config.clone()),
+        Some(Duration::from_secs(60)),
     );
+    if matches!(
+        binary_role,
+        BinaryRole::OrchestratorFiltered | BinaryRole::OrchestratorUnfiltered
+    ) {
+        let supervisor = Arc::new(SpaceSupervisor::new(
+            org_storage.clone(),
+            bs.runtimes.clone(),
+            spawn_space_tasks,
+        ));
+        tokio::spawn(supervisor.run(SPACE_RECONCILE_INTERVAL));
+    } else {
+        let home = match wiring::Messenger::from_command(cli.command.as_ref()) {
+            Some(messenger) => messenger_deps.bound_space(messenger).await?,
+            None => space_binding::SpaceBinding::default_space(&default_space),
+        };
+        // Not awaited: the tasks run for the life of the process.
+        let _space_tasks = spawn_space_tasks(home.space_ref(&bs.runtimes).await?);
+    }
 
     // 7a. Register the periodic skill improvement scheduled task when learning is enabled.
     if bs.config.learning.enabled
@@ -320,25 +318,6 @@ async fn main() -> Result<()> {
     {
         warn!(error = %e, "Failed to register skill improvement task");
     }
-
-    // 7b. Start the memory indexer background task (gated by the worker plan).
-    let _memory_indexer = worker_plan
-        .spawn_memory_indexer
-        .then(|| spawn_memory_indexer(&bs.config.memory, bs.storage.clone(), bs.llm.clone()));
-
-    // 7b'. Start the title-generator worker (gated by the worker plan). Consumes
-    //      `turn.result` and auto-titles conversations across every interface.
-    //      The web-ui binary intentionally skips this to avoid duplicate
-    //      consumers racing on the same bus claim (#730).
-    let _title_worker = worker_plan.spawn_title_generator.then(|| {
-        assistant_runtime::spawn_title_generator_worker(
-            bs.orchestrator.bus().clone(),
-            bs.storage.clone(),
-            bs.llm.clone(),
-            bs.config.titling.clone(),
-            selected_persona.clone(),
-        )
-    });
 
     // 7c. Build transcription provider (shared across interfaces).
     let transcription_language = bs
@@ -358,12 +337,9 @@ async fn main() -> Result<()> {
         .transpose()?;
 
     let messenger_deps = messengers::MessengerDeps {
-        config: &bs.config,
-        orchestrator: bs.orchestrator.clone(),
-        storage: bs.storage.clone(),
-        executor: bs.executor.clone(),
         transcription: transcription_provider,
         transcription_language,
+        ..messenger_deps
     };
 
     // 8. Single-messenger mode (`assistant slack|mattermost|...`).
@@ -382,24 +358,6 @@ async fn main() -> Result<()> {
         {
             return result;
         }
-    }
-
-    // Spawn the interface-filtered workers (scheduler-worker, web-worker)
-    // requested by the worker plan. The plan returns these for
-    // `OrchestratorFiltered` so scheduled tasks and Web-interface turns get
-    // consumed by this process — the main unfiltered worker is suppressed in
-    // that mode to avoid double-consuming Slack/Mattermost/etc. turns.
-    for spec in worker_plan
-        .workers
-        .iter()
-        .filter(|w| w.interface_filter.is_some())
-    {
-        let orch = bs.orchestrator.clone();
-        let id = spec.worker_id;
-        let filter = spec.interface_filter;
-        tokio::spawn(async move {
-            orch.run_worker_filtered(id, filter).await;
-        });
     }
 
     if orchestrator_no_repl {

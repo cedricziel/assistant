@@ -14,7 +14,7 @@ use axum::Extension;
 
 use assistant_core::auth::AuthContext;
 
-use super::handlers::test_support::test_state;
+use super::handlers::test_support::{test_state, test_state_and_store};
 use super::handlers::{
     A2AState, build_default_agent_card, cancel_task, create_push_notification_config,
     delete_push_notification_config, get_agent_card_well_known, get_extended_agent_card,
@@ -168,8 +168,8 @@ async fn cancel_task_unknown_id_returns_404() {
 
 #[tokio::test]
 async fn get_task_returns_created_task_when_present() {
-    let state = make_state("https://example.com").await;
-    let task = state.task_store.create_task(None).await.unwrap();
+    let (state, store) = test_state_and_store("https://example.com").await;
+    let task = store.create_task(None).await.unwrap();
     let id = task.id.clone();
     let app = make_app(state);
     let resp = app
@@ -188,8 +188,8 @@ async fn get_task_returns_created_task_when_present() {
 
 #[tokio::test]
 async fn cancel_task_existing_returns_200() {
-    let state = make_state("https://example.com").await;
-    let task = state.task_store.create_task(None).await.unwrap();
+    let (state, store) = test_state_and_store("https://example.com").await;
+    let task = store.create_task(None).await.unwrap();
     let id = task.id.clone();
     let app = make_app(state);
     let resp = app
@@ -287,8 +287,8 @@ async fn delete_push_config_unknown_returns_404() {
 
 #[tokio::test]
 async fn create_then_get_then_list_then_delete_push_config_round_trip() {
-    let state = make_state("https://example.com").await;
-    let task = state.task_store.create_task(None).await.unwrap();
+    let (state, store) = test_state_and_store("https://example.com").await;
+    let task = store.create_task(None).await.unwrap();
     let task_id = task.id.clone();
     let app = make_app(state);
 
@@ -424,7 +424,10 @@ async fn send_message_without_conversations_write_scope_returns_403() {
         user_id: "u".into(),
         org_id: "default".into(),
         email: "u@example.com".to_string(),
-        space_roles: std::collections::HashMap::new(),
+        space_roles: std::collections::HashMap::from([(
+            assistant_core::identity::SpaceId::from("default"),
+            assistant_core::identity::Role::Member,
+        )]),
         scopes: vec![],
         client_id: "test".to_string(),
     };

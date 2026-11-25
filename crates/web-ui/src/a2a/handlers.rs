@@ -14,7 +14,6 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use futures::StreamExt;
-use sqlx::SqlitePool;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 
@@ -28,25 +27,41 @@ use assistant_runtime::AssistantInterface;
 use assistant_runtime::projection::StreamProjector;
 use assistant_storage::{ConversationStore, SqliteConversationStore};
 
+use super::backend::A2aSpaceBackend;
 use super::task_store::A2aTaskStore;
 use crate::api::messages::caller_can_post;
 use crate::openapi::ApiErrorResponse;
+use crate::space::{Access, SpaceCtx, SpaceResolver};
 
 // -- Shared state --
 
 /// Shared state for all A2A handlers.
 #[derive(Clone)]
 pub struct A2AState {
-    /// Durable A2A task store, scoped to the active agent's space db.
-    pub task_store: Arc<dyn A2aTaskStore>,
+    /// Resolves each request to the caller's space and its database.
+    pub spaces: SpaceResolver,
+    /// Per-space orchestrator and task store.
+    pub backend: Arc<dyn A2aSpaceBackend>,
     /// The agent card describing this agent.
     pub agent_card: AgentCard,
-    /// Orchestrator used to run real turns for A2A messages.
-    pub orchestrator: Arc<dyn AssistantInterface>,
-    /// Space db pool, for resolving/creating conversations.
-    pub pool: SqlitePool,
-    /// The active agent id (space scope) for conversation resolution.
+    /// The active agent id for conversation resolution.
     pub agent_id: String,
+}
+
+impl axum::extract::FromRef<A2AState> for SpaceResolver {
+    fn from_ref(state: &A2AState) -> Self {
+        state.spaces.clone()
+    }
+}
+
+impl A2AState {
+    async fn task_store(&self, space: &SpaceCtx) -> Result<Arc<dyn A2aTaskStore>, Response> {
+        self.backend.task_store(space).await.map_err(internal_error)
+    }
+
+    async fn interface(&self, space: &SpaceCtx) -> Result<Arc<dyn AssistantInterface>, Response> {
+        self.backend.interface(space).await.map_err(internal_error)
+    }
 }
 
 /// Resolve the conversation for an A2A message. A returned `context_id` is the
@@ -179,10 +194,23 @@ pub async fn get_extended_agent_card(State(state): State<A2AState>) -> Json<Agen
     security(("bearer_token" = []))
 )]
 pub async fn send_message(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Extension(auth): Extension<AuthContext>,
     Json(req): Json<SendMessageRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+    let orchestrator = match state.interface(&space).await {
+        Ok(interface) => interface,
+        Err(response) => return response,
+    };
+
     if !caller_can_post(&auth) {
         return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
     }
@@ -197,7 +225,9 @@ pub async fn send_message(
 
     // Resolve (or create) the conversation, then key the task to it so the
     // client can reuse the returned context_id for follow-up turns.
-    let conv_store = SqliteConversationStore::for_agent(state.pool.clone(), &state.agent_id);
+    let conv_store =
+        SqliteConversationStore::for_agent(space.storage.pool.clone(), &state.agent_id)
+            .with_user_id(auth.user_id.0.clone());
     let Some(conv_id) = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await
     else {
         return (
@@ -207,21 +237,16 @@ pub async fn send_message(
             .into_response();
     };
 
-    let task = match state
-        .task_store
-        .create_task(Some(conv_id.to_string()))
-        .await
-    {
+    let task = match task_store.create_task(Some(conv_id.to_string())).await {
         Ok(t) => t,
         Err(e) => return internal_error(e),
     };
     let mut user_msg = req.message.clone();
     user_msg.task_id = Some(task.id.clone());
-    if let Err(e) = state.task_store.append_history(&task.id, user_msg).await {
+    if let Err(e) = task_store.append_history(&task.id, user_msg).await {
         return internal_error(e);
     }
-    if let Err(e) = state
-        .task_store
+    if let Err(e) = task_store
         .update_status(&task.id, TaskState::TaskStateWorking, None)
         .await
     {
@@ -229,8 +254,7 @@ pub async fn send_message(
     }
 
     // Run the real turn through the Orchestrator.
-    let result = state
-        .orchestrator
+    let result = orchestrator
         .submit_turn(&auth, &user_text, conv_id, Interface::A2a, None)
         .await;
 
@@ -238,11 +262,10 @@ pub async fn send_message(
         Ok(turn) => turn.answer,
         Err(e) => {
             let err_msg = agent_message(&task, format!("Turn failed: {e}"));
-            let _ = state
-                .task_store
+            let _ = task_store
                 .update_status(&task.id, TaskState::TaskStateFailed, Some(err_msg))
                 .await;
-            let failed = state.task_store.get_task(&task.id).await.ok().flatten();
+            let failed = task_store.get_task(&task.id).await.ok().flatten();
             return Json(SendMessageResponse {
                 task: failed,
                 message: None,
@@ -252,22 +275,17 @@ pub async fn send_message(
     };
 
     let agent_msg = agent_message(&task, answer);
-    if let Err(e) = state
-        .task_store
-        .append_history(&task.id, agent_msg.clone())
-        .await
-    {
+    if let Err(e) = task_store.append_history(&task.id, agent_msg.clone()).await {
         return internal_error(e);
     }
-    if let Err(e) = state
-        .task_store
+    if let Err(e) = task_store
         .update_status(&task.id, TaskState::TaskStateCompleted, Some(agent_msg))
         .await
     {
         return internal_error(e);
     }
 
-    let final_task = match state.task_store.get_task(&task.id).await {
+    let final_task = match task_store.get_task(&task.id).await {
         Ok(Some(t)) => t,
         Ok(None) => {
             return (
@@ -303,10 +321,23 @@ pub async fn send_message(
     security(("bearer_token" = []))
 )]
 pub async fn send_message_streaming(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Extension(auth): Extension<AuthContext>,
     Json(req): Json<SendMessageRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+    let orchestrator = match state.interface(&space).await {
+        Ok(interface) => interface,
+        Err(response) => return response,
+    };
+
     if !caller_can_post(&auth) {
         return (StatusCode::FORBIDDEN, "Missing conversations:write scope").into_response();
     }
@@ -319,7 +350,9 @@ pub async fn send_message_streaming(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let conv_store = SqliteConversationStore::for_agent(state.pool.clone(), &state.agent_id);
+    let conv_store =
+        SqliteConversationStore::for_agent(space.storage.pool.clone(), &state.agent_id)
+            .with_user_id(auth.user_id.0.clone());
     let Some(conv_id) = resolve_conversation(&conv_store, req.message.context_id.as_deref()).await
     else {
         return (
@@ -329,11 +362,7 @@ pub async fn send_message_streaming(
             .into_response();
     };
 
-    let task = match state
-        .task_store
-        .create_task(Some(conv_id.to_string()))
-        .await
-    {
+    let task = match task_store.create_task(Some(conv_id.to_string())).await {
         Ok(t) => t,
         Err(e) => return internal_error(e),
     };
@@ -341,11 +370,10 @@ pub async fn send_message_streaming(
     let ctx = task.context_id.clone();
     let mut user_msg = req.message.clone();
     user_msg.task_id = Some(task_id.clone());
-    if let Err(e) = state.task_store.append_history(&task_id, user_msg).await {
+    if let Err(e) = task_store.append_history(&task_id, user_msg).await {
         return internal_error(e);
     }
-    if let Err(e) = state
-        .task_store
+    if let Err(e) = task_store
         .update_status(&task_id, TaskState::TaskStateWorking, None)
         .await
     {
@@ -356,14 +384,11 @@ pub async fn send_message_streaming(
     let (sse_tx, sse_rx) = tokio::sync::mpsc::unbounded_channel::<Result<Event, Infallible>>();
     let (event_tx, mut event_rx) =
         tokio::sync::mpsc::channel::<assistant_runtime::OrchestratorEvent>(64);
-    state
-        .orchestrator
-        .register_token_sink(conv_id, event_tx)
-        .await;
+    orchestrator.register_token_sink(conv_id, event_tx).await;
 
     // Run the turn; capture the final result via a oneshot.
     let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-    let orchestrator = state.orchestrator.clone();
+    let orchestrator = orchestrator.clone();
     let turn_auth = auth.clone();
     let turn_text = user_text.clone();
     tokio::spawn(async move {
@@ -376,7 +401,7 @@ pub async fn send_message_streaming(
     // Drain orchestrator events -> A2A StreamResponse frames -> SSE, then persist
     // the final answer and emit the terminal task snapshot.
     let projector = crate::a2a::projection::A2aProjector::new(task_id.clone(), ctx.clone());
-    let task_store = state.task_store.clone();
+    let task_store = task_store.clone();
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             for frame in projector.project(&event) {
@@ -456,11 +481,20 @@ pub async fn send_message_streaming(
     security(("bearer_token" = []))
 )]
 pub async fn get_task(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Path(id): Path<String>,
     Query(_query): Query<GetTaskQuery>,
 ) -> Response {
-    match state.task_store.get_task(&id).await {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+
+    match task_store.get_task(&id).await {
         Ok(Some(task)) => Json(task).into_response(),
         Ok(None) => not_found(format!("Task '{id}' not found")),
         Err(e) => internal_error(e),
@@ -498,13 +532,21 @@ pub struct GetTaskQuery {
     security(("bearer_token" = []))
 )]
 pub async fn list_tasks(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Query(query): Query<ListTasksRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+
     let limit = query.page_size.unwrap_or(50).clamp(1, 100) as usize;
 
-    let tasks = match state
-        .task_store
+    let tasks = match task_store
         .list_tasks(query.context_id.as_deref(), query.status, limit)
         .await
     {
@@ -542,12 +584,21 @@ pub async fn list_tasks(
     security(("bearer_token" = []))
 )]
 pub async fn cancel_task(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Path(id): Path<String>,
     body: Option<axum::Json<CancelTaskRequest>>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+
     let _ = body; // body fields are available for future use (e.g. metadata)
-    match state.task_store.cancel_task(&id).await {
+    match task_store.cancel_task(&id).await {
         Ok(Some(task)) => Json(task).into_response(),
         Ok(None) => not_found(format!("Task '{id}' not found")),
         Err(e) => internal_error(e),
@@ -573,8 +624,20 @@ pub async fn cancel_task(
     tag = "tasks",
     security(("bearer_token" = []))
 )]
-pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<String>) -> Response {
-    let rx = match state.task_store.subscribe(&id).await {
+pub async fn subscribe_to_task(
+    space: SpaceCtx,
+    State(state): State<A2AState>,
+    Path(id): Path<String>,
+) -> Response {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+
+    let rx = match task_store.subscribe(&id).await {
         Ok(r) => r,
         Err(e) => return internal_error(e),
     };
@@ -582,7 +645,7 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
     match rx {
         Some(rx) => {
             let task_id = id.clone();
-            let store = state.task_store.clone();
+            let store = task_store.clone();
 
             let stream = UnboundedReceiverStream::new(rx)
                 .map(|task_snapshot| {
@@ -609,7 +672,7 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
         }
         None => {
             // Task doesn't exist or is already terminal.
-            match state.task_store.get_task(&id).await {
+            match task_store.get_task(&id).await {
                 Ok(Some(t)) if t.status.state.is_terminal() => bad_request(format!(
                     "Task '{id}' is already in terminal state: {:?}",
                     t.status.state
@@ -642,15 +705,20 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
     security(("bearer_token" = []))
 )]
 pub async fn create_push_notification_config(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Path(task_id): Path<String>,
     Json(req): Json<CreateTaskPushNotificationConfigRequest>,
 ) -> Response {
-    match state
-        .task_store
-        .create_push_config(&task_id, req.config)
-        .await
-    {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+
+    match task_store.create_push_config(&task_id, req.config).await {
         Ok(Some(config)) => (StatusCode::CREATED, Json(config)).into_response(),
         Ok(None) => not_found(format!("Task '{task_id}' not found")),
         Err(e) => internal_error(e),
@@ -676,10 +744,19 @@ pub async fn create_push_notification_config(
     security(("bearer_token" = []))
 )]
 pub async fn get_push_notification_config(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Path((task_id, config_id)): Path<(String, String)>,
 ) -> Response {
-    match state.task_store.get_push_config(&task_id, &config_id).await {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+
+    match task_store.get_push_config(&task_id, &config_id).await {
         Ok(Some(config)) => Json(config).into_response(),
         Ok(None) => not_found(format!(
             "Push notification config '{config_id}' not found for task '{task_id}'"
@@ -715,11 +792,20 @@ pub struct ListPushConfigsQuery {
     security(("bearer_token" = []))
 )]
 pub async fn list_push_notification_configs(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Path(task_id): Path<String>,
     Query(_query): Query<ListPushConfigsQuery>,
 ) -> Response {
-    let configs = match state.task_store.list_push_configs(&task_id).await {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+
+    let configs = match task_store.list_push_configs(&task_id).await {
         Ok(c) => c,
         Err(e) => return internal_error(e),
     };
@@ -748,14 +834,19 @@ pub async fn list_push_notification_configs(
     security(("bearer_token" = []))
 )]
 pub async fn delete_push_notification_config(
+    space: SpaceCtx,
     State(state): State<A2AState>,
     Path((task_id, config_id)): Path<(String, String)>,
 ) -> Response {
-    match state
-        .task_store
-        .delete_push_config(&task_id, &config_id)
-        .await
-    {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
+    let task_store = match state.task_store(&space).await {
+        Ok(store) => store,
+        Err(response) => return response,
+    };
+
+    match task_store.delete_push_config(&task_id, &config_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found(format!(
             "Push notification config '{config_id}' not found for task '{task_id}'"
@@ -866,17 +957,54 @@ pub(crate) mod test_support {
         }
     }
 
+    /// Serves one orchestrator and one task store to every space.
+    pub struct FixedBackend {
+        pub interface: Arc<dyn AssistantInterface>,
+        pub task_store: Arc<dyn crate::a2a::task_store::A2aTaskStore>,
+    }
+
+    #[async_trait]
+    impl crate::a2a::backend::A2aSpaceBackend for FixedBackend {
+        async fn interface(
+            &self,
+            _space: &crate::space::SpaceCtx,
+        ) -> anyhow::Result<Arc<dyn AssistantInterface>> {
+            Ok(self.interface.clone())
+        }
+
+        async fn task_store(
+            &self,
+            _space: &crate::space::SpaceCtx,
+        ) -> anyhow::Result<Arc<dyn crate::a2a::task_store::A2aTaskStore>> {
+            Ok(self.task_store.clone())
+        }
+    }
+
     /// Build an `A2AState` backed by in-memory storage + an echo orchestrator.
     pub async fn test_state(base_url: &str) -> A2AState {
-        let storage = assistant_storage::StorageLayer::new_in_memory()
-            .await
-            .expect("in-memory storage");
-        A2AState {
-            task_store: Arc::new(InMemoryA2aTaskStore::new()),
+        test_state_and_store(base_url).await.0
+    }
+
+    /// [`test_state`], also returning the task store every space shares.
+    pub async fn test_state_and_store(
+        base_url: &str,
+    ) -> (A2AState, Arc<dyn crate::a2a::task_store::A2aTaskStore>) {
+        let task_store: Arc<dyn crate::a2a::task_store::A2aTaskStore> =
+            Arc::new(InMemoryA2aTaskStore::new());
+        let storage = Arc::new(
+            assistant_storage::StorageLayer::new_in_memory()
+                .await
+                .expect("in-memory storage"),
+        );
+        let state = A2AState {
+            spaces: crate::api::test_helpers::default_resolver(&storage).await,
+            backend: Arc::new(FixedBackend {
+                interface: Arc::new(EchoInterface),
+                task_store: task_store.clone(),
+            }),
             agent_card: build_default_agent_card(base_url),
-            orchestrator: Arc::new(EchoInterface),
-            pool: storage.pool.clone(),
             agent_id: "default".to_string(),
-        }
+        };
+        (state, task_store)
     }
 }

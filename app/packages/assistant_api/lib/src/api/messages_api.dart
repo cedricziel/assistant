@@ -24,6 +24,7 @@ class MessagesApi {
   ///
   /// Parameters:
   /// * [sendMessageRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -35,6 +36,7 @@ class MessagesApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<SendMessageResponse>> a2aSendMessage({
     required SendMessageRequest sendMessageRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -46,6 +48,7 @@ class MessagesApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -126,6 +129,7 @@ class MessagesApi {
   ///
   /// Parameters:
   /// * [sendMessageRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -137,6 +141,7 @@ class MessagesApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<StreamResponse>> a2aSendMessageStreaming({
     required SendMessageRequest sendMessageRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -148,6 +153,7 @@ class MessagesApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{

@@ -64,6 +64,17 @@ impl AuthContext {
         }
     }
 
+    /// The trusted system caller acting inside one space.
+    ///
+    /// Scheduled and workflow turns run as this context so their identity names
+    /// the org and space they belong to instead of the `default` pair.
+    pub fn system_in(org_id: OrgId, space_id: SpaceId) -> Self {
+        let mut context = Self::system();
+        context.org_id = org_id;
+        context.space_roles = HashMap::from([(space_id, Role::OrgAdmin)]);
+        context
+    }
+
     /// Returns `true` if this context carries the `OrgAdmin` role in any space,
     /// or has the `org:manage` scope.
     pub fn is_org_admin(&self) -> bool {
@@ -445,6 +456,24 @@ pub trait DeviceCodeStore: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_in_names_the_org_and_space_it_acts_in() {
+        let ctx = AuthContext::system_in(OrgId::from("org_acme"), SpaceId::from("spc_eng"));
+
+        assert_eq!(ctx.org_id, OrgId::from("org_acme"));
+        assert_eq!(ctx.user_id, UserId::from("system"));
+        assert_eq!(
+            ctx.space_roles,
+            HashMap::from([(SpaceId::from("spc_eng"), Role::OrgAdmin)]),
+            "the system caller holds no role in any other space"
+        );
+        assert!(ctx.scopes.iter().any(|s| s.covers(
+            &ResourceKind::Conversations,
+            &Action::Write,
+            None
+        )));
+    }
 
     fn make_org_admin() -> AuthContext {
         let mut space_roles = HashMap::new();

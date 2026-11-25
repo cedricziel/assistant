@@ -14,7 +14,7 @@ Method | HTTP request | Description
 
 
 # **a2aSendMessage**
-> SendMessageResponse a2aSendMessage(sendMessageRequest)
+> SendMessageResponse a2aSendMessage(sendMessageRequest, xSpaceId)
 
 `POST /message/send` -- Sends a message to the agent (unary).
 
@@ -26,9 +26,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getMessagesApi();
 final SendMessageRequest sendMessageRequest = ; // SendMessageRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.a2aSendMessage(sendMessageRequest);
+    final response = api.a2aSendMessage(sendMessageRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling MessagesApi->a2aSendMessage: $e\n');
@@ -40,6 +41,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **sendMessageRequest** | [**SendMessageRequest**](SendMessageRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -57,7 +59,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **a2aSendMessageStreaming**
-> StreamResponse a2aSendMessageStreaming(sendMessageRequest)
+> StreamResponse a2aSendMessageStreaming(sendMessageRequest, xSpaceId)
 
 `POST /message/stream` -- Sends a message with streaming response (SSE).
 
@@ -67,9 +69,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getMessagesApi();
 final SendMessageRequest sendMessageRequest = ; // SendMessageRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.a2aSendMessageStreaming(sendMessageRequest);
+    final response = api.a2aSendMessageStreaming(sendMessageRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling MessagesApi->a2aSendMessageStreaming: $e\n');
@@ -81,6 +84,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **sendMessageRequest** | [**SendMessageRequest**](SendMessageRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

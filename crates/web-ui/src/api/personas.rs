@@ -28,12 +28,13 @@ use axum::{
     routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use tracing::warn;
 
 use assistant_core::auth::AuthContext;
 use assistant_core::validate_agent_id;
+
+use crate::space::{Access, SpaceCtx, SpaceResolver};
 
 // -- Constants ---------------------------------------------------------------
 
@@ -66,9 +67,16 @@ const MAX_FILE_BYTES: usize = 2 * 1024 * 1024; // 2 MB
 
 #[derive(Clone)]
 pub struct PersonaApiState {
-    pub pool: SqlitePool,
+    /// Resolves each request to the caller's space and its database.
+    pub spaces: SpaceResolver,
     /// Shared live agent ID — updated when the user switches personas.
     pub agent_id: Arc<RwLock<String>>,
+}
+
+impl axum::extract::FromRef<PersonaApiState> for SpaceResolver {
+    fn from_ref(state: &PersonaApiState) -> Self {
+        state.spaces.clone()
+    }
 }
 
 // -- Helpers -----------------------------------------------------------------
@@ -217,11 +225,11 @@ pub fn personas_router() -> Router<PersonaApiState> {
     ),
     security(("bearer_token" = []))
 )]
-pub async fn list_personas(
-    Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
-) -> Response {
-    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool);
+pub async fn list_personas(space: SpaceCtx, Extension(ctx): Extension<AuthContext>) -> Response {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let store = assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     match store.list_accessible(&ctx.user_id.0).await {
         Ok(personas) => {
             let summaries: Vec<PersonaSummary> = personas
@@ -256,10 +264,13 @@ pub async fn list_personas(
     security(("bearer_token" = []))
 )]
 pub async fn create_persona(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
     Json(body): Json<CreatePersonaRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
     let id = body.id.trim().to_string();
     let name = body.name.trim().to_string();
 
@@ -278,7 +289,7 @@ pub async fn create_persona(
             .into_response();
     }
 
-    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     match store.create_owned(&id, &name, &ctx.user_id.0).await {
         Ok(p) => {
             let files: Vec<PersonaFileSlot> = PERSONA_FILE_SLOTS
@@ -330,16 +341,20 @@ pub async fn create_persona(
     security(("bearer_token" = []))
 )]
 pub async fn set_active_persona(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Json(body): Json<SetActivePersonaRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
     let id = body.id.trim().to_string();
     if id.is_empty() {
         return (StatusCode::BAD_REQUEST, "Persona ID is required").into_response();
     }
 
-    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
 
     // Verify the persona exists and is accessible to this user.
     let persona = match store.get_accessible(&id, &ctx.user_id.0).await {
@@ -383,10 +398,13 @@ pub async fn set_active_persona(
     security(("bearer_token" = []))
 )]
 pub async fn get_persona(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
     if !validate_agent_id(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -395,7 +413,7 @@ pub async fn get_persona(
             .into_response();
     }
 
-    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     let persona = match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(Some(p)) => p,
         Ok(None) => {
@@ -442,10 +460,13 @@ pub async fn get_persona(
     security(("bearer_token" = []))
 )]
 pub async fn get_persona_file(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
     Path((id, filename)): Path<(String, String)>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
     if !validate_agent_id(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -461,7 +482,7 @@ pub async fn get_persona_file(
             .into_response();
     }
 
-    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -507,11 +528,14 @@ pub async fn get_persona_file(
     security(("bearer_token" = []))
 )]
 pub async fn put_persona_file(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
     Path((id, filename)): Path<(String, String)>,
     Json(body): Json<WritePersonaFileRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
     if !validate_agent_id(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -534,7 +558,7 @@ pub async fn put_persona_file(
             .into_response();
     }
 
-    let store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let store = assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -595,10 +619,13 @@ pub async fn put_persona_file(
     security(("bearer_token" = []))
 )]
 pub async fn get_skill_access(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
     if !validate_agent_id(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -607,7 +634,8 @@ pub async fn get_skill_access(
             .into_response();
     }
 
-    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let persona_store =
+        assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -624,7 +652,7 @@ pub async fn get_skill_access(
     }
 
     let access_store = assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
-        state.pool.clone(),
+        space.storage.pool.clone(),
     );
     let mode = access_store
         .get_mode(&id)
@@ -651,11 +679,14 @@ pub async fn get_skill_access(
     security(("bearer_token" = []))
 )]
 pub async fn patch_skill_access_mode(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
     Path(id): Path<String>,
     Json(body): Json<SetSkillAccessModeRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
     if !validate_agent_id(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -673,7 +704,8 @@ pub async fn patch_skill_access_mode(
             .into_response();
     }
 
-    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let persona_store =
+        assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -690,7 +722,7 @@ pub async fn patch_skill_access_mode(
     }
 
     let access_store = assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
-        state.pool.clone(),
+        space.storage.pool.clone(),
     );
 
     if let Err(e) = access_store.set_mode(&id, &mode).await {
@@ -719,11 +751,14 @@ pub async fn patch_skill_access_mode(
     security(("bearer_token" = []))
 )]
 pub async fn add_skill_access(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
     Path(id): Path<String>,
     Json(body): Json<AddSkillAccessRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
     if !validate_agent_id(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -732,7 +767,8 @@ pub async fn add_skill_access(
             .into_response();
     }
 
-    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let persona_store =
+        assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -749,7 +785,7 @@ pub async fn add_skill_access(
     }
 
     let access_store = assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
-        state.pool.clone(),
+        space.storage.pool.clone(),
     );
 
     if let Err(e) = access_store.add_skill(&id, &body.skill_name).await {
@@ -784,10 +820,13 @@ pub async fn add_skill_access(
     security(("bearer_token" = []))
 )]
 pub async fn delete_skill_access(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
-    State(state): State<PersonaApiState>,
     Path((id, skill_name)): Path<(String, String)>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Admin) {
+        return denied.into_response();
+    }
     if !validate_agent_id(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -796,7 +835,8 @@ pub async fn delete_skill_access(
             .into_response();
     }
 
-    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    let persona_store =
+        assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
     match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
@@ -813,7 +853,7 @@ pub async fn delete_skill_access(
     }
 
     let access_store = assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
-        state.pool.clone(),
+        space.storage.pool.clone(),
     );
 
     if let Err(e) = access_store.remove_skill(&id, &skill_name).await {
@@ -840,7 +880,7 @@ mod tests {
     use tower::ServiceExt;
 
     use assistant_core::auth::AuthContext;
-    use assistant_core::identity::{OrgId, UserId};
+    use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
     use assistant_storage::StorageLayer;
 
     use super::{PersonaApiState, personas_router};
@@ -848,9 +888,9 @@ mod tests {
     fn make_test_ctx() -> AuthContext {
         AuthContext {
             user_id: UserId::from("test-user"),
-            org_id: OrgId::from("org_1"),
+            org_id: OrgId::from("default"),
             email: "test@test.local".into(),
-            space_roles: HashMap::new(),
+            space_roles: HashMap::from([(SpaceId::from("default"), Role::SpaceAdmin)]),
             scopes: vec![],
             client_id: "test".into(),
         }
@@ -864,7 +904,7 @@ mod tests {
             .await
             .unwrap();
         let state = PersonaApiState {
-            pool: storage.pool.clone(),
+            spaces: super::super::test_helpers::default_resolver(&storage).await,
             agent_id: Arc::new(RwLock::new("default".to_string())),
         };
         (state, storage)

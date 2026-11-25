@@ -39,7 +39,7 @@ pub mod llm;
 // ── Storage / message-bus configuration ───────────────────────────────────────
 //
 // Moved to the `storage` submodule. Import via
-// `use assistant_core::types::storage::{StorageConfig, BusConfig, BusKind};`
+// `use assistant_core::types::storage::{BusConfig, BusKind};`
 pub mod storage;
 
 // ── Skills / MCP / mirror configuration ───────────────────────────────────────

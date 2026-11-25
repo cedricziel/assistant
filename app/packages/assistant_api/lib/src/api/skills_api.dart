@@ -27,6 +27,7 @@ class SkillsApi {
   ///
   /// Parameters:
   /// * [createSkillRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -38,6 +39,7 @@ class SkillsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<SkillDetail>> createSkill({
     required CreateSkillRequest createSkillRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -49,6 +51,7 @@ class SkillsApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -129,6 +132,7 @@ class SkillsApi {
   ///
   /// Parameters:
   /// * [name] - Skill name
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -140,6 +144,7 @@ class SkillsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> deleteSkill({
     required String name,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -154,6 +159,7 @@ class SkillsApi {
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -185,6 +191,7 @@ class SkillsApi {
   ///
   /// Parameters:
   /// * [name] - Skill name
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -196,6 +203,7 @@ class SkillsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<SkillDetail>> getSkill({
     required String name,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -210,6 +218,7 @@ class SkillsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -270,6 +279,7 @@ class SkillsApi {
   ///
   /// Parameters:
   /// * [personaId] - Persona ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -281,6 +291,7 @@ class SkillsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<BuiltList<SkillEntryResponse>>> listPersonaSkills({
     required String personaId,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -295,6 +306,7 @@ class SkillsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -355,6 +367,7 @@ class SkillsApi {
   ///
   ///
   /// Parameters:
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -365,6 +378,7 @@ class SkillsApi {
   /// Returns a [Future] containing a [Response] with a [BuiltList<SkillDetail>] as data
   /// Throws [DioException] if API call or serialization fails
   Future<Response<BuiltList<SkillDetail>>> listSkills({
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -376,6 +390,7 @@ class SkillsApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -437,6 +452,7 @@ class SkillsApi {
   /// Parameters:
   /// * [name] - Skill name
   /// * [updateSkillRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -449,6 +465,7 @@ class SkillsApi {
   Future<Response<SkillDetail>> updateSkill({
     required String name,
     required UpdateSkillRequest updateSkillRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -463,6 +480,7 @@ class SkillsApi {
     final _options = Options(
       method: r'PUT',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{

@@ -6,7 +6,7 @@
 
 #![cfg(test)]
 
-use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -19,9 +19,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use assistant_core::types::agent::AssistantConfig;
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_llm_provider::retry::RetryConfig;
-use assistant_runtime::{CommandRegistry, Orchestrator};
-use assistant_storage::{RunBroadcaster, SkillRegistry, StorageLayer};
-use assistant_tool_executor::ToolExecutor;
+use assistant_runtime::SpaceRuntimes;
+use assistant_runtime::bootstrap::AutoDenyConfirmation;
+use assistant_storage::StorageLayer;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
 
 use assistant_core::identity::{OrgId, SpaceId};
@@ -44,8 +44,14 @@ pub(crate) struct TestSpace {
 /// Build a [`SpaceResolver`] over an in-memory org database that holds
 /// `spaces`, each served from its preloaded storage (nothing touches disk).
 pub(crate) async fn resolver_for(spaces: &[TestSpace]) -> SpaceResolver {
+    resolver_in(Path::new("/nonexistent/assistant-test-root"), spaces).await
+}
+
+/// Like [`resolver_for`], with the install root at `root`: skills and other
+/// files that runtimes write land there.
+pub(crate) async fn resolver_in(root: &Path, spaces: &[TestSpace]) -> SpaceResolver {
     let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
-    let pools = Arc::new(OrgPoolFactory::new("/nonexistent/assistant-test-root"));
+    let pools = Arc::new(OrgPoolFactory::new(root));
     let now = chrono::DateTime::UNIX_EPOCH;
     let mut orgs_seen = std::collections::HashSet::new();
     for space in spaces {
@@ -147,13 +153,32 @@ pub(crate) async fn mount_llm_reply(server: &MockServer, reply: &str) {
         .await;
 }
 
-/// Build an `ApiState` wired to an in-memory DB and a mock LLM server.
-pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
+/// An `ApiState` whose runtimes are built over `spaces`' preloaded storage,
+/// answering from the Ollama-shaped mock at `llm_url`. With `workers`, every
+/// space's orchestrator also runs a turn worker.
+pub(crate) async fn state_over(
+    llm_url: &str,
+    spaces: &[TestSpace],
+    workers: bool,
+) -> (ApiState, SpaceResolver) {
+    state_over_in(
+        Path::new("/nonexistent/assistant-test-root"),
+        llm_url,
+        spaces,
+        workers,
+    )
+    .await
+}
+
+/// [`state_over`] with the install root at `root`.
+pub(crate) async fn state_over_in(
+    root: &Path,
+    llm_url: &str,
+    spaces: &[TestSpace],
+    workers: bool,
+) -> (ApiState, SpaceResolver) {
     let mut config = AssistantConfig::default();
     config.memory.enabled = false;
-
-    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
     let llm = Arc::new(
         LlmClient::new(LlmClientConfig {
             model: "test".to_string(),
@@ -163,99 +188,59 @@ pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
         })
         .unwrap(),
     );
-    let executor = Arc::new(ToolExecutor::new(
-        storage.clone(),
-        llm.clone(),
-        registry.clone(),
-        Arc::new(config.clone()),
-    ));
-    let bus = Arc::new(storage.message_bus());
+    let resolver = resolver_in(root, spaces).await;
     // Cap the submit timeout: the production default is 3 hours, so a turn
     // that never gets picked up by the worker would keep a test — and the CI
     // job around it — blocked for that long instead of failing fast.
-    let orchestrator = Arc::new(
-        Orchestrator::new(llm, storage.clone(), executor, registry, bus, &config)
-            .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
+    let runtimes = Arc::new(
+        SpaceRuntimes::new(
+            resolver.pools().clone(),
+            Arc::new(config),
+            llm,
+            Arc::new(AutoDenyConfirmation {
+                interface_name: "test",
+            }),
+        )
+        .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
     );
+    if workers {
+        for space in spaces {
+            let runtime = runtimes.get(space.org_slug, space.slug).await.unwrap();
+            let worker = runtime.orchestrator.clone();
+            tokio::spawn(async move { worker.run_worker("test-worker").await });
+        }
+    }
+    let state = ApiState::new(
+        resolver.clone(),
+        runtimes,
+        Arc::new(RwLock::new("default".to_string())),
+    );
+    (state, resolver)
+}
 
-    // Spawn the turn-processing worker so submit_turn requests are handled.
-    let worker_orch = orchestrator.clone();
-    tokio::spawn(async move {
-        worker_orch.run_worker("test-worker").await;
-    });
+pub(crate) fn default_space(storage: &Arc<StorageLayer>) -> TestSpace {
+    TestSpace {
+        id: "default",
+        org_id: "default",
+        org_slug: "default",
+        slug: "default",
+        storage: storage.clone(),
+    }
+}
 
-    let orchestrator_ref = orchestrator.clone();
-    let default_model = orchestrator_ref.llm.model_name().to_string();
-    let state = ApiState {
-        spaces: default_resolver(&storage).await,
-        agent_id: Arc::new(RwLock::new("default".to_string())),
-        orchestrator,
-        push_dispatcher: None,
-        transcription_provider: None,
-        tts_provider: None,
-        audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-        run_broadcaster: RunBroadcaster::new(),
-        command_registry: Arc::new(CommandRegistry::new()),
-        conversation_broadcasters: super::ConversationBroadcasters::default(),
-        conversation_configs: Arc::new(RwLock::new(HashMap::new())),
-        orchestrator_ref,
-        active_turns: Arc::new(RwLock::new(HashMap::new())),
-        default_model,
-    };
+/// Build an `ApiState` wired to an in-memory DB and a mock LLM server.
+pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let (state, _) = state_over(llm_url, &[default_space(&storage)], true).await;
     (state, storage)
 }
 
-/// Create a minimal state with a real event store but a stub orchestrator.
-/// No worker task is spawned, so the single in-memory connection is not
-/// contended. Use this for tests that only exercise the event log endpoints.
+/// Create a minimal state with a real event store but no turn worker, so the
+/// single in-memory connection is not contended. Use this for tests that only
+/// exercise the event log endpoints.
 pub(crate) async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
-    let mut config = AssistantConfig::default();
-    config.memory.enabled = false;
-
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
-    let llm = Arc::new(
-        LlmClient::new(LlmClientConfig {
-            model: "test".to_string(),
-            base_url: "http://127.0.0.1:1".to_string(),
-            timeout_secs: 1,
-            retry_config: RetryConfig::disabled(),
-        })
-        .unwrap(),
-    );
-    let executor = Arc::new(ToolExecutor::new(
-        storage.clone(),
-        llm.clone(),
-        registry.clone(),
-        Arc::new(config.clone()),
-    ));
-    let bus = Arc::new(storage.message_bus());
-    // Cap the submit timeout: the production default is 3 hours, so a turn
-    // that never gets picked up by the worker would keep a test — and the CI
-    // job around it — blocked for that long instead of failing fast.
-    let orchestrator = Arc::new(
-        Orchestrator::new(llm, storage.clone(), executor, registry, bus, &config)
-            .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
-    );
-    // NOTE: No worker task spawned — avoids contention on the single in-memory connection.
-    let orchestrator_ref = orchestrator.clone();
-    let default_model = orchestrator_ref.llm.model_name().to_string();
-    let state = ApiState {
-        spaces: default_resolver(&storage).await,
-        agent_id: Arc::new(RwLock::new("default".to_string())),
-        orchestrator,
-        push_dispatcher: None,
-        transcription_provider: None,
-        tts_provider: None,
-        audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-        run_broadcaster: RunBroadcaster::new(),
-        command_registry: Arc::new(CommandRegistry::new()),
-        conversation_broadcasters: super::ConversationBroadcasters::default(),
-        conversation_configs: Arc::new(RwLock::new(HashMap::new())),
-        orchestrator_ref,
-        active_turns: Arc::new(RwLock::new(HashMap::new())),
-        default_model,
-    };
+    let (state, _) = state_over("http://127.0.0.1:1", &[default_space(&storage)], false).await;
     (state, storage)
 }
 

@@ -152,3 +152,43 @@ space.
 
 - **WHEN** an org admin creates a space while the server is running
 - **THEN** within one reconcile interval its adapters are running
+
+### Requirement: Turns run on the runtime of their space
+
+Each `(org, space)` SHALL have its own runtime (skill registry, tool executor,
+message bus and orchestrator) bound to that space's database, built on first use
+and cached. A turn submitted for a space MUST run on that space's runtime and
+MUST NOT read or write another space's database. A message broker shared by
+several spaces MUST namespace its topics per space.
+
+#### Scenario: Turn submitted in a non-default space
+
+- **GIVEN** spaces `A1` and `B1`
+- **WHEN** a member of `B1` sends a message with `X-Space-Id` set to `B1`
+- **THEN** the conversation and its messages exist only in `B1`'s database
+
+#### Scenario: Shared broker
+
+- **GIVEN** `[bus] kind = "nats"`
+- **WHEN** a turn is published for `B1`
+- **THEN** only a worker of `B1` can claim it
+
+### Requirement: The orchestrator service works every space
+
+`assistant orchestrator run` SHALL run the turn workers, scheduler, title
+generator and memory indexer once per space in `org.db` and MUST start them for
+spaces created later and stop them for deleted spaces. A messenger interface
+SHALL run in the space its interface instance is bound to, and in the default
+space when it has no instance.
+
+#### Scenario: Turn in a second space
+
+- **GIVEN** the orchestrator service is running with spaces `A1` and `B1`
+- **WHEN** a turn is queued in `B1`
+- **THEN** a `B1` worker answers it and `A1`'s database is untouched
+
+#### Scenario: Messenger bound to a space
+
+- **GIVEN** a Slack interface instance bound to `B1`
+- **WHEN** a Slack message arrives
+- **THEN** the turn runs on `B1`'s runtime
