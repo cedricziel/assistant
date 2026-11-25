@@ -150,7 +150,7 @@ impl ToolHandler for McpToolHandler {
                 }
             }
             Err(e) => Ok(ToolOutput::error(format!(
-                "MCP tool call to '{}' failed: {e}",
+                "MCP tool call to '{}' failed: {e:#}",
                 self.remote_name
             ))),
         }
