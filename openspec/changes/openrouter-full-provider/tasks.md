@@ -4,11 +4,11 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 1. Key resolution and decision model
 
-- [ ] 1.1 Write failing tests in `crates/core/src/types/llm.rs` for `LlmConfig::openrouter_api_key()` and `resolve_openrouter_key`. Cover section key, reused `[llm]` key, a non-OpenRouter `[llm]` key never reused, env fallback, and no key. Confirm red.
-- [ ] 1.2 Implement both helpers. Verify the 1.1 tests pass.
-- [ ] 1.3 Write failing tests for `DecisionModelConfig.api_key` parsing and for `JevDecider::from_config(cfg, llm)` key order. Confirm red.
-- [ ] 1.4 Add `api_key`, change `from_config`, and pass `&config.llm` from `build_permission_policy`. Verify with `cargo test -p assistant-runtime decision_model` and the permission tests.
-- [ ] 1.5 Update `docs/tool-permissions.md` and `docs/operations/configuration.md`. Check every claim against the code.
+- [x] 1.1 Write failing tests in `crates/core/src/types/llm.rs` for `LlmConfig::openrouter_api_key()` and `resolve_openrouter_key`. Cover section key, reused `[llm]` key, a non-OpenRouter `[llm]` key never reused, env fallback, and no key. Confirm red.
+- [x] 1.2 Implement both helpers. Verify the 1.1 tests pass.
+- [x] 1.3 Write failing tests for `DecisionModelConfig.api_key` parsing and for `JevDecider::from_config(cfg, llm)` key order. Confirm red.
+- [x] 1.4 Add `api_key`, change `from_config`, and pass `&config.llm` from `build_permission_policy`. Verify with `cargo test -p assistant-runtime decision_model` and the permission tests.
+- [x] 1.5 Update `docs/tool-permissions.md` and `docs/operations/configuration.md`. Check every claim against the code.
 
 ## 2. Retry-After and usage accounting
 
