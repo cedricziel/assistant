@@ -44,6 +44,7 @@ pub mod skill_executions;
 pub mod skill_stats;
 pub mod slack_threads;
 pub mod space_store;
+pub mod tool_permission_rules;
 pub mod user_store;
 pub mod webhooks;
 pub mod workflows;
@@ -109,6 +110,10 @@ pub use slack_threads::{
     InMemorySlackActiveThreadStore, SlackActiveThreadStore, SqliteSlackActiveThreadStore,
 };
 pub use space_store::{SqliteMembershipStore, SqliteSpaceStore};
+pub use tool_permission_rules::{
+    InMemoryToolPermissionRuleStore, RuleEffect, SqliteToolPermissionRuleStore, ToolPermissionRule,
+    ToolPermissionRuleStore,
+};
 pub use user_store::SqliteUserStore;
 pub use webhooks::{InMemoryWebhookStore, SqliteWebhookStore, WebhookRecord, WebhookStore};
 pub use workflows::{
@@ -195,6 +200,11 @@ impl StorageLayer {
     /// Convenience: build a `SkillExecutionStore` backed by this pool.
     pub fn skill_execution_store(&self) -> SqliteSkillExecutionStore {
         SqliteSkillExecutionStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `ToolPermissionRuleStore` backed by this pool.
+    pub fn tool_permission_rule_store(&self) -> SqliteToolPermissionRuleStore {
+        SqliteToolPermissionRuleStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `ScheduledTaskStore` backed by this pool.
@@ -471,6 +481,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "045_skill_executions",
             include_str!("../../../migrations/045_skill_executions.sql"),
+        ),
+        (
+            "048_tool_permission_rules",
+            include_str!("../../../migrations/048_tool_permission_rules.sql"),
         ),
     ];
 
