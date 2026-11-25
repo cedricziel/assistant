@@ -152,6 +152,15 @@ void main() {
       expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
     });
 
+    testWidgets('a read-only opted-out row says it is not used', (
+      tester,
+    ) async {
+      await _pump(tester, integrationSummary('int_a'), optedOut: true);
+
+      expect(find.text('Not used in this space'), findsOneWidget);
+      expect(find.byType(Switch), findsNothing);
+    });
+
     testWidgets('the delete button reports taps', (tester) async {
       var deletes = 0;
       await _pump(

@@ -118,6 +118,10 @@ class IntegrationListTile extends StatelessWidget {
               const SizedBox(height: AssistantSpacing.xs),
               Text('Acts as $actsAs', style: muted),
             ],
+            if (optOut == null && optedOut) ...[
+              const SizedBox(height: AssistantSpacing.xs),
+              Text('Not used in this space', style: muted),
+            ],
             if (optOut != null) ...[
               const SizedBox(height: AssistantSpacing.xs),
               Row(
