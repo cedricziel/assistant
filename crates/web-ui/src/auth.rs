@@ -95,7 +95,7 @@ async fn resolve_bearer(auth: &AuthState, token: &str) -> Option<AuthContext> {
 
     // 3. Try legacy token.
     if let Some(ref legacy) = auth.legacy_token
-        && token == legacy
+        && assistant_auth::constant_time::eq(token, legacy)
         && let Some(ref ctx) = auth.legacy_context
     {
         return Some(ctx.clone());

@@ -24,7 +24,7 @@ pub fn challenge_from_verifier(verifier: &str) -> String {
 
 /// Verify that a verifier matches a previously stored S256 challenge.
 pub fn verify(verifier: &str, challenge: &str) -> bool {
-    challenge_from_verifier(verifier) == challenge
+    crate::constant_time::eq(&challenge_from_verifier(verifier), challenge)
 }
 
 #[cfg(test)]
