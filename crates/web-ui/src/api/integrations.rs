@@ -9,6 +9,15 @@
 //! |--------|-------------------------------------|-----------------------------------|
 //! | GET    | `/api/integrations/catalog`         | Search the integrations catalog   |
 //! | GET    | `/api/integrations/catalog/{id}`    | Get one catalog entry             |
+//! | GET    | `/api/integrations`                 | List integrations the caller sees |
+//! | POST   | `/api/integrations`                 | Install an integration            |
+//! | GET    | `/api/integrations/{id}`            | Get one integration               |
+//! | PATCH  | `/api/integrations/{id}`            | Update an integration             |
+//! | DELETE | `/api/integrations/{id}`            | Remove an integration             |
+//! | GET    | `/api/integrations/policy`          | Get the org policy                |
+//! | PUT    | `/api/integrations/policy`          | Replace the org policy (admin)    |
+//! | PUT    | `/api/integrations/{id}/spaces/{space_id}` | Allow or opt out a space   |
+//! | DELETE | `/api/integrations/{id}/spaces/{space_id}` | Remove that row            |
 
 use std::sync::Arc;
 
@@ -16,25 +25,78 @@ use axum::{
     Extension, Json, Router,
     extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, put},
 };
 use serde::{Deserialize, Serialize};
 
+use assistant_core::SpaceStore;
 use assistant_core::auth::AuthContext;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::integrations::catalog::{
     CatalogAuth, CatalogAuthKind, CatalogEntry, CatalogQuery,
 };
+use assistant_core::integrations::{
+    EffectiveIntegrations, IntegrationCredentialStore, IntegrationLayer, IntegrationStore,
+};
+use assistant_storage::OrgStorageLayer;
 
 use crate::catalog_sync::CatalogSync;
-use crate::errors::json_error;
 use crate::openapi::ErrorBody;
+use error::{ApiError, ApiResult};
+
+mod authz;
+mod error;
+pub mod manage;
+pub mod policy;
+pub mod spaces;
+#[cfg(test)]
+mod testing;
+pub mod types;
+
+use manage::{
+    create_integration, delete_integration, get_integration, list_integrations, update_integration,
+};
+use policy::{get_integration_policy, put_integration_policy};
+use spaces::{delete_space_access, put_space_access};
 
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct IntegrationsApiState {
     pub catalog: Arc<CatalogSync>,
+    store: Arc<dyn IntegrationStore>,
+    credentials: Arc<dyn IntegrationCredentialStore>,
+    spaces: Arc<dyn SpaceStore>,
+    effective: Arc<EffectiveIntegrations>,
+    clock: Arc<dyn Clock>,
+}
+
+impl IntegrationsApiState {
+    /// `key_id` identifies the server's secrets key; a credential sealed under
+    /// another key reports `auth_expired`.
+    pub fn new(catalog: Arc<CatalogSync>, org_storage: &OrgStorageLayer, key_id: &str) -> Self {
+        let store: Arc<dyn IntegrationStore> = Arc::new(org_storage.integration_store());
+        let credentials: Arc<dyn IntegrationCredentialStore> =
+            Arc::new(org_storage.integration_credential_store());
+        Self {
+            catalog,
+            effective: Arc::new(EffectiveIntegrations::new(
+                store.clone(),
+                credentials.clone(),
+                key_id,
+            )),
+            store,
+            credentials,
+            spaces: Arc::new(org_storage.space_store()),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Stamp created and updated rows from `clock` instead of the system clock.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
 }
 
 // -- Request/response types --------------------------------------------------
@@ -93,6 +155,9 @@ pub struct CatalogEntrySummary {
     /// HTTPS endpoint of the remote MCP server.
     pub connect_url: String,
     pub auth: CatalogAuthResponse,
+    /// The layers the caller may install this entry at now: the ones they may
+    /// write to and the org policy allows.
+    pub installable_layers: Vec<types::IntegrationLayer>,
 }
 
 /// One page of catalog search results.
@@ -127,8 +192,8 @@ impl From<&CatalogAuth> for CatalogAuthResponse {
     }
 }
 
-impl From<&CatalogEntry> for CatalogEntrySummary {
-    fn from(entry: &CatalogEntry) -> Self {
+impl CatalogEntrySummary {
+    fn new(entry: &CatalogEntry, installable_layers: Vec<IntegrationLayer>) -> Self {
         Self {
             id: entry.id.clone(),
             name: entry.name.clone(),
@@ -138,6 +203,7 @@ impl From<&CatalogEntry> for CatalogEntrySummary {
             categories: entry.categories.clone(),
             connect_url: entry.connect_url.clone(),
             auth: (&entry.auth).into(),
+            installable_layers: installable_layers.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -150,6 +216,24 @@ pub fn integrations_api_router() -> Router<IntegrationsApiState> {
         // Catalog ids contain a slash (`curated/linear-app-mcp`); a wildcard
         // accepts both that and the percent-encoded `curated%2Flinear-app-mcp`.
         .route("/integrations/catalog/{*id}", get(get_catalog_entry))
+        .route(
+            "/integrations",
+            get(list_integrations).post(create_integration),
+        )
+        .route(
+            "/integrations/policy",
+            get(get_integration_policy).put(put_integration_policy),
+        )
+        .route(
+            "/integrations/{id}",
+            get(get_integration)
+                .patch(update_integration)
+                .delete(delete_integration),
+        )
+        .route(
+            "/integrations/{id}/spaces/{space_id}",
+            put(put_space_access).delete(delete_space_access),
+        )
 }
 
 // -- Handlers ----------------------------------------------------------------
@@ -168,29 +252,34 @@ pub fn integrations_api_router() -> Router<IntegrationsApiState> {
     )
 )]
 pub async fn list_catalog_entries(
-    Extension(_ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     query: Result<Query<ListCatalogEntriesQuery>, QueryRejection>,
-) -> Response {
-    let Query(query) = match query {
-        Ok(query) => query,
-        Err(rejection) => return json_error(StatusCode::BAD_REQUEST, rejection.body_text()),
-    };
-    let index = state.catalog.index().await;
+) -> ApiResult<Json<CatalogEntryListResponse>> {
+    let Query(query) = query?;
+    let (policy, index) =
+        futures::join!(state.store.get_policy(&ctx.org_id), state.catalog.index());
+    let policy = policy?;
     let search = CatalogQuery {
         q: query.q.as_deref(),
         category: query.category.as_deref().filter(|c| !c.is_empty()),
         limit: query.limit,
         cursor: query.cursor.as_deref().filter(|c| !c.is_empty()),
     };
-    match index.search(&search) {
-        Ok(page) => Json(CatalogEntryListResponse {
-            items: page.items.into_iter().map(Into::into).collect(),
-            next_cursor: page.next_cursor,
-        })
-        .into_response(),
-        Err(e) => json_error(StatusCode::BAD_REQUEST, e.to_string()),
-    }
+    let page = index
+        .search(&search)
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(Json(CatalogEntryListResponse {
+        items: page
+            .items
+            .into_iter()
+            .map(|entry| {
+                let layers = authz::installable_layers(&ctx, &policy, &entry.id);
+                CatalogEntrySummary::new(entry, layers)
+            })
+            .collect(),
+        next_cursor: page.next_cursor,
+    }))
 }
 
 /// `GET /api/integrations/catalog/{id}` — get one catalog entry.
@@ -207,14 +296,17 @@ pub async fn list_catalog_entries(
     )
 )]
 pub async fn get_catalog_entry(
-    Extension(_ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     Path(id): Path<String>,
-) -> Response {
-    match state.catalog.index().await.get(&id) {
-        Some(entry) => Json(CatalogEntrySummary::from(entry)).into_response(),
-        None => json_error(StatusCode::NOT_FOUND, "catalog entry not found"),
-    }
+) -> ApiResult<Json<CatalogEntrySummary>> {
+    let index = state.catalog.index().await;
+    let entry = index
+        .get(&id)
+        .ok_or_else(|| ApiError::not_found("catalog entry not found"))?;
+    let policy = state.store.get_policy(&ctx.org_id).await?;
+    let layers = authz::installable_layers(&ctx, &policy, &entry.id);
+    Ok(Json(CatalogEntrySummary::new(entry, layers)))
 }
 
 // -- Tests -------------------------------------------------------------------
@@ -238,9 +330,9 @@ mod tests {
     use assistant_core::store::{InMemoryMembershipStore, InMemoryUserStore};
     use assistant_core::types::features::CatalogConfig;
 
+    use super::testing::catalog_with_fixture;
     use crate::auth::{WebAuthConfig, require_auth};
 
-    const FIXTURE: &str = include_str!("../../../core/tests/fixtures/integrations-catalog.json");
     const TOKEN: &str = "test-token";
     /// Entries of the fixture that are installable remote MCP servers.
     const FIXTURE_ENTRIES: usize = 13;
@@ -257,7 +349,8 @@ mod tests {
     }
 
     /// The router behind the real auth middleware, mounted under `/api`.
-    fn app(catalog: Arc<CatalogSync>) -> Router {
+    async fn app(catalog: Arc<CatalogSync>) -> Router {
+        let org_storage = OrgStorageLayer::new_in_memory().await.unwrap();
         let secret = b"test-secret-that-is-long-enough!!";
         let jwt = Arc::new(JwtManager::new(
             JwtKeyPair::from_secret(secret).unwrap(),
@@ -279,27 +372,13 @@ mod tests {
         Router::new()
             .nest(
                 "/api",
-                integrations_api_router().with_state(IntegrationsApiState { catalog }),
+                integrations_api_router().with_state(IntegrationsApiState::new(
+                    catalog,
+                    &org_storage,
+                    "k",
+                )),
             )
             .route_layer(axum::middleware::from_fn_with_state(auth, require_auth))
-    }
-
-    /// A catalog service that serves the fixture from its disk cache and
-    /// never reaches the network.
-    async fn catalog_with_fixture(dir: &std::path::Path) -> Arc<CatalogSync> {
-        let cache = dir.join("cache").join("integrations");
-        std::fs::create_dir_all(&cache).unwrap();
-        std::fs::write(cache.join("catalog.json"), FIXTURE).unwrap();
-        let sync = CatalogSync::new(
-            CatalogConfig {
-                enabled: true,
-                source_url: "http://127.0.0.1:9/api.json".into(),
-            },
-            dir,
-        )
-        .unwrap();
-        sync.load_cached().await;
-        Arc::new(sync)
     }
 
     async fn get(app: &Router, uri: &str, authenticated: bool) -> (StatusCode, Value) {
@@ -334,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn list_requires_authentication() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, _) = get(&app, "/api/integrations/catalog", false).await;
 
@@ -344,7 +423,7 @@ mod tests {
     #[tokio::test]
     async fn get_requires_authentication() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, _) = get(
             &app,
@@ -359,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn list_returns_the_normalized_entries() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, body) = get(&app, "/api/integrations/catalog", true).await;
 
@@ -377,13 +456,13 @@ mod tests {
         assert_eq!(linear["domain"], "linear.app");
         assert_eq!(linear["connect_url"], "https://mcp.linear.app/mcp");
         assert_eq!(linear["auth"], serde_json::json!({"kind": "oauth"}));
-        assert!(linear.get("installable_layers").is_none());
+        assert_eq!(linear["installable_layers"], serde_json::json!(["user"]));
     }
 
     #[tokio::test]
     async fn list_exposes_header_templates() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (_, body) = get(&app, "/api/integrations/catalog?q=github", true).await;
 
@@ -401,7 +480,7 @@ mod tests {
     #[tokio::test]
     async fn list_filters_by_text() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, body) = get(&app, "/api/integrations/catalog?q=LiNeAr", true).await;
 
@@ -412,7 +491,7 @@ mod tests {
     #[tokio::test]
     async fn list_filters_by_category() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (_, body) = get(
             &app,
@@ -429,7 +508,7 @@ mod tests {
     #[tokio::test]
     async fn list_pages_with_limit_and_cursor() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (_, first) = get(&app, "/api/integrations/catalog?limit=5", true).await;
         assert_eq!(item_ids(&first).len(), 5);
@@ -462,7 +541,7 @@ mod tests {
     #[tokio::test]
     async fn list_rejects_a_bad_cursor_with_the_error_envelope() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, body) = get(&app, "/api/integrations/catalog?cursor=zzz", true).await;
 
@@ -473,7 +552,7 @@ mod tests {
     #[tokio::test]
     async fn list_rejects_a_non_numeric_limit_with_the_error_envelope() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, body) = get(&app, "/api/integrations/catalog?limit=many", true).await;
 
@@ -495,7 +574,7 @@ mod tests {
             dir.path(),
         )
         .unwrap();
-        let app = app(Arc::new(sync));
+        let app = app(Arc::new(sync)).await;
 
         let (status, body) = get(&app, "/api/integrations/catalog", true).await;
 
@@ -506,7 +585,7 @@ mod tests {
     #[tokio::test]
     async fn get_returns_one_entry_by_its_slashed_id() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, body) = get(
             &app,
@@ -523,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn get_accepts_a_percent_encoded_id() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, body) = get(
             &app,
@@ -539,7 +618,7 @@ mod tests {
     #[tokio::test]
     async fn get_unknown_entry_is_404_with_the_error_envelope() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, body) = get(&app, "/api/integrations/catalog/curated/nope", true).await;
 
@@ -550,7 +629,7 @@ mod tests {
     #[tokio::test]
     async fn get_hides_entries_that_are_not_installable() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, _) = get(&app, "/api/integrations/catalog/curated/exa", true).await;
 
@@ -560,7 +639,7 @@ mod tests {
     #[tokio::test]
     async fn list_treats_empty_cursor_and_category_as_absent() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let (status, empty) =
             get(&app, "/api/integrations/catalog?cursor=&category=&q=", true).await;
@@ -573,7 +652,7 @@ mod tests {
     #[tokio::test]
     async fn unauthenticated_response_is_the_plain_text_the_middleware_sends() {
         let dir = tempfile::tempdir().unwrap();
-        let app = app(catalog_with_fixture(dir.path()).await);
+        let app = app(catalog_with_fixture(dir.path()).await).await;
 
         let response = app
             .oneshot(
@@ -608,6 +687,37 @@ mod tests {
                 content.get("application/json").is_none(),
                 "{path}: {content}"
             );
+        }
+    }
+
+    #[test]
+    fn every_management_route_is_documented_with_the_plain_text_401() {
+        use utoipa::OpenApi;
+
+        let spec = serde_json::to_value(crate::openapi::ApiDoc::openapi()).unwrap();
+        let routes = [
+            ("/api/integrations", ["get", "post"].as_slice()),
+            (
+                "/api/integrations/{id}",
+                ["get", "patch", "delete"].as_slice(),
+            ),
+            ("/api/integrations/policy", ["get", "put"].as_slice()),
+            (
+                "/api/integrations/{id}/spaces/{space_id}",
+                ["put", "delete"].as_slice(),
+            ),
+        ];
+
+        for (path, methods) in routes {
+            for method in methods {
+                let operation = &spec["paths"][path][method];
+                assert!(operation.is_object(), "{method} {path} is not documented");
+                let content = &operation["responses"]["401"]["content"];
+                assert!(
+                    content.get("text/plain").is_some(),
+                    "{method} {path}: {content}"
+                );
+            }
         }
     }
 }

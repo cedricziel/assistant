@@ -108,7 +108,7 @@ impl EffectiveIntegrations {
         let mut evaluated = Vec::with_capacity(candidates.len());
         for integration in candidates {
             let (availability, credential_subject) =
-                self.verdict(&policy, &integration, user).await?;
+                self.assess(&policy, &integration, user).await?;
             evaluated.push(EvaluatedIntegration {
                 integration,
                 availability,
@@ -163,7 +163,9 @@ impl EffectiveIntegrations {
             .collect())
     }
 
-    async fn verdict(
+    /// The verdict for one integration and caller, wherever the caller is
+    /// (no space needed). `user = None` is a system caller.
+    pub async fn assess(
         &self,
         policy: &IntegrationPolicy,
         integration: &Integration,
@@ -791,5 +793,35 @@ mod tests {
         let got = w.sut.evaluate(&org(), &eng(), Some(&u1())).await.unwrap();
         let ids: Vec<_> = got.iter().map(|e| e.integration.id.as_str()).collect();
         assert_eq!(ids, ["o", "s", "u"], "org, then space, then user");
+    }
+
+    #[tokio::test]
+    async fn assess_judges_one_integration_without_a_space() {
+        let mut w = World::new();
+        w.org_int("o", |_| {}).await;
+        w.user_int("u", &u1(), |_| {}).await;
+        w.ready("u", Some(&u1())).await;
+        let policy = w.store.get_policy(&org()).await.unwrap();
+        let get = |id: &str| {
+            let store = w.store.clone();
+            let id = id.to_owned();
+            async move { store.get(&id).await.unwrap().unwrap() }
+        };
+
+        let (org_verdict, org_subject) = w
+            .sut
+            .assess(&policy, &get("o").await, Some(&u1()))
+            .await
+            .unwrap();
+        let (user_verdict, user_subject) = w
+            .sut
+            .assess(&policy, &get("u").await, Some(&u1()))
+            .await
+            .unwrap();
+
+        assert_eq!(org_verdict, Availability::NeedsConnection, "no shared key");
+        assert_eq!(org_subject, None);
+        assert_eq!(user_verdict, Availability::Available);
+        assert_eq!(user_subject, Some(u1()));
     }
 }

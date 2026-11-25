@@ -65,7 +65,15 @@ use crate::api::{
         CommandArgResponse, CommandDefResponse, CommandEventResponse, ExecuteCommandRequest,
     },
     integrations::{
-        CatalogAuthKindResponse, CatalogAuthResponse, CatalogEntryListResponse, CatalogEntrySummary,
+        CatalogAuthKindResponse, CatalogAuthResponse, CatalogEntryListResponse,
+        CatalogEntrySummary,
+        types::{
+            CatalogMode, CreateIntegrationRequest, CredentialMode, IntegrationAuthKind,
+            IntegrationDetail, IntegrationLayer, IntegrationListResponse,
+            IntegrationPolicyResponse, IntegrationStatus, IntegrationSummary, IntegrationTrust,
+            SetSpaceAccessRequest, SpaceAccessEntry, SpaceAccessMode,
+            UpdateIntegrationPolicyRequest, UpdateIntegrationRequest,
+        },
     },
     interfaces::{CreateInterfaceInstanceRequest, InterfaceInstanceResponse},
     members::{AddMemberRequest, MemberEntry, UpdateMemberRequest},
@@ -226,6 +234,9 @@ impl Modify for SecuritySchemesAddon {
 ///
 /// OAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`]
 /// (RFC 6749 §5.2) and are intentionally exempt.
+///
+/// One more exception: a `401 Unauthorized` is sent by the auth middleware
+/// before any handler runs, as the plain text `Unauthorized`, not as JSON.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct ErrorBody {
     /// Human-readable error message.
@@ -393,6 +404,16 @@ pub struct ApiErrorResponse {
         // Integrations catalog
         crate::api::integrations::list_catalog_entries,
         crate::api::integrations::get_catalog_entry,
+        // Integrations
+        crate::api::integrations::manage::list_integrations,
+        crate::api::integrations::manage::create_integration,
+        crate::api::integrations::manage::get_integration,
+        crate::api::integrations::manage::update_integration,
+        crate::api::integrations::manage::delete_integration,
+        crate::api::integrations::policy::get_integration_policy,
+        crate::api::integrations::policy::put_integration_policy,
+        crate::api::integrations::spaces::put_space_access,
+        crate::api::integrations::spaces::delete_space_access,
         // Interface instances
         crate::api::interfaces::create_interface,
         crate::api::interfaces::list_interfaces,
@@ -580,6 +601,22 @@ pub struct ApiErrorResponse {
             CatalogEntryListResponse,
             CatalogAuthResponse,
             CatalogAuthKindResponse,
+            IntegrationLayer,
+            IntegrationAuthKind,
+            CredentialMode,
+            IntegrationTrust,
+            SpaceAccessMode,
+            CatalogMode,
+            IntegrationStatus,
+            IntegrationSummary,
+            IntegrationDetail,
+            IntegrationListResponse,
+            SpaceAccessEntry,
+            CreateIntegrationRequest,
+            UpdateIntegrationRequest,
+            IntegrationPolicyResponse,
+            UpdateIntegrationPolicyRequest,
+            SetSpaceAccessRequest,
             // Interface instance types
             InterfaceInstanceResponse,
             CreateInterfaceInstanceRequest,
@@ -639,7 +676,7 @@ pub struct ApiErrorResponse {
         (name = "catalog",
          description = "Catalog management — publish, list, and remove shared resources; manage space subscriptions"),
         (name = "integrations",
-         description = "Integrations — search the cached integrations.sh catalog of remote MCP servers"),
+         description = "Integrations — remote MCP servers installed at the org, space or user layer, the org policy that limits them, and the cached integrations.sh catalog"),
         (name = "interfaces",
          description = "Interface instances — create, list, and delete per-space interface configurations"),
         (name = "bindings",

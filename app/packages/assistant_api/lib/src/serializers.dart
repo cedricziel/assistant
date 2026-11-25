@@ -40,6 +40,7 @@ import 'package:assistant_api/src/model/catalog_auth_response.dart';
 import 'package:assistant_api/src/model/catalog_entry_list_response.dart';
 import 'package:assistant_api/src/model/catalog_entry_summary.dart';
 import 'package:assistant_api/src/model/catalog_item_response.dart';
+import 'package:assistant_api/src/model/catalog_mode.dart';
 import 'package:assistant_api/src/model/change_password_request.dart';
 import 'package:assistant_api/src/model/client_credentials_o_auth_flow.dart';
 import 'package:assistant_api/src/model/client_info_schema.dart';
@@ -55,6 +56,7 @@ import 'package:assistant_api/src/model/create_api_key_response.dart';
 import 'package:assistant_api/src/model/create_binding_request.dart';
 import 'package:assistant_api/src/model/create_conversation_request.dart';
 import 'package:assistant_api/src/model/create_from_template_request.dart';
+import 'package:assistant_api/src/model/create_integration_request.dart';
 import 'package:assistant_api/src/model/create_interface_instance_request.dart';
 import 'package:assistant_api/src/model/create_org_request.dart';
 import 'package:assistant_api/src/model/create_persona_request.dart';
@@ -64,12 +66,21 @@ import 'package:assistant_api/src/model/create_subscription_request.dart';
 import 'package:assistant_api/src/model/create_task_push_notification_config_request.dart';
 import 'package:assistant_api/src/model/create_user_request.dart';
 import 'package:assistant_api/src/model/create_webhook_request.dart';
+import 'package:assistant_api/src/model/credential_mode.dart';
 import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/device_code_response_schema.dart';
 import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/execute_command_request.dart';
 import 'package:assistant_api/src/model/http_auth_security_scheme.dart';
 import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
+import 'package:assistant_api/src/model/integration_auth_kind.dart';
+import 'package:assistant_api/src/model/integration_detail.dart';
+import 'package:assistant_api/src/model/integration_layer.dart';
+import 'package:assistant_api/src/model/integration_list_response.dart';
+import 'package:assistant_api/src/model/integration_policy_response.dart';
+import 'package:assistant_api/src/model/integration_status.dart';
+import 'package:assistant_api/src/model/integration_summary.dart';
+import 'package:assistant_api/src/model/integration_trust.dart';
 import 'package:assistant_api/src/model/interface_instance_response.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
 import 'package:assistant_api/src/model/list_tasks_response.dart';
@@ -108,8 +119,11 @@ import 'package:assistant_api/src/model/server_capabilities.dart';
 import 'package:assistant_api/src/model/server_metadata.dart';
 import 'package:assistant_api/src/model/set_active_persona_request.dart';
 import 'package:assistant_api/src/model/set_skill_access_mode_request.dart';
+import 'package:assistant_api/src/model/set_space_access_request.dart';
 import 'package:assistant_api/src/model/skill_detail.dart';
 import 'package:assistant_api/src/model/skill_entry_response.dart';
+import 'package:assistant_api/src/model/space_access_entry.dart';
+import 'package:assistant_api/src/model/space_access_mode.dart';
 import 'package:assistant_api/src/model/space_detail.dart';
 import 'package:assistant_api/src/model/space_summary.dart';
 import 'package:assistant_api/src/model/sse_status_event.dart';
@@ -143,6 +157,8 @@ import 'package:assistant_api/src/model/update_agent_request.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
 import 'package:assistant_api/src/model/update_current_user_request.dart';
 import 'package:assistant_api/src/model/update_current_user_response.dart';
+import 'package:assistant_api/src/model/update_integration_policy_request.dart';
+import 'package:assistant_api/src/model/update_integration_request.dart';
 import 'package:assistant_api/src/model/update_member_request.dart';
 import 'package:assistant_api/src/model/update_org_request.dart';
 import 'package:assistant_api/src/model/update_skill_request.dart';
@@ -194,6 +210,7 @@ part 'serializers.g.dart';
   CatalogEntryListResponse,
   CatalogEntrySummary,
   CatalogItemResponse,
+  CatalogMode,
   ChangePasswordRequest,
   ClientCredentialsOAuthFlow,
   ClientInfoSchema,
@@ -209,6 +226,7 @@ part 'serializers.g.dart';
   CreateBindingRequest,
   CreateConversationRequest,
   CreateFromTemplateRequest,
+  CreateIntegrationRequest,
   CreateInterfaceInstanceRequest,
   CreateOrgRequest,
   CreatePersonaRequest,
@@ -218,12 +236,21 @@ part 'serializers.g.dart';
   CreateTaskPushNotificationConfigRequest,
   CreateUserRequest,
   CreateWebhookRequest,
+  CredentialMode,
   DeviceCodeOAuthFlow,
   DeviceCodeResponseSchema,
   ErrorBody,
   ExecuteCommandRequest,
   HttpAuthSecurityScheme,
   ImplicitOAuthFlow,
+  IntegrationAuthKind,
+  IntegrationDetail,
+  IntegrationLayer,
+  IntegrationListResponse,
+  IntegrationPolicyResponse,
+  IntegrationStatus,
+  IntegrationSummary,
+  IntegrationTrust,
   InterfaceInstanceResponse,
   ListTaskPushNotificationConfigsResponse,
   ListTasksResponse,
@@ -262,8 +289,11 @@ part 'serializers.g.dart';
   ServerMetadata,
   SetActivePersonaRequest,
   SetSkillAccessModeRequest,
+  SetSpaceAccessRequest,
   SkillDetail,
   SkillEntryResponse,
+  SpaceAccessEntry,
+  SpaceAccessMode,
   SpaceDetail,
   SpaceSummary,
   SseStatusEvent,
@@ -297,6 +327,8 @@ part 'serializers.g.dart';
   UpdateConversationRequest,
   UpdateCurrentUserRequest,
   UpdateCurrentUserResponse,
+  UpdateIntegrationPolicyRequest,
+  UpdateIntegrationRequest,
   UpdateMemberRequest,
   UpdateOrgRequest,
   UpdateSkillRequest,

@@ -95,7 +95,17 @@ fn str_field<'a>(raw: &'a Value, key: &str) -> Option<&'a str> {
 fn is_https_url(url: &str) -> bool {
     !url.contains(char::is_whitespace)
         && url::Url::parse(url)
-            .is_ok_and(|parsed| parsed.scheme() == "https" && parsed.host_str().is_some())
+            .is_ok_and(|parsed| parsed.scheme() == "https" && is_plain_url(&parsed))
+}
+
+/// Whether `url` names a host and carries no userinfo or fragment. Userinfo
+/// would put a secret where everyone who can see the integration reads it, and
+/// a fragment never reaches the server.
+pub fn is_plain_url(url: &url::Url) -> bool {
+    url.host_str().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.fragment().is_none()
 }
 
 /// Lowercase `text` one character at a time.
@@ -911,6 +921,21 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(page.items.len(), 1, "category {category:?}");
+        }
+    }
+
+    #[test]
+    fn urls_with_credentials_or_fragments_are_skipped() {
+        for url in [
+            "https://bob:token@y.example/mcp",
+            "https://bob@y.example/mcp",
+            "https://y.example/mcp#frag",
+        ] {
+            let raw = json!({
+                "id": "x/y", "kind": "mcp", "name": "Y",
+                "connectUrl": url, "auth": {"kind": "none"}
+            });
+            assert_eq!(normalize(&raw), None, "{url}");
         }
     }
 }

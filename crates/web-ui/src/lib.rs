@@ -653,9 +653,10 @@ async fn run_with_args(args: Args) -> Result<()> {
     let catalog_api_state = api::catalog::CatalogApiState {
         org_storage: org_storage.clone(),
     };
-    let integrations_api_state = api::integrations::IntegrationsApiState {
-        catalog: catalog_sync,
-    };
+    let secrets = assistant_core::integrations::SecretBox::load_from_env(&base_path)
+        .context("Failed to load the integration secrets key")?;
+    let integrations_api_state =
+        api::integrations::IntegrationsApiState::new(catalog_sync, &org_storage, secrets.key_id());
     let interfaces_api_state = api::interfaces::InterfacesApiState {
         org_storage: org_storage.clone(),
     };
