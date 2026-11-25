@@ -33,6 +33,7 @@ use uuid::Uuid;
 mod dispatch;
 mod prompt;
 pub mod stream_event;
+mod turn_cancellations;
 mod turn_control;
 
 mod subagent;
@@ -75,6 +76,11 @@ pub enum CancelOutcome {
 /// in `assistant-web-ui`) match on this substring to emit a final
 /// `agent_error` event with the structured cancellation reason.
 pub const TURN_CANCELLED_MARKER: &str = "turn_cancelled";
+
+/// Additional error message fragment present, beside [`TURN_CANCELLED_MARKER`],
+/// when the turn was cancelled before any worker claimed it. Nothing of such a
+/// turn ran: the user message was never added to the conversation history.
+pub const TURN_CANCELLED_BEFORE_START_MARKER: &str = "cancelled_before_start";
 
 /// The result of a single orchestrator turn.
 pub struct TurnResult {
@@ -228,7 +234,9 @@ pub struct Orchestrator {
     /// (the `batch_id` / `correlation_id` set by `submit_turn`).
     /// When `submit_turn` times out it cancels the token so the worker
     /// drops the in-progress turn future rather than running to completion.
-    pub(crate) turn_cancellations: tokio::sync::RwLock<HashMap<Uuid, CancellationToken>>,
+    /// Also remembers requests cancelled before a worker claimed them, so the
+    /// worker skips them.
+    pub(crate) turn_cancellations: tokio::sync::RwLock<turn_cancellations::TurnCancellations>,
     /// OTel metric instruments for GenAI and operational metrics.
     pub(crate) metrics: crate::MetricsRecorder,
     /// Active assistant agent ID for memory/workspace conversation scoping.
@@ -321,7 +329,7 @@ impl Orchestrator {
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
-            turn_cancellations: tokio::sync::RwLock::new(HashMap::new()),
+            turn_cancellations: tokio::sync::RwLock::new(Default::default()),
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
             compaction_config,
@@ -406,29 +414,18 @@ impl Orchestrator {
     /// never registered. The caller is responsible for any side effects
     /// (e.g. emitting a final SSE `agent_error` event for streaming clients).
     pub async fn cancel_turn(&self, request_id: Uuid) -> CancelOutcome {
-        let token = self
-            .turn_cancellations
-            .read()
-            .await
-            .get(&request_id)
-            .cloned();
-        match token {
-            Some(t) => {
-                t.cancel();
-                info!(request_id = %request_id, "cancel_turn: cancelled in-flight turn");
-                CancelOutcome::Cancelled
-            }
-            None => CancelOutcome::NotFound,
+        if self.turn_cancellations.write().await.cancel(request_id) {
+            info!(request_id = %request_id, "cancel_turn: cancelled in-flight turn");
+            CancelOutcome::Cancelled
+        } else {
+            CancelOutcome::NotFound
         }
     }
 
     /// True when `request_id` currently has a registered cancellation token —
     /// i.e. a turn is in flight under this id. Exposed primarily for tests.
     pub async fn is_turn_in_flight(&self, request_id: Uuid) -> bool {
-        self.turn_cancellations
-            .read()
-            .await
-            .contains_key(&request_id)
+        self.turn_cancellations.read().await.contains(request_id)
     }
 
     /// Attach an [`AudioStore`] so that audio produced by the `voice-response`
