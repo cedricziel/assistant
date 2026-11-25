@@ -24,8 +24,13 @@ jobs:
           flutter-version-file: app/pubspec.yaml
           cache: true
 
+      - name: Install Flutter dependencies
+        run: flutter pub get
+        working-directory: app
+
       - name: Build Flutter web
-        run: make build-web
+        run: flutter build web --release
+        working-directory: app
 
       - name: Install Rust toolchain
         run: |
@@ -43,17 +48,18 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
 
-      - name: Vendor JS dependencies
-        run: make vendor
-
       - name: Build x86_64 musl binary
         run: cross build --release --target x86_64-unknown-linux-musl -p assistant-cli
 
       - name: Build aarch64 musl binary
         run: cross build --release --target aarch64-unknown-linux-musl -p assistant-cli
 
+      - name: Validate x86_64 musl binary
+        run: target/x86_64-unknown-linux-musl/release/assistant --version
+
       - name: Stage binaries for Docker build context
         run: |
+          set -euo pipefail
           mkdir -p docker-context/bin/amd64 docker-context/bin/arm64
           cp target/x86_64-unknown-linux-musl/release/assistant docker-context/bin/amd64/assistant
           cp target/aarch64-unknown-linux-musl/release/assistant docker-context/bin/arm64/assistant
