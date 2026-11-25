@@ -67,6 +67,10 @@ pub async fn put_space_access(
 ///
 /// The `mode` query parameter names the row (`allow` or `opt_out`) and has the
 /// same permissions as `PUT`. Removing a row that does not exist succeeds.
+///
+/// Removing the last `allow` row does not hide the integration everywhere: with
+/// no `allow` rows left it is offered to every space again, except those that
+/// opted out.
 #[utoipa::path(
     delete,
     path = "/api/integrations/{id}/spaces/{space_id}",

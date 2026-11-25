@@ -24,6 +24,10 @@ use assistant_storage::OrgStorageLayer;
 
 use super::{IntegrationsApiState, integrations_api_router};
 use crate::catalog_sync::CatalogSync;
+use assistant_core::integrations::{
+    EffectiveIntegrations, IntegrationCredentialStore, IntegrationFilter, IntegrationStore,
+    SpaceAccess, SpaceAccessMode,
+};
 
 const FIXTURE: &str = include_str!("../../../../core/tests/fixtures/integrations-catalog.json");
 
@@ -309,4 +313,117 @@ pub async fn catalog_with_fixture(dir: &std::path::Path) -> Arc<CatalogSync> {
     .unwrap();
     sync.load_cached().await;
     Arc::new(sync)
+}
+
+/// A credential store whose every call fails, to prove a code path never needs it.
+pub struct FailingCredentials;
+
+#[async_trait::async_trait]
+impl IntegrationCredentialStore for FailingCredentials {
+    async fn put(&self, _: &StoredCredential) -> anyhow::Result<()> {
+        anyhow::bail!("credential store is down")
+    }
+    async fn get(&self, _: &str, _: Option<&UserId>) -> anyhow::Result<Option<StoredCredential>> {
+        anyhow::bail!("credential store is down")
+    }
+    async fn delete(&self, _: &str, _: Option<&UserId>) -> anyhow::Result<bool> {
+        anyhow::bail!("credential store is down")
+    }
+    async fn compare_and_swap(
+        &self,
+        _: DateTime<Utc>,
+        _: &StoredCredential,
+    ) -> anyhow::Result<bool> {
+        anyhow::bail!("credential store is down")
+    }
+}
+
+impl Harness {
+    /// Make every credential lookup of the API fail.
+    pub fn break_credentials(&mut self) {
+        let credentials: Arc<dyn IntegrationCredentialStore> = Arc::new(FailingCredentials);
+        self.state.effective = Arc::new(EffectiveIntegrations::new(
+            self.state.store.clone(),
+            credentials.clone(),
+            KEY_ID,
+        ));
+        self.state.credentials = credentials;
+    }
+
+    /// Make the next `update_if_unchanged` lose a race: `rival` is written to
+    /// the store first, as if a concurrent request had saved it.
+    pub fn lose_the_next_update_to(&mut self, rival: Integration) {
+        self.state.store = Arc::new(RacingStore {
+            inner: self.state.store.clone(),
+            rival: std::sync::Mutex::new(Some(rival)),
+        });
+    }
+}
+
+/// Delegates to `inner`, but writes `rival` just before the first conditional update.
+struct RacingStore {
+    inner: Arc<dyn IntegrationStore>,
+    rival: std::sync::Mutex<Option<Integration>>,
+}
+
+#[async_trait::async_trait]
+impl IntegrationStore for RacingStore {
+    async fn create(&self, i: &Integration) -> anyhow::Result<()> {
+        self.inner.create(i).await
+    }
+    async fn get(&self, id: &str) -> anyhow::Result<Option<Integration>> {
+        self.inner.get(id).await
+    }
+    async fn list(
+        &self,
+        org_id: &OrgId,
+        filter: &IntegrationFilter,
+    ) -> anyhow::Result<Vec<Integration>> {
+        self.inner.list(org_id, filter).await
+    }
+    async fn update(&self, i: &Integration) -> anyhow::Result<bool> {
+        self.inner.update(i).await
+    }
+    async fn update_if_unchanged(
+        &self,
+        i: &Integration,
+        expected_updated_at: DateTime<Utc>,
+    ) -> anyhow::Result<bool> {
+        let rival = self.rival.lock().unwrap().take();
+        if let Some(rival) = rival {
+            self.inner.update(&rival).await?;
+        }
+        self.inner.update_if_unchanged(i, expected_updated_at).await
+    }
+    async fn delete(&self, id: &str) -> anyhow::Result<bool> {
+        self.inner.delete(id).await
+    }
+    async fn add_space_access(
+        &self,
+        id: &str,
+        space: &SpaceId,
+        mode: SpaceAccessMode,
+    ) -> anyhow::Result<()> {
+        self.inner.add_space_access(id, space, mode).await
+    }
+    async fn remove_space_access(
+        &self,
+        id: &str,
+        space: &SpaceId,
+        mode: SpaceAccessMode,
+    ) -> anyhow::Result<bool> {
+        self.inner.remove_space_access(id, space, mode).await
+    }
+    async fn list_space_access(&self, id: &str) -> anyhow::Result<Vec<SpaceAccess>> {
+        self.inner.list_space_access(id).await
+    }
+    async fn list_org_space_access(&self, org_id: &OrgId) -> anyhow::Result<Vec<SpaceAccess>> {
+        self.inner.list_org_space_access(org_id).await
+    }
+    async fn get_policy(&self, org_id: &OrgId) -> anyhow::Result<IntegrationPolicy> {
+        self.inner.get_policy(org_id).await
+    }
+    async fn put_policy(&self, policy: &IntegrationPolicy) -> anyhow::Result<()> {
+        self.inner.put_policy(policy).await
+    }
 }

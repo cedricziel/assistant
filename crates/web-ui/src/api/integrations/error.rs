@@ -39,14 +39,15 @@ impl ApiError {
     }
 }
 
-/// `DuplicateSlug` is a `409`, `ConnectUrlImmutable` a `422`; anything else is
+/// `DuplicateSlug` and `Stale` are a `409`, `ConnectUrlImmutable` a `422`; anything else is
 /// an internal error.
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         match error.downcast_ref::<IntegrationStoreError>() {
-            Some(e @ IntegrationStoreError::DuplicateSlug { .. }) => {
-                Self::new(StatusCode::CONFLICT, e.to_string())
-            }
+            Some(
+                e @ (IntegrationStoreError::DuplicateSlug { .. }
+                | IntegrationStoreError::Stale { .. }),
+            ) => Self::new(StatusCode::CONFLICT, e.to_string()),
             Some(e @ IntegrationStoreError::ConnectUrlImmutable { .. }) => {
                 Self::unprocessable(e.to_string())
             }

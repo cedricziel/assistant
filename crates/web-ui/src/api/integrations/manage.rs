@@ -13,7 +13,7 @@ use axum::{
 
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::SpaceId;
-use assistant_core::integrations::catalog::{CatalogAuthKind, CatalogEntry};
+use assistant_core::integrations::catalog::{CatalogAuthKind, CatalogEntry, is_plain_url};
 use assistant_core::integrations::{
     self as domain, Integration, IntegrationFilter, IntegrationPolicy, MAX_SLUG_LEN, SpaceAccess,
 };
@@ -111,8 +111,12 @@ pub async fn list_integrations(
         if !authz::access(&ctx, &integration, own_rows).can_view() {
             continue;
         }
+        // Which spaces allow or opt out of an integration is configuration of
+        // those spaces: only their members (and org admins) may read it.
         let offered = space.as_ref().is_none_or(|space| {
-            integration.layer != domain::IntegrationLayer::Org || authz::active_in(own_rows, space)
+            integration.layer != domain::IntegrationLayer::Org
+                || ((ctx.is_org_admin() || ctx.role_in(space).is_some())
+                    && authz::active_in(own_rows, space))
         });
         if !offered {
             continue;
@@ -257,13 +261,16 @@ async fn create(
         updated_at: now,
     };
     state.store.create(&integration).await?;
-    detail_for(state, ctx, &policy, &integration, Vec::new()).await
+    // Nothing fallible may follow the write: the caller must learn the new id.
+    let (status, has_credential) = fresh_view(&integration);
+    Ok(detail(&integration, status, has_credential, Vec::new()))
 }
 
 /// `GET /api/integrations/{id}` — get one integration.
 ///
 /// `404` when the caller may not see it, including another user's personal
-/// integration.
+/// integration. Org admins are the exception: they can read a personal
+/// integration's metadata (never its credential) so they can remove it.
 #[utoipa::path(
     get,
     path = "/api/integrations/{id}",
@@ -273,7 +280,7 @@ async fn create(
     responses(
         (status = 200, description = "The integration", body = IntegrationDetail),
         (status = 401, description = "Unauthorized; the body is the plain text `Unauthorized`", content_type = "text/plain", body = String),
-        (status = 404, description = "No such integration, or the caller may not see it", body = ErrorBody),
+        (status = 404, description = "No such integration, or the caller may not see it (another user's personal integration, except to org admins)", body = ErrorBody),
     )
 )]
 pub async fn get_integration(
@@ -298,7 +305,9 @@ pub async fn get_integration(
 ///
 /// Layer, owner, catalog entry, auth kind and credential mode are fixed at
 /// install time. A catalog install cannot change its URL or header template;
-/// moving a custom URL deletes its stored credentials.
+/// moving a custom URL deletes its stored credentials. A change that races
+/// with another one on the same integration fails with `409` instead of
+/// overwriting it.
 #[utoipa::path(
     patch,
     path = "/api/integrations/{id}",
@@ -311,7 +320,7 @@ pub async fn get_integration(
         (status = 401, description = "Unauthorized; the body is the plain text `Unauthorized`", content_type = "text/plain", body = String),
         (status = 403, description = "The caller may see but not change it", body = ErrorBody),
         (status = 404, description = "No such integration, or the caller may not see it", body = ErrorBody),
-        (status = 409, description = "The slug is already taken", body = ErrorBody),
+        (status = 409, description = "The slug is already taken, or another request changed the integration since it was read (reload and retry)", body = ErrorBody),
         (status = 422, description = "Invalid slug or a field that cannot change", body = ErrorBody),
     )
 )]
@@ -329,19 +338,31 @@ pub async fn update_integration(
     let mut integration = visible.integration.clone();
     apply_update(&mut integration, request)?;
     integration.updated_at = state.clock.now();
-    if !state.store.update(&integration).await? {
+
+    // Everything fallible comes before the write, so a failure never follows a
+    // saved change. Moving the URL deletes the credentials, so the view of the
+    // moved integration is that of a fresh one.
+    let (status, has_credential) = if integration.connect_url != visible.integration.connect_url {
+        fresh_view(&integration)
+    } else {
+        let policy = state.store.get_policy(&ctx.org_id).await?;
+        caller_view(&state, &ctx, &policy, &integration).await?
+    };
+
+    // The row may only change if nobody else changed it since it was read.
+    if !state
+        .store
+        .update_if_unchanged(&integration, visible.integration.updated_at)
+        .await?
+    {
         return Err(ApiError::not_found("integration not found"));
     }
-    let policy = state.store.get_policy(&ctx.org_id).await?;
-    let detail = detail_for(
-        &state,
-        &ctx,
-        &policy,
+    Ok(Json(detail(
         &integration,
+        status,
+        has_credential,
         visible.space_access(&ctx),
-    )
-    .await?;
-    Ok(Json(detail))
+    )))
 }
 
 /// `DELETE /api/integrations/{id}` — remove an integration and its credentials.
@@ -563,13 +584,7 @@ fn validate_header(name: &str, prefix: Option<&str>) -> ApiResult<()> {
 
 fn validate_connect_url(url: &str) -> ApiResult<()> {
     match url::Url::parse(url) {
-        Ok(parsed)
-            if matches!(parsed.scheme(), "http" | "https")
-                && parsed.host_str().is_some()
-                && parsed.username().is_empty()
-                && parsed.password().is_none()
-                && parsed.fragment().is_none() =>
-        {
+        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") && is_plain_url(&parsed) => {
             Ok(())
         }
         _ => Err(ApiError::unprocessable(
@@ -700,11 +715,13 @@ fn apply_update(integration: &mut Integration, request: UpdateIntegrationRequest
 
 // -- Representation ---------------------------------------------------------------
 
-/// The status of `integration` for the caller, and whether a credential is
-/// stored for the caller's subject.
+/// The status of `integration` and whether the caller has a credential stored
+/// for it.
 ///
-/// The subject of a user-layer integration is its owner, so an org admin
-/// looking at someone else's sees the owner's state. Never the credential.
+/// The status of a user-layer integration is its owner's, so an org admin
+/// looking at someone else's sees that state. `has_credential` is always the
+/// caller's own (the shared credential, or their own per-user one), so it
+/// reveals nothing about another user. Never the credential itself.
 async fn caller_view(
     state: &IntegrationsApiState,
     ctx: &AuthContext,
@@ -721,7 +738,7 @@ async fn caller_view(
         .await?;
     let subject = match integration.credential_mode {
         domain::CredentialMode::Shared => None,
-        domain::CredentialMode::PerUser => user,
+        domain::CredentialMode::PerUser => Some(ctx.user_id.clone()),
     };
     let has_credential = integration.auth_kind != domain::IntegrationAuthKind::None
         && state
@@ -730,6 +747,20 @@ async fn caller_view(
             .await?
             .is_some();
     Ok((availability.into(), has_credential))
+}
+
+/// The view of an integration that has no credential yet (just installed, or
+/// its URL moved), without any lookup. Org policy is not consulted: installs
+/// are checked against it first, and the org layer is exempt.
+fn fresh_view(integration: &Integration) -> (IntegrationStatus, bool) {
+    let status = if !integration.enabled {
+        IntegrationStatus::Disabled
+    } else if integration.auth_kind == domain::IntegrationAuthKind::None {
+        IntegrationStatus::Ready
+    } else {
+        IntegrationStatus::NeedsConnection
+    };
+    (status, false)
 }
 
 async fn detail_for(
@@ -920,6 +951,42 @@ mod tests {
         assert_eq!(body["status"], "needs_connection");
         assert_eq!(body["has_credential"], false);
         assert!(body.get("owner_user_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn create_succeeds_even_when_credential_lookups_fail() {
+        let mut h = Harness::new().await;
+        h.break_credentials();
+
+        let (status, body) = h
+            .post(Who::Admin, "/api/integrations", linear("org", "linear"))
+            .await;
+
+        assert_eq!(
+            status, CREATED,
+            "the row is committed, so the caller must learn its id: {body}"
+        );
+        assert_eq!(body["status"], "needs_connection");
+        assert_eq!(body["has_credential"], false);
+        let rows = h
+            .state
+            .store
+            .list(&"org_1".into(), &Default::default())
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_new_integration_that_needs_no_credential_is_ready() {
+        let h = Harness::new().await;
+        let mut body = linear("org", "open");
+        body["catalog_entry_id"] = json!("curated/deepwiki-com-mcp");
+
+        let (status, created) = h.post(Who::Admin, "/api/integrations", body).await;
+
+        assert_eq!(status, CREATED, "{created}");
+        assert_eq!(created["status"], "ready");
     }
 
     #[tokio::test]
@@ -1391,7 +1458,34 @@ mod tests {
 
         let (_, body) = h.get(Who::Other, "/api/integrations?space_id=sp_eng").await;
 
-        assert_eq!(ids(&body), ["int_org"], "no view of eng's own integrations");
+        assert!(
+            ids(&body).is_empty(),
+            "eng's integrations are not sales' to see"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_space_filter_does_not_reveal_other_spaces_availability() {
+        let h = world().await;
+        h.state
+            .store
+            .add_space_access("int_org", &"sp_sales".into(), SpaceAccessMode::Allow)
+            .await
+            .unwrap();
+
+        let (_, member_of_eng) = h
+            .get(Who::Member, "/api/integrations?space_id=sp_sales")
+            .await;
+        let (_, member_of_sales) = h
+            .get(Who::Other, "/api/integrations?space_id=sp_sales")
+            .await;
+        let (_, admin) = h
+            .get(Who::Admin, "/api/integrations?space_id=sp_sales")
+            .await;
+
+        assert!(ids(&member_of_eng).is_empty(), "eng may not probe sales");
+        assert_eq!(ids(&member_of_sales), ["int_org"]);
+        assert_eq!(ids(&admin), ["int_org"]);
     }
 
     // -- Input hygiene ---------------------------------------------------------
@@ -1649,6 +1743,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_failed_status_lookup_leaves_the_row_unchanged() {
+        let mut h = world().await;
+        h.break_credentials();
+
+        let (status, _) = h
+            .patch(
+                Who::Admin,
+                "/api/integrations/int_org",
+                json!({"name": "Renamed"}),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        let stored = h.state.store.get("int_org").await.unwrap().unwrap();
+        assert_eq!(stored.name, "int_org", "the failure came before the write");
+    }
+
+    #[tokio::test]
+    async fn a_concurrent_change_makes_patch_conflict_without_losing_it() {
+        let mut h = world().await;
+        let mut rival = h.state.store.get("int_org").await.unwrap().unwrap();
+        rival.enabled = false;
+        rival.updated_at = super::super::testing::at(500);
+        h.lose_the_next_update_to(rival);
+
+        let (status, body) = h
+            .patch(
+                Who::Admin,
+                "/api/integrations/int_org",
+                json!({"name": "Renamed"}),
+            )
+            .await;
+
+        assert_eq!(status, CONFLICT, "{body}");
+        let stored = h.state.store.get("int_org").await.unwrap().unwrap();
+        assert!(!stored.enabled, "the rival's change survives");
+        assert_eq!(stored.name, "int_org", "and the stale write did not land");
+    }
+
+    #[tokio::test]
     async fn patch_rejects_bad_slugs_and_duplicates() {
         let h = world().await;
         h.seed("int_org2", IntegrationLayer::Org, None, |i| {
@@ -1715,6 +1849,10 @@ mod tests {
         assert_eq!(body["connect_url"], "https://new.example.com/mcp");
         assert_eq!(body["header_name"], "X-Key");
         assert_eq!(body["has_credential"], false);
+        assert_eq!(
+            body["status"], "needs_connection",
+            "the old credential is gone"
+        );
         assert!(!h.has_credential("int_custom", None).await);
     }
 
@@ -1756,8 +1894,8 @@ mod tests {
             let (status, body) = h.delete(who, &format!("/api/integrations/{id}")).await;
             assert_eq!(status, want, "{who:?} deleting {id}: {body}");
             let (after, _) = h.get(Who::Admin, &format!("/api/integrations/{id}")).await;
-            let gone = want == NO_CONTENT;
-            assert_eq!(after == NOT_FOUND, gone, "{who:?} deleting {id}");
+            let still_there = if want == NO_CONTENT { NOT_FOUND } else { OK };
+            assert_eq!(after, still_there, "{who:?} deleting {id}");
         }
     }
 
@@ -1780,9 +1918,12 @@ mod tests {
         h.seed_credential("int_member", Some(Who::Member), CredentialStatus::Ready)
             .await;
 
-        let (_, detail) = h.get(Who::Admin, "/api/integrations/int_member").await;
-        let (_, list) = h.get(Who::Admin, "/api/integrations").await;
+        let (detail_status, detail) = h.get(Who::Admin, "/api/integrations/int_member").await;
+        let (list_status, list) = h.get(Who::Admin, "/api/integrations").await;
 
+        assert_eq!((detail_status, list_status), (OK, OK), "{detail} {list}");
+        assert_eq!(detail["id"], "int_member");
+        assert!(ids(&list).contains(&"int_member".to_owned()));
         for text in [detail.to_string(), list.to_string()] {
             for needle in [
                 "ciphertext",
@@ -1829,6 +1970,24 @@ mod tests {
         assert_eq!(
             status_of(&h, Who::Member, "int_member").await,
             (json!("ready"), json!(true))
+        );
+    }
+
+    #[tokio::test]
+    async fn an_org_admin_learns_nothing_about_a_users_credential_from_has_credential() {
+        let h = world().await;
+        h.seed_credential("int_member", Some(Who::Member), CredentialStatus::Ready)
+            .await;
+
+        let (owner_status, owner_has) = status_of(&h, Who::Member, "int_member").await;
+        let (admin_status, admin_has) = status_of(&h, Who::Admin, "int_member").await;
+
+        assert_eq!((owner_status, owner_has), (json!("ready"), json!(true)));
+        assert_eq!(admin_status, json!("ready"), "status is the owner's");
+        assert_eq!(
+            admin_has,
+            json!(false),
+            "has_credential is the caller's own"
         );
     }
 

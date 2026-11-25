@@ -234,6 +234,9 @@ impl Modify for SecuritySchemesAddon {
 ///
 /// OAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`]
 /// (RFC 6749 §5.2) and are intentionally exempt.
+///
+/// One more exception: a `401 Unauthorized` is sent by the auth middleware
+/// before any handler runs, as the plain text `Unauthorized`, not as JSON.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct ErrorBody {
     /// Human-readable error message.
