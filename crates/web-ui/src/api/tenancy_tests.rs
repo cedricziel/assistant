@@ -281,7 +281,7 @@ impl Tenancy {
                     filename: "secret.png".into(),
                     mime_type: "image/png".into(),
                     size_bytes: tiny_png().len() as u64,
-                    created_at: chrono::Utc::now(),
+                    created_at: chrono::DateTime::UNIX_EPOCH,
                 },
                 &tiny_png(),
             )
