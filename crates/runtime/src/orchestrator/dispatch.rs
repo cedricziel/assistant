@@ -126,6 +126,7 @@ impl Orchestrator {
         turn_index: i64,
         turn_attachments: &mut Vec<Attachment>,
         turn_attachment_ids: &mut Vec<Uuid>,
+        active_skill: &mut Option<String>,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
     ) -> FinalizedTool {
@@ -147,7 +148,7 @@ impl Orchestrator {
             && let Some(args) = tool_arguments
             && let Some(name) = args.get("name").and_then(|v| v.as_str())
         {
-            *self.active_skill.write().await = Some(name.to_string());
+            *active_skill = Some(name.to_string());
         }
 
         // For the voice-response tool we need to extract the audio_id before
@@ -381,6 +382,7 @@ impl Orchestrator {
         turn_attachments: &mut Vec<Attachment>,
         turn_attachment_ids: &mut Vec<Uuid>,
         tool_handlers: &[Arc<dyn ToolHandler>],
+        active_skill: &mut Option<String>,
         instrument_span: &tracing::Span,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
@@ -455,6 +457,7 @@ impl Orchestrator {
                 turn_index,
                 turn_attachments,
                 turn_attachment_ids,
+                active_skill,
                 event_sink,
                 tool_call_id,
             )

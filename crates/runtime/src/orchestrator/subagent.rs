@@ -181,6 +181,7 @@ impl SubagentRunner for Orchestrator {
         // Track tool usage for post-turn skill learning.
         let mut subagent_tool_count: usize = 0;
         let mut subagent_had_errors = false;
+        let mut subagent_active_skill: Option<String> = None;
 
         // Tool-calling loop (same structure as run_turn, but with restricted context).
         let report = 'outer: {
@@ -526,6 +527,7 @@ impl SubagentRunner for Orchestrator {
                                 turn_index,
                                 &mut scratch_attachments,
                                 &mut scratch_attachment_ids,
+                                &mut subagent_active_skill,
                                 child_event_sink.as_ref(),
                                 tool_call_id.as_deref(),
                             )
