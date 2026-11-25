@@ -179,6 +179,18 @@ mod tests {
         server
     }
 
+    /// The JSON-RPC requests the server has seen. Closing a session sends a
+    /// `DELETE` of its own a moment later, which a count must not include.
+    async fn posts(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.method.as_str() == "POST")
+            .count()
+    }
+
     fn uri(id: &str) -> String {
         format!("/api/integrations/{id}/test")
     }
@@ -411,7 +423,7 @@ mod tests {
         connected_space(&h, &server.uri()).await;
         let (status, _) = h.post(Who::EngAdmin, &uri("int_space"), json!({})).await;
         assert_eq!(status, OK);
-        let requests = server.received_requests().await.unwrap().len();
+        let requests = posts(&server).await;
 
         h.clock.advance(std::time::Duration::from_secs(2));
         let response = h
@@ -436,7 +448,7 @@ mod tests {
             Some("3")
         );
         assert_eq!(
-            server.received_requests().await.unwrap().len(),
+            posts(&server).await,
             requests,
             "a throttled test must not contact the server"
         );

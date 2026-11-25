@@ -40,10 +40,6 @@ impl ToolOverlay {
     pub fn handlers(&self) -> impl Iterator<Item = &Arc<dyn ToolHandler>> {
         self.handlers.values()
     }
-
-    pub(crate) fn specs(&self) -> impl Iterator<Item = ToolSpec> + '_ {
-        self.handlers.values().map(spec_of)
-    }
 }
 
 pub(crate) fn spec_of(handler: &Arc<dyn ToolHandler>) -> ToolSpec {
