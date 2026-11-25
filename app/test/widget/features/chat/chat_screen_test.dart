@@ -197,6 +197,82 @@ void main() {
     });
   });
 
+  group('Chat screen — empty state and input row', () {
+    testWidgets(
+      'shows the empty-conversation prompt when there are no messages',
+      (tester) async {
+        await pumpChatScreen(tester);
+
+        expect(find.text('Start a conversation'), findsOneWidget);
+        expect(find.text('Type a message below to begin.'), findsOneWidget);
+        expect(find.byIcon(Icons.chat_bubble_outline), findsOneWidget);
+      },
+    );
+
+    testWidgets('hides the empty prompt once messages exist', (tester) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [ChatMessage(id: 'm1', role: 'user', content: 'hello')],
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Start a conversation'), findsNothing);
+    });
+
+    testWidgets('queue badge pluralises and is hidden when queue is empty', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+      expect(find.byKey(const Key('queue_depth_badge')), findsNothing);
+
+      PendingMessage pending(String t) =>
+          PendingMessage(text: t, conversationId: 'c1');
+      res.notifier.push(
+        ChatState(conversationId: 'c1', pendingQueue: [pending('a')]),
+      );
+      await tester.pump();
+      expect(find.text('1 message queued'), findsOneWidget);
+
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          pendingQueue: [pending('a'), pending('b')],
+        ),
+      );
+      await tester.pump();
+      expect(find.text('2 messages queued'), findsOneWidget);
+    });
+
+    testWidgets('send button swaps for stop button while sending', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+      expect(find.byKey(const Key('send_button')), findsOneWidget);
+      expect(find.byKey(const Key('stop_button')), findsNothing);
+
+      res.notifier.push(const ChatState(conversationId: 'c1', isSending: true));
+      await tester.pump();
+
+      expect(find.byKey(const Key('stop_button')), findsOneWidget);
+      expect(find.byKey(const Key('send_button')), findsNothing);
+    });
+
+    testWidgets('input shows the default placeholder and attach button', (
+      tester,
+    ) async {
+      await pumpChatScreen(tester);
+
+      final field = tester.widget<AdaptiveTextField>(
+        find.byKey(const Key('message_input')),
+      );
+      expect(field.placeholder, 'Type a message...');
+      expect(find.byKey(const Key('attach_image_button')), findsOneWidget);
+    });
+  });
+
   group('Chat screen — scroll-to-bottom FAB', () {
     /// Builds a list of [count] messages to ensure the ListView has scroll
     /// extent in the 480×960 test viewport.
