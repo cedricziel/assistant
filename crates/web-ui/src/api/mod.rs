@@ -21,6 +21,7 @@ pub mod integrations;
 pub mod interfaces;
 pub mod members;
 pub mod messages;
+pub mod org_oidc;
 pub mod orgs;
 pub mod personas;
 pub mod push;

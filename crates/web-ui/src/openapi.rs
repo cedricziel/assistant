@@ -77,6 +77,7 @@ use crate::api::{
     },
     interfaces::{CreateInterfaceInstanceRequest, InterfaceInstanceResponse},
     members::{AddMemberRequest, MemberEntry, UpdateMemberRequest},
+    org_oidc::{OrgOidcConfigResponse, PutOrgOidcConfigRequest},
     orgs::{CreateOrgRequest, OrgDetail, OrgSummary, UpdateOrgRequest},
     personas::{
         AddSkillAccessRequest, CreatePersonaRequest, PersonaDetail, PersonaFileContent,
@@ -367,6 +368,9 @@ pub struct ApiErrorResponse {
         crate::api::orgs::create_org,
         crate::api::orgs::get_org,
         crate::api::orgs::update_org,
+        crate::api::org_oidc::get_org_oidc,
+        crate::api::org_oidc::put_org_oidc,
+        crate::api::org_oidc::delete_org_oidc,
         // User management
         crate::api::users::list_users,
         crate::api::users::create_user,
@@ -572,6 +576,8 @@ pub struct ApiErrorResponse {
             OrgDetail,
             CreateOrgRequest,
             UpdateOrgRequest,
+            OrgOidcConfigResponse,
+            PutOrgOidcConfigRequest,
             // User management types
             UserSummary,
             UserDetail,

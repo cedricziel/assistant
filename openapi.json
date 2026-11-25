@@ -2817,6 +2817,16 @@
               }
             }
           },
+          "400": {
+            "description": "Unknown auth_mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized",
             "content": {
@@ -2839,6 +2849,252 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "auth_mode oidc without OIDC settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{id}/oidc": {
+      "get": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`GET /api/orgs/{id}/oidc` — get the org's OIDC settings.",
+        "operationId": "get_org_oidc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OIDC settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgOidcConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No OIDC settings for this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`PUT /api/orgs/{id}/oidc` — create or replace the org's OIDC settings.",
+        "operationId": "put_org_oidc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutOrgOidcConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OIDC settings saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgOidcConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Org not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`DELETE /api/orgs/{id}/oidc` — remove the org's OIDC settings.",
+        "description": "Refused while the org's `auth_mode` is `\"oidc\"`.",
+        "operationId": "delete_org_oidc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "OIDC settings removed"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No OIDC settings for this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Org still uses OIDC sign-in",
             "content": {
               "application/json": {
                 "schema": {
@@ -10391,7 +10647,7 @@
               "string",
               "null"
             ],
-            "description": "Auth mode: `\"password\"` or `\"oidc\"`."
+            "description": "Must be `\"password\"` if set; switch to `\"oidc\"` after configuring\n`PUT /api/orgs/{id}/oidc`."
           },
           "name": {
             "type": "string"
@@ -11490,6 +11746,47 @@
           }
         }
       },
+      "OrgOidcConfigResponse": {
+        "type": "object",
+        "description": "An org's OIDC settings as returned by the API. The client secret is never\nincluded.",
+        "required": [
+          "issuer_url",
+          "client_id",
+          "has_client_secret",
+          "auto_provision",
+          "allowed_email_domains",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "allowed_email_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Email domains allowed to sign in; empty allows any domain."
+          },
+          "auto_provision": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "has_client_secret": {
+            "type": "boolean",
+            "description": "Whether a client secret is stored."
+          },
+          "issuer_url": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
       "OrgSummary": {
         "type": "object",
         "description": "Summary of an organization.",
@@ -11789,6 +12086,40 @@
           "url": {
             "type": "string",
             "description": "The URL where the notification should be sent."
+          }
+        }
+      },
+      "PutOrgOidcConfigRequest": {
+        "type": "object",
+        "description": "Body for `PUT /api/orgs/{id}/oidc`.",
+        "required": [
+          "issuer_url",
+          "client_id"
+        ],
+        "properties": {
+          "allowed_email_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "auto_provision": {
+            "type": "boolean",
+            "description": "Defaults to `true`."
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Omit to keep the stored secret, `null` to clear it."
+          },
+          "issuer_url": {
+            "type": "string",
+            "description": "`https` URL, or `http` for `localhost` / loopback addresses."
           }
         }
       },
