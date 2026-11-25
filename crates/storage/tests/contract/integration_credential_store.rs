@@ -195,6 +195,21 @@ async fn persisted_bytes_are_never_the_plaintext(fx: Fixture) {
     }
 }
 
+async fn credentials_require_an_existing_integration(fx: Fixture) {
+    let orphan = credential("missing", None, 1);
+    assert!(
+        fx.credentials.put(&orphan).await.is_err(),
+        "put for unknown integration"
+    );
+    assert!(fx.credentials.get("missing", None).await.unwrap().is_none());
+    assert!(
+        !fx.credentials
+            .compare_and_swap(at(1), &orphan)
+            .await
+            .unwrap()
+    );
+}
+
 macro_rules! contract_tests {
     ($mod_name:ident, $ctor:expr) => {
         mod $mod_name {
@@ -215,6 +230,10 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_cas() {
                 compare_and_swap_requires_the_expected_updated_at($ctor).await;
+            }
+            #[tokio::test]
+            async fn t_needs_integration() {
+                credentials_require_an_existing_integration($ctor).await;
             }
             #[tokio::test]
             async fn t_never_plaintext() {

@@ -1,110 +1,45 @@
 //! In-memory [`IntegrationStore`] and [`IntegrationCredentialStore`] for tests.
 //!
-//! They honour the SQLite behaviour that matters to callers: slug uniqueness
-//! per scope, one credential per subject, and cascading delete. They do not
+//! They enforce the same invariants as the SQLite schema: the layer/owner
+//! columns, `user` layer implies per-user credentials, slug length and
+//! uniqueness per scope, one credential per subject, credentials and space
+//! access only for existing integrations, and cascading delete. They do not
 //! check foreign keys to orgs, spaces or users.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use super::model::*;
 use crate::identity::{OrgId, SpaceId, UserId};
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
-}
+/// The longest slug the schema accepts.
+const MAX_SLUG_LEN: usize = 32;
 
-/// In-memory [`IntegrationCredentialStore`].
-#[derive(Default)]
-pub struct InMemoryIntegrationCredentialStore {
-    rows: Mutex<Vec<StoredCredential>>,
-}
-
-impl InMemoryIntegrationCredentialStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn remove_integration(&self, integration_id: &str) {
-        lock(&self.rows).retain(|c| c.integration_id != integration_id);
-    }
-}
-
-fn is_row(c: &StoredCredential, integration_id: &str, subject: Option<&UserId>) -> bool {
-    c.integration_id == integration_id && c.subject_user_id.as_ref() == subject
-}
-
-fn find_mut<'a>(
-    rows: &'a mut [StoredCredential],
-    wanted: &StoredCredential,
-) -> Option<&'a mut StoredCredential> {
-    let subject = wanted.subject_user_id.as_ref();
-    rows.iter_mut()
-        .find(|c| is_row(c, &wanted.integration_id, subject))
-}
-
-#[async_trait]
-impl IntegrationCredentialStore for InMemoryIntegrationCredentialStore {
-    async fn put(&self, credential: &StoredCredential) -> Result<()> {
-        let mut rows = lock(&self.rows);
-        match find_mut(&mut rows, credential) {
-            Some(existing) => *existing = credential.clone(),
-            None => rows.push(credential.clone()),
-        }
-        Ok(())
-    }
-
-    async fn get(
-        &self,
-        integration_id: &str,
-        subject: Option<&UserId>,
-    ) -> Result<Option<StoredCredential>> {
-        Ok(lock(&self.rows)
-            .iter()
-            .find(|c| is_row(c, integration_id, subject))
-            .cloned())
-    }
-
-    async fn delete(&self, integration_id: &str, subject: Option<&UserId>) -> Result<bool> {
-        let mut rows = lock(&self.rows);
-        let before = rows.len();
-        rows.retain(|c| !is_row(c, integration_id, subject));
-        Ok(rows.len() < before)
-    }
-
-    async fn compare_and_swap(
-        &self,
-        expected_updated_at: DateTime<Utc>,
-        credential: &StoredCredential,
-    ) -> Result<bool> {
-        let mut rows = lock(&self.rows);
-        match find_mut(&mut rows, credential) {
-            Some(existing) if existing.updated_at == expected_updated_at => {
-                *existing = credential.clone();
-                Ok(true)
-            }
-            _ => Ok(false),
-        }
-    }
-}
-
+/// State shared by a store and its paired credential store, so credentials
+/// can be checked against, and cascade with, their integration.
 #[derive(Default)]
 struct State {
     integrations: Vec<Integration>,
     access: Vec<SpaceAccess>,
     policies: HashMap<OrgId, IntegrationPolicy>,
+    credentials: Vec<StoredCredential>,
 }
 
-/// In-memory [`IntegrationStore`]. Deleting an integration also clears the
-/// credentials of its paired [`credential_store`](Self::credential_store).
+type Shared = Arc<Mutex<State>>;
+
+fn lock(state: &Shared) -> MutexGuard<'_, State> {
+    state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// In-memory [`IntegrationStore`]. Its credentials are reached through
+/// [`credential_store`](Self::credential_store).
 #[derive(Default)]
 pub struct InMemoryIntegrationStore {
-    state: Mutex<State>,
-    credentials: Arc<InMemoryIntegrationCredentialStore>,
+    state: Shared,
 }
 
 impl InMemoryIntegrationStore {
@@ -112,10 +47,41 @@ impl InMemoryIntegrationStore {
         Self::default()
     }
 
-    /// The credential store paired with this store.
+    /// The credential store over the same integrations.
     pub fn credential_store(&self) -> Arc<InMemoryIntegrationCredentialStore> {
-        self.credentials.clone()
+        Arc::new(InMemoryIntegrationCredentialStore {
+            state: self.state.clone(),
+        })
     }
+}
+
+/// Mirrors the table `CHECK` constraints.
+fn check_invariants(i: &Integration) -> Result<()> {
+    let owners_match = match i.layer {
+        IntegrationLayer::Org => i.space_id.is_none() && i.owner_user_id.is_none(),
+        IntegrationLayer::Space => i.space_id.is_some() && i.owner_user_id.is_none(),
+        IntegrationLayer::User => i.space_id.is_none() && i.owner_user_id.is_some(),
+    };
+    if !owners_match {
+        bail!(
+            "integration {}: owner columns do not match layer {}",
+            i.id,
+            i.layer
+        );
+    }
+    if i.layer == IntegrationLayer::User && i.credential_mode != CredentialMode::PerUser {
+        bail!(
+            "integration {}: user-layer integrations must be per_user",
+            i.id
+        );
+    }
+    if !(1..=MAX_SLUG_LEN).contains(&i.slug.chars().count()) {
+        bail!(
+            "integration {}: slug must be 1-{MAX_SLUG_LEN} characters",
+            i.id
+        );
+    }
+    Ok(())
 }
 
 fn same_scope(a: &Integration, b: &Integration) -> bool {
@@ -132,9 +98,10 @@ fn duplicate_slug(slug: &str) -> anyhow::Error {
 #[async_trait]
 impl IntegrationStore for InMemoryIntegrationStore {
     async fn create(&self, integration: &Integration) -> Result<()> {
+        check_invariants(integration)?;
         let mut state = lock(&self.state);
         if state.integrations.iter().any(|i| i.id == integration.id) {
-            anyhow::bail!("integration already exists: {}", integration.id);
+            bail!("integration already exists: {}", integration.id);
         }
         if state
             .integrations
@@ -187,6 +154,13 @@ impl IntegrationStore for InMemoryIntegrationStore {
             return Ok(false);
         };
         let current = &state.integrations[pos];
+        let url_changed = current.connect_url != integration.connect_url;
+        if url_changed && current.catalog_entry_id.is_some() {
+            return Err(IntegrationStoreError::ConnectUrlImmutable {
+                id: integration.id.clone(),
+            }
+            .into());
+        }
         let taken = state
             .integrations
             .iter()
@@ -202,7 +176,13 @@ impl IntegrationStore for InMemoryIntegrationStore {
         next.owner_user_id = current.owner_user_id.clone();
         next.catalog_entry_id = current.catalog_entry_id.clone();
         next.created_at = current.created_at;
+        check_invariants(&next)?;
         state.integrations[pos] = next;
+        if url_changed {
+            state
+                .credentials
+                .retain(|c| c.integration_id != integration.id);
+        }
         Ok(true)
     }
 
@@ -214,8 +194,7 @@ impl IntegrationStore for InMemoryIntegrationStore {
             return Ok(false);
         }
         state.access.retain(|a| a.integration_id != id);
-        drop(state);
-        self.credentials.remove_integration(id);
+        state.credentials.retain(|c| c.integration_id != id);
         Ok(true)
     }
 
@@ -226,6 +205,9 @@ impl IntegrationStore for InMemoryIntegrationStore {
         mode: SpaceAccessMode,
     ) -> Result<()> {
         let mut state = lock(&self.state);
+        if !state.integrations.iter().any(|i| i.id == integration_id) {
+            bail!("unknown integration: {integration_id}");
+        }
         let row = SpaceAccess {
             integration_id: integration_id.into(),
             space_id: space_id.clone(),
@@ -288,5 +270,79 @@ impl IntegrationStore for InMemoryIntegrationStore {
             .policies
             .insert(policy.org_id.clone(), policy.clone());
         Ok(())
+    }
+}
+
+/// In-memory [`IntegrationCredentialStore`], obtained from
+/// [`InMemoryIntegrationStore::credential_store`].
+pub struct InMemoryIntegrationCredentialStore {
+    state: Shared,
+}
+
+fn is_row(c: &StoredCredential, integration_id: &str, subject: Option<&UserId>) -> bool {
+    c.integration_id == integration_id && c.subject_user_id.as_ref() == subject
+}
+
+fn find_mut<'a>(
+    rows: &'a mut [StoredCredential],
+    wanted: &StoredCredential,
+) -> Option<&'a mut StoredCredential> {
+    let subject = wanted.subject_user_id.as_ref();
+    rows.iter_mut()
+        .find(|c| is_row(c, &wanted.integration_id, subject))
+}
+
+#[async_trait]
+impl IntegrationCredentialStore for InMemoryIntegrationCredentialStore {
+    async fn put(&self, credential: &StoredCredential) -> Result<()> {
+        let mut state = lock(&self.state);
+        if !state
+            .integrations
+            .iter()
+            .any(|i| i.id == credential.integration_id)
+        {
+            bail!("unknown integration: {}", credential.integration_id);
+        }
+        match find_mut(&mut state.credentials, credential) {
+            Some(existing) => *existing = credential.clone(),
+            None => state.credentials.push(credential.clone()),
+        }
+        Ok(())
+    }
+
+    async fn get(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+    ) -> Result<Option<StoredCredential>> {
+        Ok(lock(&self.state)
+            .credentials
+            .iter()
+            .find(|c| is_row(c, integration_id, subject))
+            .cloned())
+    }
+
+    async fn delete(&self, integration_id: &str, subject: Option<&UserId>) -> Result<bool> {
+        let mut state = lock(&self.state);
+        let before = state.credentials.len();
+        state
+            .credentials
+            .retain(|c| !is_row(c, integration_id, subject));
+        Ok(state.credentials.len() < before)
+    }
+
+    async fn compare_and_swap(
+        &self,
+        expected_updated_at: DateTime<Utc>,
+        credential: &StoredCredential,
+    ) -> Result<bool> {
+        let mut state = lock(&self.state);
+        match find_mut(&mut state.credentials, credential) {
+            Some(existing) if existing.updated_at == expected_updated_at => {
+                *existing = credential.clone();
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 }

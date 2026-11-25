@@ -215,13 +215,14 @@ async fn list_filters_by_layer_space_owner_and_org(fx: Fixture) {
 }
 
 async fn update_changes_mutable_fields_only(fx: Fixture) {
-    let original = integration(
+    let mut original = integration(
         "int_1",
         IntegrationLayer::Space,
         Some("sp_eng"),
         None,
         "linear",
     );
+    original.catalog_entry_id = None; // custom URL: connect_url may change
     fx.store.create(&original).await.unwrap();
 
     let mut edit = original.clone();
@@ -422,6 +423,174 @@ async fn policy_defaults_then_round_trips(fx: Fixture) {
     assert_eq!(other.catalog_mode, CatalogMode::All, "policy is per org");
 }
 
+async fn catalog_install_connect_url_is_immutable(fx: Fixture) {
+    let mut i = org_integration("int_1", "linear");
+    i.credential_mode = CredentialMode::PerUser;
+    fx.store.create(&i).await.unwrap();
+    for subject in [None, Some("usr_1")] {
+        fx.credentials
+            .put(&super::integration_credential_store::credential(
+                "int_1", subject, 0,
+            ))
+            .await
+            .unwrap();
+    }
+
+    let mut edit = i.clone();
+    edit.connect_url = "https://attacker.example/mcp".into();
+    edit.name = "Renamed".into();
+    let err = fx.store.update(&edit).await.unwrap_err();
+    assert_eq!(
+        err.downcast_ref::<IntegrationStoreError>(),
+        Some(&IntegrationStoreError::ConnectUrlImmutable { id: "int_1".into() }),
+        "{err:#}"
+    );
+
+    let got = fx.store.get("int_1").await.unwrap().unwrap();
+    assert_eq!(got, i, "a rejected update changes nothing");
+    assert!(fx.credentials.get("int_1", None).await.unwrap().is_some());
+    assert!(
+        fx.credentials
+            .get("int_1", Some(&UserId::from("usr_1")))
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    // Re-saving the same URL is fine.
+    let mut same = i.clone();
+    same.name = "Renamed".into();
+    same.updated_at = at(5);
+    assert!(fx.store.update(&same).await.unwrap());
+}
+
+async fn custom_url_change_deletes_every_credential(fx: Fixture) {
+    let mut i = org_integration("int_1", "custom");
+    i.catalog_entry_id = None;
+    i.credential_mode = CredentialMode::PerUser;
+    let mut other = org_integration("int_2", "other");
+    other.catalog_entry_id = None;
+    fx.store.create(&i).await.unwrap();
+    fx.store.create(&other).await.unwrap();
+    for (id, subject) in [("int_1", None), ("int_1", Some("usr_1")), ("int_2", None)] {
+        fx.credentials
+            .put(&super::integration_credential_store::credential(
+                id, subject, 0,
+            ))
+            .await
+            .unwrap();
+    }
+
+    // Unchanged URL keeps credentials.
+    let mut rename = i.clone();
+    rename.name = "Renamed".into();
+    assert!(fx.store.update(&rename).await.unwrap());
+    assert!(fx.credentials.get("int_1", None).await.unwrap().is_some());
+
+    let mut moved = i.clone();
+    moved.connect_url = "https://new.example/mcp".into();
+    moved.updated_at = at(9);
+    assert!(fx.store.update(&moved).await.unwrap());
+    assert_eq!(
+        fx.store.get("int_1").await.unwrap().unwrap().connect_url,
+        "https://new.example/mcp"
+    );
+    assert!(fx.credentials.get("int_1", None).await.unwrap().is_none());
+    assert!(
+        fx.credentials
+            .get("int_1", Some(&UserId::from("usr_1")))
+            .await
+            .unwrap()
+            .is_none(),
+        "per-user credentials must go too"
+    );
+    assert!(
+        fx.credentials.get("int_2", None).await.unwrap().is_some(),
+        "other integrations keep theirs"
+    );
+}
+
+async fn create_rejects_rows_that_violate_the_schema_invariants(fx: Fixture) {
+    let bad: Vec<(&str, Integration)> = vec![
+        (
+            "space layer without space_id",
+            integration("b1", IntegrationLayer::Space, None, None, "x"),
+        ),
+        (
+            "space layer with owner",
+            integration(
+                "b2",
+                IntegrationLayer::Space,
+                Some("sp_eng"),
+                Some("usr_1"),
+                "x",
+            ),
+        ),
+        (
+            "user layer without owner",
+            integration("b3", IntegrationLayer::User, None, None, "x"),
+        ),
+        (
+            "user layer with space",
+            integration(
+                "b4",
+                IntegrationLayer::User,
+                Some("sp_eng"),
+                Some("usr_1"),
+                "x",
+            ),
+        ),
+        (
+            "org layer with space",
+            integration("b5", IntegrationLayer::Org, Some("sp_eng"), None, "x"),
+        ),
+        (
+            "org layer with owner",
+            integration("b6", IntegrationLayer::Org, None, Some("usr_1"), "x"),
+        ),
+        ("empty slug", org_integration("b7", "")),
+        ("slug over 32 chars", org_integration("b8", &"a".repeat(33))),
+        ("user layer with shared mode", {
+            let mut i = integration("b9", IntegrationLayer::User, None, Some("usr_1"), "x");
+            i.credential_mode = CredentialMode::Shared;
+            i
+        }),
+    ];
+    for (name, i) in bad {
+        assert!(
+            fx.store.create(&i).await.is_err(),
+            "{name} must be rejected"
+        );
+        assert!(
+            fx.store.get(&i.id).await.unwrap().is_none(),
+            "{name} was stored"
+        );
+    }
+}
+
+async fn update_rejects_rows_that_violate_the_schema_invariants(fx: Fixture) {
+    let user_int = integration("u", IntegrationLayer::User, None, Some("usr_1"), "x");
+    fx.store.create(&user_int).await.unwrap();
+    let mut shared = user_int.clone();
+    shared.credential_mode = CredentialMode::Shared;
+    assert!(
+        fx.store.update(&shared).await.is_err(),
+        "user layer must stay per_user"
+    );
+    let mut empty = user_int.clone();
+    empty.slug = String::new();
+    assert!(fx.store.update(&empty).await.is_err(), "empty slug");
+    assert_eq!(fx.store.get("u").await.unwrap().unwrap(), user_int);
+}
+
+async fn space_access_requires_an_existing_integration(fx: Fixture) {
+    let res = fx
+        .store
+        .add_space_access("missing", &SpaceId::from("sp_eng"), SpaceAccessMode::Allow)
+        .await;
+    assert!(res.is_err());
+}
+
 macro_rules! contract_tests {
     ($mod_name:ident, $ctor:expr) => {
         mod $mod_name {
@@ -458,6 +627,26 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_org_space_access() {
                 org_space_access_lists_every_integration_of_the_org($ctor).await;
+            }
+            #[tokio::test]
+            async fn t_catalog_url_immutable() {
+                catalog_install_connect_url_is_immutable($ctor).await;
+            }
+            #[tokio::test]
+            async fn t_custom_url_change_drops_credentials() {
+                custom_url_change_deletes_every_credential($ctor).await;
+            }
+            #[tokio::test]
+            async fn t_create_invariants() {
+                create_rejects_rows_that_violate_the_schema_invariants($ctor).await;
+            }
+            #[tokio::test]
+            async fn t_update_invariants() {
+                update_rejects_rows_that_violate_the_schema_invariants($ctor).await;
+            }
+            #[tokio::test]
+            async fn t_space_access_needs_integration() {
+                space_access_requires_an_existing_integration($ctor).await;
             }
             #[tokio::test]
             async fn t_policy() {

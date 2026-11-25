@@ -199,6 +199,9 @@ pub struct StoredCredential {
 pub enum IntegrationStoreError {
     /// The slug is already taken in this layer and owner scope.
     DuplicateSlug { slug: String },
+    /// A catalog install's `connect_url` cannot change: it would re-point the
+    /// stored credentials at a different host.
+    ConnectUrlImmutable { id: String },
 }
 
 impl fmt::Display for IntegrationStoreError {
@@ -207,6 +210,10 @@ impl fmt::Display for IntegrationStoreError {
             Self::DuplicateSlug { slug } => {
                 write!(f, "integration slug '{slug}' already exists in this scope")
             }
+            Self::ConnectUrlImmutable { id } => write!(
+                f,
+                "integration {id} comes from the catalog; its connect_url cannot change"
+            ),
         }
     }
 }
@@ -223,6 +230,10 @@ pub trait IntegrationStore: Send + Sync {
     async fn list(&self, org_id: &OrgId, filter: &IntegrationFilter) -> Result<Vec<Integration>>;
     /// Replaces the mutable fields (everything except id, org, layer, owner
     /// columns, catalog entry and `created_at`). `false` if `id` is unknown.
+    ///
+    /// `connect_url` is immutable for catalog installs (fails with
+    /// [`IntegrationStoreError::ConnectUrlImmutable`]). Changing it on a custom
+    /// URL integration deletes all of its credentials in the same transaction.
     async fn update(&self, integration: &Integration) -> Result<bool>;
     /// Deletes the integration with its credentials, space access and OAuth
     /// state. `false` if `id` is unknown.

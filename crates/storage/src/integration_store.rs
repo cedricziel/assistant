@@ -164,6 +164,24 @@ impl IntegrationStore for SqliteIntegrationStore {
     }
 
     async fn update(&self, i: &Integration) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let current =
+            sqlx::query("SELECT catalog_entry_id, connect_url FROM integrations WHERE id = ?")
+                .bind(&i.id)
+                .fetch_optional(&mut *tx)
+                .await
+                .with_context(|| format!("loading integration {}", i.id))?;
+        let Some(current) = current else {
+            return Ok(false);
+        };
+        let from_catalog = current
+            .try_get::<Option<String>, _>("catalog_entry_id")?
+            .is_some();
+        let url_changed = current.try_get::<String, _>("connect_url")? != i.connect_url;
+        if from_catalog && url_changed {
+            return Err(IntegrationStoreError::ConnectUrlImmutable { id: i.id.clone() }.into());
+        }
+
         let result = sqlx::query(
             "UPDATE integrations SET slug = ?, name = ?, connect_url = ?, auth_kind = ?,
                     header_name = ?, header_value_prefix = ?, credential_mode = ?, trust = ?,
@@ -182,9 +200,24 @@ impl IntegrationStore for SqliteIntegrationStore {
         .bind(&i.oauth_client_id_override)
         .bind(i.updated_at)
         .bind(&i.id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| map_write_error(e, &i.slug, &format!("updating integration {}", i.id)))?;
+
+        if url_changed {
+            // Credentials were issued for the old host; never send them to the new one.
+            sqlx::query("DELETE FROM integration_credentials WHERE integration_id = ?")
+                .bind(&i.id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("dropping credentials of integration {}", i.id))?;
+            sqlx::query("DELETE FROM integration_oauth_states WHERE integration_id = ?")
+                .bind(&i.id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("dropping OAuth state of integration {}", i.id))?;
+        }
+        tx.commit().await?;
         Ok(result.rows_affected() > 0)
     }
 
