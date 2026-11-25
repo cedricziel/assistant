@@ -89,6 +89,22 @@ query language. It stays possible behind the same trait.
 This was not done here because step 2 touches
 `crates/runtime/src/orchestrator/dispatch.rs`, which another change owns.
 
+### Update
+
+The replacement was implemented as proposed (migration
+`045_skill_executions.sql`, `finalize_tool_result` in the orchestrator, the
+CLI registering `skill-self-improve` again). It differs from the proposal in
+three ways:
+
+- No token column. The token fields of `SkillStats` are always 0.
+- No retention prune. Rows accumulate.
+- No separate `SqliteSkillStats`. `SkillStatsProvider` is implemented for
+  every `SkillExecutionStore`, and `ToolExecutor::new` wires the SQLite store.
+  `UnavailableSkillStats` and `ToolExecutor::with_stats_provider` are removed.
+
+The `load-skill` call that activates a skill is not recorded. A tool that
+returns `Ok` with `success == false` counts as an error.
+
 ## Consequences
 
 **Good**
@@ -103,7 +119,7 @@ This was not done here because step 2 touches
 - A single-node install with no collector has no built-in trace, log or
   metric history. Run a local collector or a single-binary backend if you
   need one.
-- Skill self-improvement is off until the replacement above lands.
+- Skill execution rows have no retention prune yet and accumulate in the space database.
 - Existing local telemetry rows are deleted on upgrade.
 - No backward compatibility: nothing reads the old tables, endpoints or
   config key.

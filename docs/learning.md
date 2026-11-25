@@ -99,15 +99,15 @@ tool or the `/review` CLI command to inspect and accept/reject them.
 
 Tool spans carry an `active_skill` attribute when a skill is loaded and are
 exported over OTLP like all telemetry. The improvement analysis does not read
-them: it asks a `SkillStatsProvider` for per-skill execution stats, and the
-local trace store that used to provide them was removed
-([ADR-0012](adr/adr-0012-otlp-only-telemetry.md)).
+them ([ADR-0012](adr/adr-0012-otlp-only-telemetry.md)).
 
-**Skill self-improvement is therefore inactive.** The `self-analyze` tool
-reports that no statistics are collected, the `skill-self-improve` task is not
-registered, and the CLI logs a warning at startup when `[learning] enabled`.
-Autonomous skill creation is unaffected. ADR-0012 proposes the replacement:
-a `skill_executions` table written by the orchestrator.
+Execution stats come from the `skill_executions` table in the space database.
+The orchestrator writes one row for each tool call finalised while a skill is
+active: skill, persona, conversation, tool, outcome, error text, duration and
+timestamp. The `load-skill` call that activates the skill is not recorded. A
+tool that returns `Ok` with `success == false` counts as an error. Token usage
+is not recorded, so the token fields of `SkillStats` are always 0. Nothing
+prunes old rows yet.
 
 ## Disabling
 

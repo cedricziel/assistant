@@ -309,15 +309,16 @@ async fn main() -> Result<()> {
         Duration::from_secs(60),
     );
 
-    // 7a. Skill self-improvement needs per-skill execution statistics, which
-    //     were read from the local trace store that no longer exists. The
-    //     scheduled task is not registered until a replacement provider is
-    //     wired into `ToolExecutor` (see `UnavailableSkillStats`).
-    if bs.config.learning.enabled {
-        warn!(
-            "Skill self-improvement is inactive: no skill execution statistics are collected \
-             now that telemetry is exported over OTLP only"
-        );
+    // 7a. Register the periodic skill improvement scheduled task when learning is enabled.
+    if bs.config.learning.enabled
+        && let Err(e) = assistant_runtime::skill_improver::register_improvement_task(
+            &bs.storage,
+            &selected_persona,
+            &bs.config.learning,
+        )
+        .await
+    {
+        warn!(error = %e, "Failed to register skill improvement task");
     }
 
     // 7b. Start the memory indexer background task (gated by the worker plan).
