@@ -653,7 +653,6 @@ async fn run_with_args(args: Args) -> Result<()> {
     let api_state = {
         let orchestrator_ref = orchestrator.clone();
         let mut s = api::ApiState::new(
-            storage.pool.clone(),
             space_resolver.clone(),
             orchestrator,
             state.agent_id.clone(),
@@ -695,7 +694,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     // An empty key means key generation failed; exposing the endpoints in that
     // state would let clients subscribe but never receive any delivery.
     let push_api_state = (!vapid_public_key.is_empty()).then(|| PushApiState {
-        store: push_store_for_state,
+        spaces: space_resolver.clone(),
         vapid_public_key: Arc::new(vapid_public_key),
     });
 

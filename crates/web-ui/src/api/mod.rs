@@ -101,11 +101,7 @@ use std::sync::Arc;
 
 use assistant_core::ConversationConfig;
 use assistant_runtime::{AssistantInterface, CommandRegistry, Orchestrator};
-use assistant_storage::{
-    AttachmentStore, CommandEventStore, ConversationBroadcast, ConversationEventStore,
-    InMemoryConversationBroadcaster, RunBroadcaster, SqliteAttachmentStore,
-    SqliteCommandEventStore, SqliteConversationEventStore,
-};
+use assistant_storage::{ConversationBroadcast, InMemoryConversationBroadcaster, RunBroadcaster};
 use assistant_transcription::{TranscriptionProvider, TtsProvider};
 use axum::{
     Router,
@@ -117,7 +113,6 @@ use axum::{
     },
     routing::{delete, get, patch, post},
 };
-use sqlx::SqlitePool;
 use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
@@ -129,7 +124,6 @@ use crate::space::SpaceResolver;
 /// Shared state for the conversation API handlers.
 #[derive(Clone)]
 pub struct ApiState {
-    pub pool: SqlitePool,
     /// Resolves each request to the caller's space and its storage.
     pub spaces: SpaceResolver,
     /// Shared live agent ID — updated when the user switches personas at runtime.
@@ -143,16 +137,10 @@ pub struct ApiState {
     pub tts_provider: Option<Arc<dyn TtsProvider>>,
     /// In-memory store for tool-synthesized audio blobs.
     pub audio_store: Arc<crate::audio_store::AudioStore>,
-    /// Durable event log store for conversation streaming runs.
-    pub event_store: Arc<dyn ConversationEventStore>,
     /// In-memory broadcast registry for live-tailing active runs.
     pub run_broadcaster: RunBroadcaster,
-    /// Persistent attachment storage (metadata in SQLite, bytes on disk).
-    pub attachment_store: Arc<dyn AttachmentStore>,
     /// Slash-command registry (shared with all interfaces).
     pub command_registry: Arc<CommandRegistry>,
-    /// Durable store for slash-command events.
-    pub command_event_store: Arc<dyn CommandEventStore>,
     /// Per-space conversation-list broadcasters for reactive SSE streaming.
     pub conversation_broadcasters: ConversationBroadcasters,
     /// Per-conversation config overrides (model selection, etc.).
@@ -167,21 +155,13 @@ pub struct ApiState {
 
 impl ApiState {
     pub fn new(
-        pool: SqlitePool,
         spaces: SpaceResolver,
         orchestrator: Arc<dyn AssistantInterface>,
         agent_id: Arc<RwLock<String>>,
         orchestrator_ref: Arc<Orchestrator>,
     ) -> Self {
-        let event_store: Arc<dyn ConversationEventStore> =
-            Arc::new(SqliteConversationEventStore::new(pool.clone()));
-        let attachment_store: Arc<dyn AttachmentStore> =
-            Arc::new(SqliteAttachmentStore::new(pool.clone()));
-        let command_event_store: Arc<dyn CommandEventStore> =
-            Arc::new(SqliteCommandEventStore::new(pool.clone()));
         let default_model = orchestrator_ref.llm.model_name().to_string();
         Self {
-            pool,
             spaces,
             agent_id,
             orchestrator,
@@ -189,11 +169,8 @@ impl ApiState {
             transcription_provider: None,
             tts_provider: None,
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-            event_store,
             run_broadcaster: RunBroadcaster::new(),
-            attachment_store,
             command_registry: Arc::new(CommandRegistry::new()),
-            command_event_store,
             conversation_broadcasters: ConversationBroadcasters::default(),
             conversation_configs: orchestrator_ref.conversation_configs(),
             orchestrator_ref,

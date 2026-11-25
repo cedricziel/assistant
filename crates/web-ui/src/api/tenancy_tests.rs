@@ -245,7 +245,7 @@ impl Tenancy {
                 agent_id,
             }))
             .merge(push_api_router().with_state(PushApiState {
-                store: Arc::new(a1.push_subscription_store()),
+                spaces: api_state.spaces.clone(),
                 vapid_public_key: Arc::new("vapid-key".to_string()),
             }));
         let principals: HashMap<&'static str, AuthContext> =
@@ -639,7 +639,6 @@ async fn conversations_viewer_can_read_their_own() {
 // -- Turns ---------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn turns_are_isolated_across_tenants_and_owners() {
     let t = Tenancy::build().await;
     let status = format!("/conversations/{}/turns/{}/status", t.alice_conv, t.turn_id);
@@ -670,7 +669,6 @@ async fn turns_are_isolated_across_tenants_and_owners() {
 // -- Attachments ---------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn attachments_are_isolated_across_tenants_and_owners() {
     let t = Tenancy::build().await;
     let serve = format!("/attachments/{}", t.attachment_id);
@@ -685,7 +683,6 @@ async fn attachments_are_isolated_across_tenants_and_owners() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn attachments_upload_requires_write_in_the_callers_space() {
     let t = Tenancy::build().await;
     let uri = format!("/conversations/{}/attachments", t.alice_conv);
@@ -714,7 +711,6 @@ async fn attachments_upload_requires_write_in_the_callers_space() {
 // -- Audio ---------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn audio_is_isolated_across_tenants_and_owners() {
     let t = Tenancy::build().await;
     let message_audio = format!("/messages/{}/audio", t.alice_message);
@@ -742,7 +738,6 @@ async fn audio_is_isolated_across_tenants_and_owners() {
 // -- Commands ------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn commands_are_isolated_across_tenants_and_owners() {
     let t = Tenancy::build().await;
     let events = format!("/conversations/{}/events", t.alice_conv);
@@ -783,7 +778,6 @@ async fn commands_are_isolated_across_tenants_and_owners() {
 // -- Capabilities --------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn capabilities_require_a_role_in_the_selected_space() {
     let t = Tenancy::build().await;
 
@@ -810,7 +804,6 @@ async fn capabilities_require_a_role_in_the_selected_space() {
 // -- Push ----------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn push_subscriptions_never_cross_spaces() {
     let t = Tenancy::build().await;
     let subscribe = json!({"endpoint": "https://push.test/bob", "p256dh": "k", "auth": "a"});

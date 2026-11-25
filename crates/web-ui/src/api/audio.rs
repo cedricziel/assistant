@@ -10,10 +10,13 @@ use tracing::warn;
 use uuid::Uuid;
 
 use assistant_core::types::conversation::MessageRole;
-use assistant_storage::{ConversationStore, SqliteConversationStore};
+use assistant_storage::ConversationStore as _;
 use assistant_transcription::TtsRequest;
 
+use crate::space::{Access, SpaceCtx};
+
 use super::ApiState;
+use super::conversations::{caller_store, owned_conversation};
 
 /// `GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant
 /// message and return it as `audio/mpeg`.
@@ -31,7 +34,14 @@ use super::ApiState;
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_message_audio(State(state): State<ApiState>, Path(id): Path<String>) -> Response {
+pub async fn get_message_audio(
+    ctx: SpaceCtx,
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
     let tts_provider = match &state.tts_provider {
         Some(p) => p.clone(),
         None => {
@@ -44,8 +54,7 @@ pub async fn get_message_audio(State(state): State<ApiState>, Path(id): Path<Str
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid message ID").into_response(),
     };
 
-    let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store = caller_store(&ctx, &state).await;
 
     let msg = match store.get_message(msg_id).await {
         Ok(Some(m)) => m,
@@ -55,6 +64,13 @@ pub async fn get_message_audio(State(state): State<ApiState>, Path(id): Path<Str
             return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
     };
+    // The message is readable only through a conversation the caller owns.
+    if owned_conversation(&store, msg.conversation_id)
+        .await
+        .is_err()
+    {
+        return (StatusCode::NOT_FOUND, "Message not found").into_response();
+    }
 
     if !matches!(msg.role, MessageRole::Assistant) {
         return (
@@ -99,7 +115,14 @@ pub async fn get_message_audio(State(state): State<ApiState>, Path(id): Path<Str
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_audio(State(state): State<ApiState>, Path(id): Path<String>) -> Response {
+pub async fn get_audio(
+    ctx: SpaceCtx,
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
     let audio_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid audio ID").into_response(),

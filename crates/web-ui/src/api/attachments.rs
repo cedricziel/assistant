@@ -12,9 +12,12 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
-use assistant_storage::{ConversationStore, SqliteConversationStore};
+use assistant_storage::AttachmentStore as _;
+
+use crate::space::{Access, SpaceCtx};
 
 use super::ApiState;
+use super::conversations::{caller_store, owned_conversation};
 
 /// Multipart form for image attachment upload.
 #[derive(utoipa::ToSchema)]
@@ -72,24 +75,22 @@ impl AttachmentMetaResponse {
     security(("bearer_token" = []))
 )]
 pub async fn upload_attachment(
+    ctx: SpaceCtx,
     State(state): State<ApiState>,
     Path(id): Path<String>,
     mut multipart: Multipart,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteConversationStore::for_agent(state.pool.clone(), &agent_id);
-    match store.get_conversation(conv_id).await {
-        Ok(None) => return (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
-        Err(e) => {
-            warn!("Failed to check conversation {conv_id}: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-        }
-        _ => {}
+    if let Err(response) = owned_conversation(&caller_store(&ctx, &state).await, conv_id).await {
+        return response;
     }
 
     // Parse multipart — expect a single "file" field.
@@ -160,7 +161,12 @@ pub async fn upload_attachment(
         created_at: SystemClock.now(),
     };
 
-    if let Err(e) = state.attachment_store.store(&meta, &file_bytes).await {
+    if let Err(e) = ctx
+        .storage
+        .attachment_store()
+        .store(&meta, &file_bytes)
+        .await
+    {
         warn!("Failed to store attachment: {e}");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -208,20 +214,32 @@ pub struct AttachmentServeParams {
     security(("bearer_token" = []))
 )]
 pub async fn serve_attachment(
+    ctx: SpaceCtx,
     State(state): State<ApiState>,
     Path(id): Path<String>,
     headers: axum::http::HeaderMap,
     axum::extract::Query(params): axum::extract::Query<AttachmentServeParams>,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
     let att_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid attachment ID").into_response(),
     };
 
-    let meta = match state.attachment_store.get_meta(att_id).await {
+    let attachments = ctx.storage.attachment_store();
+    let meta = match attachments.get_meta(att_id).await {
         Ok(m) => m,
         Err(_) => return (StatusCode::NOT_FOUND, "Attachment not found").into_response(),
     };
+    // An attachment is readable only through a conversation the caller owns.
+    if owned_conversation(&caller_store(&ctx, &state).await, meta.conversation_id)
+        .await
+        .is_err()
+    {
+        return (StatusCode::NOT_FOUND, "Attachment not found").into_response();
+    }
 
     // Determine target size (default: original).
     let want_w = params.w.unwrap_or(0);
@@ -245,7 +263,7 @@ pub async fn serve_attachment(
     }
 
     // Load original bytes.
-    let original = match state.attachment_store.load_bytes(att_id).await {
+    let original = match attachments.load_bytes(att_id).await {
         Ok(b) => b,
         Err(e) => {
             warn!("Failed to load attachment bytes for {att_id}: {e}");
@@ -326,12 +344,15 @@ mod tests {
 
     use assistant_storage::{ConversationStore, SqliteConversationStore};
 
+    use assistant_storage::AttachmentStore as _;
+
     use super::super::test_helpers::*;
 
     #[tokio::test]
     async fn upload_attachment_rejects_unsupported_mime() {
         let (state, storage) = event_log_state().await;
-        let conv_store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv_store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         let conv = conv_store.create_conversation(None).await.unwrap();
 
         let (content_type, body) =
@@ -353,7 +374,8 @@ mod tests {
     #[tokio::test]
     async fn upload_attachment_succeeds_with_png() {
         let (state, storage) = event_log_state().await;
-        let conv_store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv_store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         let conv = conv_store.create_conversation(None).await.unwrap();
 
         let png_data = tiny_png();
@@ -407,8 +429,8 @@ mod tests {
 
     #[tokio::test]
     async fn serve_attachment_returns_bytes_and_cache_headers() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
 
         // Store an attachment directly.
         let png_data = tiny_png();
@@ -422,8 +444,8 @@ mod tests {
             size_bytes: png_data.len() as u64,
             created_at: Utc::now(),
         };
-        state
-            .attachment_store
+        storage
+            .attachment_store()
             .store(&meta, &png_data)
             .await
             .unwrap();
@@ -454,8 +476,8 @@ mod tests {
 
     #[tokio::test]
     async fn serve_attachment_304_on_matching_etag() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
 
         let png_data = tiny_png();
         let meta = assistant_core::AttachmentMeta {
@@ -468,8 +490,8 @@ mod tests {
             size_bytes: png_data.len() as u64,
             created_at: Utc::now(),
         };
-        state
-            .attachment_store
+        storage
+            .attachment_store()
             .store(&meta, &png_data)
             .await
             .unwrap();
@@ -490,8 +512,8 @@ mod tests {
 
     #[tokio::test]
     async fn serve_attachment_with_resize_params() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
 
         // Create a slightly larger image so resize actually does something.
         let img: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
@@ -510,8 +532,8 @@ mod tests {
             size_bytes: png_data.len() as u64,
             created_at: Utc::now(),
         };
-        state
-            .attachment_store
+        storage
+            .attachment_store()
             .store(&meta, &png_data)
             .await
             .unwrap();

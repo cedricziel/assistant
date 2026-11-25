@@ -1117,7 +1117,7 @@ mod tests {
     use assistant_runtime::CommandRegistry;
     use assistant_storage::{
         ConversationEventStore, ConversationStore, RunBroadcaster, SkillRegistry,
-        SqliteAttachmentStore, SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
+        SqliteConversationStore, StorageLayer,
     };
 
     use super::super::ApiState;
@@ -1855,7 +1855,6 @@ mod tests {
         let orchestrator_ref = orchestrator.clone();
         let default_model = orchestrator_ref.llm.model_name().to_string();
         let state = ApiState {
-            pool: sl.pool.clone(),
             spaces: super::super::test_helpers::default_resolver(&sl).await,
             agent_id: Arc::new(RwLock::new("default".to_string())),
             orchestrator,
@@ -1863,11 +1862,8 @@ mod tests {
             transcription_provider: None,
             tts_provider: None,
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-            event_store: Arc::new(short_ttl_store),
             run_broadcaster: RunBroadcaster::new(),
-            attachment_store: Arc::new(SqliteAttachmentStore::new(sl.pool.clone())),
             command_registry: Arc::new(CommandRegistry::new()),
-            command_event_store: Arc::new(SqliteCommandEventStore::new(sl.pool.clone())),
             conversation_broadcasters: crate::api::ConversationBroadcasters::default(),
             conversation_configs: Arc::new(RwLock::new(HashMap::new())),
             orchestrator_ref,

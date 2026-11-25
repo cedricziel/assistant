@@ -5,8 +5,7 @@
 //! - `GET /api/conversations/{id}/events` — list command events for timeline.
 
 use assistant_core::CommandDef;
-use assistant_storage::CommandEventRow;
-use assistant_storage::ConversationStore;
+use assistant_storage::{CommandEventRow, CommandEventStore as _, SqliteCommandEventStore};
 use axum::{
     Json,
     extract::{Path, State},
@@ -18,7 +17,10 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::space::{Access, SpaceCtx};
+
 use super::ApiState;
+use super::conversations::{caller_store, owned_conversation};
 
 // -- Request / Response types ------------------------------------------------
 
@@ -122,7 +124,10 @@ impl From<CommandEventRow> for CommandEventResponse {
     ),
     security(("bearer_token" = []))
 )]
-pub async fn list_commands(State(state): State<ApiState>) -> Response {
+pub async fn list_commands(space: SpaceCtx, State(state): State<ApiState>) -> Response {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
     let defs: Vec<CommandDefResponse> = state
         .command_registry
         .list()
@@ -147,28 +152,22 @@ pub async fn list_commands(State(state): State<ApiState>) -> Response {
     security(("bearer_token" = []))
 )]
 pub async fn execute_command(
+    space: SpaceCtx,
     State(state): State<ApiState>,
     Path(id): Path<String>,
     Json(body): Json<ExecuteCommandRequest>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    // Verify the conversation exists.
-    let agent_id = state.agent_id.read().await.clone();
-    let store =
-        assistant_storage::SqliteConversationStore::for_agent(state.pool.clone(), &agent_id);
-    match store.get_conversation(conv_id).await {
-        Ok(None) => {
-            return (StatusCode::NOT_FOUND, "Conversation not found").into_response();
-        }
-        Err(e) => {
-            warn!("Failed to check conversation {conv_id}: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-        }
-        _ => {}
+    // Verify the caller owns the conversation.
+    if let Err(response) = owned_conversation(&caller_store(&space, &state).await, conv_id).await {
+        return response;
     }
 
     // Verify the command is known.
@@ -204,8 +203,7 @@ pub async fn execute_command(
         _ => None,
     };
 
-    match state
-        .command_event_store
+    match SqliteCommandEventStore::new(space.storage.pool.clone())
         .save_event(conv_id, &body.command, payload.as_ref(), &result.ack_text)
         .await
     {
@@ -235,15 +233,25 @@ pub async fn execute_command(
     security(("bearer_token" = []))
 )]
 pub async fn list_command_events(
+    space: SpaceCtx,
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
+    if let Err(response) = owned_conversation(&caller_store(&space, &state).await, conv_id).await {
+        return response;
+    }
 
-    match state.command_event_store.list_events(conv_id).await {
+    match SqliteCommandEventStore::new(space.storage.pool.clone())
+        .list_events(conv_id)
+        .await
+    {
         Ok(events) => {
             let responses: Vec<CommandEventResponse> =
                 events.into_iter().map(CommandEventResponse::from).collect();

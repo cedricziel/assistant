@@ -20,10 +20,7 @@ use assistant_core::types::agent::AssistantConfig;
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_llm_provider::retry::RetryConfig;
 use assistant_runtime::{CommandRegistry, Orchestrator};
-use assistant_storage::{
-    RunBroadcaster, SkillRegistry, SqliteAttachmentStore, SqliteCommandEventStore,
-    SqliteConversationEventStore, StorageLayer,
-};
+use assistant_storage::{RunBroadcaster, SkillRegistry, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
 
@@ -190,7 +187,6 @@ pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
     let orchestrator_ref = orchestrator.clone();
     let default_model = orchestrator_ref.llm.model_name().to_string();
     let state = ApiState {
-        pool: storage.pool.clone(),
         spaces: default_resolver(&storage).await,
         agent_id: Arc::new(RwLock::new("default".to_string())),
         orchestrator,
@@ -198,11 +194,8 @@ pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
         transcription_provider: None,
         tts_provider: None,
         audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-        event_store: Arc::new(SqliteConversationEventStore::new(storage.pool.clone())),
         run_broadcaster: RunBroadcaster::new(),
-        attachment_store: Arc::new(SqliteAttachmentStore::new(storage.pool.clone())),
         command_registry: Arc::new(CommandRegistry::new()),
-        command_event_store: Arc::new(SqliteCommandEventStore::new(storage.pool.clone())),
         conversation_broadcasters: super::ConversationBroadcasters::default(),
         conversation_configs: Arc::new(RwLock::new(HashMap::new())),
         orchestrator_ref,
@@ -248,7 +241,6 @@ pub(crate) async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
     let orchestrator_ref = orchestrator.clone();
     let default_model = orchestrator_ref.llm.model_name().to_string();
     let state = ApiState {
-        pool: storage.pool.clone(),
         spaces: default_resolver(&storage).await,
         agent_id: Arc::new(RwLock::new("default".to_string())),
         orchestrator,
@@ -256,11 +248,8 @@ pub(crate) async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
         transcription_provider: None,
         tts_provider: None,
         audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-        event_store: Arc::new(SqliteConversationEventStore::new(storage.pool.clone())),
         run_broadcaster: RunBroadcaster::new(),
-        attachment_store: Arc::new(SqliteAttachmentStore::new(storage.pool.clone())),
         command_registry: Arc::new(CommandRegistry::new()),
-        command_event_store: Arc::new(SqliteCommandEventStore::new(storage.pool.clone())),
         conversation_broadcasters: super::ConversationBroadcasters::default(),
         conversation_configs: Arc::new(RwLock::new(HashMap::new())),
         orchestrator_ref,
