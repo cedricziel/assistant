@@ -13,7 +13,7 @@ part 'quick_message_request.g.dart';
 /// Properties:
 /// * [context] - Optional context text to include with the message (e.g. clipboard contents, file text).  Prepended to the user message for the LLM.
 /// * [message] - The message text to send to the assistant.
-/// * [personaId] - Optional persona ID to route the message to a specific persona. When absent, the server's active persona is used.
+/// * [personaId] - Optional persona ID to run the message as. Must name the persona this instance serves; any other existing persona is rejected with 422. Unknown IDs and an absent value fall back to the server's active persona.
 @BuiltValue()
 abstract class QuickMessageRequest
     implements Built<QuickMessageRequest, QuickMessageRequestBuilder> {
@@ -25,7 +25,7 @@ abstract class QuickMessageRequest
   @BuiltValueField(wireName: r'message')
   String get message;
 
-  /// Optional persona ID to route the message to a specific persona. When absent, the server's active persona is used.
+  /// Optional persona ID to run the message as. Must name the persona this instance serves; any other existing persona is rejected with 422. Unknown IDs and an absent value fall back to the server's active persona.
   @BuiltValueField(wireName: r'persona_id')
   String? get personaId;
 
