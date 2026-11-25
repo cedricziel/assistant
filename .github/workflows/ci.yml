@@ -398,6 +398,9 @@ jobs:
       - name: Test release notes formatting
         run: python3 -m unittest discover -s scripts -v
 
+      - name: Test App Store release parameters
+        run: ruby app/fastlane/test/app_store_release_test.rb
+
   integration:
     name: Integration (smoke)
     if: github.event.action != 'closed'
