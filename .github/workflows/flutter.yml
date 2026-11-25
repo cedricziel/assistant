@@ -53,6 +53,45 @@ jobs:
         if: steps.filter.outputs.flutter == 'true'
         run: flutter test
 
+  # Regenerates the Dart client with the generator version pinned in the
+  # Makefile and fails when the committed output differs. Not a required check.
+  api-client-drift:
+    name: API client drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Detect API client changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            client:
+              - 'openapi.json'
+              - 'app/openapi-generator.yaml'
+              - 'app/packages/assistant_api/**'
+              - 'Makefile'
+              - '.github/workflows/flutter.yml'
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        if: steps.filter.outputs.client == 'true'
+        with:
+          flutter-version-file: app/pubspec.yaml
+          cache: true
+
+      - name: Regenerate the client
+        if: steps.filter.outputs.client == 'true'
+        run: make generate-flutter-client
+
+      - name: Fail on drift
+        if: steps.filter.outputs.client == 'true'
+        run: |
+          git add --intent-to-add app/packages/assistant_api
+          if ! git diff --exit-code app/packages/assistant_api; then
+            echo "::error::app/packages/assistant_api differs from the generator output. Run 'make dump-openapi generate-flutter-client' and commit the result."
+            exit 1
+          fi
+
   build-macos-bundle:
     name: Build macOS Bundle (no-codesign)
     runs-on: macos-26
