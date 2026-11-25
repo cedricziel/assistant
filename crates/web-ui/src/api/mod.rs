@@ -9,7 +9,6 @@
 
 pub mod account;
 pub mod agents;
-pub mod analytics;
 pub mod api_keys;
 pub mod attachments;
 pub mod audio;
@@ -19,7 +18,6 @@ pub mod catalog;
 pub mod commands;
 pub mod conversations;
 pub mod interfaces;
-pub mod logs;
 pub mod members;
 pub mod messages;
 pub mod orgs;
@@ -28,7 +26,6 @@ pub mod push;
 pub mod skills;
 pub mod spaces;
 pub mod templates;
-pub mod traces;
 pub mod turns;
 pub mod users;
 pub mod webhooks;
@@ -47,28 +44,6 @@ pub(crate) fn internal_error<E: std::fmt::Display>(err: E) -> (axum::http::Statu
         axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         err.to_string(),
     )
-}
-
-/// Serde deserializer that maps an absent **or** empty-string query parameter
-/// to `None`, and parses non-empty strings via `FromStr`.
-///
-/// The generated Dart/Dio client sends `""` for every `null` optional query
-/// parameter (e.g. `?limit=50&since=&until=`).  Without this helper, axum's
-/// `Query` extractor rejects `since=` because `""` is not a valid
-/// `DateTime<Utc>`, returning 400.  Applying this to all optional query-param
-/// fields makes the server tolerate the generated client's serialisation.
-pub(crate) fn empty_string_as_none<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: std::str::FromStr,
-    T::Err: std::fmt::Display,
-{
-    let opt: Option<String> = serde::Deserialize::deserialize(d)?;
-    match opt {
-        None => Ok(None),
-        Some(ref s) if s.is_empty() => Ok(None),
-        Some(s) => s.parse::<T>().map(Some).map_err(serde::de::Error::custom),
-    }
 }
 
 /// Build an SSE response with keepalive pings and `Cache-Control: no-cache`.
@@ -296,9 +271,8 @@ pub fn api_router() -> Router<ApiState> {
 
 #[cfg(test)]
 mod helper_tests {
-    use super::{empty_string_as_none, internal_error};
+    use super::internal_error;
     use axum::http::StatusCode;
-    use serde::Deserialize;
 
     #[test]
     fn internal_error_returns_500_with_display_string() {
@@ -313,37 +287,6 @@ mod helper_tests {
         let (status, body) = internal_error(&err);
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(body.contains("disk full"));
-    }
-
-    #[derive(Deserialize, Debug)]
-    struct Wrap {
-        #[serde(default, deserialize_with = "empty_string_as_none")]
-        value: Option<i32>,
-    }
-
-    #[test]
-    fn empty_string_as_none_returns_none_for_missing_field() {
-        let w: Wrap = serde_json::from_str("{}").unwrap();
-        assert_eq!(w.value, None);
-    }
-
-    #[test]
-    fn empty_string_as_none_returns_none_for_empty_string() {
-        let w: Wrap = serde_json::from_str(r#"{"value": ""}"#).unwrap();
-        assert_eq!(w.value, None);
-    }
-
-    #[test]
-    fn empty_string_as_none_parses_non_empty_string() {
-        let w: Wrap = serde_json::from_str(r#"{"value": "42"}"#).unwrap();
-        assert_eq!(w.value, Some(42));
-    }
-
-    #[test]
-    fn empty_string_as_none_errors_on_invalid_value() {
-        let err = serde_json::from_str::<Wrap>(r#"{"value": "abc"}"#).unwrap_err();
-        // Parse error from `i32::from_str` surfaces via serde::de::Error::custom.
-        assert!(err.to_string().contains("invalid"));
     }
 }
 

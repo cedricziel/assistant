@@ -305,7 +305,7 @@ async fn main() -> Result<()> {
     let personas = storage.persona_store();
     personas.ensure_exists(&selected_persona).await?;
 
-    let _otel_guard = init_tracing(storage.pool.clone(), &config.observability).await?;
+    let _otel_guard = init_tracing()?;
     for msg in config_logs {
         match msg {
             ConfigLoadMessage::Info(text) => info!("{text}"),
@@ -409,16 +409,15 @@ async fn main() -> Result<()> {
         Duration::from_secs(60),
     );
 
-    // 7a. Register the periodic skill improvement scheduled task when learning is enabled.
-    if bs.config.learning.enabled
-        && let Err(e) = assistant_runtime::skill_improver::register_improvement_task(
-            &bs.storage,
-            &selected_persona,
-            &bs.config.learning,
-        )
-        .await
-    {
-        warn!(error = %e, "Failed to register skill improvement task");
+    // 7a. Skill self-improvement needs per-skill execution statistics, which
+    //     were read from the local trace store that no longer exists. The
+    //     scheduled task is not registered until a replacement provider is
+    //     wired into `ToolExecutor` (see `UnavailableSkillStats`).
+    if bs.config.learning.enabled {
+        warn!(
+            "Skill self-improvement is inactive: no skill execution statistics are collected \
+             now that telemetry is exported over OTLP only"
+        );
     }
 
     // 7b. Start the memory indexer background task (gated by the worker plan).

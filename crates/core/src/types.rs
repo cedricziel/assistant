@@ -51,7 +51,7 @@ pub mod skills_mcp;
 // ── Observability / telemetry configuration ──────────────────────────────────
 //
 // Moved to the `observability` submodule. Import via
-// `use assistant_core::types::observability::{OtelExporter, ObservabilityConfig, ...};`
+// `use assistant_core::types::observability::{ObservabilityConfig, ...};`
 pub mod observability;
 
 // ── Per-feature runtime configuration ─────────────────────────────────────────

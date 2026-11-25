@@ -72,6 +72,4 @@ pub use memory::{
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput};
-// `assistant_core::types::observability::OtelExporter`) rather than from the
-// crate root.
 pub use upload::resolve_upload_bytes;

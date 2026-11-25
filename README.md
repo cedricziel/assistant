@@ -7,7 +7,7 @@ A minimalist, self-improving personal AI assistant written in Rust.
 
 - **Local-first** — runs entirely on your machine via [Ollama](https://ollama.com)
 - **Agent Skills native** — skills are portable `SKILL.md` directories following the [agentskills.io](https://agentskills.io) open standard
-- **Self-improving** — passively logs execution traces and proposes SKILL.md refinements for human review
+- **Self-improving** — proposes SKILL.md refinements for human review (currently inactive, see [Self-improvement](#self-improvement))
 - **MCP server** — exposes skills via the [Model Context Protocol](https://modelcontextprotocol.io) so Claude Code and other tools can discover and invoke them
 - **Multi-interface** — single `assistant` binary runs orchestrator, workers, web UI, MCP, and chat interfaces via subcommands
 - **Ambient skills** — active interfaces register their capabilities (e.g. `slack-post`) into the skill executor so the Persona can use them from any context
@@ -129,7 +129,7 @@ ollama pull qwen2.5:14b
 | --------------- | ---------------------------------------------------------- |
 | `list-skills`   | List all registered skills                                 |
 | `load-skill`    | Load the body text of a skill into context by name         |
-| `self-analyze`  | Analyse execution traces and propose SKILL.md improvements |
+| `self-analyze`  | Analyse skill execution stats and propose SKILL.md improvements |
 | `schedule-task` | Schedule a prompt task (cron or one-shot)                  |
 | `list-tasks`    | List all scheduled tasks with status and next run time     |
 | `cancel-task`   | Cancel a scheduled task by ID or name                      |
@@ -168,14 +168,19 @@ Or via the MCP `install_skill` tool when connecting from Claude Code.
 
 ## Self-improvement
 
-Every skill execution produces an OpenTelemetry span that lands in SQLite's
-`distributed_traces` table. When you run:
+> **Currently inactive.** Skill execution statistics used to be read from the
+> local trace store, which was removed when telemetry became OTLP-only
+> ([ADR-0012](docs/adr/adr-0012-otlp-only-telemetry.md)). `self-analyze`
+> reports that no statistics are available and the improvement task is not
+> scheduled until a replacement lands.
+
+The intended flow is below. When you run:
 
 ```
 assistant> Analyse the web-fetch skill and suggest improvements
 ```
 
-The assistant invokes `self-analyze`, queries the recent traces, sends them along with the current SKILL.md to Ollama, and stores the proposed improvement in the database. Review and apply it:
+The assistant invokes `self-analyze`, queries the recent execution stats, sends them along with the current SKILL.md to Ollama, and stores the proposed improvement in the database. Review and apply it:
 
 ```
 assistant> /review
@@ -282,7 +287,7 @@ assistant/
 │   ├── provider-openai/                # OpenAI backend (GPT models + embeddings)
 │   ├── provider-moonshot/              # Moonshot/Kimi backend (OpenAI-compatible)
 │   ├── skills/                         # Skill parsing, validation, embedded builtins
-│   ├── storage/                        # SQLite, SkillRegistry, trace store, memory store
+│   ├── storage/                        # SQLite, SkillRegistry, memory store
 │   ├── bus-nats/                       # NATS JetStream MessageBus (optional, feature-gated)
 │   ├── runtime/                        # ReAct orchestrator, scheduler, Subagent Processes
 │   ├── tool-executor/                  # Builtin tool registry + skill installer
@@ -294,9 +299,8 @@ assistant/
 │   ├── interface-mattermost/           # Mattermost WebSocket library
 │   ├── interface-nextcloud/            # Nextcloud Talk webhook bot
 │   ├── interface-signal/               # Signal interface library
-│   ├── web-ui/                         # Trace analysis web UI + A2A protocol server
+│   ├── web-ui/                         # Flutter web host, REST API + A2A protocol server
 │   ├── a2a-json-schema/                # A2A protocol JSON Schema types
-│   ├── opentelemetry-exporter-sqlite/  # SQLite exporter for OpenTelemetry spans/logs
 │   └── integration-tests/              # End-to-end smoke tests
 ├── docker/                             # Dockerfiles (all build the unified assistant binary)
 ├── migrations/                         # SQLite migration files
@@ -317,7 +321,7 @@ make run-slack      # cargo run -p assistant-cli -- orchestrator run --interface
 make run-mattermost # cargo run -p assistant-cli -- orchestrator run --interfaces mattermost --no-repl
 make run-nextcloud  # cargo run -p assistant-cli -- orchestrator run --interfaces nextcloud --no-repl
 make run-signal     # cargo run -p assistant-cli -- orchestrator run --interfaces signal --no-repl
-# Trace analysis UI (auth token required)
+# Web UI (auth token required)
 ASSISTANT_WEB_TOKEN=changeme cargo run -p assistant-cli -- webui serve --listen 127.0.0.1:8080
 ```
 
@@ -326,8 +330,8 @@ ASSISTANT_WEB_TOKEN=changeme cargo run -p assistant-cli -- webui serve --listen 
 The runtime emits OpenTelemetry **traces, logs, and metrics** for every
 conversation turn, LLM call, and tool invocation. Real observability lives
 outside the assistant: export via OTLP to your own stack and query it there.
-A small local SQLite store powers the built-in web UI viewers for single-node
-debugging, and can be switched off with `[observability] exporter = "none"`.
+The assistant keeps no local telemetry store. Without an
+`OTEL_EXPORTER_OTLP_*` variable, telemetry is off.
 
 ```sh
 # Send all signals to an OTLP collector (Tempo, Grafana, Honeycomb, …)
@@ -352,8 +356,8 @@ The `opentelemetry-otlp` crate reads the standard `OTEL_EXPORTER_OTLP_*` env
 vars (endpoint, protocol, headers, timeout, compression) with per-signal
 overrides — see [docs/opentelemetry.md](docs/opentelemetry.md) for the full
 reference of emitted spans, metrics, and supported environment variables, and
-[ADR-0010](docs/adr/adr-0010-external-observability.md) for why the built-in
-analytics stack was removed.
+[ADR-0012](docs/adr/adr-0012-otlp-only-telemetry.md) for why the built-in
+viewers and local store were removed.
 
 ### Pre-commit hooks
 
@@ -471,7 +475,7 @@ See `crates/interface-signal/README.md` for setup and device linking details.
 | [Nextcloud Talk interface](docs/nextcloud.md)  | Webhook bot setup and message flow                    |
 | [OpenAI provider](docs/openai.md)              | API key and OAuth PKCE auth, Azure/vLLM compatibility |
 | [Moonshot provider](docs/moonshot.md)          | Kimi K2/K2.5 models, regional endpoints               |
-| [Web UI](docs/web-ui.md)                       | Trace analysis dashboard and A2A protocol server      |
+| [Web UI](docs/web-ui.md)                       | Flutter web host, REST API, and A2A protocol server   |
 | [Authentication](docs/authentication.md)       | Web UI token auth, cookie flow, and A2A security      |
 | [Message bus](docs/messaging.md)               | Durable topic-based message bus architecture          |
 | [Voice transcription](docs/transcription.md)   | Whisper, Ollama, and Deepgram transcription providers |

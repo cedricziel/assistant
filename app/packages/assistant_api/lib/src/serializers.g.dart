@@ -18,7 +18,6 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(AgentProvider.serializer)
       ..add(AgentSkill.serializer)
       ..add(AgentSummary.serializer)
-      ..add(AnalyticsSummaryResponse.serializer)
       ..add(ApiErrorResponse.serializer)
       ..add(ApiKeySecurityScheme.serializer)
       ..add(ApiKeySummary.serializer)
@@ -63,12 +62,10 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(InterfaceInstanceResponse.serializer)
       ..add(ListTaskPushNotificationConfigsResponse.serializer)
       ..add(ListTasksResponse.serializer)
-      ..add(LogEntryResponse.serializer)
       ..add(MemberEntry.serializer)
       ..add(Message.serializer)
       ..add(MessageSummary.serializer)
       ..add(ModelPart.serializer)
-      ..add(ModelUsageResponse.serializer)
       ..add(MutualTlsSecurityScheme.serializer)
       ..add(OAuth2SecurityScheme.serializer)
       ..add(OAuthErrorResponse.serializer)
@@ -104,7 +101,6 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SkillEntryResponse.serializer)
       ..add(SpaceDetail.serializer)
       ..add(SpaceSummary.serializer)
-      ..add(SpanEntryResponse.serializer)
       ..add(SseStatusEvent.serializer)
       ..add(SseSubagentCompletedEvent.serializer)
       ..add(SseSubagentStartedEvent.serializer)
@@ -127,12 +123,8 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(TaskStatus.serializer)
       ..add(TaskStatusUpdateEvent.serializer)
       ..add(TemplateResponse.serializer)
-      ..add(TimeSeriesResponse.serializer)
       ..add(TokenResponse.serializer)
       ..add(ToolCallSummary.serializer)
-      ..add(ToolUsageResponse.serializer)
-      ..add(TraceDetailResponse.serializer)
-      ..add(TraceSummaryResponse.serializer)
       ..add(TurnState.serializer)
       ..add(TurnStatusResponse.serializer)
       ..add(UnsubscribeRequest.serializer)
@@ -190,26 +182,8 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(MessageSummary)]),
           () => ListBuilder<MessageSummary>())
       ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(ModelUsageResponse)]),
-          () => ListBuilder<ModelUsageResponse>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(TimeSeriesResponse)]),
-          () => ListBuilder<TimeSeriesResponse>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(TimeSeriesResponse)]),
-          () => ListBuilder<TimeSeriesResponse>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(ToolUsageResponse)]),
-          () => ListBuilder<ToolUsageResponse>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(String)]),
-          () => ListBuilder<String>())
-      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
           () => ListBuilder<PersonaFileSlot>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(SpanEntryResponse)]),
-          () => ListBuilder<SpanEntryResponse>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

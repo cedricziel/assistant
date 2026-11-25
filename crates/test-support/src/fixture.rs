@@ -28,13 +28,12 @@ use assistant_llm_provider::ScriptedLlmProvider;
 use assistant_storage::{
     AgentStore, AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
     InMemoryAgentStore, InMemoryAttachmentStore, InMemoryCommandEventStore,
-    InMemoryConversationEventStore, InMemoryConversationStore, InMemoryLogStore,
-    InMemoryMemoryChunkStore, InMemoryMessageBus, InMemoryMetricsStore,
-    InMemoryPersonaSkillAccessStore, InMemoryPersonaStore, InMemoryPushSubscriptionStore,
-    InMemoryRefinementsStore, InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore,
-    InMemoryTraceStore, InMemoryWebhookStore, InMemoryWorkflowStore, LogStore, MemoryChunkStore,
-    MetricsStore, PersonaSkillAccessStore, PersonaStore, PushSubscriptionStore, RefinementsStore,
-    ScheduledTaskStore, SlackActiveThreadStore, TraceStore, WebhookStore, WorkflowStore,
+    InMemoryConversationEventStore, InMemoryConversationStore, InMemoryMemoryChunkStore,
+    InMemoryMessageBus, InMemoryPersonaSkillAccessStore, InMemoryPersonaStore,
+    InMemoryPushSubscriptionStore, InMemoryRefinementsStore, InMemoryScheduledTaskStore,
+    InMemorySlackActiveThreadStore, InMemoryWebhookStore, InMemoryWorkflowStore, MemoryChunkStore,
+    PersonaSkillAccessStore, PersonaStore, PushSubscriptionStore, RefinementsStore,
+    ScheduledTaskStore, SlackActiveThreadStore, WebhookStore, WorkflowStore,
 };
 
 /// Builder for a composed [`Fixture`].
@@ -98,8 +97,6 @@ impl FixtureBuilder {
             llm: self.llm,
             message_bus: Arc::new(InMemoryMessageBus::new()),
             conversation_store: Arc::new(InMemoryConversationStore::new()),
-            trace_store: Arc::new(InMemoryTraceStore::new()),
-            log_store: Arc::new(InMemoryLogStore::new()),
             attachment_store: Arc::new(InMemoryAttachmentStore::new()),
             push_subscription_store: Arc::new(InMemoryPushSubscriptionStore::new()),
             command_event_store: Arc::new(InMemoryCommandEventStore::new()),
@@ -108,7 +105,6 @@ impl FixtureBuilder {
             agent_store: Arc::new(InMemoryAgentStore::new()),
             scheduled_task_store: Arc::new(InMemoryScheduledTaskStore::new()),
             conversation_event_store: Arc::new(InMemoryConversationEventStore::new()),
-            metrics_store: Arc::new(InMemoryMetricsStore::new()),
             refinements_store: Arc::new(InMemoryRefinementsStore::new()),
             persona_store: Arc::new(InMemoryPersonaStore::new()),
             workflow_store: Arc::new(InMemoryWorkflowStore::new()),
@@ -134,8 +130,6 @@ pub struct Fixture {
     pub llm: Arc<dyn LlmProvider>,
     pub message_bus: Arc<dyn MessageBus>,
     pub conversation_store: Arc<dyn ConversationStore>,
-    pub trace_store: Arc<dyn TraceStore>,
-    pub log_store: Arc<dyn LogStore>,
     pub attachment_store: Arc<dyn AttachmentStore>,
     pub push_subscription_store: Arc<dyn PushSubscriptionStore>,
     pub command_event_store: Arc<dyn CommandEventStore>,
@@ -144,7 +138,6 @@ pub struct Fixture {
     pub agent_store: Arc<dyn AgentStore>,
     pub scheduled_task_store: Arc<dyn ScheduledTaskStore>,
     pub conversation_event_store: Arc<dyn ConversationEventStore>,
-    pub metrics_store: Arc<dyn MetricsStore>,
     pub refinements_store: Arc<dyn RefinementsStore>,
     pub persona_store: Arc<dyn PersonaStore>,
     pub workflow_store: Arc<dyn WorkflowStore>,
@@ -163,8 +156,6 @@ mod tests {
         let fx = FixtureBuilder::new().build().await;
         let convs = fx.conversation_store.list_conversations().await.unwrap();
         assert!(convs.is_empty());
-        let traces = fx.trace_store.list_recent(10).await.unwrap();
-        assert!(traces.is_empty());
     }
 
     #[tokio::test]

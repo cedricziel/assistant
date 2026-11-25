@@ -1,19 +1,14 @@
-use std::time::Duration;
-
 use anyhow::Result;
-use assistant_core::types::observability::{ObservabilityConfig, OtelExporter};
 use opentelemetry::{Key, KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_exporter_sqlite::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry_sdk::{
     Resource,
-    logs::{BatchLogProcessor, SdkLoggerProvider},
+    logs::SdkLoggerProvider,
     metrics::{PeriodicReader, SdkMeterProvider},
     propagation::TraceContextPropagator,
-    trace::{BatchSpanProcessor, SdkTracerProvider},
+    trace::SdkTracerProvider,
 };
 use opentelemetry_semantic_conventions::attribute::{SERVICE_NAME, SERVICE_VERSION};
-use sqlx::SqlitePool;
 use tracing::info;
 use tracing_subscriber::{
     EnvFilter, Layer, filter::Targets, layer::SubscriberExt, util::SubscriberInitExt,
@@ -21,34 +16,25 @@ use tracing_subscriber::{
 
 /// Guard that shuts down all OTel providers when dropped.
 pub struct OtelGuard {
-    tracer_provider: Option<SdkTracerProvider>,
-    logger_provider: Option<SdkLoggerProvider>,
-    meter_provider: Option<SdkMeterProvider>,
+    tracer_provider: SdkTracerProvider,
+    logger_provider: SdkLoggerProvider,
+    meter_provider: SdkMeterProvider,
 }
 
 impl Drop for OtelGuard {
     fn drop(&mut self) {
-        if let Some(ref provider) = self.logger_provider {
-            let _ = provider.shutdown();
-        }
-        if let Some(ref provider) = self.meter_provider {
-            let _ = provider.shutdown();
-        }
-        if let Some(ref provider) = self.tracer_provider {
-            let _ = provider.shutdown();
-        }
+        let _ = self.logger_provider.shutdown();
+        let _ = self.meter_provider.shutdown();
+        let _ = self.tracer_provider.shutdown();
     }
 }
 
 /// Build the per-layer `Targets` filter for the OTel log bridge.
 ///
-/// This filter suppresses all `sqlx*` targets to prevent a feedback loop:
-///
-///   tracing event → bridge → BatchLogProcessor → SqliteLogExporter
-///     → sqlx INSERT INTO logs → sqlx emits tracing event → bridge → ∞
-///
-/// Application targets pass through at INFO and above.
-/// Noisy third-party crates (async_nats, h2, hyper_util) are suppressed below WARN.
+/// Application targets pass through at INFO and above. Database and HTTP
+/// client internals are suppressed so that exporting a record does not
+/// itself generate records that get exported in turn, and noisy third-party
+/// crates (`async_nats`, `h2`, `hyper_util`) are quieted.
 pub(crate) fn otel_log_bridge_filter() -> Targets {
     Targets::new()
         .with_default(tracing::Level::INFO)
@@ -61,17 +47,14 @@ pub(crate) fn otel_log_bridge_filter() -> Targets {
         .with_target("hyper_util", tracing::metadata::LevelFilter::OFF)
 }
 
-/// Install tracing subscribers and OpenTelemetry exporters.
+/// Install tracing subscribers and, when configured, OTLP export.
 ///
-/// Two independent destinations exist, and they can run side by side — each
-/// OTel provider simply gets multiple processors/readers:
-///
-/// 1. **Local SQLite** (`[observability] exporter = "sqlite"`, the default).
-///    A small on-disk store that powers the built-in trace/log/metric viewers.
-///    Set `exporter = "none"` to turn it off.
-/// 2. **OTLP**, enabled by setting *any* non-empty `OTEL_EXPORTER_OTLP_*`
-///    environment variable. This is the supported path to a real
-///    observability stack (Grafana/Tempo/Loki/Mimir, Honeycomb, SignalDB, …).
+/// Console logging to stderr is always installed. Traces, logs and metrics
+/// are exported over OTLP, enabled by setting *any* non-empty
+/// `OTEL_EXPORTER_OTLP_*` environment variable. Without one, telemetry is a
+/// no-op and `Ok(None)` is returned. This is the only telemetry output: the
+/// assistant keeps no local telemetry store. Point it at a real
+/// observability stack (Grafana/Tempo/Loki/Mimir, Honeycomb, SignalDB, …).
 ///
 /// The `opentelemetry-otlp` crate reads the standard env vars internally, so
 /// all of the following are supported without additional code:
@@ -96,145 +79,83 @@ pub(crate) fn otel_log_bridge_filter() -> Targets {
 /// `OTEL_METRIC_EXPORT_INTERVAL`.
 ///
 /// The OTel log bridge uses a dedicated per-layer filter (see
-/// [`otel_log_bridge_filter`]) that suppresses all `sqlx` targets. Without
-/// this, the log exporter's own INSERT queries would emit tracing events that
-/// get captured by the bridge, creating a feedback loop.
-pub async fn init_tracing(
-    pool: SqlitePool,
-    observability: &ObservabilityConfig,
-) -> Result<Option<OtelGuard>> {
+/// [`otel_log_bridge_filter`]).
+pub fn init_tracing() -> Result<Option<OtelGuard>> {
     let fmt_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
-
-    // -- Shared resource (used by traces, logs, and metrics) --
-    let resource = build_resource();
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_filter(fmt_filter);
 
     // `OTEL_SDK_DISABLED=true` is the spec-defined kill switch: no providers,
     // no exporters, console logging only.
-    let disabled = sdk_disabled(std::env::var(OTEL_SDK_DISABLED).ok().as_deref());
-
-    let enable_sqlite = !disabled && matches!(observability.exporter, OtelExporter::Sqlite);
-
-    // Detect whether the user wants OTLP export by checking for any of the
-    // standard `OTEL_EXPORTER_OTLP_*` env vars.  We intentionally do NOT
-    // read the values ourselves — the crate resolves per-signal overrides,
-    // protocol, timeouts, headers, and compression internally.
-    let enable_otlp = !disabled && otlp_configured(std::env::vars());
-    let need_otel = enable_sqlite || enable_otlp;
-
-    if disabled {
+    if sdk_disabled_from_env() {
         info!("{OTEL_SDK_DISABLED} is set — OpenTelemetry export is disabled");
     }
 
-    if enable_otlp {
-        info!(
-            "OTLP export enabled — the opentelemetry-otlp crate will read endpoint, protocol, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars"
-        );
+    // We intentionally do NOT read the OTLP values ourselves — the crate
+    // resolves per-signal overrides, protocol, timeouts, headers, and
+    // compression internally.
+    if !otlp_export_enabled() {
+        tracing_subscriber::registry().with(fmt_layer).init();
+        return Ok(None);
     }
 
-    if need_otel {
-        global::set_text_map_propagator(TraceContextPropagator::new());
-    }
+    info!(
+        "OTLP export enabled — the opentelemetry-otlp crate will read endpoint, protocol, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars"
+    );
 
-    // -- Trace provider --------------------------------------------------
-    let mut trace_provider_builder = SdkTracerProvider::builder().with_resource(resource.clone());
-    let mut have_trace_exporter = false;
+    global::set_text_map_propagator(TraceContextPropagator::new());
+    let resource = build_resource();
 
-    if enable_sqlite {
-        let sqlite_exporter = SqliteSpanExporter::new(pool.clone());
-        let processor = BatchSpanProcessor::builder(sqlite_exporter).build();
-        trace_provider_builder = trace_provider_builder.with_span_processor(processor);
-        have_trace_exporter = true;
-    }
+    // `build()` without an explicit transport lets the crate resolve the
+    // protocol from OTEL_EXPORTER_OTLP_TRACES_PROTOCOL (or the generic
+    // fallback), along with endpoint, headers, timeout, and compression.
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_resource(resource.clone())
+        .with_batch_exporter(opentelemetry_otlp::SpanExporter::builder().build()?)
+        .build();
+    global::set_tracer_provider(tracer_provider.clone());
 
-    if enable_otlp {
-        // `build()` without an explicit transport lets the crate resolve the
-        // protocol from OTEL_EXPORTER_OTLP_TRACES_PROTOCOL (or the generic
-        // fallback), along with endpoint, headers, timeout, and compression.
-        let otlp_exporter = opentelemetry_otlp::SpanExporter::builder().build()?;
-        trace_provider_builder = trace_provider_builder.with_batch_exporter(otlp_exporter);
-        have_trace_exporter = true;
-    }
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_resource(resource.clone())
+        .with_batch_exporter(opentelemetry_otlp::LogExporter::builder().build()?)
+        .build();
 
-    // -- Logger provider (OTel logs) -------------------------------------
-    let mut logger_provider: Option<SdkLoggerProvider> = None;
+    // No explicit interval — `PeriodicReader` picks up
+    // `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds) and falls back to 60s.
+    // Setting one here would override the env var.
+    let meter_provider = SdkMeterProvider::builder()
+        .with_resource(resource)
+        .with_reader(
+            PeriodicReader::builder(opentelemetry_otlp::MetricExporter::builder().build()?).build(),
+        )
+        .build();
+    global::set_meter_provider(meter_provider.clone());
 
-    // -- Meter provider (OTel metrics) -----------------------------------
-    let mut meter_provider: Option<SdkMeterProvider> = None;
+    // Bridge tracing events → OTel log records.
+    let otel_log_layer =
+        OpenTelemetryTracingBridge::new(&logger_provider).with_filter(otel_log_bridge_filter());
 
-    if need_otel {
-        // Logs — attach SQLite and/or OTLP processors to the same provider.
-        let mut log_builder = SdkLoggerProvider::builder().with_resource(resource.clone());
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(otel_log_layer)
+        .init();
 
-        if enable_sqlite {
-            let sqlite_log_exporter = SqliteLogExporter::new(pool.clone());
-            let processor = BatchLogProcessor::builder(sqlite_log_exporter).build();
-            log_builder = log_builder.with_log_processor(processor);
-        }
+    Ok(Some(OtelGuard {
+        tracer_provider,
+        logger_provider,
+        meter_provider,
+    }))
+}
 
-        if enable_otlp {
-            let otlp_log_exporter = opentelemetry_otlp::LogExporter::builder().build()?;
-            log_builder = log_builder.with_batch_exporter(otlp_log_exporter);
-        }
+/// Returns `true` when OTLP export will be installed: an `OTEL_EXPORTER_OTLP_*`
+/// variable is set and `OTEL_SDK_DISABLED` does not switch the SDK off.
+pub fn otlp_export_enabled() -> bool {
+    !sdk_disabled_from_env() && otlp_configured(std::env::vars())
+}
 
-        // Metrics — attach SQLite and/or OTLP readers to the same provider.
-        let mut meter_builder = SdkMeterProvider::builder().with_resource(resource);
-
-        if enable_sqlite {
-            let sqlite_metric_exporter = SqliteMetricExporter::new(pool);
-            let reader = PeriodicReader::builder(sqlite_metric_exporter)
-                .with_interval(Duration::from_secs(60))
-                .build();
-            meter_builder = meter_builder.with_reader(reader);
-        }
-
-        if enable_otlp {
-            let otlp_metric_exporter = opentelemetry_otlp::MetricExporter::builder().build()?;
-            // No explicit interval — `PeriodicReader` picks up
-            // `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds) and falls back to
-            // 60s. Setting one here would override the env var.
-            let reader = PeriodicReader::builder(otlp_metric_exporter).build();
-            meter_builder = meter_builder.with_reader(reader);
-        }
-
-        let log_prov = log_builder.build();
-
-        // Bridge tracing events → OTel log records with the anti-stampede filter.
-        let otel_filter = otel_log_bridge_filter();
-        let otel_log_layer = OpenTelemetryTracingBridge::new(&log_prov).with_filter(otel_filter);
-        logger_provider = Some(log_prov);
-
-        let meter_prov = meter_builder.build();
-        global::set_meter_provider(meter_prov.clone());
-        meter_provider = Some(meter_prov);
-
-        tracing_subscriber::registry()
-            .with(fmt_layer.with_filter(fmt_filter))
-            .with(otel_log_layer)
-            .init();
-    } else {
-        tracing_subscriber::registry()
-            .with(fmt_layer.with_filter(fmt_filter))
-            .init();
-    }
-
-    if have_trace_exporter {
-        let provider = trace_provider_builder.build();
-        global::set_tracer_provider(provider.clone());
-        Ok(Some(OtelGuard {
-            tracer_provider: Some(provider),
-            logger_provider,
-            meter_provider,
-        }))
-    } else if logger_provider.is_some() || meter_provider.is_some() {
-        Ok(Some(OtelGuard {
-            tracer_provider: None,
-            logger_provider,
-            meter_provider,
-        }))
-    } else {
-        Ok(None)
-    }
+fn sdk_disabled_from_env() -> bool {
+    sdk_disabled(std::env::var(OTEL_SDK_DISABLED).ok().as_deref())
 }
 
 /// Prefix shared by every standard OTLP exporter environment variable.
@@ -310,7 +231,6 @@ mod tests {
     use super::*;
 
     /// The filter must block all sqlx query-level events regardless of level.
-    /// These are the events emitted by every SQL statement the exporter runs.
     #[test]
     fn filter_blocks_sqlx_query_at_all_levels() {
         let filter = otel_log_bridge_filter();

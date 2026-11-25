@@ -12,7 +12,6 @@ import 'package:assistant_api/src/auth/oauth.dart';
 import 'package:assistant_api/src/api/account_api.dart';
 import 'package:assistant_api/src/api/agent_card_api.dart';
 import 'package:assistant_api/src/api/agents_api.dart';
-import 'package:assistant_api/src/api/analytics_api.dart';
 import 'package:assistant_api/src/api/api_keys_api.dart';
 import 'package:assistant_api/src/api/attachments_api.dart';
 import 'package:assistant_api/src/api/bindings_api.dart';
@@ -21,7 +20,6 @@ import 'package:assistant_api/src/api/catalog_api.dart';
 import 'package:assistant_api/src/api/commands_api.dart';
 import 'package:assistant_api/src/api/conversations_api.dart';
 import 'package:assistant_api/src/api/interfaces_api.dart';
-import 'package:assistant_api/src/api/logs_api.dart';
 import 'package:assistant_api/src/api/members_api.dart';
 import 'package:assistant_api/src/api/messages_api.dart';
 import 'package:assistant_api/src/api/oauth_api.dart';
@@ -32,7 +30,6 @@ import 'package:assistant_api/src/api/skills_api.dart';
 import 'package:assistant_api/src/api/spaces_api.dart';
 import 'package:assistant_api/src/api/tasks_api.dart';
 import 'package:assistant_api/src/api/templates_api.dart';
-import 'package:assistant_api/src/api/traces_api.dart';
 import 'package:assistant_api/src/api/users_api.dart';
 import 'package:assistant_api/src/api/web_push_api.dart';
 import 'package:assistant_api/src/api/webhooks_api.dart';
@@ -176,12 +173,6 @@ class AssistantApi {
     return AgentsApi(dio, serializers);
   }
 
-  /// Get AnalyticsApi instance, base route and serializer can be overridden by a given but be careful,
-  /// by doing that all interceptors will not be executed
-  AnalyticsApi getAnalyticsApi() {
-    return AnalyticsApi(dio, serializers);
-  }
-
   /// Get ApiKeysApi instance, base route and serializer can be overridden by a given but be careful,
   /// by doing that all interceptors will not be executed
   ApiKeysApi getApiKeysApi() {
@@ -228,12 +219,6 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   InterfacesApi getInterfacesApi() {
     return InterfacesApi(dio, serializers);
-  }
-
-  /// Get LogsApi instance, base route and serializer can be overridden by a given but be careful,
-  /// by doing that all interceptors will not be executed
-  LogsApi getLogsApi() {
-    return LogsApi(dio, serializers);
   }
 
   /// Get MembersApi instance, base route and serializer can be overridden by a given but be careful,
@@ -294,12 +279,6 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   TemplatesApi getTemplatesApi() {
     return TemplatesApi(dio, serializers);
-  }
-
-  /// Get TracesApi instance, base route and serializer can be overridden by a given but be careful,
-  /// by doing that all interceptors will not be executed
-  TracesApi getTracesApi() {
-    return TracesApi(dio, serializers);
   }
 
   /// Get UsersApi instance, base route and serializer can be overridden by a given but be careful,

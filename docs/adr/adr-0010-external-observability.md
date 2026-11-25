@@ -1,6 +1,9 @@
 # ADR 0010: Observability Lives Outside the Assistant
 
-**Status**: Accepted
+**Status**: Accepted. The local SQLite exporter, the built-in viewers and
+the self-learning statement below are superseded by
+[ADR-0012](adr-0012-otlp-only-telemetry.md); the OTLP transport and
+environment-variable decisions stand.
 **Date**: 2026-08-07
 
 ## Context

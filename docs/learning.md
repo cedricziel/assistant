@@ -66,7 +66,7 @@ auto_apply_refinements = true
 # Minimum tool calls in a turn to consider skill creation (default: 3)
 min_tool_calls_for_skill = 3
 
-# Minimum traced executions before analyzing a skill (default: 10)
+# Minimum recorded executions before analyzing a skill (default: 10)
 min_executions_for_analysis = 10
 
 # Cron schedule for the improvement cycle (default: every 6 hours)
@@ -97,12 +97,17 @@ tool or the `/review` CLI command to inspect and accept/reject them.
 
 ## Observability
 
-Skill-scoped execution data is tracked via OpenTelemetry spans. Each
-span carries an `active_skill` attribute when a skill is loaded. The
-improvement analysis reads these stats through the `SkillStatsProvider`
-trait, backed by the local SQLite trace store. The trait is the seam for
-sourcing the same stats from an external telemetry backend (TraceQL /
-PromQL) later — see `docs/adr/adr-0010-external-observability.md`.
+Tool spans carry an `active_skill` attribute when a skill is loaded and are
+exported over OTLP like all telemetry. The improvement analysis does not read
+them: it asks a `SkillStatsProvider` for per-skill execution stats, and the
+local trace store that used to provide them was removed
+([ADR-0012](adr/adr-0012-otlp-only-telemetry.md)).
+
+**Skill self-improvement is therefore inactive.** The `self-analyze` tool
+reports that no statistics are collected, the `skill-self-improve` task is not
+registered, and the CLI logs a warning at startup when `[learning] enabled`.
+Autonomous skill creation is unaffected. ADR-0012 proposes the replacement:
+a `skill_executions` table written by the orchestrator.
 
 ## Disabling
 
