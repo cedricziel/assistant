@@ -116,9 +116,8 @@ class IntegrationListViewModel extends AsyncNotifier<IntegrationListState> {
   /// Removes [id] and its credentials.
   Future<void> delete(String id) => _act(id, () async {
     await ref.read(apiClientProvider)!.integrations.deleteIntegration(id: id);
-    final current = state.requireValue;
-    state = AsyncData(
-      current.copyWith(
+    _update(
+      (current) => current.copyWith(
         rows: [
           for (final row in current.rows)
             if (row.integration.id != id) row,
@@ -163,10 +162,11 @@ class IntegrationListViewModel extends AsyncNotifier<IntegrationListState> {
     } catch (error) {
       await _report(error);
     }
-    if (ref.mounted) _setBusy(id, busy: false);
+    _setBusy(id, busy: false);
   }
 
   Future<void> _report(Object error) async {
+    if (!ref.mounted) return;
     final failure = describeIntegrationFailure(error);
     final stale =
         failure.kind == IntegrationFailureKind.conflict ||
@@ -190,28 +190,29 @@ class IntegrationListViewModel extends AsyncNotifier<IntegrationListState> {
     );
   }
 
-  void _setBusy(String id, {required bool busy}) {
-    final current = state.requireValue;
-    state = AsyncData(
-      current.copyWith(
-        busyIds: busy
-            ? {...current.busyIds, id}
-            : ({...current.busyIds}..remove(id)),
-      ),
-    );
+  /// Applies [change] to the loaded state; a no-op once the screen is gone.
+  void _update(IntegrationListState Function(IntegrationListState) change) {
+    if (!ref.mounted) return;
+    state = AsyncData(change(state.requireValue));
   }
 
-  void _replace(String id, IntegrationRow Function(IntegrationRow) change) {
-    final current = state.requireValue;
-    state = AsyncData(
-      current.copyWith(
-        rows: [
-          for (final row in current.rows)
-            if (row.integration.id == id) change(row) else row,
-        ],
-      ),
-    );
-  }
+  void _setBusy(String id, {required bool busy}) => _update(
+    (current) => current.copyWith(
+      busyIds: busy
+          ? {...current.busyIds, id}
+          : ({...current.busyIds}..remove(id)),
+    ),
+  );
+
+  void _replace(String id, IntegrationRow Function(IntegrationRow) change) =>
+      _update(
+        (current) => current.copyWith(
+          rows: [
+            for (final row in current.rows)
+              if (row.integration.id == id) change(row) else row,
+          ],
+        ),
+      );
 
   Future<List<IntegrationRow>> _fetch() async {
     final integrations = ref.read(apiClientProvider)!.integrations;

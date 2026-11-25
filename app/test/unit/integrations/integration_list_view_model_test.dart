@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/features/account/account_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
@@ -181,6 +183,76 @@ void main() {
       _notifier(container, scope).clearMessage();
 
       expect(_state(container, scope).message, isNull);
+    });
+  });
+
+  group('closing the screen mid-request', () {
+    const scope = IntegrationListScope.org();
+
+    Future<void> run(
+      FakeIntegrationsApi api,
+      Future<void> Function(IntegrationListViewModel vm) action,
+      Completer<void> gate,
+      void Function() settle,
+    ) async {
+      final errors = <Object>[];
+      await runZonedGuarded(() async {
+        final container = _container(api, scope);
+        await _load(container, scope);
+        final pending = action(_notifier(container, scope));
+        container.dispose();
+        settle();
+        try {
+          await pending;
+        } catch (error) {
+          errors.add(error);
+        }
+        await Future<void>.delayed(Duration.zero);
+      }, (error, _) => errors.add(error));
+      expect(errors, isEmpty);
+    }
+
+    test('a toggle that finishes after disposal throws nothing', () async {
+      final gate = Completer<void>();
+      final api = FakeIntegrationsApi()
+        ..onList = ((layer, spaceId) async => [integrationSummary('int_a')])
+        ..onUpdate = ((id, r) async {
+          await gate.future;
+          return integrationDetail(id, enabled: false);
+        });
+
+      await run(
+        api,
+        (vm) => vm.setEnabled('int_a', false),
+        gate,
+        gate.complete,
+      );
+    });
+
+    test('a delete that finishes after disposal throws nothing', () async {
+      final gate = Completer<void>();
+      final api = FakeIntegrationsApi()
+        ..onList = ((layer, spaceId) async => [integrationSummary('int_a')])
+        ..onDelete = ((id) => gate.future);
+
+      await run(api, (vm) => vm.delete('int_a'), gate, gate.complete);
+    });
+
+    test('a failure that arrives after disposal throws nothing', () async {
+      final gate = Completer<void>();
+      final api = FakeIntegrationsApi()
+        ..onList = ((layer, spaceId) async => [integrationSummary('int_a')])
+        ..onUpdate = ((id, r) async {
+          await gate.future;
+          throw dioError(409);
+        });
+
+      await run(
+        api,
+        (vm) => vm.setEnabled('int_a', false),
+        gate,
+        gate.complete,
+      );
     });
   });
 
