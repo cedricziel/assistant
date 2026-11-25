@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::{OrgId, SpaceId, UserId};
 
+/// The longest slug the schema accepts.
+pub const MAX_SLUG_LEN: usize = 32;
+
 /// Declares a string-backed enum with `as_str`, `Display` and `FromStr`.
 macro_rules! string_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident => $text:literal),+ $(,)? }) => {

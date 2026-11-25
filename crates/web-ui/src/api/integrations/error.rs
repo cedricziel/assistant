@@ -1,19 +1,21 @@
 //! The error type of the integration handlers.
 
-use axum::extract::rejection::JsonRejection;
+use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+
+use assistant_core::integrations::IntegrationStoreError;
 
 use crate::errors::json_error;
 
 /// A failed request: a status and the message of the `{"error": ...}` envelope.
 #[derive(Debug)]
-pub(super) struct ApiError {
+pub struct ApiError {
     status: StatusCode,
     message: String,
 }
 
-pub(super) type ApiResult<T> = Result<T, ApiError>;
+pub type ApiResult<T> = Result<T, ApiError>;
 
 impl ApiError {
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
@@ -37,10 +39,28 @@ impl ApiError {
     }
 }
 
+/// `DuplicateSlug` is a `409`, `ConnectUrlImmutable` a `422`; anything else is
+/// an internal error.
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
-        tracing::error!("integrations api: {error:#}");
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        match error.downcast_ref::<IntegrationStoreError>() {
+            Some(e @ IntegrationStoreError::DuplicateSlug { .. }) => {
+                Self::new(StatusCode::CONFLICT, e.to_string())
+            }
+            Some(e @ IntegrationStoreError::ConnectUrlImmutable { .. }) => {
+                Self::unprocessable(e.to_string())
+            }
+            None => {
+                tracing::error!("integrations api: {error:#}");
+                Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+            }
+        }
+    }
+}
+
+impl From<QueryRejection> for ApiError {
+    fn from(rejection: QueryRejection) -> Self {
+        Self::new(rejection.status(), rejection.body_text())
     }
 }
 

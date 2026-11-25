@@ -1,5 +1,7 @@
 //! `/api/integrations[/{id}]`: install, list, read, update and remove.
 
+use std::collections::HashMap;
+
 use axum::{
     Extension, Json,
     extract::{
@@ -7,7 +9,6 @@ use axum::{
         rejection::{JsonRejection, QueryRejection},
     },
     http::{HeaderName, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
 };
 use chrono::Utc;
 
@@ -15,8 +16,7 @@ use assistant_core::auth::AuthContext;
 use assistant_core::identity::SpaceId;
 use assistant_core::integrations::catalog::{CatalogAuthKind, CatalogEntry};
 use assistant_core::integrations::{
-    self as domain, Integration, IntegrationFilter, IntegrationPolicy, IntegrationStoreError,
-    SpaceAccess,
+    self as domain, Integration, IntegrationFilter, IntegrationPolicy, MAX_SLUG_LEN, SpaceAccess,
 };
 
 use super::IntegrationsApiState;
@@ -26,10 +26,8 @@ use super::types::{
     CreateIntegrationRequest, IntegrationDetail, IntegrationListResponse, IntegrationStatus,
     IntegrationSummary, ListIntegrationsQuery, SpaceAccessEntry, UpdateIntegrationRequest,
 };
-use crate::errors::json_error;
 use crate::openapi::ErrorBody;
 
-const MAX_SLUG_LEN: usize = 32;
 const MAX_NAME_LEN: usize = 100;
 
 // -- Handlers ----------------------------------------------------------------
@@ -56,40 +54,44 @@ pub async fn list_integrations(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     query: Result<Query<ListIntegrationsQuery>, QueryRejection>,
-) -> Response {
-    let Query(query) = match query {
-        Ok(query) => query,
-        Err(rejection) => return json_error(StatusCode::BAD_REQUEST, rejection.body_text()),
-    };
-    into_response(list(&state, &ctx, query).await)
-}
-
-async fn list(
-    state: &IntegrationsApiState,
-    ctx: &AuthContext,
-    query: ListIntegrationsQuery,
 ) -> ApiResult<Json<IntegrationListResponse>> {
+    let Query(query) = query?;
     let filter = IntegrationFilter {
         layer: query.layer.map(Into::into),
         space_id: query.space_id.map(SpaceId::from),
         owner_user_id: None,
     };
+    // Space rows only matter for org-layer integrations.
+    let wants_org_layer = filter
+        .layer
+        .is_none_or(|layer| layer == domain::IntegrationLayer::Org);
     let (integrations, rows, policy) = futures::try_join!(
         state.store.list(&ctx.org_id, &filter),
-        state.store.list_org_space_access(&ctx.org_id),
+        async {
+            if wants_org_layer {
+                state.store.list_org_space_access(&ctx.org_id).await
+            } else {
+                Ok(Vec::new())
+            }
+        },
         state.store.get_policy(&ctx.org_id),
     )?;
+    let mut rows_by_integration: HashMap<String, Vec<SpaceAccess>> = HashMap::new();
+    for row in rows {
+        rows_by_integration
+            .entry(row.integration_id.clone())
+            .or_default()
+            .push(row);
+    }
     let mut items = Vec::new();
     for integration in integrations {
-        let own_rows: Vec<SpaceAccess> = rows
-            .iter()
-            .filter(|row| row.integration_id == integration.id)
-            .cloned()
-            .collect();
-        if !authz::access(ctx, &integration, &own_rows).can_view() {
+        let own_rows = rows_by_integration
+            .get(&integration.id)
+            .map_or(&[][..], Vec::as_slice);
+        if !authz::access(&ctx, &integration, own_rows).can_view() {
             continue;
         }
-        let (status, has_credential) = caller_view(state, ctx, &policy, &integration).await?;
+        let (status, has_credential) = caller_view(&state, &ctx, &policy, &integration).await?;
         items.push(summary(&integration, status, has_credential));
     }
     Ok(Json(IntegrationListResponse { items }))
@@ -120,16 +122,10 @@ pub async fn create_integration(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     body: Result<Json<CreateIntegrationRequest>, JsonRejection>,
-) -> Response {
-    let result = async {
-        let Json(request) = body?;
-        create(&state, &ctx, request).await
-    }
-    .await;
-    match result {
-        Ok(detail) => (StatusCode::CREATED, Json(detail)).into_response(),
-        Err(error) => error.into_response(),
-    }
+) -> ApiResult<(StatusCode, Json<IntegrationDetail>)> {
+    let Json(request) = body?;
+    let detail = create(&state, &ctx, request).await?;
+    Ok((StatusCode::CREATED, Json(detail)))
 }
 
 async fn create(
@@ -140,10 +136,7 @@ async fn create(
     let layer: domain::IntegrationLayer = request.layer.into();
     let space_id = layer_target(ctx, layer, request.space_id.as_deref())?;
     if let Some(space) = &space_id {
-        let found = state.spaces.get_space(space).await?;
-        if found.is_none_or(|space| space.org_id != ctx.org_id) {
-            return Err(ApiError::not_found("space not found"));
-        }
+        ensure_space_in_org(state, ctx, space).await?;
     }
 
     let origin = match (&request.catalog_entry_id, &request.connect_url) {
@@ -186,7 +179,10 @@ async fn create(
         .or(source.default_slug)
         .ok_or_else(|| ApiError::unprocessable("slug is required for a custom URL"))?;
     validate_slug(&slug)?;
-    let name = request.name.unwrap_or_else(|| source.default_name.clone());
+    let name = request
+        .name
+        .or(source.default_name)
+        .ok_or_else(|| ApiError::unprocessable("name is required for a custom URL"))?;
     validate_name(&name)?;
 
     let credential_mode: domain::CredentialMode = match (layer, request.credential_mode) {
@@ -200,8 +196,10 @@ async fn create(
         (domain::IntegrationLayer::User, _) => domain::CredentialMode::PerUser,
         (_, Some(mode)) => mode.into(),
         (_, None)
-            if source.auth_kind == domain::IntegrationAuthKind::Oauth
-                || source.auth_kind == domain::IntegrationAuthKind::Mixed =>
+            if matches!(
+                source.auth_kind,
+                domain::IntegrationAuthKind::Oauth | domain::IntegrationAuthKind::Mixed
+            ) =>
         {
             domain::CredentialMode::PerUser
         }
@@ -232,11 +230,7 @@ async fn create(
         created_at: now,
         updated_at: now,
     };
-    state
-        .store
-        .create(&integration)
-        .await
-        .map_err(store_error)?;
+    state.store.create(&integration).await?;
     detail_for(state, ctx, &policy, &integration, Vec::new()).await
 }
 
@@ -260,21 +254,18 @@ pub async fn get_integration(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     Path(id): Path<String>,
-) -> Response {
-    let result = async {
-        let visible = load_visible(&state, &ctx, &id).await?;
-        let policy = state.store.get_policy(&ctx.org_id).await?;
-        detail_for(
-            &state,
-            &ctx,
-            &policy,
-            &visible.integration,
-            visible.space_access(&ctx),
-        )
-        .await
-    }
-    .await;
-    into_response(result.map(Json))
+) -> ApiResult<Json<IntegrationDetail>> {
+    let visible = load_visible(&state, &ctx, &id).await?;
+    let policy = state.store.get_policy(&ctx.org_id).await?;
+    let detail = detail_for(
+        &state,
+        &ctx,
+        &policy,
+        &visible.integration,
+        visible.space_access(&ctx),
+    )
+    .await?;
+    Ok(Json(detail))
 }
 
 /// `PATCH /api/integrations/{id}` — update an integration.
@@ -303,36 +294,28 @@ pub async fn update_integration(
     State(state): State<IntegrationsApiState>,
     Path(id): Path<String>,
     body: Result<Json<UpdateIntegrationRequest>, JsonRejection>,
-) -> Response {
-    let result = async {
-        let Json(request) = body?;
-        let visible = load_visible(&state, &ctx, &id).await?;
-        if !visible.access.can_manage() {
-            return Err(ApiError::forbidden("you may not change this integration"));
-        }
-        let mut integration = visible.integration.clone();
-        apply_update(&mut integration, request)?;
-        integration.updated_at = Utc::now();
-        if !state
-            .store
-            .update(&integration)
-            .await
-            .map_err(store_error)?
-        {
-            return Err(ApiError::not_found("integration not found"));
-        }
-        let policy = state.store.get_policy(&ctx.org_id).await?;
-        detail_for(
-            &state,
-            &ctx,
-            &policy,
-            &integration,
-            visible.space_access(&ctx),
-        )
-        .await
+) -> ApiResult<Json<IntegrationDetail>> {
+    let Json(request) = body?;
+    let visible = load_visible(&state, &ctx, &id).await?;
+    if !visible.access.can_manage() {
+        return Err(ApiError::forbidden("you may not change this integration"));
     }
-    .await;
-    into_response(result.map(Json))
+    let mut integration = visible.integration.clone();
+    apply_update(&mut integration, request)?;
+    integration.updated_at = Utc::now();
+    if !state.store.update(&integration).await? {
+        return Err(ApiError::not_found("integration not found"));
+    }
+    let policy = state.store.get_policy(&ctx.org_id).await?;
+    let detail = detail_for(
+        &state,
+        &ctx,
+        &policy,
+        &integration,
+        visible.space_access(&ctx),
+    )
+    .await?;
+    Ok(Json(detail))
 }
 
 /// `DELETE /api/integrations/{id}` — remove an integration and its credentials.
@@ -355,17 +338,13 @@ pub async fn delete_integration(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     Path(id): Path<String>,
-) -> Response {
-    let result = async {
-        let visible = load_visible(&state, &ctx, &id).await?;
-        if !visible.access.can_delete() {
-            return Err(ApiError::forbidden("you may not remove this integration"));
-        }
-        state.store.delete(&id).await?;
-        Ok(StatusCode::NO_CONTENT)
+) -> ApiResult<StatusCode> {
+    let visible = load_visible(&state, &ctx, &id).await?;
+    if !visible.access.can_delete() {
+        return Err(ApiError::forbidden("you may not remove this integration"));
     }
-    .await;
-    into_response(result)
+    state.store.delete(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // -- Shared with the other integration routes ----------------------------------
@@ -410,11 +389,17 @@ pub(super) async fn load_visible(
     })
 }
 
-pub(super) fn into_response<T: IntoResponse>(result: ApiResult<T>) -> Response {
-    match result {
-        Ok(ok) => ok.into_response(),
-        Err(error) => error.into_response(),
+/// Fail with `404` unless `space` exists in the caller's org.
+pub(super) async fn ensure_space_in_org(
+    state: &IntegrationsApiState,
+    ctx: &AuthContext,
+    space: &SpaceId,
+) -> ApiResult<()> {
+    let found = state.spaces.get_space(space).await?;
+    if found.is_none_or(|found| found.org_id != ctx.org_id) {
+        return Err(ApiError::not_found("space not found"));
     }
+    Ok(())
 }
 
 // -- Create: validation ---------------------------------------------------------
@@ -431,7 +416,7 @@ struct Source {
     auth_kind: domain::IntegrationAuthKind,
     header_name: Option<String>,
     header_value_prefix: Option<String>,
-    default_name: String,
+    default_name: Option<String>,
     default_slug: Option<String>,
 }
 
@@ -472,7 +457,7 @@ impl Source {
             auth_kind,
             header_name,
             header_value_prefix,
-            default_name: entry.name.clone(),
+            default_name: Some(entry.name.clone()),
             default_slug: Some(slug_from_catalog_id(&entry.id)),
         })
     }
@@ -480,9 +465,6 @@ impl Source {
     fn custom(url: &str, request: &CreateIntegrationRequest) -> ApiResult<Self> {
         use domain::IntegrationAuthKind as Kind;
         validate_connect_url(url)?;
-        let Some(name) = request.name.clone() else {
-            return Err(ApiError::unprocessable("name is required for a custom URL"));
-        };
         let auth_kind = match request.auth_kind.map(Into::into) {
             Some(kind @ (Kind::None | Kind::Header | Kind::Oauth)) => kind,
             _ => {
@@ -497,7 +479,7 @@ impl Source {
             auth_kind,
             header_name,
             header_value_prefix,
-            default_name: name,
+            default_name: None,
             default_slug: None,
         })
     }
@@ -635,20 +617,6 @@ fn validate_name(name: &str) -> ApiResult<()> {
         Err(ApiError::unprocessable(format!(
             "name must be 1-{MAX_NAME_LEN} characters"
         )))
-    }
-}
-
-/// `DuplicateSlug` is a `409`, `ConnectUrlImmutable` a `422`; anything else is
-/// an internal error.
-fn store_error(error: anyhow::Error) -> ApiError {
-    match error.downcast_ref::<IntegrationStoreError>() {
-        Some(e @ IntegrationStoreError::DuplicateSlug { .. }) => {
-            ApiError::new(StatusCode::CONFLICT, e.to_string())
-        }
-        Some(e @ IntegrationStoreError::ConnectUrlImmutable { .. }) => {
-            ApiError::unprocessable(e.to_string())
-        }
-        None => error.into(),
     }
 }
 

@@ -25,7 +25,6 @@ use axum::{
     Extension, Json, Router,
     extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
-    response::{IntoResponse, Response},
     routing::{get, put},
 };
 use serde::{Deserialize, Serialize};
@@ -41,9 +40,8 @@ use assistant_core::integrations::{
 use assistant_storage::OrgStorageLayer;
 
 use crate::catalog_sync::CatalogSync;
-use crate::errors::json_error;
 use crate::openapi::ErrorBody;
-use error::ApiError;
+use error::{ApiError, ApiResult};
 
 mod authz;
 mod error;
@@ -248,37 +246,31 @@ pub async fn list_catalog_entries(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     query: Result<Query<ListCatalogEntriesQuery>, QueryRejection>,
-) -> Response {
-    let Query(query) = match query {
-        Ok(query) => query,
-        Err(rejection) => return json_error(StatusCode::BAD_REQUEST, rejection.body_text()),
-    };
-    let policy = match state.store.get_policy(&ctx.org_id).await {
-        Ok(policy) => policy,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
-    let index = state.catalog.index().await;
+) -> ApiResult<Json<CatalogEntryListResponse>> {
+    let Query(query) = query?;
+    let (policy, index) =
+        futures::join!(state.store.get_policy(&ctx.org_id), state.catalog.index());
+    let policy = policy?;
     let search = CatalogQuery {
         q: query.q.as_deref(),
         category: query.category.as_deref().filter(|c| !c.is_empty()),
         limit: query.limit,
         cursor: query.cursor.as_deref().filter(|c| !c.is_empty()),
     };
-    match index.search(&search) {
-        Ok(page) => Json(CatalogEntryListResponse {
-            items: page
-                .items
-                .into_iter()
-                .map(|entry| {
-                    let layers = authz::installable_layers(&ctx, &policy, &entry.id);
-                    CatalogEntrySummary::new(entry, layers)
-                })
-                .collect(),
-            next_cursor: page.next_cursor,
-        })
-        .into_response(),
-        Err(e) => json_error(StatusCode::BAD_REQUEST, e.to_string()),
-    }
+    let page = index
+        .search(&search)
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(Json(CatalogEntryListResponse {
+        items: page
+            .items
+            .into_iter()
+            .map(|entry| {
+                let layers = authz::installable_layers(&ctx, &policy, &entry.id);
+                CatalogEntrySummary::new(entry, layers)
+            })
+            .collect(),
+        next_cursor: page.next_cursor,
+    }))
 }
 
 /// `GET /api/integrations/catalog/{id}` — get one catalog entry.
@@ -298,18 +290,14 @@ pub async fn get_catalog_entry(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     Path(id): Path<String>,
-) -> Response {
-    let policy = match state.store.get_policy(&ctx.org_id).await {
-        Ok(policy) => policy,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
-    match state.catalog.index().await.get(&id) {
-        Some(entry) => {
-            let layers = authz::installable_layers(&ctx, &policy, &entry.id);
-            Json(CatalogEntrySummary::new(entry, layers)).into_response()
-        }
-        None => json_error(StatusCode::NOT_FOUND, "catalog entry not found"),
-    }
+) -> ApiResult<Json<CatalogEntrySummary>> {
+    let index = state.catalog.index().await;
+    let entry = index
+        .get(&id)
+        .ok_or_else(|| ApiError::not_found("catalog entry not found"))?;
+    let policy = state.store.get_policy(&ctx.org_id).await?;
+    let layers = authz::installable_layers(&ctx, &policy, &entry.id);
+    Ok(Json(CatalogEntrySummary::new(entry, layers)))
 }
 
 // -- Tests -------------------------------------------------------------------

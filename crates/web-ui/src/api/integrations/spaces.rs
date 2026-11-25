@@ -11,7 +11,6 @@ use axum::{
         rejection::{JsonRejection, QueryRejection},
     },
     http::StatusCode,
-    response::Response,
 };
 
 use assistant_core::auth::AuthContext;
@@ -21,9 +20,8 @@ use assistant_core::integrations::{IntegrationLayer, SpaceAccessMode};
 use super::IntegrationsApiState;
 use super::authz;
 use super::error::{ApiError, ApiResult};
-use super::manage::{into_response, load_visible};
+use super::manage::{ensure_space_in_org, load_visible};
 use super::types::{DeleteSpaceAccessQuery, SetSpaceAccessRequest, SpaceAccessEntry};
-use crate::errors::json_error;
 use crate::openapi::ErrorBody;
 
 /// `PUT /api/integrations/{id}/spaces/{space_id}` — add a space row.
@@ -54,19 +52,15 @@ pub async fn put_space_access(
     State(state): State<IntegrationsApiState>,
     Path((id, space_id)): Path<(String, String)>,
     body: Result<Json<SetSpaceAccessRequest>, JsonRejection>,
-) -> Response {
-    let result = async {
-        let Json(request) = body?;
-        let mode = request.mode.into();
-        let space = authorize(&state, &ctx, &id, &space_id, mode).await?;
-        state.store.add_space_access(&id, &space, mode).await?;
-        Ok(Json(SpaceAccessEntry {
-            space_id: space.0,
-            mode: mode.into(),
-        }))
-    }
-    .await;
-    into_response(result)
+) -> ApiResult<Json<SpaceAccessEntry>> {
+    let Json(request) = body?;
+    let mode = request.mode.into();
+    let space = authorize(&state, &ctx, &id, &space_id, mode).await?;
+    state.store.add_space_access(&id, &space, mode).await?;
+    Ok(Json(SpaceAccessEntry {
+        space_id: space.0,
+        mode: mode.into(),
+    }))
 }
 
 /// `DELETE /api/integrations/{id}/spaces/{space_id}?mode=` — remove a space row.
@@ -97,19 +91,12 @@ pub async fn delete_space_access(
     State(state): State<IntegrationsApiState>,
     Path((id, space_id)): Path<(String, String)>,
     query: Result<Query<DeleteSpaceAccessQuery>, QueryRejection>,
-) -> Response {
-    let Query(query) = match query {
-        Ok(query) => query,
-        Err(rejection) => return json_error(StatusCode::BAD_REQUEST, rejection.body_text()),
-    };
-    let result = async {
-        let mode = query.mode.into();
-        let space = authorize(&state, &ctx, &id, &space_id, mode).await?;
-        state.store.remove_space_access(&id, &space, mode).await?;
-        Ok(StatusCode::NO_CONTENT)
-    }
-    .await;
-    into_response(result)
+) -> ApiResult<StatusCode> {
+    let Query(query) = query?;
+    let mode = query.mode.into();
+    let space = authorize(&state, &ctx, &id, &space_id, mode).await?;
+    state.store.remove_space_access(&id, &space, mode).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Check the caller may set or remove a `mode` row of `space_id` on
@@ -128,20 +115,17 @@ async fn authorize(
         ));
     }
     let space = SpaceId::from(space_id);
-    let allowed = match mode {
-        SpaceAccessMode::Allow => ctx.is_org_admin(),
-        SpaceAccessMode::OptOut => authz::can_administer_space(ctx, &space),
+    let (allowed, denial) = match mode {
+        SpaceAccessMode::Allow => (ctx.is_org_admin(), "org admin required"),
+        SpaceAccessMode::OptOut => (
+            authz::can_administer_space(ctx, &space),
+            "space admin or org admin required",
+        ),
     };
     if !allowed {
-        return Err(ApiError::forbidden(match mode {
-            SpaceAccessMode::Allow => "org admin required",
-            SpaceAccessMode::OptOut => "space admin or org admin required",
-        }));
+        return Err(ApiError::forbidden(denial));
     }
-    let found = state.spaces.get_space(&space).await?;
-    if found.is_none_or(|found| found.org_id != ctx.org_id) {
-        return Err(ApiError::not_found("space not found"));
-    }
+    ensure_space_in_org(state, ctx, &space).await?;
     Ok(space)
 }
 

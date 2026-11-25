@@ -1,9 +1,10 @@
 //! `/api/integrations/policy`: what lower layers may install.
 
+use std::collections::HashSet;
+
 use axum::{
     Extension, Json,
     extract::{State, rejection::JsonRejection},
-    response::Response,
 };
 use chrono::{DateTime, Utc};
 
@@ -12,7 +13,6 @@ use assistant_core::integrations::IntegrationPolicy;
 
 use super::IntegrationsApiState;
 use super::error::{ApiError, ApiResult};
-use super::manage::into_response;
 use super::types::{IntegrationPolicyResponse, UpdateIntegrationPolicyRequest};
 use crate::openapi::ErrorBody;
 
@@ -32,9 +32,8 @@ use crate::openapi::ErrorBody;
 pub async fn get_integration_policy(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
-) -> Response {
-    let result = async { Ok(Json(response(state.store.get_policy(&ctx.org_id).await?))) }.await;
-    into_response(result)
+) -> ApiResult<Json<IntegrationPolicyResponse>> {
+    Ok(Json(response(state.store.get_policy(&ctx.org_id).await?)))
 }
 
 /// `PUT /api/integrations/policy` — replace the org's integration policy.
@@ -58,31 +57,24 @@ pub async fn put_integration_policy(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<IntegrationsApiState>,
     body: Result<Json<UpdateIntegrationPolicyRequest>, JsonRejection>,
-) -> Response {
-    let result: ApiResult<_> = async {
-        if !ctx.is_org_admin() {
-            return Err(ApiError::forbidden("org admin required"));
-        }
-        let Json(request) = body?;
-        let mut allowed_catalog_ids = Vec::new();
-        for id in request.allowed_catalog_ids {
-            if !allowed_catalog_ids.contains(&id) {
-                allowed_catalog_ids.push(id);
-            }
-        }
-        let policy = IntegrationPolicy {
-            org_id: ctx.org_id.clone(),
-            catalog_mode: request.catalog_mode.into(),
-            allowed_catalog_ids,
-            allow_custom_urls: request.allow_custom_urls,
-            allow_user_integrations: request.allow_user_integrations,
-            updated_at: Utc::now(),
-        };
-        state.store.put_policy(&policy).await?;
-        Ok(Json(response(policy)))
+) -> ApiResult<Json<IntegrationPolicyResponse>> {
+    if !ctx.is_org_admin() {
+        return Err(ApiError::forbidden("org admin required"));
     }
-    .await;
-    into_response(result)
+    let Json(request) = body?;
+    let mut seen = HashSet::new();
+    let mut allowed_catalog_ids = request.allowed_catalog_ids;
+    allowed_catalog_ids.retain(|id| seen.insert(id.clone()));
+    let policy = IntegrationPolicy {
+        org_id: ctx.org_id.clone(),
+        catalog_mode: request.catalog_mode.into(),
+        allowed_catalog_ids,
+        allow_custom_urls: request.allow_custom_urls,
+        allow_user_integrations: request.allow_user_integrations,
+        updated_at: Utc::now(),
+    };
+    state.store.put_policy(&policy).await?;
+    Ok(Json(response(policy)))
 }
 
 fn response(policy: IntegrationPolicy) -> IntegrationPolicyResponse {

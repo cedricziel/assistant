@@ -16,9 +16,6 @@ use chrono::{DateTime, Utc};
 use super::model::*;
 use crate::identity::{OrgId, SpaceId, UserId};
 
-/// The longest slug the schema accepts.
-const MAX_SLUG_LEN: usize = 32;
-
 /// State shared by a store and its paired credential store, so credentials
 /// can be checked against, and cascade with, their integration.
 #[derive(Default)]
