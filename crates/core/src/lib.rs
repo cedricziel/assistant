@@ -10,6 +10,7 @@ pub mod command;
 pub mod config;
 pub mod context;
 pub mod identity;
+pub mod integrations;
 pub mod llm;
 pub mod memory;
 pub mod permission;
