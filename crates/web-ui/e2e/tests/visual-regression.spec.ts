@@ -115,6 +115,51 @@ async function apiPost(
   );
 }
 
+/**
+ * Stub `GET /api/integrations/catalog` so the screenshot does not depend on the
+ * live integrations.sh catalog that the test server syncs at startup.
+ */
+async function mockCatalog(page: Page, items: unknown[]) {
+  await page.route(/\/api\/integrations\/catalog(\?.*)?$/, (route) =>
+    route.fulfill({ json: { items } }),
+  );
+}
+
+const CATALOG_FIXTURE = [
+  {
+    id: "curated/linear-app-mcp",
+    name: "Linear",
+    description: "Issue tracking and project planning for product teams.",
+    domain: "linear.app",
+    categories: ["project-management", "dev"],
+    connect_url: "https://mcp.linear.app/mcp",
+    auth: { kind: "oauth" },
+  },
+  {
+    id: "curated/github-mcp",
+    name: "GitHub",
+    description: "Repositories, pull requests and issues.",
+    domain: "github.com",
+    categories: ["dev"],
+    connect_url: "https://api.githubcopilot.com/mcp/",
+    auth: {
+      kind: "header",
+      header_name: "Authorization",
+      placeholder: "pat",
+      value_prefix: "Bearer ",
+    },
+  },
+  {
+    id: "curated/deepwiki-mcp",
+    name: "DeepWiki",
+    description: "Documentation search for public repositories.",
+    domain: "deepwiki.com",
+    categories: ["docs"],
+    connect_url: "https://mcp.deepwiki.com/mcp",
+    auth: { kind: "none" },
+  },
+];
+
 // -- Data creation helpers (API-based) --------------------------------------
 
 /** Create a webhook via the REST API and return its id. */
@@ -342,6 +387,24 @@ test.describe("Authenticated pages", () => {
 
   // NOTE: /contexts is hidden on web (redirects to /chat) — managed via the
   // native app's context switcher only.
+
+  test("integrations catalog page", async ({ page }) => {
+    await mockCatalog(page, CATALOG_FIXTURE);
+    await navigateAndSettle(page, "/integrations");
+    await expect(page).toHaveScreenshot("integrations-catalog.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("integrations catalog page (empty state)", async ({ page }) => {
+    await mockCatalog(page, []);
+    await navigateAndSettle(page, "/integrations");
+    await expect(page).toHaveScreenshot("integrations-empty.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
 
   test("agents list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/agents");
