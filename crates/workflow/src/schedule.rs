@@ -113,3 +113,107 @@ fn parse_schedule(expr: &str) -> Option<Schedule> {
         .or_else(|_| Schedule::from_str(&format!("0 {expr}")))
         .ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn five_field_cron_is_accepted() {
+        assert!(parse_schedule("*/15 * * * *").is_some());
+    }
+
+    #[test]
+    fn six_field_cron_is_accepted_as_is() {
+        assert!(parse_schedule("0 */15 * * * *").is_some());
+    }
+
+    #[test]
+    fn garbage_cron_is_rejected() {
+        assert!(parse_schedule("not a cron").is_none());
+    }
+
+    async fn store_with_schedule_run() -> (assistant_storage::InMemoryWorkflowStore, Uuid) {
+        let store = assistant_storage::InMemoryWorkflowStore::new();
+        let graph = assistant_storage::WorkflowGraph {
+            version: 1,
+            nodes: vec![
+                assistant_storage::WorkflowNode {
+                    id: "t".to_string(),
+                    kind: WorkflowNodeKind::Trigger,
+                    config: serde_json::json!({"type": "schedule", "cron": "* * * * *"}),
+                },
+                assistant_storage::WorkflowNode {
+                    id: "a".to_string(),
+                    kind: WorkflowNodeKind::Action,
+                    config: serde_json::json!({"type": "http_request", "url": "https://example.com"}),
+                },
+            ],
+            edges: vec![],
+            execution: assistant_storage::WorkflowExecutionLimits {
+                max_steps: 10,
+                max_visits_per_node: 3,
+            },
+        };
+        let id = store.create("wf", "", &graph, true).await.unwrap();
+        store
+            .create_run(
+                id,
+                WorkflowTriggerKind::Schedule,
+                &serde_json::json!({"trigger_node_id": "t"}),
+            )
+            .await
+            .unwrap();
+        (store, id)
+    }
+
+    #[tokio::test]
+    async fn trigger_with_no_previous_run_is_due() {
+        let store = assistant_storage::InMemoryWorkflowStore::new();
+
+        let due = schedule_trigger_due(&store, Uuid::new_v4(), "t", "* * * * *", Utc::now())
+            .await
+            .unwrap();
+
+        assert!(due);
+    }
+
+    #[tokio::test]
+    async fn trigger_is_not_due_before_next_cron_tick_after_last_run() {
+        let (store, id) = store_with_schedule_run().await;
+
+        let due = schedule_trigger_due(&store, id, "t", "0 0 1 1 *", Utc::now())
+            .await
+            .unwrap();
+
+        assert!(!due);
+    }
+
+    #[tokio::test]
+    async fn trigger_is_due_once_next_cron_tick_has_passed() {
+        let (store, id) = store_with_schedule_run().await;
+
+        let due = schedule_trigger_due(
+            &store,
+            id,
+            "t",
+            "* * * * *",
+            Utc::now() + chrono::Duration::minutes(5),
+        )
+        .await
+        .unwrap();
+
+        assert!(due);
+    }
+
+    #[tokio::test]
+    async fn trigger_with_invalid_cron_is_never_due() {
+        let store = assistant_storage::InMemoryWorkflowStore::new();
+
+        let due = schedule_trigger_due(&store, Uuid::new_v4(), "t", "bogus", Utc::now())
+            .await
+            .unwrap();
+
+        assert!(!due);
+    }
+}

@@ -8,6 +8,7 @@ use assistant_storage::{
     WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRunRecord, WorkflowStore,
 };
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::action::{WorkflowActionExecutor, WorkflowActionInput};
 
@@ -261,5 +262,178 @@ fn evaluate_condition(node: &WorkflowNode, trigger_payload: &Value) -> String {
             }
         }
         _ => "true".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use assistant_storage::{InMemoryWorkflowStore, WorkflowEdge, WorkflowExecutionLimits};
+
+    use super::*;
+
+    fn node(id: &str, kind: WorkflowNodeKind, config: Value) -> WorkflowNode {
+        WorkflowNode {
+            id: id.to_string(),
+            kind,
+            config,
+        }
+    }
+
+    fn edge(from: &str, to: &str) -> WorkflowEdge {
+        WorkflowEdge {
+            from: from.to_string(),
+            to: to.to_string(),
+            on: None,
+            condition: None,
+        }
+    }
+
+    fn valid_graph() -> WorkflowGraph {
+        WorkflowGraph {
+            version: 1,
+            nodes: vec![
+                node("t", WorkflowNodeKind::Trigger, json!({"type": "manual"})),
+                node(
+                    "a",
+                    WorkflowNodeKind::Action,
+                    json!({"type": "http_request", "url": "https://example.com"}),
+                ),
+            ],
+            edges: vec![edge("t", "a")],
+            execution: WorkflowExecutionLimits {
+                max_steps: 10,
+                max_visits_per_node: 3,
+            },
+        }
+    }
+
+    /// Run `graph` (which may be invalid for the store) against a run that was
+    /// created from a valid workflow, returning the outcome and recorded node ids.
+    async fn traverse(graph: &WorkflowGraph) -> (RunOutcome, Vec<String>) {
+        let store = InMemoryWorkflowStore::new();
+        let workflow_id = store.create("wf", "", &valid_graph(), true).await.unwrap();
+        let run_id = store
+            .create_run(
+                workflow_id,
+                assistant_storage::WorkflowTriggerKind::Manual,
+                &json!({}),
+            )
+            .await
+            .unwrap();
+        let run = store
+            .list_runs(workflow_id, 1)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let outcome = traverse_graph(&run, graph, &store, &[]).await.unwrap();
+        let steps = store.list_run_steps(run_id, 100).await.unwrap();
+        (outcome, steps.into_iter().map(|s| s.node_id).collect())
+    }
+
+    #[tokio::test]
+    async fn graph_without_trigger_completes_without_executing_anything() {
+        let mut graph = valid_graph();
+        graph.nodes.remove(0);
+        graph.edges.clear();
+
+        let (outcome, visited) = traverse(&graph).await;
+
+        assert!(matches!(outcome, RunOutcome::Completed));
+        assert!(visited.is_empty(), "visited: {visited:?}");
+    }
+
+    #[tokio::test]
+    async fn edge_to_missing_node_is_ignored() {
+        let mut graph = valid_graph();
+        graph.edges.insert(0, edge("t", "ghost"));
+
+        let (outcome, visited) = traverse(&graph).await;
+
+        assert!(matches!(outcome, RunOutcome::Completed));
+        assert_eq!(visited, ["t", "a", "a"]);
+    }
+
+    fn payload_key_condition(config: Value) -> WorkflowNode {
+        node("c", WorkflowNodeKind::Condition, config)
+    }
+
+    #[test]
+    fn payload_key_condition_without_key_is_false() {
+        let cond = payload_key_condition(json!({"type": "has_trigger_payload_key"}));
+
+        assert_eq!(evaluate_condition(&cond, &json!({"": 1})), "false");
+    }
+
+    #[test]
+    fn payload_key_condition_with_empty_key_is_false() {
+        let cond = payload_key_condition(json!({"type": "has_trigger_payload_key", "key": ""}));
+
+        assert_eq!(evaluate_condition(&cond, &json!({"": 1})), "false");
+    }
+
+    #[test]
+    fn condition_without_type_is_true() {
+        let cond = payload_key_condition(json!({}));
+
+        assert_eq!(evaluate_condition(&cond, &json!({})), "true");
+    }
+
+    #[test]
+    fn condition_with_unknown_type_is_true() {
+        let cond = payload_key_condition(json!({"type": "mystery"}));
+
+        assert_eq!(evaluate_condition(&cond, &json!({})), "true");
+    }
+
+    #[test]
+    fn unlabelled_edge_matches_any_outcome() {
+        assert!(edge_matches_label(None, "failure"));
+    }
+
+    #[test]
+    fn labelled_edge_only_matches_its_own_outcome() {
+        assert!(!edge_matches_label(Some("success"), "failure"));
+    }
+
+    fn run_with(trigger_type: &str, payload: Value) -> WorkflowRunRecord {
+        WorkflowRunRecord {
+            id: Uuid::new_v4(),
+            workflow_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
+            trigger_type: trigger_type.to_string(),
+            trigger_payload: payload,
+            status: "running".to_string(),
+            started_at: chrono::Utc::now(),
+            finished_at: None,
+            error_message: None,
+        }
+    }
+
+    #[test]
+    fn untyped_trigger_node_counts_as_manual() {
+        let trigger = node("t", WorkflowNodeKind::Trigger, json!({}));
+
+        assert!(run_starts_from_trigger(
+            &run_with("manual", json!({})),
+            &trigger
+        ));
+        assert!(!run_starts_from_trigger(
+            &run_with("webhook", json!({})),
+            &trigger
+        ));
+    }
+
+    #[test]
+    fn unrecognised_run_trigger_type_starts_from_every_trigger() {
+        let trigger = node("t", WorkflowNodeKind::Trigger, json!({"type": "webhook"}));
+
+        assert!(run_starts_from_trigger(
+            &run_with("custom", json!({})),
+            &trigger
+        ));
     }
 }
