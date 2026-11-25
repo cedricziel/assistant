@@ -1,7 +1,7 @@
 //! tar.gz archive creation and extraction helpers.
 
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use flate2::Compression;
@@ -29,7 +29,8 @@ pub fn write_tar_gz(
 
     let result = (|| -> Result<u64> {
         // The archive holds `secrets.key` and `jwt_secret`, so keep it private.
-        let file = open_private(&tmp_path).with_context(|| format!("creating {:?}", tmp_path))?;
+        let file = create_fresh(&tmp_path, PRIVATE_MODE)
+            .with_context(|| format!("creating {:?}", tmp_path))?;
         let gz = GzEncoder::new(file, Compression::default());
         let mut tar = tar::Builder::new(gz);
 
@@ -64,15 +65,31 @@ pub fn write_tar_gz(
     }
 }
 
-/// Create (or truncate) `path` writable by the owner only on Unix.
-fn open_private(path: &Path) -> std::io::Result<std::fs::File> {
+/// Mode for key material and the archives that hold it.
+const PRIVATE_MODE: u32 = 0o600;
+/// Mode for other restored files, before the umask applies.
+const DEFAULT_MODE: u32 = 0o666;
+
+/// Create `path` as a new file with `mode` (Unix; ignored elsewhere).
+///
+/// Any existing file is removed first: the mode of a leftover file would
+/// survive a plain open, and `create_new` refuses to follow a symlink planted
+/// at `path`.
+fn create_fresh(path: &Path, mode: u32) -> std::io::Result<std::fs::File> {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options.mode(mode);
     }
+    #[cfg(not(unix))]
+    let _ = mode;
     options.open(path)
 }
 
@@ -91,24 +108,56 @@ fn remove_stale_sidecars(db: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Write one restored file, with mode `0600` for key material.
+/// Write one restored file atomically: write and fsync `<dest>.tmp`, drop the
+/// stale side files of a database, then rename over `dest`. A failure before
+/// the rename leaves the existing file and its WAL untouched. Key material
+/// gets mode `0600`.
 fn write_restored(dest: &Path, data: &[u8]) -> Result<()> {
-    if is_sqlite_db(dest) {
-        remove_stale_sidecars(dest)?;
+    let mut tmp = dest.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+
+    let mode = if is_private_file(dest) {
+        PRIVATE_MODE
+    } else {
+        DEFAULT_MODE
+    };
+    let result = (|| -> Result<()> {
+        let mut file = create_fresh(&tmp, mode).with_context(|| format!("creating {tmp:?}"))?;
+        file.write_all(data)
+            .and_then(|()| file.sync_all())
+            .with_context(|| format!("writing {tmp:?}"))?;
+        if is_sqlite_db(dest) {
+            remove_stale_sidecars(dest)?;
+        }
+        std::fs::rename(&tmp, dest).with_context(|| format!("renaming {tmp:?} → {dest:?}"))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    if !is_private_file(dest) {
-        return std::fs::write(dest, data).with_context(|| format!("writing {dest:?}"));
+    result
+}
+
+/// Refuse to restore through a symlink: neither `dest` nor any existing
+/// directory between `install_dir` and `dest` may be one. A symlink there
+/// would redirect the write outside the installation.
+fn ensure_no_symlink(install_dir: &Path, dest: &Path) -> Result<()> {
+    let rel = dest
+        .strip_prefix(install_dir)
+        .with_context(|| format!("{dest:?} is outside {install_dir:?}"))?;
+    let mut current = install_dir.to_path_buf();
+    for component in rel.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                bail!("refusing to restore {dest:?}: {current:?} is a symlink")
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(e) => return Err(e).with_context(|| format!("inspecting {current:?}")),
+        }
     }
-    let mut file = open_private(dest).with_context(|| format!("writing {dest:?}"))?;
-    // `mode` only applies when the file is created; fix up an existing one.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("restricting {dest:?}"))?;
-    }
-    file.write_all(data)
-        .with_context(|| format!("writing {dest:?}"))
+    Ok(())
 }
 
 /// Append raw bytes as a tar entry with the given name.
@@ -239,6 +288,7 @@ pub fn extract_tar_gz(
                 continue;
             }
 
+            ensure_no_symlink(install_dir, &dest)?;
             to_write.push((dest, data));
         } else {
             // Entry not declared in manifest.json — treat as corruption and abort.
@@ -304,8 +354,6 @@ pub fn make_test_archive(files: &[(&str, &[u8])]) -> Vec<u8> {
     let gz = tar.into_inner().unwrap();
     gz.finish().unwrap()
 }
-
-use std::path::PathBuf;
 
 #[cfg(test)]
 mod tests {

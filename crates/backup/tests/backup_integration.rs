@@ -190,6 +190,14 @@ async fn read_rows(path: &Path) -> Vec<String> {
         .unwrap()
 }
 
+/// Key material and credentials written at the install root.
+const PRIVATE_FILES: [&str; 4] = [
+    "secrets.key",
+    "jwt_secret",
+    "openai-oauth.json",
+    "credentials.json",
+];
+
 const DB_PATHS: [&str; 5] = [
     "org.db",
     "orgs/acme/spaces/eng/space.db",
@@ -198,10 +206,12 @@ const DB_PATHS: [&str; 5] = [
     "orgs/globex/spaces/ops/space.db",
 ];
 
-const PLAIN_FILES: [&str; 12] = [
+const PLAIN_FILES: [&str; 14] = [
     "server.toml",
     "secrets.key",
     "jwt_secret",
+    "openai-oauth.json",
+    "credentials.json",
     "orgs/acme/org.toml",
     "orgs/globex/org.toml",
     "orgs/acme/catalog/templates/weekly.md",
@@ -354,7 +364,7 @@ async fn test_archive_and_restored_secrets_are_private() {
 
     let install_dir = TempDir::new().unwrap();
     let output_dir = TempDir::new().unwrap();
-    for name in ["secrets.key", "jwt_secret"] {
+    for name in PRIVATE_FILES {
         std::fs::write(install_dir.path().join(name), b"secret").unwrap();
     }
     let archive = output_dir.path().join("backup.tar.gz");
@@ -374,7 +384,123 @@ async fn test_archive_and_restored_secrets_are_private() {
         })
         .await
         .unwrap();
-    for name in ["secrets.key", "jwt_secret"] {
+    for name in PRIVATE_FILES {
         assert_eq!(mode(&restore_dir.path().join(name)), 0o600, "{name}");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_backup_makes_a_leftover_tmp_archive_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let install_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    std::fs::write(install_dir.path().join("secrets.key"), b"secret").unwrap();
+    let archive = output_dir.path().join("backup.tar.gz");
+    let leftover = archive.with_extension("tar.gz.tmp");
+    std::fs::write(&leftover, b"from a crashed run").unwrap();
+    std::fs::set_permissions(&leftover, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    BackupEngine::new()
+        .run(backup_opts(install_dir.path(), archive.clone()))
+        .await
+        .unwrap();
+
+    let mode = std::fs::metadata(&archive).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
+#[tokio::test]
+async fn test_failed_restore_keeps_the_existing_database_and_its_wal() {
+    let install_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    let _live = seed_live_db(&install_dir.path().join("org.db"), &["new"]).await;
+    let archive = output_dir.path().join("backup.tar.gz");
+    BackupEngine::new()
+        .run(backup_opts(install_dir.path(), archive.clone()))
+        .await
+        .unwrap();
+
+    // A directory where the temporary file must go makes the write fail.
+    let target = TempDir::new().unwrap();
+    std::fs::write(target.path().join("org.db"), b"existing").unwrap();
+    std::fs::write(target.path().join("org.db-wal"), b"newest rows").unwrap();
+    std::fs::create_dir(target.path().join("org.db.tmp")).unwrap();
+    std::fs::write(target.path().join("org.db.tmp").join("x"), b"x").unwrap();
+
+    let result = RestoreEngine::new()
+        .run(RestoreOptions {
+            archive_path: archive,
+            install_dir: target.path().to_path_buf(),
+            force: true,
+        })
+        .await;
+
+    assert!(result.is_err(), "the write must fail");
+    assert_eq!(
+        std::fs::read(target.path().join("org.db")).unwrap(),
+        b"existing"
+    );
+    assert_eq!(
+        std::fs::read(target.path().join("org.db-wal")).unwrap(),
+        b"newest rows",
+        "the WAL must survive a failed restore"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_restore_refuses_to_write_through_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let install_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    for rel in ["server.toml", "orgs/acme/org.toml"] {
+        let path = install_dir.path().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"from the backup").unwrap();
+    }
+    let archive = output_dir.path().join("backup.tar.gz");
+    BackupEngine::new()
+        .run(backup_opts(install_dir.path(), archive.clone()))
+        .await
+        .unwrap();
+
+    let outside = TempDir::new().unwrap();
+    std::fs::write(outside.path().join("victim.toml"), b"untouched").unwrap();
+
+    // A symlinked file, then a symlinked parent directory.
+    for plant in ["file", "dir"] {
+        let target = TempDir::new().unwrap();
+        match plant {
+            "file" => symlink(
+                outside.path().join("victim.toml"),
+                target.path().join("server.toml"),
+            )
+            .unwrap(),
+            _ => symlink(outside.path(), target.path().join("orgs")).unwrap(),
+        }
+
+        let result = RestoreEngine::new()
+            .run(RestoreOptions {
+                archive_path: archive.clone(),
+                install_dir: target.path().to_path_buf(),
+                force: true,
+            })
+            .await;
+
+        let err = result.expect_err("a symlink at the destination must be refused");
+        assert!(format!("{err:#}").contains("symlink"), "{err:#}");
+        assert_eq!(
+            std::fs::read(outside.path().join("victim.toml")).unwrap(),
+            b"untouched",
+            "{plant}: the file behind the symlink must not change"
+        );
+        assert_eq!(
+            std::fs::read_dir(outside.path()).unwrap().count(),
+            1,
+            "{plant}: nothing may be created behind the symlink"
+        );
     }
 }

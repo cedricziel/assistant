@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use assistant_core::clock::{Clock, SystemClock};
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Default installation directory (`~/.assistant/`).
 pub fn default_install_dir() -> PathBuf {
@@ -26,11 +26,18 @@ pub fn default_archive_name() -> String {
     format!("assistant-backup-{}.tar.gz", now.format("%Y%m%d-%H%M%S"))
 }
 
-/// Key material at the install root. A backup is useless without it:
-/// `secrets.key` encrypts stored integration credentials, so losing it makes
-/// every credential in `org.db` unreadable, and `jwt_secret` signs issued
-/// tokens. Restored copies are written with mode `0600`.
-const PRIVATE_FILES: [&str; 2] = ["secrets.key", "jwt_secret"];
+/// Key material and credentials at the install root. A backup is useless
+/// without them: `secrets.key` encrypts stored integration credentials, so
+/// losing it makes every credential in `org.db` unreadable, and `jwt_secret`
+/// signs issued tokens. `openai-oauth.json` holds the OpenAI refresh token and
+/// `credentials.json` the CLI's login to a server. Restored copies are written
+/// with mode `0600`.
+const PRIVATE_FILES: [&str; 4] = [
+    "secrets.key",
+    "jwt_secret",
+    "openai-oauth.json",
+    "credentials.json",
+];
 
 /// Other files at the install root that are always part of a backup.
 const ROOT_FILES: [&str; 2] = ["server.toml", "org.db"];
@@ -110,6 +117,11 @@ fn collect_dir_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
             collect_dir_files(&path, out)?;
         } else if meta.is_file() && !is_sqlite_sidecar(&path) {
             out.push(path);
+        } else if meta.is_symlink() {
+            warn!(
+                "not backing up symlink {:?}: symlinks are not followed",
+                path
+            );
         }
     }
     Ok(())
@@ -272,6 +284,36 @@ mod tests {
         let found = relative(dir.path(), discover_files(dir.path()).unwrap());
 
         assert_eq!(found, ["org.db", "orgs/acme/spaces/eng/space.db"]);
+    }
+
+    #[test]
+    fn credential_files_at_the_install_root_are_discovered() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "openai-oauth.json");
+        touch(dir.path(), "credentials.json");
+
+        let found = relative(dir.path(), discover_files(dir.path()).unwrap());
+
+        assert_eq!(found, ["openai-oauth.json", "credentials.json"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_inside_the_tree_are_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        touch(outside.path(), "secret.txt");
+        touch(dir.path(), "orgs/acme/org.toml");
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("orgs/acme/linked")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.txt"),
+            dir.path().join("orgs/acme/secret.txt"),
+        )
+        .unwrap();
+
+        let found = relative(dir.path(), discover_files(dir.path()).unwrap());
+
+        assert_eq!(found, ["orgs/acme/org.toml"]);
     }
 
     #[test]
