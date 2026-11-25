@@ -553,6 +553,108 @@ void main() {
       );
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Characterization: settings sheet and node palette
+
+  group('WorkflowEditorScreen sheets', () {
+    Widget buildScreen() {
+      final router = GoRouter(
+        routes: [
+          GoRoute(path: '/', builder: (_, _) => const WorkflowEditorScreen()),
+          GoRoute(
+            path: '/workflows',
+            builder: (_, _) => const Scaffold(body: Text('workflows')),
+          ),
+        ],
+      );
+      return ProviderScope(
+        overrides: [
+          workflowsProvider.overrideWith(() => _FakeWorkflowsNotifier()),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      );
+    }
+
+    void useViewport(WidgetTester tester, Size size) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    }
+
+    testWidgets('settings sheet lists fields and applies the active toggle', (
+      tester,
+    ) async {
+      useViewport(tester, const Size(400, 844));
+      await tester.pumpWidget(buildScreen());
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Workflow settings'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Name'), findsOneWidget);
+      expect(find.text('Description (optional)'), findsOneWidget);
+      expect(find.text('Active'), findsOneWidget);
+      expect(find.text('Enable automatic triggering'), findsOneWidget);
+      expect(find.textContaining('Max visits/node:'), findsOneWidget);
+      expect(find.byType(Slider), findsNWidgets(2));
+      expect(
+        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isFalse,
+      );
+
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pump();
+      await tester.tap(find.text('Apply Settings'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Apply Settings'), findsNothing, reason: 'sheet closed');
+
+      await tester.tap(find.byTooltip('Workflow settings'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isTrue,
+        reason: 'applied active flag persists on the screen',
+      );
+    });
+
+    testWidgets('node palette lists every section and closes on selection', (
+      tester,
+    ) async {
+      useViewport(tester, const Size(800, 600));
+      await tester.pumpWidget(buildScreen());
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Add node'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Add Node'), findsOneWidget);
+      expect(find.text('TRIGGERS'), findsOneWidget);
+      for (final title in ['Manual', 'Webhook', 'Schedule', 'Event']) {
+        expect(find.text(title), findsOneWidget, reason: title);
+      }
+
+      // Lower sections are built lazily; scroll the palette to reach them.
+      final paletteScrollable = find.descendant(
+        of: find.byType(DraggableScrollableSheet),
+        matching: find.byType(Scrollable),
+      );
+      await tester.scrollUntilVisible(
+        find.text('Always False'),
+        200,
+        scrollable: paletteScrollable.first,
+      );
+      expect(find.text('ACTIONS'), findsOneWidget);
+      expect(find.text('CONDITIONS'), findsOneWidget);
+      expect(find.text('Always True'), findsOneWidget);
+      await tester.tap(find.text('Always True'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Add Node'), findsNothing, reason: 'palette closed');
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
