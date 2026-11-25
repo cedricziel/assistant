@@ -1,6 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:go_router/go_router.dart';
+
+import '../../router/app_router.dart';
 import 'account_provider.dart';
 
 /// Self-service account screen — view/edit name, email, and password.
@@ -44,6 +47,16 @@ class _AccountBody extends StatelessWidget {
         _EmailSection(account: account),
         const SizedBox(height: 24),
         if (!account.isOidc) const _PasswordSection(),
+        const SizedBox(height: 24),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.hub_outlined),
+            title: const Text('Connections'),
+            subtitle: const Text('Integrations you use with your own account'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push(AppRoutes.connections),
+          ),
+        ),
       ],
     );
   }
