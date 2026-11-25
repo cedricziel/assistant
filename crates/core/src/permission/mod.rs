@@ -21,7 +21,9 @@ use serde_json::Value;
 
 use crate::types::conversation::ExecutionContext;
 
-pub use path::{PathOutsideRoots, WorkspaceRoots, glob_literal_dir, resolve_real_path};
+pub use path::{
+    PathOutsideRoots, SymlinkBudgetExhausted, WorkspaceRoots, glob_literal_dir, resolve_real_path,
+};
 pub use policy::PermissionPolicy;
 pub use rule::{Rule, wildcard_match};
 pub use static_rules::StaticRules;

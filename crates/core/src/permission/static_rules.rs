@@ -154,7 +154,11 @@ fn subjects_for(req: &PermissionRequest<'_>, mode: Mode) -> Vec<String> {
             .into_iter()
             .collect(),
         t if FILE_TOOLS.contains(&t) => file_subject(t, req.params)
-            .map(|p| resolve_real_path(&p, None).to_string_lossy().into_owned())
+            .map(|p| {
+                resolve_real_path(&p, None)
+                    .map(|real| real.to_string_lossy().into_owned())
+                    .unwrap_or(p)
+            })
             .into_iter()
             .collect(),
         _ => vec![req.params.to_string()],

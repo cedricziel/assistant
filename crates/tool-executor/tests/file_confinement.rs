@@ -199,3 +199,30 @@ async fn file_glob_omits_matches_that_resolve_outside_roots() {
     assert!(out.content.contains("kept.txt"));
     assert!(!out.content.contains("leak.txt"), "{}", out.content);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn file_glob_hides_outside_paths_in_traversal_errors() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let locked = outside.path().join("locked-secret-dir");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    std::os::unix::fs::symlink(outside.path(), Path::new(&root_of(&ws)).join("out")).unwrap();
+    let h = FileGlobHandler::new().with_extra_roots(vec![root_of(&ws)]);
+    let out = h
+        .run(
+            params(&[("pattern", json!(format!("{}/**/*", root_of(&ws))))]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        !out.content.contains("locked-secret-dir"),
+        "{}",
+        out.content
+    );
+}

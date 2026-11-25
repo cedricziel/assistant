@@ -1,9 +1,10 @@
 //! Builtin handler for file-glob tool — finds files matching a glob pattern.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use anyhow::Result;
-use assistant_core::permission::{glob_literal_dir, resolve_real_path};
+use assistant_core::permission::{WorkspaceRoots, glob_literal_dir, resolve_real_path};
 use assistant_core::{
     ToolHandler, ToolOutput, expand_tilde, types::conversation::ExecutionContext,
 };
@@ -114,11 +115,14 @@ impl ToolHandler for FileGlobHandler {
             }
             match entry {
                 Ok(path) => {
-                    if roots.contains(&resolve_real_path(&path.to_string_lossy(), None)) {
+                    if is_inside(&roots, &path) {
                         results.push(path.display().to_string());
                     }
                 }
-                Err(e) => results.push(format!("[error reading entry: {}]", e)),
+                Err(e) if is_inside(&roots, e.path()) => {
+                    results.push(format!("[error reading entry: {}]", e))
+                }
+                Err(_) => results.push("[error reading entry outside the workspace]".to_string()),
             }
         }
 
@@ -138,4 +142,10 @@ impl ToolHandler for FileGlobHandler {
         let data = serde_json::json!({"paths": results, "truncated": truncated});
         Ok(ToolOutput::success(output).with_data(data))
     }
+}
+
+fn is_inside(roots: &WorkspaceRoots, path: &Path) -> bool {
+    resolve_real_path(&path.to_string_lossy(), None)
+        .map(|real| roots.contains(&real))
+        .unwrap_or(false)
 }
