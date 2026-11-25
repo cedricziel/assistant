@@ -11,7 +11,6 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
@@ -26,7 +25,7 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::common::pending_cache;
+use crate::common::{Reconnect, pending_cache};
 
 use super::client::MatrixClient;
 
@@ -166,8 +165,10 @@ impl ChannelAdapter for MatrixAdapter {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
 
+            let mut reconnect = Reconnect::new(stop_rx.clone());
+
             loop {
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
 
@@ -183,16 +184,11 @@ impl ChannelAdapter for MatrixAdapter {
                     }
                 };
 
-                let sync_resp = match sync_result {
-                    Ok(r) => r,
-                    Err(e) => {
-                        warn!(error = %e, "Matrix sync failed; retrying in 5s");
-                        tokio::select! {
-                            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
-                            _ = stop_rx.changed() => {}
-                        }
-                        continue;
-                    }
+                let Some(sync_resp) = reconnect
+                    .connect_or_backoff(sync_result, "Matrix sync failed")
+                    .await
+                else {
+                    continue;
                 };
 
                 let next = sync_resp.next_batch.clone();
@@ -764,6 +760,34 @@ mod tests {
             "unexpected content: {:?}",
             msg.content
         );
+    }
+
+    #[tokio::test]
+    async fn sync_failure_is_retried_with_backoff() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(ResponseTemplate::new(500))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        let event_sync = sync_with_event(
+            "m.text",
+            "@user:example.com",
+            serde_json::json!({ "body": "after the outage" }),
+        );
+        mount_two_syncs(&server, event_sync).await;
+
+        let adapter = make_adapter(make_client(&server));
+        let mut stream = adapter.start().await.unwrap();
+
+        // The first sync fails; the retry waits BACKOFF_MIN (about 1 s), far
+        // less than the 5 s that used to be hardcoded.
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(4), stream.next())
+            .await
+            .expect("sync was not retried within the backoff window")
+            .expect("stream ended");
+        assert!(matches!(&msg.content, ChannelContent::Text(t) if t == "after the outage"));
     }
 
     #[tokio::test]

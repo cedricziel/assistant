@@ -21,12 +21,12 @@ use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::mattermost::client::MattermostClient;
 
-use crate::common::{BACKOFF_MIN, pending_cache, sleep_backoff};
+use crate::common::{Reconnect, pending_cache};
 
 /// Maximum audio download size (25 MB).
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
@@ -124,24 +124,22 @@ impl ChannelAdapter for MattermostAdapter {
         let (tx, rx) = mpsc::channel::<ChannelMessage>(64);
 
         tokio::spawn(async move {
-            let mut backoff = BACKOFF_MIN;
+            let mut reconnect = Reconnect::new(stop_rx.clone());
             loop {
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
 
                 let ws_url = client.ws_url();
-                let ws_stream = match connect_async(&ws_url).await {
-                    Ok((stream, _)) => stream,
-                    Err(e) => {
-                        error!(error = %e, "Mattermost WS connect failed; retrying");
-                        sleep_backoff(&mut backoff, &mut stop_rx).await;
-                        continue;
-                    }
+                let connected = connect_async(&ws_url).await.map(|(stream, _)| stream);
+                let Some(ws_stream) = reconnect
+                    .connect_or_backoff(connected, "Mattermost WS connect failed")
+                    .await
+                else {
+                    continue;
                 };
 
                 info!("Mattermost WebSocket connected");
-                backoff = BACKOFF_MIN;
 
                 let (mut ws_write, mut ws_read) = futures::StreamExt::split(ws_stream);
 
@@ -154,7 +152,7 @@ impl ChannelAdapter for MattermostAdapter {
                 .to_string();
                 if ws_write.send(WsMessage::Text(auth.into())).await.is_err() {
                     warn!("Mattermost WS auth send failed; reconnecting");
-                    sleep_backoff(&mut backoff, &mut stop_rx).await;
+                    reconnect.backoff().await;
                     continue;
                 }
 
@@ -231,10 +229,10 @@ impl ChannelAdapter for MattermostAdapter {
                     }
                 }
 
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
-                sleep_backoff(&mut backoff, &mut stop_rx).await;
+                reconnect.backoff().await;
             }
         });
 

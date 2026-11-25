@@ -106,4 +106,4 @@ Direct messages are regular Matrix rooms, so per-DM context isolation is automat
 
 ## Reconnection
 
-If the homeserver becomes unreachable, the bot retries the `/sync` request every 5 seconds. No manual intervention is required.
+If the homeserver becomes unreachable, the bot retries the `/sync` request with exponential backoff: the delay starts at 1 second, doubles after each consecutive failure up to 60 seconds, and carries about ±10 % jitter. A successful sync resets the delay to 1 second. No manual intervention is required.

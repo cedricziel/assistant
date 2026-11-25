@@ -26,13 +26,13 @@ use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::client::SlackApiClient;
 use super::config::SlackConfigExt;
 
-use crate::common::{BACKOFF_MIN, pending_cache, sleep_backoff};
+use crate::common::{Reconnect, pending_cache};
 
 /// Maximum audio file size downloaded for transcription (25 MB — Whisper API limit).
 /// LRU capacity for the in-process cache of Slack thread roots that the bot
@@ -163,34 +163,27 @@ impl ChannelAdapter for SlackAdapter {
             let mut active_threads: LruCache<String, ()> =
                 LruCache::new(ACTIVE_THREAD_CACHE_CAPACITY);
 
-            let mut backoff = BACKOFF_MIN;
+            let mut reconnect = Reconnect::new(stop_rx.clone());
             loop {
-                // Check stop signal.
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
 
                 // Get a fresh WebSocket URL on each connection attempt.
-                let ws_url = match client.apps_connections_open().await {
-                    Ok(url) => url,
-                    Err(e) => {
-                        error!(error = %e, "apps.connections.open failed; retrying");
-                        sleep_backoff(&mut backoff, &mut stop_rx).await;
-                        continue;
-                    }
-                };
-
-                let ws_stream = match connect_async(&ws_url).await {
-                    Ok((stream, _)) => stream,
-                    Err(e) => {
-                        error!(error = %e, "WebSocket connect failed; retrying");
-                        sleep_backoff(&mut backoff, &mut stop_rx).await;
-                        continue;
-                    }
+                let connected = async {
+                    let ws_url = client.apps_connections_open().await?;
+                    let (stream, _) = connect_async(&ws_url).await?;
+                    anyhow::Ok(stream)
+                }
+                .await;
+                let Some(ws_stream) = reconnect
+                    .connect_or_backoff(connected, "Slack Socket Mode connect failed")
+                    .await
+                else {
+                    continue;
                 };
 
                 info!("Slack Socket Mode connected");
-                backoff = BACKOFF_MIN; // reset on success
 
                 let (mut ws_write, mut ws_read) = futures::StreamExt::split(ws_stream);
 
@@ -420,10 +413,10 @@ impl ChannelAdapter for SlackAdapter {
                     }
                 }
 
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
-                sleep_backoff(&mut backoff, &mut stop_rx).await;
+                reconnect.backoff().await;
             }
         });
 
