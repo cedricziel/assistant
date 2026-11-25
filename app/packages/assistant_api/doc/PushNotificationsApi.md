@@ -16,7 +16,7 @@ Method | HTTP request | Description
 
 
 # **createPushNotificationConfig**
-> TaskPushNotificationConfig createPushNotificationConfig(taskId, createTaskPushNotificationConfigRequest)
+> TaskPushNotificationConfig createPushNotificationConfig(taskId, createTaskPushNotificationConfigRequest, xSpaceId)
 
 `POST /tasks/:task_id/pushNotificationConfigs`
 
@@ -27,9 +27,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getPushNotificationsApi();
 final String taskId = taskId_example; // String | Parent task ID
 final CreateTaskPushNotificationConfigRequest createTaskPushNotificationConfigRequest = ; // CreateTaskPushNotificationConfigRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.createPushNotificationConfig(taskId, createTaskPushNotificationConfigRequest);
+    final response = api.createPushNotificationConfig(taskId, createTaskPushNotificationConfigRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling PushNotificationsApi->createPushNotificationConfig: $e\n');
@@ -42,6 +43,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **taskId** | **String**| Parent task ID | 
  **createTaskPushNotificationConfigRequest** | [**CreateTaskPushNotificationConfigRequest**](CreateTaskPushNotificationConfigRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -59,7 +61,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deletePushNotificationConfig**
-> deletePushNotificationConfig(taskId, configId)
+> deletePushNotificationConfig(taskId, configId, xSpaceId)
 
 `DELETE /tasks/:task_id/pushNotificationConfigs/:config_id`
 
@@ -70,9 +72,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getPushNotificationsApi();
 final String taskId = taskId_example; // String | Parent task ID
 final String configId = configId_example; // String | Push notification config ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.deletePushNotificationConfig(taskId, configId);
+    api.deletePushNotificationConfig(taskId, configId, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling PushNotificationsApi->deletePushNotificationConfig: $e\n');
 }
@@ -84,6 +87,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **taskId** | **String**| Parent task ID | 
  **configId** | **String**| Push notification config ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -101,7 +105,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getPushNotificationConfig**
-> TaskPushNotificationConfig getPushNotificationConfig(taskId, configId)
+> TaskPushNotificationConfig getPushNotificationConfig(taskId, configId, xSpaceId)
 
 `GET /tasks/:task_id/pushNotificationConfigs/:config_id`
 
@@ -112,9 +116,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getPushNotificationsApi();
 final String taskId = taskId_example; // String | Parent task ID
 final String configId = configId_example; // String | Push notification config ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getPushNotificationConfig(taskId, configId);
+    final response = api.getPushNotificationConfig(taskId, configId, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling PushNotificationsApi->getPushNotificationConfig: $e\n');
@@ -127,6 +132,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **taskId** | **String**| Parent task ID | 
  **configId** | **String**| Push notification config ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -144,7 +150,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listPushNotificationConfigs**
-> ListTaskPushNotificationConfigsResponse listPushNotificationConfigs(taskId, pageSize, pageToken)
+> ListTaskPushNotificationConfigsResponse listPushNotificationConfigs(taskId, pageSize, pageToken, xSpaceId)
 
 `GET /tasks/:task_id/pushNotificationConfigs`
 
@@ -156,9 +162,10 @@ final api = AssistantApi().getPushNotificationsApi();
 final String taskId = taskId_example; // String | Parent task ID
 final int pageSize = 56; // int | 
 final String pageToken = pageToken_example; // String | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listPushNotificationConfigs(taskId, pageSize, pageToken);
+    final response = api.listPushNotificationConfigs(taskId, pageSize, pageToken, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling PushNotificationsApi->listPushNotificationConfigs: $e\n');
@@ -172,6 +179,7 @@ Name | Type | Description  | Notes
  **taskId** | **String**| Parent task ID | 
  **pageSize** | **int**|  | [optional] 
  **pageToken** | **String**|  | [optional] 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

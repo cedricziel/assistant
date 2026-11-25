@@ -18,7 +18,7 @@ Method | HTTP request | Description
 
 
 # **createSkill**
-> SkillDetail createSkill(createSkillRequest)
+> SkillDetail createSkill(createSkillRequest, xSpaceId)
 
 `POST /api/skills` — create a new user skill.
 
@@ -28,9 +28,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getSkillsApi();
 final CreateSkillRequest createSkillRequest = ; // CreateSkillRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.createSkill(createSkillRequest);
+    final response = api.createSkill(createSkillRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling SkillsApi->createSkill: $e\n');
@@ -42,6 +43,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **createSkillRequest** | [**CreateSkillRequest**](CreateSkillRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -59,7 +61,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deleteSkill**
-> deleteSkill(name)
+> deleteSkill(name, xSpaceId)
 
 `DELETE /api/skills/{name}` — delete a user skill.
 
@@ -69,9 +71,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getSkillsApi();
 final String name = name_example; // String | Skill name
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    api.deleteSkill(name);
+    api.deleteSkill(name, xSpaceId);
 } on DioException catch (e) {
     print('Exception when calling SkillsApi->deleteSkill: $e\n');
 }
@@ -82,6 +85,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **name** | **String**| Skill name | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -99,7 +103,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getSkill**
-> SkillDetail getSkill(name)
+> SkillDetail getSkill(name, xSpaceId)
 
 `GET /api/skills/{name}` — get a skill by name.
 
@@ -109,9 +113,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getSkillsApi();
 final String name = name_example; // String | Skill name
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getSkill(name);
+    final response = api.getSkill(name, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling SkillsApi->getSkill: $e\n');
@@ -123,6 +128,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **name** | **String**| Skill name | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -140,7 +146,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listPersonaSkills**
-> BuiltList<SkillEntryResponse> listPersonaSkills(personaId)
+> BuiltList<SkillEntryResponse> listPersonaSkills(personaId, xSpaceId)
 
 `GET /api/personas/{persona_id}/skills` — list skills for a persona.
 
@@ -150,9 +156,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getSkillsApi();
 final String personaId = personaId_example; // String | Persona ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listPersonaSkills(personaId);
+    final response = api.listPersonaSkills(personaId, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling SkillsApi->listPersonaSkills: $e\n');
@@ -164,6 +171,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **personaId** | **String**| Persona ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -181,7 +189,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listSkills**
-> BuiltList<SkillDetail> listSkills()
+> BuiltList<SkillDetail> listSkills(xSpaceId)
 
 `GET /api/skills` — list all skills.
 
@@ -190,9 +198,10 @@ Name | Type | Description  | Notes
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getSkillsApi();
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listSkills();
+    final response = api.listSkills(xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling SkillsApi->listSkills: $e\n');
@@ -200,7 +209,10 @@ try {
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -218,7 +230,7 @@ This endpoint does not need any parameter.
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateSkill**
-> SkillDetail updateSkill(name, updateSkillRequest)
+> SkillDetail updateSkill(name, updateSkillRequest, xSpaceId)
 
 `PUT /api/skills/{name}` — update a user skill.
 
@@ -229,9 +241,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getSkillsApi();
 final String name = name_example; // String | Skill name
 final UpdateSkillRequest updateSkillRequest = ; // UpdateSkillRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.updateSkill(name, updateSkillRequest);
+    final response = api.updateSkill(name, updateSkillRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling SkillsApi->updateSkill: $e\n');
@@ -244,6 +257,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **name** | **String**| Skill name | 
  **updateSkillRequest** | [**UpdateSkillRequest**](UpdateSkillRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

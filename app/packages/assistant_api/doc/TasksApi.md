@@ -16,7 +16,7 @@ Method | HTTP request | Description
 
 
 # **cancelTask**
-> Task cancelTask(id, cancelTaskRequest)
+> Task cancelTask(id, cancelTaskRequest, xSpaceId)
 
 `POST /tasks/:id/cancel` -- Cancels a task.
 
@@ -27,9 +27,10 @@ import 'package:assistant_api/api.dart';
 final api = AssistantApi().getTasksApi();
 final String id = id_example; // String | Task ID to cancel
 final CancelTaskRequest cancelTaskRequest = ; // CancelTaskRequest | Optional cancellation metadata
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.cancelTask(id, cancelTaskRequest);
+    final response = api.cancelTask(id, cancelTaskRequest, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling TasksApi->cancelTask: $e\n');
@@ -42,6 +43,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Task ID to cancel | 
  **cancelTaskRequest** | [**CancelTaskRequest**](CancelTaskRequest.md)| Optional cancellation metadata | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -59,7 +61,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getTask**
-> Task getTask(id, historyLength, tenant)
+> Task getTask(id, historyLength, tenant, xSpaceId)
 
 `GET /tasks/:id` -- Gets the latest state of a task.
 
@@ -71,9 +73,10 @@ final api = AssistantApi().getTasksApi();
 final String id = id_example; // String | Task ID
 final int historyLength = 56; // int | Max number of recent messages to include in history.
 final String tenant = tenant_example; // String | Optional tenant ID.
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getTask(id, historyLength, tenant);
+    final response = api.getTask(id, historyLength, tenant, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling TasksApi->getTask: $e\n');
@@ -87,6 +90,7 @@ Name | Type | Description  | Notes
  **id** | **String**| Task ID | 
  **historyLength** | **int**| Max number of recent messages to include in history. | [optional] 
  **tenant** | **String**| Optional tenant ID. | [optional] 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -104,7 +108,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listTasks**
-> ListTasksResponse listTasks(tenant, contextId, status, pageSize, pageToken, historyLength, statusTimestampAfter, includeArtifacts)
+> ListTasksResponse listTasks(tenant, contextId, status, pageSize, pageToken, historyLength, statusTimestampAfter, includeArtifacts, xSpaceId)
 
 `GET /tasks` -- Lists tasks matching optional filters.
 
@@ -121,9 +125,10 @@ final String pageToken = pageToken_example; // String | Page token from a previo
 final int historyLength = 56; // int | Max number of messages to include in each task's history.
 final DateTime statusTimestampAfter = 2013-10-20T19:20:30+01:00; // DateTime | Filter tasks with status updated after this timestamp.
 final bool includeArtifacts = true; // bool | Whether to include artifacts in returned tasks.
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listTasks(tenant, contextId, status, pageSize, pageToken, historyLength, statusTimestampAfter, includeArtifacts);
+    final response = api.listTasks(tenant, contextId, status, pageSize, pageToken, historyLength, statusTimestampAfter, includeArtifacts, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling TasksApi->listTasks: $e\n');
@@ -142,6 +147,7 @@ Name | Type | Description  | Notes
  **historyLength** | **int**| Max number of messages to include in each task's history. | [optional] 
  **statusTimestampAfter** | **DateTime**| Filter tasks with status updated after this timestamp. | [optional] 
  **includeArtifacts** | **bool**| Whether to include artifacts in returned tasks. | [optional] 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
@@ -159,7 +165,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **subscribeToTask**
-> StreamResponse subscribeToTask(id)
+> StreamResponse subscribeToTask(id, xSpaceId)
 
 `GET /tasks/:id/subscribe` -- Subscribes to task updates (SSE).
 
@@ -169,9 +175,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getTasksApi();
 final String id = id_example; // String | Task ID to subscribe to
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.subscribeToTask(id);
+    final response = api.subscribeToTask(id, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling TasksApi->subscribeToTask: $e\n');
@@ -183,6 +190,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Task ID to subscribe to | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 
