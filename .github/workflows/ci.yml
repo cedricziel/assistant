@@ -388,6 +388,16 @@ jobs:
       - name: Lint OpenAPI spec with Spectral (project rules)
         run: npx --yes @stoplight/spectral-cli@6 lint openapi.json --ruleset openapi-spectral.yaml --fail-severity=error
 
+  release-scripts:
+    name: Release scripts
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Test release notes formatting
+        run: python3 -m unittest discover -s scripts -v
+
   integration:
     name: Integration (smoke)
     if: github.event.action != 'closed'
