@@ -59,6 +59,21 @@ const ALLOWED_GRANT_TYPES: &[&str] = &[
 /// Allowed response types for validation.
 const ALLOWED_RESPONSE_TYPES: &[&str] = &["code"];
 
+/// Schemes a redirect URI must never use: they execute script, expose local
+/// files, or are not an app callback. Every other non-HTTP scheme is treated as
+/// a native app's private-use scheme.
+const BLOCKED_REDIRECT_SCHEMES: &[&str] = &[
+    "javascript",
+    "data",
+    "file",
+    "vbscript",
+    "blob",
+    "about",
+    "ftp",
+    "ws",
+    "wss",
+];
+
 /// Allowed token endpoint auth methods.
 const ALLOWED_AUTH_METHODS: &[&str] = &["none", "client_secret_post", "client_secret_basic"];
 
@@ -167,7 +182,7 @@ fn validate_redirect_uri(uri: &str) -> Result<()> {
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid redirect_uri '{uri}': {e}"))?;
 
-    // Must use HTTPS or localhost HTTP.
+    // HTTPS, loopback HTTP, or a private-use scheme for native apps (RFC 8252 §7).
     match parsed.scheme() {
         "https" => {}
         "http" => {
@@ -176,7 +191,10 @@ fn validate_redirect_uri(uri: &str) -> Result<()> {
                 bail!("redirect_uri with http:// is only allowed for localhost, got: {uri}");
             }
         }
-        other => bail!("redirect_uri must use https:// or http://localhost, got scheme: {other}"),
+        scheme if BLOCKED_REDIRECT_SCHEMES.contains(&scheme) => {
+            bail!("redirect_uri scheme is not allowed: {scheme}")
+        }
+        _ => {}
     }
 
     // Must not contain a fragment.
@@ -304,6 +322,47 @@ mod tests {
         let mut req = valid_registration();
         req.redirect_uris = vec!["http://localhost:8080/callback".into()];
         assert!(reg.register(req).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn loopback_ip_redirects_are_allowed_on_any_port() {
+        let reg = make_registrar();
+        for uri in [
+            "http://127.0.0.1:33418/callback",
+            "http://[::1]:33418/callback",
+        ] {
+            let mut req = valid_registration();
+            req.redirect_uris = vec![uri.into()];
+            assert!(reg.register(req).await.is_ok(), "{uri} should be allowed");
+        }
+    }
+
+    #[tokio::test]
+    async fn private_use_scheme_redirects_are_allowed() {
+        let reg = make_registrar();
+        for uri in [
+            "com.example.app:/oauth/callback",
+            "cursor://anysphere.cursor-retrieval/oauth/callback",
+        ] {
+            let mut req = valid_registration();
+            req.redirect_uris = vec![uri.into()];
+            assert!(reg.register(req).await.is_ok(), "{uri} should be allowed");
+        }
+    }
+
+    #[tokio::test]
+    async fn schemes_that_run_code_or_read_files_are_rejected() {
+        let reg = make_registrar();
+        for uri in [
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "file:///etc/passwd",
+            "vbscript:msgbox",
+        ] {
+            let mut req = valid_registration();
+            req.redirect_uris = vec![uri.into()];
+            assert!(reg.register(req).await.is_err(), "{uri} should be rejected");
+        }
     }
 
     #[tokio::test]
