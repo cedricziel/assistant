@@ -1,7 +1,7 @@
 //! Serves the embedded Flutter web build.
 //!
 //! The `app/build/web/` directory is embedded at compile time by `rust-embed`
-//! (the build script in `build.rs` runs `flutter build web` beforehand).
+//! (produced beforehand by `make build-web`; `build.rs` embeds a placeholder page when it is absent).
 //!
 //! All unmatched routes fall through to [`flutter_handler`], which implements
 //! SPA routing: known assets are served with their correct MIME type; unknown
