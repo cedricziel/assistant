@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../connection/connection_provider.dart';
 import 'caller_roles.dart';
 import 'integration_failure.dart';
+import 'integration_summary_of.dart';
 
 /// Which integrations a list shows.
 enum IntegrationScopeKind { org, space, connections }
@@ -112,7 +113,10 @@ class IntegrationListViewModel extends AsyncNotifier<IntegrationListState> {
           ),
         );
     final detail = response.data!;
-    _replace(id, (row) => row.copyWith(integration: _summaryOf(detail)));
+    _replace(
+      id,
+      (row) => row.copyWith(integration: integrationSummaryOf(detail)),
+    );
   });
 
   /// Removes [id] and its credentials.
@@ -295,26 +299,6 @@ class IntegrationListViewModel extends AsyncNotifier<IntegrationListState> {
       ? item.ownerUserId == userId
       : item.credentialMode == CredentialMode.perUser;
 }
-
-IntegrationSummary _summaryOf(IntegrationDetail detail) => IntegrationSummary(
-  (b) => b
-    ..id = detail.id
-    ..layer = detail.layer
-    ..slug = detail.slug
-    ..name = detail.name
-    ..connectUrl = detail.connectUrl
-    ..catalogEntryId = detail.catalogEntryId
-    ..authKind = detail.authKind
-    ..credentialMode = detail.credentialMode
-    ..trust = detail.trust
-    ..enabled = detail.enabled
-    ..status = detail.status
-    ..hasCredential = detail.hasCredential
-    ..ownerUserId = detail.ownerUserId
-    ..spaceId = detail.spaceId
-    ..createdAt = detail.createdAt
-    ..updatedAt = detail.updatedAt,
-);
 
 final integrationListViewModelProvider = AsyncNotifierProvider.autoDispose
     .family<
