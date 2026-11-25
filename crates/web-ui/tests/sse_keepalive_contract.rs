@@ -83,6 +83,7 @@ async fn keep_alive_comment_arrives_during_long_silence() {
     // Connect with a low-level HTTP client. `reqwest::bytes_stream`
     // surfaces the raw response body, including SSE comment lines —
     // unlike an `EventSource` parser which would filter them.
+    assistant_core::tls::install_ring();
     let resp = reqwest::Client::builder()
         .build()
         .expect("client")
@@ -156,6 +157,7 @@ async fn semantic_events_still_flow_alongside_keep_alive() {
             .expect("send 2");
     });
 
+    assistant_core::tls::install_ring();
     let resp = reqwest::Client::builder()
         .build()
         .expect("client")

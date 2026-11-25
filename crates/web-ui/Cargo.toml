@@ -58,6 +58,8 @@ mime_guess = { workspace = true }
 urlencoding.workspace = true
 
 [dev-dependencies]
+# Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
+assistant-core = { path = "../core", features = ["test-tls"] }
 tempfile = { workspace = true }
 http-body-util = { workspace = true }
 wiremock = { workspace = true }

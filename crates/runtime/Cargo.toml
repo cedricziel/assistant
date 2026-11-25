@@ -40,6 +40,8 @@ base64 = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]
+# Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
+assistant-core = { path = "../core", features = ["test-tls"] }
 sqlx = { workspace = true }
 wiremock = { workspace = true }
 # Decompress gzipped OTLP payloads in tests/otlp_env_config.rs.

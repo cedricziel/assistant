@@ -64,6 +64,8 @@ base64 = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
+# Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
+assistant-core = { path = "../core", features = ["test-tls"] }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-tool-executor = { path = "../tool-executor" }
 toml = { workspace = true }

@@ -77,16 +77,18 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # Encoding
 base64 = "0.23"
 # HTTP client
-reqwest = { version = "0.13", features = ["json", "stream", "rustls", "multipart", "form"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "stream", "rustls-no-provider", "multipart", "form"], default-features = false }
 # Force vendored OpenSSL for static linking when cross-compiling (e.g. musl targets).
 # openssl-sys builds from source rather than requiring a system installation.
 reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
 reqwest-retry = "0.9"
 reqwest-tracing = "0.7"
 # OpenAI-compatible client (used by provider-openai and provider-moonshot)
-async-openai = { version = "0.43", features = ["chat-completion", "embedding", "responses"] }
-# TLS — explicit dep so binaries can install_default() when both aws-lc-rs and ring are in tree
-rustls = { version = "0.23", features = ["ring"] }
+async-openai = { version = "0.43", default-features = false, features = ["chat-completion", "embedding", "responses", "rustls-no-provider"] }
+# TLS — ring is the only crypto backend (deny.toml bans aws-lc-rs); never re-enable rustls defaults
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+# Runs `tls::install_ring` before test mains (see assistant-core `test-tls` feature)
+ctor = "1.0"
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -192,7 +194,7 @@ http-body-util = "0.1"
 # URL percent-encoding
 urlencoding = "2"
 # Authentication
-jsonwebtoken = { version = "12", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", features = ["rust_crypto"] }
 argon2 = { version = "0.5", features = ["std"] }
 rand = "0.10"
 # Constant-time comparison (API key verification)

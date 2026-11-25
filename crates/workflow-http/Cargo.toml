@@ -15,6 +15,8 @@ tokio = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+# Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
+assistant-core = { path = "../core", features = ["test-tls"] }
 wiremock = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

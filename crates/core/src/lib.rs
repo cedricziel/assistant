@@ -18,6 +18,7 @@ pub mod secret;
 pub mod store;
 pub mod subagent;
 pub mod text;
+pub mod tls;
 pub mod tool;
 pub mod types;
 pub mod upload;

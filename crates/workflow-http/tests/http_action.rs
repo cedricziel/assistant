@@ -12,6 +12,13 @@ use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+/// A reqwest client with the ring TLS provider installed. Integration tests
+/// do not link `assistant-core` on their own, so its test-tls hook never runs.
+fn client() -> Client {
+    assistant_core::tls::install_ring();
+    Client::new()
+}
+
 fn make_input(config: Value, trigger_payload: Value) -> WorkflowActionInput {
     WorkflowActionInput {
         run_id: uuid::Uuid::new_v4(),
@@ -35,7 +42,7 @@ async fn happy_path_post_returns_success() {
         .mount(&server)
         .await;
 
-    let executor = HttpRequestActionExecutor::with_client(Client::new(), Duration::from_secs(5));
+    let executor = HttpRequestActionExecutor::with_client(client(), Duration::from_secs(5));
     let input = make_input(
         json!({
             "url": format!("{}/hook", server.uri()),
@@ -68,7 +75,7 @@ async fn non_success_status_returns_failure() {
         .mount(&server)
         .await;
 
-    let executor = HttpRequestActionExecutor::with_client(Client::new(), Duration::from_secs(2));
+    let executor = HttpRequestActionExecutor::with_client(client(), Duration::from_secs(2));
     let input = make_input(json!({"url": format!("{}/fail", server.uri())}), json!({}));
 
     let result = executor.execute(input).await.unwrap();
@@ -87,7 +94,7 @@ async fn body_from_trigger_uses_trigger_payload() {
         .mount(&server)
         .await;
 
-    let executor = HttpRequestActionExecutor::with_client(Client::new(), Duration::from_secs(2));
+    let executor = HttpRequestActionExecutor::with_client(client(), Duration::from_secs(2));
     let input = make_input(
         json!({
             "url": format!("{}/echo", server.uri()),
@@ -109,7 +116,7 @@ async fn host_blocklist_rejects_request() {
         .unwrap()
         .to_string();
 
-    let executor = HttpRequestActionExecutor::with_client(Client::new(), Duration::from_secs(2))
+    let executor = HttpRequestActionExecutor::with_client(client(), Duration::from_secs(2))
         .with_blocked_hosts([host]);
 
     let input = make_input(
@@ -127,7 +134,7 @@ async fn host_blocklist_rejects_request() {
 #[tokio::test]
 async fn host_allowlist_rejects_unlisted() {
     let server = MockServer::start().await;
-    let executor = HttpRequestActionExecutor::with_client(Client::new(), Duration::from_secs(2))
+    let executor = HttpRequestActionExecutor::with_client(client(), Duration::from_secs(2))
         .with_allowed_hosts(["example.com".to_string()]);
 
     let input = make_input(
@@ -154,7 +161,7 @@ async fn json_pointer_extracts_field() {
         .mount(&server)
         .await;
 
-    let executor = HttpRequestActionExecutor::with_client(Client::new(), Duration::from_secs(2));
+    let executor = HttpRequestActionExecutor::with_client(client(), Duration::from_secs(2));
     let input = make_input(
         json!({
             "url": format!("{}/data", server.uri()),
@@ -174,7 +181,7 @@ async fn json_pointer_extracts_field() {
 
 #[tokio::test]
 async fn invalid_url_fails() {
-    let executor = HttpRequestActionExecutor::with_client(Client::new(), Duration::from_secs(2));
+    let executor = HttpRequestActionExecutor::with_client(client(), Duration::from_secs(2));
     let input = make_input(json!({"url": "not-a-url"}), json!({}));
 
     let err = executor.execute(input).await.unwrap_err();
@@ -186,7 +193,7 @@ async fn invalid_url_fails() {
 
 #[tokio::test]
 async fn missing_url_fails() {
-    let executor = HttpRequestActionExecutor::with_client(Client::new(), Duration::from_secs(2));
+    let executor = HttpRequestActionExecutor::with_client(client(), Duration::from_secs(2));
     let input = make_input(json!({}), json!({}));
 
     let err = executor.execute(input).await.unwrap_err();
