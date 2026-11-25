@@ -21,7 +21,7 @@ class TrayService with TrayListener {
   /// Sets up the tray icon.  Call this before [runApp] (no [Ref] required).
   Future<void> initIcon() async {
     trayManager.addListener(this);
-    await trayManager.setIcon('assets/tray_icon.png');
+    await trayManager.setIcon('assets/tray_icon.png', isTemplate: true);
     // Show a static menu until [initMenu] is called with a Ref.
     await trayManager.setContextMenu(
       Menu(
