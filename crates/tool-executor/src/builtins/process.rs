@@ -7,17 +7,23 @@
 //! - `write`  — send data to the process's stdin
 //! - `kill`   — terminate a running process
 //! - `list`   — enumerate all tracked sessions
+//!
+//! Sessions are bounded: at most `process_max_sessions` run at once, stored
+//! output lines are truncated to `process_max_line_chars`, and a session idle
+//! for `process_ttl_secs` is killed and forgotten.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::types::conversation::ExecutionContext;
+use assistant_core::types::permissions::LimitsConfig;
 use assistant_core::{ToolHandler, ToolOutput, runtime_workspace_dir};
 use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::ChildStdin;
 use tokio::sync::{Mutex, oneshot};
 use tracing::debug;
@@ -39,6 +45,84 @@ struct ProcessHandle {
     /// Send a `()` to this channel to request the background wait task to kill
     /// the process and exit.
     kill_tx: Mutex<Option<oneshot::Sender<()>>>,
+    created: Instant,
+    /// Milliseconds since `created` of the last access.
+    last_activity_ms: AtomicU64,
+}
+
+impl ProcessHandle {
+    fn touch(&self) {
+        let ms = u64::try_from(self.created.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.last_activity_ms.store(ms, Ordering::Relaxed);
+    }
+
+    fn idle_for(&self) -> Duration {
+        let last = Duration::from_millis(self.last_activity_ms.load(Ordering::Relaxed));
+        self.created.elapsed().saturating_sub(last)
+    }
+
+    async fn request_kill(&self) {
+        if let Some(tx) = self.kill_tx.lock().await.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
+const LINE_TRUNCATED_MARKER: &str = " [line truncated]";
+
+/// Read one line, keeping at most `max_bytes` of it and discarding the rest,
+/// so a process that never prints a newline cannot grow memory without bound.
+/// Returns `None` at end of stream.
+async fn next_capped_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> Option<String> {
+    let mut line: Vec<u8> = Vec::new();
+    let mut truncated = false;
+    let mut seen_any = false;
+    loop {
+        let available = reader.fill_buf().await.ok()?;
+        if available.is_empty() {
+            if !seen_any {
+                return None;
+            }
+            break;
+        }
+        seen_any = true;
+        let newline = available.iter().position(|&b| b == b'\n');
+        let content = &available[..newline.unwrap_or(available.len())];
+        let take = content.len().min(max_bytes.saturating_sub(line.len()));
+        line.extend_from_slice(&content[..take]);
+        truncated |= take < content.len();
+        let consumed = newline.map_or(available.len(), |i| i + 1);
+        reader.consume(consumed);
+        if newline.is_some() {
+            break;
+        }
+    }
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+    let mut text = String::from_utf8_lossy(&line).into_owned();
+    if truncated {
+        text.push_str(LINE_TRUNCATED_MARKER);
+    }
+    Some(text)
+}
+
+async fn drain_lines<R: tokio::io::AsyncRead + Unpin>(
+    stream: R,
+    buf: Arc<Mutex<VecDeque<String>>>,
+    max_line_bytes: usize,
+) {
+    let mut reader = BufReader::new(stream);
+    while let Some(line) = next_capped_line(&mut reader, max_line_bytes).await {
+        let mut buf = buf.lock().await;
+        if buf.len() >= MAX_LINES {
+            buf.pop_front();
+        }
+        buf.push_back(line);
+    }
 }
 
 // -- ProcessHandler ------------------------------------------------------------
@@ -46,13 +130,46 @@ struct ProcessHandle {
 /// Tool handler for `process` — session-based background process management.
 pub struct ProcessHandler {
     sessions: Arc<Mutex<HashMap<String, Arc<ProcessHandle>>>>,
+    limits: LimitsConfig,
 }
 
 impl ProcessHandler {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            limits: LimitsConfig::default(),
         }
+    }
+
+    /// Session TTL, session cap and per-line cap (`[permissions.limits]`).
+    pub fn with_limits(mut self, limits: LimitsConfig) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Find a session and mark it as used.
+    async fn lookup(&self, session_id: &str) -> Option<Arc<ProcessHandle>> {
+        let handle = self.sessions.lock().await.get(session_id).cloned()?;
+        handle.touch();
+        Some(handle)
+    }
+
+    /// Kill and forget the session once it has been idle for the TTL.
+    fn spawn_expiry(&self, session_id: String, handle: Arc<ProcessHandle>) {
+        let ttl = Duration::from_secs(self.limits.process_ttl_secs);
+        let sessions = Arc::clone(&self.sessions);
+        tokio::spawn(async move {
+            loop {
+                let idle = handle.idle_for();
+                if idle >= ttl {
+                    handle.request_kill().await;
+                    sessions.lock().await.remove(&session_id);
+                    debug!("process: expired idle session={session_id}");
+                    return;
+                }
+                tokio::time::sleep(ttl - idle).await;
+            }
+        });
     }
 }
 
@@ -159,6 +276,20 @@ impl ProcessHandler {
             .map(String::from)
             .or_else(|| runtime_workspace_dir().map(|path| path.to_string_lossy().to_string()));
 
+        let running = {
+            let sessions = self.sessions.lock().await;
+            sessions
+                .values()
+                .filter(|h| h.running.load(Ordering::SeqCst))
+                .count()
+        };
+        if running >= self.limits.process_max_sessions {
+            return Ok(ToolOutput::error(format!(
+                "Process session limit reached ({} running). Kill a session before starting another.",
+                self.limits.process_max_sessions
+            )));
+        }
+
         let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-c").arg(&command);
         cmd.stdin(std::process::Stdio::piped());
@@ -198,31 +329,9 @@ impl ProcessHandler {
         let running = Arc::new(AtomicBool::new(true));
         let (kill_tx, kill_rx) = oneshot::channel::<()>();
 
-        // Drain stdout into ring buffer.
-        let stdout_buf_clone = stdout_buf.clone();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let mut buf = stdout_buf_clone.lock().await;
-                if buf.len() >= MAX_LINES {
-                    buf.pop_front();
-                }
-                buf.push_back(line);
-            }
-        });
-
-        // Drain stderr into ring buffer.
-        let stderr_buf_clone = stderr_buf.clone();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let mut buf = stderr_buf_clone.lock().await;
-                if buf.len() >= MAX_LINES {
-                    buf.pop_front();
-                }
-                buf.push_back(line);
-            }
-        });
+        let max_line = self.limits.process_max_line_chars;
+        tokio::spawn(drain_lines(stdout, stdout_buf.clone(), max_line));
+        tokio::spawn(drain_lines(stderr, stderr_buf.clone(), max_line));
 
         // Wait for process exit (or kill signal).
         let exit_code_clone = exit_code.clone();
@@ -255,12 +364,15 @@ impl ProcessHandler {
             exit_code,
             running,
             kill_tx: Mutex::new(Some(kill_tx)),
+            created: Instant::now(),
+            last_activity_ms: AtomicU64::new(0),
         });
 
         self.sessions
             .lock()
             .await
-            .insert(session_id.clone(), handle);
+            .insert(session_id.clone(), handle.clone());
+        self.spawn_expiry(session_id.clone(), handle);
 
         debug!(
             "process: started session={} pid={} cmd={}",
@@ -286,16 +398,10 @@ impl ProcessHandler {
             }
         };
 
-        let handle = {
-            let sessions = self.sessions.lock().await;
-            match sessions.get(&session_id) {
-                Some(h) => h.clone(),
-                None => {
-                    return Ok(ToolOutput::error(format!(
-                        "Session '{session_id}' not found"
-                    )));
-                }
-            }
+        let Some(handle) = self.lookup(&session_id).await else {
+            return Ok(ToolOutput::error(format!(
+                "Session '{session_id}' not found"
+            )));
         };
 
         let running = handle.running.load(Ordering::SeqCst);
@@ -326,16 +432,10 @@ impl ProcessHandler {
         };
         let lines = params.get("lines").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
-        let handle = {
-            let sessions = self.sessions.lock().await;
-            match sessions.get(&session_id) {
-                Some(h) => h.clone(),
-                None => {
-                    return Ok(ToolOutput::error(format!(
-                        "Session '{session_id}' not found"
-                    )));
-                }
-            }
+        let Some(handle) = self.lookup(&session_id).await else {
+            return Ok(ToolOutput::error(format!(
+                "Session '{session_id}' not found"
+            )));
         };
 
         let stdout = {
@@ -388,16 +488,10 @@ impl ProcessHandler {
             }
         };
 
-        let handle = {
-            let sessions = self.sessions.lock().await;
-            match sessions.get(&session_id) {
-                Some(h) => h.clone(),
-                None => {
-                    return Ok(ToolOutput::error(format!(
-                        "Session '{session_id}' not found"
-                    )));
-                }
-            }
+        let Some(handle) = self.lookup(&session_id).await else {
+            return Ok(ToolOutput::error(format!(
+                "Session '{session_id}' not found"
+            )));
         };
 
         let mut stdin_lock = handle.stdin.lock().await;
@@ -422,16 +516,10 @@ impl ProcessHandler {
             }
         };
 
-        let handle = {
-            let sessions = self.sessions.lock().await;
-            match sessions.get(&session_id) {
-                Some(h) => h.clone(),
-                None => {
-                    return Ok(ToolOutput::error(format!(
-                        "Session '{session_id}' not found"
-                    )));
-                }
-            }
+        let Some(handle) = self.lookup(&session_id).await else {
+            return Ok(ToolOutput::error(format!(
+                "Session '{session_id}' not found"
+            )));
         };
 
         if !handle.running.load(Ordering::SeqCst) {

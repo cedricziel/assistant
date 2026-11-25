@@ -7,7 +7,7 @@
 use anyhow::Result;
 use assistant_core::{
     AgentReport, AgentReportStatus, AgentSpawn, ChatHistoryMessage, ChatRole, LlmResponse,
-    StreamChunk, SubagentRunner, types::conversation::DEFAULT_MAX_AGENT_DEPTH,
+    StreamChunk, SubagentRunner, ToolOutput, types::conversation::DEFAULT_MAX_AGENT_DEPTH,
     types::conversation::ExecutionContext, types::conversation::Interface,
     types::conversation::Message,
 };
@@ -455,12 +455,31 @@ impl SubagentRunner for Orchestrator {
                                 space_id: None,
                             };
 
-                            let start = std::time::Instant::now();
-                            let exec_result = self
+                            let requires_confirm = self
                                 .executor
-                                .execute(&name, params_map, &ctx)
-                                .instrument(iteration_span.clone())
+                                .list_tools()
+                                .iter()
+                                .any(|h| h.name() == name && h.requires_confirmation());
+                            let authorization = self
+                                .authorize_tool_call(
+                                    &name,
+                                    &params,
+                                    &ctx,
+                                    requires_confirm,
+                                    super::dispatch::task_context(&history),
+                                )
                                 .await;
+
+                            let start = std::time::Instant::now();
+                            let exec_result = match authorization {
+                                Ok(()) => {
+                                    self.executor
+                                        .execute(&name, params_map, &ctx)
+                                        .instrument(iteration_span.clone())
+                                        .await
+                                }
+                                Err(observation) => Ok(ToolOutput::error(observation)),
+                            };
                             let elapsed = start.elapsed();
 
                             if exec_result.is_err() {

@@ -82,6 +82,35 @@ async fn web_fetch_returns_body_from_http_endpoint() {
 }
 
 #[tokio::test]
+async fn web_fetch_reports_the_final_url_after_redirects() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/old"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/new"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/new"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<p>moved</p>"))
+        .mount(&server)
+        .await;
+
+    let out = WebFetchHandler::new()
+        .run(
+            params(&[("url", json!(format!("{}/old", server.uri())))]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
+    assert!(out.success, "{}", out.content);
+    assert!(
+        out.content.contains(&format!("URL: {}/new", server.uri())),
+        "{}",
+        out.content
+    );
+}
+
+#[tokio::test]
 async fn web_fetch_honors_max_chars() {
     let server = MockServer::start().await;
     let body = "x".repeat(20_000);

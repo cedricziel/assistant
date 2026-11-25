@@ -119,7 +119,7 @@ pub(crate) enum FinalAnswerOutcome {
 
 /// Outcome of dispatching a single global (executor) tool call.
 pub(crate) enum DispatchOutcome {
-    /// The user denied execution via the confirmation gate.
+    /// The permission gate (or the user, via confirmation) denied the call.
     Denied,
     /// The tool was executed and its result finalized.
     Executed { had_error: bool },
@@ -209,6 +209,8 @@ pub struct Orchestrator {
     pub(crate) bus: Arc<dyn MessageBus>,
     pub(crate) max_iterations: usize,
     pub(crate) confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
+    /// Gate evaluated before every tool call (static rules, decision model).
+    pub(crate) permission_policy: assistant_core::permission::PermissionPolicy,
     /// Memory loader used to rebuild the system prompt at the start of every
     /// turn so that writes made by memory tools are reflected immediately.
     pub(crate) memory_loader: MemoryLoader,
@@ -293,6 +295,7 @@ impl Orchestrator {
             bus,
             max_iterations: config.llm.max_iterations,
             confirmation_callback: None,
+            permission_policy: Self::build_permission_policy(&config.permissions),
             memory_loader,
             trace_content: config.observability.trace_content,
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
@@ -378,6 +381,35 @@ impl Orchestrator {
     /// tool is included in `TurnResult::attachments`.
     pub fn with_audio_store(mut self, store: Arc<AudioStore>) -> Self {
         self.audio_store = Some(store);
+        self
+    }
+
+    /// Static rules from config, plus the decision model when it is enabled.
+    /// A decision model that cannot be built (e.g. missing API key) is
+    /// reported and left out: undecided calls then fall back to a human or a
+    /// denial, so this fails closed.
+    fn build_permission_policy(
+        cfg: &assistant_core::types::permissions::PermissionsConfig,
+    ) -> assistant_core::permission::PermissionPolicy {
+        let policy = assistant_core::permission::PermissionPolicy::from_config(cfg);
+        if !cfg.decision_model.enabled {
+            return policy;
+        }
+        match crate::decision_model::JevDecider::from_config(&cfg.decision_model) {
+            Ok(model) => policy.with_model(Arc::new(model)),
+            Err(e) => {
+                tracing::error!("permission decision model disabled: {e}");
+                policy
+            }
+        }
+    }
+
+    /// Replace the permission policy (e.g. to attach a decision model).
+    pub fn with_permission_policy(
+        mut self,
+        policy: assistant_core::permission::PermissionPolicy,
+    ) -> Self {
+        self.permission_policy = policy;
         self
     }
 

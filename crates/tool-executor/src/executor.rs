@@ -62,16 +62,21 @@ impl ToolExecutor {
     ) {
         use crate::builtins::*;
         let storage = self.storage.clone();
+        let extra_roots = config.permissions.workspace_roots.clone();
 
         let tools: Vec<Arc<dyn ToolHandler>> = vec![
             // File I/O
-            Arc::new(FileReadHandler::new()),
-            Arc::new(FileWriteHandler::new()),
-            Arc::new(FileEditHandler::new()),
-            Arc::new(FileGlobHandler::new()),
+            Arc::new(FileReadHandler::new().with_extra_roots(extra_roots.clone())),
+            Arc::new(FileWriteHandler::new().with_extra_roots(extra_roots.clone())),
+            Arc::new(FileEditHandler::new().with_extra_roots(extra_roots.clone())),
+            Arc::new(FileGlobHandler::new().with_extra_roots(extra_roots)),
             // Shell
-            Arc::new(BashHandler::new()),
-            Arc::new(ProcessHandler::new()),
+            Arc::new(
+                BashHandler::new()
+                    .with_limits(config.permissions.limits.clone())
+                    .with_extra_roots(config.permissions.workspace_roots.clone()),
+            ),
+            Arc::new(ProcessHandler::new().with_limits(config.permissions.limits.clone())),
             // Web
             Arc::new(WebFetchHandler::new()),
             Arc::new(WebSearchHandler::new()),

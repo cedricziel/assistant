@@ -1,4 +1,4 @@
-//! Builtin handler for file-write tool — writes content to any file on disk.
+//! Builtin handler for file-write tool — writes content to a file inside the workspace roots.
 
 use std::collections::HashMap;
 use std::fs;
@@ -8,19 +8,20 @@ use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionCont
 use async_trait::async_trait;
 use tracing::debug;
 
-use super::file_read::expand_tilde;
-
-pub struct FileWriteHandler;
+#[derive(Default)]
+pub struct FileWriteHandler {
+    extra_roots: Vec<String>,
+}
 
 impl FileWriteHandler {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
-}
 
-impl Default for FileWriteHandler {
-    fn default() -> Self {
-        Self::new()
+    /// Allow access to these directories in addition to the persona workspace.
+    pub fn with_extra_roots(mut self, roots: Vec<String>) -> Self {
+        self.extra_roots = roots;
+        self
     }
 }
 
@@ -31,7 +32,7 @@ impl ToolHandler for FileWriteHandler {
     }
 
     fn description(&self) -> &str {
-        "Write content to a file, creating it and parent directories if needed. Completely replaces existing content."
+        "Write content to a file inside the workspace, creating it and parent directories if needed. Completely replaces existing content."
     }
 
     fn params_schema(&self) -> serde_json::Value {
@@ -52,7 +53,7 @@ impl ToolHandler for FileWriteHandler {
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let path_str = match params.get("path").and_then(|v| v.as_str()) {
             Some(p) => p.to_string(),
@@ -64,7 +65,10 @@ impl ToolHandler for FileWriteHandler {
             None => return Ok(ToolOutput::error("Missing required parameter 'content'")),
         };
 
-        let path = expand_tilde(&path_str);
+        let path = match super::confine::confine(ctx, &self.extra_roots, &path_str) {
+            Ok(p) => p,
+            Err(refusal) => return Ok(refusal),
+        };
         debug!(path = %path.display(), "file-write access");
 
         // Create parent directories if needed.

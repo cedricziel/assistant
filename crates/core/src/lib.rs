@@ -12,6 +12,7 @@ pub mod context;
 pub mod identity;
 pub mod llm;
 pub mod memory;
+pub mod permission;
 pub mod secret;
 pub mod store;
 pub mod subagent;

@@ -9,6 +9,7 @@ use super::features::{
 };
 use super::llm::LlmConfig;
 use super::observability::ObservabilityConfig;
+use super::permissions::PermissionsConfig;
 use super::skills_mcp::{McpConfig, MirrorConfig, SkillsConfig};
 use super::storage::{BusConfig, StorageConfig};
 use super::transcription::{TranscriptionConfig, TtsConfig};
@@ -70,6 +71,9 @@ pub struct AssistantConfig {
     /// Push notification / VAPID configuration (`[notifications]` section).
     #[serde(default)]
     pub notifications: NotificationsConfig,
+    /// Tool-permission rules and decision model (`[permissions]` section).
+    #[serde(default)]
+    pub permissions: PermissionsConfig,
 }
 
 /// Active assistant agent configuration.

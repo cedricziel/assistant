@@ -47,7 +47,8 @@ async fn file_read_returns_text_content() {
     let path = dir.path().join("hello.txt");
     tokio::fs::write(&path, "hello world").await.unwrap();
 
-    let handler = FileReadHandler::new();
+    let handler =
+        FileReadHandler::new().with_extra_roots(vec![dir.path().to_string_lossy().into_owned()]);
     let out = handler
         .run(params(&[("path", json!(path.to_string_lossy()))]), &ctx())
         .await
@@ -66,9 +67,15 @@ async fn file_read_missing_path_returns_error() {
 
 #[tokio::test]
 async fn file_read_nonexistent_file_returns_error() {
-    let handler = FileReadHandler::new();
+    let dir = TempDir::new().unwrap();
+    let handler =
+        FileReadHandler::new().with_extra_roots(vec![dir.path().to_string_lossy().into_owned()]);
+    let missing = dir.path().join("no-such-file");
     let out = handler
-        .run(params(&[("path", json!("/no/such/file/12345"))]), &ctx())
+        .run(
+            params(&[("path", json!(missing.to_string_lossy()))]),
+            &ctx(),
+        )
         .await
         .unwrap();
     assert!(!out.success);
@@ -82,7 +89,8 @@ async fn file_read_honors_limit_and_appends_truncation_marker() {
     let body = "a".repeat(20_000);
     tokio::fs::write(&path, &body).await.unwrap();
 
-    let handler = FileReadHandler::new();
+    let handler =
+        FileReadHandler::new().with_extra_roots(vec![dir.path().to_string_lossy().into_owned()]);
     let out = handler
         .run(
             params(&[
@@ -107,7 +115,8 @@ async fn file_write_creates_file_with_content() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("out.txt");
 
-    let handler = FileWriteHandler::new();
+    let handler =
+        FileWriteHandler::new().with_extra_roots(vec![dir.path().to_string_lossy().into_owned()]);
     let out = handler
         .run(
             params(&[
@@ -141,7 +150,8 @@ async fn file_edit_replaces_matching_text() {
         .await
         .unwrap();
 
-    let handler = FileEditHandler::new();
+    let handler =
+        FileEditHandler::new().with_extra_roots(vec![dir.path().to_string_lossy().into_owned()]);
     let out = handler
         .run(
             params(&[
@@ -164,7 +174,8 @@ async fn file_edit_missing_match_returns_error_output() {
     let path = dir.path().join("doc.md");
     tokio::fs::write(&path, "alpha bravo").await.unwrap();
 
-    let handler = FileEditHandler::new();
+    let handler =
+        FileEditHandler::new().with_extra_roots(vec![dir.path().to_string_lossy().into_owned()]);
     let out = handler
         .run(
             params(&[
@@ -194,7 +205,8 @@ async fn file_glob_finds_matching_files() {
         .await
         .unwrap();
 
-    let handler = FileGlobHandler::new();
+    let handler =
+        FileGlobHandler::new().with_extra_roots(vec![dir.path().to_string_lossy().into_owned()]);
     let pattern = format!("{}/*.txt", dir.path().to_string_lossy());
     let out = handler
         .run(params(&[("pattern", json!(pattern))]), &ctx())
