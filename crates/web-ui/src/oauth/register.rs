@@ -20,6 +20,7 @@ use super::{
     responses(
         (status = 201, description = "Client registered", body = ClientInfoSchema),
         (status = 400, description = "Invalid registration", body = OAuthErrorResponse),
+        (status = 429, description = "Rate limit exceeded; see the Retry-After header"),
     )
 )]
 pub async fn register(

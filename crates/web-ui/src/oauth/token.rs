@@ -53,6 +53,7 @@ pub struct TokenResponse {
     responses(
         (status = 200, description = "Token issued", body = TokenResponse),
         (status = 400, description = "Invalid grant", body = OAuthErrorResponse),
+        (status = 429, description = "Rate limit exceeded; see the Retry-After header"),
         (status = 500, description = "Server error", body = OAuthErrorResponse),
     )
 )]

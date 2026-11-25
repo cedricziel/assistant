@@ -26,6 +26,9 @@ pub fn hash_password(plain: &str) -> Result<String> {
     Ok(hash.to_string())
 }
 
+/// Argon2id hash of a throwaway password, with the default cost parameters.
+const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$uCaKNJGrnRj4jbFWtWTxog$9FhC/RiJVH8/HLMmzJ84JWfCI82gJD0oCPDTIE+x4g0";
+
 /// Verify a plaintext password against a PHC-formatted argon2id hash.
 pub fn verify_password(plain: &str, hash: &str) -> Result<bool> {
     let parsed_hash = PasswordHash::new(hash)
@@ -39,9 +42,31 @@ pub fn verify_password(plain: &str, hash: &str) -> Result<bool> {
     }
 }
 
+/// Spend the cost of a real verification on a fixed hash, so callers can
+/// answer "no such user" in the same time as "wrong password".
+pub fn verify_dummy(plain: &str) {
+    let _ = verify_password(plain, DUMMY_HASH);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dummy_hash_uses_the_same_cost_parameters_as_real_hashes() {
+        let real = hash_password("x").unwrap();
+        let real = PasswordHash::new(&real).unwrap();
+        let dummy = PasswordHash::new(DUMMY_HASH).unwrap();
+        assert_eq!(dummy.algorithm, real.algorithm);
+        assert_eq!(dummy.version, real.version);
+        assert_eq!(dummy.params, real.params);
+    }
+
+    #[test]
+    fn dummy_verification_never_matches() {
+        assert!(!verify_password("anything", DUMMY_HASH).unwrap());
+        assert!(!verify_password("", DUMMY_HASH).unwrap());
+    }
 
     #[test]
     fn hash_and_verify_correct_password() {

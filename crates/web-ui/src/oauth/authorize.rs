@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 use super::oidc_sessions::PendingOidcSession;
 use super::{OAuthState, escape_html_attr};
+use crate::rate_limit::too_many_requests;
 
 /// Query parameters for GET /oauth/authorize (RFC 6749 §4.1.1).
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -153,6 +154,7 @@ pub async fn authorize_get(
         (status = 303, description = "Redirect with authorization code"),
         (status = 400, description = "Invalid request"),
         (status = 401, description = "Invalid credentials"),
+        (status = 429, description = "Too many failed attempts; see Retry-After"),
         (status = 500, description = "Internal server error"),
     )
 )]
@@ -176,6 +178,22 @@ pub async fn authorize_post(
             .into_response();
     }
 
+    // Lock out an account after repeated failures. Unknown emails are counted
+    // too, so the lockout does not reveal which accounts exist.
+    let account_key = email.trim().to_lowercase();
+    let failures = &state.rate_limits.login_failures;
+    if let Err(retry_after) = failures.check(&account_key) {
+        return too_many_requests(retry_after);
+    }
+    let invalid_credentials = || {
+        let _ = failures.try_acquire(&account_key);
+        (
+            StatusCode::UNAUTHORIZED,
+            Html("error: invalid email or password".to_string()),
+        )
+            .into_response()
+    };
+
     // Look up user by email (cross-org) and verify password.
     let user = match state
         .org_storage
@@ -185,11 +203,10 @@ pub async fn authorize_post(
     {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Html("error: invalid email or password".to_string()),
-            )
-                .into_response();
+            // Burn the same argon2 time as a real check so response timing
+            // does not reveal whether the email is registered.
+            assistant_auth::password::verify_dummy(&password);
+            return invalid_credentials();
         }
         Err(e) => {
             tracing::error!("user lookup failed: {e}");
@@ -203,21 +220,12 @@ pub async fn authorize_post(
 
     // Verify password hash.
     if user.password_hash.is_empty() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Html("error: invalid email or password".to_string()),
-        )
-            .into_response();
+        assistant_auth::password::verify_dummy(&password);
+        return invalid_credentials();
     }
     match assistant_auth::password::verify_password(&password, &user.password_hash) {
-        Ok(true) => {}
-        _ => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Html("error: invalid email or password".to_string()),
-            )
-                .into_response();
-        }
+        Ok(true) => failures.reset(&account_key),
+        _ => return invalid_credentials(),
     }
 
     // PKCE is mandatory per OAuth 2.1 §4.1.1 — reject requests without a

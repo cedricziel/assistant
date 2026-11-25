@@ -8,6 +8,7 @@ pub mod install;
 mod oauth;
 mod openapi;
 pub(crate) mod push;
+pub(crate) mod rate_limit;
 pub mod space;
 pub mod sw_version;
 
@@ -124,6 +125,9 @@ struct Args {
     #[arg(long)]
     print_openapi: bool,
 
+    #[command(flatten)]
+    rate_limit: rate_limit::RateLimitArgs,
+
     /// OIDC issuer URL (e.g. "https://auth.example.com/realms/main").
     /// When set, the server uses OIDC for authentication instead of password login.
     #[arg(long, env = "OIDC_ISSUER_URL")]
@@ -187,6 +191,10 @@ async fn run_with_args(args: Args) -> Result<()> {
     // Parse listen address early so we can determine cookie security.
     let addr: SocketAddr = args.listen.parse()?;
     let secure_cookie = !addr.ip().is_loopback() && !args.no_secure_cookie;
+    let rate_limits = Arc::new(rate_limit::RateLimits::new(
+        Arc::new(assistant_core::clock::SystemClock),
+        &args.rate_limit,
+    ));
 
     // Resolve the install root (default: ~/.assistant). Migration and the
     // multi-org factory both work against this path; the runtime db_path is
@@ -756,6 +764,7 @@ async fn run_with_args(args: Args) -> Result<()> {
             secure_cookie,
             oidc_provider,
             oidc_sessions,
+            rate_limits: rate_limits.clone(),
         }
     };
 
@@ -909,6 +918,10 @@ async fn run_with_args(args: Args) -> Result<()> {
         // paths (no auth required — FR-013).
         .fallback(flutter_assets::flutter_handler)
         .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(
+            rate_limits,
+            rate_limit::enforce_ip_limits,
+        ))
         .layer(TraceLayer::new_for_http());
 
     // Warn when binding to a non-loopback address.
@@ -923,7 +936,11 @@ async fn run_with_args(args: Args) -> Result<()> {
     info!("A2A agent card: http://{}/.well-known/agent.json", addr);
     info!("Authentication enabled — enter token at http://{}/", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router.into_make_service()).await?;
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

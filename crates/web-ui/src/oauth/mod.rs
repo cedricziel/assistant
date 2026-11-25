@@ -51,6 +51,8 @@ pub struct OAuthState {
     pub oidc_provider: Option<Arc<OidcProvider>>,
     /// Pending OIDC authorization sessions (state → original params).
     pub oidc_sessions: Option<Arc<PendingOidcSessionStore>>,
+    /// Rate limiters; the password endpoint uses the per-account lockout.
+    pub rate_limits: Arc<crate::rate_limit::RateLimits>,
 }
 
 /// Build the public OAuth2 router (no auth required on these endpoints).
@@ -271,6 +273,12 @@ mod tests {
 
     /// Build a test `OAuthState` backed by in-memory stores.
     async fn test_state() -> OAuthState {
+        test_state_with_clock().await.0
+    }
+
+    /// Like [`test_state`], also returning the clock driving the rate limiters.
+    async fn test_state_with_clock() -> (OAuthState, assistant_core::clock::FakeClock) {
+        let clock = assistant_core::clock::FakeClock::new_at_seed();
         let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
 
         // Seed a test org and user.
@@ -324,7 +332,17 @@ mod tests {
             "http://localhost/oauth/device/verify".into(),
         ));
 
-        OAuthState {
+        let rate_limits = Arc::new(crate::rate_limit::RateLimits::new(
+            Arc::new(clock.clone()),
+            &crate::rate_limit::RateLimitArgs {
+                auth_rate_limit_per_minute: 1000,
+                register_rate_limit_per_hour: 1000,
+                login_max_failures: 3,
+                trust_forwarded_for: false,
+            },
+        ));
+
+        let state = OAuthState {
             oauth2_server,
             jwt_manager,
             client_registrar,
@@ -334,7 +352,9 @@ mod tests {
             secure_cookie: false,
             oidc_provider: None,
             oidc_sessions: None,
-        }
+            rate_limits,
+        };
+        (state, clock)
     }
 
     fn build_app(state: OAuthState) -> Router {
@@ -1070,5 +1090,152 @@ mod tests {
         assert_eq!(claims.email, "alice@example.com");
         // sanity-check: signature checks pass through the existing key pair.
         let _ = JwtKeyPair::generate();
+    }
+
+    // -- per-account lockout and timing -------------------------------------
+
+    async fn register_lockout_client(state: &OAuthState) -> String {
+        let reg_body = serde_json::json!({
+            "client_name": "Lockout Test",
+            "redirect_uris": ["http://localhost/cb"],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"]
+        });
+        let resp = build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        client["client_id"].as_str().unwrap().to_string()
+    }
+
+    async fn attempt_login(
+        state: &OAuthState,
+        client_id: &str,
+        email: &str,
+        password: &str,
+    ) -> axum::response::Response {
+        let (_verifier, challenge) = test_pkce();
+        let form = format!(
+            "email={}&password={password}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256",
+            urlencoding::encode(email)
+        );
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn repeated_failures_lock_the_account_with_retry_after() {
+        let (state, clock) = test_state_with_clock().await;
+        let client_id = register_lockout_client(&state).await;
+
+        for _ in 0..3 {
+            let resp = attempt_login(&state, &client_id, "alice@example.com", "wrong").await;
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        }
+
+        let locked = attempt_login(&state, &client_id, "alice@example.com", "secret123").await;
+        assert_eq!(
+            locked.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "even the right password is refused while locked"
+        );
+        let retry: u64 = locked
+            .headers()
+            .get("retry-after")
+            .expect("Retry-After header")
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!((1..=60).contains(&retry));
+
+        clock.advance(std::time::Duration::from_secs(60));
+        let ok = attempt_login(&state, &client_id, "alice@example.com", "secret123").await;
+        assert_eq!(ok.status(), StatusCode::SEE_OTHER, "lockout expires");
+    }
+
+    #[tokio::test]
+    async fn lockout_is_case_insensitive_on_the_email() {
+        let (state, _clock) = test_state_with_clock().await;
+        let client_id = register_lockout_client(&state).await;
+        for email in [
+            "alice@example.com",
+            "ALICE@example.com",
+            " Alice@Example.com",
+        ] {
+            attempt_login(&state, &client_id, email, "wrong").await;
+        }
+        let resp = attempt_login(&state, &client_id, "alice@EXAMPLE.com", "secret123").await;
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn unknown_emails_are_throttled_like_known_ones() {
+        let (state, _clock) = test_state_with_clock().await;
+        let client_id = register_lockout_client(&state).await;
+        for _ in 0..3 {
+            let resp = attempt_login(&state, &client_id, "ghost@example.com", "wrong").await;
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        }
+        let resp = attempt_login(&state, &client_id, "ghost@example.com", "wrong").await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "lockout must not reveal whether the account exists"
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_login_clears_the_failure_count() {
+        let (state, _clock) = test_state_with_clock().await;
+        let client_id = register_lockout_client(&state).await;
+        for _ in 0..2 {
+            attempt_login(&state, &client_id, "alice@example.com", "wrong").await;
+        }
+        let ok = attempt_login(&state, &client_id, "alice@example.com", "secret123").await;
+        assert_eq!(ok.status(), StatusCode::SEE_OTHER);
+        for _ in 0..2 {
+            let resp = attempt_login(&state, &client_id, "alice@example.com", "wrong").await;
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "counter was reset");
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_email_takes_as_long_as_a_wrong_password() {
+        let (state, _clock) = test_state_with_clock().await;
+        let client_id = register_lockout_client(&state).await;
+
+        let started = std::time::Instant::now();
+        attempt_login(&state, &client_id, "alice@example.com", "wrong").await;
+        let known = started.elapsed();
+
+        let started = std::time::Instant::now();
+        attempt_login(&state, &client_id, "ghost@example.com", "wrong").await;
+        let unknown = started.elapsed();
+
+        assert!(
+            unknown * 2 > known,
+            "unknown-user path ({unknown:?}) must run a password hash like the known-user path ({known:?})"
+        );
     }
 }

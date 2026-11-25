@@ -36,6 +36,7 @@ pub struct RevokeRequest {
     responses(
         (status = 200, description = "Token revoked (or already invalid)"),
         (status = 400, description = "Invalid request", body = OAuthErrorResponse),
+        (status = 429, description = "Rate limit exceeded; see the Retry-After header"),
     )
 )]
 pub async fn revoke(
