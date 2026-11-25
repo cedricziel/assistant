@@ -41,6 +41,7 @@ pub struct IntegrationsApiState {
 
 /// Query parameters of `GET /api/integrations/catalog`.
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListCatalogEntriesQuery {
     /// Case-insensitive text matched against name, domain and description.
     pub q: Option<String>,
