@@ -25,6 +25,7 @@ class _FakePersonasApi extends PersonasApi {
     ValidateStatus? validateStatus,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
+    String? xSpaceId,
   }) async {
     listCallCount++;
     return Response(
