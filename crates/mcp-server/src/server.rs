@@ -9,13 +9,13 @@ use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, CompleteRequestParams, CompleteResult,
     ContentBlock, GetPromptRequestParams, GetPromptResponse, Implementation, ListPromptsResult,
     ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
-    ServerConfig, SubscriptionFilter, Tool,
+    ProgressNotificationParam, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
+    ServerCapabilities, ServerConfig, SubscriptionFilter, Tool,
 };
 use rmcp::service::{NotificationContext, RequestContext, SubscriptionContext};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
-use tracing::warn;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use assistant_core::permission::{PermissionPolicy, PermissionRequest};
@@ -121,20 +121,38 @@ impl AssistantMcpServer {
                 .any(|spec| spec.name == tool_name && spec.requires_confirmation)
     }
 
+    /// Runs one turn. Reports progress at start and completion when the
+    /// request carries a progress token, and cancels the turn when the client
+    /// cancels the request.
     async fn run_prompt(
         &self,
         caller: &Caller,
         input: &Value,
+        context: &RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let prompt = required_str(input, "prompt")?;
-        let turn = self
-            .orchestrator
-            .submit_turn(&caller.auth, prompt, Uuid::new_v4(), Interface::Mcp, None)
-            .await
-            .map_err(|e| {
+        report_progress(context, 0.0, "Turn started").await;
+        let request_id = Uuid::new_v4();
+        let turn = self.orchestrator.submit_turn_with_request_id(
+            &caller.auth,
+            request_id,
+            prompt,
+            Uuid::new_v4(),
+            Interface::Mcp,
+            None,
+        );
+        let turn = tokio::select! {
+            turn = turn => turn.map_err(|e| {
                 warn!(error = %e, "run_prompt failed");
                 ErrorData::internal_error(e.to_string(), None)
-            })?;
+            })?,
+            () = context.ct.cancelled() => {
+                self.orchestrator.cancel_turn(request_id).await;
+                // rmcp sends nothing for a cancelled request.
+                return Err(ErrorData::internal_error("run-prompt was cancelled", None));
+            }
+        };
+        report_progress(context, 1.0, "Turn finished").await;
         Ok(text_result(turn.answer))
     }
 
@@ -167,6 +185,19 @@ fn tool(
         _ => serde_json::Map::from_iter([("type".to_owned(), json!("object"))]),
     };
     Tool::new(name, description, schema)
+}
+
+/// Sends `progress` out of a total of 1 when the request asked for progress.
+async fn report_progress(context: &RequestContext<RoleServer>, progress: f64, message: &str) {
+    let Some(token) = context.meta.get_progress_token() else {
+        return;
+    };
+    let notification = ProgressNotificationParam::new(token, progress)
+        .with_total(1.0)
+        .with_message(message);
+    if let Err(error) = context.peer.notify_progress(notification).await {
+        debug!(%error, "progress notification not delivered");
+    }
 }
 
 fn text_result(text: impl Into<String>) -> CallToolResult {
@@ -233,7 +264,10 @@ impl ServerHandler for AssistantMcpServer {
         // `run-prompt` is exempt from the policy: its tool calls pass the
         // orchestrator's own gate.
         if tool_name == RUN_PROMPT {
-            return self.run_prompt(&caller, &input).await.map(Into::into);
+            return self
+                .run_prompt(&caller, &input, &context)
+                .await
+                .map(Into::into);
         }
 
         // MCP callers cannot be prompted, so the policy decides alone.
