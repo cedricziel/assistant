@@ -16,6 +16,7 @@ void main() {
         'Personas',
         'Webhooks',
         'Agents',
+        'Integrations',
         'Admin',
       ]);
     });
@@ -38,6 +39,7 @@ void main() {
         'Personas',
         'Webhooks',
         'Agents',
+        'Integrations',
         'Admin',
         'Settings',
       ]);
@@ -48,6 +50,7 @@ void main() {
     test('matches overflow destinations and their sub-paths', () {
       expect(isOverflowRoute('/webhooks'), isTrue);
       expect(isOverflowRoute('/webhooks/abc'), isTrue);
+      expect(isOverflowRoute('/integrations'), isTrue);
       expect(isOverflowRoute('/admin/users'), isTrue);
     });
 
@@ -66,7 +69,13 @@ void main() {
     });
 
     test('maps contexts, settings and overflow routes to More', () {
-      for (final path in ['/contexts', '/settings', '/personas', '/admin']) {
+      for (final path in [
+        '/contexts',
+        '/settings',
+        '/personas',
+        '/integrations',
+        '/admin',
+      ]) {
         expect(mobileSelectedIndex(path), 3, reason: path);
       }
     });
@@ -98,8 +107,9 @@ void main() {
     test('indexes into the flat Apple sidebar list', () {
       expect(appleSidebarSelectedIndex('/chat'), 0);
       expect(appleSidebarSelectedIndex('/contexts'), 1);
-      expect(appleSidebarSelectedIndex('/admin'), 7);
-      expect(appleSidebarSelectedIndex('/settings'), 8);
+      expect(appleSidebarSelectedIndex('/integrations'), 7);
+      expect(appleSidebarSelectedIndex('/admin'), 8);
+      expect(appleSidebarSelectedIndex('/settings'), 9);
     });
 
     test('falls back to the first row', () {
@@ -112,7 +122,8 @@ void main() {
       expect(materialSidebarSelectedIndex('/chat'), 0);
       expect(materialSidebarSelectedIndex('/workflows'), 2);
       expect(materialSidebarSelectedIndex('/personas'), 3);
-      expect(materialSidebarSelectedIndex('/admin'), 6);
+      expect(materialSidebarSelectedIndex('/integrations'), 6);
+      expect(materialSidebarSelectedIndex('/admin'), 7);
     });
 
     test('returns -1 for the trailing section and unknown routes', () {

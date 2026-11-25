@@ -20,6 +20,7 @@ import '../features/personas/persona_detail_screen.dart';
 import '../features/personas/persona_file_editor_screen.dart';
 import '../features/personas/personas_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/integrations/catalog_browser_screen.dart';
 import '../features/skills/skill_create_edit_screen.dart';
 import '../features/skills/skill_detail_screen.dart';
 import '../features/skills/skills_screen.dart';
@@ -59,6 +60,7 @@ class AppRoutes {
   static const agentDetail = '/agents/:id';
   static const settings = '/settings';
   static const settingsAccount = '/settings/account';
+  static const integrations = '/integrations';
   static const admin = '/admin';
   static const apiKeys = '/api-keys';
   static const spaceSelector = '/spaces';
@@ -325,6 +327,12 @@ final routerProvider = Provider<GoRouter>((ref) {
                 },
               ),
             ],
+          ),
+
+          // -- Integrations --------------------------------------------------
+          GoRoute(
+            path: AppRoutes.integrations,
+            builder: (context, state) => const CatalogBrowserScreen(),
           ),
 
           // -- Admin ---------------------------------------------------------

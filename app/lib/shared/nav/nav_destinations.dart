@@ -68,6 +68,12 @@ const List<NavDest> overflowDestinations = [
     label: 'Agents',
   ),
   NavDest(
+    path: '/integrations',
+    icon: Icons.hub_outlined,
+    selectedIcon: Icons.hub,
+    label: 'Integrations',
+  ),
+  NavDest(
     path: '/admin',
     icon: Icons.admin_panel_settings_outlined,
     selectedIcon: Icons.admin_panel_settings,

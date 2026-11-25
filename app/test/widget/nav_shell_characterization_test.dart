@@ -29,6 +29,7 @@ const _routes = [
   '/personas',
   '/webhooks',
   '/agents',
+  '/integrations',
   '/admin',
   '/settings',
   '/spaces',
@@ -101,6 +102,7 @@ void main() {
       '/personas': 3,
       '/webhooks': 3,
       '/agents': 3,
+      '/integrations': 3,
       '/admin': 3,
       '/settings': 3,
     };
@@ -133,6 +135,7 @@ void main() {
         'Personas',
         'Webhooks',
         'Agents',
+        'Integrations',
         'Admin',
         'Settings',
         'Log out',
@@ -148,6 +151,9 @@ void main() {
     ) async {
       await _pump(tester, _app(location: '/chat'), size: _phone);
       await tester.tap(find.text('More'));
+      await tester.pumpAndSettle();
+      // The sheet scrolls once every destination no longer fits.
+      await tester.ensureVisible(find.text('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
@@ -177,6 +183,7 @@ void main() {
       '/personas': 'Personas',
       '/webhooks': 'Webhooks',
       '/agents': 'Agents',
+      '/integrations': 'Integrations',
       '/admin': 'Admin',
       '/settings': 'Settings',
     };
@@ -317,8 +324,9 @@ void main() {
       '/personas': 4,
       '/webhooks': 5,
       '/agents': 6,
-      '/admin': 7,
-      '/settings': 8,
+      '/integrations': 7,
+      '/admin': 8,
+      '/settings': 9,
     };
     for (final entry in expected.entries) {
       testWidgets('${entry.key} selects sidebar row ${entry.value}', (
