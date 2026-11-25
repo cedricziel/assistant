@@ -289,8 +289,6 @@ async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
-    use std::time::Duration;
-
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

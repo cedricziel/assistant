@@ -114,19 +114,11 @@ fn normalize_auth(raw: Option<&Value>) -> CatalogAuth {
             .and_then(parse_header_template),
         _ => None,
     };
-    match template {
-        Some(t) => CatalogAuth {
-            kind,
-            header_name: Some(t.header_name),
-            placeholder: Some(t.placeholder),
-            value_prefix: Some(t.value_prefix),
-        },
-        None => CatalogAuth {
-            kind,
-            header_name: None,
-            placeholder: None,
-            value_prefix: None,
-        },
+    CatalogAuth {
+        kind,
+        header_name: template.as_ref().map(|t| t.header_name.clone()),
+        placeholder: template.as_ref().map(|t| t.placeholder.clone()),
+        value_prefix: template.map(|t| t.value_prefix),
     }
 }
 
