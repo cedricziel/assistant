@@ -170,6 +170,38 @@ void main() {
       expect(state.items, isEmpty);
     });
 
+    test('describes an HTTP failure without the Dio boilerplate', () async {
+      final t = _setup(
+        (_) async => throw DioException.badResponse(
+          statusCode: 500,
+          requestOptions: RequestOptions(path: '/api/integrations/catalog'),
+          response: Response(
+            requestOptions: RequestOptions(path: '/api/integrations/catalog'),
+            statusCode: 500,
+          ),
+        ),
+      );
+      addTearDown(t.container.dispose);
+
+      final state = await t.container.read(catalogViewModelProvider.future);
+
+      expect(state.error, 'The server answered with status 500.');
+    });
+
+    test('describes an unreachable server', () async {
+      final t = _setup(
+        (_) async => throw DioException.connectionError(
+          requestOptions: RequestOptions(path: '/api/integrations/catalog'),
+          reason: 'socket',
+        ),
+      );
+      addTearDown(t.container.dispose);
+
+      final state = await t.container.read(catalogViewModelProvider.future);
+
+      expect(state.error, 'The server could not be reached.');
+    });
+
     test('retry reloads after an error', () async {
       var fail = true;
       final t = _setup((_) async {

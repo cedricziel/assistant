@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:assistant_api/assistant_api.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../connection/connection_provider.dart';
@@ -181,7 +182,7 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
         items: const [],
         nextCursor: null,
         isLoading: false,
-        error: e.toString(),
+        error: _describe(e),
       );
     }
   }
@@ -202,6 +203,16 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
     final data = response.data;
     if (data == null) throw StateError('Empty catalog response');
     return (items: data.items.toList(), nextCursor: data.nextCursor);
+  }
+
+  /// A short, user-readable reason; Dio's own message is a multi-line essay.
+  String _describe(Object error) {
+    if (error is DioException) {
+      final status = error.response?.statusCode;
+      if (status != null) return 'The server answered with status $status.';
+      return 'The server could not be reached.';
+    }
+    return error.toString();
   }
 
   List<String> _mergeCategories(
