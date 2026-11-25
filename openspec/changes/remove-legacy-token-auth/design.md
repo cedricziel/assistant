@@ -38,10 +38,28 @@ log in via the UI.
 Both roles go away:
 
 - **As a bearer bypass** — gone with branch 3.
-- **As a seed password** — bootstrap always generates a random 24-char password
-  and writes it to `admin_credentials_file` with mode 0600
-  (`crates/web-ui/src/install.rs:94`). That file already exists in the migration
-  flow; we just remove the `ASSISTANT_WEB_TOKEN` branch in `bootstrap.rs:45`.
+- **As a seed password** — the seed branch in `crates/auth/src/bootstrap.rs` is
+  removed; the initial admin always gets a random 24-character password.
+
+The current code has no first-run admin at all. `bootstrap::create_admin_user`
+had no callers after the single-user migration was removed (9602fcf3), and
+`install::ensure_default_space` seeds only the default org and space. The
+legacy token is therefore today's only way to reach the API on a fresh
+install. This change adds the missing bootstrap, as its own first step,
+before the bypass is removed:
+
+- `install::ensure_initial_admin` runs at web-UI startup, right after
+  `ensure_default_space`. When the default org is in `password` mode and has
+  no users, it calls `bootstrap::ensure_admin_user`. OIDC orgs are skipped
+  because they provision users on first sign-in.
+- The admin is `admin@localhost` with the `OrgAdmin` role in the default
+  space. The password is written to
+  `~/.assistant/orgs/{slug}/admin_credentials.txt` (mode 0600, also enforced
+  on a leftover file). Only the file path is logged, never the password.
+- If the file cannot be written, the user and membership are rolled back and
+  startup fails, so the next start retries instead of leaving an admin nobody
+  can sign in as.
+- A second start finds a user and does nothing.
 
 Rejected alternative: keep `ASSISTANT_WEB_TOKEN` as seed-only. Adds a code path
 nobody will exercise after the first run, and keeping the env var name alive
@@ -92,12 +110,12 @@ to make the SPA the single owner.
 Existing deployments using `ASSISTANT_WEB_TOKEN` need a way to log in once the
 bypass is gone. Two cases:
 
-- **Migrated deployment (has an admin user in `org.db`)** — use the
-  credentials in `admin_credentials_file`, or run reset-password to pick a new
-  one.
-- **Never-migrated deployment** — the bootstrap path runs on every fresh
-  startup if no admin user exists. After this change, on first boot post-
-  upgrade, the bootstrap creates the user and writes the credentials file.
+- **Org already has a user** — the bootstrap does nothing. The operator
+  signs in with their own credentials, or runs reset-password to pick a new
+  password.
+- **Org has no user** — the bootstrap runs on the first start after the
+  upgrade, creates the admin and writes the credentials file. Logs name the
+  file path.
 
 `assistant admin reset-password` is a small but necessary new affordance: a
 CLI that opens `org.db` directly, finds the user, prompts for a new password
@@ -381,9 +399,9 @@ machinery in `crates/web-ui/src/auth.rs` are deleted.
 
 ## Migration sequencing
 
-1. Land the change behind a feature-detection-friendly migration: on first
-   startup after the upgrade, if no admin user exists in `org.db`, run the
-   bootstrap and log the credentials file path prominently.
+1. Land the bootstrap first, while the legacy token still works: on first
+   startup after the upgrade, if the default org has no user in `org.db`, run
+   the bootstrap and log the credentials file path.
 2. Release notes call out: "If you were using `ASSISTANT_WEB_TOKEN`, look up
    your admin password in `~/.assistant/orgs/{slug}/admin_credentials.txt`
    or run `assistant admin reset-password user@host`."
@@ -393,13 +411,12 @@ machinery in `crates/web-ui/src/auth.rs` are deleted.
 
 ## Risks
 
-- **Operator lockout.** If a deployment never ran the migration (legacy
-  single-user setup with `assistant.db` and `ASSISTANT_WEB_TOKEN` only), and
-  also never wrote `admin_credentials_file`, the operator has no way in. The
-  reset-password CLI is the safety net but they need SSH access. Acceptable
-  risk because (a) bootstrap writes the file on the very first migration, (b)
-  pre-existing migrations already happened in 2026-04, so most installs are
-  through it, and (c) reset-password runs as a local OS user.
+- **Operator lockout.** An install whose only credential was the legacy token
+  has no user until the bootstrap runs. The bootstrap creates the admin on
+  the first start after the upgrade (which still accepts the token), so the
+  operator can read the credentials file before the token is removed.
+  Reset-password is the safety net if the file is lost; it needs shell access
+  as the OS user that owns `~/.assistant`.
 - **Forgotten doc surface.** Search before merge: `rg "ASSISTANT_WEB_TOKEN|--auth-token|legacy.token"`.
 - **OpenAPI consumers.** Anyone reading `openapi.json` will see different
   bearer-auth wording. No breaking change to the protocol, just to the prose.
