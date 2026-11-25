@@ -141,78 +141,50 @@ pub struct DeviceCodeResponseSchema {
     pub expires_in: u64,
 }
 
-/// Helper to build an [`AuthContext`] stub for a user who just authenticated
-/// via password or OIDC (before full space roles are loaded).
-pub(crate) fn stub_auth_context(user_id: &str, org_id: &str, email: &str) -> AuthContext {
-    AuthContext {
-        user_id: assistant_core::identity::UserId::from(user_id),
-        org_id: assistant_core::identity::OrgId::from(org_id),
-        email: email.to_string(),
-        space_roles: std::collections::HashMap::new(),
-        scopes: vec![],
-        client_id: String::new(),
-    }
+/// A user's identity as read from `org.db` at token issuance.
+pub(crate) struct IssuedIdentity {
+    pub ctx: AuthContext,
+    /// Session generation the access token must be bound to.
+    pub token_version: u64,
 }
 
-/// Build an [`AuthContext`] for a user who has just authenticated, populating
-/// the real `org_id`, `email`, and `space_roles` from the org-level store.
+/// Build the [`AuthContext`] for a user who has just authenticated, with the
+/// real `org_id`, `email` and `space_roles` from the org-level store.
 ///
-/// Falls back to [`stub_auth_context`] (with `org_id="default"` and empty
-/// roles) only when the user record cannot be loaded — this preserves
-/// the legacy behaviour for callers that still rely on it but means an
-/// authenticated user with a missing DB row still gets a (degraded) JWT
-/// rather than a 500 response.
+/// `Ok(None)` means the user no longer exists, so no token may be issued.
 pub(crate) async fn build_auth_context_for_user(
     org_storage: &OrgStorageLayer,
     user_id: &str,
     client_id: &str,
-) -> AuthContext {
+) -> anyhow::Result<Option<IssuedIdentity>> {
     let user_id_typed = UserId::from(user_id);
 
-    let user = match org_storage.user_store().get_user(&user_id_typed).await {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            tracing::warn!(
-                user_id = %user_id,
-                "user record not found while issuing JWT — falling back to stub context"
-            );
-            let mut ctx = stub_auth_context(user_id, "default", "");
-            ctx.client_id = client_id.to_string();
-            return ctx;
-        }
-        Err(e) => {
-            tracing::error!(
-                user_id = %user_id,
-                error = %e,
-                "user lookup failed while issuing JWT — falling back to stub context"
-            );
-            let mut ctx = stub_auth_context(user_id, "default", "");
-            ctx.client_id = client_id.to_string();
-            return ctx;
-        }
+    let Some(user) = org_storage.user_store().get_user(&user_id_typed).await? else {
+        return Ok(None);
     };
-
+    let Some(session) = org_storage
+        .user_store()
+        .session_state(&user_id_typed)
+        .await?
+    else {
+        return Ok(None);
+    };
     let space_roles = org_storage
         .membership_store()
         .get_space_roles(&user_id_typed)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::error!(
-                user_id = %user_id,
-                error = %e,
-                "membership lookup failed while issuing JWT — proceeding with empty roles"
-            );
-            std::collections::HashMap::new()
-        });
+        .await?;
 
-    AuthContext {
-        user_id: user.id,
-        org_id: user.org_id,
-        email: user.email,
-        space_roles,
-        scopes: vec![],
-        client_id: client_id.to_string(),
-    }
+    Ok(Some(IssuedIdentity {
+        ctx: AuthContext {
+            user_id: user.id,
+            org_id: user.org_id,
+            email: user.email,
+            space_roles,
+            scopes: vec![],
+            client_id: client_id.to_string(),
+        },
+        token_version: session.token_version,
+    }))
 }
 
 #[cfg(test)]
@@ -1090,6 +1062,110 @@ mod tests {
         assert_eq!(claims.email, "alice@example.com");
         // sanity-check: signature checks pass through the existing key pair.
         let _ = JwtKeyPair::generate();
+    }
+
+    // -- token issuance is bound to the user's session generation ------------
+
+    async fn refresh_for(state: &OAuthState, refresh_token: &str) -> axum::response::Response {
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "grant_type=refresh_token&refresh_token={refresh_token}&client_id=webui"
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn issued_identity_carries_the_current_token_version() {
+        let state = test_state().await;
+        let alice = assistant_core::identity::UserId::from("usr_alice");
+        state
+            .org_storage
+            .user_store()
+            .bump_token_version(&alice)
+            .await
+            .unwrap();
+
+        let identity = build_auth_context_for_user(&state.org_storage, "usr_alice", "webui")
+            .await
+            .unwrap()
+            .expect("user exists");
+
+        assert_eq!(identity.token_version, 1);
+        assert_eq!(identity.ctx.org_id, OrgId::from("org_test"));
+    }
+
+    #[tokio::test]
+    async fn no_identity_is_issued_for_a_missing_user() {
+        let state = test_state().await;
+
+        let identity = build_auth_context_for_user(&state.org_storage, "usr_ghost", "webui")
+            .await
+            .unwrap();
+
+        assert!(identity.is_none());
+    }
+
+    #[tokio::test]
+    async fn refreshed_jwt_is_bound_to_the_current_token_version() {
+        let state = test_state().await;
+        let pair = state
+            .oauth2_server
+            .issue_token_pair("usr_alice", "webui", vec![])
+            .await
+            .unwrap();
+        state
+            .org_storage
+            .user_store()
+            .bump_token_version(&assistant_core::identity::UserId::from("usr_alice"))
+            .await
+            .unwrap();
+
+        let resp = refresh_for(&state, &pair.refresh_token).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let tokens: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let claims = state
+            .jwt_manager
+            .validate(tokens["access_token"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(claims.tv, 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_for_a_deleted_user_is_refused() {
+        let state = test_state().await;
+        let pair = state
+            .oauth2_server
+            .issue_token_pair("usr_alice", "webui", vec![])
+            .await
+            .unwrap();
+        state
+            .org_storage
+            .user_store()
+            .delete_user(&assistant_core::identity::UserId::from("usr_alice"))
+            .await
+            .unwrap();
+
+        let resp = refresh_for(&state, &pair.refresh_token).await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(resp.headers().get("set-cookie").is_none());
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(err["error"], "invalid_grant");
     }
 
     // -- per-account lockout and timing -------------------------------------

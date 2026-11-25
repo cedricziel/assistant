@@ -619,13 +619,17 @@ async fn run_with_args(args: Args) -> Result<()> {
     });
     let api_key_store: Arc<dyn assistant_auth::api_keys::ApiKeyStore> =
         Arc::new(org_storage.api_key_store());
-    let auth_config = WebAuthConfig::new(
-        jwt_manager,
-        api_key_store.clone(),
-        legacy_token,
-        legacy_context,
+    let auth_config = WebAuthConfig {
+        auth_state: assistant_auth::middleware::AuthState {
+            jwt_manager,
+            api_key_store: api_key_store.clone(),
+            users: Arc::new(org_storage.user_store()),
+            memberships: Arc::new(org_storage.membership_store()),
+            legacy_token,
+            legacy_context,
+        },
         secure_cookie,
-    );
+    };
 
     // -- Management API states (orgs, users, spaces, members, API keys) ------
     let orgs_api_state = api::orgs::OrgsApiState {

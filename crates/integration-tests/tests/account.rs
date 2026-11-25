@@ -29,6 +29,7 @@ use tower::ServiceExt;
 
 use assistant_auth::api_keys::{ApiKeyRecord, ApiKeyStore, InMemoryApiKeyStore, generate_key};
 use assistant_auth::jwt::{JwtKeyPair, JwtManager};
+use assistant_auth::middleware::AuthState;
 use assistant_auth::oauth2::server::{
     InMemoryRefreshTokenStore, RefreshTokenStore, StoredRefreshToken,
 };
@@ -134,7 +135,17 @@ async fn setup() -> TestEnv {
         "https://test.local".into(),
     );
 
-    let auth_config = WebAuthConfig::new(jwt_validate, api_key_store, None, None, false);
+    let auth_config = WebAuthConfig {
+        auth_state: AuthState {
+            jwt_manager: jwt_validate,
+            api_key_store,
+            users: Arc::new(layer.user_store()),
+            memberships: Arc::new(layer.membership_store()),
+            legacy_token: None,
+            legacy_context: None,
+        },
+        secure_cookie: false,
+    };
 
     let account_state = AccountApiState {
         org_storage: layer.clone(),
@@ -146,7 +157,7 @@ async fn setup() -> TestEnv {
         .route_layer(from_fn_with_state(auth_config, require_auth));
 
     // Sign alice's JWT — this is what the "logged-in client" carries.
-    let alice_jwt = jwt_sign.sign(&alice_ctx(), ORG_SLUG, "Alice").unwrap();
+    let alice_jwt = jwt_sign.sign(&alice_ctx(), ORG_SLUG, "Alice", 0).unwrap();
 
     TestEnv {
         app,
