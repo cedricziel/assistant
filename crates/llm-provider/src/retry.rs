@@ -60,9 +60,10 @@ impl RetryConfig {
 /// - 502: Bad Gateway
 /// - 503: Service Unavailable
 /// - 504: Gateway Timeout
+/// - 524: Origin timeout (Cloudflare, returned by OpenRouter)
 /// - 529: Overloaded (Anthropic-specific)
 pub fn is_transient_status(status: u16) -> bool {
-    matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 529)
+    matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 524 | 529)
 }
 
 /// Markers that identify *permanent* upstream failures even when the message
@@ -148,6 +149,64 @@ fn contains_transient_status_code(msg: &str) -> bool {
         .any(is_transient_status)
 }
 
+// ── Typed provider errors ────────────────────────────────────────────────────
+
+/// A non-2xx response from a provider, kept typed so retries can honor the
+/// status and `Retry-After` instead of guessing from the message text.
+#[derive(Debug, Clone)]
+pub struct ProviderHttpError {
+    pub status: u16,
+    pub message: String,
+    /// Provider-specific error class, e.g. OpenRouter's `metadata.error_type`.
+    pub error_type: Option<String>,
+    pub retry_after: Option<Duration>,
+}
+
+impl std::fmt::Display for ProviderHttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.error_type {
+            Some(kind) => write!(f, "API error ({}, {kind}): {}", self.status, self.message),
+            None => write!(f, "API error ({}): {}", self.status, self.message),
+        }
+    }
+}
+
+impl std::error::Error for ProviderHttpError {}
+
+/// Parse a `Retry-After` header value. Only the delay-seconds form is
+/// supported; the HTTP-date form would need the wall clock, so it yields
+/// `None` and the caller's backoff applies.
+pub fn parse_retry_after(value: &str) -> Option<Duration> {
+    value.trim().parse::<u64>().ok().map(Duration::from_secs)
+}
+
+/// Whether a failed attempt may be retried, and the earliest time to do so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryVerdict {
+    Permanent,
+    Transient { after: Option<Duration> },
+}
+
+/// Classify an error for [`with_retry_hinted`]. A [`ProviderHttpError`] is
+/// judged by its status and carries its `Retry-After`; any other error falls
+/// back to [`is_transient_error_message`]. Billing failures are permanent
+/// either way.
+pub fn classify_provider_error(err: &anyhow::Error) -> RetryVerdict {
+    if let Some(http) = err.downcast_ref::<ProviderHttpError>() {
+        if is_transient_status(http.status) && !is_permanent_billing_error(&http.message) {
+            return RetryVerdict::Transient {
+                after: http.retry_after,
+            };
+        }
+        return RetryVerdict::Permanent;
+    }
+    if is_transient_error_message(&err.to_string()) {
+        RetryVerdict::Transient { after: None }
+    } else {
+        RetryVerdict::Permanent
+    }
+}
+
 // ── Generic async retry helper ───────────────────────────────────────────────
 
 /// Retry an async operation with exponential backoff.
@@ -167,7 +226,7 @@ pub async fn with_retry<F, Fut, T, E, C>(
     config: &RetryConfig,
     provider_name: &str,
     classify: C,
-    mut operation: F,
+    operation: F,
 ) -> Result<T, E>
 where
     F: FnMut() -> Fut,
@@ -175,65 +234,103 @@ where
     E: std::fmt::Display,
     C: Fn(&E) -> bool,
 {
+    with_retry_hinted(
+        config,
+        provider_name,
+        |err| {
+            if classify(err) {
+                RetryVerdict::Transient { after: None }
+            } else {
+                RetryVerdict::Permanent
+            }
+        },
+        operation,
+    )
+    .await
+}
+
+/// Like [`with_retry`], but `classify` may also say how long the provider
+/// asked us to wait. The sleep is the larger of the backoff and that hint. A
+/// hint longer than `config.max_delay_ms` ends the retries: waiting that long
+/// inside one call would stall the turn.
+pub async fn with_retry_hinted<F, Fut, T, E, C>(
+    config: &RetryConfig,
+    provider_name: &str,
+    classify: C,
+    mut operation: F,
+) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+    C: Fn(&E) -> RetryVerdict,
+{
     let mut attempt = 0u32;
     let mut delay_ms = config.initial_delay_ms as f64;
+    let max_delay = Duration::from_millis(config.max_delay_ms);
 
     loop {
-        match operation().await {
+        let err = match operation().await {
             Ok(val) => return Ok(val),
-            Err(err) => {
-                attempt += 1;
-                if attempt > config.max_retries || !classify(&err) {
-                    if attempt > config.max_retries && config.max_retries > 0 {
-                        warn!(
-                            provider = provider_name,
-                            attempts = attempt,
-                            "All {} retry attempts exhausted: {err}",
-                            config.max_retries
-                        );
-                    }
-                    return Err(err);
-                }
-
-                // Compute delay with optional jitter.
-                let actual_delay = if config.jitter {
-                    // Simple jitter: random value between 50% and 100% of delay.
-                    // Uses getrandom for proper randomness instead of
-                    // SystemTime::now() (which is banned in production code by
-                    // the workspace clock lint and was an abuse of the system
-                    // clock for entropy anyway).
-                    let mut buf = [0u8; 4];
-                    let unit = if getrandom::fill(&mut buf).is_ok() {
-                        u32::from_le_bytes(buf) as f64 / u32::MAX as f64
-                    } else {
-                        // Random fill should be infallible on supported
-                        // platforms; if it isn't, fall back to mid-jitter
-                        // (75% of base delay).
-                        0.5
-                    };
-                    let jitter_factor = 0.5 + 0.5 * unit;
-                    delay_ms * jitter_factor
-                } else {
-                    delay_ms
-                };
-
-                let capped_delay = actual_delay.min(config.max_delay_ms as f64);
-
+            Err(err) => err,
+        };
+        attempt += 1;
+        let after = match classify(&err) {
+            RetryVerdict::Permanent => return Err(err),
+            RetryVerdict::Transient { after } => after,
+        };
+        if attempt > config.max_retries {
+            if config.max_retries > 0 {
                 warn!(
                     provider = provider_name,
-                    attempt,
-                    max_retries = config.max_retries,
-                    delay_ms = capped_delay as u64,
-                    "Transient error, retrying: {err}"
+                    attempts = attempt,
+                    "All {} retry attempts exhausted: {err}",
+                    config.max_retries
                 );
-
-                tokio::time::sleep(Duration::from_millis(capped_delay as u64)).await;
-
-                // Increase delay for next attempt.
-                delay_ms *= config.multiplier;
             }
+            return Err(err);
         }
+        if after.is_some_and(|after| after > max_delay) {
+            warn!(
+                provider = provider_name,
+                retry_after_secs = after.map(|a| a.as_secs()),
+                "Provider asked to wait longer than the retry cap; giving up: {err}"
+            );
+            return Err(err);
+        }
+
+        let backoff = Duration::from_millis(
+            jittered(config, delay_ms).min(config.max_delay_ms as f64) as u64,
+        );
+        let wait = after.map_or(backoff, |after| after.max(backoff));
+
+        warn!(
+            provider = provider_name,
+            attempt,
+            max_retries = config.max_retries,
+            delay_ms = wait.as_millis() as u64,
+            "Transient error, retrying: {err}"
+        );
+
+        tokio::time::sleep(wait).await;
+        delay_ms *= config.multiplier;
     }
+}
+
+/// `delay_ms`, scaled to between 50% and 100% when jitter is on.
+fn jittered(config: &RetryConfig, delay_ms: f64) -> f64 {
+    if !config.jitter {
+        return delay_ms;
+    }
+    // getrandom rather than the system clock: the workspace clock lint bans
+    // SystemTime::now() in production code.
+    let mut buf = [0u8; 4];
+    let unit = if getrandom::fill(&mut buf).is_ok() {
+        u32::from_le_bytes(buf) as f64 / u32::MAX as f64
+    } else {
+        0.5
+    };
+    delay_ms * (0.5 + 0.5 * unit)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -479,5 +576,160 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    // -- Retry-After aware retries --
+
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn no_jitter(initial_delay_ms: u64, max_delay_ms: u64) -> RetryConfig {
+        RetryConfig {
+            max_retries: 3,
+            initial_delay_ms,
+            max_delay_ms,
+            jitter: false,
+            ..Default::default()
+        }
+    }
+
+    /// Fails once with `first_error`, then succeeds. Returns the result, the
+    /// number of attempts and the virtual time that passed.
+    async fn fail_once(
+        cfg: &RetryConfig,
+        first_error: anyhow::Error,
+    ) -> (anyhow::Result<&'static str>, u32, Duration) {
+        let attempts = Arc::new(AtomicU32::new(0));
+        let first = std::sync::Mutex::new(Some(first_error));
+        let start = tokio::time::Instant::now();
+        let result = with_retry_hinted(cfg, "test", classify_provider_error, || {
+            let attempts = attempts.clone();
+            let err = first.lock().unwrap().take();
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                match err {
+                    Some(e) => Err(e),
+                    None => Ok("ok"),
+                }
+            }
+        })
+        .await;
+        (result, attempts.load(Ordering::SeqCst), start.elapsed())
+    }
+
+    fn http_error(status: u16, retry_after: Option<u64>) -> anyhow::Error {
+        anyhow::Error::new(ProviderHttpError {
+            status,
+            message: "upstream says no".into(),
+            error_type: None,
+            retry_after: retry_after.map(Duration::from_secs),
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_after_longer_than_backoff_is_honored() {
+        let (result, attempts, elapsed) =
+            fail_once(&no_jitter(100, 60_000), http_error(429, Some(2))).await;
+        assert_eq!(result.unwrap(), "ok", "the second attempt succeeds");
+        assert_eq!(attempts, 2, "one retry");
+        assert!(
+            elapsed >= Duration::from_secs(2),
+            "waited at least Retry-After, not just the 100ms backoff: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn backoff_longer_than_retry_after_wins() {
+        let (_, _, elapsed) = fail_once(&no_jitter(5_000, 60_000), http_error(503, Some(1))).await;
+        assert!(
+            elapsed >= Duration::from_secs(5),
+            "the larger of backoff and Retry-After is used: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_after_beyond_max_delay_gives_up() {
+        let (result, attempts, elapsed) =
+            fail_once(&no_jitter(100, 10_000), http_error(429, Some(120))).await;
+        let err = result.unwrap_err();
+        assert_eq!(attempts, 1, "no retry when Retry-After exceeds max_delay");
+        assert_eq!(elapsed, Duration::ZERO, "no sleep at all");
+        assert_eq!(
+            err.downcast_ref::<ProviderHttpError>().map(|e| e.status),
+            Some(429),
+            "the original error is returned"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn permanent_statuses_are_not_retried() {
+        for status in [400, 401, 402, 403, 404, 413] {
+            let (result, attempts, _) =
+                fail_once(&no_jitter(1, 60_000), http_error(status, None)).await;
+            assert!(result.is_err(), "{status} fails");
+            assert_eq!(attempts, 1, "{status} must not be retried");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn transient_statuses_are_retried() {
+        for status in [408, 429, 500, 502, 503, 504, 524, 529] {
+            let (result, attempts, _) =
+                fail_once(&no_jitter(1, 60_000), http_error(status, None)).await;
+            assert!(result.is_ok(), "{status} is retried and recovers");
+            assert_eq!(attempts, 2, "{status} gets one retry");
+        }
+    }
+
+    #[test]
+    fn untyped_errors_fall_back_to_message_heuristics() {
+        assert_eq!(
+            classify_provider_error(&anyhow::anyhow!("API error (503): busy")),
+            RetryVerdict::Transient { after: None },
+            "plain errors still use is_transient_error_message"
+        );
+        assert_eq!(
+            classify_provider_error(&anyhow::anyhow!("API error (429): insufficient_quota")),
+            RetryVerdict::Permanent,
+            "billing markers stay permanent"
+        );
+    }
+
+    #[test]
+    fn typed_429_with_billing_message_is_permanent() {
+        let err = anyhow::Error::new(ProviderHttpError {
+            status: 429,
+            message: "Insufficient balance, please recharge".into(),
+            error_type: None,
+            retry_after: Some(Duration::from_secs(1)),
+        });
+        assert_eq!(classify_provider_error(&err), RetryVerdict::Permanent);
+    }
+
+    #[test]
+    fn parse_retry_after_accepts_delay_seconds_only() {
+        assert_eq!(parse_retry_after("2"), Some(Duration::from_secs(2)));
+        assert_eq!(parse_retry_after(" 30 "), Some(Duration::from_secs(30)));
+        assert_eq!(
+            parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"),
+            None,
+            "HTTP-date needs the wall clock; fall back to backoff"
+        );
+        assert_eq!(parse_retry_after("-1"), None);
+        assert_eq!(parse_retry_after(""), None);
+    }
+
+    #[test]
+    fn provider_http_error_display_names_status_type_and_message() {
+        let err = ProviderHttpError {
+            status: 502,
+            message: "Provider disconnected".into(),
+            error_type: Some("provider_unavailable".into()),
+            retry_after: None,
+        };
+        let text = err.to_string();
+        assert!(text.contains("502"), "{text}");
+        assert!(text.contains("provider_unavailable"), "{text}");
+        assert!(text.contains("Provider disconnected"), "{text}");
     }
 }

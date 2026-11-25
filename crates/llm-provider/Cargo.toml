@@ -31,6 +31,7 @@ getrandom            = { workspace = true }
 # Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
 assistant-core = { path = "../core", features = ["test-tls"] }
 tempfile             = { workspace = true }
+tokio                = { workspace = true, features = ["test-util"] }
 wiremock             = { workspace = true }
 
 # Panic-free contract: all non-test code in this crate propagates errors
