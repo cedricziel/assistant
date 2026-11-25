@@ -201,6 +201,9 @@ async fn run_with_args(args: Args) -> Result<()> {
     let default_space = install::ensure_default_space(&org_storage)
         .await
         .context("Failed to seed the default org and space")?;
+    install::ensure_initial_admin(&org_storage, &default_space, &base_path)
+        .await
+        .context("Failed to create the initial admin user")?;
     let space_resolver = space::SpaceResolver::new(org_storage.clone(), pool_factory.clone());
 
     // -- Settings --------------------------------------------------------------
