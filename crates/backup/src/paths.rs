@@ -1,4 +1,4 @@
-//! Installation path discovery and SQLite WAL checkpoint helper.
+//! Installation path discovery and the SQLite snapshot helper.
 
 use std::path::{Path, PathBuf};
 
@@ -26,66 +26,44 @@ pub fn default_archive_name() -> String {
     format!("assistant-backup-{}.tar.gz", now.format("%Y%m%d-%H%M%S"))
 }
 
+/// Key material at the install root. A backup is useless without it:
+/// `secrets.key` encrypts stored integration credentials, so losing it makes
+/// every credential in `org.db` unreadable, and `jwt_secret` signs issued
+/// tokens. Restored copies are written with mode `0600`.
+const PRIVATE_FILES: [&str; 2] = ["secrets.key", "jwt_secret"];
+
+/// Other files at the install root that are always part of a backup.
+const ROOT_FILES: [&str; 2] = ["server.toml", "org.db"];
+
+/// Directories under the install root that are backed up recursively.
+///
+/// `orgs/` holds every org's config, catalog and spaces (`space.db`, agents,
+/// skills). The rest are the install-root persona and skill directories and
+/// the interface state stores. Anything else, such as `cache/` (regenerated
+/// on demand), `backups/` and `*.legacy` snapshots, is left out.
+const ROOT_DIRS: [&str; 5] = ["agents", "skills", "orgs", "matrix-state", "signal-store"];
+
 /// Walk `install_dir` and return all files to include in a backup.
 ///
-/// The returned paths are absolute. The function skips `backups/` itself to
-/// avoid recursive inclusion of previous backup archives.
-pub fn discover_files(install_dir: &Path, db_path: Option<&Path>) -> Result<Vec<PathBuf>> {
+/// The returned paths are absolute and in a deterministic order. SQLite
+/// `-wal` and `-shm` side files are not listed: databases are archived as
+/// consistent snapshots (see [`snapshot_sqlite`]) that already contain the
+/// WAL contents, and a stale side file restored next to a snapshot could
+/// corrupt it.
+pub fn discover_files(install_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = Vec::new();
 
-    // server.toml, then each org's org.toml
-    let server_config = install_dir.join("server.toml");
-    if server_config.exists() {
-        files.push(server_config);
-    }
-    collect_org_configs(install_dir, &mut files)?;
-
-    // SQLite database (potentially at a custom path)
-    let db = db_path
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| install_dir.join("assistant.db"));
-
-    if db.exists() {
-        files.push(db.clone());
-    }
-    // WAL and SHM files alongside the main db.
-    // Use with_file_name to append the suffix rather than with_extension, which
-    // would replace the extension (e.g. "assistant.sqlite" → "assistant.db-wal"
-    // instead of the correct "assistant.sqlite-wal").
-    if let Some(name) = db.file_name() {
-        let name = name.to_string_lossy();
-        let wal = db.with_file_name(format!("{}-wal", name));
-        if wal.exists() {
-            files.push(wal);
-        }
-        let shm = db.with_file_name(format!("{}-shm", name));
-        if shm.exists() {
-            files.push(shm);
+    for name in ROOT_FILES.into_iter().chain(PRIVATE_FILES) {
+        let path = install_dir.join(name);
+        if path.is_file() {
+            files.push(path);
         }
     }
-
-    // agents/ directory tree
-    let agents_dir = install_dir.join("agents");
-    if agents_dir.exists() {
-        collect_dir_files(&agents_dir, &mut files)?;
-    }
-
-    // skills/ directory tree
-    let skills_dir = install_dir.join("skills");
-    if skills_dir.exists() {
-        collect_dir_files(&skills_dir, &mut files)?;
-    }
-
-    // matrix-state/ (optional)
-    let matrix_dir = install_dir.join("matrix-state");
-    if matrix_dir.exists() {
-        collect_dir_files(&matrix_dir, &mut files)?;
-    }
-
-    // signal-store/ (optional)
-    let signal_dir = install_dir.join("signal-store");
-    if signal_dir.exists() {
-        collect_dir_files(&signal_dir, &mut files)?;
+    for name in ROOT_DIRS {
+        let dir = install_dir.join(name);
+        if dir.is_dir() {
+            collect_dir_files(&dir, &mut files)?;
+        }
     }
 
     debug!(
@@ -96,24 +74,23 @@ pub fn discover_files(install_dir: &Path, db_path: Option<&Path>) -> Result<Vec<
     Ok(files)
 }
 
-/// Collect `orgs/*/org.toml`, ordered by org slug.
-fn collect_org_configs(install_dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    let orgs_dir = install_dir.join("orgs");
-    if !orgs_dir.is_dir() {
-        return Ok(());
-    }
-    let mut org_dirs: Vec<_> = std::fs::read_dir(&orgs_dir)
-        .with_context(|| format!("reading directory {:?}", orgs_dir))?
-        .collect::<Result<_, _>>()?;
-    org_dirs.sort_by_key(|e| e.path());
+/// Whether `path` is a SQLite database file that must be snapshotted.
+pub fn is_sqlite_db(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "db")
+}
 
-    for org_dir in org_dirs {
-        let org_config = org_dir.path().join("org.toml");
-        if org_config.is_file() {
-            out.push(org_config);
-        }
-    }
-    Ok(())
+/// Whether `path` is key material that must not be readable by other users.
+pub fn is_private_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| PRIVATE_FILES.contains(&n))
+}
+
+/// Whether `path` is a SQLite `-wal` or `-shm` side file.
+fn is_sqlite_sidecar(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with(".db-wal") || n.ends_with(".db-shm"))
 }
 
 /// Recursively collect all regular files under `dir` in deterministic order.
@@ -131,43 +108,49 @@ fn collect_dir_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let meta = entry.metadata()?;
         if meta.is_dir() {
             collect_dir_files(&path, out)?;
-        } else if meta.is_file() {
+        } else if meta.is_file() && !is_sqlite_sidecar(&path) {
             out.push(path);
         }
     }
     Ok(())
 }
 
-/// Issue a WAL checkpoint on the SQLite database at `db_path` using a
-/// read-only connection, then close the connection.
+/// Return a transactionally consistent copy of the SQLite database at
+/// `db_path`, including rows that are still only in its `-wal` file.
 ///
-/// This folds any outstanding WAL data back into the main database file,
-/// making a subsequent file copy consistent.
-pub async fn checkpoint_sqlite(db_path: &Path) -> Result<()> {
-    use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
-    use sqlx::{ConnectOptions, Connection};
+/// Uses `VACUUM INTO`, which reads inside a single read transaction, so a
+/// server that keeps writing cannot produce a torn copy. Copying the main
+/// file and its side files one by one cannot give that guarantee.
+pub async fn snapshot_sqlite(db_path: &Path) -> Result<Vec<u8>> {
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{Connection, SqliteConnection};
 
-    // Use SqliteConnectOptions::new().filename() rather than constructing a
-    // "sqlite://" URL to avoid issues with Windows paths containing backslashes
-    // that sqlx's URL parser cannot handle reliably.
-    let opts = SqliteConnectOptions::new()
+    // `filename()` rather than a `sqlite://` URL: sqlx's URL parser cannot
+    // handle Windows paths with backslashes reliably.
+    let options = SqliteConnectOptions::new()
         .filename(db_path)
-        .read_only(true)
-        .journal_mode(SqliteJournalMode::Wal);
-
-    let mut conn = opts
-        .connect()
+        .read_only(true);
+    let mut conn = SqliteConnection::connect_with(&options)
         .await
-        .with_context(|| format!("opening SQLite {:?} for checkpoint", db_path))?;
+        .with_context(|| format!("opening SQLite {db_path:?} for snapshot"))?;
 
-    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+    let scratch = tempfile::tempdir().context("creating snapshot scratch directory")?;
+    let target = scratch.path().join("snapshot.db");
+    let snapshot = sqlx::query("VACUUM INTO ?1")
+        .bind(target.to_string_lossy().into_owned())
         .execute(&mut conn)
         .await
-        .with_context(|| "executing WAL checkpoint")?;
+        .with_context(|| format!("snapshotting SQLite {db_path:?}"));
+    if let Err(e) = conn.close().await {
+        debug!("closing snapshot connection for {db_path:?}: {e}");
+    }
+    snapshot?;
 
-    conn.close().await.ok();
-    debug!("WAL checkpoint completed for {:?}", db_path);
-    Ok(())
+    let bytes = tokio::fs::read(&target)
+        .await
+        .with_context(|| format!("reading snapshot of {db_path:?}"))?;
+    debug!("snapshotted {:?} ({} bytes)", db_path, bytes.len());
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -187,34 +170,116 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn discovers_server_toml_and_every_org_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        touch(dir.path(), "server.toml");
-        touch(dir.path(), "orgs/globex/org.toml");
-        touch(dir.path(), "orgs/acme/org.toml");
-
-        let files = discover_files(dir.path(), None).unwrap();
-
-        assert_eq!(
-            relative(dir.path(), files),
-            ["server.toml", "orgs/acme/org.toml", "orgs/globex/org.toml"]
-        );
+    /// A 0.2.0-style install: two orgs with two spaces each, plus the
+    /// root-level files and the things a backup must leave out.
+    fn seed_multi_org_install(root: &Path) {
+        for rel in [
+            "server.toml",
+            "org.db",
+            "secrets.key",
+            "jwt_secret",
+            "agents/default/SOUL.md",
+            "skills/triage/SKILL.md",
+        ] {
+            touch(root, rel);
+        }
+        for org in ["globex", "acme"] {
+            touch(root, &format!("orgs/{org}/org.toml"));
+            touch(root, &format!("orgs/{org}/catalog/templates/weekly.md"));
+            for space in ["ops", "eng"] {
+                let space_dir = format!("orgs/{org}/spaces/{space}");
+                touch(root, &format!("{space_dir}/space.db"));
+                touch(root, &format!("{space_dir}/agents/p1/SOUL.md"));
+                touch(root, &format!("{space_dir}/agents/p1/memory/note.md"));
+                touch(root, &format!("{space_dir}/skills/s1/SKILL.md"));
+            }
+        }
     }
 
     #[test]
-    fn skips_org_directories_without_an_org_toml() {
+    fn discovers_the_whole_multi_org_tree() {
         let dir = tempfile::tempdir().unwrap();
-        touch(dir.path(), "orgs/acme/org.db");
+        seed_multi_org_install(dir.path());
 
-        assert!(discover_files(dir.path(), None).unwrap().is_empty());
+        let found = relative(dir.path(), discover_files(dir.path()).unwrap());
+
+        let mut expected = vec![
+            "server.toml".to_string(),
+            "org.db".into(),
+            "secrets.key".into(),
+            "jwt_secret".into(),
+            "agents/default/SOUL.md".into(),
+            "skills/triage/SKILL.md".into(),
+        ];
+        for org in ["acme", "globex"] {
+            expected.push(format!("orgs/{org}/catalog/templates/weekly.md"));
+            expected.push(format!("orgs/{org}/org.toml"));
+            for space in ["eng", "ops"] {
+                let space_dir = format!("orgs/{org}/spaces/{space}");
+                expected.push(format!("{space_dir}/agents/p1/SOUL.md"));
+                expected.push(format!("{space_dir}/agents/p1/memory/note.md"));
+                expected.push(format!("{space_dir}/skills/s1/SKILL.md"));
+                expected.push(format!("{space_dir}/space.db"));
+            }
+        }
+        let mut found_sorted = found.clone();
+        found_sorted.sort();
+        expected.sort();
+        assert_eq!(found_sorted, expected);
+        assert_eq!(found.len(), expected.len(), "no file may be listed twice");
     }
 
     #[test]
-    fn a_leftover_config_toml_is_not_archived() {
+    fn leaves_out_regenerable_and_unrelated_paths() {
         let dir = tempfile::tempdir().unwrap();
-        touch(dir.path(), "config.toml");
+        seed_multi_org_install(dir.path());
+        for rel in [
+            "cache/integrations/index.json",
+            "backups/assistant-backup-20260101-000000.tar.gz",
+            "assistant.db",
+            "assistant.db.legacy",
+            "config.toml",
+        ] {
+            touch(dir.path(), rel);
+        }
 
-        assert!(discover_files(dir.path(), None).unwrap().is_empty());
+        let found = relative(dir.path(), discover_files(dir.path()).unwrap());
+
+        for excluded in [
+            "cache/",
+            "backups/",
+            "assistant.db",
+            "config.toml",
+            ".legacy",
+        ] {
+            assert!(
+                !found.iter().any(|f| f.contains(excluded)),
+                "{excluded} must not be archived, found {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sqlite_sidecars_are_never_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "org.db");
+        touch(dir.path(), "org.db-wal");
+        touch(dir.path(), "org.db-shm");
+        touch(dir.path(), "orgs/acme/spaces/eng/space.db");
+        touch(dir.path(), "orgs/acme/spaces/eng/space.db-wal");
+        touch(dir.path(), "orgs/acme/spaces/eng/space.db-shm");
+
+        let found = relative(dir.path(), discover_files(dir.path()).unwrap());
+
+        assert_eq!(found, ["org.db", "orgs/acme/spaces/eng/space.db"]);
+    }
+
+    #[test]
+    fn a_missing_install_dir_yields_no_files() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let found = discover_files(&dir.path().join("absent")).unwrap();
+
+        assert!(found.is_empty());
     }
 }

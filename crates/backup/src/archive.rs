@@ -12,6 +12,7 @@ use tracing::debug;
 
 use crate::checksum::sha256_hex;
 use crate::manifest::BackupManifest;
+use crate::paths::{is_private_file, is_sqlite_db};
 
 /// Write a `.tar.gz` archive to `output_path`.
 ///
@@ -27,8 +28,8 @@ pub fn write_tar_gz(
     let tmp_path = output_path.with_extension("tar.gz.tmp");
 
     let result = (|| -> Result<u64> {
-        let file =
-            std::fs::File::create(&tmp_path).with_context(|| format!("creating {:?}", tmp_path))?;
+        // The archive holds `secrets.key` and `jwt_secret`, so keep it private.
+        let file = open_private(&tmp_path).with_context(|| format!("creating {:?}", tmp_path))?;
         let gz = GzEncoder::new(file, Compression::default());
         let mut tar = tar::Builder::new(gz);
 
@@ -61,6 +62,53 @@ pub fn write_tar_gz(
             Err(e)
         }
     }
+}
+
+/// Create (or truncate) `path` writable by the owner only on Unix.
+fn open_private(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// Delete the `-wal`/`-shm` files next to a database about to be replaced:
+/// SQLite would replay a stale WAL onto the restored database.
+fn remove_stale_sidecars(db: &Path) -> Result<()> {
+    for suffix in ["-wal", "-shm"] {
+        let mut side = db.as_os_str().to_owned();
+        side.push(suffix);
+        match std::fs::remove_file(&side) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("removing stale {side:?}")),
+        }
+    }
+    Ok(())
+}
+
+/// Write one restored file, with mode `0600` for key material.
+fn write_restored(dest: &Path, data: &[u8]) -> Result<()> {
+    if is_sqlite_db(dest) {
+        remove_stale_sidecars(dest)?;
+    }
+    if !is_private_file(dest) {
+        return std::fs::write(dest, data).with_context(|| format!("writing {dest:?}"));
+    }
+    let mut file = open_private(dest).with_context(|| format!("writing {dest:?}"))?;
+    // `mode` only applies when the file is created; fix up an existing one.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("restricting {dest:?}"))?;
+    }
+    file.write_all(data)
+        .with_context(|| format!("writing {dest:?}"))
 }
 
 /// Append raw bytes as a tar entry with the given name.
@@ -209,7 +257,7 @@ pub fn extract_tar_gz(
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating directory {:?}", parent))?;
         }
-        std::fs::write(dest, data).with_context(|| format!("writing {:?}", dest))?;
+        write_restored(dest, data)?;
         debug!("restored {:?}", dest);
     }
 
