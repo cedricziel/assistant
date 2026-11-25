@@ -75,6 +75,7 @@ async fn resolve_ollama() -> Result<(Option<ContainerAsync<GenericImage>>, Strin
 }
 
 async fn pull_model(base_url: &str, model: &str) -> Result<()> {
+    assistant_core::tls::install_ring();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
         .build()?;

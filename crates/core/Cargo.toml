@@ -24,9 +24,18 @@ hex = { workspace = true }
 getrandom = { workspace = true }
 # tokio sync primitives (mpsc::Sender in LlmProvider trait)
 tokio = { workspace = true }
+# TLS provider install helper (`tls::install_ring`)
+rustls = { workspace = true }
+ctor = { workspace = true, optional = true }
+
+[features]
+# Installs the ring provider before any test `main` runs. Crates whose tests build
+# reqwest clients enable it from `[dev-dependencies]`; binaries call `tls::install_ring`.
+test-tls = ["dep:ctor"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+reqwest = { workspace = true }
 
 # Panic-free contract: all non-test code in this crate either propagates
 # errors via `Result<_, anyhow::Error>` or recovers from `std::sync::Mutex`
