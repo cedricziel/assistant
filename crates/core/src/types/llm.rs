@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::default_true;
+use crate::secret::Secret;
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ pub struct EmbeddingConfig {
     pub base_url: Option<String>,
     /// API key (also checked via provider-specific env vars:
     /// `OPENAI_API_KEY`, `VOYAGE_API_KEY`).
-    pub api_key: Option<String>,
+    pub api_key: Option<Secret>,
 }
 
 // ── LLM config ────────────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ pub struct LlmConfig {
     /// For Anthropic, also checked via `ANTHROPIC_API_KEY` env var.
     /// For OpenAI, also checked via `OPENAI_API_KEY` env var.
     #[serde(default)]
-    pub api_key: Option<String>,
+    pub api_key: Option<Secret>,
     /// Provider-specific Anthropic options.
     #[serde(default)]
     pub anthropic: AnthropicOptions,
@@ -353,6 +354,7 @@ pub struct OpenRouterOptions {
 #[cfg(test)]
 mod tests {
     use super::{EmbeddingConfig, EmbeddingProviderKind, LlmConfig, LlmProviderKind};
+    use crate::secret::Secret;
 
     // -- EmbeddingConfig deserialization --------------------------------------
 
@@ -371,7 +373,10 @@ mod tests {
             cfg.base_url.as_deref(),
             Some("https://custom.voyage.example.com")
         );
-        assert_eq!(cfg.api_key.as_deref(), Some("pa-test-key"));
+        assert_eq!(
+            cfg.api_key.as_ref().map(Secret::expose),
+            Some("pa-test-key")
+        );
     }
 
     #[test]
@@ -437,7 +442,7 @@ mod tests {
         let emb = cfg.embeddings.expect("embeddings should be Some");
         assert_eq!(emb.provider, EmbeddingProviderKind::Voyage);
         assert_eq!(emb.model.as_deref(), Some("voyage-3-lite"));
-        assert_eq!(emb.api_key.as_deref(), Some("pa-secret"));
+        assert_eq!(emb.api_key.as_ref().map(Secret::expose), Some("pa-secret"));
     }
 
     #[test]

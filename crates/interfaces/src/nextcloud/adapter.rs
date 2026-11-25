@@ -7,7 +7,6 @@
 //! HMAC-SHA256 signing logic is unchanged — it lives in `signing.rs`.
 
 use assistant_core::clock::{Clock, SystemClock};
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +14,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use assistant_core::types::channels::NextcloudConfig;
 use assistant_core::{
-    Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, ToolHandler,
+    Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, Secret, ToolHandler,
     types::conversation::ChannelType,
 };
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
@@ -26,11 +25,15 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use futures::stream::Stream;
+use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use crate::common::pending_cache;
+
 use super::config::NextcloudConfigExt;
+use super::replay::{REPLAY_CAPACITY, REPLAY_WINDOW, ReplayGuard};
 use super::signing::{sign_request, verify_signature};
 use super::types::WebhookEvent;
 
@@ -44,16 +47,18 @@ const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
 pub struct NextcloudAdapter {
     config: NextcloudConfig,
     server_url: String,
-    secret: String,
+    secret: Secret,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
     /// Stores pending ⏳ message IDs keyed by conversation_token.
     /// Used to remove the hourglass reaction in on_turn_start.
-    pending_message_ids: Arc<Mutex<HashMap<String, String>>>,
+    pending_message_ids: Arc<Mutex<LruCache<String, String>>>,
     /// Optional audio transcription provider for voice messages.
     transcription: Option<Arc<dyn TranscriptionProvider>>,
     /// BCP-47 language hint passed to the transcription provider.
     transcription_language: Option<String>,
+    /// Set when the webhook server dies; read by the interface runner.
+    serve_failure: ServeFailure,
 }
 
 impl NextcloudAdapter {
@@ -71,10 +76,16 @@ impl NextcloudAdapter {
             secret,
             stop_tx,
             stop_rx,
-            pending_message_ids: Arc::new(Mutex::new(HashMap::new())),
+            pending_message_ids: Arc::new(Mutex::new(pending_cache())),
             transcription: None,
             transcription_language: None,
+            serve_failure: ServeFailure::default(),
         })
+    }
+
+    /// Why the webhook server stopped, if it stopped because of an error.
+    pub fn serve_failure(&self) -> Option<String> {
+        self.serve_failure.get()
     }
 
     /// Attach a transcription provider for inbound voice messages.
@@ -92,13 +103,32 @@ impl NextcloudAdapter {
 // ── Shared axum state ────────────────────────────────────────────────────────
 
 struct WebhookState {
-    secret: String,
+    secret: Secret,
     server_url: String,
     allowed_channels: Vec<String>,
     allowed_users: Vec<String>,
     tx: mpsc::Sender<ChannelMessage>,
     transcription: Option<Arc<dyn TranscriptionProvider>>,
     transcription_language: Option<String>,
+    replay: ReplayGuard,
+}
+
+/// Records why the webhook server stopped, so the runner can fail visibly
+/// instead of treating a dead server as a quiet end of stream.
+#[derive(Clone, Default)]
+struct ServeFailure(Arc<std::sync::OnceLock<String>>);
+
+impl ServeFailure {
+    fn record(&self, result: std::io::Result<()>) {
+        if let Err(e) = result {
+            error!(error = %e, "Nextcloud: webhook server stopped unexpectedly");
+            let _ = self.0.set(e.to_string());
+        }
+    }
+
+    fn get(&self) -> Option<String> {
+        self.0.get().cloned()
+    }
 }
 
 // ── ChannelAdapter impl ───────────────────────────────────────────────────────
@@ -125,6 +155,7 @@ impl ChannelAdapter for NextcloudAdapter {
             tx,
             transcription: self.transcription.clone(),
             transcription_language: self.transcription_language.clone(),
+            replay: ReplayGuard::new(Arc::new(SystemClock), REPLAY_WINDOW, REPLAY_CAPACITY),
         });
 
         // Bind before spawning so failures propagate as errors from start().
@@ -134,6 +165,7 @@ impl ChannelAdapter for NextcloudAdapter {
         info!(addr = %listen_addr, "Nextcloud: webhook server listening");
 
         let mut stop_rx = self.stop_rx.clone();
+        let serve_failure = self.serve_failure.clone();
 
         tokio::spawn(async move {
             let app = Router::new()
@@ -141,11 +173,12 @@ impl ChannelAdapter for NextcloudAdapter {
                 .route("/webhook", post(webhook_handler))
                 .with_state(state);
 
-            let _ = axum::serve(listener, app)
+            let result = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     let _ = stop_rx.changed().await;
                 })
                 .await;
+            serve_failure.record(result);
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -158,7 +191,7 @@ impl ChannelAdapter for NextcloudAdapter {
             ChannelContent::Text(text) => {
                 http_post_message(
                     &self.server_url,
-                    &self.secret,
+                    self.secret.expose(),
                     conversation_token,
                     &text,
                     None,
@@ -195,7 +228,7 @@ impl ChannelAdapter for NextcloudAdapter {
                 let reply_to: Option<i64> = thread_id.parse().ok();
                 http_post_message(
                     &self.server_url,
-                    &self.secret,
+                    self.secret.expose(),
                     conversation_token,
                     &text,
                     reply_to,
@@ -255,11 +288,11 @@ impl ChannelAdapter for NextcloudAdapter {
         self.pending_message_ids
             .lock()
             .await
-            .insert(conversation_token.clone(), message_id.clone());
+            .put(conversation_token.clone(), message_id.clone());
         // Add ⏳ reaction (best-effort; Talk < 17 returns 404, which we ignore).
         if let Err(e) = http_add_reaction(
             &self.server_url,
-            &self.secret,
+            self.secret.expose(),
             &conversation_token,
             &message_id,
             "⏳",
@@ -280,18 +313,24 @@ impl ChannelAdapter for NextcloudAdapter {
             .pending_message_ids
             .lock()
             .await
-            .remove(conversation_token);
+            .pop(conversation_token);
         if let Some(mid) = message_id {
             let _ = http_remove_reaction(
                 &self.server_url,
-                &self.secret,
+                self.secret.expose(),
                 conversation_token,
                 &mid,
                 "⏳",
             )
             .await;
         }
-        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, true).await;
+        let _ = http_send_typing(
+            &self.server_url,
+            self.secret.expose(),
+            conversation_token,
+            true,
+        )
+        .await;
         Ok(())
     }
 
@@ -303,7 +342,13 @@ impl ChannelAdapter for NextcloudAdapter {
         attachments: &[Attachment],
     ) -> Result<()> {
         let conversation_token = &user.platform_id;
-        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, false).await;
+        let _ = http_send_typing(
+            &self.server_url,
+            self.secret.expose(),
+            conversation_token,
+            false,
+        )
+        .await;
         if attachments.is_empty() {
             return Ok(());
         }
@@ -324,7 +369,7 @@ impl ChannelAdapter for NextcloudAdapter {
         );
         let _ = http_post_message(
             &self.server_url,
-            &self.secret,
+            self.secret.expose(),
             conversation_token,
             &notice,
             None,
@@ -335,10 +380,16 @@ impl ChannelAdapter for NextcloudAdapter {
 
     async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
         let conversation_token = &user.platform_id;
-        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, false).await;
+        let _ = http_send_typing(
+            &self.server_url,
+            self.secret.expose(),
+            conversation_token,
+            false,
+        )
+        .await;
         let _ = http_post_message(
             &self.server_url,
-            &self.secret,
+            self.secret.expose(),
             conversation_token,
             &format!("Sorry, something went wrong: {err}"),
             None,
@@ -376,8 +427,15 @@ async fn webhook_handler(
         }
     };
 
-    if !verify_signature(&state.secret, &random, &body, &signature) {
+    if !verify_signature(state.secret.expose(), &random, &body, &signature) {
         warn!("Nextcloud: invalid webhook signature");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    // Only signed requests reach the guard, so unauthenticated callers cannot
+    // fill it.
+    if !state.replay.check_and_record(&random) {
+        warn!("Nextcloud: rejected replayed webhook");
         return StatusCode::UNAUTHORIZED;
     }
 
@@ -401,7 +459,7 @@ async fn webhook_handler(
     let audio_transcript = transcribe_webhook_audio(
         &event,
         &state.server_url,
-        &state.secret,
+        state.secret.expose(),
         &state.transcription,
         &state.transcription_language,
     )
@@ -856,13 +914,14 @@ mod tests {
     ) {
         let (tx, rx) = channel(8);
         let state = Arc::new(WebhookState {
-            secret: SECRET.to_string(),
+            secret: SECRET.into(),
             server_url: "http://nextcloud.example".to_string(),
             allowed_channels: vec![],
             allowed_users: vec![],
             tx,
             transcription: None,
             transcription_language: None,
+            replay: ReplayGuard::new(Arc::new(SystemClock), REPLAY_WINDOW, REPLAY_CAPACITY),
         });
         (state, rx)
     }
@@ -912,6 +971,79 @@ mod tests {
         let headers = sign_headers(SECRET, body_str);
         let status = webhook_handler(State(state), headers, Bytes::from(body_str)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn pending_message_ids_stay_bounded_when_turns_never_start() {
+        use crate::common::PENDING_CAPACITY;
+
+        let adapter = NextcloudAdapter::new(NextcloudConfig {
+            server_url: Some("http://127.0.0.1:1".to_string()),
+            secret: Some(SECRET.into()),
+            ..Default::default()
+        })
+        .unwrap();
+        for i in 0..PENDING_CAPACITY + 5 {
+            let msg = ChannelMessage {
+                channel_type: ChannelType::Nextcloud,
+                platform_message_id: Some(i.to_string()),
+                sender: ChannelUser {
+                    platform_id: format!("room-{i}"),
+                    display_name: None,
+                },
+                content: ChannelContent::Text("hi".into()),
+                thread_id: None,
+                timestamp: SystemClock.now(),
+                metadata: Default::default(),
+            };
+            adapter.on_message_received(&msg).await.unwrap();
+        }
+        let pending = adapter.pending_message_ids.lock().await;
+        assert_eq!(pending.len(), PENDING_CAPACITY);
+        assert!(pending.peek("room-0").is_none(), "oldest entry evicted");
+        assert!(
+            pending
+                .peek(&format!("room-{}", PENDING_CAPACITY + 4))
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn webhook_handler_rejects_replayed_request() {
+        let (state, _rx) = make_webhook_state();
+        let body_str = serde_json::json!({
+            "type": "Update",
+            "actor": { "type": "Person", "id": "users/alice", "name": "Alice" },
+            "object": { "type": "Note", "id": "msg-1", "name": "message", "content": "{}" },
+        })
+        .to_string();
+        let headers = sign_headers(SECRET, &body_str);
+
+        let first = webhook_handler(
+            State(state.clone()),
+            headers.clone(),
+            Bytes::from(body_str.clone().into_bytes()),
+        )
+        .await;
+        let second =
+            webhook_handler(State(state), headers, Bytes::from(body_str.into_bytes())).await;
+
+        assert_eq!(first, StatusCode::OK, "first delivery is accepted");
+        assert_eq!(
+            second,
+            StatusCode::UNAUTHORIZED,
+            "reusing the same random must be rejected"
+        );
+    }
+
+    #[test]
+    fn serve_error_is_recorded_for_the_runner() {
+        let failure = ServeFailure::default();
+        failure.record(Ok(()));
+        assert_eq!(failure.get(), None, "clean shutdown is not a failure");
+
+        failure.record(Err(std::io::Error::other("accept loop died")));
+        assert_eq!(failure.get().as_deref(), Some("accept loop died"));
     }
 
     #[tokio::test]
@@ -993,7 +1125,7 @@ mod tests {
 
         let config = NextcloudConfig {
             server_url: Some("http://localhost".to_string()),
-            secret: Some("s3cret".to_string()),
+            secret: Some("s3cret".into()),
             ..Default::default()
         };
         let adapter = NextcloudAdapter::new(config)

@@ -6,7 +6,6 @@
 //! `futures::Stream`.
 
 use assistant_core::clock::{Clock, SystemClock};
-use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -27,13 +26,13 @@ use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::client::SlackApiClient;
 use super::config::SlackConfigExt;
 
-use crate::common::{BACKOFF_MIN, sleep_backoff};
+use crate::common::{Reconnect, pending_cache};
 
 /// Maximum audio file size downloaded for transcription (25 MB — Whisper API limit).
 /// LRU capacity for the in-process cache of Slack thread roots that the bot
@@ -58,7 +57,7 @@ pub struct SlackAdapter {
     /// Optional storage layer for seeding thread history on first turn.
     storage: Option<Arc<StorageLayer>>,
     /// Set of `platform_id`s for which history has already been seeded.
-    seeded_keys: Arc<Mutex<HashSet<String>>>,
+    seeded_keys: Arc<Mutex<LruCache<String, ()>>>,
     /// Optional audio transcription provider for voice messages.
     transcription: Option<Arc<dyn TranscriptionProvider>>,
     /// BCP-47 language hint passed to the transcription provider.
@@ -82,10 +81,20 @@ impl SlackAdapter {
             stop_tx,
             stop_rx,
             storage: None,
-            seeded_keys: Arc::new(Mutex::new(HashSet::new())),
+            seeded_keys: Arc::new(Mutex::new(pending_cache())),
             transcription: None,
             transcription_language: None,
         })
+    }
+
+    /// Record that `key` has been seen; `true` when this is the first time
+    /// (or the entry was evicted), meaning history should be seeded.
+    async fn mark_seeded(&self, key: &str) -> bool {
+        self.seeded_keys
+            .lock()
+            .await
+            .put(key.to_string(), ())
+            .is_none()
     }
 
     /// Attach a storage layer to enable thread-history seeding on first turn.
@@ -154,34 +163,27 @@ impl ChannelAdapter for SlackAdapter {
             let mut active_threads: LruCache<String, ()> =
                 LruCache::new(ACTIVE_THREAD_CACHE_CAPACITY);
 
-            let mut backoff = BACKOFF_MIN;
+            let mut reconnect = Reconnect::new(stop_rx.clone());
             loop {
-                // Check stop signal.
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
 
                 // Get a fresh WebSocket URL on each connection attempt.
-                let ws_url = match client.apps_connections_open().await {
-                    Ok(url) => url,
-                    Err(e) => {
-                        error!(error = %e, "apps.connections.open failed; retrying");
-                        sleep_backoff(&mut backoff, &mut stop_rx).await;
-                        continue;
-                    }
-                };
-
-                let ws_stream = match connect_async(&ws_url).await {
-                    Ok((stream, _)) => stream,
-                    Err(e) => {
-                        error!(error = %e, "WebSocket connect failed; retrying");
-                        sleep_backoff(&mut backoff, &mut stop_rx).await;
-                        continue;
-                    }
+                let connected = async {
+                    let ws_url = client.apps_connections_open().await?;
+                    let (stream, _) = connect_async(&ws_url).await?;
+                    anyhow::Ok(stream)
+                }
+                .await;
+                let Some(ws_stream) = reconnect
+                    .connect_or_backoff(connected, "Slack Socket Mode connect failed")
+                    .await
+                else {
+                    continue;
                 };
 
                 info!("Slack Socket Mode connected");
-                backoff = BACKOFF_MIN; // reset on success
 
                 let (mut ws_write, mut ws_read) = futures::StreamExt::split(ws_stream);
 
@@ -411,10 +413,10 @@ impl ChannelAdapter for SlackAdapter {
                     }
                 }
 
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
-                sleep_backoff(&mut backoff, &mut stop_rx).await;
+                reconnect.backoff().await;
             }
         });
 
@@ -559,11 +561,7 @@ impl ChannelAdapter for SlackAdapter {
         // Seed thread history into the conversation store on first touch.
         if let Some(storage) = &self.storage {
             let platform_id = user.platform_id.clone();
-            let already_seeded = {
-                let mut seeded = self.seeded_keys.lock().await;
-                !seeded.insert(platform_id.clone())
-            };
-            if !already_seeded {
+            if self.mark_seeded(&platform_id).await {
                 let thread_key = thread_ts.as_deref().unwrap_or("").to_string();
                 if !channel.is_empty() && !thread_key.is_empty() {
                     match self
@@ -957,8 +955,7 @@ mod tests {
 
     fn make_adapter(server: &MockServer) -> SlackAdapter {
         let client = Arc::new(
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap(),
+            SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap(),
         );
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         SlackAdapter {
@@ -967,10 +964,27 @@ mod tests {
             stop_tx,
             stop_rx,
             storage: None,
-            seeded_keys: Arc::new(Mutex::new(Default::default())),
+            seeded_keys: Arc::new(Mutex::new(pending_cache())),
             transcription: None,
             transcription_language: None,
         }
+    }
+
+    #[tokio::test]
+    async fn seeded_keys_stay_bounded() {
+        use crate::common::PENDING_CAPACITY;
+
+        let server = MockServer::start().await;
+        let adapter = make_adapter(&server);
+        assert!(adapter.mark_seeded("C1/1.0").await, "first sighting seeds");
+        assert!(
+            !adapter.mark_seeded("C1/1.0").await,
+            "second sighting skips"
+        );
+        for i in 0..PENDING_CAPACITY + 5 {
+            adapter.mark_seeded(&format!("C/{i}")).await;
+        }
+        assert_eq!(adapter.seeded_keys.lock().await.len(), PENDING_CAPACITY);
     }
 
     fn make_msg(channel: &str, ts: &str) -> ChannelMessage {
@@ -1079,9 +1093,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         let event = serde_json::json!({
             "files": [{
@@ -1201,9 +1213,7 @@ mod tests {
     #[tokio::test]
     async fn extract_image_skips_non_image_files() {
         let server = MockServer::start().await;
-        let client =
-            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
-                .unwrap();
+        let client = SlackApiClient::with_base_url("xoxb-test", "xapp-test", server.uri()).unwrap();
 
         let event = serde_json::json!({
             "files": [{

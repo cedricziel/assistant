@@ -86,11 +86,16 @@ impl NextcloudInterface {
         }
         let adapter = Arc::new(adapter);
 
-        let mut runner = ChannelRunner::new(adapter, self.orchestrator.clone());
+        let mut runner = ChannelRunner::new(adapter.clone(), self.orchestrator.clone());
         if let Some(token) = &self.shutdown {
             runner = runner.with_shutdown(token.clone());
         }
-        runner.run().await
+        runner.run().await?;
+
+        match adapter.serve_failure() {
+            Some(cause) => anyhow::bail!("Nextcloud webhook server failed: {cause}"),
+            None => Ok(()),
+        }
     }
 }
 

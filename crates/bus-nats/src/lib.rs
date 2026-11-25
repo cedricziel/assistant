@@ -44,6 +44,7 @@ use uuid::Uuid;
 use assistant_core::types::storage::BusConfig;
 use assistant_core::{
     BusMessage, ClaimFilter, MAX_TURN_REDELIVERIES, MessageBus, MessageStatus, PublishRequest,
+    Secret,
 };
 
 // -- Header keys ------------------------------------------------------------
@@ -85,8 +86,8 @@ const MAX_DELIVER: i64 = MAX_TURN_REDELIVERIES as i64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ResolvedNatsAuth {
     CredentialsFile(String),
-    Token(String),
-    UserPassword { username: String, password: String },
+    Token(Secret),
+    UserPassword { username: String, password: Secret },
     None,
 }
 
@@ -183,11 +184,14 @@ impl NatsMessageBus {
             }
             ResolvedNatsAuth::Token(tok) => {
                 debug!("NATS auth: token");
-                async_nats::ConnectOptions::with_token(tok)
+                async_nats::ConnectOptions::with_token(tok.expose().to_owned())
             }
             ResolvedNatsAuth::UserPassword { username, password } => {
                 debug!(user = %username, "NATS auth: username/password");
-                async_nats::ConnectOptions::with_user_and_password(username, password)
+                async_nats::ConnectOptions::with_user_and_password(
+                    username,
+                    password.expose().to_owned(),
+                )
             }
             ResolvedNatsAuth::None => async_nats::ConnectOptions::new(),
         };
@@ -294,7 +298,10 @@ where
         return ResolvedNatsAuth::CredentialsFile(path);
     }
 
-    let token = config.token.clone().or_else(|| get_env("NATS_TOKEN"));
+    let token = config
+        .token
+        .clone()
+        .or_else(|| get_env("NATS_TOKEN").map(Secret::from));
     if let Some(tok) = token {
         return ResolvedNatsAuth::Token(tok);
     }
@@ -304,8 +311,8 @@ where
         let password = config
             .password
             .clone()
-            .or_else(|| get_env("NATS_PASSWORD"))
-            .unwrap_or_default();
+            .or_else(|| get_env("NATS_PASSWORD").map(Secret::from))
+            .unwrap_or_else(|| Secret::new(""));
         return ResolvedNatsAuth::UserPassword { username, password };
     }
 
@@ -792,9 +799,9 @@ mod tests {
     #[test]
     fn test_auth_resolution_prefers_credentials_file() {
         let config = BusConfig {
-            token: Some("token-config".to_string()),
+            token: Some(Secret::new("token-config")),
             username: Some("user-config".to_string()),
-            password: Some("pass-config".to_string()),
+            password: Some(Secret::new("pass-config")),
             credentials_file: Some("/config.creds".to_string()),
             ..Default::default()
         };
@@ -809,14 +816,14 @@ mod tests {
     #[test]
     fn test_auth_resolution_prefers_token_over_user_password() {
         let config = BusConfig {
-            token: Some("token-config".to_string()),
+            token: Some(Secret::new("token-config")),
             username: Some("user-config".to_string()),
-            password: Some("pass-config".to_string()),
+            password: Some(Secret::new("pass-config")),
             ..Default::default()
         };
 
         let auth = resolve_nats_auth_with(&config, |_| None);
-        assert_eq!(auth, ResolvedNatsAuth::Token("token-config".to_string()));
+        assert_eq!(auth, ResolvedNatsAuth::Token(Secret::new("token-config")));
     }
 
     #[test]
@@ -832,7 +839,7 @@ mod tests {
             auth,
             ResolvedNatsAuth::UserPassword {
                 username: "env-user".to_string(),
-                password: "env-pass".to_string(),
+                password: Secret::new("env-pass"),
             }
         );
     }

@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
+use assistant_core::Secret;
 use assistant_core::types::llm::LlmConfig;
 use assistant_core::{
     Capabilities, ChatHistoryMessage, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta,
@@ -55,7 +56,7 @@ impl MoonshotProvider {
         let config = ChatCompletionsConfig {
             model,
             base_url,
-            api_key: api_key.to_string(),
+            api_key: Secret::new(api_key),
             timeout_secs,
             max_tokens,
             extra_headers: vec![],
@@ -82,7 +83,7 @@ impl MoonshotProvider {
         let api_key = cfg
             .api_key
             .clone()
-            .or_else(|| std::env::var("MOONSHOT_API_KEY").ok())
+            .or_else(|| std::env::var("MOONSHOT_API_KEY").ok().map(Secret::from))
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "Moonshot API key not found. Set api_key in [llm] config or \
@@ -104,7 +105,7 @@ impl MoonshotProvider {
         Self::new(
             cfg.model.clone(),
             base_url,
-            &api_key,
+            api_key.expose(),
             cfg.timeout_secs,
             max_tokens,
             web_search_enabled,

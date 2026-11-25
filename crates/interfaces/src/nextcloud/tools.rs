@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use tracing::{debug, warn};
 
 use assistant_core::{
-    ToolHandler, ToolOutput, sanitize_llm_output, types::conversation::ExecutionContext,
+    Secret, ToolHandler, ToolOutput, sanitize_llm_output, types::conversation::ExecutionContext,
 };
 
 use super::signing::sign_request;
@@ -38,7 +38,7 @@ pub struct NextcloudReplyHandler {
     /// Nextcloud server base URL (e.g. `"https://nextcloud.example.com"`).
     server_url: String,
     /// Shared secret for signing requests.
-    secret: String,
+    secret: Secret,
     /// Conversation token (room) to reply in.
     conversation_token: String,
     /// Message ID to reply to (the triggering message).
@@ -50,7 +50,7 @@ pub struct NextcloudReplyHandler {
 impl NextcloudReplyHandler {
     pub fn new(
         server_url: String,
-        secret: String,
+        secret: Secret,
         conversation_token: String,
         reply_to_id: String,
     ) -> Self {
@@ -128,7 +128,7 @@ impl ToolHandler for NextcloudReplyHandler {
         }
 
         let body_str = body.to_string();
-        let (random, signature) = match sign_request(&self.secret, &body_str) {
+        let (random, signature) = match sign_request(self.secret.expose(), &body_str) {
             Ok(pair) => pair,
             Err(e) => return Ok(ToolOutput::error(format!("Signing failed: {e}"))),
         };
@@ -182,7 +182,7 @@ pub struct NextcloudReactHandler {
     /// Nextcloud server base URL.
     server_url: String,
     /// Shared secret for signing requests.
-    secret: String,
+    secret: Secret,
     /// Conversation token.
     conversation_token: String,
     /// Message ID to react to.
@@ -194,7 +194,7 @@ pub struct NextcloudReactHandler {
 impl NextcloudReactHandler {
     pub fn new(
         server_url: String,
-        secret: String,
+        secret: Secret,
         conversation_token: String,
         message_id: String,
     ) -> Self {
@@ -248,7 +248,7 @@ impl ToolHandler for NextcloudReactHandler {
 
         let body = serde_json::json!({ "reaction": reaction });
         let body_str = body.to_string();
-        let (random, signature) = match sign_request(&self.secret, &body_str) {
+        let (random, signature) = match sign_request(self.secret.expose(), &body_str) {
             Ok(pair) => pair,
             Err(e) => return Ok(ToolOutput::error(format!("Signing failed: {e}"))),
         };
@@ -299,20 +299,20 @@ impl ToolHandler for NextcloudReactHandler {
 /// Build the per-turn extension tools for a specific Nextcloud Talk message.
 pub fn build_nextcloud_tools(
     server_url: &str,
-    secret: &str,
+    secret: &Secret,
     conversation_token: &str,
     message_id: &str,
 ) -> Vec<Arc<dyn ToolHandler>> {
     vec![
         Arc::new(NextcloudReplyHandler::new(
             server_url.to_string(),
-            secret.to_string(),
+            secret.clone(),
             conversation_token.to_string(),
             message_id.to_string(),
         )),
         Arc::new(NextcloudReactHandler::new(
             server_url.to_string(),
-            secret.to_string(),
+            secret.clone(),
             conversation_token.to_string(),
             message_id.to_string(),
         )),
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn build_nextcloud_tools_returns_two_tools() {
-        let tools = build_nextcloud_tools("https://nc.local", "secret", "token", "42");
+        let tools = build_nextcloud_tools("https://nc.local", &"secret".into(), "token", "42");
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].name(), "reply");
         assert_eq!(tools[1].name(), "nextcloud-react");

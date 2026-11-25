@@ -4,6 +4,7 @@
 //! in [`AssistantConfig`][assistant_core::types::agent::AssistantConfig].  This module
 //! re-exports it and adds runtime helpers that depend on env vars.
 
+pub use assistant_core::Secret;
 pub use assistant_core::types::channels::MatrixConfig;
 
 /// Extension methods for [`MatrixConfig`] that resolve values from env vars.
@@ -16,10 +17,10 @@ pub trait MatrixConfigExt {
     fn resolved_username(&self) -> Option<String>;
 
     /// Return the access token, falling back to `MATRIX_ACCESS_TOKEN`.
-    fn resolved_access_token(&self) -> Option<String>;
+    fn resolved_access_token(&self) -> Option<Secret>;
 
     /// Return the password, falling back to `MATRIX_PASSWORD`.
-    fn resolved_password(&self) -> Option<String>;
+    fn resolved_password(&self) -> Option<Secret>;
 
     /// Return the state store path (no env-var fallback; uses runtime default).
     fn resolved_state_store_path(&self) -> Option<String>;
@@ -38,16 +39,16 @@ impl MatrixConfigExt for MatrixConfig {
             .or_else(|| std::env::var("MATRIX_USERNAME").ok())
     }
 
-    fn resolved_access_token(&self) -> Option<String> {
+    fn resolved_access_token(&self) -> Option<Secret> {
         self.access_token
             .clone()
-            .or_else(|| std::env::var("MATRIX_ACCESS_TOKEN").ok())
+            .or_else(|| std::env::var("MATRIX_ACCESS_TOKEN").ok().map(Secret::from))
     }
 
-    fn resolved_password(&self) -> Option<String> {
+    fn resolved_password(&self) -> Option<Secret> {
         self.password
             .clone()
-            .or_else(|| std::env::var("MATRIX_PASSWORD").ok())
+            .or_else(|| std::env::var("MATRIX_PASSWORD").ok().map(Secret::from))
     }
 
     #[allow(dead_code)]
@@ -65,8 +66,8 @@ mod tests {
         let cfg = MatrixConfig {
             homeserver_url: Some("https://matrix.example.com".to_string()),
             username: Some("@bot:example.com".to_string()),
-            access_token: Some("tok-abc".to_string()),
-            password: Some("s3cr3t".to_string()),
+            access_token: Some("tok-abc".into()),
+            password: Some("s3cr3t".into()),
             ..Default::default()
         };
         assert_eq!(
@@ -80,12 +81,12 @@ mod tests {
             "username should be returned verbatim"
         );
         assert_eq!(
-            cfg.resolved_access_token().as_deref(),
+            cfg.resolved_access_token().as_ref().map(Secret::expose),
             Some("tok-abc"),
             "access_token should be returned verbatim"
         );
         assert_eq!(
-            cfg.resolved_password().as_deref(),
+            cfg.resolved_password().as_ref().map(Secret::expose),
             Some("s3cr3t"),
             "password should be returned verbatim"
         );
@@ -125,7 +126,11 @@ mod tests {
             Some("@bot:example.com"),
             "username"
         );
-        assert_eq!(cfg.access_token.as_deref(), Some("tok-xyz"), "access_token");
+        assert_eq!(
+            cfg.access_token.as_ref().map(Secret::expose),
+            Some("tok-xyz"),
+            "access_token"
+        );
         assert_eq!(cfg.device_id.as_deref(), Some("MYDEVICE"), "device_id");
         assert_eq!(
             cfg.state_store_path.as_deref(),
@@ -156,7 +161,7 @@ mod tests {
             "homeserver_url from AssistantConfig"
         );
         assert_eq!(
-            mx.access_token.as_deref(),
+            mx.access_token.as_ref().map(Secret::expose),
             Some("tok-abc"),
             "access_token from AssistantConfig"
         );

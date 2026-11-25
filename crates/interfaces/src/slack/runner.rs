@@ -118,12 +118,13 @@ impl InterfaceRunner for SlackInterface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assistant_core::Secret;
     use assistant_core::types::channels::SlackConfig;
 
     fn config_with_tokens(bot: Option<&str>, app: Option<&str>) -> SlackConfig {
         SlackConfig {
-            bot_token: bot.map(String::from),
-            app_token: app.map(String::from),
+            bot_token: bot.map(Secret::from),
+            app_token: app.map(Secret::from),
             ..Default::default()
         }
     }

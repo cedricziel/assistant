@@ -57,7 +57,7 @@ impl MattermostInterface {
             )
         })?;
 
-        let client = Arc::new(MattermostClient::new(&server_url, &token)?);
+        let client = Arc::new(MattermostClient::new(&server_url, token.expose())?);
         let mut adapter = MattermostAdapter::new(
             client,
             self.config.allowed_channels.clone(),

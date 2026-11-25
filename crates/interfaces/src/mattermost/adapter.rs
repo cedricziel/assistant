@@ -5,7 +5,6 @@
 //! Automatic exponential-backoff reconnection is built in.
 
 use assistant_core::clock::{Clock, SystemClock};
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -18,15 +17,16 @@ use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_au
 use async_trait::async_trait;
 use futures::SinkExt;
 use futures::stream::Stream;
+use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::mattermost::client::MattermostClient;
 
-use crate::common::{BACKOFF_MIN, sleep_backoff};
+use crate::common::{Reconnect, pending_cache};
 
 /// Maximum audio download size (25 MB).
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
@@ -41,7 +41,7 @@ pub struct MattermostAdapter {
     /// Stores the post ID that the hourglass reaction was added to in `on_message_received`,
     /// keyed by platform_id (channel_id/thread_root).  Used for precise removal in
     /// `on_turn_start` regardless of threading.
-    pending_post_ids: Arc<Mutex<HashMap<String, String>>>,
+    pending_post_ids: Arc<Mutex<LruCache<String, String>>>,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
     /// Optional audio transcription provider for voice messages.
@@ -62,7 +62,7 @@ impl MattermostAdapter {
             allowed_channels,
             allowed_users,
             bot_user_id: Arc::new(tokio::sync::RwLock::new(None)),
-            pending_post_ids: Arc::new(Mutex::new(HashMap::new())),
+            pending_post_ids: Arc::new(Mutex::new(pending_cache())),
             stop_tx,
             stop_rx,
             transcription: None,
@@ -124,24 +124,22 @@ impl ChannelAdapter for MattermostAdapter {
         let (tx, rx) = mpsc::channel::<ChannelMessage>(64);
 
         tokio::spawn(async move {
-            let mut backoff = BACKOFF_MIN;
+            let mut reconnect = Reconnect::new(stop_rx.clone());
             loop {
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
 
                 let ws_url = client.ws_url();
-                let ws_stream = match connect_async(&ws_url).await {
-                    Ok((stream, _)) => stream,
-                    Err(e) => {
-                        error!(error = %e, "Mattermost WS connect failed; retrying");
-                        sleep_backoff(&mut backoff, &mut stop_rx).await;
-                        continue;
-                    }
+                let connected = connect_async(&ws_url).await.map(|(stream, _)| stream);
+                let Some(ws_stream) = reconnect
+                    .connect_or_backoff(connected, "Mattermost WS connect failed")
+                    .await
+                else {
+                    continue;
                 };
 
                 info!("Mattermost WebSocket connected");
-                backoff = BACKOFF_MIN;
 
                 let (mut ws_write, mut ws_read) = futures::StreamExt::split(ws_stream);
 
@@ -149,12 +147,12 @@ impl ChannelAdapter for MattermostAdapter {
                 let auth = serde_json::json!({
                     "seq": 1,
                     "action": "authentication_challenge",
-                    "data": { "token": client.token }
+                    "data": { "token": client.token.expose() }
                 })
                 .to_string();
                 if ws_write.send(WsMessage::Text(auth.into())).await.is_err() {
                     warn!("Mattermost WS auth send failed; reconnecting");
-                    sleep_backoff(&mut backoff, &mut stop_rx).await;
+                    reconnect.backoff().await;
                     continue;
                 }
 
@@ -231,10 +229,10 @@ impl ChannelAdapter for MattermostAdapter {
                     }
                 }
 
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
-                sleep_backoff(&mut backoff, &mut stop_rx).await;
+                reconnect.backoff().await;
             }
         });
 
@@ -359,7 +357,7 @@ impl ChannelAdapter for MattermostAdapter {
             self.pending_post_ids
                 .lock()
                 .await
-                .insert(msg.sender.platform_id.clone(), post_id);
+                .put(msg.sender.platform_id.clone(), post_id);
         }
         Ok(())
     }
@@ -374,7 +372,7 @@ impl ChannelAdapter for MattermostAdapter {
             .and_then(|g| g.clone())
             .unwrap_or_default();
         if !bot_user_id.is_empty() {
-            let post_id = self.pending_post_ids.lock().await.remove(&user.platform_id);
+            let post_id = self.pending_post_ids.lock().await.pop(&user.platform_id);
             if let Some(pid) = post_id
                 && let Err(e) = self
                     .client
@@ -644,6 +642,44 @@ mod tests {
         let adapter = adapter.with_transcription(Arc::new(DummyProvider), Some("en".to_string()));
         assert!(adapter.transcription.is_some());
         assert_eq!(adapter.transcription_language.as_deref(), Some("en"));
+    }
+
+    #[tokio::test]
+    async fn pending_post_ids_stay_bounded_when_turns_never_start() {
+        use crate::common::PENDING_CAPACITY;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/reactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        let client = Arc::new(
+            crate::mattermost::client::MattermostClient::new(server.uri(), "tok").unwrap(),
+        );
+        let adapter = MattermostAdapter::new(client, vec![], vec![]);
+        *adapter.bot_user_id.write().await = Some("bot".to_string());
+
+        for i in 0..PENDING_CAPACITY + 5 {
+            let msg = ChannelMessage {
+                channel_type: ChannelType::Mattermost,
+                platform_message_id: Some(format!("post-{i}")),
+                sender: ChannelUser {
+                    platform_id: format!("chan-{i}"),
+                    display_name: None,
+                },
+                content: ChannelContent::Text("hi".into()),
+                thread_id: None,
+                timestamp: SystemClock.now(),
+                metadata: Default::default(),
+            };
+            adapter.on_message_received(&msg).await.unwrap();
+        }
+        let pending = adapter.pending_post_ids.lock().await;
+        assert_eq!(pending.len(), PENDING_CAPACITY);
+        assert!(pending.peek("chan-0").is_none(), "oldest entry evicted");
     }
 
     #[test]

@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::secret::Secret;
+
 /// Storage configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StorageConfig {
@@ -54,10 +56,10 @@ pub struct BusConfig {
     pub username: Option<String>,
     /// Password for NATS authentication.
     /// Falls back to the `NATS_PASSWORD` environment variable.
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     /// Authentication token for NATS.
     /// Falls back to the `NATS_TOKEN` environment variable.
-    pub token: Option<String>,
+    pub token: Option<Secret>,
     /// Path to a `.creds` file for NATS JWT + NKey authentication.
     /// Falls back to the `NATS_CREDENTIALS_FILE` environment variable.
     pub credentials_file: Option<String>,

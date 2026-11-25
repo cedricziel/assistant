@@ -26,11 +26,11 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::http::Request;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use super::config::{SignalConfig, SignalConfigExt};
 
-use crate::common::{BACKOFF_MIN, sleep_backoff};
+use crate::common::Reconnect;
 
 /// Maximum audio download size (25 MB).
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
@@ -78,7 +78,7 @@ impl SignalAdapter {
     fn basic_auth_header(&self) -> Option<String> {
         let user = self.config.resolved_api_user()?;
         let pass = self.config.resolved_api_password().unwrap_or_default();
-        let encoded = B64_STANDARD.encode(format!("{user}:{pass}"));
+        let encoded = B64_STANDARD.encode(format!("{user}:{}", pass.expose()));
         Some(format!("Basic {encoded}"))
     }
 }
@@ -109,46 +109,39 @@ impl ChannelAdapter for SignalAdapter {
         let (tx, rx) = mpsc::channel::<ChannelMessage>(64);
 
         tokio::spawn(async move {
-            let mut backoff = BACKOFF_MIN;
+            let mut reconnect = Reconnect::new(stop_rx.clone());
 
             // Build the WebSocket URL (ws:// or wss://).
             let ws_url = build_ws_url(&api_url, &phone_number);
 
             loop {
                 // Check stop signal before each connection attempt.
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
 
                 // Build a Request so we can attach the Authorization header.
-                let connect_result = if let Some(ref auth) = auth_header {
-                    match Request::builder()
-                        .uri(&ws_url)
-                        .header("Authorization", auth)
-                        .body(())
-                    {
-                        Ok(req) => connect_async(req).await,
-                        Err(e) => {
-                            error!(error = %e, "signal: failed to build WebSocket request; retrying");
-                            sleep_backoff(&mut backoff, &mut stop_rx).await;
-                            continue;
-                        }
-                    }
-                } else {
-                    connect_async(&ws_url).await
-                };
-
-                let ws_stream = match connect_result {
-                    Ok((stream, _)) => stream,
-                    Err(e) => {
-                        error!(error = %e, url = %ws_url, "signal: WebSocket connect failed; retrying");
-                        sleep_backoff(&mut backoff, &mut stop_rx).await;
-                        continue;
-                    }
+                let connected = async {
+                    let (stream, _) = if let Some(ref auth) = auth_header {
+                        let req = Request::builder()
+                            .uri(&ws_url)
+                            .header("Authorization", auth)
+                            .body(())?;
+                        connect_async(req).await?
+                    } else {
+                        connect_async(&ws_url).await?
+                    };
+                    anyhow::Ok(stream)
+                }
+                .await;
+                let Some(ws_stream) = reconnect
+                    .connect_or_backoff(connected, "signal: WebSocket connect failed")
+                    .await
+                else {
+                    continue;
                 };
 
                 info!(url = %ws_url, "signal: WebSocket connected");
-                backoff = BACKOFF_MIN; // reset on success
 
                 let (_ws_write, mut ws_read) = futures::StreamExt::split(ws_stream);
 
@@ -216,10 +209,10 @@ impl ChannelAdapter for SignalAdapter {
                     }
                 }
 
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
-                sleep_backoff(&mut backoff, &mut stop_rx).await;
+                reconnect.backoff().await;
             }
         });
 
@@ -618,7 +611,7 @@ fn build_reqwest_client(config: &SignalConfig) -> Result<reqwest::Client> {
     let mut headers = reqwest::header::HeaderMap::new();
     if let Some(user) = config.resolved_api_user() {
         let pass = config.resolved_api_password().unwrap_or_default();
-        let encoded = B64_STANDARD.encode(format!("{user}:{pass}"));
+        let encoded = B64_STANDARD.encode(format!("{user}:{}", pass.expose()));
         let auth_value = reqwest::header::HeaderValue::from_str(&format!("Basic {encoded}"))?;
         headers.insert(reqwest::header::AUTHORIZATION, auth_value);
     }
@@ -892,10 +885,26 @@ mod tests {
         let cfg = SignalConfig {
             phone_number: Some("+14155550123".to_string()),
             api_user: Some("admin".to_string()),
-            api_password: Some("s3cret".to_string()),
+            api_password: Some("s3cret".into()),
             ..Default::default()
         };
         let _ = build_reqwest_client(&cfg).unwrap();
+    }
+
+    #[test]
+    fn basic_auth_header_encodes_the_real_password() {
+        let adapter = SignalAdapter::new(SignalConfig {
+            phone_number: Some("+14155550123".to_string()),
+            api_user: Some("admin".to_string()),
+            api_password: Some("s3cret".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            adapter.basic_auth_header().as_deref(),
+            Some(format!("Basic {}", B64_STANDARD.encode("admin:s3cret")).as_str()),
+            "the redacting Display must not leak into the credential"
+        );
     }
 
     #[test]

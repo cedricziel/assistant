@@ -7,11 +7,10 @@
 //! Auto-accepts room invitations via `POST /join/<room_id>`.
 
 use assistant_core::clock::{Clock, SystemClock};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
@@ -21,9 +20,12 @@ use assistant_core::{
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest};
 use async_trait::async_trait;
 use futures::stream::Stream;
+use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+use crate::common::{Reconnect, pending_cache};
 
 use super::client::MatrixClient;
 
@@ -49,7 +51,47 @@ pub struct MatrixAdapter {
     /// Stores the reaction event IDs for pending ⏳ hourglass reactions,
     /// keyed by room_id.  A VecDeque is used so that multiple queued messages
     /// in the same room are redacted in FIFO order without losing track.
-    pending_reactions: Arc<Mutex<HashMap<String, VecDeque<String>>>>,
+    pending_reactions: Arc<Mutex<PendingReactions>>,
+}
+
+/// Most ⏳ reactions remembered per room before the oldest is dropped.
+const MAX_PENDING_PER_ROOM: usize = 64;
+
+/// Reaction event IDs awaiting redaction, per room, oldest first.
+///
+/// Bounded in both dimensions: rooms are LRU-evicted and each room's queue
+/// drops its oldest entry once full, so turns that never reach
+/// `on_turn_start` cannot grow it without limit.
+struct PendingReactions {
+    rooms: LruCache<String, VecDeque<String>>,
+}
+
+impl PendingReactions {
+    fn new() -> Self {
+        Self {
+            rooms: pending_cache(),
+        }
+    }
+
+    fn push(&mut self, room_id: String, reaction_id: String) {
+        if let Some(queue) = self.rooms.get_mut(&room_id) {
+            if queue.len() >= MAX_PENDING_PER_ROOM {
+                queue.pop_front();
+            }
+            queue.push_back(reaction_id);
+        } else {
+            self.rooms.put(room_id, VecDeque::from([reaction_id]));
+        }
+    }
+
+    fn pop(&mut self, room_id: &str) -> Option<String> {
+        self.rooms.get_mut(room_id).and_then(|q| q.pop_front())
+    }
+
+    #[cfg(test)]
+    fn rooms(&self) -> usize {
+        self.rooms.len()
+    }
 }
 
 impl MatrixAdapter {
@@ -73,7 +115,7 @@ impl MatrixAdapter {
             stop_rx,
             transcription: None,
             transcription_language: None,
-            pending_reactions: Arc::new(Mutex::new(HashMap::new())),
+            pending_reactions: Arc::new(Mutex::new(PendingReactions::new())),
         }
     }
 
@@ -123,8 +165,10 @@ impl ChannelAdapter for MatrixAdapter {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
 
+            let mut reconnect = Reconnect::new(stop_rx.clone());
+
             loop {
-                if *stop_rx.borrow() {
+                if reconnect.should_stop() {
                     break;
                 }
 
@@ -140,16 +184,11 @@ impl ChannelAdapter for MatrixAdapter {
                     }
                 };
 
-                let sync_resp = match sync_result {
-                    Ok(r) => r,
-                    Err(e) => {
-                        warn!(error = %e, "Matrix sync failed; retrying in 5s");
-                        tokio::select! {
-                            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
-                            _ = stop_rx.changed() => {}
-                        }
-                        continue;
-                    }
+                let Some(sync_resp) = reconnect
+                    .connect_or_backoff(sync_result, "Matrix sync failed")
+                    .await
+                else {
+                    continue;
                 };
 
                 let next = sync_resp.next_batch.clone();
@@ -467,12 +506,7 @@ impl ChannelAdapter for MatrixAdapter {
         tokio::spawn(async move {
             match client.add_reaction(&room_id, &event_id, "⏳").await {
                 Ok(reaction_id) => {
-                    pending
-                        .lock()
-                        .await
-                        .entry(room_id)
-                        .or_default()
-                        .push_back(reaction_id);
+                    pending.lock().await.push(room_id, reaction_id);
                 }
                 Err(e) => {
                     debug!(error = %e, "matrix: failed to add hourglass reaction (best-effort)");
@@ -485,12 +519,7 @@ impl ChannelAdapter for MatrixAdapter {
     /// Redact ⏳ (FIFO) and send typing indicator when a turn starts.
     async fn on_turn_start(&self, user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
         let room_id = &user.platform_id;
-        let reaction_id = self
-            .pending_reactions
-            .lock()
-            .await
-            .get_mut(room_id)
-            .and_then(|q| q.pop_front());
+        let reaction_id = self.pending_reactions.lock().await.pop(room_id);
         if let Some(rid) = reaction_id
             && let Err(e) = self.client.redact_event(room_id, &rid).await
         {
@@ -589,6 +618,27 @@ mod tests {
 
     use super::*;
     use crate::matrix::client::MatrixClient;
+
+    #[test]
+    fn pending_reactions_bound_rooms_and_queue_depth() {
+        use crate::common::PENDING_CAPACITY;
+
+        let mut pending = PendingReactions::new();
+        for i in 0..PENDING_CAPACITY + 5 {
+            pending.push(format!("!room{i}"), format!("r{i}"));
+        }
+        assert_eq!(pending.rooms(), PENDING_CAPACITY, "rooms are LRU-bounded");
+        assert_eq!(pending.pop("!room0"), None, "oldest room evicted");
+
+        for i in 0..MAX_PENDING_PER_ROOM + 3 {
+            pending.push("!busy".to_string(), format!("b{i}"));
+        }
+        assert_eq!(
+            pending.pop("!busy").as_deref(),
+            Some("b3"),
+            "oldest dropped"
+        );
+    }
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -710,6 +760,34 @@ mod tests {
             "unexpected content: {:?}",
             msg.content
         );
+    }
+
+    #[tokio::test]
+    async fn sync_failure_is_retried_with_backoff() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(ResponseTemplate::new(500))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        let event_sync = sync_with_event(
+            "m.text",
+            "@user:example.com",
+            serde_json::json!({ "body": "after the outage" }),
+        );
+        mount_two_syncs(&server, event_sync).await;
+
+        let adapter = make_adapter(make_client(&server));
+        let mut stream = adapter.start().await.unwrap();
+
+        // The first sync fails; the retry waits BACKOFF_MIN (about 1 s), far
+        // less than the 5 s that used to be hardcoded.
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(4), stream.next())
+            .await
+            .expect("sync was not retried within the backoff window")
+            .expect("stream ended");
+        assert!(matches!(&msg.content, ChannelContent::Text(t) if t == "after the outage"));
     }
 
     #[tokio::test]

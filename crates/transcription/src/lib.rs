@@ -68,7 +68,8 @@ pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvi
         TtsProviderKind::OpenAI => {
             let api_key = config
                 .api_key
-                .clone()
+                .as_ref()
+                .map(|key| key.expose().to_owned())
                 .or_else(|| std::env::var("OPENAI_API_KEY").ok())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
@@ -92,7 +93,8 @@ pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvi
         TtsProviderKind::Deepgram => {
             let api_key = config
                 .api_key
-                .clone()
+                .as_ref()
+                .map(|key| key.expose().to_owned())
                 .or_else(|| std::env::var("DEEPGRAM_API_KEY").ok())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
@@ -127,7 +129,8 @@ pub fn build_provider(
         TranscriptionProviderKind::Whisper => {
             let api_key = config
                 .api_key
-                .clone()
+                .as_ref()
+                .map(|key| key.expose().to_owned())
                 .or_else(|| std::env::var("OPENAI_API_KEY").ok())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
@@ -158,7 +161,8 @@ pub fn build_provider(
         TranscriptionProviderKind::Deepgram => {
             let api_key = config
                 .api_key
-                .clone()
+                .as_ref()
+                .map(|key| key.expose().to_owned())
                 .or_else(|| std::env::var("DEEPGRAM_API_KEY").ok())
                 .ok_or_else(|| {
                     anyhow::anyhow!(

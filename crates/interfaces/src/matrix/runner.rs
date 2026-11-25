@@ -60,7 +60,7 @@ impl MatrixInterface {
                 )
             })?;
             tracing::info!("Matrix: using access token auth");
-            MatrixClient::new_with_token(&homeserver_url, token, username)?
+            MatrixClient::new_with_token(&homeserver_url, token.expose(), username)?
         } else {
             let username = self.config.resolved_username().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -72,7 +72,7 @@ impl MatrixInterface {
                 .resolved_password()
                 .ok_or_else(|| anyhow::anyhow!("username is set but password is missing."))?;
             tracing::info!(username = %username, "Matrix: logging in with password");
-            MatrixClient::login(&homeserver_url, &username, &password).await?
+            MatrixClient::login(&homeserver_url, &username, password.expose()).await?
         });
 
         tracing::info!(user_id = %client.user_id, "Matrix: authenticated");

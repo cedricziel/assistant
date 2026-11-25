@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use assistant_core::Secret;
 use assistant_core::types::llm::LlmConfig;
 use assistant_core::{
     Capabilities, ChatHistoryMessage, LlmProvider, LlmResponse, StreamChunk, ToolSpec, ToolSupport,
@@ -43,7 +44,7 @@ impl OpenRouterProvider {
         let api_key = cfg
             .api_key
             .clone()
-            .or_else(|| std::env::var("OPENROUTER_API_KEY").ok())
+            .or_else(|| std::env::var("OPENROUTER_API_KEY").ok().map(Secret::from))
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "OpenRouter API key not found. Set api_key in [llm] config \
@@ -162,7 +163,7 @@ mod tests {
     fn provider_name_is_openrouter() {
         let cfg = LlmConfig {
             provider: LlmProviderKind::OpenRouter,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             ..LlmConfig::default()
         };
         let provider = OpenRouterProvider::from_llm_config(&cfg).unwrap();
@@ -173,7 +174,7 @@ mod tests {
     fn default_base_url_when_not_configured() {
         let cfg = LlmConfig {
             provider: LlmProviderKind::OpenRouter,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             ..LlmConfig::default()
         };
         let provider = OpenRouterProvider::from_llm_config(&cfg).unwrap();
@@ -184,7 +185,7 @@ mod tests {
     fn custom_base_url_preserved() {
         let cfg = LlmConfig {
             provider: LlmProviderKind::OpenRouter,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             base_url: "https://custom.openrouter.example/v1".to_string(),
             ..LlmConfig::default()
         };
@@ -218,7 +219,7 @@ mod tests {
     fn capabilities_report_tools_and_streaming() {
         let cfg = LlmConfig {
             provider: LlmProviderKind::OpenRouter,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             ..LlmConfig::default()
         };
         let provider = OpenRouterProvider::from_llm_config(&cfg).unwrap();
@@ -233,7 +234,7 @@ mod tests {
         let cfg = LlmConfig {
             provider: LlmProviderKind::OpenRouter,
             model: "anthropic/claude-sonnet-4-20250514".to_string(),
-            api_key: Some("sk-or-test".to_string()),
+            api_key: Some(Secret::new("sk-or-test")),
             openrouter: OpenRouterOptions {
                 referer: Some("https://example.com".to_string()),
                 title: Some("Test App".to_string()),
@@ -283,7 +284,7 @@ mod tests {
     fn make_provider(server_uri: &str) -> OpenRouterProvider {
         let cfg = LlmConfig {
             provider: LlmProviderKind::OpenRouter,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(Secret::new("test-key")),
             base_url: server_uri.to_string(),
             openrouter: OpenRouterOptions {
                 referer: Some("https://my-app.example.com".to_string()),
@@ -509,7 +510,7 @@ mod tests {
         let cfg = LlmConfig {
             provider: LlmProviderKind::OpenRouter,
             model: "meta-llama/llama-3.3-8b-instruct:free".to_string(),
-            api_key: Some(api_key),
+            api_key: Some(Secret::new(api_key)),
             openrouter: OpenRouterOptions {
                 referer: Some("https://assistant.test".to_string()),
                 title: Some("Assistant Test Suite".to_string()),

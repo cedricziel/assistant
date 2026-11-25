@@ -162,6 +162,8 @@ server {
 ## Security
 
 - **HMAC-SHA256 verification**: Every incoming webhook is verified against the shared secret before processing. Invalid signatures are rejected with HTTP 401.
+- **Replay protection**: The Talk bot protocol sends no timestamp, so the assistant remembers each signed `X-Nextcloud-Talk-Random` value for 10 minutes (up to 10,000 values) and rejects reuse with HTTP 401. A replay older than the window, or one that arrives after the cap evicts its entry, is not detected.
+- **Server failure**: If the webhook server stops because of an error, the interface logs it and exits with an error instead of ending silently.
 - **Allowlists**: Use `allowed_channels` and `allowed_users` to restrict which conversations and users the bot responds to. Empty lists accept all.
 - **Bot message filtering**: Messages from bots are ignored to prevent loops.
 - **Non-interactive confirmation**: Mutating tool calls use auto-deny confirmation (same as Slack/Mattermost).
