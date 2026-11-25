@@ -111,6 +111,11 @@ impl Orchestrator {
     /// context.
     const TOOL_RESULT_DISPLAY_LIMIT: usize = 512;
 
+    /// Maximum serialized size of the structured `data` carried on a
+    /// `ToolResult` event. Larger payloads are dropped whole: cutting JSON
+    /// generically would produce half-valid shapes.
+    pub(crate) const TOOL_RESULT_DATA_LIMIT_BYTES: usize = 32 * 1024;
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn finalize_tool_result(
         &self,
@@ -177,11 +182,21 @@ impl Orchestrator {
         };
 
         let mut had_error = false;
+        let mut data = None;
         let observation = match exec_result {
-            Ok(output) => {
+            Ok(mut output) => {
                 debug!(tool = %tool_name, duration_ms, "Tool execution completed");
+                // Structured render data goes to the event only: take it before
+                // anything else sees the output so it cannot leak into the LLM
+                // history, the persisted observation or the webhook payload.
+                data = Self::cap_tool_data(tool_name, output.data.take());
+                // A tool-level failure (`ToolOutput::error`, non-zero bash
+                // exit) is an error even though the call itself returned `Ok`.
+                if !output.success {
+                    tool_status = "error";
+                }
                 otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                otel_span.set_attribute(KeyValue::new("tool_status", tool_status));
                 otel_span.set_attribute(KeyValue::new("tool_observation", output.content.clone()));
                 if !output.attachments.is_empty() {
                     // Persist each tool-produced attachment to the store.
@@ -273,7 +288,8 @@ impl Orchestrator {
 
         if let Some(sink) = event_sink {
             let truncated_result = if observation.len() > Self::TOOL_RESULT_DISPLAY_LIMIT {
-                let mut s = observation[..Self::TOOL_RESULT_DISPLAY_LIMIT].to_string();
+                let cut = observation.floor_char_boundary(Self::TOOL_RESULT_DISPLAY_LIMIT);
+                let mut s = observation[..cut].to_string();
                 s.push('…');
                 Some(s)
             } else {
@@ -286,6 +302,7 @@ impl Orchestrator {
                     arguments: tool_arguments.cloned(),
                     result: truncated_result,
                     tool_call_id: tool_call_id.map(|s| s.to_string()),
+                    data,
                 })
                 .await;
 
@@ -331,6 +348,26 @@ impl Orchestrator {
         }
 
         FinalizedTool { had_error }
+    }
+
+    /// Drop `data` whole when its serialized form exceeds
+    /// [`Self::TOOL_RESULT_DATA_LIMIT_BYTES`].
+    fn cap_tool_data(
+        tool_name: &str,
+        data: Option<serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        let value = data?;
+        let size = value.to_string().len();
+        if size > Self::TOOL_RESULT_DATA_LIMIT_BYTES {
+            warn!(
+                tool = %tool_name,
+                size,
+                limit = Self::TOOL_RESULT_DATA_LIMIT_BYTES,
+                "Dropping tool result data over the size cap"
+            );
+            return None;
+        }
+        Some(value)
     }
 
     /// Append one tool call to the skill execution log.
@@ -455,6 +492,7 @@ impl Orchestrator {
                         arguments: Some(params.clone()),
                         result: Some(observation.clone()),
                         tool_call_id: tool_call_id.map(|s| s.to_string()),
+                        data: None,
                     })
                     .await;
             }
