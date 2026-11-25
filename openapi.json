@@ -1438,7 +1438,7 @@
           {
             "name": "space_id",
             "in": "query",
-            "description": "Only space-layer integrations of this space.",
+            "description": "Only integrations in use in this space: its own space-layer ones, plus\nthe org-layer ones offered to it that it has not opted out of. User-layer\nintegrations belong to no space and are never returned. Without this\nfilter, opted-out org integrations are listed too, so a space can opt\nback in.",
             "required": false,
             "schema": {
               "type": "string"
