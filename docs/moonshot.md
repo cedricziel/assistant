@@ -8,11 +8,12 @@ a thin facade over the existing `assistant-provider-openai` crate.
 ## Quick start
 
 ```sh
-# Set your API key (or put it in config.toml)
+# Set your API key (or put it in org.toml)
 export MOONSHOT_API_KEY=sk-...
 
-# Edit ~/.assistant/config.toml
-cat <<'EOF' >> ~/.assistant/config.toml
+# Edit ~/.assistant/orgs/default/org.toml
+mkdir -p ~/.assistant/orgs/default
+cat <<'EOF' >> ~/.assistant/orgs/default/org.toml
 [llm]
 provider = "moonshot"
 model    = "kimi-k2.6"
@@ -25,7 +26,7 @@ cargo run -p assistant-cli
 ## Configuration
 
 All Moonshot settings live under the `[llm]` and `[llm.moonshot]`
-sections in `~/.assistant/config.toml`.
+sections in `~/.assistant/orgs/default/org.toml`.
 
 ### `[llm]` section
 
@@ -54,7 +55,7 @@ environment variable or config file:
 # Environment variable (recommended — avoids secrets in config files)
 export MOONSHOT_API_KEY=sk-...
 
-# Or in config.toml
+# Or in org.toml
 [llm]
 provider = "moonshot"
 api_key  = "sk-..."
@@ -214,7 +215,7 @@ Set the key via environment variable or config file:
 export MOONSHOT_API_KEY=sk-...
 ```
 
-Or add `api_key = "sk-..."` to the `[llm]` section in config.toml.
+Or add `api_key = "sk-..."` to the `[llm]` section in org.toml.
 
 ### Requests timing out
 

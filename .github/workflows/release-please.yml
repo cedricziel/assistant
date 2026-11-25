@@ -173,8 +173,9 @@ jobs:
           cp "target/${{ matrix.target }}/release/assistant" "${ARCHIVE}/" || \
             cp "target/${{ matrix.target }}/release/assistant.exe" "${ARCHIVE}/" 2>/dev/null || true
 
-          # Copy config template
-          cp config.toml "${ARCHIVE}/config.toml.example"
+          # Copy config templates
+          cp server.toml "${ARCHIVE}/server.toml.example"
+          cp org.toml "${ARCHIVE}/org.toml.example"
 
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           echo "ARCHIVE=${ARCHIVE}.tar.gz" >> $GITHUB_ENV
@@ -272,7 +273,8 @@ jobs:
           STANDALONE="assistant-${TAG}-macos-arm64"
           mkdir -p "${STANDALONE}"
           cp target/aarch64-apple-darwin/release/assistant "${STANDALONE}/"
-          cp config.toml "${STANDALONE}/config.toml.example"
+          cp server.toml "${STANDALONE}/server.toml.example"
+          cp org.toml "${STANDALONE}/org.toml.example"
           tar czf "${STANDALONE}.tar.gz" "${STANDALONE}"
           echo "STANDALONE_ARCHIVE=${STANDALONE}.tar.gz" >> $GITHUB_ENV
 
@@ -467,7 +469,7 @@ jobs:
           cp */assistant ../../docker-context/bin/arm64/assistant
           cd ../..
 
-          cp config.toml docker-context/config.toml
+          cp server.toml org.toml docker-context/
           cp docker/Dockerfile.assistant-alpine docker-context/Dockerfile
           chmod +x docker-context/bin/amd64/assistant docker-context/bin/arm64/assistant
 

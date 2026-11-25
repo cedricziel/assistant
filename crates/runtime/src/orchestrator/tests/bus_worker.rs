@@ -10,7 +10,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use assistant_core::auth::AuthContext;
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{Interface, TurnIdentity};
 use assistant_core::{LlmProvider, MessageBus, PublishRequest, bus_messages, topic};
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
@@ -294,7 +294,7 @@ async fn with_submit_timeout_respected() {
     mount_answer(&server, "not used").await;
 
     // Build without wrapping in Arc so we can apply with_submit_timeout first.
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
@@ -366,7 +366,7 @@ async fn persistent_transient_error_stops_at_redelivery_cap() {
         .mount(&server)
         .await;
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
@@ -484,7 +484,7 @@ async fn timeout_cancels_in_flight_worker_turn() {
         .mount(&server)
         .await;
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
@@ -608,7 +608,7 @@ async fn failed_turn_with_tools_max_iterations_returns_error() {
         .mount(&server)
         .await;
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     config.llm.max_iterations = 2;
     let (orch, _) = build_with_config(&server.uri(), config).await;
@@ -665,7 +665,7 @@ async fn cancel_turn_aborts_inflight_submit() {
         .mount(&server)
         .await;
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());

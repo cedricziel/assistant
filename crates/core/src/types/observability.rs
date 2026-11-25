@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// Top-level observability configuration.
 ///
-/// Configured via `[observability]` in `config.toml`.
+/// Configured via `[observability]` in `org.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ObservabilityConfig {
     /// When `true`, LLM span events include full message content

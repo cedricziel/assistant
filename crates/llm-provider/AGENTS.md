@@ -42,7 +42,7 @@ If the new provider speaks the OpenAI Chat Completions wire format:
 5. **Wire into `create_provider()`** match in `lib.rs`.
 6. **Export** from `lib.rs`.
 7. **Update CLI arg parsing** in `crates/web-ui/src/main.rs` (provider string match).
-8. **Add config example** to `config.toml`.
+8. **Add config example** to `org.toml`.
 
 ## Adding a Non-Compatible Provider
 

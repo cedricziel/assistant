@@ -1,7 +1,7 @@
 //! Matrix interface configuration.
 //!
 //! [`MatrixConfig`] is defined in `assistant-core` so it can be embedded
-//! in [`AssistantConfig`][assistant_core::types::agent::AssistantConfig].  This module
+//! in [`OrgConfig`][assistant_core::types::agent::OrgConfig].  This module
 //! re-exports it and adds runtime helpers that depend on env vars.
 
 pub use assistant_core::Secret;
@@ -152,24 +152,23 @@ mod tests {
             homeserver_url = "https://matrix.example.com"
             access_token = "tok-abc"
         "#;
-        let cfg: assistant_core::types::agent::AssistantConfig =
-            toml::from_str(toml_str).expect("parse");
+        let cfg: assistant_core::types::agent::OrgConfig = toml::from_str(toml_str).expect("parse");
         let mx = cfg.matrix.expect("matrix section present");
         assert_eq!(
             mx.homeserver_url.as_deref(),
             Some("https://matrix.example.com"),
-            "homeserver_url from AssistantConfig"
+            "homeserver_url from OrgConfig"
         );
         assert_eq!(
             mx.access_token.as_ref().map(Secret::expose),
             Some("tok-abc"),
-            "access_token from AssistantConfig"
+            "access_token from OrgConfig"
         );
     }
 
     #[test]
     fn assistant_config_without_matrix_section_is_none() {
-        let cfg: assistant_core::types::agent::AssistantConfig = toml::from_str("").expect("parse");
+        let cfg: assistant_core::types::agent::OrgConfig = toml::from_str("").expect("parse");
         assert!(cfg.matrix.is_none(), "matrix should be None when absent");
     }
 }

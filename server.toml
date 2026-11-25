@@ -1,0 +1,55 @@
+# Process-wide settings for the AI assistant.
+# Copy to ~/.assistant/server.toml and customize.
+#
+# Settings that belong to one organization (LLM provider, memory, persona,
+# messenger credentials, ...) live in ~/.assistant/orgs/<org>/org.toml instead;
+# see org.toml in this directory.
+
+# [bus]
+# Message bus backend.  Options: "sqlite" (default), "nats".
+# NATS JetStream eliminates SQLite write-lock contention when the
+# orchestrator, OTel exporters, and bus all share a single SQLite pool.
+# Requires the `nats` feature to be compiled in.
+# kind = "nats"
+# nats_url = "nats://localhost:4222"   # or set NATS_URL env var
+#
+# Authentication (pick one, all fields fall back to env vars):
+# username = "myuser"                  # or NATS_USER
+# password = "s3cret"                  # or NATS_PASSWORD
+# token = "t0k3n!"                    # or NATS_TOKEN
+# credentials_file = "/path/to/nats.creds"  # or NATS_CREDENTIALS_FILE
+
+[mcp]
+
+# ── External MCP servers (client connections) ─────────────────────────────────
+# Connect to external MCP servers and bridge their tools into the assistant.
+# Tools are namespaced as mcp__{name}__{tool_name} to avoid collisions.
+#
+# Stdio transport — spawns a local subprocess:
+# [[mcp.servers]]
+# name = "github"
+# command = ["npx", "-y", "@modelcontextprotocol/server-github"]
+# trust = "confirm"            # "confirm" (default) or "trust"
+# [mcp.servers.env]
+# GITHUB_TOKEN = "${GITHUB_TOKEN}"
+#
+# [[mcp.servers]]
+# name = "filesystem"
+# command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/user/docs"]
+# trust = "trust"              # read-only server, skip confirmation
+#
+# HTTP/SSE transport — connect to a remote server:
+# [[mcp.servers]]
+# name = "remote-db"
+# url = "https://db.example.com/mcp/sse"
+# [mcp.servers.headers]
+# Authorization = "Bearer ${DB_TOKEN}"
+
+# ── Web Push (VAPID) ──────────────────────────────────────────────────────────
+# The web UI generates a P-256 key pair on first start and writes it here, so
+# browser push subscriptions stay valid across restarts.  Set the keys yourself
+# only to reuse an existing pair.
+#
+# [notifications]
+# vapid_private_key = "..."
+# vapid_public_key  = "..."

@@ -15,7 +15,7 @@ use std::{env, time::Duration};
 use anyhow::Result;
 use assistant_core::{
     MessageBus,
-    types::agent::AssistantConfig,
+    types::agent::OrgConfig,
     types::conversation::{ExecutionContext, Interface, TurnIdentity},
 };
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
@@ -131,7 +131,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     // Disable learning so background skill-eval LLM calls don't compete with
     // the test's own LLM calls on the CPU-only CI Ollama instance.
     config.learning.enabled = false;

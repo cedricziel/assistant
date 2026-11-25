@@ -16,11 +16,11 @@ use tokio::sync::RwLock;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_llm_provider::retry::RetryConfig;
-use assistant_runtime::SpaceRuntimes;
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
+use assistant_runtime::{OrgContexts, SpaceRuntimes};
 use assistant_storage::StorageLayer;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
 
@@ -177,7 +177,7 @@ pub(crate) async fn state_over_in(
     spaces: &[TestSpace],
     workers: bool,
 ) -> (ApiState, SpaceResolver) {
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     let llm = Arc::new(
         LlmClient::new(LlmClientConfig {
@@ -195,8 +195,7 @@ pub(crate) async fn state_over_in(
     let runtimes = Arc::new(
         SpaceRuntimes::new(
             resolver.pools().clone(),
-            Arc::new(config),
-            llm,
+            Arc::new(OrgContexts::fixed(config, llm)),
             Arc::new(AutoDenyConfirmation {
                 interface_name: "test",
             }),

@@ -1,6 +1,6 @@
 # Tool permissions
 
-Every tool call the LLM makes passes through a permission check before it runs. This page covers the `[permissions]` section of `~/.assistant/config.toml`, the order the checks run in, and how to write rules.
+Every tool call the LLM makes passes through a permission check before it runs. This page covers the `[permissions]` section of `~/.assistant/orgs/default/org.toml`, the order the checks run in, and how to write rules.
 
 Subagent Processes use the same check as the main turn.
 

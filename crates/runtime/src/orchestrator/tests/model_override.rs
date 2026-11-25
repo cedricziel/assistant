@@ -1,7 +1,7 @@
 //! A conversation's `/model` override picks the model its turns run on.
 
 use assistant_core::ConversationConfig;
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{Interface, TurnIdentity};
 use serde_json::Value;
 use uuid::Uuid;
@@ -41,7 +41,7 @@ async fn turns_use_the_conversations_model_override() {
     let server = MockServer::start().await;
     mount_answer(&server, "hi").await;
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     config.llm.base_url = server.uri();
     allow_all_tools(&mut config);
@@ -73,7 +73,7 @@ async fn the_model_command_switches_the_next_turn() {
     let server = MockServer::start().await;
     mount_answer(&server, "hi").await;
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     config.llm.base_url = server.uri();
     allow_all_tools(&mut config);

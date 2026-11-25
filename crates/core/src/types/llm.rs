@@ -31,7 +31,7 @@ fn default_embedding_model() -> String {
 
 /// Which LLM backend to use.
 ///
-/// Set via `[llm] provider = "ollama"` in `config.toml`.
+/// Set via `[llm] provider = "ollama"` in `org.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmProviderKind {
@@ -50,7 +50,7 @@ pub enum LlmProviderKind {
 /// Which embedding backend to use when configured separately from the main
 /// LLM provider.
 ///
-/// Set via `[llm.embeddings] provider = "voyage"` in `config.toml`.
+/// Set via `[llm.embeddings] provider = "voyage"` in `org.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EmbeddingProviderKind {

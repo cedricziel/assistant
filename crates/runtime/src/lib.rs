@@ -12,6 +12,7 @@ pub mod memory_indexer;
 pub mod metrics;
 pub mod orchestration;
 pub mod orchestrator;
+pub mod org_context;
 pub(crate) mod otel_spans;
 pub mod projection;
 pub mod scheduler;
@@ -35,6 +36,7 @@ pub use orchestration::{OrchestrationEngine, RecordedSubmitTurn, StubOrchestrati
 pub use orchestrator::{
     CancelOutcome, Orchestrator, OrchestratorEvent, TURN_CANCELLED_MARKER, TurnResult,
 };
+pub use org_context::{OrgConfigAdjust, OrgContext, OrgContexts, build_llm};
 pub use otel_spans::start_conversation_context;
 pub use scheduler::spawn_scheduler;
 pub use space_runtime::{SpaceRuntime, SpaceRuntimes};

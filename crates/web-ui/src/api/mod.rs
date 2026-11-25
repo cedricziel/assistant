@@ -148,8 +148,6 @@ pub struct ApiState {
     pub conversation_broadcasters: ConversationBroadcasters,
     /// Active turns map: conv_id → request_id (for `/stop`).
     pub active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
-    /// Default model name from global config.
-    pub default_model: String,
 }
 
 impl ApiState {
@@ -158,7 +156,6 @@ impl ApiState {
         runtimes: Arc<SpaceRuntimes>,
         agent_id: Arc<RwLock<String>>,
     ) -> Self {
-        let default_model = runtimes.llm().model_name().to_string();
         Self {
             spaces,
             agent_id,
@@ -171,7 +168,6 @@ impl ApiState {
             command_registry: Arc::new(CommandRegistry::new()),
             conversation_broadcasters: ConversationBroadcasters::default(),
             active_turns: Arc::new(RwLock::new(HashMap::new())),
-            default_model,
         }
     }
 

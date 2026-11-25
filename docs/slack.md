@@ -54,7 +54,7 @@ Install to your workspace. Copy the **Bot Token** (`xoxb-...`).
 
 ## Configuration
 
-Add to `~/.assistant/config.toml`:
+Add to `~/.assistant/orgs/default/org.toml`:
 
 ```toml
 [slack]

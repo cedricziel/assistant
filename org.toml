@@ -1,5 +1,11 @@
-# Default configuration for the AI assistant
-# Copy to ~/.assistant/config.toml and customize
+# Settings of one organization for the AI assistant.
+# Copy to ~/.assistant/orgs/<org>/org.toml (the first org is "default") and
+# customize.  Every org has its own file, so each can use a different LLM
+# provider, persona and messenger credentials.
+#
+# Process-wide settings (message bus, MCP servers, push keys) live in
+# ~/.assistant/server.toml instead; see server.toml in this directory.
+
 
 [llm]
 # LLM backend provider.  Options: "ollama" (default, local), "anthropic", "openai", "openrouter", "moonshot".
@@ -163,20 +169,6 @@ timeout_secs = 120
 # ~/.assistant/agents/<id>/ while sharing the same SQLite database.
 # id = "default"
 
-# [bus]
-# Message bus backend.  Options: "sqlite" (default), "nats".
-# NATS JetStream eliminates SQLite write-lock contention when the
-# orchestrator, OTel exporters, and bus all share a single SQLite pool.
-# Requires the `nats` feature to be compiled in.
-# kind = "nats"
-# nats_url = "nats://localhost:4222"   # or set NATS_URL env var
-#
-# Authentication (pick one, all fields fall back to env vars):
-# username = "myuser"                  # or NATS_USER
-# password = "s3cret"                  # or NATS_PASSWORD
-# token = "t0k3n!"                    # or NATS_TOKEN
-# credentials_file = "/path/to/nats.creds"  # or NATS_CREDENTIALS_FILE
-
 [skills]
 # Directories to scan for skills (highest priority first):
 # 1. entries from extra_dirs (defaults target Claude Code/NanoClaw folders)
@@ -190,35 +182,7 @@ timeout_secs = 120
 # skills are picked up automatically.
 # extra_dirs = ["~/.claude/skills", "./.claude/skills"]
 
-[mcp]
-
-# ── External MCP servers (client connections) ─────────────────────────────────
-# Connect to external MCP servers and bridge their tools into the assistant.
-# Tools are namespaced as mcp__{name}__{tool_name} to avoid collisions.
-#
-# Stdio transport — spawns a local subprocess:
-# [[mcp.servers]]
-# name = "github"
-# command = ["npx", "-y", "@modelcontextprotocol/server-github"]
-# trust = "confirm"            # "confirm" (default) or "trust"
-# [mcp.servers.env]
-# GITHUB_TOKEN = "${GITHUB_TOKEN}"
-#
-# [[mcp.servers]]
-# name = "filesystem"
-# command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/user/docs"]
-# trust = "trust"              # read-only server, skip confirmation
-#
-# HTTP/SSE transport — connect to a remote server:
-# [[mcp.servers]]
-# name = "remote-db"
-# url = "https://db.example.com/mcp/sse"
-# [mcp.servers.headers]
-# Authorization = "Bearer ${DB_TOKEN}"
-
-[self_improvement]
-# Enable passive execution trace collection
-trace_enabled = true
+[observability]
 # Record full message content on LLM spans (system prompt, input messages,
 # output messages, tool definitions).  Off by default — content may contain PII.
 # trace_content = false

@@ -7,7 +7,7 @@
 //!
 //! On first `assistant webui serve` startup, if `[notifications]` is absent or
 //! lacks VAPID keys, a new P-256 key pair is generated and written back to
-//! `~/.assistant/config.toml`.  The public key is served at
+//! `~/.assistant/server.toml`.  The public key is served at
 //! `GET /api/push/vapid-public-key` so the Flutter PWA can call
 //! `PushManager.subscribe({ applicationServerKey })`.
 //!
@@ -42,7 +42,7 @@ use assistant_storage::SqlitePushSubscriptionStore;
 
 // -- VAPID key provisioning --------------------------------------------------
 
-/// Load VAPID keys from `config.toml`, or generate and persist them if absent.
+/// Load VAPID keys from `server.toml`, or generate and persist them if absent.
 ///
 /// Returns `(private_key_b64url, public_key_b64url)`.
 pub async fn ensure_vapid_keys(
@@ -86,7 +86,7 @@ fn generate_vapid_keypair() -> Result<(String, String)> {
     Ok((priv_b64, pub_b64))
 }
 
-/// Append/update `[notifications]` section in `config.toml` with the new keys.
+/// Append/update `[notifications]` section in `server.toml` with the new keys.
 async fn persist_vapid_keys(
     config_path: &PathBuf,
     private_key_b64: &str,

@@ -25,7 +25,11 @@ contents:
     file_info:
       mode: 0755
 
-  # Default config template — never overwritten on upgrade
-  - src: BIN_DIR_PLACEHOLDER/config.toml.example
-    dst: /etc/assistant/config.toml.example
+  # Default config templates — never overwritten on upgrade
+  - src: BIN_DIR_PLACEHOLDER/server.toml.example
+    dst: /etc/assistant/server.toml.example
+    type: config|noreplace
+
+  - src: BIN_DIR_PLACEHOLDER/org.toml.example
+    dst: /etc/assistant/org.toml.example
     type: config|noreplace

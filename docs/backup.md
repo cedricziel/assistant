@@ -6,7 +6,8 @@ The assistant ships two CLI subcommands for creating and restoring point-in-time
 
 | Path                              | Description                                           |
 | --------------------------------- | ----------------------------------------------------- |
-| `config.toml`                     | Main configuration file                               |
+| `server.toml`                     | Process-wide configuration                            |
+| `orgs/*/org.toml`                 | Per-organization configuration, one file per org      |
 | `assistant.db` (+ `-wal`, `-shm`) | SQLite database (WAL checkpointed before copy)        |
 | `agents/`                         | All agent personas, memory files, and skill overrides |
 | `skills/`                         | User-defined skill definitions                        |

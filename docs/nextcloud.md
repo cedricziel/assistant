@@ -54,7 +54,7 @@ By default, newly installed bots are available but not enabled in any conversati
 
 ### 4. Configure the assistant
 
-Add to `~/.assistant/config.toml`:
+Add to `~/.assistant/orgs/default/org.toml`:
 
 ```toml
 [nextcloud]
@@ -84,7 +84,7 @@ cargo run -p assistant-cli -- orchestrator run --interfaces nextcloud --no-repl
 
 ### Background mode (REPL + Nextcloud)
 
-When the `[nextcloud]` section is present in `config.toml`, the Nextcloud interface starts automatically in the background alongside the REPL:
+When the `[nextcloud]` section is present in `org.toml`, the Nextcloud interface starts automatically in the background alongside the REPL:
 
 ```sh
 make run
@@ -173,7 +173,7 @@ server {
 | Symptom                           | Likely cause                                                                         |
 | --------------------------------- | ------------------------------------------------------------------------------------ |
 | Bot never receives messages       | Webhook URL not reachable from Nextcloud server; bot not enabled in the conversation |
-| HTTP 401 on all webhooks          | Shared secret mismatch between `occ talk:bot:install` and `config.toml`              |
+| HTTP 401 on all webhooks          | Shared secret mismatch between `occ talk:bot:install` and `org.toml`              |
 | Bot receives but never replies    | `server_url` in config is wrong or unreachable from the assistant host               |
 | "Failed to add reaction" warnings | Bot may lack the `reaction` feature flag; non-fatal                                  |
 

@@ -18,7 +18,7 @@ use tracing::{debug, warn};
 use crate::clock::{Clock, SystemClock};
 
 use crate::context::runtime_agent_root;
-use crate::types::agent::AssistantConfig;
+use crate::types::agent::OrgConfig;
 use crate::types::features::MemoryConfig;
 
 /// Maximum characters per individual memory file included in the system prompt.
@@ -61,14 +61,14 @@ pub struct MemoryLoader {
 
 impl MemoryLoader {
     /// Create a MemoryLoader from the assistant configuration.
-    pub fn new(config: &AssistantConfig) -> Self {
+    pub fn new(config: &OrgConfig) -> Self {
         let base = base_dir();
         let mem = &config.memory;
         Self::from_parts(mem, &base)
     }
 
     /// Create a MemoryLoader directly from a `MemoryConfig` (useful when you
-    /// don't have the full `AssistantConfig` available).
+    /// don't have the full `OrgConfig` available).
     pub fn from_memory_config(mem: &MemoryConfig) -> Self {
         let base = base_dir();
         Self::from_parts(mem, &base)

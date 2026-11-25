@@ -29,9 +29,10 @@ ollama pull qwen2.5:7b
 # 2. Build the unified binary
 cargo build -p assistant-cli --release
 
-# 3. Copy the default config
-mkdir -p ~/.assistant
-cp config.toml ~/.assistant/config.toml
+# 3. Copy the example config
+mkdir -p ~/.assistant/orgs/default
+cp server.toml ~/.assistant/server.toml
+cp org.toml ~/.assistant/orgs/default/org.toml
 
 # 4. Copy built-in skills next to the binary (or run from the repo root)
 cp -r skills target/release/
@@ -65,7 +66,7 @@ assistant mcp                                       # stdio MCP server
 ```
 
 If Slack, Mattermost, Nextcloud, and/or Signal credentials are present in
-`~/.assistant/config.toml`, interfaces start automatically when running
+`~/.assistant/orgs/default/org.toml`, interfaces start automatically when running
 `assistant orchestrator run`.
 
 ## Model recommendations (2026)
@@ -83,11 +84,11 @@ models to stay within the stated VRAM budget.
 | **≤ 12 GB** | `phi4:14b`                 | ~11 GB        | ~18 tok/s | Compact; good structured output     |
 | **≤ 24 GB** | `qwen2.5:32b`              | ~22 GB        | ~10 tok/s | Near-frontier reasoning locally     |
 
-Pull any model and set it in `~/.assistant/config.toml`:
+Pull any model and set it in `~/.assistant/orgs/default/org.toml`:
 
 ```sh
 ollama pull qwen2.5:14b
-# then set model = "qwen2.5:14b" in ~/.assistant/config.toml
+# then set model = "qwen2.5:14b" in ~/.assistant/orgs/default/org.toml
 ```
 
 ## Built-in tools
@@ -223,7 +224,12 @@ Configure in Claude Code's `settings.json`:
 
 ## Configuration
 
-Copy `config.toml` to `~/.assistant/config.toml` and edit:
+Settings live in two kinds of files under `~/.assistant/`:
+
+- `server.toml` holds process-wide settings: the message bus, external MCP servers and the Web Push keys.
+- `orgs/<org>/org.toml` holds one organization's settings: LLM provider, memory, persona, messenger credentials, speech providers. The first org is `default`.
+
+Copy `org.toml` to `~/.assistant/orgs/default/org.toml` and edit:
 
 ```toml
 [llm]
@@ -256,8 +262,8 @@ model    = "voyage-3-lite"     # optional, provider-specific default used
 ```
 
 To use NATS JetStream instead of SQLite for the message bus (eliminates
-write-lock contention at high concurrency), set `[bus] kind = "nats"` and
-configure:
+write-lock contention at high concurrency), set `[bus] kind = "nats"` in
+`~/.assistant/server.toml` and configure:
 
 ```toml
 [bus]
@@ -299,7 +305,8 @@ assistant/
 ├── docker/                             # Dockerfiles (all build the unified assistant binary)
 ├── migrations/                         # SQLite migration files
 ├── skills/                             # Built-in SKILL.md definitions
-└── config.toml                         # Default configuration template
+├── server.toml                         # Example process-wide configuration
+└── org.toml                            # Example per-organization configuration
 ```
 
 ## Development
@@ -381,8 +388,10 @@ future desktop integration.
 sudo apt install ./assistant_*.deb    # or rpm -i assistant_*.rpm
 
 # 2. Edit your config
-cp /etc/assistant/config.toml.example ~/.assistant/config.toml
-$EDITOR ~/.assistant/config.toml      # add Slack/Mattermost credentials
+mkdir -p ~/.assistant/orgs/default
+cp /etc/assistant/server.toml.example ~/.assistant/server.toml
+cp /etc/assistant/org.toml.example ~/.assistant/orgs/default/org.toml
+$EDITOR ~/.assistant/orgs/default/org.toml   # add Slack/Mattermost credentials
 
 # 3. Enable and start whichever bots you need
 systemctl --user enable --now assistant-slack
@@ -446,7 +455,8 @@ docker run ghcr.io/cedricziel/assistant/assistant assistant webui serve --listen
 Mount your config at runtime:
 
 ```sh
-docker run -v ~/.assistant/config.toml:/etc/assistant/config.toml \
+docker run -v ~/.assistant/server.toml:/etc/assistant/server.toml \
+  -v ~/.assistant/orgs/default/org.toml:/etc/assistant/org.toml \
   ghcr.io/cedricziel/assistant/assistant
 ```
 

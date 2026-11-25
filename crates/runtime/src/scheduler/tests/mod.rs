@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use assistant_core::{LlmProvider, MessageBus, types::agent::AssistantConfig};
+use assistant_core::{LlmProvider, MessageBus, types::agent::OrgConfig};
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_storage::StorageLayer;
 use assistant_storage::registry::SkillRegistry;
@@ -54,7 +54,7 @@ pub(crate) async fn mount_answer(server: &MockServer, text: &str) {
 // ── Orchestrator fixtures ──────────────────────────────────────────────────
 
 pub(crate) async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
@@ -113,7 +113,7 @@ pub(crate) async fn build_with_agent_dir(
     let agent_dir = assistant_core::context::agent_base_dir(&agent_id);
     std::fs::create_dir_all(&agent_dir).unwrap();
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     config.agent.id = agent_id.clone();
 

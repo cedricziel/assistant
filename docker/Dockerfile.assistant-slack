@@ -29,5 +29,6 @@ RUN useradd -r -s /bin/false assistant
 USER assistant
 
 # Mount a real config at runtime:
-#   -v /host/config.toml:/etc/assistant/config.toml
+#   -v /host/server.toml:/etc/assistant/server.toml
+#   -v /host/org.toml:/etc/assistant/org.toml
 ENTRYPOINT ["assistant", "slack"]

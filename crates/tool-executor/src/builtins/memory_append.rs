@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{
-    ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path, types::agent::AssistantConfig,
+    ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path, types::agent::OrgConfig,
 };
 
 /// Canonicalize as much of `p` as exists, then re-append non-existent tail
@@ -47,11 +47,11 @@ fn canonicalize_prefix(p: &std::path::Path) -> PathBuf {
 }
 
 pub struct MemoryAppendHandler {
-    config: Arc<AssistantConfig>,
+    config: Arc<OrgConfig>,
 }
 
 impl MemoryAppendHandler {
-    pub fn new(config: Arc<AssistantConfig>) -> Self {
+    pub fn new(config: Arc<OrgConfig>) -> Self {
         Self { config }
     }
 
@@ -230,14 +230,14 @@ mod tests {
     #[test]
     fn date_validation_rejects_all_dashes() {
         // "----------" is 10 chars of dashes — must be rejected.
-        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
         let result = handler.resolve_target("notes/----------");
         assert!(result.is_none(), "all-dash string should be rejected");
     }
 
     #[test]
     fn date_validation_rejects_bad_structure() {
-        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
         // Digits in wrong positions.
         assert!(
             handler.resolve_target("notes/99-99-9999").is_none(),
@@ -252,14 +252,14 @@ mod tests {
 
     #[test]
     fn date_validation_accepts_valid_date() {
-        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
         let result = handler.resolve_target("notes/2026-02-26");
         assert!(result.is_some(), "valid ISO date should be accepted");
     }
 
     #[test]
     fn unknown_target_returns_none() {
-        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
         assert!(handler.resolve_target("bogus").is_none());
         assert!(handler.resolve_target("").is_none());
         assert!(handler.resolve_target("notes/").is_none());
@@ -282,7 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_missing_params_returns_tool_error() {
-        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
         let ctx = test_ctx();
 
         // Missing both params.
@@ -303,7 +303,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_unknown_target_returns_tool_error() {
-        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
         let ctx = test_ctx();
         let mut params = HashMap::new();
         params.insert(

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 
-use crate::types::agent::AssistantConfig;
+use crate::types::agent::OrgConfig;
 
 pub fn default_agent_id() -> &'static str {
     "default"
@@ -47,7 +47,7 @@ pub fn runtime_workspace_dir() -> Option<PathBuf> {
     lock.read().ok().and_then(|guard| guard.clone())
 }
 
-pub fn apply_agent_context(config: &mut AssistantConfig, agent_id: &str) {
+pub fn apply_agent_context(config: &mut OrgConfig, agent_id: &str) {
     let root = agent_base_dir(agent_id);
     config.agent.id = agent_id.to_string();
 

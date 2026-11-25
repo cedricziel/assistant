@@ -179,8 +179,11 @@ pub async fn execute_command(
             .into_response();
     }
 
-    let orchestrator = match state.runtime(&space).await {
-        Ok(runtime) => runtime.orchestrator.clone(),
+    let (orchestrator, default_model) = match state.runtime(&space).await {
+        Ok(runtime) => (
+            runtime.orchestrator.clone(),
+            runtime.llm.model_name().to_string(),
+        ),
         Err(response) => return response,
     };
 
@@ -191,7 +194,7 @@ pub async fn execute_command(
         orchestrator,
         active_turns: state.active_turns.clone(),
         evict_conversation: None, // Web UI doesn't have an LRU cache to evict
-        default_model: state.default_model.clone(),
+        default_model,
     };
 
     let result = state

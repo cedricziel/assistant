@@ -34,7 +34,7 @@ From any Matrix client, invite the bot account (`@assistant:example.com`) to the
 
 ## Configuration
 
-Add a `[matrix]` section to `~/.assistant/config.toml`:
+Add a `[matrix]` section to `~/.assistant/orgs/default/org.toml`:
 
 ```toml
 [matrix]
@@ -96,7 +96,7 @@ Two authentication paths are supported, tried in this order:
 
 - Use `allowed_rooms` and `allowed_users` to restrict which rooms and users the bot responds to. Empty lists (the default) accept all.
 - `allowed_rooms` entries must be canonical Matrix room IDs (e.g. `!abc123:example.com`), not room aliases or display names.
-- Store `access_token` and `password` in environment variables rather than committing them to `config.toml`.
+- Store `access_token` and `password` in environment variables rather than committing them to `org.toml`.
 
 ## Conversation continuity
 

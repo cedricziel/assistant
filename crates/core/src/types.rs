@@ -12,10 +12,10 @@ pub(crate) fn default_true() -> bool {
 // `use assistant_core::types::conversation::{Message, MessageRole, ...};`
 pub mod conversation;
 
-// ── Top-level assistant config + agent context ────────────────────────────────
+// ── Server / org config + agent context ────────────────────────────────
 //
 // Moved to the `agent` submodule. Import via
-// `use assistant_core::types::agent::{AssistantConfig, AgentConfig};`
+// `use assistant_core::types::agent::{ServerConfig, OrgConfig, AgentConfig};`
 pub mod agent;
 
 // ── Channel adapter configuration ─────────────────────────────────────────────
@@ -42,7 +42,7 @@ pub mod llm;
 // `use assistant_core::types::storage::{BusConfig, BusKind};`
 pub mod storage;
 
-// ── Skills / MCP / mirror configuration ───────────────────────────────────────
+// ── Skills / MCP configuration ───────────────────────────────────────
 //
 // Moved to the `skills_mcp` submodule. Import via
 // `use assistant_core::types::skills_mcp::{SkillsConfig, McpConfig, ...};`

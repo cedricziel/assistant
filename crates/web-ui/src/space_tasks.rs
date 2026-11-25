@@ -70,10 +70,10 @@ mod tests {
 
     use assistant_core::identity::{OrgId, SpaceId};
     use assistant_core::store::{OrgStore as _, Organization, Space, SpaceStore as _};
-    use assistant_core::types::agent::AssistantConfig;
+    use assistant_core::types::agent::OrgConfig;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
     use assistant_runtime::bootstrap::AutoDenyConfirmation;
-    use assistant_runtime::{SpaceRuntimes, SpaceSupervisor};
+    use assistant_runtime::{OrgContexts, SpaceRuntimes, SpaceSupervisor};
     use assistant_storage::{
         ConversationStore as _, OrgPoolFactory, SqliteConversationStore, StorageLayer,
         WorkflowGraph, WorkflowStore as _,
@@ -145,13 +145,15 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let mut config = AssistantConfig::default();
+        let mut config = OrgConfig::default();
         config.memory.enabled = false;
         let runtimes = Arc::new(
             SpaceRuntimes::new(
                 pools.clone(),
-                Arc::new(config),
-                Arc::new(ScriptedLlmProvider::new()),
+                Arc::new(OrgContexts::fixed(
+                    config,
+                    Arc::new(ScriptedLlmProvider::new()),
+                )),
                 Arc::new(AutoDenyConfirmation {
                     interface_name: "test",
                 }),

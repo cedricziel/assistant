@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 
 use crate::args::{AccountCommand, ApiKeysCommand, Cli, Command, SkillCommand};
 use crate::{
@@ -18,9 +18,9 @@ use crate::{
 /// workers, MCP, `skill generate`), so the caller continues bootstrapping.
 pub async fn run_one_shot(
     cli: &Cli,
-    config_path: &Path,
+    assistant_dir: &Path,
     db_path: &Path,
-    config: &AssistantConfig,
+    config: &OrgConfig,
 ) -> Option<Result<()>> {
     let result = match cli.command.as_ref()? {
         Command::Reset { yes } => cmd_reset::cmd_reset(db_path, config, *yes),
@@ -33,7 +33,7 @@ pub async fn run_one_shot(
         Command::Backup(args) => cmd_backup::cmd_backup(args).await,
         Command::Restore(args) => cmd_backup::cmd_restore(args).await,
         Command::Webui { command } => cmd_webui::cmd_webui(command).await,
-        Command::Doctor => cmd_doctor::cmd_doctor(config_path, db_path, config).await,
+        Command::Doctor => cmd_doctor::cmd_doctor(assistant_dir, db_path).await,
         Command::Login { server } => cmd_login::cmd_login(server).await,
         Command::Logout => cmd_login::cmd_logout().await,
         Command::Status => cmd_login::cmd_status(),

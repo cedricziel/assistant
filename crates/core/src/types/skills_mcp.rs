@@ -1,5 +1,4 @@
-//! Configuration for skill discovery, external MCP server connections, and
-//! the legacy mirror/trace section.
+//! Configuration for skill discovery and external MCP server connections.
 
 use std::collections::HashMap;
 
@@ -108,28 +107,6 @@ pub enum McpTrustLevel {
     Confirm,
     /// Tools may run without confirmation (use for trusted, read-only servers).
     Trust,
-}
-
-// ── Mirror (legacy trace config) ──────────────────────────────────────────────
-
-/// Self-improvement / tracing config
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MirrorConfig {
-    pub trace_enabled: bool,
-    /// When `true`, LLM span events include full message content
-    /// (`gen_ai.input.messages`, `gen_ai.output.messages`, etc.).
-    /// Off by default because content may contain PII.
-    #[serde(default)]
-    pub trace_content: bool,
-}
-
-impl Default for MirrorConfig {
-    fn default() -> Self {
-        Self {
-            trace_enabled: true,
-            trace_content: false,
-        }
-    }
 }
 
 #[cfg(test)]

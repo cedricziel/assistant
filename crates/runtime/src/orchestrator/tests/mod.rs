@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use assistant_core::tool::{ToolHandler, ToolOutput};
 use assistant_core::types::conversation::ExecutionContext;
-use assistant_core::{LlmProvider, MessageBus, types::agent::AssistantConfig};
+use assistant_core::{LlmProvider, MessageBus, types::agent::OrgConfig};
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
@@ -66,13 +66,13 @@ async fn mount_answer(server: &MockServer, text: &str) {
 /// Orchestrator plumbing tests drive arbitrary mock tools; the permission
 /// policy itself is covered in `permission.rs`. Built-in hard denies still
 /// apply.
-fn allow_all_tools(config: &mut AssistantConfig) {
+fn allow_all_tools(config: &mut OrgConfig) {
     config.permissions.allow = vec!["*".parse().expect("valid rule")];
 }
 
 /// Build an [`Orchestrator`] wired to `base_url` with a fresh in-memory DB.
 async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     allow_all_tools(&mut config);
     build_with_config(base_url, config).await
@@ -80,7 +80,7 @@ async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
 
 async fn build_with_config(
     base_url: &str,
-    config: AssistantConfig,
+    config: OrgConfig,
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
     build_customized(base_url, config, |o| o).await
 }
@@ -89,7 +89,7 @@ async fn build_with_config(
 /// (e.g. attach a confirmation callback) before it is shared.
 async fn build_customized(
     base_url: &str,
-    config: AssistantConfig,
+    config: OrgConfig,
     customize: impl FnOnce(Orchestrator) -> Orchestrator,
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
@@ -127,7 +127,7 @@ async fn build_customized(
 async fn build_with_executor(
     base_url: &str,
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>, Arc<ToolExecutor>) {
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     allow_all_tools(&mut config);
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());

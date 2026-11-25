@@ -137,7 +137,7 @@ mutate the process environment.
 
 ### Config file
 
-In `~/.assistant/config.toml`:
+In `~/.assistant/orgs/default/org.toml`:
 
 ```toml
 [observability]

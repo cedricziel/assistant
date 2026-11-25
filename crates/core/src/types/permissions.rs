@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::permission::Rule;
 
-/// Tool-permission configuration (`[permissions]` in `config.toml`).
+/// Tool-permission configuration (`[permissions]` in `org.toml`).
 ///
 /// Rules use the grammar `tool-name` or `tool-name(pattern)`; see
 /// [`crate::permission`]. Config rules are *added* to the built-in rules;
@@ -211,7 +211,7 @@ workspace_roots = ["~/scratch"]
 
     #[test]
     fn assistant_config_defaults_to_empty_permissions() {
-        let cfg: crate::types::agent::AssistantConfig = toml::from_str("").unwrap();
+        let cfg: crate::types::agent::OrgConfig = toml::from_str("").unwrap();
         assert_eq!(cfg.permissions, PermissionsConfig::default());
     }
 }

@@ -8,7 +8,7 @@ use assistant_core::tool::{ToolHandler, ToolOutput};
 use assistant_core::types::conversation::{ExecutionContext, Interface, TurnIdentity};
 use assistant_core::{
     LlmProvider, LlmResponse, LlmResponseMeta, MessageBus, ToolCallItem, ToolCallResponse,
-    types::agent::AssistantConfig,
+    types::agent::OrgConfig,
 };
 use assistant_llm_provider::ScriptedLlmProvider;
 use assistant_storage::{
@@ -81,7 +81,7 @@ async fn tool_calls_under_an_active_skill_are_recorded() {
             LlmResponse::FinalAnswer("done".to_string(), LlmResponseMeta::default()),
         ]));
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     config.permissions.allow = vec!["*".parse().expect("valid rule")];
 

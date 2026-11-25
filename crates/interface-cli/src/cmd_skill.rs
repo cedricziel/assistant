@@ -5,17 +5,13 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_skills::SkillSource;
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 
 use crate::args::SkillCommand;
 
-pub async fn cmd_skill(
-    db_path: &Path,
-    config: &AssistantConfig,
-    command: &SkillCommand,
-) -> Result<()> {
+pub async fn cmd_skill(db_path: &Path, config: &OrgConfig, command: &SkillCommand) -> Result<()> {
     let storage = StorageLayer::new(db_path).await?;
     let registry = SkillRegistry::new(storage.pool.clone()).await?;
 
@@ -120,8 +116,8 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn cfg_under(root: &Path) -> AssistantConfig {
-        let mut cfg = AssistantConfig::default();
+    fn cfg_under(root: &Path) -> OrgConfig {
+        let mut cfg = OrgConfig::default();
         // Point skill discovery at an empty subdir so load_from_dirs() finds
         // nothing extra beyond builtins.
         cfg.skills.extra_dirs = vec![root.join("skills").to_string_lossy().into_owned()];

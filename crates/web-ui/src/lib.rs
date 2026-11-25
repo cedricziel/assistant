@@ -22,15 +22,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::LlmProvider;
 use assistant_core::types::llm::LlmProviderKind;
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
-    MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
-    set_runtime_workspace_dir, validate_agent_id,
+    MessageBus, apply_agent_context, default_workspace_dir, load_server_config, server_config_path,
+    set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
-use assistant_runtime::{SpaceRuntimes, SpaceSupervisor, init_tracing};
+use assistant_runtime::{OrgContexts, SpaceRuntimes, SpaceSupervisor, init_tracing};
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use axum::{Extension, Router, http::StatusCode, routing::get};
 use clap::Parser;
@@ -77,7 +76,7 @@ struct Args {
     no_secure_cookie: bool,
 
     /// LLM provider to use for chat responses (ollama, anthropic, or openai).
-    /// Overrides the provider set in ~/.assistant/config.toml when specified.
+    /// Overrides the provider set in each org's org.toml when specified.
     #[arg(long, env = "LLM_PROVIDER")]
     llm_provider: Option<String>,
 
@@ -140,7 +139,7 @@ const SPACE_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 /// The broker shared by every space, when `[bus] kind = "nats"`; otherwise each
 /// space uses the SQLite bus in its own database.
 async fn shared_nats_bus(
-    config: &assistant_core::types::agent::AssistantConfig,
+    config: &assistant_core::types::agent::ServerConfig,
 ) -> Result<Option<Arc<dyn MessageBus>>> {
     if config.bus.kind != BusKind::Nats {
         return Ok(None);
@@ -233,71 +232,79 @@ async fn run_with_args(args: Args) -> Result<()> {
         .context("Failed to seed the default org and space")?;
     let space_resolver = space::SpaceResolver::new(org_storage.clone(), pool_factory.clone());
 
-    // -- Load assistant config from ~/.assistant/config.toml --------------------
-    let mut config = match assistant_core::default_config_path() {
-        Some(p) => assistant_core::load_config(&p),
-        None => {
-            warn!("Cannot determine home directory; using default LLM config");
-            assistant_core::types::agent::AssistantConfig::default()
-        }
-    };
-
-    // CLI args override config file values when explicitly set.
-    if let Some(provider) = args.llm_provider {
-        config.llm.provider = match provider.to_lowercase().as_str() {
-            "ollama" => LlmProviderKind::Ollama,
-            "anthropic" => LlmProviderKind::Anthropic,
-            "openai" => LlmProviderKind::OpenAI,
-            "moonshot" => LlmProviderKind::Moonshot,
-            "openrouter" => LlmProviderKind::OpenRouter,
+    // -- Settings --------------------------------------------------------------
+    //
+    // `server.toml` holds the process-wide settings. Each org's `org.toml` is
+    // loaded the first time one of its spaces is used; the CLI flags override
+    // the LLM settings of every org.
+    let server_config = load_server_config(&base_path)?;
+    let llm_provider_override = args
+        .llm_provider
+        .as_deref()
+        .map(|provider| match provider.to_lowercase().as_str() {
+            "ollama" => Ok(LlmProviderKind::Ollama),
+            "anthropic" => Ok(LlmProviderKind::Anthropic),
+            "openai" => Ok(LlmProviderKind::OpenAI),
+            "moonshot" => Ok(LlmProviderKind::Moonshot),
+            "openrouter" => Ok(LlmProviderKind::OpenRouter),
             other => anyhow::bail!(
                 "Unsupported --llm-provider value: {other}. \
                  Expected one of: ollama, anthropic, openai, moonshot, openrouter."
             ),
-        };
-    }
-    if let Some(model) = args.llm_model {
-        config.llm.model = model;
-    }
-    if let Some(base_url) = args.llm_base_url {
-        config.llm.base_url = base_url;
-    }
+        })
+        .transpose()?;
+    let (llm_model_override, llm_base_url_override) =
+        (args.llm_model.clone(), args.llm_base_url.clone());
+    let cli_agent_override = args.agent.clone();
+    let orgs = Arc::new(OrgContexts::from_files(&base_path).with_adjust(Arc::new(
+        move |org_config| {
+            if let Some(provider) = &llm_provider_override {
+                org_config.llm.provider = provider.clone();
+            }
+            if let Some(model) = &llm_model_override {
+                org_config.llm.model = model.clone();
+            }
+            if let Some(base_url) = &llm_base_url_override {
+                org_config.llm.base_url = base_url.clone();
+            }
+            let agent = cli_agent_override
+                .clone()
+                .unwrap_or_else(|| org_config.agent.id.clone());
+            if !validate_agent_id(&agent) {
+                anyhow::bail!(
+                    "Invalid agent ID '{agent}'. Use only letters, numbers, '-' and '_'."
+                );
+            }
+            apply_agent_context(org_config, &agent);
+            Ok(())
+        },
+    )));
 
     let _otel_guard = init_tracing()?;
 
     // -- VAPID key provisioning (once, at startup) ---------------------------
     //
     // If `[notifications]` is absent or incomplete, generate a new P-256 key
-    // pair and write it back to the config file.  This is done before anything
+    // pair and write it back to `server.toml`.  This is done before anything
     // else so all subsequent handlers can read stable VAPID keys.
-    let config_path = assistant_core::default_config_path();
-    let (vapid_private_key, vapid_public_key) = if let Some(ref path) = config_path {
-        push::ensure_vapid_keys(
-            path,
-            config.notifications.vapid_private_key.as_deref(),
-            config.notifications.vapid_public_key.as_deref(),
-        )
-        .await
-        .unwrap_or_else(|e| {
-            warn!("VAPID key provisioning failed: {e}; push notifications will be unavailable");
-            (String::new(), String::new())
-        })
-    } else {
-        warn!("Cannot determine config path; VAPID key provisioning skipped");
+    let (vapid_private_key, vapid_public_key) = push::ensure_vapid_keys(
+        &server_config_path(&base_path),
+        server_config.notifications.vapid_private_key.as_deref(),
+        server_config.notifications.vapid_public_key.as_deref(),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!("VAPID key provisioning failed: {e}; push notifications will be unavailable");
         (String::new(), String::new())
-    };
+    });
 
-    let cli_agent_override = args.agent.clone();
-    let selected_agent = cli_agent_override
-        .clone()
-        .unwrap_or_else(|| config.agent.id.clone());
-    if !validate_agent_id(&selected_agent) {
-        anyhow::bail!(
-            "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
-            selected_agent
-        );
-    }
-    apply_agent_context(&mut config, &selected_agent);
+    // The default org's settings decide the persona of the process-wide A2A
+    // agent card and the voice providers.
+    let default_org = orgs
+        .get(assistant_storage::migration::DEFAULT_ORG_SLUG)
+        .context("Failed to load the default org's settings")?;
+    let config = default_org.config.clone();
+    let selected_agent = config.agent.id.clone();
     if let Some(home) = dirs::home_dir() {
         let agent_root = home.join(".assistant").join("agents").join(&selected_agent);
         set_runtime_agent_root(agent_root);
@@ -317,8 +324,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     // use.
     //
     // See skills/interface-implementation/SKILL.md for the canonical checklist.
-    let llm: Arc<dyn LlmProvider> = assistant_llm_provider::create_provider(&config.llm)
-        .context("Failed to create LLM provider")?;
+    let llm = default_org.llm.clone();
     info!(
         "Chat LLM: provider={}, model={}",
         llm.provider_name(),
@@ -341,14 +347,13 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let mut runtimes = SpaceRuntimes::new(
         pool_factory.clone(),
-        Arc::new(config.clone()),
-        llm,
+        orgs.clone(),
         Arc::new(AutoDenyConfirmation {
             interface_name: "Web",
         }),
     )
     .with_audio_store(audio_store.clone());
-    if let Some(bus) = shared_nats_bus(&config).await? {
+    if let Some(bus) = shared_nats_bus(&server_config).await? {
         runtimes = runtimes.with_shared_bus(bus);
     }
     if let Some(ref tts) = tts_provider {
@@ -358,9 +363,10 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     // Connect to configured external MCP servers and register their tools in
     // every space.
-    if !config.mcp.servers.is_empty() {
-        let mcp_manager =
-            Arc::new(assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?);
+    if !server_config.mcp.servers.is_empty() {
+        let mcp_manager = Arc::new(
+            assistant_mcp_client::McpClientManager::start(&server_config.mcp.servers).await?,
+        );
         let mcp_tools = mcp_manager.tool_handlers().await;
         for handler in &mcp_tools {
             runtimes.register_ambient_tool(handler.clone());
@@ -390,13 +396,13 @@ async fn run_with_args(args: Args) -> Result<()> {
     let state = AppState {
         pool: org_storage.pool().clone(),
         agent_id: Arc::new(RwLock::new(selected_agent.clone())),
-        bus_kind: config.bus.kind.clone(),
-        nats_url: config
+        bus_kind: server_config.bus.kind.clone(),
+        nats_url: server_config
             .bus
             .nats_url
             .clone()
             .or_else(|| std::env::var("NATS_URL").ok()),
-        nats_token: config
+        nats_token: server_config
             .bus
             .token
             .as_ref()

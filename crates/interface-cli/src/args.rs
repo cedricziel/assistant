@@ -46,26 +46,26 @@ pub enum Command {
     Mcp,
     /// Run only the Slack interface (no interactive REPL).
     ///
-    /// Requires Slack bot_token and app_token configured in ~/.assistant/config.toml.
+    /// Requires Slack bot_token and app_token configured in ~/.assistant/orgs/default/org.toml.
     Slack,
     /// Run only the Mattermost interface (no interactive REPL).
     ///
-    /// Requires Mattermost server_url and token configured in ~/.assistant/config.toml.
+    /// Requires Mattermost server_url and token configured in ~/.assistant/orgs/default/org.toml.
     Mattermost,
     /// Run only the Nextcloud Talk interface (no interactive REPL).
     ///
-    /// Requires Nextcloud server_url and secret configured in ~/.assistant/config.toml.
+    /// Requires Nextcloud server_url and secret configured in ~/.assistant/orgs/default/org.toml.
     /// The bot receives messages via webhooks from the Nextcloud Talk server.
     Nextcloud,
     /// Run only the Matrix bot interface (no interactive REPL).
     ///
-    /// Requires homeserver_url and credentials configured in ~/.assistant/config.toml.
-    #[command(about = "Start the Matrix bot (requires [matrix] in config.toml)")]
+    /// Requires homeserver_url and credentials configured in ~/.assistant/orgs/default/org.toml.
+    #[command(about = "Start the Matrix bot (requires [matrix] in org.toml)")]
     Matrix,
     /// Run only the Signal interface (no interactive REPL).
     ///
     /// Requires a running signal-cli-rest-api daemon and [signal] section in
-    /// ~/.assistant/config.toml.
+    /// ~/.assistant/orgs/default/org.toml.
     Signal,
     /// Manage Persona contexts.
     Persona {

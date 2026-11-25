@@ -44,7 +44,7 @@ pub use catalog::{CatalogEntry, CatalogResolver, CatalogResourceType};
 pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use command::{CommandArg, CommandDef, CommandResult, ConversationConfig};
-pub use config::{default_config_path, load_config};
+pub use config::{load_org_config, load_server_config, org_config_path, server_config_path};
 pub use context::{
     agent_base_dir, apply_agent_context, default_agent_id, default_workspace_dir,
     runtime_agent_root, runtime_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,

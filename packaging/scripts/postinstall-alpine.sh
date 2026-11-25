@@ -5,7 +5,7 @@ cat <<'MSG'
 
 assistant has been installed.  To run a chat bot:
 
-  1. Make sure ~/.assistant/config.toml contains your credentials.
+  1. Make sure ~/.assistant/orgs/default/org.toml contains your credentials.
 
   2. Run the assistant directly:
 
@@ -19,10 +19,15 @@ assistant has been installed.  To run a chat bot:
        addgroup -S assistant
        adduser -S -G assistant -h /var/lib/assistant assistant
        install -d -m 750 -o assistant -g assistant /var/lib/assistant/.assistant
-       # Copy your config.toml
+       # Copy your server.toml and org.toml
+       install -d -m 750 -o assistant -g assistant \
+         /var/lib/assistant/.assistant/orgs/default
        install -m 640 -o assistant -g assistant \
-         /etc/assistant/config.toml.example \
-         /var/lib/assistant/.assistant/config.toml
+         /etc/assistant/server.toml.example \
+         /var/lib/assistant/.assistant/server.toml
+       install -m 640 -o assistant -g assistant \
+         /etc/assistant/org.toml.example \
+         /var/lib/assistant/.assistant/orgs/default/org.toml
 
        cat > /etc/init.d/assistant-web-ui << EOF
        #!/sbin/openrc-run

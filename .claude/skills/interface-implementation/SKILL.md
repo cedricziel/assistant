@@ -61,7 +61,7 @@ pub enum Interface {
 Every interface needs these components, in order:
 
 ```text
-AssistantConfig        (load from ~/.assistant/config.toml)
+OrgConfig              (load from ~/.assistant/orgs/{slug}/org.toml)
   -> StorageLayer      (SQLite, migrations)
   -> SkillRegistry     (load embedded + dir-scanned skills)
   -> LlmProvider       (Ollama / Anthropic / OpenAI)
