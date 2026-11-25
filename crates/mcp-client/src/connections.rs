@@ -83,6 +83,9 @@ pub enum ConnectError {
     /// A probe came too soon after the last one for the same integration and
     /// subject.
     Throttled { retry_after: Duration },
+    /// The integration changed after the caller read it; its credential no
+    /// longer belongs with the URL the caller holds. Retry with a fresh read.
+    Changed,
 }
 
 impl ConnectError {
@@ -96,6 +99,7 @@ impl ConnectError {
                     retry_after.as_secs().max(1)
                 )
             }
+            Self::Changed => "the integration changed; try again".into(),
         }
     }
 }
@@ -106,7 +110,7 @@ impl fmt::Display for ConnectError {
             Self::Credential(m) => write!(f, "credential unusable: {m}"),
             Self::Unreachable(m) => write!(f, "unreachable: {m}"),
             Self::Internal(m) => write!(f, "internal error: {m}"),
-            Self::Throttled { .. } => f.write_str(&self.message()),
+            Self::Throttled { .. } | Self::Changed => f.write_str(&self.message()),
         }
     }
 }
@@ -260,6 +264,7 @@ impl IntegrationConnections {
                 return Err(error);
             }
         };
+        self.ensure_unchanged(integration, stored.as_ref()).await?;
         let versions = Versions {
             integration: integration.updated_at,
             credential: stored.as_ref().map(|c| c.updated_at),
@@ -374,6 +379,7 @@ impl IntegrationConnections {
         let subject = effective.credential_subject.as_ref();
         self.shared.reserve_probe(integration, subject)?;
         let stored = self.stored_credential(integration, subject).await?;
+        self.ensure_unchanged(integration, stored.as_ref()).await?;
         let header = self.auth_header(integration, subject, stored.as_ref())?;
         match open(
             &integration.slug,
@@ -429,6 +435,36 @@ impl IntegrationConnections {
             .entry((integration.id.clone(), subject.cloned()))
             .or_default()
             .clone()
+    }
+
+    /// Refuse to use `credential` with `snapshot`'s URL unless the stored
+    /// integration is still the one the caller read.
+    ///
+    /// The credential is read first and the integration second, so a URL change
+    /// (which deletes the old credentials) between the caller's read and now
+    /// shows up here instead of pairing the new host's credential with the old
+    /// URL.
+    async fn ensure_unchanged(
+        &self,
+        snapshot: &Integration,
+        credential: Option<&StoredCredential>,
+    ) -> Result<(), ConnectError> {
+        if credential.is_none() {
+            return Ok(());
+        }
+        let current = self
+            .integrations
+            .get(&snapshot.id)
+            .await
+            .map_err(|e| ConnectError::Internal(format!("loading the integration: {e:#}")))?;
+        match current {
+            Some(c)
+                if c.connect_url == snapshot.connect_url && c.updated_at == snapshot.updated_at =>
+            {
+                Ok(())
+            }
+            _ => Err(ConnectError::Changed),
+        }
     }
 
     /// The caller's stored credential, or `None` for an integration that needs

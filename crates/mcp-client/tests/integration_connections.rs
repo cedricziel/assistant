@@ -446,6 +446,7 @@ async fn a_changed_integration_reconnects() {
 
     let mut edited = integration.clone();
     edited.updated_at = at(60);
+    world.store.update(&edited).await.unwrap();
     world.pool.connect(&effective(&edited, None)).await.unwrap();
 
     assert_eq!(count(&server, "initialize").await, 2);
@@ -623,6 +624,7 @@ async fn editing_the_integration_ends_the_pause_after_a_failure() {
     script.healthy.store(true, Ordering::SeqCst);
     let mut fixed = integration.clone();
     fixed.updated_at = at(5);
+    world.store.update(&fixed).await.unwrap();
     assert!(world.pool.connect(&effective(&fixed, None)).await.is_ok());
 }
 
@@ -1101,4 +1103,74 @@ async fn an_integration_without_a_credential_may_use_plain_http() {
             .await
             .is_ok()
     );
+}
+
+// -- The credential belongs to the URL it is sent to ----------------------------
+
+/// The integration moved to another host after the turn read it, and a
+/// credential for the new host is already stored: the old URL must not get it.
+async fn moved_since_read(world: &World, old_url: &str, new_url: &str) -> EffectiveIntegration {
+    let integration = world
+        .integration(old_url, |i| i.catalog_entry_id = None)
+        .await;
+    let snapshot = effective(&integration, None);
+    let mut moved = integration.clone();
+    moved.connect_url = new_url.into();
+    moved.updated_at = at(60);
+    world.store.update(&moved).await.unwrap(); // drops the old credentials
+    world
+        .credential(&moved, None, "token-for-the-new-host", 61)
+        .await;
+    snapshot
+}
+
+#[tokio::test]
+async fn a_url_change_after_the_read_stops_connect_before_anything_is_sent() {
+    let old = serve(&Script::new(&["t"])).await;
+    let new = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let snapshot = moved_since_read(&world, &old.uri(), &new.uri()).await;
+
+    let result = world.pool.connect(&snapshot).await;
+
+    assert!(
+        matches!(result, Err(ConnectError::Changed)),
+        "got {:?}",
+        result.err()
+    );
+    assert!(old.received_requests().await.unwrap().is_empty());
+    assert!(new.received_requests().await.unwrap().is_empty());
+    assert_eq!(world.pool.connection_count().await, 0);
+}
+
+#[tokio::test]
+async fn a_url_change_after_the_read_stops_probe_before_anything_is_sent() {
+    let old = serve(&Script::new(&["t"])).await;
+    let new = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let snapshot = moved_since_read(&world, &old.uri(), &new.uri()).await;
+
+    let result = world.pool.probe(&snapshot).await;
+
+    assert!(
+        matches!(result, Err(ConnectError::Changed)),
+        "got {:?}",
+        result.err()
+    );
+    assert!(old.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_integration_removed_after_the_read_is_not_connected() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+    world.store.delete("int_1").await.unwrap();
+
+    let result = world.pool.connect(&eff).await;
+
+    assert!(result.is_err());
+    assert!(server.received_requests().await.unwrap().is_empty());
 }

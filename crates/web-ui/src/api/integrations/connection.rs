@@ -7,6 +7,7 @@
 use axum::{
     Extension, Json,
     extract::{Path, State},
+    http::StatusCode,
 };
 
 use assistant_core::auth::AuthContext;
@@ -39,6 +40,7 @@ use crate::openapi::ErrorBody;
         (status = 401, description = "Unauthorized; the body is the plain text `Unauthorized`", content_type = "text/plain", body = String),
         (status = 403, description = "The caller may not use this integration's credential", body = ErrorBody),
         (status = 404, description = "No such integration, or the caller may not see it", body = ErrorBody),
+        (status = 409, description = "The integration changed while the test ran; test again", body = ErrorBody),
         (status = 422, description = "The integration cannot be used by the caller now: disabled, blocked by policy, or no usable credential", body = ErrorBody),
         (status = 429, description = "Tested again too soon; wait the number of seconds in `Retry-After`", body = ErrorBody, headers(("Retry-After" = u64, description = "Seconds until the integration may be tested again"))),
     )
@@ -86,6 +88,9 @@ pub async fn test_integration(
         }
         Err(error @ ConnectError::Throttled { retry_after }) => {
             return Err(ApiError::too_many_requests(error.message(), retry_after));
+        }
+        Err(error @ ConnectError::Changed) => {
+            return Err(ApiError::new(StatusCode::CONFLICT, error.message()));
         }
         Err(error) => (false, Vec::new(), Some(error.message())),
     };
@@ -456,6 +461,40 @@ mod tests {
         h.clock.advance(std::time::Duration::from_secs(3));
         let (status, _) = h.post(Who::EngAdmin, &uri("int_space"), json!({})).await;
         assert_eq!(status, OK);
+    }
+
+    /// If the integration changed between the handler's read and the
+    /// connection, the credential may no longer belong with the URL: a conflict.
+    #[tokio::test]
+    async fn an_integration_that_changed_under_the_test_is_a_409() {
+        use std::sync::Arc;
+
+        use assistant_core::integrations::InMemoryIntegrationStore;
+        use assistant_mcp_client::{ConnectionsConfig, IntegrationConnections};
+
+        let server = serve(&["t"], true).await;
+        let mut h = Harness::new().await;
+        connected_space(&h, &server.uri()).await;
+        // A pool whose view of the integration no longer matches what the
+        // handler read.
+        h.state.connections = Arc::new(
+            IntegrationConnections::new(
+                Arc::new(InMemoryIntegrationStore::new()),
+                h.state.credentials.clone(),
+                h.state.health.clone(),
+                h.state.secrets.clone(),
+                h.state.clock.clone(),
+            )
+            .with_config(ConnectionsConfig {
+                allow_plain_http: true,
+                ..ConnectionsConfig::default()
+            }),
+        );
+
+        let (status, body) = h.post(Who::EngAdmin, &uri("int_space"), json!({})).await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(posts(&server).await, 0, "nothing was sent");
     }
 
     #[tokio::test]
