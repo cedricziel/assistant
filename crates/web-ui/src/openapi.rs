@@ -204,6 +204,7 @@ impl Modify for SecuritySchemesAddon {
                 ("org:manage", "Full organization management"),
                 ("api_keys:read", "List API keys"),
                 ("api_keys:write", "Create and revoke API keys"),
+                ("mcp:execute", "Call tools through the MCP endpoint"),
             ]
             .into_iter()
             .collect();

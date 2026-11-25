@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use chrono::Duration;
 use jsonwebtoken::{
     Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode,
@@ -177,13 +177,26 @@ impl JwtManager {
     }
 
     /// Sign a JWT for the given auth context, bound to the user's current
-    /// `token_version`.
+    /// `token_version` and to the manager's own (API) audience.
     pub fn sign(
         &self,
         ctx: &AuthContext,
         org_slug: &str,
         name: &str,
         token_version: u64,
+    ) -> Result<String> {
+        self.sign_for_audience(ctx, org_slug, name, token_version, &self.audience)
+    }
+
+    /// Like [`Self::sign`], but the token's `aud` is `audience` (RFC 8707
+    /// resource-bound tokens).
+    pub fn sign_for_audience(
+        &self,
+        ctx: &AuthContext,
+        org_slug: &str,
+        name: &str,
+        token_version: u64,
+        audience: &str,
     ) -> Result<String> {
         let now = self.clock.now();
         let exp = now + self.access_ttl;
@@ -206,7 +219,7 @@ impl JwtManager {
         let claims = Claims {
             iss: self.issuer.clone(),
             sub: ctx.user_id.0.clone(),
-            aud: self.audience.clone(),
+            aud: audience.to_owned(),
             exp: exp.timestamp(),
             iat: now.timestamp(),
             jti: uuid::Uuid::new_v4().to_string(),
@@ -224,11 +237,17 @@ impl JwtManager {
         encode(&header, &claims, &self.key_pair.encoding).context("failed to sign JWT")
     }
 
-    /// Validate a JWT and return the claims.
+    /// Validate a JWT issued for the manager's own (API) audience and return
+    /// the claims.
     pub fn validate(&self, token: &str) -> Result<Claims> {
+        self.validate_for_audience(token, &self.audience)
+    }
+
+    /// Validate a JWT that must carry `audience` as its `aud`.
+    pub fn validate_for_audience(&self, token: &str, audience: &str) -> Result<Claims> {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_issuer(&[&self.issuer]);
-        validation.set_audience(&[&self.audience]);
+        validation.set_audience(&[audience]);
 
         let token_data: TokenData<Claims> =
             decode(token, &self.key_pair.decoding, &validation).context("JWT validation failed")?;
@@ -272,34 +291,13 @@ pub fn claims_to_context(claims: &Claims) -> Result<AuthContext> {
 
 /// Parse a scope string like `"personas:read"` into a [`Scope`].
 fn parse_scope(s: &str) -> Result<assistant_core::identity::Scope> {
-    use assistant_core::identity::{Action, ResourceKind, Scope};
+    use assistant_core::identity::Scope;
 
     let (res_str, act_str) = s
         .split_once(':')
         .with_context(|| format!("invalid scope format: {s}"))?;
-
-    let resource = match res_str {
-        "personas" => ResourceKind::Personas,
-        "conversations" => ResourceKind::Conversations,
-        "messages" => ResourceKind::Messages,
-        "skills" => ResourceKind::Skills,
-        "interfaces" => ResourceKind::Interfaces,
-        "bindings" => ResourceKind::Bindings,
-        "users" => ResourceKind::Users,
-        "org" => ResourceKind::Org,
-        "api_keys" => ResourceKind::ApiKeys,
-        "spaces" => ResourceKind::Spaces,
-        other => bail!("unknown resource kind in scope: {other}"),
-    };
-
-    let action = match act_str {
-        "read" => Action::Read,
-        "write" => Action::Write,
-        "delete" => Action::Delete,
-        "execute" => Action::Execute,
-        "manage" => Action::Manage,
-        other => bail!("unknown action in scope: {other}"),
-    };
+    let resource = res_str.parse().map_err(anyhow::Error::msg)?;
+    let action = act_str.parse().map_err(anyhow::Error::msg)?;
 
     Ok(Scope::new(resource, action))
 }
@@ -452,6 +450,59 @@ mod tests {
         let scope = parse_scope("org:manage").unwrap();
         assert_eq!(scope.resource, ResourceKind::Org);
         assert_eq!(scope.action, Action::Manage);
+    }
+
+    #[test]
+    fn parse_scope_accepts_mcp_execute() {
+        let scope = parse_scope("mcp:execute").unwrap();
+        assert_eq!(scope.resource, ResourceKind::Mcp);
+        assert_eq!(scope.action, Action::Execute);
+    }
+
+    const MCP_AUDIENCE: &str = "https://test.local/mcp";
+
+    fn manager() -> JwtManager {
+        JwtManager::new(
+            JwtKeyPair::generate().unwrap(),
+            "https://test.local".into(),
+            "https://test.local".into(),
+        )
+    }
+
+    #[test]
+    fn token_signed_for_mcp_audience_carries_that_aud() {
+        let mgr = manager();
+
+        let token = mgr
+            .sign_for_audience(&make_test_context(), "acme", "Alice", 0, MCP_AUDIENCE)
+            .unwrap();
+
+        let claims = mgr.validate_for_audience(&token, MCP_AUDIENCE).unwrap();
+        assert_eq!(claims.aud, MCP_AUDIENCE);
+    }
+
+    #[test]
+    fn api_validation_rejects_mcp_audience_token() {
+        let mgr = manager();
+        let token = mgr
+            .sign_for_audience(&make_test_context(), "acme", "Alice", 0, MCP_AUDIENCE)
+            .unwrap();
+
+        assert!(
+            mgr.validate(&token).is_err(),
+            "an MCP-audience token must not authenticate against the API audience"
+        );
+    }
+
+    #[test]
+    fn mcp_validation_rejects_api_audience_token() {
+        let mgr = manager();
+        let token = mgr.sign(&make_test_context(), "acme", "Alice", 0).unwrap();
+
+        assert!(
+            mgr.validate_for_audience(&token, MCP_AUDIENCE).is_err(),
+            "an API-audience token must not authenticate against the MCP audience"
+        );
     }
 
     #[test]

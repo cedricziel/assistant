@@ -384,6 +384,8 @@ pub struct AuthCode {
     pub redirect_uri: String,
     pub scopes: Vec<String>,
     pub pkce_challenge: Option<String>,
+    /// RFC 8707 resource the code was authorized for.
+    pub resource: Option<String>,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -403,6 +405,8 @@ pub struct StoredRefreshToken {
     pub user_id: String,
     pub client_id: String,
     pub scopes: Vec<String>,
+    /// RFC 8707 resource every access token minted from this token is bound to.
+    pub resource: Option<String>,
     pub expires_at: DateTime<Utc>,
     /// Whether this token has been consumed (for rotation detection).
     pub consumed: bool,

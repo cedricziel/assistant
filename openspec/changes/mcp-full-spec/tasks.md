@@ -30,10 +30,10 @@ Each numbered group is one PR in the stack, in order.
 
 ## 5. Audience-bound tokens and `mcp:execute` (PR 5)
 
-- [ ] 5.1 Add failing tests in `crates/core` and `crates/auth`: `mcp:execute` parses; a JWT issued with resource `<origin>/mcp` has that `aud`; verification with the API audience rejects it and vice versa; confirm red
-- [ ] 5.2 Add `ResourceKind::Mcp`, per-call expected audience in `JwtService`, and verify the tests pass
-- [ ] 5.3 Add failing web-ui tests: `/oauth/authorize` + `/oauth/token` with `resource` issue an MCP-audience token; DCR with a loopback redirect URI and `mcp:execute` succeeds; RFC 8414 metadata lists `mcp:execute`; implement and verify they pass
-- [ ] 5.4 Document the new `resource` parameter in the utoipa annotations, run `make dump-openapi` and `make generate-flutter-client`, and verify `openapi.json` diff contains only the expected changes
+- [x] 5.1 Add failing tests in `crates/core` and `crates/auth`: `mcp:execute` parses; a JWT issued with resource `<origin>/mcp` has that `aud`; verification with the API audience rejects it and vice versa; confirm red
+- [x] 5.2 Add `ResourceKind::Mcp`, per-call expected audience in `JwtService`, and verify the tests pass
+- [x] 5.3 Add failing web-ui tests: `/oauth/authorize` + `/oauth/token` with `resource` issue an MCP-audience token; DCR with a loopback redirect URI and `mcp:execute` succeeds; RFC 8414 metadata lists `mcp:execute`; implement and verify they pass
+- [x] 5.4 Document the new `resource` parameter in the utoipa annotations, run `make dump-openapi` and `make generate-flutter-client`, and verify `openapi.json` diff contains only the expected changes
 
 ## 6. Streamable HTTP `/mcp` endpoint (PR 6)
 

@@ -193,6 +193,50 @@ Access tokens are **HS256 JWTs** signed by the server. Claims include:
 Default TTL is **1 hour**. Refresh tokens are opaque base64url strings
 stored server-side with a configurable TTL (default 30 days).
 
+### MCP tokens (`resource` and `mcp:execute`)
+
+`/oauth/authorize` (GET, POST, identify) and `/oauth/token` accept an optional
+`resource` parameter (RFC 8707). The only accepted value is the canonical MCP
+URL, `<public base URL>/mcp`. The base URL is the OAuth issuer: `--public-url`,
+else derived from the listen address, with no trailing slash. Any other value
+fails with `invalid_target` (an HTML 400 at the authorize endpoint, a JSON 400
+at the token endpoint).
+
+| Request               | JWT `aud`       | JWT `scope`   | Accepted by           |
+| --------------------- | --------------- | ------------- | --------------------- |
+| No `resource`         | server base URL | as before     | `/api`                |
+| `resource=<base>/mcp` | `<base>/mcp`    | `mcp:execute` | the MCP endpoint only |
+
+`/api` rejects an MCP token with an audience mismatch. Scopes the client
+requests are not copied into the token, and an MCP token is never set as the
+`assistant_session` cookie.
+
+The server stores the resource with the authorization code and the refresh
+token. On the `authorization_code` and `refresh_token` grants, a `resource`
+sent to `/oauth/token` must equal the authorized one, or the request fails with
+`invalid_target`; omit it to inherit. The `device_code` grant takes `resource`
+on the token request.
+
+```
+GET /oauth/authorize?response_type=code&client_id=...&redirect_uri=...
+    &code_challenge=...&code_challenge_method=S256
+    &resource=https://assistant.example.com/mcp
+
+POST /oauth/token
+grant_type=authorization_code&code=...&code_verifier=...&client_id=...
+&redirect_uri=...&resource=https://assistant.example.com/mcp
+```
+
+To reach the MCP endpoint without OAuth, create an API key with the scopes
+`["mcp:execute"]`. `/.well-known/oauth-authorization-server` lists
+`scopes_supported: ["mcp:execute"]`.
+
+`POST /oauth/register` accepts loopback redirect URIs (`http://127.0.0.1:<port>/...`,
+`http://localhost`, `http://[::1]`) and private-use scheme URIs such as
+`com.example.app:/callback`. It rejects the schemes `javascript`, `data`,
+`file`, `vbscript`, `blob`, `about`, `ftp`, `ws`, and `wss`. A `scope` field in
+the body is accepted and ignored.
+
 ### CLI authentication
 
 The CLI uses the **device code flow** (RFC 8628):

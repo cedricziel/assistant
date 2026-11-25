@@ -29,6 +29,35 @@ pub struct TokenPair {
     pub refresh_token: String,
     /// The user who authorized the token.
     pub user_id: String,
+    /// RFC 8707 resource the access token must be bound to; `None` means the
+    /// server's own API.
+    pub resource: Option<String>,
+}
+
+/// A `resource` parameter (RFC 8707) that conflicts with what was authorized.
+///
+/// Callers map it to the `invalid_target` error code; any other error from
+/// the grant methods is an `invalid_grant`.
+#[derive(Debug)]
+pub struct InvalidTarget(pub String);
+
+impl std::fmt::Display for InvalidTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for InvalidTarget {}
+
+/// Check a `resource` sent with a token request against the one the grant was
+/// authorized for. An absent request value inherits the grant's.
+fn check_resource(granted: Option<&str>, requested: Option<&str>) -> Result<()> {
+    match requested {
+        Some(r) if Some(r) != granted => {
+            Err(InvalidTarget(format!("resource {r} was not authorized for this grant")).into())
+        }
+        _ => Ok(()),
+    }
 }
 
 // -- In-memory implementations --
@@ -148,6 +177,7 @@ impl OAuth2Server {
         redirect_uri: &str,
         pkce_challenge: Option<&str>,
         scopes: Vec<String>,
+        resource: Option<&str>,
     ) -> Result<String> {
         let code = generate_random_token();
         let auth_code = AuthCode {
@@ -157,6 +187,7 @@ impl OAuth2Server {
             redirect_uri: redirect_uri.to_owned(),
             scopes,
             pkce_challenge: pkce_challenge.map(|s| s.to_owned()),
+            resource: resource.map(str::to_owned),
             expires_at: self.clock.now() + self.code_ttl,
         };
         self.code_store.store_code(auth_code).await?;
@@ -165,13 +196,16 @@ impl OAuth2Server {
 
     /// Exchange an authorization code for an access/refresh token pair.
     ///
-    /// The code is single-use and is consumed on success.
+    /// The code is single-use and is consumed on success. A `resource` sent
+    /// with the request must equal the one the code was authorized for
+    /// ([`InvalidTarget`]).
     pub async fn exchange_auth_code(
         &self,
         code: &str,
         client_id: &str,
         redirect_uri: &str,
         pkce_verifier: Option<&str>,
+        resource: Option<&str>,
     ) -> Result<TokenPair> {
         let auth_code = self
             .code_store
@@ -206,10 +240,13 @@ impl OAuth2Server {
             (None, None) => bail!("PKCE code_challenge is required"),
         }
 
+        check_resource(auth_code.resource.as_deref(), resource)?;
+
         // Generate tokens.
         let access_token = generate_random_token();
         let refresh_token = generate_random_token();
         let user_id = auth_code.user_id.clone();
+        let resource = auth_code.resource.clone();
 
         // Store refresh token.
         self.refresh_store
@@ -218,6 +255,7 @@ impl OAuth2Server {
                 user_id: auth_code.user_id,
                 client_id: auth_code.client_id,
                 scopes: auth_code.scopes,
+                resource: resource.clone(),
                 expires_at: self.clock.now() + self.refresh_ttl,
                 consumed: false,
             })
@@ -227,6 +265,7 @@ impl OAuth2Server {
             access_token,
             refresh_token,
             user_id,
+            resource,
         })
     }
 
@@ -234,8 +273,15 @@ impl OAuth2Server {
     ///
     /// Implements refresh token rotation: the old token is consumed and a new
     /// pair is issued. If a consumed token is reused (replay attack), all
-    /// tokens for that user+client are revoked.
-    pub async fn refresh(&self, refresh_token: &str, client_id: &str) -> Result<TokenPair> {
+    /// tokens for that user+client are revoked. A `resource` sent with the
+    /// request must equal the one the refresh token is bound to
+    /// ([`InvalidTarget`]); that check runs before the token is consumed.
+    pub async fn refresh(
+        &self,
+        refresh_token: &str,
+        client_id: &str,
+        resource: Option<&str>,
+    ) -> Result<TokenPair> {
         let stored = self
             .refresh_store
             .get_token(refresh_token)
@@ -260,6 +306,8 @@ impl OAuth2Server {
             bail!("refresh token expired");
         }
 
+        check_resource(stored.resource.as_deref(), resource)?;
+
         // Consume old token.
         self.refresh_store.consume_token(refresh_token).await?;
 
@@ -274,6 +322,7 @@ impl OAuth2Server {
                 user_id: stored.user_id,
                 client_id: stored.client_id,
                 scopes: stored.scopes,
+                resource: stored.resource.clone(),
                 expires_at: self.clock.now() + self.refresh_ttl,
                 consumed: false,
             })
@@ -283,6 +332,7 @@ impl OAuth2Server {
             access_token: new_access,
             refresh_token: new_refresh,
             user_id,
+            resource: stored.resource,
         })
     }
 
@@ -296,6 +346,7 @@ impl OAuth2Server {
         user_id: &str,
         client_id: &str,
         scopes: Vec<String>,
+        resource: Option<&str>,
     ) -> Result<TokenPair> {
         let access_token = generate_random_token();
         let refresh_token = generate_random_token();
@@ -306,6 +357,7 @@ impl OAuth2Server {
                 user_id: user_id.to_string(),
                 client_id: client_id.to_string(),
                 scopes,
+                resource: resource.map(str::to_owned),
                 expires_at: self.clock.now() + self.refresh_ttl,
                 consumed: false,
             })
@@ -315,6 +367,7 @@ impl OAuth2Server {
             access_token,
             refresh_token,
             user_id: user_id.to_string(),
+            resource: resource.map(str::to_owned),
         })
     }
 }
@@ -362,12 +415,19 @@ mod tests {
                 "http://localhost/callback",
                 Some(&challenge),
                 vec!["personas:read".into()],
+                None,
             )
             .await
             .unwrap();
 
         let pair = server
-            .exchange_auth_code(&code, "webui", "http://localhost/callback", Some(&verifier))
+            .exchange_auth_code(
+                &code,
+                "webui",
+                "http://localhost/callback",
+                Some(&verifier),
+                None,
+            )
             .await
             .unwrap();
 
@@ -387,19 +447,20 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
 
         // First exchange succeeds.
         server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
             .await
             .unwrap();
 
         // Second exchange fails.
         let err = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
             .await;
         assert!(err.is_err(), "auth code should be single-use");
     }
@@ -417,13 +478,20 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
 
         let wrong_verifier = pkce::generate_verifier();
         let err = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&wrong_verifier))
+            .exchange_auth_code(
+                &code,
+                "webui",
+                "http://localhost/cb",
+                Some(&wrong_verifier),
+                None,
+            )
             .await;
         assert!(err.is_err(), "wrong PKCE verifier should be rejected");
     }
@@ -441,12 +509,13 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
 
         let err = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", None)
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", None, None)
             .await;
         assert!(err.is_err(), "missing PKCE verifier should be rejected");
     }
@@ -463,6 +532,7 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
@@ -473,6 +543,7 @@ mod tests {
                 "wrong_client",
                 "http://localhost/cb",
                 Some(&verifier),
+                None,
             )
             .await;
         assert!(err.is_err(), "wrong client_id should be rejected");
@@ -490,12 +561,13 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
 
         let err = server
-            .exchange_auth_code(&code, "webui", "http://evil.com/cb", Some(&verifier))
+            .exchange_auth_code(&code, "webui", "http://evil.com/cb", Some(&verifier), None)
             .await;
         assert!(err.is_err(), "wrong redirect_uri should be rejected");
     }
@@ -512,24 +584,28 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
 
         let pair1 = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
             .await
             .unwrap();
 
         // Refresh yields new tokens.
-        let pair2 = server.refresh(&pair1.refresh_token, "webui").await.unwrap();
+        let pair2 = server
+            .refresh(&pair1.refresh_token, "webui", None)
+            .await
+            .unwrap();
         assert_ne!(
             pair1.refresh_token, pair2.refresh_token,
             "refresh should rotate tokens"
         );
 
         // Old refresh token cannot be reused.
-        let err = server.refresh(&pair1.refresh_token, "webui").await;
+        let err = server.refresh(&pair1.refresh_token, "webui", None).await;
         assert!(err.is_err(), "reusing consumed refresh token should fail");
     }
 
@@ -545,24 +621,28 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
 
         let pair1 = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
             .await
             .unwrap();
 
         // Normal refresh.
-        let pair2 = server.refresh(&pair1.refresh_token, "webui").await.unwrap();
+        let pair2 = server
+            .refresh(&pair1.refresh_token, "webui", None)
+            .await
+            .unwrap();
 
         // Replay attack with old token — triggers revocation.
-        let err = server.refresh(&pair1.refresh_token, "webui").await;
+        let err = server.refresh(&pair1.refresh_token, "webui", None).await;
         assert!(err.is_err(), "replay should be detected");
 
         // Even the new token is now revoked.
-        let err2 = server.refresh(&pair2.refresh_token, "webui").await;
+        let err2 = server.refresh(&pair2.refresh_token, "webui", None).await;
         assert!(err2.is_err(), "all tokens should be revoked after replay");
     }
 
@@ -581,6 +661,7 @@ mod tests {
                     user_id: user.into(),
                     client_id: format!("client_{i}"),
                     scopes: vec![],
+                    resource: None,
                     expires_at: now + Duration::days(30),
                     consumed: false,
                 })
@@ -596,6 +677,7 @@ mod tests {
                 user_id: "usr_bob".into(),
                 client_id: "client_x".into(),
                 scopes: vec![],
+                resource: None,
                 expires_at: now + Duration::days(30),
                 consumed: false,
             })
@@ -642,6 +724,7 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
@@ -649,7 +732,13 @@ mod tests {
         // Exchange will fail on expiry before PKCE is checked, but we still
         // supply the challenge to satisfy the mandatory-PKCE invariant.
         let err = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&_verifier))
+            .exchange_auth_code(
+                &code,
+                "webui",
+                "http://localhost/cb",
+                Some(&_verifier),
+                None,
+            )
             .await;
         assert!(err.is_err(), "expired code should be rejected");
     }
@@ -666,16 +755,17 @@ mod tests {
                 "http://localhost/cb",
                 Some(&challenge),
                 vec![],
+                None,
             )
             .await
             .unwrap();
 
         let pair = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
             .await
             .unwrap();
 
-        let err = server.refresh(&pair.refresh_token, "webui").await;
+        let err = server.refresh(&pair.refresh_token, "webui", None).await;
         assert!(err.is_err(), "expired refresh token should be rejected");
     }
 
@@ -684,12 +774,19 @@ mod tests {
         let server = make_server();
 
         let code = server
-            .generate_auth_code("usr_alice", "webui", "http://localhost/cb", None, vec![])
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                None,
+                vec![],
+                None,
+            )
             .await
             .unwrap();
 
         let err = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", None)
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", None, None)
             .await;
         assert!(err.is_err(), "exchange without PKCE should be rejected");
     }
@@ -708,18 +805,28 @@ mod tests {
                 "http://localhost/callback",
                 Some(&challenge),
                 vec!["personas:read".into(), "conversations:write".into()],
+                None,
             )
             .await
             .unwrap();
 
         // 2. Exchange with PKCE.
         let pair1 = server
-            .exchange_auth_code(&code, "webui", "http://localhost/callback", Some(&verifier))
+            .exchange_auth_code(
+                &code,
+                "webui",
+                "http://localhost/callback",
+                Some(&verifier),
+                None,
+            )
             .await
             .unwrap();
 
         // 3. Refresh.
-        let pair2 = server.refresh(&pair1.refresh_token, "webui").await.unwrap();
+        let pair2 = server
+            .refresh(&pair1.refresh_token, "webui", None)
+            .await
+            .unwrap();
         assert_ne!(pair1.access_token, pair2.access_token, "new access token");
         assert_ne!(
             pair1.refresh_token, pair2.refresh_token,
@@ -727,7 +834,10 @@ mod tests {
         );
 
         // 4. Refresh again with new token.
-        let pair3 = server.refresh(&pair2.refresh_token, "webui").await.unwrap();
+        let pair3 = server
+            .refresh(&pair2.refresh_token, "webui", None)
+            .await
+            .unwrap();
         assert_ne!(pair2.refresh_token, pair3.refresh_token, "rotated again");
     }
 
@@ -736,7 +846,7 @@ mod tests {
         let server = make_server();
 
         let pair = server
-            .issue_token_pair("usr_bob", "cli", vec!["personas:read".into()])
+            .issue_token_pair("usr_bob", "cli", vec!["personas:read".into()], None)
             .await
             .unwrap();
 
@@ -745,7 +855,180 @@ mod tests {
         assert_eq!(pair.user_id, "usr_bob");
 
         // The refresh token should be usable.
-        let pair2 = server.refresh(&pair.refresh_token, "cli").await.unwrap();
+        let pair2 = server
+            .refresh(&pair.refresh_token, "cli", None)
+            .await
+            .unwrap();
         assert_ne!(pair.refresh_token, pair2.refresh_token, "should rotate");
+    }
+
+    const MCP: &str = "https://assistant.test/mcp";
+
+    async fn code_for(server: &OAuth2Server, resource: Option<&str>) -> (String, String) {
+        let (verifier, challenge) = test_pkce();
+        let code = server
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                Some(&challenge),
+                vec![],
+                resource,
+            )
+            .await
+            .unwrap();
+        (code, verifier)
+    }
+
+    fn is_invalid_target(err: &anyhow::Error) -> bool {
+        err.downcast_ref::<InvalidTarget>().is_some()
+    }
+
+    #[tokio::test]
+    async fn resource_is_carried_from_auth_code_to_the_token_pair() {
+        let server = make_server();
+        let (code, verifier) = code_for(&server, Some(MCP)).await;
+
+        let pair = server
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
+            .await
+            .unwrap();
+
+        assert_eq!(pair.resource.as_deref(), Some(MCP));
+    }
+
+    #[tokio::test]
+    async fn token_request_resource_must_match_the_authorized_one() {
+        let server = make_server();
+        let (code, verifier) = code_for(&server, Some(MCP)).await;
+
+        let err = server
+            .exchange_auth_code(
+                &code,
+                "webui",
+                "http://localhost/cb",
+                Some(&verifier),
+                Some("https://other.test/"),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(is_invalid_target(&err), "got: {err:#}");
+    }
+
+    #[tokio::test]
+    async fn token_request_cannot_add_a_resource_the_code_lacks() {
+        let server = make_server();
+        let (code, verifier) = code_for(&server, None).await;
+
+        let err = server
+            .exchange_auth_code(
+                &code,
+                "webui",
+                "http://localhost/cb",
+                Some(&verifier),
+                Some(MCP),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(is_invalid_target(&err), "got: {err:#}");
+    }
+
+    #[tokio::test]
+    async fn matching_token_request_resource_is_accepted() {
+        let server = make_server();
+        let (code, verifier) = code_for(&server, Some(MCP)).await;
+
+        let pair = server
+            .exchange_auth_code(
+                &code,
+                "webui",
+                "http://localhost/cb",
+                Some(&verifier),
+                Some(MCP),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(pair.resource.as_deref(), Some(MCP));
+    }
+
+    #[tokio::test]
+    async fn resource_survives_refresh_rotation() {
+        let server = make_server();
+        let (code, verifier) = code_for(&server, Some(MCP)).await;
+        let first = server
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
+            .await
+            .unwrap();
+
+        let second = server
+            .refresh(&first.refresh_token, "webui", None)
+            .await
+            .unwrap();
+        assert_eq!(second.resource.as_deref(), Some(MCP));
+
+        let third = server
+            .refresh(&second.refresh_token, "webui", Some(MCP))
+            .await
+            .unwrap();
+        assert_eq!(third.resource.as_deref(), Some(MCP));
+    }
+
+    #[tokio::test]
+    async fn refresh_cannot_switch_resource() {
+        let server = make_server();
+        let (code, verifier) = code_for(&server, Some(MCP)).await;
+        let pair = server
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
+            .await
+            .unwrap();
+
+        let err = server
+            .refresh(&pair.refresh_token, "webui", Some("https://other.test/"))
+            .await
+            .unwrap_err();
+
+        assert!(is_invalid_target(&err), "got: {err:#}");
+    }
+
+    #[tokio::test]
+    async fn rejected_refresh_resource_leaves_the_token_usable() {
+        let server = make_server();
+        let (code, verifier) = code_for(&server, Some(MCP)).await;
+        let pair = server
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier), None)
+            .await
+            .unwrap();
+
+        let _ = server
+            .refresh(&pair.refresh_token, "webui", Some("https://other.test/"))
+            .await;
+
+        assert!(
+            server
+                .refresh(&pair.refresh_token, "webui", None)
+                .await
+                .is_ok(),
+            "a bad `resource` must not consume the refresh token"
+        );
+    }
+
+    #[tokio::test]
+    async fn issued_token_pair_stores_its_resource() {
+        let server = make_server();
+
+        let pair = server
+            .issue_token_pair("usr_alice", "cli", vec![], Some(MCP))
+            .await
+            .unwrap();
+        let refreshed = server
+            .refresh(&pair.refresh_token, "cli", None)
+            .await
+            .unwrap();
+
+        assert_eq!(pair.resource.as_deref(), Some(MCP));
+        assert_eq!(refreshed.resource.as_deref(), Some(MCP));
     }
 }

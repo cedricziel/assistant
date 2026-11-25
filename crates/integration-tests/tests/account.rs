@@ -191,6 +191,7 @@ fn refresh_token(token: &str, user_id: &str) -> StoredRefreshToken {
         user_id: user_id.into(),
         client_id: "integration-test".into(),
         scopes: vec![],
+        resource: None,
         expires_at: Utc::now() + chrono::Duration::days(30),
         consumed: false,
     }

@@ -61,10 +61,26 @@ impl AuthState {
     /// from the token, so removing or demoting a member takes effect on their
     /// next request.
     pub async fn authenticate_jwt(&self, token: &str) -> Result<AuthContext, SessionError> {
-        let claims = self
-            .jwt_manager
-            .validate(token)
-            .map_err(|_| SessionError::Rejected)?;
+        self.authenticate_claims(self.jwt_manager.validate(token))
+            .await
+    }
+
+    /// Like [`Self::authenticate_jwt`], for a token that must carry `audience`
+    /// (an RFC 8707 resource such as the MCP endpoint) instead of the API's.
+    pub async fn authenticate_jwt_for_audience(
+        &self,
+        token: &str,
+        audience: &str,
+    ) -> Result<AuthContext, SessionError> {
+        self.authenticate_claims(self.jwt_manager.validate_for_audience(token, audience))
+            .await
+    }
+
+    async fn authenticate_claims(
+        &self,
+        claims: anyhow::Result<crate::jwt::Claims>,
+    ) -> Result<AuthContext, SessionError> {
+        let claims = claims.map_err(|_| SessionError::Rejected)?;
         let mut ctx = claims_to_context(&claims).map_err(|_| SessionError::Rejected)?;
 
         let session = self
@@ -394,6 +410,31 @@ mod tests {
         let result = state.authenticate_jwt(&token).await;
 
         assert!(matches!(result, Err(SessionError::Rejected)), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn jwt_audience_decides_which_surface_accepts_it() {
+        let (state, _) = state_with_bob().await;
+        let mcp = "https://test.local/mcp";
+        let token = jwt_manager()
+            .sign_for_audience(&make_member_context(), "acme", "Bob", 0, mcp)
+            .unwrap();
+
+        assert!(matches!(
+            state.authenticate_jwt(&token).await,
+            Err(SessionError::Rejected)
+        ));
+        let ctx = state
+            .authenticate_jwt_for_audience(&token, mcp)
+            .await
+            .unwrap();
+        assert_eq!(ctx.user_id, UserId::from("bob"));
+        assert!(matches!(
+            state
+                .authenticate_jwt_for_audience(&sign_for_bob(0), mcp)
+                .await,
+            Err(SessionError::Rejected)
+        ));
     }
 
     #[tokio::test]

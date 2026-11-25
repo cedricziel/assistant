@@ -24,7 +24,7 @@ use axum::routing::{get, post};
 use assistant_auth::jwt::JwtManager;
 use assistant_auth::oauth2::clients::ClientRegistrar;
 use assistant_auth::oauth2::device::DeviceCodeManager;
-use assistant_auth::oauth2::server::OAuth2Server;
+use assistant_auth::oauth2::server::{InvalidTarget, OAuth2Server};
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::UserId;
 use assistant_core::store::{MembershipStore, UserStore};
@@ -56,6 +56,25 @@ pub struct OAuthState {
     pub oidc_sessions: Arc<PendingOidcSessionStore>,
     /// Rate limiters; the password endpoint uses the per-account lockout.
     pub rate_limits: Arc<crate::rate_limit::RateLimits>,
+}
+
+impl OAuthState {
+    /// Canonical URL of the MCP endpoint (`<public base URL>/mcp`), the only
+    /// RFC 8707 `resource` this server issues tokens for besides its own API.
+    pub fn mcp_resource(&self) -> String {
+        format!("{}/mcp", self.issuer.trim_end_matches('/'))
+    }
+
+    /// Check a `resource` request parameter (RFC 8707). `None` is the server's
+    /// own API; anything but the MCP URL is an [`InvalidTarget`].
+    pub(crate) fn validate_resource(&self, resource: Option<&str>) -> Result<(), InvalidTarget> {
+        match resource {
+            Some(r) if r != self.mcp_resource() => {
+                Err(InvalidTarget(format!("unknown resource: {r}")))
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Build the public OAuth2 router (no auth required on these endpoints).
@@ -787,12 +806,12 @@ mod tests {
         let state = test_state().await;
         let web = state
             .oauth2_server
-            .issue_token_pair("usr_alice", "webui", vec![])
+            .issue_token_pair("usr_alice", "webui", vec![], None)
             .await
             .unwrap();
         let cli = state
             .oauth2_server
-            .issue_token_pair("usr_alice", "cli", vec![])
+            .issue_token_pair("usr_alice", "cli", vec![], None)
             .await
             .unwrap();
 
@@ -1299,7 +1318,7 @@ mod tests {
         let state = test_state().await;
         let pair = state
             .oauth2_server
-            .issue_token_pair("usr_alice", "webui", vec![])
+            .issue_token_pair("usr_alice", "webui", vec![], None)
             .await
             .unwrap();
         state
@@ -1328,7 +1347,7 @@ mod tests {
         let state = test_state().await;
         let pair = state
             .oauth2_server
-            .issue_token_pair("usr_alice", "webui", vec![])
+            .issue_token_pair("usr_alice", "webui", vec![], None)
             .await
             .unwrap();
         state
@@ -2258,5 +2277,454 @@ mod tests {
             device_approver(&state, &device_code).await.as_deref(),
             Some("usr_alice2")
         );
+    }
+
+    // -- RFC 8707 resource indicators / MCP audience --
+
+    /// The canonical MCP URL for the test issuer.
+    const MCP_URL: &str = "http://localhost/mcp";
+
+    async fn post_form(state: &OAuthState, uri: &str, form: String) -> axum::response::Response {
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn post_json(
+        state: &OAuthState,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> axum::response::Response {
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn json_body(resp: axum::response::Response) -> serde_json::Value {
+        serde_json::from_str(&body_text(resp).await).unwrap()
+    }
+
+    /// Register a public client the way a desktop MCP client would.
+    async fn register_mcp_client(state: &OAuthState, redirect_uri: &str) -> String {
+        let resp = post_json(
+            state,
+            "/oauth/register",
+            serde_json::json!({
+                "client_name": "MCP Client",
+                "redirect_uris": [redirect_uri],
+                "grant_types": ["authorization_code", "refresh_token"],
+                "response_types": ["code"],
+                "token_endpoint_auth_method": "none",
+                "scope": "mcp:execute"
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        json_body(resp).await["client_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// Sign in as alice through POST `/oauth/authorize`; returns the response.
+    async fn password_authorize(
+        state: &OAuthState,
+        client_id: &str,
+        redirect_uri: &str,
+        challenge: &str,
+        resource: Option<&str>,
+    ) -> axum::response::Response {
+        let resource = resource
+            .map(|r| format!("&resource={}", urlencoding::encode(r)))
+            .unwrap_or_default();
+        post_form(
+            state,
+            "/oauth/authorize",
+            format!(
+                "email=alice%40example.com&password=secret123&org=test&client_id={client_id}&redirect_uri={}&code_challenge={challenge}&code_challenge_method=S256{resource}",
+                urlencoding::encode(redirect_uri)
+            ),
+        )
+        .await
+    }
+
+    fn code_from(resp: &axum::response::Response) -> String {
+        let url = url::Url::parse(&location(resp)).unwrap();
+        url.query_pairs()
+            .find(|(k, _)| k == "code")
+            .map(|(_, v)| v.into_owned())
+            .unwrap()
+    }
+
+    /// Run the whole code + PKCE flow for a loopback client, asking for
+    /// `resource` at the authorization endpoint.
+    async fn token_via_code_flow(
+        state: &OAuthState,
+        resource: Option<&str>,
+    ) -> (String, axum::response::Response) {
+        let redirect = "http://127.0.0.1:33418/callback";
+        let client_id = register_mcp_client(state, redirect).await;
+        let (verifier, challenge) = test_pkce();
+        let resp = password_authorize(state, &client_id, redirect, &challenge, resource).await;
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let code = code_from(&resp);
+        let resp = post_form(
+            state,
+            "/oauth/token",
+            format!(
+                "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri={}&code_verifier={verifier}",
+                urlencoding::encode(redirect)
+            ),
+        )
+        .await;
+        (client_id, resp)
+    }
+
+    #[tokio::test]
+    async fn metadata_advertises_the_mcp_scope() {
+        let app = build_app(test_state().await);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/oauth-authorization-server")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let meta = json_body(resp).await;
+        assert!(
+            meta["scopes_supported"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("mcp:execute")),
+            "scopes_supported: {meta}"
+        );
+    }
+
+    #[tokio::test]
+    async fn desktop_client_registers_a_loopback_redirect_with_the_mcp_scope() {
+        let state = test_state().await;
+
+        let client_id = register_mcp_client(&state, "http://127.0.0.1:33418/callback").await;
+
+        assert!(client_id.starts_with("cid_"));
+    }
+
+    #[tokio::test]
+    async fn custom_scheme_redirect_uris_can_be_registered() {
+        let state = test_state().await;
+
+        let resp = post_json(
+            &state,
+            "/oauth/register",
+            serde_json::json!({
+                "client_name": "IDE",
+                "redirect_uris": ["com.example.ide:/oauth/callback"],
+                "grant_types": ["authorization_code"],
+                "response_types": ["code"]
+            }),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    #[tokio::test]
+    async fn resource_bound_code_flow_issues_an_mcp_audience_token() {
+        let state = test_state().await;
+
+        let (_, resp) = token_via_code_flow(&state, Some(MCP_URL)).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(
+            resp.headers().get("set-cookie").is_none(),
+            "an MCP token must not replace the browser session cookie"
+        );
+        let tokens = json_body(resp).await;
+        let jwt = tokens["access_token"].as_str().unwrap();
+        let claims = state
+            .jwt_manager
+            .validate_for_audience(jwt, MCP_URL)
+            .unwrap();
+        assert_eq!(claims.aud, MCP_URL);
+        assert_eq!(claims.scope, "mcp:execute");
+        assert!(
+            state.jwt_manager.validate(jwt).is_err(),
+            "the API audience must not accept an MCP token"
+        );
+    }
+
+    #[tokio::test]
+    async fn refreshing_an_mcp_token_keeps_the_mcp_audience() {
+        let state = test_state().await;
+        let (client_id, resp) = token_via_code_flow(&state, Some(MCP_URL)).await;
+        let refresh_token = json_body(resp).await["refresh_token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let resp = post_form(
+            &state,
+            "/oauth/token",
+            format!("grant_type=refresh_token&refresh_token={refresh_token}&client_id={client_id}"),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(resp.headers().get("set-cookie").is_none());
+        let jwt = json_body(resp).await["access_token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            state
+                .jwt_manager
+                .validate_for_audience(&jwt, MCP_URL)
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_rejects_a_different_resource() {
+        let state = test_state().await;
+        let (client_id, resp) = token_via_code_flow(&state, Some(MCP_URL)).await;
+        let refresh_token = json_body(resp).await["refresh_token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let resp = post_form(
+            &state,
+            "/oauth/token",
+            format!(
+                "grant_type=refresh_token&refresh_token={refresh_token}&client_id={client_id}&resource=http%3A%2F%2Flocalhost%2Fapi"
+            ),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(json_body(resp).await["error"], "invalid_target");
+    }
+
+    #[tokio::test]
+    async fn code_flow_without_resource_keeps_the_api_audience() {
+        let state = test_state().await;
+
+        let (_, resp) = token_via_code_flow(&state, None).await;
+
+        let jwt = json_body(resp).await["access_token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let claims = state.jwt_manager.validate(&jwt).unwrap();
+        assert_eq!(claims.aud, "http://localhost");
+        assert_eq!(claims.scope, "");
+    }
+
+    #[tokio::test]
+    async fn authorize_rejects_an_unknown_resource() {
+        let state = test_state().await;
+        let redirect = "http://127.0.0.1:33418/callback";
+        let client_id = register_mcp_client(&state, redirect).await;
+        let (_, challenge) = test_pkce();
+
+        let resp = password_authorize(
+            &state,
+            &client_id,
+            redirect,
+            &challenge,
+            Some("https://elsewhere.example/mcp"),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(body_text(resp).await.contains("invalid_target"));
+    }
+
+    #[tokio::test]
+    async fn token_request_rejects_a_resource_the_code_was_not_issued_for() {
+        let state = test_state().await;
+        let redirect = "http://127.0.0.1:33418/callback";
+        let client_id = register_mcp_client(&state, redirect).await;
+        let (verifier, challenge) = test_pkce();
+        let resp = password_authorize(&state, &client_id, redirect, &challenge, None).await;
+        let code = code_from(&resp);
+
+        let resp = post_form(
+            &state,
+            "/oauth/token",
+            format!(
+                "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri={}&code_verifier={verifier}&resource={}",
+                urlencoding::encode(redirect),
+                urlencoding::encode(MCP_URL)
+            ),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(json_body(resp).await["error"], "invalid_target");
+    }
+
+    #[tokio::test]
+    async fn token_request_rejects_an_unknown_resource() {
+        let state = test_state().await;
+        let redirect = "http://127.0.0.1:33418/callback";
+        let client_id = register_mcp_client(&state, redirect).await;
+        let (verifier, challenge) = test_pkce();
+        let resp =
+            password_authorize(&state, &client_id, redirect, &challenge, Some(MCP_URL)).await;
+        let code = code_from(&resp);
+
+        let resp = post_form(
+            &state,
+            "/oauth/token",
+            format!(
+                "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri={}&code_verifier={verifier}&resource=https%3A%2F%2Felsewhere.example%2F",
+                urlencoding::encode(redirect)
+            ),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(json_body(resp).await["error"], "invalid_target");
+    }
+
+    #[tokio::test]
+    async fn device_code_grant_honours_the_resource() {
+        let state = test_state().await;
+        let (device_code, user_code) = start_device_flow(&state).await;
+        let resp = verify_device(
+            &state,
+            &user_code,
+            Some("test"),
+            "alice@example.com",
+            "secret123",
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let resp = post_form(
+            &state,
+            "/oauth/token",
+            format!(
+                "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&device_code={device_code}&client_id=device-client&resource={}",
+                urlencoding::encode(MCP_URL)
+            ),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let jwt = json_body(resp).await["access_token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            state
+                .jwt_manager
+                .validate_for_audience(&jwt, MCP_URL)
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn device_code_grant_rejects_an_unknown_resource() {
+        let state = test_state().await;
+        let (device_code, _) = start_device_flow(&state).await;
+
+        let resp = post_form(
+            &state,
+            "/oauth/token",
+            format!(
+                "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&device_code={device_code}&client_id=device-client&resource=https%3A%2F%2Felsewhere.example%2F"
+            ),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(json_body(resp).await["error"], "invalid_target");
+    }
+
+    #[tokio::test]
+    async fn sign_in_forms_carry_the_resource_forward() {
+        let state = test_state().await;
+        let client_id = register_mcp_client(&state, "http://127.0.0.1:33418/callback").await;
+        let (_, challenge) = test_pkce();
+
+        let resp = build_app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://127.0.0.1:33418/callback&code_challenge={challenge}&code_challenge_method=S256&resource=http://localhost/mcp&org=test"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            body_text(resp)
+                .await
+                .contains(r#"name="resource" value="http://localhost/mcp""#),
+            "the password form must round-trip the resource"
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_redirect_remembers_the_resource_for_the_callback() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        let redirect = "http://127.0.0.1:33418/callback";
+        let client_id = register_mcp_client(&state, redirect).await;
+        let (_, challenge) = test_pkce();
+
+        let resp = build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri={redirect}&code_challenge={challenge}&code_challenge_method=S256&resource={MCP_URL}&org=acme"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let idp_state = url::Url::parse(&location(&resp))
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .map(|(_, v)| v.into_owned())
+            .unwrap();
+        let pending = state.oidc_sessions.take(&idp_state).await.unwrap();
+        assert_eq!(pending.resource.as_deref(), Some(MCP_URL));
     }
 }

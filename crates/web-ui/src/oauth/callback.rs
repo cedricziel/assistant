@@ -152,6 +152,7 @@ pub async fn callback(
             &pending.redirect_uri,
             pending.code_challenge.as_deref(),
             scopes,
+            pending.resource.as_deref(),
         )
         .await
     {
@@ -314,6 +315,7 @@ mod tests {
                 "http://localhost:9999/cb".into(),
                 None,
                 Some("client-state-xyz".into()),
+                None,
                 None,
             ))
             .await

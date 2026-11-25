@@ -805,6 +805,7 @@ mod tests {
                 user_id: "usr_del".into(),
                 client_id: "webui".into(),
                 scopes: vec![],
+                resource: None,
                 expires_at: now + chrono::Duration::days(1),
                 consumed: false,
             })

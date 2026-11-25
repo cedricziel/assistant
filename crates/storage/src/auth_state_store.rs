@@ -119,8 +119,8 @@ impl SqliteAuthCodeStore {
 impl AuthCodeStore for SqliteAuthCodeStore {
     async fn store_code(&self, code: AuthCode) -> Result<()> {
         sqlx::query(
-            "INSERT INTO auth_codes (code_hash, user_id, client_id, redirect_uri, pkce_challenge, scopes_json, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO auth_codes (code_hash, user_id, client_id, redirect_uri, pkce_challenge, scopes_json, resource, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&code.code)
         .bind(&code.user_id)
@@ -128,6 +128,7 @@ impl AuthCodeStore for SqliteAuthCodeStore {
         .bind(&code.redirect_uri)
         .bind(&code.pkce_challenge)
         .bind(to_json(&code.scopes))
+        .bind(&code.resource)
         .bind(code.expires_at)
         .execute(&self.pool)
         .await
@@ -138,7 +139,7 @@ impl AuthCodeStore for SqliteAuthCodeStore {
     async fn take_code(&self, code: &str) -> Result<Option<AuthCode>> {
         // Single-use: fetch then delete in a transaction-like sequence.
         let row = sqlx::query(
-            "SELECT code_hash, user_id, client_id, redirect_uri, pkce_challenge, scopes_json, expires_at
+            "SELECT code_hash, user_id, client_id, redirect_uri, pkce_challenge, scopes_json, resource, expires_at
              FROM auth_codes WHERE code_hash = ?",
         )
         .bind(code)
@@ -162,6 +163,7 @@ impl AuthCodeStore for SqliteAuthCodeStore {
             redirect_uri: row.get("redirect_uri"),
             pkce_challenge: row.get("pkce_challenge"),
             scopes: from_json(row.get("scopes_json")),
+            resource: row.get("resource"),
             expires_at: row.get("expires_at"),
         }))
     }
@@ -186,13 +188,14 @@ impl SqliteRefreshTokenStore {
 impl RefreshTokenStore for SqliteRefreshTokenStore {
     async fn store_token(&self, token: StoredRefreshToken) -> Result<()> {
         sqlx::query(
-            "INSERT INTO refresh_tokens (token_hash, user_id, client_id, scopes_json, expires_at, consumed)
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO refresh_tokens (token_hash, user_id, client_id, scopes_json, resource, expires_at, consumed)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&token.token)
         .bind(&token.user_id)
         .bind(&token.client_id)
         .bind(to_json(&token.scopes))
+        .bind(&token.resource)
         .bind(token.expires_at)
         .bind(token.consumed as i32)
         .execute(&self.pool)
@@ -203,7 +206,7 @@ impl RefreshTokenStore for SqliteRefreshTokenStore {
 
     async fn get_token(&self, token: &str) -> Result<Option<StoredRefreshToken>> {
         let row = sqlx::query(
-            "SELECT token_hash, user_id, client_id, scopes_json, expires_at, consumed
+            "SELECT token_hash, user_id, client_id, scopes_json, resource, expires_at, consumed
              FROM refresh_tokens WHERE token_hash = ?",
         )
         .bind(token)
@@ -217,6 +220,7 @@ impl RefreshTokenStore for SqliteRefreshTokenStore {
                 user_id: r.get("user_id"),
                 client_id: r.get("client_id"),
                 scopes: from_json(r.get("scopes_json")),
+                resource: r.get("resource"),
                 expires_at: r.get("expires_at"),
                 consumed: consumed != 0,
             }
@@ -437,6 +441,7 @@ mod tests {
             redirect_uri: "http://localhost/callback".into(),
             scopes: vec!["read".into(), "write".into()],
             pkce_challenge: Some("challenge_value".into()),
+            resource: Some("https://assistant.test/mcp".into()),
             expires_at: Utc::now() + Duration::minutes(5),
         };
         store.store_code(code).await.unwrap();
@@ -447,6 +452,10 @@ mod tests {
         let taken = taken.unwrap();
         assert_eq!(taken.user_id, "usr_1");
         assert_eq!(taken.scopes, vec!["read", "write"]);
+        assert_eq!(
+            taken.resource.as_deref(),
+            Some("https://assistant.test/mcp")
+        );
 
         // Second take returns None (single-use).
         let again = store.take_code("abc123").await.unwrap();
@@ -473,6 +482,7 @@ mod tests {
             user_id: "usr_1".into(),
             client_id: "cli_app".into(),
             scopes: vec!["read".into()],
+            resource: Some("https://assistant.test/mcp".into()),
             expires_at: Utc::now() + Duration::days(30),
             consumed: false,
         };
@@ -483,6 +493,10 @@ mod tests {
         let found = found.unwrap();
         assert!(!found.consumed);
         assert_eq!(found.user_id, "usr_1");
+        assert_eq!(
+            found.resource.as_deref(),
+            Some("https://assistant.test/mcp")
+        );
     }
 
     #[tokio::test]
@@ -496,6 +510,7 @@ mod tests {
                 user_id: "usr_1".into(),
                 client_id: "cli_app".into(),
                 scopes: vec![],
+                resource: None,
                 expires_at: Utc::now() + Duration::days(30),
                 consumed: false,
             })
@@ -520,6 +535,7 @@ mod tests {
                     user_id: "usr_1".into(),
                     client_id: "cli_app".into(),
                     scopes: vec![],
+                    resource: None,
                     expires_at: Utc::now() + Duration::days(30),
                     consumed: false,
                 })
@@ -548,6 +564,7 @@ mod tests {
                     user_id: "usr_1".into(),
                     client_id: format!("cli_{i}"),
                     scopes: vec![],
+                    resource: None,
                     expires_at: Utc::now() + Duration::days(30),
                     consumed: false,
                 })
@@ -560,6 +577,7 @@ mod tests {
                 user_id: "usr_2".into(),
                 client_id: "cli_x".into(),
                 scopes: vec![],
+                resource: None,
                 expires_at: Utc::now() + Duration::days(30),
                 consumed: false,
             })

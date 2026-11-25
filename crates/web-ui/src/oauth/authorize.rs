@@ -31,6 +31,10 @@ pub struct AuthorizeQuery {
     /// defaults to `plain`) are rejected.
     pub code_challenge_method: Option<String>,
     pub scope: Option<String>,
+    /// RFC 8707 resource the token is for. Only the MCP endpoint URL
+    /// (`<public base URL>/mcp`) is accepted; any other value is rejected as
+    /// `invalid_target`. Omit it for a token for the web API.
+    pub resource: Option<String>,
     /// Slug of the org to sign in to. An org in OIDC mode redirects to its
     /// own identity provider; a password org shows the password form. Without
     /// this parameter the page asks for the user's email to find the org.
@@ -54,6 +58,10 @@ pub struct AuthorizeForm {
     /// Must be `S256`.
     pub code_challenge_method: Option<String>,
     pub scope: Option<String>,
+    /// RFC 8707 resource the token is for. Only the MCP endpoint URL
+    /// (`<public base URL>/mcp`) is accepted; any other value is rejected as
+    /// `invalid_target`. Omit it for a token for the web API.
+    pub resource: Option<String>,
 }
 
 /// Form fields for POST /oauth/authorize/identify (the email-first step).
@@ -68,6 +76,10 @@ pub struct IdentifyForm {
     /// Must be `S256`.
     pub code_challenge_method: Option<String>,
     pub scope: Option<String>,
+    /// RFC 8707 resource the token is for. Only the MCP endpoint URL
+    /// (`<public base URL>/mcp`) is accepted; any other value is rejected as
+    /// `invalid_target`. Omit it for a token for the web API.
+    pub resource: Option<String>,
 }
 
 /// The authorization request, carried through every sign-in page.
@@ -78,6 +90,7 @@ struct OAuthParams {
     code_challenge: Option<String>,
     code_challenge_method: Option<String>,
     scope: Option<String>,
+    resource: Option<String>,
 }
 
 impl OAuthParams {
@@ -100,9 +113,15 @@ impl OAuthParams {
             // Requests that reach a form already passed the S256-only check.
             field("code_challenge_method", "S256"),
             field("scope", self.scope.as_deref().unwrap_or("")),
+            field("resource", self.resource.as_deref().unwrap_or("")),
         ]
         .join("\n  ")
     }
+}
+
+/// A form field the page round-trips as `""` when it was not sent.
+fn non_empty(value: &Option<String>) -> Option<String> {
+    value.clone().filter(|v| !v.is_empty())
 }
 
 impl From<&AuthorizeQuery> for OAuthParams {
@@ -114,6 +133,7 @@ impl From<&AuthorizeQuery> for OAuthParams {
             code_challenge: q.code_challenge.clone(),
             code_challenge_method: q.code_challenge_method.clone(),
             scope: q.scope.clone(),
+            resource: non_empty(&q.resource),
         }
     }
 }
@@ -127,6 +147,7 @@ impl From<&AuthorizeForm> for OAuthParams {
             code_challenge: f.code_challenge.clone(),
             code_challenge_method: f.code_challenge_method.clone(),
             scope: f.scope.clone(),
+            resource: non_empty(&f.resource),
         }
     }
 }
@@ -140,6 +161,7 @@ impl From<&IdentifyForm> for OAuthParams {
             code_challenge: f.code_challenge.clone(),
             code_challenge_method: f.code_challenge_method.clone(),
             scope: f.scope.clone(),
+            resource: non_empty(&f.resource),
         }
     }
 }
@@ -366,6 +388,7 @@ async fn redirect_to_org_idp(
         params.code_challenge.clone(),
         params.state.clone(),
         params.scope.clone(),
+        params.resource.clone(),
     );
     let oidc_state = state.oidc_sessions.insert(pending).await;
 
@@ -436,6 +459,7 @@ pub async fn authorize_post(
             &form.redirect_uri,
             form.code_challenge.as_deref(),
             scopes,
+            params.resource.as_deref(),
         )
         .await
     {
@@ -543,13 +567,20 @@ pub(super) async fn authenticate_password(
 }
 
 /// The checks every sign-in step applies to the authorization request: a
-/// registered client and redirect URI, and S256 PKCE. `Some` is the rejection.
+/// registered client and redirect URI, a known `resource`, and S256 PKCE.
+/// `Some` is the rejection.
 ///
 /// PKCE is mandatory per OAuth 2.1 §4.1.1: a request without a code_challenge
 /// is rejected to prevent authorization code interception.
 async fn reject_invalid_request(state: &OAuthState, params: &OAuthParams) -> Option<Response> {
     if let Err(resp) = validate_client(state, &params.client_id, &params.redirect_uri).await {
         return Some(resp);
+    }
+    if let Err(e) = state.validate_resource(params.resource.as_deref()) {
+        return Some(html_error(
+            StatusCode::BAD_REQUEST,
+            &format!("invalid_target: {e}"),
+        ));
     }
     if params.code_challenge.as_deref().unwrap_or("").is_empty() {
         return Some(html_error(
