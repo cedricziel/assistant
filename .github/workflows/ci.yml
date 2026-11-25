@@ -43,20 +43,6 @@ jobs:
           path: app/build/web/
           retention-days: 1
 
-  check:
-    name: Check
-    if: github.event.action != 'closed'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: ./.github/actions/setup-rust
-        with:
-          cache-key: "check"
-
-      - name: cargo check
-        run: cargo check --workspace --all-features
-
   test:
     name: Test
     if: github.event.action != 'closed'
@@ -80,10 +66,10 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: "check"
+          cache-key: "lint"
 
       - name: cargo clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-features -- -D warnings
 
   format:
     name: Format

@@ -21,11 +21,10 @@ description: >
 Jobs run in parallel. Order of gates (fast → slow):
 
 1. **format** — `cargo fmt --all -- --check`. No apt deps, no cache needed. Fails fastest.
-2. **check** — `cargo check --workspace --all-features`. Requires `protobuf-compiler ffmpeg`.
-3. **lint** — `cargo clippy --workspace -- -D warnings` + separate `signal` feature clippy.
-4. **test** — `cargo test --workspace`.
-5. **visual-regression** — Playwright screenshot tests against the Flutter SPA served by the embedded binary. The Flutter web build comes from the `build-flutter-web` job (artifact `flutter-web-build`); cargo itself never runs Flutter. `continue-on-error: true`.
-6. **integration** — Smoke tests against live Ollama. `continue-on-error: true`, `timeout-minutes: 45`.
+2. **lint** — `cargo clippy --workspace --all-features -- -D warnings`. Replaces the former separate `cargo check --all-features` job; clippy type-checks everything `check` did. Requires `protobuf-compiler ffmpeg`.
+3. **test** — `cargo test --workspace`.
+4. **visual-regression** — Playwright screenshot tests against the Flutter SPA served by the embedded binary. The Flutter web build comes from the `build-flutter-web` job (artifact `flutter-web-build`); cargo itself never runs Flutter. `continue-on-error: true`.
+5. **integration** — Smoke tests against live Ollama. `continue-on-error: true`, `timeout-minutes: 45`.
 
 ## Principles
 
@@ -47,14 +46,11 @@ sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
 `protobuf-compiler` is required for `--all-features` (signal feature uses protobuf). `ffmpeg` is needed for transcription. macOS uses `brew install protobuf`.
 
-### Signal feature linted separately
+### Feature coverage
 
-```yaml
-- name: cargo clippy (signal feature)
-  run: cargo clippy -p assistant-interface-signal --features signal -- -D warnings
-```
+The lint job passes `--all-features`, so optional features such as `signal` are linted by the single workspace clippy run. Do not add per-feature clippy steps.
 
-Always include this step in the lint job — the signal feature is not covered by `--workspace`.
+The lint job does not pass `--all-targets`: test targets are exempt from the panic-free lints by policy, and `clippy.toml`'s `allow-*-in-tests` options do not cover test helper functions or `tests/` files (a trial run flagged ~250 findings across 19 test targets). Test code is still compiled by the test job.
 
 ### Concurrency (cancel stale PR runs, never cancel main)
 
