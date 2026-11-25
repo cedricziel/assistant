@@ -346,7 +346,7 @@ impl OidcProvider {
     /// Provision or look up a user from OIDC claims.
     ///
     /// 1. Look up by (issuer, subject) — if found, return existing user.
-    /// 2. Look up by email — if found, link IdP and return.
+    /// 2. Look up by email — if found and the IdP verified it, link and return.
     /// 3. If auto-provision is enabled, create a new user.
     /// 4. Otherwise, fail.
     pub async fn provision_or_lookup(
@@ -361,7 +361,7 @@ impl OidcProvider {
             match &info.email {
                 Some(email) => {
                     let domain = email.rsplit_once('@').map(|(_, d)| d).unwrap_or("");
-                    if !domains.iter().any(|d| d == domain) {
+                    if !domains.iter().any(|d| d.eq_ignore_ascii_case(domain)) {
                         bail!("email domain '{domain}' not in allowed list for this organization");
                     }
                 }
@@ -378,10 +378,16 @@ impl OidcProvider {
             return Ok(user_id);
         }
 
-        // 2. Look up by email and link.
+        // 2. Look up by email and link — only for an IdP-verified email, or
+        //    anyone who can set an address at the IdP takes over the account.
         if let Some(ref email) = info.email
             && let Some(user_id) = store.find_by_email(email).await?
         {
+            if claims.email_verified != Some(true) {
+                bail!(
+                    "OIDC email '{email}' matches an existing account but is not verified by the IdP"
+                );
+            }
             debug!(user_id = %user_id, email = %email, "linking existing user to IdP");
             store
                 .link_idp(&user_id, &info.idp_issuer, &info.idp_subject)
@@ -1155,5 +1161,49 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
             .await;
 
         assert!(err.is_err(), "should reject error response from IdP");
+    }
+
+    async fn provider_with_domains(server: &MockServer, domains: Vec<String>) -> OidcProvider {
+        let mut provider = setup_mock_provider(server).await;
+        provider.config.allowed_email_domains = Some(domains);
+        provider
+    }
+
+    #[tokio::test]
+    async fn provision_does_not_link_unverified_email() {
+        let server = MockServer::start().await;
+        let provider = setup_mock_provider(&server).await;
+        for verified in [Some(false), None] {
+            let mut claims = make_test_claims(&server.uri(), "test-client");
+            claims.email_verified = verified;
+            let store =
+                InMemoryUserStore::new().with_user("usr_email", "alice@example.com", vec![]);
+
+            let result = provider.provision_or_lookup(&claims, &store).await;
+            assert!(
+                result.is_err(),
+                "email_verified = {verified:?} must not take over an existing account"
+            );
+            let linked = store
+                .find_by_idp(&server.uri(), "idp-user-123")
+                .await
+                .unwrap();
+            assert!(linked.is_none(), "no IdP link may be created");
+        }
+    }
+
+    #[tokio::test]
+    async fn provision_matches_email_domain_case_insensitively() {
+        let server = MockServer::start().await;
+        let provider = provider_with_domains(&server, vec!["example.com".into()]).await;
+        let mut claims = make_test_claims(&server.uri(), "test-client");
+        claims.email = Some("Alice@Example.COM".into());
+
+        let store = InMemoryUserStore::new();
+        let result = provider.provision_or_lookup(&claims, &store).await;
+        assert!(
+            result.is_ok(),
+            "domain match should ignore case: {result:?}"
+        );
     }
 }

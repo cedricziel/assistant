@@ -134,20 +134,24 @@ Class | Method | HTTP request | Description
 [*MembersApi*](doc/MembersApi.md) | [**updateMember**](doc/MembersApi.md#updatemember) | **PATCH** /api/orgs/{org_id}/spaces/{space_id}/members/{user_id} | &#x60;PATCH /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}&#x60; — change role.
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessage**](doc/MessagesApi.md#a2asendmessage) | **POST** /message/send | &#x60;POST /message/send&#x60; -- Sends a message to the agent (unary).
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessageStreaming**](doc/MessagesApi.md#a2asendmessagestreaming) | **POST** /message/stream | &#x60;POST /message/stream&#x60; -- Sends a message with streaming response (SSE).
-[*OauthApi*](doc/OauthApi.md) | [**authorizeGet**](doc/OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render login form.
-[*OauthApi*](doc/OauthApi.md) | [**authorizePost**](doc/OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate credentials, generate auth code, redirect.
+[*OauthApi*](doc/OauthApi.md) | [**authorizeGet**](doc/OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render the email step, the password form, or redirect to the org&#39;s IdP.
+[*OauthApi*](doc/OauthApi.md) | [**authorizePost**](doc/OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate one org&#39;s password credentials, generate an auth code, redirect.
 [*OauthApi*](doc/OauthApi.md) | [**callback**](doc/OauthApi.md#callback) | **GET** /oauth/callback | GET /oauth/callback — handle the IdP redirect.
 [*OauthApi*](doc/OauthApi.md) | [**complete**](doc/OauthApi.md#complete) | **GET** /oauth/complete | GET /oauth/complete — return the authorization code as JSON.
 [*OauthApi*](doc/OauthApi.md) | [**deviceInitiate**](doc/OauthApi.md#deviceinitiate) | **POST** /oauth/device | POST /oauth/device — initiate the device authorization flow.
 [*OauthApi*](doc/OauthApi.md) | [**deviceVerifyPage**](doc/OauthApi.md#deviceverifypage) | **GET** /oauth/device/verify | GET /oauth/device/verify — render page where user enters the code.
 [*OauthApi*](doc/OauthApi.md) | [**deviceVerifySubmit**](doc/OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
+[*OauthApi*](doc/OauthApi.md) | [**identifyPost**](doc/OauthApi.md#identifypost) | **POST** /oauth/authorize/identify | POST /oauth/authorize/identify — find the org an email signs in to.
 [*OauthApi*](doc/OauthApi.md) | [**metadata**](doc/OauthApi.md#metadata) | **GET** /.well-known/oauth-authorization-server | GET /.well-known/oauth-authorization-server
 [*OauthApi*](doc/OauthApi.md) | [**register**](doc/OauthApi.md#register) | **POST** /oauth/register | POST /oauth/register — register a new OAuth2 client.
 [*OauthApi*](doc/OauthApi.md) | [**revoke**](doc/OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh or access token.
 [*OauthApi*](doc/OauthApi.md) | [**token**](doc/OauthApi.md#token) | **POST** /oauth/token | POST /oauth/token
 [*OrgsApi*](doc/OrgsApi.md) | [**createOrg**](doc/OrgsApi.md#createorg) | **POST** /api/orgs | &#x60;POST /api/orgs&#x60; — create a new organization.
+[*OrgsApi*](doc/OrgsApi.md) | [**deleteOrgOidc**](doc/OrgsApi.md#deleteorgoidc) | **DELETE** /api/orgs/{id}/oidc | &#x60;DELETE /api/orgs/{id}/oidc&#x60; — remove the org&#39;s OIDC settings.
 [*OrgsApi*](doc/OrgsApi.md) | [**getOrg**](doc/OrgsApi.md#getorg) | **GET** /api/orgs/{id} | &#x60;GET /api/orgs/{id}&#x60; — get organization detail.
+[*OrgsApi*](doc/OrgsApi.md) | [**getOrgOidc**](doc/OrgsApi.md#getorgoidc) | **GET** /api/orgs/{id}/oidc | &#x60;GET /api/orgs/{id}/oidc&#x60; — get the org&#39;s OIDC settings.
 [*OrgsApi*](doc/OrgsApi.md) | [**listOrgs**](doc/OrgsApi.md#listorgs) | **GET** /api/orgs | &#x60;GET /api/orgs&#x60; — list organizations the user has access to.
+[*OrgsApi*](doc/OrgsApi.md) | [**putOrgOidc**](doc/OrgsApi.md#putorgoidc) | **PUT** /api/orgs/{id}/oidc | &#x60;PUT /api/orgs/{id}/oidc&#x60; — create or replace the org&#39;s OIDC settings.
 [*OrgsApi*](doc/OrgsApi.md) | [**updateOrg**](doc/OrgsApi.md#updateorg) | **PATCH** /api/orgs/{id} | &#x60;PATCH /api/orgs/{id}&#x60; — update organization settings.
 [*PersonasApi*](doc/PersonasApi.md) | [**addSkillAccess**](doc/PersonasApi.md#addskillaccess) | **POST** /api/personas/{id}/skill-access/skills | &#x60;POST /api/personas/{id}/skill-access/skills&#x60; — add a skill to the access list.
 [*PersonasApi*](doc/PersonasApi.md) | [**createPersona**](doc/PersonasApi.md#createpersona) | **POST** /api/personas | &#x60;POST /api/personas&#x60; — create a new persona.
@@ -295,6 +299,7 @@ Class | Method | HTTP request | Description
  - [OnboardingStatusResponse](doc/OnboardingStatusResponse.md)
  - [OpenIdConnectSecurityScheme](doc/OpenIdConnectSecurityScheme.md)
  - [OrgDetail](doc/OrgDetail.md)
+ - [OrgOidcConfigResponse](doc/OrgOidcConfigResponse.md)
  - [OrgSummary](doc/OrgSummary.md)
  - [PasswordOAuthFlow](doc/PasswordOAuthFlow.md)
  - [PersonaDetail](doc/PersonaDetail.md)
@@ -305,6 +310,7 @@ Class | Method | HTTP request | Description
  - [PersonaSummary](doc/PersonaSummary.md)
  - [PublishCatalogItemRequest](doc/PublishCatalogItemRequest.md)
  - [PushNotificationConfig](doc/PushNotificationConfig.md)
+ - [PutOrgOidcConfigRequest](doc/PutOrgOidcConfigRequest.md)
  - [QuickMessageRequest](doc/QuickMessageRequest.md)
  - [QuickMessageResponse](doc/QuickMessageResponse.md)
  - [RegisterAgentRequest](doc/RegisterAgentRequest.md)

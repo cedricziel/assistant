@@ -17,19 +17,40 @@ impl SqliteUserStore {
         Self { pool }
     }
 
-    /// Look up a user by email across all organizations.
+    /// Look up a user in one org by their IdP (issuer, subject) pair.
     ///
-    /// Used during OAuth login when the caller does not yet know which org
-    /// the user belongs to. Returns the first matching user.
-    pub async fn get_user_by_email_any(&self, email: &str) -> Result<Option<User>> {
+    /// Orgs can share an IdP, so the lookup must not cross org boundaries.
+    pub async fn get_user_by_idp_in_org(
+        &self,
+        org_id: &OrgId,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<Option<User>> {
         let row = sqlx::query(
             "SELECT id, org_id, email, name, password_hash, idp_issuer, idp_subject, created_at, updated_at
-             FROM users WHERE email = ? LIMIT 1",
+             FROM users WHERE org_id = ? AND idp_issuer = ? AND idp_subject = ?",
         )
-        .bind(email)
+        .bind(&org_id.0)
+        .bind(issuer)
+        .bind(subject)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(row_to_user))
+    }
+
+    /// List the users with this email in every organization.
+    ///
+    /// Emails are only unique per org, so the sign-in flow uses this to find
+    /// out which orgs an email belongs to.
+    pub async fn list_users_by_email_any(&self, email: &str) -> Result<Vec<User>> {
+        let rows = sqlx::query(
+            "SELECT id, org_id, email, name, password_hash, idp_issuer, idp_subject, created_at, updated_at
+             FROM users WHERE email = ? ORDER BY org_id",
+        )
+        .bind(email)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(row_to_user).collect())
     }
 }
 
@@ -235,6 +256,47 @@ mod tests {
             .await
             .unwrap();
         assert!(not_found.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_by_email_any_returns_the_user_of_every_org() {
+        let (layer, store) = setup().await;
+        let now = Utc::now();
+        layer
+            .org_store()
+            .create_org(&Organization {
+                id: OrgId::from("org_2"),
+                name: "Beta".into(),
+                slug: "beta".into(),
+                auth_mode: "password".into(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+        for (id, org, email) in [
+            ("usr_a1", "org_1", "alice@acme.com"),
+            ("usr_a2", "org_2", "alice@acme.com"),
+            ("usr_b1", "org_1", "bob@acme.com"),
+        ] {
+            store.create_user(&make_user(id, org, email)).await.unwrap();
+        }
+
+        let mut orgs: Vec<String> = store
+            .list_users_by_email_any("alice@acme.com")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|u| u.org_id.0)
+            .collect();
+        orgs.sort();
+        assert_eq!(orgs, ["org_1", "org_2"]);
+
+        let none = store
+            .list_users_by_email_any("nobody@acme.com")
+            .await
+            .unwrap();
+        assert!(none.is_empty(), "unknown email matches nothing");
     }
 
     #[tokio::test]

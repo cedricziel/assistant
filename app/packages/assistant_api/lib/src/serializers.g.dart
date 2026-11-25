@@ -89,6 +89,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(OnboardingStatusResponse.serializer)
       ..add(OpenIdConnectSecurityScheme.serializer)
       ..add(OrgDetail.serializer)
+      ..add(OrgOidcConfigResponse.serializer)
       ..add(OrgSummary.serializer)
       ..add(PasswordOAuthFlow.serializer)
       ..add(PersonaDetail.serializer)
@@ -99,6 +100,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(PersonaSummary.serializer)
       ..add(PublishCatalogItemRequest.serializer)
       ..add(PushNotificationConfig.serializer)
+      ..add(PutOrgOidcConfigRequest.serializer)
       ..add(QuickMessageRequest.serializer)
       ..add(QuickMessageResponse.serializer)
       ..add(RegisterAgentRequest.serializer)
@@ -217,6 +219,12 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

@@ -96,6 +96,7 @@ import 'package:assistant_api/src/model/o_auth_flows.dart';
 import 'package:assistant_api/src/model/onboarding_status_response.dart';
 import 'package:assistant_api/src/model/open_id_connect_security_scheme.dart';
 import 'package:assistant_api/src/model/org_detail.dart';
+import 'package:assistant_api/src/model/org_oidc_config_response.dart';
 import 'package:assistant_api/src/model/org_summary.dart';
 import 'package:assistant_api/src/model/password_o_auth_flow.dart';
 import 'package:assistant_api/src/model/persona_detail.dart';
@@ -106,6 +107,7 @@ import 'package:assistant_api/src/model/persona_skill_access.dart';
 import 'package:assistant_api/src/model/persona_summary.dart';
 import 'package:assistant_api/src/model/publish_catalog_item_request.dart';
 import 'package:assistant_api/src/model/push_notification_config.dart';
+import 'package:assistant_api/src/model/put_org_oidc_config_request.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
 import 'package:assistant_api/src/model/register_agent_request.dart';
@@ -269,6 +271,7 @@ part 'serializers.g.dart';
   OnboardingStatusResponse,
   OpenIdConnectSecurityScheme,
   OrgDetail,
+  OrgOidcConfigResponse,
   OrgSummary,
   PasswordOAuthFlow,
   PersonaDetail,
@@ -279,6 +282,7 @@ part 'serializers.g.dart';
   PersonaSummary,
   PublishCatalogItemRequest,
   PushNotificationConfig,
+  PutOrgOidcConfigRequest,
   QuickMessageRequest,
   QuickMessageResponse,
   RegisterAgentRequest,

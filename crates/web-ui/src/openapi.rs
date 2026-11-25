@@ -77,6 +77,7 @@ use crate::api::{
     },
     interfaces::{CreateInterfaceInstanceRequest, InterfaceInstanceResponse},
     members::{AddMemberRequest, MemberEntry, UpdateMemberRequest},
+    org_oidc::{OrgOidcConfigResponse, PutOrgOidcConfigRequest},
     orgs::{CreateOrgRequest, OrgDetail, OrgSummary, UpdateOrgRequest},
     personas::{
         AddSkillAccessRequest, CreatePersonaRequest, PersonaDetail, PersonaFileContent,
@@ -353,6 +354,7 @@ pub struct ApiErrorResponse {
         // OAuth2 endpoints
         crate::oauth::authorize::authorize_get,
         crate::oauth::authorize::authorize_post,
+        crate::oauth::authorize::identify_post,
         crate::oauth::token::token,
         crate::oauth::register::register,
         crate::oauth::device::device_initiate,
@@ -367,6 +369,9 @@ pub struct ApiErrorResponse {
         crate::api::orgs::create_org,
         crate::api::orgs::get_org,
         crate::api::orgs::update_org,
+        crate::api::org_oidc::get_org_oidc,
+        crate::api::org_oidc::put_org_oidc,
+        crate::api::org_oidc::delete_org_oidc,
         // User management
         crate::api::users::list_users,
         crate::api::users::create_user,
@@ -556,6 +561,7 @@ pub struct ApiErrorResponse {
             crate::oauth::token::TokenRequest,
             crate::oauth::token::TokenResponse,
             crate::oauth::authorize::AuthorizeForm,
+            crate::oauth::authorize::IdentifyForm,
             crate::oauth::device::DeviceInitiateRequest,
             crate::oauth::device::DeviceVerifyForm,
             crate::oauth::revoke::RevokeRequest,
@@ -572,6 +578,8 @@ pub struct ApiErrorResponse {
             OrgDetail,
             CreateOrgRequest,
             UpdateOrgRequest,
+            OrgOidcConfigResponse,
+            PutOrgOidcConfigRequest,
             // User management types
             UserSummary,
             UserDetail,
