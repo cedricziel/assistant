@@ -3,6 +3,7 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:assistant_api/src/model/integration_layer.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:assistant_api/src/model/catalog_auth_response.dart';
 import 'package:built_value/built_value.dart';
@@ -20,6 +21,7 @@ part 'catalog_entry_summary.g.dart';
 /// * [domain]
 /// * [iconUrl]
 /// * [id] - Upstream catalog id, e.g. `curated/linear-app-mcp`. Contains a slash.
+/// * [installableLayers] - The layers the caller may install this entry at now: the ones they may write to and the org policy allows.
 /// * [name]
 @BuiltValue()
 abstract class CatalogEntrySummary
@@ -46,6 +48,10 @@ abstract class CatalogEntrySummary
   /// Upstream catalog id, e.g. `curated/linear-app-mcp`. Contains a slash.
   @BuiltValueField(wireName: r'id')
   String get id;
+
+  /// The layers the caller may install this entry at now: the ones they may write to and the org policy allows.
+  @BuiltValueField(wireName: r'installable_layers')
+  BuiltList<IntegrationLayer> get installableLayers;
 
   @BuiltValueField(wireName: r'name')
   String get name;
@@ -115,6 +121,11 @@ class _$CatalogEntrySummarySerializer
     yield serializers.serialize(
       object.id,
       specifiedType: const FullType(String),
+    );
+    yield r'installable_layers';
+    yield serializers.serialize(
+      object.installableLayers,
+      specifiedType: const FullType(BuiltList, [FullType(IntegrationLayer)]),
     );
     yield r'name';
     yield serializers.serialize(
@@ -195,6 +206,14 @@ class _$CatalogEntrySummarySerializer
             specifiedType: const FullType(String),
           ) as String;
           result.id = valueDes;
+          break;
+        case r'installable_layers':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType:
+                const FullType(BuiltList, [FullType(IntegrationLayer)]),
+          ) as BuiltList<IntegrationLayer>;
+          result.installableLayers.replace(valueDes);
           break;
         case r'name':
           final valueDes = serializers.deserialize(

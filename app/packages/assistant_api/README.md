@@ -111,8 +111,17 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**createIntegration**](doc/IntegrationsApi.md#createintegration) | **POST** /api/integrations | &#x60;POST /api/integrations&#x60; — install an integration.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**deleteIntegration**](doc/IntegrationsApi.md#deleteintegration) | **DELETE** /api/integrations/{id} | &#x60;DELETE /api/integrations/{id}&#x60; — remove an integration and its credentials.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**deleteSpaceAccess**](doc/IntegrationsApi.md#deletespaceaccess) | **DELETE** /api/integrations/{id}/spaces/{space_id} | &#x60;DELETE /api/integrations/{id}/spaces/{space_id}?mode&#x3D;&#x60; — remove a space row.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**getCatalogEntry**](doc/IntegrationsApi.md#getcatalogentry) | **GET** /api/integrations/catalog/{id} | &#x60;GET /api/integrations/catalog/{id}&#x60; — get one catalog entry.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**getIntegration**](doc/IntegrationsApi.md#getintegration) | **GET** /api/integrations/{id} | &#x60;GET /api/integrations/{id}&#x60; — get one integration.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**getIntegrationPolicy**](doc/IntegrationsApi.md#getintegrationpolicy) | **GET** /api/integrations/policy | &#x60;GET /api/integrations/policy&#x60; — the org&#39;s integration policy.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**listCatalogEntries**](doc/IntegrationsApi.md#listcatalogentries) | **GET** /api/integrations/catalog | &#x60;GET /api/integrations/catalog&#x60; — search the integrations catalog.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**listIntegrations**](doc/IntegrationsApi.md#listintegrations) | **GET** /api/integrations | &#x60;GET /api/integrations&#x60; — list the integrations the caller may see.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**putIntegrationPolicy**](doc/IntegrationsApi.md#putintegrationpolicy) | **PUT** /api/integrations/policy | &#x60;PUT /api/integrations/policy&#x60; — replace the org&#39;s integration policy.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**putSpaceAccess**](doc/IntegrationsApi.md#putspaceaccess) | **PUT** /api/integrations/{id}/spaces/{space_id} | &#x60;PUT /api/integrations/{id}/spaces/{space_id}&#x60; — add a space row.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**updateIntegration**](doc/IntegrationsApi.md#updateintegration) | **PATCH** /api/integrations/{id} | &#x60;PATCH /api/integrations/{id}&#x60; — update an integration.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**createInterface**](doc/InterfacesApi.md#createinterface) | **POST** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — create an interface instance.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**deleteInterface**](doc/InterfacesApi.md#deleteinterface) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}&#x60; — delete an interface instance.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**listInterfaces**](doc/InterfacesApi.md#listinterfaces) | **GET** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — list interface instances.
@@ -227,6 +236,7 @@ Class | Method | HTTP request | Description
  - [CatalogEntryListResponse](doc/CatalogEntryListResponse.md)
  - [CatalogEntrySummary](doc/CatalogEntrySummary.md)
  - [CatalogItemResponse](doc/CatalogItemResponse.md)
+ - [CatalogMode](doc/CatalogMode.md)
  - [ChangePasswordRequest](doc/ChangePasswordRequest.md)
  - [ClientCredentialsOAuthFlow](doc/ClientCredentialsOAuthFlow.md)
  - [ClientInfoSchema](doc/ClientInfoSchema.md)
@@ -242,6 +252,7 @@ Class | Method | HTTP request | Description
  - [CreateBindingRequest](doc/CreateBindingRequest.md)
  - [CreateConversationRequest](doc/CreateConversationRequest.md)
  - [CreateFromTemplateRequest](doc/CreateFromTemplateRequest.md)
+ - [CreateIntegrationRequest](doc/CreateIntegrationRequest.md)
  - [CreateInterfaceInstanceRequest](doc/CreateInterfaceInstanceRequest.md)
  - [CreateOrgRequest](doc/CreateOrgRequest.md)
  - [CreatePersonaRequest](doc/CreatePersonaRequest.md)
@@ -251,12 +262,21 @@ Class | Method | HTTP request | Description
  - [CreateTaskPushNotificationConfigRequest](doc/CreateTaskPushNotificationConfigRequest.md)
  - [CreateUserRequest](doc/CreateUserRequest.md)
  - [CreateWebhookRequest](doc/CreateWebhookRequest.md)
+ - [CredentialMode](doc/CredentialMode.md)
  - [DeviceCodeOAuthFlow](doc/DeviceCodeOAuthFlow.md)
  - [DeviceCodeResponseSchema](doc/DeviceCodeResponseSchema.md)
  - [ErrorBody](doc/ErrorBody.md)
  - [ExecuteCommandRequest](doc/ExecuteCommandRequest.md)
  - [HttpAuthSecurityScheme](doc/HttpAuthSecurityScheme.md)
  - [ImplicitOAuthFlow](doc/ImplicitOAuthFlow.md)
+ - [IntegrationAuthKind](doc/IntegrationAuthKind.md)
+ - [IntegrationDetail](doc/IntegrationDetail.md)
+ - [IntegrationLayer](doc/IntegrationLayer.md)
+ - [IntegrationListResponse](doc/IntegrationListResponse.md)
+ - [IntegrationPolicyResponse](doc/IntegrationPolicyResponse.md)
+ - [IntegrationStatus](doc/IntegrationStatus.md)
+ - [IntegrationSummary](doc/IntegrationSummary.md)
+ - [IntegrationTrust](doc/IntegrationTrust.md)
  - [InterfaceInstanceResponse](doc/InterfaceInstanceResponse.md)
  - [ListTaskPushNotificationConfigsResponse](doc/ListTaskPushNotificationConfigsResponse.md)
  - [ListTasksResponse](doc/ListTasksResponse.md)
@@ -295,8 +315,11 @@ Class | Method | HTTP request | Description
  - [ServerMetadata](doc/ServerMetadata.md)
  - [SetActivePersonaRequest](doc/SetActivePersonaRequest.md)
  - [SetSkillAccessModeRequest](doc/SetSkillAccessModeRequest.md)
+ - [SetSpaceAccessRequest](doc/SetSpaceAccessRequest.md)
  - [SkillDetail](doc/SkillDetail.md)
  - [SkillEntryResponse](doc/SkillEntryResponse.md)
+ - [SpaceAccessEntry](doc/SpaceAccessEntry.md)
+ - [SpaceAccessMode](doc/SpaceAccessMode.md)
  - [SpaceDetail](doc/SpaceDetail.md)
  - [SpaceSummary](doc/SpaceSummary.md)
  - [SseStatusEvent](doc/SseStatusEvent.md)
@@ -330,6 +353,8 @@ Class | Method | HTTP request | Description
  - [UpdateConversationRequest](doc/UpdateConversationRequest.md)
  - [UpdateCurrentUserRequest](doc/UpdateCurrentUserRequest.md)
  - [UpdateCurrentUserResponse](doc/UpdateCurrentUserResponse.md)
+ - [UpdateIntegrationPolicyRequest](doc/UpdateIntegrationPolicyRequest.md)
+ - [UpdateIntegrationRequest](doc/UpdateIntegrationRequest.md)
  - [UpdateMemberRequest](doc/UpdateMemberRequest.md)
  - [UpdateOrgRequest](doc/UpdateOrgRequest.md)
  - [UpdateSkillRequest](doc/UpdateSkillRequest.md)
