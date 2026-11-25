@@ -32,7 +32,7 @@ const INSTALL_SKILL: &str = "install-skill";
 
 /// Revisions this server implements, oldest first. Pinned rather than taken from
 /// rmcp's known set so a rmcp upgrade cannot silently advertise older revisions.
-const SUPPORTED_VERSIONS: &[ProtocolVersion] =
+pub(crate) const SUPPORTED_VERSIONS: &[ProtocolVersion] =
     &[ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28];
 
 /// Serves the assistant's tools and skills to MCP clients.
@@ -172,18 +172,23 @@ fn required_str<'a>(input: &'a Value, name: &str) -> Result<&'a str, ErrorData> 
     })
 }
 
+/// What the server advertises in `initialize` and `server/discover`.
+pub(crate) fn server_info() -> ServerConfig {
+    ServerConfig::new(
+        ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .build(),
+    )
+    .with_server_info(Implementation::new(
+        "assistant-mcp-server",
+        env!("CARGO_PKG_VERSION"),
+    ))
+}
+
 impl ServerHandler for AssistantMcpServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .build(),
-        )
-        .with_server_info(Implementation::new(
-            "assistant-mcp-server",
-            env!("CARGO_PKG_VERSION"),
-        ))
+        server_info()
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
