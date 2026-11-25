@@ -45,6 +45,9 @@ pub enum SkillSource {
     Project,
     /// Installed via /install command
     Installed,
+    /// Published by an external MCP server through the Skills extension.
+    /// Untrusted: a server can change it at any time.
+    Mcp { server: String },
 }
 
 impl std::fmt::Display for SkillSource {
@@ -54,6 +57,7 @@ impl std::fmt::Display for SkillSource {
             SkillSource::User => write!(f, "user"),
             SkillSource::Project => write!(f, "project"),
             SkillSource::Installed => write!(f, "installed"),
+            SkillSource::Mcp { server } => write!(f, "mcp:{server}"),
         }
     }
 }
@@ -134,5 +138,21 @@ impl SkillDef {
     /// Returns true if the skill directory contains any auxiliary files.
     pub fn has_auxiliary_files(&self) -> bool {
         !self.auxiliary_files().is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_source_names_its_server() {
+        let source = SkillSource::Mcp {
+            server: "acme".into(),
+        };
+        assert_eq!(source.to_string(), "mcp:acme");
+        let json = serde_json::to_value(&source).unwrap();
+        assert_eq!(json, serde_json::json!({"mcp": {"server": "acme"}}));
+        assert_eq!(serde_json::from_value::<SkillSource>(json).unwrap(), source);
     }
 }

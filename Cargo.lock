@@ -405,6 +405,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "assistant-core",
+ "assistant-skills",
  "async-trait",
  "base64 0.23.1",
  "chrono",
@@ -413,6 +414,7 @@ dependencies = [
  "reqwest",
  "rmcp",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

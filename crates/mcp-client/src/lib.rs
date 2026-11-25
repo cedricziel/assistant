@@ -20,6 +20,7 @@ pub mod client;
 pub mod connections;
 pub mod handler;
 pub mod manager;
+pub mod skills;
 pub mod tool_source;
 
 pub use bridge::McpToolHandler;
@@ -27,4 +28,5 @@ pub use client::McpClient;
 pub use connections::{ConnectError, Connected, ConnectionsConfig, IntegrationConnections};
 pub use handler::{AssistantClientHandler, StaleTools};
 pub use manager::McpClientManager;
+pub use skills::McpSkillSource;
 pub use tool_source::{IntegrationStores, IntegrationToolSource};
