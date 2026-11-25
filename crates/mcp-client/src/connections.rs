@@ -288,7 +288,8 @@ impl IntegrationConnections {
                         live.listed_at = now;
                     }
                     Ok(Err(e)) => {
-                        debug!(integration = %integration.id, error = %e, "tools refresh failed; reconnecting");
+                        let kind = classify(&format!("{e:#}"));
+                        debug!(integration = %integration.id, %kind, "tools refresh failed; reconnecting");
                         slot.live = None;
                     }
                     Err(_) => {
@@ -703,9 +704,10 @@ async fn open(
     match tokio::time::timeout(timeout, attempt).await {
         Ok(Ok(opened)) => Ok(opened),
         Ok(Err(e)) => {
-            let raw = format!("{e:#}");
-            debug!(integration = name, error = %raw, "integration connection failed");
-            Err(ConnectError::Unreachable(classify(&raw)))
+            // Only the kind is logged: an upstream may echo a credential in its error.
+            let kind = classify(&format!("{e:#}"));
+            debug!(integration = name, %kind, "integration connection failed");
+            Err(ConnectError::Unreachable(kind))
         }
         Err(_) => Err(ConnectError::Unreachable(TIMEOUT.into())),
     }

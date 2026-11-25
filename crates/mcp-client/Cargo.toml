@@ -39,6 +39,7 @@ rmcp = { version = "3.1.4", default-features = false, features = [
 serde_json = { workspace = true }
 uuid = { workspace = true }
 wiremock = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # Panic-free contract: production code propagates errors via `anyhow::Result`.
 # Tests are exempt because `make lint` (`cargo clippy --workspace`) does not
