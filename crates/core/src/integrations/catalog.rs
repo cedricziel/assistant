@@ -93,10 +93,25 @@ fn str_field<'a>(raw: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 fn is_https_url(url: &str) -> bool {
-    let has_https_scheme = url
-        .get(..8)
-        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
-    has_https_scheme && url.len() > 8 && !url.contains(char::is_whitespace)
+    !url.contains(char::is_whitespace)
+        && url::Url::parse(url)
+            .is_ok_and(|parsed| parsed.scheme() == "https" && parsed.host_str().is_some())
+}
+
+/// Lowercase `text` one character at a time.
+///
+/// `str::to_lowercase` picks a final sigma by context, so `ΟΣ` and `ΟΣΑ`
+/// would fold `Σ` differently and a prefix query would miss.
+fn fold(text: &str) -> String {
+    text.chars().flat_map(char::to_lowercase).collect()
+}
+
+/// RFC 9110 `token`: the characters allowed in an HTTP field name.
+fn is_http_token(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c))
 }
 
 fn normalize_auth(raw: Option<&Value>) -> CatalogAuth {
@@ -132,7 +147,7 @@ struct HeaderTemplate {
 fn parse_header_template(template: &str) -> Option<HeaderTemplate> {
     let (name, value) = template.split_once(':')?;
     let header_name = name.trim();
-    if header_name.is_empty() || header_name.contains(char::is_whitespace) {
+    if !is_http_token(header_name) {
         return None;
     }
     let value = value.trim_start();
@@ -206,19 +221,17 @@ struct IndexedEntry {
 
 impl IndexedEntry {
     fn new(entry: CatalogEntry) -> Self {
-        let haystack =
-            format!("{}\n{}\n{}", entry.name, entry.domain, entry.description).to_lowercase();
+        let haystack = fold(&format!(
+            "{}\n{}\n{}",
+            entry.name, entry.domain, entry.description
+        ));
         Self { entry, haystack }
     }
 
+    /// `q` and `category` must already be [`fold`]ed.
     fn matches(&self, q: &str, category: Option<&str>) -> bool {
         self.haystack.contains(q)
-            && category.is_none_or(|wanted| {
-                self.entry
-                    .categories
-                    .iter()
-                    .any(|c| c.eq_ignore_ascii_case(wanted))
-            })
+            && category.is_none_or(|wanted| self.entry.categories.iter().any(|c| fold(c) == wanted))
     }
 }
 
@@ -269,12 +282,13 @@ impl CatalogIndex {
             .limit
             .unwrap_or(DEFAULT_PAGE_SIZE)
             .clamp(1, MAX_PAGE_SIZE);
-        let q = query.q.map(|q| q.trim().to_lowercase()).unwrap_or_default();
+        let q = query.q.map(|q| fold(q.trim())).unwrap_or_default();
+        let category = query.category.map(fold);
 
         let mut matching = self
             .entries
             .iter()
-            .filter(|indexed| indexed.matches(&q, query.category))
+            .filter(|indexed| indexed.matches(&q, category.as_deref()))
             .skip(offset);
         let items: Vec<&CatalogEntry> = matching
             .by_ref()
@@ -820,5 +834,83 @@ mod tests {
 
         assert!(page.items.is_empty());
         assert_eq!(page.next_cursor, None);
+    }
+
+    // -- Review follow-ups ---------------------------------------------------
+
+    #[test]
+    fn https_connect_urls_without_a_host_are_skipped() {
+        for url in [
+            "https://?x",
+            "https://",
+            "https://#frag",
+            "https://:443/mcp",
+        ] {
+            let raw = json!({
+                "id": "x/y", "kind": "mcp", "name": "Y", "connectUrl": url
+            });
+
+            assert_eq!(normalize(&raw), None, "{url:?} has no host");
+        }
+    }
+
+    #[test]
+    fn header_names_must_be_http_tokens() {
+        for template in [
+            "Bad(Name): {a}",
+            "Bad,Name: {a}",
+            "Bad/Name: {a}",
+            "Bäd: {a}",
+        ] {
+            let raw = mcp_with_auth(json!({"kind": "api_key", "header": template}));
+
+            let auth = normalize(&raw).unwrap().auth;
+
+            assert_eq!(auth.kind, CatalogAuthKind::Header, "template {template:?}");
+            assert_eq!(auth.header_name, None, "template {template:?}");
+        }
+        let raw = mcp_with_auth(json!({"kind": "api_key", "header": "X-Api_Key.1: {a}"}));
+        assert_eq!(
+            normalize(&raw).unwrap().auth.header_name.as_deref(),
+            Some("X-Api_Key.1")
+        );
+    }
+
+    fn named_index(name: &str, category: &str) -> CatalogIndex {
+        let doc = json!({"data": [{
+            "id": "u/1", "kind": "mcp", "name": name,
+            "connectUrl": "https://u.example/mcp", "categories": [category]
+        }]});
+        CatalogIndex::from_document(&doc).unwrap()
+    }
+
+    #[test]
+    fn text_search_ignores_case_for_final_sigma() {
+        let index = named_index("ΟΣΑ", "c");
+
+        for q in ["ΟΣ", "οσ", "ΟΣΑ", "οσα"] {
+            let page = index
+                .search(&CatalogQuery {
+                    q: Some(q),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(page.items.len(), 1, "query {q:?}");
+        }
+    }
+
+    #[test]
+    fn category_filter_ignores_case_for_non_ascii_names() {
+        let index = named_index("Cours", "Éducation");
+
+        for category in ["Éducation", "éducation", "ÉDUCATION"] {
+            let page = index
+                .search(&CatalogQuery {
+                    category: Some(category),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(page.items.len(), 1, "category {category:?}");
+        }
     }
 }
