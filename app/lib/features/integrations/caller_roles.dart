@@ -1,4 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../account/account_provider.dart';
@@ -52,10 +53,11 @@ final callerRolesProvider = FutureProvider.autoDispose<CallerRoles>((
           for (final member in response.data ?? const <MemberEntry>[]) {
             if (member.userId == userId) roles[space.id] = member.role;
           }
-        } catch (_) {
-          // Members may not read a space's member list: no role is shown.
+        } on DioException catch (error) {
+          // Members may not read a space's member list: no role in it.
+          if (error.response?.statusCode != 403) rethrow;
         }
       }(),
   ]);
   return CallerRoles(spaces: spaces, roles: roles);
-});
+}, retry: (_, _) => null);

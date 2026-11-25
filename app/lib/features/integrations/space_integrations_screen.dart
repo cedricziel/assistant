@@ -19,8 +19,8 @@ class SpaceIntegrationsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spaces = ref.watch(spacesProvider).value ?? const <SpaceSummary>[];
     final name = spaces.where((s) => s.id == spaceId).firstOrNull?.name;
-    final canManage =
-        ref.watch(callerRolesProvider).value?.canManageSpace(spaceId) ?? false;
+    final roles = ref.watch(callerRolesProvider);
+    final canManage = roles.value?.canManageSpace(spaceId) ?? false;
     final muted = TextStyle(
       color: Theme.of(context).colorScheme.onSurfaceVariant,
     );
@@ -32,12 +32,25 @@ class SpaceIntegrationsScreen extends ConsumerWidget {
       body: Column(
         children: [
           CatalogActionBar(
-            child: canManage
-                ? const BrowseCatalogButton(label: 'Add integration')
-                : Text(
-                    'Only space admins can change these integrations.',
-                    style: muted,
+            child: switch (roles) {
+              _ when canManage => const BrowseCatalogButton(
+                label: 'Add integration',
+              ),
+              AsyncError() => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Could not check your role.', style: muted),
+                  AdaptiveButton.plain(
+                    onPressed: () => ref.invalidate(callerRolesProvider),
+                    child: const Text('Retry'),
                   ),
+                ],
+              ),
+              _ => Text(
+                'Only space admins can change these integrations.',
+                style: muted,
+              ),
+            },
           ),
           Expanded(
             child: IntegrationListView(

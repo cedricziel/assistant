@@ -135,6 +135,47 @@ void main() {
       expect(find.text('No integrations in this space'), findsOneWidget);
     });
 
+    testWidgets('says so and retries when the role cannot be read', (
+      tester,
+    ) async {
+      var attempts = 0;
+      tester.view.physicalSize = const Size(800, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final api = FakeIntegrationsApi()
+        ..onList = ((layer, spaceId) async => [])
+        ..onGet = ((id) async => integrationDetail(id));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiClientProvider.overrideWithValue(
+              FakeApiClient(integrationsApi: api),
+            ),
+            spacesProvider.overrideWith(_Spaces.new),
+            callerRolesProvider.overrideWith((ref) async {
+              if (attempts++ == 0) throw dioError(500);
+              return CallerRoles(
+                spaces: [spaceSummary('eng')],
+                roles: const {'eng': 'space_admin'},
+              );
+            }),
+          ],
+          child: const MaterialApp(
+            home: SpaceIntegrationsScreen(spaceId: 'eng'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Could not check your role.'), findsOneWidget);
+      expect(find.text('Add integration'), findsNothing);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Add integration'), findsOneWidget);
+    });
+
     testWidgets('fits a narrow phone without overflow', (tester) async {
       await _pump(tester, role: 'space_admin', width: 360);
 

@@ -90,5 +90,20 @@ void main() {
       expect(roles.canManageSpace('eng'), isFalse);
       expect(roles.canManageSpace('ops'), isTrue);
     });
+
+    test(
+      'any other failure reading members is an error, not "no role"',
+      () async {
+        final container = _container({
+          'eng': dioError(500),
+          'ops': [memberEntry('ops', 'me', 'space_admin')],
+        });
+
+        await expectLater(
+          container.read(callerRolesProvider.future),
+          throwsA(anything),
+        );
+      },
+    );
   });
 }

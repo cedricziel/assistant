@@ -99,6 +99,42 @@ void main() {
       expect(api.calls, isEmpty);
     });
 
+    testWidgets('shows an error and retries when the role cannot be read', (
+      tester,
+    ) async {
+      var attempts = 0;
+      tester.view.physicalSize = const Size(800, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final api = FakeIntegrationsApi()
+        ..onList = ((layer, spaceId) async => [])
+        ..onGetPolicy = (() async => policy());
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiClientProvider.overrideWithValue(
+              FakeApiClient(integrationsApi: api),
+            ),
+            callerRolesProvider.overrideWith((ref) async {
+              if (attempts++ == 0) throw dioError(500);
+              return _admin();
+            }),
+          ],
+          child: const MaterialApp(home: OrgIntegrationsScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Could not check your role. Try again.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(Tab, 'Policy'), findsOneWidget);
+    });
+
     testWidgets('shows a spinner while the role is checked', (tester) async {
       final gate = Completer<CallerRoles>();
       tester.view.physicalSize = const Size(800, 1200);
