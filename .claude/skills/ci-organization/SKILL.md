@@ -76,6 +76,10 @@ Rust jobs in `ci.yml` share `.github/actions/setup-rust` (toolchain, mold, apt d
 
 `Analyze & Test` in `flutter.yml` is a required check, so the workflow has no `paths:` filter. The job always runs; `dorny/paths-filter` decides whether its steps and the macOS/iOS jobs run. Keep the job name unchanged and never add a workflow-level `paths:` filter there.
 
+### PRs on any base (stacked PRs)
+
+`pull_request` triggers have no `branches:` filter. The repo merges native `gh stack` stacks, whose upper PRs target another PR's branch, and a `branches: [main]` filter would skip CI on them. Checks attach to the head SHA, so they still count after GitHub retargets a PR to `main`. Do not re-add the filter.
+
 ### Soft failures
 
 `visual-regression` and `integration` use `continue-on-error: true` — they are informational and depend on external services (Ollama, Playwright). Do not make them blocking.
