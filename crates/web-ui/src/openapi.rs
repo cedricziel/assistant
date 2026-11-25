@@ -64,6 +64,9 @@ use crate::api::{
     commands::{
         CommandArgResponse, CommandDefResponse, CommandEventResponse, ExecuteCommandRequest,
     },
+    integrations::{
+        CatalogAuthKindResponse, CatalogAuthResponse, CatalogEntryListResponse, CatalogEntrySummary,
+    },
     interfaces::{CreateInterfaceInstanceRequest, InterfaceInstanceResponse},
     members::{AddMemberRequest, MemberEntry, UpdateMemberRequest},
     orgs::{CreateOrgRequest, OrgDetail, OrgSummary, UpdateOrgRequest},
@@ -387,6 +390,9 @@ pub struct ApiErrorResponse {
         crate::api::catalog::create_subscription,
         crate::api::catalog::list_subscriptions,
         crate::api::catalog::delete_subscription,
+        // Integrations catalog
+        crate::api::integrations::list_catalog_entries,
+        crate::api::integrations::get_catalog_entry,
         // Interface instances
         crate::api::interfaces::create_interface,
         crate::api::interfaces::list_interfaces,
@@ -569,6 +575,11 @@ pub struct ApiErrorResponse {
             PublishCatalogItemRequest,
             SubscriptionResponse,
             CreateSubscriptionRequest,
+            // Integrations catalog types
+            CatalogEntrySummary,
+            CatalogEntryListResponse,
+            CatalogAuthResponse,
+            CatalogAuthKindResponse,
             // Interface instance types
             InterfaceInstanceResponse,
             CreateInterfaceInstanceRequest,
@@ -627,6 +638,8 @@ pub struct ApiErrorResponse {
          description = "API key management — create, list, revoke API keys"),
         (name = "catalog",
          description = "Catalog management — publish, list, and remove shared resources; manage space subscriptions"),
+        (name = "integrations",
+         description = "Integrations — search the cached integrations.sh catalog of remote MCP servers"),
         (name = "interfaces",
          description = "Interface instances — create, list, and delete per-space interface configurations"),
         (name = "bindings",

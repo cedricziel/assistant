@@ -17,6 +17,7 @@ pub mod capabilities;
 pub mod catalog;
 pub mod commands;
 pub mod conversations;
+pub mod integrations;
 pub mod interfaces;
 pub mod members;
 pub mod messages;
