@@ -27,12 +27,13 @@ pub use assistant_llm_provider::{RecordedCall, ScriptedLlmProvider};
 pub use assistant_storage::{
     AgentStore, AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
     InMemoryAgentStore, InMemoryAttachmentStore, InMemoryCommandEventStore,
-    InMemoryConversationEventStore, InMemoryConversationStore, InMemoryMemoryChunkStore,
-    InMemoryMessageBus, InMemoryPersonaSkillAccessStore, InMemoryPersonaStore,
-    InMemoryPushSubscriptionStore, InMemoryRefinementsStore, InMemoryScheduledTaskStore,
-    InMemorySlackActiveThreadStore, InMemoryWebhookStore, InMemoryWorkflowStore, MemoryChunkStore,
-    PersonaSkillAccessStore, PersonaStore, PushSubscriptionStore, RefinementsStore,
-    ScheduledTaskStore, SlackActiveThreadStore, WebhookStore, WorkflowStore,
+    InMemoryConversationEventStore, InMemoryConversationStore, InMemoryInteractionStore,
+    InMemoryMemoryChunkStore, InMemoryMessageBus, InMemoryPersonaSkillAccessStore,
+    InMemoryPersonaStore, InMemoryPushSubscriptionStore, InMemoryRefinementsStore,
+    InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore, InMemoryWebhookStore,
+    InMemoryWorkflowStore, InteractionStore, MemoryChunkStore, PersonaSkillAccessStore,
+    PersonaStore, PushSubscriptionStore, RefinementsStore, ScheduledTaskStore,
+    SlackActiveThreadStore, WebhookStore, WorkflowStore,
 };
 pub use assistant_storage::{InMemorySkillCatalog, SkillCatalog};
 pub use assistant_tool_executor::{RecordedToolCall, StubToolDispatcher};
