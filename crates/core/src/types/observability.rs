@@ -34,4 +34,13 @@ mod tests {
             toml::from_str("trace_content = true").expect("trace_content parses");
         assert!(cfg.trace_content);
     }
+
+    /// The `exporter` key was removed; a config written for it must still load.
+    #[test]
+    fn leftover_exporter_key_is_ignored() {
+        let cfg: ObservabilityConfig =
+            toml::from_str("exporter = \"sqlite\"\ntrace_content = true")
+                .expect("leftover exporter key must not abort startup");
+        assert!(cfg.trace_content);
+    }
 }
