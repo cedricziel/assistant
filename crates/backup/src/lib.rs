@@ -625,7 +625,7 @@ mod tests {
         let output_dir = TempDir::new().unwrap();
 
         // Seed three files
-        let config = install_dir.path().join("config.toml");
+        let config = install_dir.path().join("server.toml");
         let agents_dir = install_dir.path().join("agents").join("default");
         std::fs::create_dir_all(&agents_dir).unwrap();
         std::fs::write(&config, b"[llm]\nprovider = \"anthropic\"").unwrap();
@@ -743,7 +743,7 @@ mod tests {
     async fn test_backup_fails_when_non_sidecar_file_vanishes() {
         let install_dir = TempDir::new().unwrap();
         let output_dir = TempDir::new().unwrap();
-        let config = install_dir.path().join("config.toml");
+        let config = install_dir.path().join("server.toml");
         std::fs::write(&config, b"x").unwrap();
 
         let engine = BackupEngine::with_fs(Arc::new(VanishingFs {
@@ -768,7 +768,7 @@ mod tests {
     #[tokio::test]
     async fn test_restore_engine_restores_files() {
         let archive_bytes = make_test_archive(&[
-            ("config.toml", b"provider = \"anthropic\""),
+            ("orgs/acme/org.toml", b"provider = \"anthropic\""),
             ("agents/default/SOUL.md", b"# Soul"),
         ]);
 
@@ -785,7 +785,7 @@ mod tests {
 
         let result = RestoreEngine::new().run(opts).await.unwrap();
         assert_eq!(result.restored_count, 2);
-        assert!(install_dir.path().join("config.toml").exists());
+        assert!(install_dir.path().join("orgs/acme/org.toml").exists());
         assert!(install_dir.path().join("agents/default/SOUL.md").exists());
     }
 
@@ -835,8 +835,8 @@ mod tests {
     async fn test_list_backups_returns_metadata() {
         let dir = TempDir::new().unwrap();
 
-        let archive1 = make_test_archive(&[("config.toml", b"a")]);
-        let archive2 = make_test_archive(&[("config.toml", b"b"), ("agents/SOUL.md", b"c")]);
+        let archive1 = make_test_archive(&[("server.toml", b"a")]);
+        let archive2 = make_test_archive(&[("server.toml", b"b"), ("agents/SOUL.md", b"c")]);
 
         std::fs::write(dir.path().join("backup1.tar.gz"), &archive1).unwrap();
         std::fs::write(dir.path().join("backup2.tar.gz"), &archive2).unwrap();

@@ -10,7 +10,16 @@ use assistant_backup::{
 
 /// Populate a fake installation directory.
 fn seed_install_dir(dir: &Path) {
-    std::fs::write(dir.join("config.toml"), b"[llm]\nprovider = \"anthropic\"").unwrap();
+    std::fs::write(dir.join("server.toml"), b"[bus]\nkind = \"sqlite\"").unwrap();
+    for org in ["acme", "globex"] {
+        let org_dir = dir.join("orgs").join(org);
+        std::fs::create_dir_all(&org_dir).unwrap();
+        std::fs::write(
+            org_dir.join("org.toml"),
+            format!("[llm]\nprovider = \"anthropic\"\nmodel = \"{org}\""),
+        )
+        .unwrap();
+    }
     let agents_default = dir.join("agents").join("default");
     std::fs::create_dir_all(&agents_default).unwrap();
     std::fs::write(agents_default.join("SOUL.md"), b"# Soul\nYou are helpful.").unwrap();
@@ -38,14 +47,14 @@ async fn test_backup_round_trip_tempdir() {
 
     assert!(output_path.exists(), "archive must exist after backup");
     assert!(result.archive_size > 0, "archive must be non-empty");
-    assert_eq!(result.entry_count, 4, "4 seeded files expected");
+    assert_eq!(result.entry_count, 6, "6 seeded files expected");
 
     // Manifest must be readable from the archive
     let manifest = read_tar_gz_manifest(&output_path).unwrap();
     assert_eq!(
         manifest.entries.len(),
-        4,
-        "manifest should list all 4 seeded files"
+        6,
+        "manifest should list all 6 seeded files"
     );
 
     let archive_paths: Vec<&str> = manifest
@@ -53,7 +62,9 @@ async fn test_backup_round_trip_tempdir() {
         .iter()
         .map(|e| e.archive_path.as_str())
         .collect();
-    assert!(archive_paths.contains(&"config.toml"));
+    assert!(archive_paths.contains(&"server.toml"));
+    assert!(archive_paths.contains(&"orgs/acme/org.toml"));
+    assert!(archive_paths.contains(&"orgs/globex/org.toml"));
     assert!(archive_paths.iter().any(|p| p.contains("SOUL.md")));
 }
 
@@ -88,9 +99,11 @@ async fn test_restore_round_trip() {
     assert!(restore_result.warnings.is_empty());
 
     // Spot-check file content is byte-identical
-    let original = std::fs::read(install_dir.path().join("config.toml")).unwrap();
-    let restored = std::fs::read(restore_dir.path().join("config.toml")).unwrap();
-    assert_eq!(original, restored, "config.toml must be byte-identical");
+    for file in ["server.toml", "orgs/acme/org.toml", "orgs/globex/org.toml"] {
+        let original = std::fs::read(install_dir.path().join(file)).unwrap();
+        let restored = std::fs::read(restore_dir.path().join(file)).unwrap();
+        assert_eq!(original, restored, "{file} must be byte-identical");
+    }
 
     let original_soul = std::fs::read(
         install_dir

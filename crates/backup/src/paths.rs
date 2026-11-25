@@ -33,11 +33,12 @@ pub fn default_archive_name() -> String {
 pub fn discover_files(install_dir: &Path, db_path: Option<&Path>) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = Vec::new();
 
-    // config.toml
-    let config = install_dir.join("config.toml");
-    if config.exists() {
-        files.push(config);
+    // server.toml, then each org's org.toml
+    let server_config = install_dir.join("server.toml");
+    if server_config.exists() {
+        files.push(server_config);
     }
+    collect_org_configs(install_dir, &mut files)?;
 
     // SQLite database (potentially at a custom path)
     let db = db_path
@@ -95,6 +96,26 @@ pub fn discover_files(install_dir: &Path, db_path: Option<&Path>) -> Result<Vec<
     Ok(files)
 }
 
+/// Collect `orgs/*/org.toml`, ordered by org slug.
+fn collect_org_configs(install_dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    let orgs_dir = install_dir.join("orgs");
+    if !orgs_dir.is_dir() {
+        return Ok(());
+    }
+    let mut org_dirs: Vec<_> = std::fs::read_dir(&orgs_dir)
+        .with_context(|| format!("reading directory {:?}", orgs_dir))?
+        .collect::<Result<_, _>>()?;
+    org_dirs.sort_by_key(|e| e.path());
+
+    for org_dir in org_dirs {
+        let org_config = org_dir.path().join("org.toml");
+        if org_config.is_file() {
+            out.push(org_config);
+        }
+    }
+    Ok(())
+}
+
 /// Recursively collect all regular files under `dir` in deterministic order.
 ///
 /// Entries are sorted by path before recursing so archives are byte-reproducible
@@ -147,4 +168,53 @@ pub async fn checkpoint_sqlite(db_path: &Path) -> Result<()> {
     conn.close().await.ok();
     debug!("WAL checkpoint completed for {:?}", db_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn touch(root: &Path, rel: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"x").unwrap();
+    }
+
+    fn relative(root: &Path, files: Vec<PathBuf>) -> Vec<String> {
+        files
+            .iter()
+            .map(|f| f.strip_prefix(root).unwrap().display().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn discovers_server_toml_and_every_org_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "server.toml");
+        touch(dir.path(), "orgs/globex/org.toml");
+        touch(dir.path(), "orgs/acme/org.toml");
+
+        let files = discover_files(dir.path(), None).unwrap();
+
+        assert_eq!(
+            relative(dir.path(), files),
+            ["server.toml", "orgs/acme/org.toml", "orgs/globex/org.toml"]
+        );
+    }
+
+    #[test]
+    fn skips_org_directories_without_an_org_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "orgs/acme/org.db");
+
+        assert!(discover_files(dir.path(), None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_leftover_config_toml_is_not_archived() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "config.toml");
+
+        assert!(discover_files(dir.path(), None).unwrap().is_empty());
+    }
 }

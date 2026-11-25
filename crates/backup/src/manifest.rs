@@ -45,8 +45,8 @@ mod tests {
             created_at: "2026-03-29T14:30:22Z".to_string(),
             install_dir: "/home/user/.assistant".to_string(),
             entries: vec![ManifestEntry {
-                archive_path: "config.toml".to_string(),
-                install_path: "/home/user/.assistant/config.toml".to_string(),
+                archive_path: "server.toml".to_string(),
+                install_path: "/home/user/.assistant/server.toml".to_string(),
                 size_bytes: 1024,
                 sha256: "a".repeat(64),
             }],
@@ -60,7 +60,7 @@ mod tests {
         assert_eq!(decoded.created_at, manifest.created_at);
         assert_eq!(decoded.install_dir, manifest.install_dir);
         assert_eq!(decoded.entries.len(), 1);
-        assert_eq!(decoded.entries[0].archive_path, "config.toml");
+        assert_eq!(decoded.entries[0].archive_path, "server.toml");
         assert_eq!(decoded.entries[0].size_bytes, 1024);
     }
 
