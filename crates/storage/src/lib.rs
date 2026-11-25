@@ -49,6 +49,7 @@ pub mod push_subscriptions;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
+pub mod skill_executions;
 pub mod skill_stats;
 pub mod slack_threads;
 pub mod space_store;
@@ -103,7 +104,11 @@ pub use registry::{InMemorySkillCatalog, SkillCatalog, SkillRegistry};
 pub use scheduled_tasks::{
     InMemoryScheduledTaskStore, ScheduledTask, ScheduledTaskStore, SqliteScheduledTaskStore,
 };
-pub use skill_stats::{SkillStats, SkillStatsProvider, UnavailableSkillStats};
+pub use skill_executions::{
+    InMemorySkillExecutionStore, SkillExecution, SkillExecutionStore, SkillOutcome,
+    SqliteSkillExecutionStore,
+};
+pub use skill_stats::{SkillStats, SkillStatsProvider};
 pub use slack_threads::{
     InMemorySlackActiveThreadStore, SlackActiveThreadStore, SqliteSlackActiveThreadStore,
 };
@@ -189,6 +194,11 @@ impl StorageLayer {
     /// Convenience: build a `RefinementsStore` backed by this pool.
     pub fn refinements_store(&self) -> SqliteRefinementsStore {
         SqliteRefinementsStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `SkillExecutionStore` backed by this pool.
+    pub fn skill_execution_store(&self) -> SqliteSkillExecutionStore {
+        SqliteSkillExecutionStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `ScheduledTaskStore` backed by this pool.
@@ -461,6 +471,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "044_bus_delivery_tracking",
             include_str!("../../../migrations/044_bus_delivery_tracking.sql"),
+        ),
+        (
+            "045_skill_executions",
+            include_str!("../../../migrations/045_skill_executions.sql"),
         ),
     ];
 

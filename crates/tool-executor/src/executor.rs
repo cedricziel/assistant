@@ -8,7 +8,7 @@ use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{
     LlmProvider, SubagentRunner, ToolHandler, ToolOutput, ToolSpec, types::agent::AssistantConfig,
 };
-use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer, UnavailableSkillStats};
+use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use tracing::warn;
 
 pub struct ToolExecutor {
@@ -23,28 +23,7 @@ impl ToolExecutor {
         registry: Arc<SkillRegistry>,
         config: Arc<AssistantConfig>,
     ) -> Self {
-        // No execution statistics are collected yet; see `UnavailableSkillStats`.
-        let stats_provider: Arc<dyn SkillStatsProvider> = Arc::new(UnavailableSkillStats);
-        let executor = Self {
-            storage: storage.clone(),
-            tool_handlers: RwLock::new(HashMap::new()),
-        };
-        executor.register_builtins(llm, registry, config, stats_provider);
-        executor
-    }
-
-    /// Create a `ToolExecutor` with a custom `SkillStatsProvider`.
-    ///
-    /// The default (`new`) reads skill statistics from the local SQLite trace
-    /// store. This seam exists so stats can later be sourced from an external
-    /// telemetry backend (TraceQL/PromQL query) without touching the tools.
-    pub fn with_stats_provider(
-        storage: Arc<StorageLayer>,
-        llm: Arc<dyn LlmProvider>,
-        registry: Arc<SkillRegistry>,
-        config: Arc<AssistantConfig>,
-        stats_provider: Arc<dyn SkillStatsProvider>,
-    ) -> Self {
+        let stats_provider: Arc<dyn SkillStatsProvider> = Arc::new(storage.skill_execution_store());
         let executor = Self {
             storage: storage.clone(),
             tool_handlers: RwLock::new(HashMap::new()),

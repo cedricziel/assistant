@@ -254,6 +254,9 @@ pub struct Orchestrator {
     pub(crate) model_providers: std::sync::Mutex<HashMap<String, Arc<dyn LlmProvider>>>,
     /// Provider settings an override model is combined with.
     pub(crate) llm_config: assistant_core::types::llm::LlmConfig,
+    /// Log of tool calls made while a skill was active; feeds skill
+    /// self-improvement.
+    pub(crate) skill_executions: Arc<dyn assistant_storage::SkillExecutionStore>,
     /// Learning configuration for autonomous skill creation and improvement.
     pub(crate) learning_config: assistant_core::types::features::LearningConfig,
     /// Clock used for timestamp generation on persisted records and for
@@ -292,6 +295,8 @@ impl Orchestrator {
             compaction_config.context_window_tokens = effective;
         }
 
+        let skill_executions = Arc::new(storage.skill_execution_store());
+
         Self {
             llm,
             storage,
@@ -316,6 +321,7 @@ impl Orchestrator {
             conversation_configs: Arc::default(),
             model_providers: std::sync::Mutex::default(),
             llm_config: config.llm.clone(),
+            skill_executions,
             learning_config: config.learning.clone(),
             clock: Arc::new(assistant_core::clock::SystemClock),
         }

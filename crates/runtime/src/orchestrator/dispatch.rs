@@ -15,6 +15,7 @@ use assistant_core::{
 };
 use assistant_storage::AttachmentStore as _AttachmentStoreTrait;
 use assistant_storage::conversations::ConversationStore;
+use assistant_storage::{SkillExecution, SkillOutcome};
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Span as _;
 use tokio::sync::mpsc;
@@ -143,6 +144,15 @@ impl Orchestrator {
 
         let mut tool_status = "ok";
 
+        // Calls made while a skill is active count as executions of it; the
+        // `load-skill` call that activates a skill does not.
+        let skill_in_use = active_skill.clone();
+        let failure = match &exec_result {
+            Ok(output) if output.success => None,
+            Ok(output) => Some(output.content.clone()),
+            Err(err) => Some(err.to_string()),
+        };
+
         // Track the active skill when load-skill is called successfully.
         if tool_name == "load-skill"
             && let Some(args) = tool_arguments
@@ -226,6 +236,17 @@ impl Orchestrator {
         };
 
         otel_span.end();
+
+        if let Some(skill_name) = skill_in_use {
+            self.record_skill_execution(
+                skill_name,
+                tool_name,
+                conversation_id,
+                failure,
+                duration_ms,
+            )
+            .await;
+        }
 
         crate::history::append_tool_result(history, tool_name, &observation);
         let tr_msg =
@@ -312,6 +333,34 @@ impl Orchestrator {
         }
 
         FinalizedTool { had_error }
+    }
+
+    /// Append one tool call to the skill execution log.
+    async fn record_skill_execution(
+        &self,
+        skill_name: String,
+        tool_name: &str,
+        conversation_id: Uuid,
+        failure: Option<String>,
+        duration_ms: i64,
+    ) {
+        let execution = SkillExecution {
+            skill_name,
+            agent_id: self.agent_id.clone(),
+            conversation_id,
+            tool_name: tool_name.to_string(),
+            outcome: if failure.is_some() {
+                SkillOutcome::Error
+            } else {
+                SkillOutcome::Success
+            },
+            error: failure,
+            duration_ms,
+            created_at: self.clock.now(),
+        };
+        if let Err(e) = self.skill_executions.record(&execution).await {
+            warn!(skill = %execution.skill_name, error = %e, "Failed to record skill execution");
+        }
     }
 
     /// Run the permission pipeline for one tool call.

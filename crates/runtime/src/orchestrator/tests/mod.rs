@@ -226,5 +226,6 @@ mod model_override;
 mod multimodal;
 mod permission;
 mod sanitize;
+mod skill_executions;
 mod streaming;
 mod subagent;
