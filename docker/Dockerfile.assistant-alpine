@@ -3,7 +3,8 @@
 # The build context must contain:
 #   bin/amd64/assistant   (x86_64-unknown-linux-musl)
 #   bin/arm64/assistant   (aarch64-unknown-linux-musl)
-#   config.toml
+#   server.toml
+#   org.toml
 #
 # TARGETARCH is injected automatically by Docker Buildx:
 #   linux/amd64  → TARGETARCH=amd64
@@ -20,8 +21,8 @@ RUN chown assistant:assistant /usr/local/bin/assistant
 
 RUN mkdir -p /etc/assistant \
     && chown assistant:assistant /etc/assistant
-COPY config.toml /etc/assistant/config.toml.example
-RUN chown assistant:assistant /etc/assistant/config.toml.example
+COPY server.toml org.toml /etc/assistant/
+RUN chown assistant:assistant /etc/assistant/server.toml /etc/assistant/org.toml
 
 USER assistant
 ENTRYPOINT ["assistant"]

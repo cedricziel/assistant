@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/assistant /usr/local/bin/assistant
-COPY config.toml /etc/assistant/config.toml.example
+COPY server.toml /etc/assistant/server.toml.example
+COPY org.toml /etc/assistant/org.toml.example
 
 ENTRYPOINT ["assistant", "mcp"]
