@@ -179,14 +179,7 @@ impl MoonshotProvider {
             let finish_reason = choice["finish_reason"].as_str().unwrap_or("");
             let message = &choice["message"];
 
-            let meta = LlmResponseMeta {
-                model: resp_body["model"].as_str().map(String::from),
-                response_id: resp_body["id"].as_str().map(String::from),
-                finish_reason: Some(finish_reason.to_string()),
-                input_tokens: resp_body["usage"]["prompt_tokens"].as_u64(),
-                output_tokens: resp_body["usage"]["completion_tokens"].as_u64(),
-                ..Default::default()
-            };
+            let meta = raw_response_meta(&resp_body, finish_reason);
 
             // Check for tool calls.
             if finish_reason == "tool_calls"
@@ -340,6 +333,24 @@ impl LlmProvider for MoonshotProvider {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+/// Metadata from a raw Chat Completions response body. `prompt_tokens` is the
+/// inclusive input total; Kimi reports cache reads either under
+/// `prompt_tokens_details.cached_tokens` or as a top-level `cached_tokens`.
+fn raw_response_meta(resp_body: &Value, finish_reason: &str) -> LlmResponseMeta {
+    let usage = &resp_body["usage"];
+    LlmResponseMeta {
+        model: resp_body["model"].as_str().map(String::from),
+        response_id: resp_body["id"].as_str().map(String::from),
+        finish_reason: Some(finish_reason.to_string()),
+        input_tokens: usage["prompt_tokens"].as_u64(),
+        output_tokens: usage["completion_tokens"].as_u64(),
+        cached_input_tokens: usage["prompt_tokens_details"]["cached_tokens"]
+            .as_u64()
+            .or_else(|| usage["cached_tokens"].as_u64()),
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,6 +367,44 @@ mod tests {
     }
 
     // ── Capabilities ─────────────────────────────────────────────────────
+
+    #[test]
+    fn raw_meta_reads_cached_tokens() {
+        let body = serde_json::json!({
+            "model": "kimi-k2",
+            "id": "cmpl-1",
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 20,
+                "prompt_tokens_details": {"cached_tokens": 900}
+            }
+        });
+        let meta = raw_response_meta(&body, "stop");
+        assert_eq!(
+            meta.input_tokens,
+            Some(1000),
+            "prompt_tokens stays the inclusive total"
+        );
+        assert_eq!(meta.cached_input_tokens, Some(900));
+        assert_eq!(meta.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn raw_meta_reads_kimi_top_level_cached_tokens() {
+        let body = serde_json::json!({
+            "usage": {"prompt_tokens": 50, "completion_tokens": 5, "cached_tokens": 40}
+        });
+        assert_eq!(
+            raw_response_meta(&body, "stop").cached_input_tokens,
+            Some(40)
+        );
+    }
+
+    #[test]
+    fn raw_meta_without_cache_details_is_none() {
+        let body = serde_json::json!({"usage": {"prompt_tokens": 5, "completion_tokens": 1}});
+        assert_eq!(raw_response_meta(&body, "stop").cached_input_tokens, None);
+    }
 
     #[test]
     fn capabilities_with_web_search_enabled() {
