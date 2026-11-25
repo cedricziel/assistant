@@ -221,6 +221,7 @@ impl MoonshotProvider {
                         items: regular_calls,
                         meta,
                         thinking: None,
+                        provider_state: None,
                     }));
                 }
 

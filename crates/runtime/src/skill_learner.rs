@@ -221,7 +221,7 @@ fn format_history_for_judge(history: &[ChatHistoryMessage]) -> String {
             ChatHistoryMessage::MultimodalUser { .. } => {
                 parts.push("USER: [multimodal content]".to_string());
             }
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 for call in calls {
                     let params_preview = serde_json::to_string(&call.params)
                         .unwrap_or_default()
@@ -466,11 +466,14 @@ mod tests {
     fn format_history_for_judge_renders_tool_calls_and_results() {
         use assistant_core::ToolCallItem;
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "shell".to_string(),
-                params: serde_json::json!({"cmd": "ls"}),
-                id: Some("c1".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "shell".to_string(),
+                    params: serde_json::json!({"cmd": "ls"}),
+                    id: Some("c1".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "shell".to_string(),
                 content: "file1\nfile2".to_string(),

@@ -385,7 +385,7 @@ pub(crate) fn serialize_history_for_span(history: &[ChatHistoryMessage]) -> Stri
                 };
                 serde_json::json!({"role": role_str, "content": content})
             }
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 let tc: Vec<serde_json::Value> = calls
                     .iter()
                     .map(|c| serde_json::json!({"name": c.name, "arguments": c.params}))
