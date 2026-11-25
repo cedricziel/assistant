@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::permission::PermissionPolicy;
 use assistant_core::tool::ToolDispatcher;
 use assistant_runtime::{OrchestrationEngine, Orchestrator};
 use assistant_storage::{SkillCatalog, StorageLayer, registry::SkillRegistry};
@@ -37,6 +38,8 @@ pub async fn run(
 ) -> Result<()> {
     info!("MCP server ready — reading JSON-RPC from stdin");
 
+    let policy = orchestrator.permission_policy().clone();
+
     let reader = BufReader::new(tokio::io::stdin());
     let writer = tokio::io::stdout();
 
@@ -45,6 +48,7 @@ pub async fn run(
         writer,
         orchestrator,
         executor,
+        policy,
         registry.clone(),
         registry,
         user_skills_dir,
@@ -56,14 +60,19 @@ pub async fn run(
 /// streams. Extracted from [`run`] so tests can pipe canned input through
 /// the dispatcher without monopolising stdin/stdout.
 ///
+/// Every `tools/call` is authorized by `policy`; MCP callers cannot be
+/// prompted, so calls the policy leaves undecided are refused.
+///
 /// The `catalog` parameter is the [`SkillCatalog`] used by `resources/list`
 /// and `resources/read`; `install_registry` is the optional concrete
 /// [`SkillRegistry`] used by the `install-skill` tool (None disables it).
+#[allow(clippy::too_many_arguments)]
 pub async fn run_io<R, W>(
     mut reader: R,
     mut writer: W,
     orchestrator: Arc<dyn OrchestrationEngine>,
     executor: Arc<dyn ToolDispatcher>,
+    policy: PermissionPolicy,
     catalog: Arc<dyn SkillCatalog>,
     install_registry: Arc<SkillRegistry>,
     user_skills_dir: PathBuf,
@@ -108,6 +117,7 @@ where
             catalog.clone(),
             executor.clone(),
             orchestrator.clone(),
+            &policy,
             user_skills_dir.clone(),
             Some(install_registry.clone()),
         )

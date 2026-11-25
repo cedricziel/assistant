@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use assistant_core::permission::{PermissionPolicy, PermissionRequest};
 use assistant_core::tool::ToolDispatcher;
 use assistant_core::{types::conversation::ExecutionContext, types::conversation::Interface};
 use assistant_runtime::OrchestrationEngine;
@@ -21,6 +22,7 @@ pub async fn handle_request(
     registry: Arc<dyn SkillCatalog>,
     executor: Arc<dyn ToolDispatcher>,
     orchestrator: Arc<dyn OrchestrationEngine>,
+    policy: &PermissionPolicy,
     user_skills_dir: PathBuf,
     install_registry: Option<Arc<assistant_storage::SkillRegistry>>,
 ) -> JsonRpcResponse {
@@ -129,6 +131,43 @@ pub async fn handle_request(
                 };
             }
 
+            // MCP callers cannot be prompted, so the policy decides alone.
+            // `run-prompt` is exempt: its tool calls pass the orchestrator's
+            // own gate.
+            let ctx = ExecutionContext {
+                conversation_id: Uuid::new_v4(),
+                agent_id: "default".to_string(),
+                turn: 0,
+                interface: Interface::Mcp,
+                interactive: false,
+                allowed_tools: None,
+                depth: 0,
+                user_id: None,
+                org_id: None,
+                space_id: None,
+            };
+            let requires_confirmation = tool_name == "install-skill"
+                || executor
+                    .to_specs()
+                    .iter()
+                    .any(|spec| spec.name == tool_name && spec.requires_confirmation);
+            let resolution = policy
+                .evaluate(&PermissionRequest {
+                    tool_name: &tool_name,
+                    params: &tool_input,
+                    ctx: &ctx,
+                    requires_confirmation,
+                    task_context: None,
+                })
+                .await;
+            if let Some(refusal) = resolution.refusal(&tool_name) {
+                warn!(tool = %tool_name, %refusal, "MCP tool call refused");
+                return JsonRpcResponse::ok(
+                    req.id,
+                    json!({ "content": [ContentItem::text(refusal)], "isError": true }),
+                );
+            }
+
             if tool_name == "install-skill" {
                 let Some(source) = tool_input["source"].as_str() else {
                     return JsonRpcResponse::err(
@@ -163,19 +202,6 @@ pub async fn handle_request(
                 map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
             } else {
                 HashMap::new()
-            };
-
-            let ctx = ExecutionContext {
-                conversation_id: Uuid::new_v4(),
-                agent_id: "default".to_string(),
-                turn: 0,
-                interface: Interface::Mcp,
-                interactive: false,
-                allowed_tools: None,
-                depth: 0,
-                user_id: None,
-                org_id: None,
-                space_id: None,
             };
 
             match executor.execute(&tool_name, params, &ctx).await {

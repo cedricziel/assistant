@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use assistant_core::permission::PermissionPolicy;
 use assistant_core::tool::ToolDispatcher;
 use assistant_mcp_server::run_io;
 use assistant_runtime::{OrchestrationEngine, StubOrchestrationEngine, TurnResult};
@@ -41,6 +42,7 @@ async fn run_io_handles_eof_immediately() {
         &mut output,
         o,
         e,
+        PermissionPolicy::default(),
         c,
         install,
         std::path::PathBuf::from("/tmp"),
@@ -66,6 +68,7 @@ async fn run_io_handles_initialize_and_returns_newline_delimited_response() {
         &mut output,
         o,
         e,
+        PermissionPolicy::default(),
         c,
         install,
         std::path::PathBuf::from("/tmp"),
@@ -97,6 +100,7 @@ async fn run_io_skips_blank_lines_between_requests() {
         &mut output,
         o,
         e,
+        PermissionPolicy::default(),
         c,
         install,
         std::path::PathBuf::from("/tmp"),
@@ -128,6 +132,7 @@ async fn run_io_garbage_input_returns_parse_error() {
         &mut output,
         o,
         e,
+        PermissionPolicy::default(),
         c,
         install,
         std::path::PathBuf::from("/tmp"),
@@ -180,6 +185,7 @@ async fn run_io_processes_multiple_requests_in_sequence() {
         &mut output,
         orch,
         exec,
+        PermissionPolicy::default(),
         cat,
         install,
         std::path::PathBuf::from("/tmp"),

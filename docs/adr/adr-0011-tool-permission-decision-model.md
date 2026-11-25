@@ -76,7 +76,7 @@ With no `[permissions]` section, calls that no rule allows are denied on non-int
 - Scheduled tasks, messenger turns and Subagent Processes that use `bash`, `web-fetch` or `process` fail until the owner adds allow rules. This is intended.
 - When the model is enabled, every undecided call pays a network round trip, bounded by `timeout_secs` (default 8). Static allow rules are the fast path.
 - The model is steerable. It reduces how often a human is asked. It is not the security boundary.
-- The MCP server entry point (`crates/mcp-server`) calls the tool executor directly and is not behind the pipeline. It stays a known gap and a follow-up.
+- The MCP server (`crates/mcp-server`) runs the same policy in its `tools/call` handler. MCP callers cannot be prompted, so undecided calls are refused. It does not go through the orchestrator's gate, so it repeats the policy call there.
 - Network destinations are not filtered. Rules match the URL string the LLM wrote, so a hostname that resolves to a sensitive address, or a redirect to one, is not caught by a deny rule on the IP.
 
 ## Alternatives considered
