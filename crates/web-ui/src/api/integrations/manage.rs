@@ -736,7 +736,7 @@ pub(super) async fn caller_view(
         domain::IntegrationLayer::User => integration.owner_user_id.clone(),
         _ => Some(ctx.user_id.clone()),
     };
-    let (availability, _) = state
+    let (availability, credential_subject) = state
         .effective
         .assess(policy, integration, user.as_ref())
         .await?;
@@ -750,14 +750,11 @@ pub(super) async fn caller_view(
             .get(&integration.id, subject.as_ref())
             .await?
             .is_some();
-    // Health follows the status: the owner's, for a user-layer integration.
-    let health_subject = match integration.credential_mode {
-        domain::CredentialMode::Shared => None,
-        domain::CredentialMode::PerUser => user,
-    };
+    // Health is recorded under the subject `assess` names (the owner's, for a
+    // user-layer integration; none for one that needs no credential).
     let health = state
         .health
-        .get(&integration.id, health_subject.as_ref())
+        .get(&integration.id, credential_subject.as_ref())
         .await?;
     let mut status: IntegrationStatus = availability.into();
     if status == IntegrationStatus::Ready && health.as_ref().is_some_and(|h| !h.reachable) {

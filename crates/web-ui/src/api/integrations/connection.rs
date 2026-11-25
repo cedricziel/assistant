@@ -352,6 +352,46 @@ mod tests {
         assert_eq!(status, NOT_FOUND);
     }
 
+    /// The pool records health under the subject `assess` returns, so the view
+    /// must read it from the same one (an integration that needs no credential
+    /// has none, even when per-user).
+    #[tokio::test]
+    async fn health_recorded_by_a_turn_shows_for_integrations_without_a_credential() {
+        use assistant_core::integrations::IntegrationAuthKind;
+        let h = Harness::new().await;
+        h.seed("int_org", IntegrationLayer::Org, None, |i| {
+            i.credential_mode = CredentialMode::PerUser;
+            i.auth_kind = IntegrationAuthKind::None;
+            i.header_name = None;
+            i.header_value_prefix = None;
+        })
+        .await;
+        h.seed("int_mine", IntegrationLayer::User, Some(Who::Member), |i| {
+            i.auth_kind = IntegrationAuthKind::None;
+            i.header_name = None;
+            i.header_value_prefix = None;
+        })
+        .await;
+        h.state
+            .health
+            .record_connected("int_mine", None, 4, super::super::testing::at(3))
+            .await
+            .unwrap();
+        for id in ["int_org", "int_mine"] {
+            h.state
+                .health
+                .record_failed(id, None, "down", super::super::testing::at(5))
+                .await
+                .unwrap();
+        }
+
+        let (_, org) = h.get(Who::Member, "/api/integrations/int_org").await;
+        assert_eq!(org["status"], json!("unreachable"), "{org}");
+        let (_, mine) = h.get(Who::Member, "/api/integrations/int_mine").await;
+        assert_eq!(mine["tool_count"], json!(4), "{mine}");
+        assert_eq!(mine["status"], json!("unreachable"), "{mine}");
+    }
+
     #[tokio::test]
     async fn an_integration_that_needs_no_credential_can_be_tested() {
         let server = serve(&["t"], true).await;
