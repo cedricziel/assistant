@@ -182,7 +182,7 @@ impl IntegrationStore for SqliteIntegrationStore {
             return Err(IntegrationStoreError::ConnectUrlImmutable { id: i.id.clone() }.into());
         }
 
-        let result = sqlx::query(
+        sqlx::query(
             "UPDATE integrations SET slug = ?, name = ?, connect_url = ?, auth_kind = ?,
                     header_name = ?, header_value_prefix = ?, credential_mode = ?, trust = ?,
                     enabled = ?, oauth_client_id_override = ?, updated_at = ?
@@ -218,7 +218,7 @@ impl IntegrationStore for SqliteIntegrationStore {
                 .with_context(|| format!("dropping OAuth state of integration {}", i.id))?;
         }
         tx.commit().await?;
-        Ok(result.rows_affected() > 0)
+        Ok(true)
     }
 
     async fn delete(&self, id: &str) -> Result<bool> {
