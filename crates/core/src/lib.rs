@@ -57,8 +57,9 @@ pub use identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
 pub use store::{
     BindingStore, CatalogItem, CatalogItemStore, CatalogSubscription, CatalogSubscriptionStore,
     InMemoryBindingStore, InMemoryCatalogItemStore, InMemoryCatalogSubscriptionStore,
-    InMemoryInterfaceInstanceStore, InMemoryMembershipStore, InMemoryOrgStore, InMemorySpaceStore,
-    InMemoryUserStore, InterfaceInstance, InterfaceInstanceStore, MembershipStore, OrgStore,
+    InMemoryInterfaceInstanceStore, InMemoryMembershipStore, InMemoryOrgOidcConfigStore,
+    InMemoryOrgStore, InMemorySpaceStore, InMemoryUserStore, InterfaceInstance,
+    InterfaceInstanceStore, MembershipStore, OrgOidcConfig, OrgOidcConfigStore, OrgStore,
     Organization, PersonaBinding, SessionState, Space, SpaceMembership, SpaceStore, User,
     UserStore,
 };
