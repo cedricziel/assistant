@@ -1,9 +1,13 @@
 version: 2
 updates:
+  # Minor and patch bumps land as one grouped PR per ecosystem; major bumps
+  # get their own PR so one breaking change can't stall every other update.
+
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: daily
+    open-pull-requests-limit: 10
     groups:
       opentelemetry:
         patterns:
@@ -11,15 +15,41 @@ updates:
       reqwest:
         patterns:
           - "reqwest*"
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: pub
     directory: /app
     schedule:
       interval: daily
+    open-pull-requests-limit: 10
     groups:
-      all-pub:
-        patterns:
-          - "*"
+      pub-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: bundler
+    directory: /app
+    schedule:
+      interval: weekly
+    groups:
+      bundler-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /crates/web-ui/e2e
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: docker
     directory: /docker
@@ -31,7 +61,9 @@ updates:
           - "*"
 
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: daily
     groups:
