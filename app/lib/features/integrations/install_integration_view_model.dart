@@ -319,10 +319,13 @@ class InstallIntegrationViewModel extends Notifier<InstallState> {
     }
   }
 
+  /// The server's default: OAuth and mixed auth connect per user.
   CredentialMode _defaultModeFor(InstallState form) =>
-      form.effectiveAuthKind == IntegrationAuthKind.oauth
-      ? CredentialMode.perUser
-      : CredentialMode.shared;
+      switch (form.effectiveAuthKind) {
+        IntegrationAuthKind.oauth ||
+        IntegrationAuthKind.mixed => CredentialMode.perUser,
+        _ => CredentialMode.shared,
+      };
 
   CreateIntegrationRequest _requestFor(InstallState form) {
     final entry = form.args.entry;

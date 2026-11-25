@@ -143,6 +143,20 @@ void main() {
     );
   });
 
+  test(
+    'credential mode defaults to per_user for mixed auth, like the server',
+    () {
+      final s = _setup(
+        _args(
+          _entry(kind: CatalogAuthKindResponse.mixed, headerName: 'X-Key'),
+          layers: [IntegrationLayer.org],
+        ),
+      );
+
+      expect(_state(s).credentialMode, CredentialMode.perUser);
+    },
+  );
+
   group('slug validation', () {
     for (final (slug, valid) in [
       ('linear', true),
