@@ -653,6 +653,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     // -- Management API states (orgs, users, spaces, members, API keys) ------
     let orgs_api_state = api::orgs::OrgsApiState {
         org_storage: org_storage.clone(),
+        secrets: secrets.clone(),
     };
     let users_api_state = api::users::UsersApiState {
         org_storage: org_storage.clone(),

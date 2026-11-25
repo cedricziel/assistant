@@ -23,6 +23,8 @@ use assistant_core::OrgStore;
 use assistant_core::auth::AuthContext;
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::OrgId;
+use assistant_core::integrations::oidc_client_secret_aad;
+use assistant_core::secret::Secret;
 use assistant_core::store::{OrgOidcConfig, OrgOidcConfigStore};
 
 use super::orgs::OrgsApiState;
@@ -238,7 +240,14 @@ pub async fn put_org_oidc(
     };
     let now = SystemClock.now();
     let client_secret = match body.client_secret {
-        Some(secret) => secret.filter(|s| !s.is_empty()),
+        Some(Some(secret)) if !secret.is_empty() => {
+            let aad = oidc_client_secret_aad(&org_id);
+            match state.secrets.seal(&Secret::new(secret), aad.as_bytes()) {
+                Ok(sealed) => Some(sealed),
+                Err(e) => return internal("failed to seal OIDC client secret", e),
+            }
+        }
+        Some(_) => None,
         None => existing.as_ref().and_then(|c| c.client_secret.clone()),
     };
     let config = OrgOidcConfig {
@@ -319,6 +328,7 @@ mod tests {
     use assistant_core::OrgStore;
     use assistant_core::auth::AuthContext;
     use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
+    use assistant_core::integrations::{SecretBox, oidc_client_secret_aad};
     use assistant_core::store::{OrgOidcConfigStore, Organization};
     use assistant_storage::OrgStorageLayer;
 
@@ -353,7 +363,10 @@ mod tests {
             })
             .await
             .unwrap();
-        OrgsApiState { org_storage }
+        OrgsApiState {
+            org_storage,
+            secrets: Arc::new(SecretBox::from_key([7; 32])),
+        }
     }
 
     fn app(state: OrgsApiState, role: Role) -> Router {
@@ -424,6 +437,59 @@ mod tests {
             got.get("client_secret").is_none(),
             "secret must never be returned: {got}"
         );
+    }
+
+    #[tokio::test]
+    async fn put_stores_the_secret_sealed() {
+        let state = setup().await;
+        let app = app(state.clone(), Role::OrgAdmin);
+        let (status, _) = send(&app, "PUT", "/orgs/org_1/oidc", Some(valid_body())).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let org_id = OrgId::from("org_1");
+        let sealed = state
+            .org_storage
+            .oidc_config_store()
+            .get_oidc_config(&org_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .client_secret
+            .expect("a secret was provided");
+        assert_ne!(
+            sealed.ciphertext, b"s3cret",
+            "the stored value must not be the plaintext"
+        );
+        let opened = state
+            .secrets
+            .open(&sealed, oidc_client_secret_aad(&org_id).as_bytes())
+            .unwrap();
+        assert_eq!(opened.expose(), "s3cret");
+    }
+
+    #[tokio::test]
+    async fn put_without_secret_keeps_the_stored_sealed_value() {
+        let state = setup().await;
+        let app = app(state.clone(), Role::OrgAdmin);
+        let store = state.org_storage.oidc_config_store();
+        send(&app, "PUT", "/orgs/org_1/oidc", Some(valid_body())).await;
+        let before = store
+            .get_oidc_config(&OrgId::from("org_1"))
+            .await
+            .unwrap()
+            .unwrap()
+            .client_secret;
+
+        let mut body = valid_body();
+        body.as_object_mut().unwrap().remove("client_secret");
+        send(&app, "PUT", "/orgs/org_1/oidc", Some(body)).await;
+        let after = store
+            .get_oidc_config(&OrgId::from("org_1"))
+            .await
+            .unwrap()
+            .unwrap()
+            .client_secret;
+        assert_eq!(after, before, "an omitted secret must not be resealed");
     }
 
     #[tokio::test]

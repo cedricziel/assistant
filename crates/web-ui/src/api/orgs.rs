@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use assistant_core::OrgStore;
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::OrgId;
+use assistant_core::integrations::SecretBox;
 use assistant_core::store::{OrgOidcConfigStore, Organization};
 use assistant_storage::OrgStorageLayer;
 
@@ -37,6 +38,7 @@ use crate::openapi::ErrorBody;
 #[derive(Clone)]
 pub struct OrgsApiState {
     pub org_storage: Arc<OrgStorageLayer>,
+    pub secrets: Arc<SecretBox>,
 }
 
 // -- Request/response types --------------------------------------------------
@@ -329,6 +331,7 @@ pub async fn update_org(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assistant_core::integrations::SecretBox;
     use axum::body::Body;
     use axum::http::Request;
     use std::collections::HashMap;
@@ -370,7 +373,10 @@ mod tests {
 
     async fn setup_state() -> OrgsApiState {
         let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
-        OrgsApiState { org_storage }
+        OrgsApiState {
+            org_storage,
+            secrets: Arc::new(SecretBox::from_key([7; 32])),
+        }
     }
 
     #[tokio::test]
