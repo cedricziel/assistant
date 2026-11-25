@@ -44,6 +44,10 @@ Position-based access level within the multi-user model. Four predefined roles: 
 
 Fine-grained permission in `resource:action` format (e.g. `conversations:write`, `personas:read`). Used by API keys to restrict access beyond what the user's role grants.
 
+## Surface
+
+Model-authored interactive UI (a form, card or choice list) shown in the web chat. A Persona builds one with the `render-surface` tool from the assistant catalog, a trimmed A2UI v1.0 component set. The server validates and stores it, and the user answers it directly instead of replying in prose. See [ADR-0019](adr/adr-0019-generative-ui-a2ui.md).
+
 ## Naming Rules
 
 - Prefer explicit terms: `Persona`, `Subagent Process`, `A2A Profile`.
