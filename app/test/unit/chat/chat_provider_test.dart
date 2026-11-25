@@ -2677,4 +2677,355 @@ void main() {
       },
     );
   });
+
+  // -- Characterization: timeline reducers + error mapping -------------------
+  //
+  // Pin the behaviour of the per-event timeline mutations and the stream
+  // error mapping so they can move out of ChatNotifier unchanged.
+
+  group('ChatNotifier — timeline event reducers', () {
+    /// Starts a turn, feeds [events], and returns the messages once pumped.
+    Future<(ChatNotifier, StreamController<StreamEvent>)> startTurn(
+      WidgetTester tester,
+      List<StreamEvent> events,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      unawaited(notifier.sendMessage('go'));
+      await tester.pump();
+      for (final e in events) {
+        ctrl.add(e);
+        await tester.pump();
+      }
+      return (notifier, ctrl);
+    }
+
+    ChatMessage subagentEntry(ChatNotifier n, String id) =>
+        n.state.value!.messages.firstWhere(
+          (m) =>
+              m.timelineType == TimelineEntryType.subagent &&
+              m.subagentId == id,
+        );
+
+    // The text path (`_streamMessage`) does not handle the subagent
+    // token/thinking/tool-result events; only the voice path does.
+    testWidgets('voice stream accumulates subagent tokens, thinking, tools', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueVoiceStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      unawaited(notifier.sendVoiceMessage(Uint8List(4), 'audio/webm'));
+      await tester.pump();
+      for (final e in const <StreamEvent>[
+        SubagentStartedEvent(agentId: 'a1', task: 'research'),
+        SubagentTokenEvent(agentId: 'a1', content: 'foo '),
+        SubagentTokenEvent(agentId: 'a1', content: 'bar'),
+        SubagentThinkingEvent(agentId: 'a1', content: 'hmm '),
+        SubagentThinkingEvent(agentId: 'a1', content: 'ok'),
+        SubagentToolResultEvent(
+          agentId: 'a1',
+          toolName: 'web-search',
+          status: 'error',
+          arguments: {'q': 'x'},
+          result: 'boom',
+        ),
+        SubagentToolResultEvent(
+          agentId: 'a1',
+          toolName: 'bash',
+          status: 'weird',
+        ),
+        // Events for an unknown subagent are ignored.
+        SubagentTokenEvent(agentId: 'ghost', content: 'nope'),
+      ]) {
+        ctrl.add(e);
+        await tester.pump();
+      }
+
+      final entry = subagentEntry(notifier, 'a1');
+      expect(entry.subagentContent, 'foo bar');
+      expect(entry.subagentThinking, 'hmm ok');
+      expect(entry.subagentToolCalls.map((t) => t.toolName), [
+        'web-search',
+        'bash',
+      ]);
+      expect(entry.subagentToolCalls.first.status, ToolCallStatus.error);
+      expect(entry.subagentToolCalls.first.arguments, {'q': 'x'});
+      expect(entry.subagentToolCalls.first.result, 'boom');
+      expect(
+        entry.subagentToolCalls.last.status,
+        ToolCallStatus.ok,
+        reason: 'unknown status strings map to ok',
+      );
+      expect(
+        notifier.state.value!.messages.where((m) => m.subagentId == 'ghost'),
+        isEmpty,
+      );
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('cancelled subagent completion marks the entry stale', (
+      tester,
+    ) async {
+      final (notifier, ctrl) = await startTurn(tester, const [
+        SubagentStartedEvent(agentId: 'a1', task: 't'),
+        SubagentStartedEvent(agentId: 'a2', task: 't'),
+        SubagentCompletedEvent(
+          agentId: 'a1',
+          status: 'cancelled',
+          summary: 'stopped',
+        ),
+        SubagentCompletedEvent(agentId: 'a2', status: 'ok', summary: 'done'),
+      ]);
+
+      final cancelled = subagentEntry(notifier, 'a1');
+      expect(cancelled.isStale, isTrue);
+      expect(cancelled.isStreaming, isFalse);
+      expect(cancelled.subagentSummary, 'stopped');
+      final ok = subagentEntry(notifier, 'a2');
+      expect(ok.isStale, isFalse);
+      expect(ok.isStreaming, isFalse);
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('tool entries insert before the streaming placeholder', (
+      tester,
+    ) async {
+      final (notifier, ctrl) = await startTurn(tester, const [
+        StatusEvent('Calling tool: web-search', toolCallId: 'c1'),
+      ]);
+
+      final msgs = notifier.state.value!.messages;
+      final toolIdx = msgs.indexWhere(
+        (m) => m.timelineType == TimelineEntryType.toolCall,
+      );
+      final placeholderIdx = msgs.indexWhere(
+        (m) => m.id == 'assistant-streaming',
+      );
+      expect(toolIdx, isNonNegative);
+      expect(toolIdx, lessThan(placeholderIdx));
+      final record = msgs[toolIdx].toolCalls.single;
+      expect(record.toolName, 'web-search');
+      expect(record.toolCallId, 'c1');
+      expect(record.status, ToolCallStatus.pending);
+      expect(msgs[toolIdx].isStreaming, isTrue);
+      expect(notifier.state.value!.statusMessage, 'Calling tool: web-search');
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('tool result resolves the pending entry matching toolCallId', (
+      tester,
+    ) async {
+      final (notifier, ctrl) = await startTurn(tester, const [
+        StatusEvent('Calling tool: bash', toolCallId: 'c1'),
+        StatusEvent('Calling tool: bash', toolCallId: 'c2'),
+        ToolResultEvent(
+          toolName: 'bash',
+          status: 'denied',
+          toolCallId: 'c1',
+          arguments: {'cmd': 'ls'},
+          result: 'no',
+        ),
+      ]);
+
+      final tools = notifier.state.value!.messages
+          .where((m) => m.timelineType == TimelineEntryType.toolCall)
+          .toList();
+      expect(tools, hasLength(2));
+      final first = tools.first.toolCalls.single;
+      expect(first.toolCallId, 'c1');
+      expect(first.status, ToolCallStatus.denied);
+      expect(first.arguments, {'cmd': 'ls'});
+      expect(first.result, 'no');
+      expect(first.duration, isNotNull);
+      expect(tools.first.isStreaming, isFalse);
+      expect(tools.last.toolCalls.single.status, ToolCallStatus.pending);
+      final last = notifier.state.value!.lastToolResult!;
+      expect(last.toolName, 'bash');
+      expect(last.status, 'denied');
+      expect(last.isSuccess, isFalse);
+      expect(notifier.state.value!.statusMessage, isNull);
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('tool result without toolCallId falls back to the tool name', (
+      tester,
+    ) async {
+      final (notifier, ctrl) = await startTurn(tester, const [
+        StatusEvent('Calling tool: a'),
+        StatusEvent('Calling tool: b'),
+        ToolResultEvent(toolName: 'a', status: 'ok'),
+      ]);
+
+      final tools = notifier.state.value!.messages
+          .where((m) => m.timelineType == TimelineEntryType.toolCall)
+          .toList();
+      expect(tools.first.toolCalls.single.status, ToolCallStatus.ok);
+      expect(tools.last.toolCalls.single.status, ToolCallStatus.pending);
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('orphan tool result inserts a resolved entry', (tester) async {
+      final (notifier, ctrl) = await startTurn(tester, const [
+        ToolResultEvent(toolName: 'file-read', status: 'error', result: 'x'),
+      ]);
+
+      final msgs = notifier.state.value!.messages;
+      final toolIdx = msgs.indexWhere(
+        (m) => m.timelineType == TimelineEntryType.toolCall,
+      );
+      expect(
+        toolIdx,
+        lessThan(msgs.indexWhere((m) => m.id == 'assistant-streaming')),
+      );
+      final record = msgs[toolIdx].toolCalls.single;
+      expect(record.toolName, 'file-read');
+      expect(record.status, ToolCallStatus.error);
+      expect(record.result, 'x');
+      expect(msgs[toolIdx].isStreaming, isFalse);
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a new timeline entry completes earlier streaming ones', (
+      tester,
+    ) async {
+      final (notifier, ctrl) = await startTurn(tester, const [
+        ThinkingEvent('hmm'),
+        StatusEvent('Calling tool: a'),
+      ]);
+
+      final msgs = notifier.state.value!.messages;
+      final thinking = msgs.firstWhere(
+        (m) => m.timelineType == TimelineEntryType.thinking,
+      );
+      expect(thinking.isStreaming, isFalse);
+      final tool = msgs.firstWhere(
+        (m) => m.timelineType == TimelineEntryType.toolCall,
+      );
+      expect(tool.isStreaming, isTrue);
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('thinking tokens are fed to the entry token stream', (
+      tester,
+    ) async {
+      final (notifier, ctrl) = await startTurn(tester, const [
+        ThinkingEvent('one '),
+      ]);
+      final entry = notifier.state.value!.messages.firstWhere(
+        (m) => m.timelineType == TimelineEntryType.thinking,
+      );
+      expect(entry.thinkingTokenStream, isNotNull);
+      final received = <String>[];
+      final sub = entry.thinkingTokenStream!.listen(received.add);
+
+      ctrl.add(const ThinkingEvent('two'));
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+
+      expect(received, ['two']);
+      unawaited(sub.cancel());
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('first answer token marks timeline entries stale', (
+      tester,
+    ) async {
+      final (notifier, ctrl) = await startTurn(tester, const [
+        ThinkingEvent('hmm'),
+        StatusEvent('Calling tool: a'),
+        ToolResultEvent(toolName: 'a', status: 'ok'),
+        TokenEvent('answer'),
+      ]);
+
+      final msgs = notifier.state.value!.messages;
+      final timeline = msgs.where(
+        (m) => m.timelineType != TimelineEntryType.message,
+      );
+      expect(timeline, hasLength(2));
+      for (final m in timeline) {
+        expect(m.isStale, isTrue);
+        expect(m.isStreaming, isFalse);
+      }
+      expect(
+        msgs.firstWhere((m) => m.id == 'assistant-streaming').isStale,
+        isFalse,
+      );
+
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+  });
+
+  group('ChatNotifier — stream error mapping', () {
+    testWidgets('non-transient stream error surfaces as Stream error', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hi'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        ctrl.addError(StateError('kaboom'));
+        await ctrl.close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final s = notifier.state.value!;
+      expect(s.error, 'Stream error: Bad state: kaboom');
+      expect(s.isSending, isFalse);
+      expect(
+        s.messages.firstWhere((m) => m.isUser).status,
+        MessageStatus.failed,
+      );
+    });
+
+    testWidgets('transient error without a run id shows the retry hint', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hi'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        ctrl.addError(const SocketException('Connection reset by peer'));
+        await ctrl.close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      expect(
+        notifier.state.value!.error,
+        'Connection lost — tap retry to resend',
+      );
+      expect(notifier.needsReconnect, isFalse);
+    });
+  });
 }

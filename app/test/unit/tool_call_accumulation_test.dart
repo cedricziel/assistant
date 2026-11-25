@@ -1,26 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:assistant_app/features/chat/chat_provider.dart';
-
-// Helpers that mirror the private logic in ChatNotifier so we can test it
-// without spinning up the full Riverpod graph.
-
-String extractToolName(String statusMessage) {
-  const prefix = 'Calling tool: ';
-  if (statusMessage.startsWith(prefix)) {
-    return statusMessage.substring(prefix.length).trim();
-  }
-  return statusMessage;
-}
-
-ToolCallStatus parseToolStatus(String status) {
-  return switch (status) {
-    'ok' => ToolCallStatus.ok,
-    'error' => ToolCallStatus.error,
-    'denied' => ToolCallStatus.denied,
-    _ => ToolCallStatus.ok,
-  };
-}
+import 'package:assistant_app/features/chat/chat_timeline_reducers.dart';
 
 void main() {
   group('extractToolName', () {
@@ -48,6 +29,10 @@ void main() {
 
     test('maps "denied" to denied', () {
       expect(parseToolStatus('denied'), ToolCallStatus.denied);
+    });
+
+    test('maps "pending" to pending', () {
+      expect(parseToolStatus('pending'), ToolCallStatus.pending);
     });
 
     test('unknown values default to ok', () {
