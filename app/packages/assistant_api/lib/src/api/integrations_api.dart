@@ -205,7 +205,7 @@ class IntegrationsApi {
   }
 
   /// &#x60;DELETE /api/integrations/{id}/spaces/{space_id}?mode&#x3D;&#x60; — remove a space row.
-  /// The &#x60;mode&#x60; query parameter names the row (&#x60;allow&#x60; or &#x60;opt_out&#x60;) and has the same permissions as &#x60;PUT&#x60;. Removing a row that does not exist succeeds.
+  /// The &#x60;mode&#x60; query parameter names the row (&#x60;allow&#x60; or &#x60;opt_out&#x60;) and has the same permissions as &#x60;PUT&#x60;. Removing a row that does not exist succeeds.  Removing the last &#x60;allow&#x60; row does not hide the integration everywhere: with no &#x60;allow&#x60; rows left it is offered to every space again, except those that opted out.
   ///
   /// Parameters:
   /// * [id] - Org-layer integration id, `int_<uuid>`
@@ -377,7 +377,7 @@ class IntegrationsApi {
   }
 
   /// &#x60;GET /api/integrations/{id}&#x60; — get one integration.
-  /// &#x60;404&#x60; when the caller may not see it, including another user&#39;s personal integration.
+  /// &#x60;404&#x60; when the caller may not see it, including another user&#39;s personal integration. Org admins are the exception: they can read a personal integration&#39;s metadata (never its credential) so they can remove it.
   ///
   /// Parameters:
   /// * [id] - Integration id, `int_<uuid>`
@@ -1003,7 +1003,7 @@ class IntegrationsApi {
   }
 
   /// &#x60;PATCH /api/integrations/{id}&#x60; — update an integration.
-  /// Layer, owner, catalog entry, auth kind and credential mode are fixed at install time. A catalog install cannot change its URL or header template; moving a custom URL deletes its stored credentials.
+  /// Layer, owner, catalog entry, auth kind and credential mode are fixed at install time. A catalog install cannot change its URL or header template; moving a custom URL deletes its stored credentials. A change that races with another one on the same integration fails with &#x60;409&#x60; instead of overwriting it.
   ///
   /// Parameters:
   /// * [id] - Integration id, `int_<uuid>`

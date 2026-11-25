@@ -120,7 +120,7 @@ void (empty response body)
 
 `DELETE /api/integrations/{id}/spaces/{space_id}?mode=` — remove a space row.
 
-The `mode` query parameter names the row (`allow` or `opt_out`) and has the same permissions as `PUT`. Removing a row that does not exist succeeds.
+The `mode` query parameter names the row (`allow` or `opt_out`) and has the same permissions as `PUT`. Removing a row that does not exist succeeds.  Removing the last `allow` row does not hide the integration everywhere: with no `allow` rows left it is offered to every space again, except those that opted out.
 
 ### Example
 ```dart
@@ -215,7 +215,7 @@ Name | Type | Description  | Notes
 
 `GET /api/integrations/{id}` — get one integration.
 
-`404` when the caller may not see it, including another user's personal integration.
+`404` when the caller may not see it, including another user's personal integration. Org admins are the exception: they can read a personal integration's metadata (never its credential) so they can remove it.
 
 ### Example
 ```dart
@@ -503,7 +503,7 @@ Name | Type | Description  | Notes
 
 `PATCH /api/integrations/{id}` — update an integration.
 
-Layer, owner, catalog entry, auth kind and credential mode are fixed at install time. A catalog install cannot change its URL or header template; moving a custom URL deletes its stored credentials.
+Layer, owner, catalog entry, auth kind and credential mode are fixed at install time. A catalog install cannot change its URL or header template; moving a custom URL deletes its stored credentials. A change that races with another one on the same integration fails with `409` instead of overwriting it.
 
 ### Example
 ```dart

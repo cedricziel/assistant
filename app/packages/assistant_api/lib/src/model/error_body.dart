@@ -8,7 +8,7 @@ import 'package:built_value/serializer.dart';
 
 part 'error_body.g.dart';
 
-/// Standard error envelope returned for every 4xx/5xx response from `/api/...` endpoints. Matches the project convention documented in `AGENTS.md`: `{\"error\": \"...message...\"}`.  OAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`] (RFC 6749 §5.2) and are intentionally exempt.
+/// Standard error envelope returned for every 4xx/5xx response from `/api/...` endpoints. Matches the project convention documented in `AGENTS.md`: `{\"error\": \"...message...\"}`.  OAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`] (RFC 6749 §5.2) and are intentionally exempt.  One more exception: a `401 Unauthorized` is sent by the auth middleware before any handler runs, as the plain text `Unauthorized`, not as JSON.
 ///
 /// Properties:
 /// * [error] - Human-readable error message.
