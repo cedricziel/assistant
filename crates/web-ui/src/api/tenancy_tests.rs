@@ -18,12 +18,8 @@
 //!
 //! Every fixture row lives in A1.
 //!
-//! The isolation tests are `#[ignore]`d so the stack stays mergeable: they fail
-//! today, because the routers share one pool and never read `AuthContext`.
-//! Reproduce the red state with
-//! `cargo test -p assistant-web-ui --lib tenancy_tests -- --ignored`. The PRs
-//! that implement resolution and authorization remove the attribute as each
-//! module goes green.
+//! The public workflow webhook ingress has no caller to authenticate; its
+//! space-slug routing is tested next to the handler in `workflows.rs`.
 
 #![cfg(test)]
 
@@ -237,11 +233,11 @@ impl Tenancy {
         let router = api_router()
             .with_state(api_state.clone())
             .merge(webhooks_api_router().with_state(WebhooksApiState {
-                pool: a1.pool.clone(),
+                spaces: api_state.spaces.clone(),
                 agent_id: agent_id.clone(),
             }))
             .merge(workflows_api_router().with_state(WorkflowsApiState {
-                pool: a1.pool.clone(),
+                spaces: api_state.spaces.clone(),
                 agent_id,
             }))
             .merge(push_api_router().with_state(PushApiState {
@@ -846,7 +842,6 @@ async fn push_subscriptions_never_cross_spaces() {
 // -- Webhooks ------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn webhooks_foreign_org_selecting_a1_is_forbidden() {
     let t = Tenancy::build().await;
     let hook = format!("/webhooks/{}", t.webhook_id);
@@ -896,7 +891,6 @@ async fn webhooks_foreign_org_selecting_a1_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn webhooks_without_selector_stay_in_the_callers_own_space() {
     let t = Tenancy::build().await;
     let hook = format!("/webhooks/{}", t.webhook_id);
@@ -927,7 +921,6 @@ async fn webhooks_without_selector_stay_in_the_callers_own_space() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn webhooks_secret_operations_require_space_admin() {
     let t = Tenancy::build().await;
     let hook = format!("/webhooks/{}", t.webhook_id);
@@ -962,7 +955,6 @@ async fn webhooks_secret_operations_require_space_admin() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn webhooks_secret_is_visible_only_to_space_admins() {
     let t = Tenancy::build().await;
     let hook = format!("/webhooks/{}", t.webhook_id);
@@ -989,7 +981,6 @@ async fn webhooks_secret_is_visible_only_to_space_admins() {
 // -- Workflows -----------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn workflows_foreign_org_selecting_a1_is_forbidden() {
     let t = Tenancy::build().await;
     let flow = format!("/workflows/{}", t.workflow_id);
@@ -1026,7 +1017,6 @@ async fn workflows_foreign_org_selecting_a1_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn workflows_without_selector_stay_in_the_callers_own_space() {
     let t = Tenancy::build().await;
     let flow = format!("/workflows/{}", t.workflow_id);
@@ -1045,7 +1035,6 @@ async fn workflows_without_selector_stay_in_the_callers_own_space() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn workflows_destructive_and_secret_operations_require_space_admin() {
     let t = Tenancy::build().await;
     let flow = format!("/workflows/{}", t.workflow_id);

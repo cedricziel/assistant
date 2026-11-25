@@ -26,21 +26,28 @@ use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use assistant_storage::{SqliteWorkflowStore, WorkflowGraph, WorkflowStore, WorkflowTriggerKind};
 
 use crate::api::internal_error;
+use crate::space::{Access, SpaceCtx, SpaceResolver};
 
 // -- State -------------------------------------------------------------------
 
 /// Shared state for workflow API handlers.
 #[derive(Clone)]
 pub struct WorkflowsApiState {
-    pub pool: SqlitePool,
+    /// Resolves each request to the caller's space and its storage.
+    pub spaces: SpaceResolver,
     pub agent_id: Arc<RwLock<String>>,
+}
+
+impl axum::extract::FromRef<WorkflowsApiState> for SpaceResolver {
+    fn from_ref(state: &WorkflowsApiState) -> Self {
+        state.spaces.clone()
+    }
 }
 
 // -- Response types ----------------------------------------------------------
@@ -178,9 +185,11 @@ pub fn workflows_api_router() -> Router<WorkflowsApiState> {
     security(("bearer_token" = []))
 )]
 pub async fn list_workflows(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
 ) -> Result<Json<Vec<WorkflowSummary>>, (StatusCode, String)> {
-    let store = workflow_store(&state).await;
+    require(&ctx, Access::Read)?;
+    let store = workflow_store(&state, &ctx).await;
     let rows = store.list().await.map_err(internal_error)?;
     Ok(Json(rows.iter().map(to_summary).collect()))
 }
@@ -199,11 +208,13 @@ pub async fn list_workflows(
     security(("bearer_token" = []))
 )]
 pub async fn create_workflow(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Json(req): Json<WorkflowUpsertRequest>,
 ) -> Result<(StatusCode, Json<WorkflowDetail>), (StatusCode, String)> {
+    require(&ctx, Access::Write)?;
     let graph = parse_graph(&req.graph)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(&state, &ctx).await;
     let id = store
         .create(req.name.trim(), req.description.trim(), &graph, req.active)
         .await
@@ -231,11 +242,13 @@ pub async fn create_workflow(
     security(("bearer_token" = []))
 )]
 pub async fn get_workflow(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path(id): Path<String>,
 ) -> Result<Json<WorkflowDetail>, (StatusCode, String)> {
+    require(&ctx, Access::Read)?;
     let uid = parse_uuid(&id)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(&state, &ctx).await;
     let w = store
         .get(uid)
         .await
@@ -260,13 +273,15 @@ pub async fn get_workflow(
     security(("bearer_token" = []))
 )]
 pub async fn update_workflow(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path(id): Path<String>,
     Json(req): Json<WorkflowUpsertRequest>,
 ) -> Result<Json<WorkflowDetail>, (StatusCode, String)> {
+    require(&ctx, Access::Write)?;
     let uid = parse_uuid(&id)?;
     let graph = parse_graph(&req.graph)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(&state, &ctx).await;
     let updated = store
         .update(
             uid,
@@ -303,11 +318,17 @@ pub async fn update_workflow(
     security(("bearer_token" = []))
 )]
 pub async fn delete_workflow(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let uid = parse_uuid(&id)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(&state, &ctx).await;
+    // Look the workflow up first so a missing id is a 404 whatever the role.
+    if store.get(uid).await.map_err(internal_error)?.is_none() {
+        return Err((StatusCode::NOT_FOUND, "Workflow not found".to_string()));
+    }
+    require(&ctx, Access::Admin)?;
     let deleted = store.delete(uid).await.map_err(internal_error)?;
     if !deleted {
         return Err((StatusCode::NOT_FOUND, "Workflow not found".to_string()));
@@ -330,10 +351,12 @@ pub async fn delete_workflow(
     security(("bearer_token" = []))
 )]
 pub async fn activate_workflow(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path(id): Path<String>,
 ) -> Result<Json<WorkflowDetail>, (StatusCode, String)> {
-    set_active(state, id, true).await
+    require(&ctx, Access::Write)?;
+    set_active(&state, &ctx, id, true).await
 }
 
 /// `POST /api/workflows/{id}/deactivate` — deactivate a workflow.
@@ -351,10 +374,12 @@ pub async fn activate_workflow(
     security(("bearer_token" = []))
 )]
 pub async fn deactivate_workflow(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path(id): Path<String>,
 ) -> Result<Json<WorkflowDetail>, (StatusCode, String)> {
-    set_active(state, id, false).await
+    require(&ctx, Access::Write)?;
+    set_active(&state, &ctx, id, false).await
 }
 
 /// `POST /api/workflows/{id}/test-run` — queue a manual test run.
@@ -372,11 +397,13 @@ pub async fn deactivate_workflow(
     security(("bearer_token" = []))
 )]
 pub async fn test_run_workflow(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path(id): Path<String>,
 ) -> Result<Json<WorkflowRunPreview>, (StatusCode, String)> {
+    require(&ctx, Access::Write)?;
     let uid = parse_uuid(&id)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(&state, &ctx).await;
     let w = store
         .get(uid)
         .await
@@ -414,26 +441,27 @@ pub async fn test_run_workflow(
     security(("bearer_token" = []))
 )]
 pub async fn get_workflow_webhook_secrets(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path(id): Path<String>,
 ) -> Result<Json<WorkflowWebhookSecrets>, (StatusCode, String)> {
+    require(&ctx, Access::Admin)?;
     let uid = parse_uuid(&id)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(&state, &ctx).await;
     let w = store
         .get(uid)
         .await
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, "Workflow not found".to_string()))?;
     let endpoint = store
-        .get_webhook_endpoint(uid)
+        .ensure_webhook_endpoint(uid)
         .await
-        .map_err(internal_error)?
-        .ok_or((
-            StatusCode::NOT_FOUND,
-            "Workflow webhook endpoint not found".to_string(),
-        ))?;
+        .map_err(internal_error)?;
     Ok(Json(WorkflowWebhookSecrets {
-        webhook_url: format!("/workflow-hooks/{}/{}", w.id, endpoint.token),
+        webhook_url: format!(
+            "/workflow-hooks/{}/{}/{}/{}",
+            ctx.org_slug, ctx.space_slug, w.id, endpoint.token
+        ),
         webhook_token: endpoint.token,
     }))
 }
@@ -453,11 +481,13 @@ pub async fn get_workflow_webhook_secrets(
     security(("bearer_token" = []))
 )]
 pub async fn list_workflow_runs(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<WorkflowRunSummary>>, (StatusCode, String)> {
+    require(&ctx, Access::Read)?;
     let uid = parse_uuid(&id)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(&state, &ctx).await;
     let exists = store.get(uid).await.map_err(internal_error)?.is_some();
     if !exists {
         return Err((StatusCode::NOT_FOUND, "Workflow not found".to_string()));
@@ -484,12 +514,14 @@ pub async fn list_workflow_runs(
     security(("bearer_token" = []))
 )]
 pub async fn get_workflow_run(
+    ctx: SpaceCtx,
     State(state): State<WorkflowsApiState>,
     Path((id, run_id)): Path<(String, String)>,
 ) -> Result<Json<WorkflowRunDetail>, (StatusCode, String)> {
+    require(&ctx, Access::Read)?;
     let uid = parse_uuid(&id)?;
     let run_uid = parse_uuid(&run_id)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(&state, &ctx).await;
     let run = store
         .get_run(uid, run_uid)
         .await
@@ -518,9 +550,14 @@ pub async fn get_workflow_run(
 
 // -- Helpers -----------------------------------------------------------------
 
-async fn workflow_store(state: &WorkflowsApiState) -> SqliteWorkflowStore {
+async fn workflow_store(state: &WorkflowsApiState, ctx: &SpaceCtx) -> SqliteWorkflowStore {
     let agent_id = state.agent_id.read().await.clone();
-    SqliteWorkflowStore::for_agent(state.pool.clone(), agent_id)
+    SqliteWorkflowStore::for_agent(ctx.storage.pool.clone(), agent_id)
+}
+
+fn require(ctx: &SpaceCtx, needed: Access) -> Result<(), (StatusCode, String)> {
+    ctx.require(needed)
+        .map_err(|_| (StatusCode::FORBIDDEN, "insufficient role".to_string()))
 }
 
 fn parse_uuid(s: &str) -> Result<Uuid, (StatusCode, String)> {
@@ -586,12 +623,13 @@ fn count_nodes(nodes: &[assistant_storage::WorkflowNode]) -> (usize, usize) {
 }
 
 async fn set_active(
-    state: WorkflowsApiState,
+    state: &WorkflowsApiState,
+    ctx: &SpaceCtx,
     id: String,
     active: bool,
 ) -> Result<Json<WorkflowDetail>, (StatusCode, String)> {
     let uid = parse_uuid(&id)?;
-    let store = workflow_store(&state).await;
+    let store = workflow_store(state, ctx).await;
     let changed = store
         .set_active(uid, active)
         .await
@@ -624,10 +662,12 @@ pub struct WorkflowWebhookTriggerAccepted {
 /// per-workflow HMAC secret that acts as authentication.
 #[utoipa::path(
     post,
-    path = "/workflow-hooks/{id}/{token}",
+    path = "/workflow-hooks/{org_slug}/{space_slug}/{id}/{token}",
     tag = "workflows",
     security(()),
     params(
+        ("org_slug" = String, Path, description = "Slug of the org that owns the workflow's space"),
+        ("space_slug" = String, Path, description = "Slug of the space that owns the workflow"),
         ("id" = String, Path, description = "Workflow ID"),
         ("token" = String, Path, description = "Webhook HMAC token"),
     ),
@@ -640,12 +680,23 @@ pub struct WorkflowWebhookTriggerAccepted {
 )]
 pub async fn public_webhook_trigger(
     State(state): State<WorkflowsApiState>,
-    Path((id, token)): Path<(String, String)>,
+    Path((org_slug, space_slug, id, token)): Path<(String, String, String, String)>,
     Json(payload): Json<Value>,
 ) -> Result<(StatusCode, Json<WorkflowWebhookTriggerAccepted>), (StatusCode, String)> {
     use tracing::{info, warn};
     let workflow_id = parse_uuid(&id)?;
-    let store = workflow_store(&state).await;
+    let storage = state
+        .spaces
+        .storage_for_slugs(&org_slug, &space_slug)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                "Workflow webhook not found".to_string(),
+            )
+        })?;
+    let agent_id = state.agent_id.read().await.clone();
+    let store = SqliteWorkflowStore::for_agent(storage.pool.clone(), agent_id);
     let workflow = store
         .resolve_by_webhook(workflow_id, &token)
         .await
@@ -680,7 +731,10 @@ pub async fn public_webhook_trigger(
 /// Mount this **outside** the auth middleware — the token in the URL path
 /// serves as the authentication credential.
 pub fn workflow_public_router() -> Router<WorkflowsApiState> {
-    Router::new().route("/workflow-hooks/{id}/{token}", post(public_webhook_trigger))
+    Router::new().route(
+        "/workflow-hooks/{org_slug}/{space_slug}/{id}/{token}",
+        post(public_webhook_trigger),
+    )
 }
 
 // -- Tests -------------------------------------------------------------------
@@ -700,14 +754,16 @@ mod tests {
     async fn test_state() -> (WorkflowsApiState, std::sync::Arc<StorageLayer>) {
         let storage = std::sync::Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let state = WorkflowsApiState {
-            pool: storage.pool.clone(),
+            spaces: super::super::test_helpers::default_resolver(&storage).await,
             agent_id: std::sync::Arc::new(RwLock::new("default".to_string())),
         };
         (state, storage)
     }
 
     fn app(state: WorkflowsApiState) -> axum::Router {
-        workflows_api_router().with_state(state)
+        workflows_api_router()
+            .layer(axum::Extension(assistant_core::auth::AuthContext::system()))
+            .with_state(state)
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -1114,5 +1170,108 @@ mod tests {
         let v = serde_json::json!({ "version": 1 });
         let err = parse_graph(&v).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    /// Create a workflow with a webhook trigger and return `(id, token)`.
+    async fn webhook_workflow(storage: &StorageLayer) -> (String, String) {
+        use assistant_storage::WorkflowStore as _;
+        let graph: assistant_storage::WorkflowGraph = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "nodes": [
+                { "id": "t1", "kind": "trigger", "config": { "type": "webhook" } },
+                { "id": "a1", "kind": "action",
+                  "config": { "type": "assistant_turn", "prompt": "hello" } },
+            ],
+            "edges": [{ "from": "t1", "to": "a1" }],
+            "execution": { "max_steps": 100, "max_visits_per_node": 10 }
+        }))
+        .unwrap();
+        let store = storage.workflow_store();
+        let id = store.create("hook", "", &graph, true).await.unwrap();
+        let token = store.ensure_webhook_endpoint(id).await.unwrap().token;
+        (id.to_string(), token)
+    }
+
+    async fn post_hook(app: axum::Router, path: String) -> StatusCode {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("Content-Type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+    }
+
+    #[tokio::test]
+    async fn public_webhook_resolves_the_space_from_the_url_slugs() {
+        let (state, storage) = test_state().await;
+        let (id, token) = webhook_workflow(&storage).await;
+        let app = super::workflow_public_router().with_state(state);
+
+        assert_eq!(
+            post_hook(
+                app.clone(),
+                format!("/workflow-hooks/default/default/{id}/{token}")
+            )
+            .await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            post_hook(
+                app.clone(),
+                format!("/workflow-hooks/default/other/{id}/{token}")
+            )
+            .await,
+            StatusCode::NOT_FOUND,
+            "unknown space"
+        );
+        assert_eq!(
+            post_hook(
+                app.clone(),
+                format!("/workflow-hooks/other/default/{id}/{token}")
+            )
+            .await,
+            StatusCode::NOT_FOUND,
+            "unknown org"
+        );
+        assert_eq!(
+            post_hook(
+                app.clone(),
+                format!("/workflow-hooks/default/default/{id}/wrong")
+            )
+            .await,
+            StatusCode::NOT_FOUND,
+            "wrong token"
+        );
+        assert_eq!(
+            post_hook(app, format!("/workflow-hooks/{id}/{token}")).await,
+            StatusCode::NOT_FOUND,
+            "the slug-less URL is gone"
+        );
+    }
+
+    #[tokio::test]
+    async fn webhook_secrets_url_carries_the_space_slugs() {
+        let (state, storage) = test_state().await;
+        let (id, token) = webhook_workflow(&storage).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workflows/{id}/webhook-secrets"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            body_json(resp.into_body()).await["webhook_url"],
+            format!("/workflow-hooks/default/default/{id}/{token}")
+        );
     }
 }

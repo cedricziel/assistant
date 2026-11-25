@@ -603,7 +603,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let workflows_api_state = api::workflows::WorkflowsApiState {
-        pool: storage.pool.clone(),
+        spaces: space_resolver.clone(),
         agent_id: state.agent_id.clone(),
     };
 
@@ -682,7 +682,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let webhooks_api_state = api::webhooks::WebhooksApiState {
-        pool: storage.pool.clone(),
+        spaces: space_resolver.clone(),
         agent_id: state.agent_id.clone(),
     };
 

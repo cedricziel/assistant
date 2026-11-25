@@ -25,18 +25,26 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use assistant_storage::{SqliteWebhookStore, WebhookStore};
 
+use crate::space::{Access, SpaceCtx, SpaceResolver};
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct WebhooksApiState {
-    pub pool: SqlitePool,
+    /// Resolves each request to the caller's space and its storage.
+    pub spaces: SpaceResolver,
     pub agent_id: Arc<RwLock<String>>,
+}
+
+impl axum::extract::FromRef<WebhooksApiState> for SpaceResolver {
+    fn from_ref(state: &WebhooksApiState) -> Self {
+        state.spaces.clone()
+    }
 }
 
 // -- Response types ----------------------------------------------------------
@@ -47,7 +55,9 @@ pub struct WebhookResponse {
     pub id: String,
     pub name: String,
     pub url: String,
-    pub secret: String,
+    /// Signing secret; present only for space admins.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
     pub event_types: Vec<String>,
     pub active: bool,
     pub verified_at: Option<DateTime<Utc>>,
@@ -91,18 +101,46 @@ pub struct UpdateWebhookRequest {
 
 // -- Helpers -----------------------------------------------------------------
 
-fn to_response(r: assistant_storage::WebhookRecord) -> WebhookResponse {
+/// Map a stored webhook to its API shape. The signing secret is included
+/// only when `reveal_secret` is set, which callers do for space admins.
+fn to_response(r: assistant_storage::WebhookRecord, reveal_secret: bool) -> WebhookResponse {
     WebhookResponse {
         id: r.id,
         name: r.name,
         url: r.url,
-        secret: r.secret,
+        secret: reveal_secret.then_some(r.secret),
         event_types: r.event_types,
         active: r.active,
         verified_at: r.verified_at,
         created_at: r.created_at,
         updated_at: r.updated_at,
     }
+}
+
+/// Check that webhook `id` exists in the caller's space, then that the caller
+/// is an admin there. Looking the webhook up first keeps a missing id a 404
+/// whatever the caller's role.
+async fn require_existing_admin(
+    ctx: &SpaceCtx,
+    store: &SqliteWebhookStore,
+    id: &str,
+) -> Result<(), Response> {
+    match store.get(id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Webhook not found"})),
+            )
+                .into_response());
+        }
+        Err(e) => {
+            warn!("Failed to get webhook {id}: {e}");
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response());
+        }
+    }
+    ctx.require(Access::Admin)
+        .map_err(IntoResponse::into_response)
 }
 
 // -- Router ------------------------------------------------------------------
@@ -134,13 +172,21 @@ pub fn webhooks_api_router() -> Router<WebhooksApiState> {
     ),
     security(("bearer_token" = []))
 )]
-pub async fn list_webhooks(State(state): State<WebhooksApiState>) -> Response {
+pub async fn list_webhooks(ctx: SpaceCtx, State(state): State<WebhooksApiState>) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
+    let reveal_secret = ctx.require(Access::Admin).is_ok();
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(ctx.storage.pool.clone(), &agent_id);
     match store.list().await {
-        Ok(webhooks) => {
-            Json(webhooks.into_iter().map(to_response).collect::<Vec<_>>()).into_response()
-        }
+        Ok(webhooks) => Json(
+            webhooks
+                .into_iter()
+                .map(|wh| to_response(wh, reveal_secret))
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
         Err(e) => {
             warn!("Failed to list webhooks: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to list webhooks").into_response()
@@ -163,9 +209,14 @@ pub async fn list_webhooks(State(state): State<WebhooksApiState>) -> Response {
     security(("bearer_token" = []))
 )]
 pub async fn create_webhook(
+    ctx: SpaceCtx,
     State(state): State<WebhooksApiState>,
     Json(body): Json<CreateWebhookRequest>,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
+    let reveal_secret = ctx.require(Access::Admin).is_ok();
     if body.name.trim().is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -183,7 +234,7 @@ pub async fn create_webhook(
     }
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(ctx.storage.pool.clone(), &agent_id);
     let id = uuid::Uuid::new_v4().to_string();
     let secret = generate_secret();
 
@@ -194,7 +245,9 @@ pub async fn create_webhook(
         Ok(()) => {
             info!(webhook_id = %id, name = %body.name, "Webhook created via API");
             match store.get(&id).await {
-                Ok(Some(wh)) => (StatusCode::CREATED, Json(to_response(wh))).into_response(),
+                Ok(Some(wh)) => {
+                    (StatusCode::CREATED, Json(to_response(wh, reveal_secret))).into_response()
+                }
                 _ => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to fetch created webhook",
@@ -227,13 +280,18 @@ pub async fn create_webhook(
     security(("bearer_token" = []))
 )]
 pub async fn get_webhook(
+    ctx: SpaceCtx,
     State(state): State<WebhooksApiState>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
+    let reveal_secret = ctx.require(Access::Admin).is_ok();
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(ctx.storage.pool.clone(), &agent_id);
     match store.get(&id).await {
-        Ok(Some(wh)) => Json(to_response(wh)).into_response(),
+        Ok(Some(wh)) => Json(to_response(wh, reveal_secret)).into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "Webhook not found"})),
@@ -262,12 +320,17 @@ pub async fn get_webhook(
     security(("bearer_token" = []))
 )]
 pub async fn update_webhook(
+    ctx: SpaceCtx,
     State(state): State<WebhooksApiState>,
     Path(id): Path<String>,
     Json(body): Json<UpdateWebhookRequest>,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
+    let reveal_secret = ctx.require(Access::Admin).is_ok();
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(ctx.storage.pool.clone(), &agent_id);
 
     // Fetch the existing record to merge with.
     let existing = match store.get(&id).await {
@@ -310,7 +373,7 @@ pub async fn update_webhook(
         .await
     {
         Ok(true) => match store.get(&id).await {
-            Ok(Some(wh)) => Json(to_response(wh)).into_response(),
+            Ok(Some(wh)) => Json(to_response(wh, reveal_secret)).into_response(),
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to fetch updated webhook",
@@ -347,11 +410,15 @@ pub async fn update_webhook(
     security(("bearer_token" = []))
 )]
 pub async fn delete_webhook(
+    ctx: SpaceCtx,
     State(state): State<WebhooksApiState>,
     Path(id): Path<String>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(ctx.storage.pool.clone(), &agent_id);
+    if let Err(response) = require_existing_admin(&ctx, &store, &id).await {
+        return response;
+    }
     match store.delete(&id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => (
@@ -384,14 +451,19 @@ pub async fn delete_webhook(
     security(("bearer_token" = []))
 )]
 pub async fn toggle_webhook(
+    ctx: SpaceCtx,
     State(state): State<WebhooksApiState>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
+    let reveal_secret = ctx.require(Access::Admin).is_ok();
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(ctx.storage.pool.clone(), &agent_id);
     match store.toggle_active(&id).await {
         Ok(true) => match store.get(&id).await {
-            Ok(Some(wh)) => Json(to_response(wh)).into_response(),
+            Ok(Some(wh)) => Json(to_response(wh, reveal_secret)).into_response(),
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to fetch toggled webhook",
@@ -428,11 +500,15 @@ pub async fn toggle_webhook(
     security(("bearer_token" = []))
 )]
 pub async fn rotate_secret(
+    ctx: SpaceCtx,
     State(state): State<WebhooksApiState>,
     Path(id): Path<String>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(ctx.storage.pool.clone(), &agent_id);
+    if let Err(response) = require_existing_admin(&ctx, &store, &id).await {
+        return response;
+    }
     let new_secret = generate_secret();
     match store.rotate_secret(&id, &new_secret).await {
         Ok(true) => Json(RotateSecretResponse { secret: new_secret }).into_response(),
@@ -465,11 +541,15 @@ pub async fn rotate_secret(
     security(("bearer_token" = []))
 )]
 pub async fn verify_webhook(
+    ctx: SpaceCtx,
     State(state): State<WebhooksApiState>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
     let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteWebhookStore::for_agent(state.pool, &agent_id);
+    let store = SqliteWebhookStore::for_agent(ctx.storage.pool.clone(), &agent_id);
 
     let wh = match store.get(&id).await {
         Ok(Some(wh)) => wh,
@@ -645,14 +725,16 @@ mod tests {
     async fn test_state() -> (WebhooksApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let state = WebhooksApiState {
-            pool: storage.pool.clone(),
+            spaces: super::super::test_helpers::default_resolver(&storage).await,
             agent_id: Arc::new(RwLock::new("default".to_string())),
         };
         (state, storage)
     }
 
     fn app(state: WebhooksApiState) -> axum::Router {
-        webhooks_api_router().with_state(state)
+        webhooks_api_router()
+            .layer(axum::Extension(assistant_core::auth::AuthContext::system()))
+            .with_state(state)
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
