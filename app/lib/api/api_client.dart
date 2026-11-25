@@ -182,11 +182,8 @@ class ApiClient {
   AttachmentsApi get attachments => _generatedApi.getAttachmentsApi();
   PersonasApi get personas => _generatedApi.getPersonasApi();
   SkillsApi get skills => _generatedApi.getSkillsApi();
-  LogsApi get logs => _generatedApi.getLogsApi();
-  TracesApi get traces => _generatedApi.getTracesApi();
   WebhooksApi get webhooks => _generatedApi.getWebhooksApi();
   AgentsApi get agents => _generatedApi.getAgentsApi();
-  AnalyticsApi get analytics => _generatedApi.getAnalyticsApi();
   WorkflowsApi get workflows => _generatedApi.getWorkflowsApi();
   CapabilitiesApi get capabilities => _generatedApi.getCapabilitiesApi();
   CommandsApi get commands => _generatedApi.getCommandsApi();

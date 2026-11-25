@@ -7,7 +7,6 @@ import '../features/agents/agent_detail_screen.dart';
 import '../features/agents/agents_screen.dart';
 import '../features/admin/admin_screen.dart';
 import '../features/api_keys/api_keys_screen.dart';
-import '../features/analytics/analytics_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/connection/connection_screen.dart';
 import '../features/contexts/models/context_model.dart';
@@ -16,7 +15,6 @@ import '../features/contexts/screens/context_switcher_screen.dart';
 import '../features/login/login_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/spaces/space_selector_screen.dart';
-import '../features/logs/logs_screen.dart';
 import '../features/personas/persona_create_screen.dart';
 import '../features/personas/persona_detail_screen.dart';
 import '../features/personas/persona_file_editor_screen.dart';
@@ -25,8 +23,6 @@ import '../features/settings/settings_screen.dart';
 import '../features/skills/skill_create_edit_screen.dart';
 import '../features/skills/skill_detail_screen.dart';
 import '../features/skills/skills_screen.dart';
-import '../features/traces/trace_detail_screen.dart';
-import '../features/traces/traces_screen.dart';
 import '../features/webhooks/webhook_detail_screen.dart';
 import '../features/webhooks/webhooks_screen.dart';
 import '../features/workflows/workflow_detail_screen.dart';
@@ -44,9 +40,6 @@ class AppRoutes {
   static const contexts = '/contexts';
   static const chat = '/chat';
   static const chatConversation = '/chat/:id';
-  static const traces = '/traces';
-  static const traceDetail = '/traces/:traceId';
-  static const logs = '/logs';
   static const skills = '/skills';
   static const skillNew = '/skills/new';
   static const skillDetail = '/skills/:name';
@@ -64,7 +57,6 @@ class AppRoutes {
   static const webhookDetail = '/webhooks/:id';
   static const agents = '/agents';
   static const agentDetail = '/agents/:id';
-  static const analytics = '/analytics';
   static const settings = '/settings';
   static const settingsAccount = '/settings/account';
   static const admin = '/admin';
@@ -206,27 +198,6 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
 
-          // -- Observability: Traces -----------------------------------------
-          GoRoute(
-            path: AppRoutes.traces,
-            builder: (context, state) => const TracesScreen(),
-            routes: [
-              GoRoute(
-                path: ':traceId',
-                builder: (context, state) {
-                  final traceId = state.pathParameters['traceId']!;
-                  return TraceDetailScreen(traceId: traceId);
-                },
-              ),
-            ],
-          ),
-
-          // -- Observability: Logs -------------------------------------------
-          GoRoute(
-            path: AppRoutes.logs,
-            builder: (context, state) => const LogsScreen(),
-          ),
-
           // -- Skills --------------------------------------------------------
           GoRoute(
             path: AppRoutes.skills,
@@ -354,12 +325,6 @@ final routerProvider = Provider<GoRouter>((ref) {
                 },
               ),
             ],
-          ),
-
-          // -- Analytics ----------------------------------------------------
-          GoRoute(
-            path: AppRoutes.analytics,
-            builder: (context, state) => const AnalyticsScreen(),
           ),
 
           // -- Admin ---------------------------------------------------------
