@@ -301,15 +301,15 @@ impl Orchestrator {
                                 had_errors: turn_result.had_errors,
                             };
 
+                            let result_payload =
+                                serde_json::to_value(&bus_result).unwrap_or_default();
                             // Propagate batch_id from the request so submit_turn
                             // can match the result to its specific request.
-                            let mut pub_req = PublishRequest::new(
-                                topic::TURN_RESULT,
-                                serde_json::to_value(&bus_result).unwrap_or_default(),
-                            )
-                            .with_agent_id(self.agent_id.clone())
-                            .with_conversation_id(conv_id)
-                            .with_causation_id(msg.id);
+                            let mut pub_req =
+                                PublishRequest::new(topic::TURN_RESULT, result_payload.clone())
+                                    .with_agent_id(self.agent_id.clone())
+                                    .with_conversation_id(conv_id)
+                                    .with_causation_id(msg.id);
                             if let Some(bid) = msg.batch_id {
                                 pub_req = pub_req.with_batch_id(bid);
                             } else if msg.correlation_id.is_some() {
@@ -354,6 +354,12 @@ impl Orchestrator {
                                             "Failed to ack bus message"
                                         );
                                     }
+                                    self.announce_completed_turn(
+                                        result_payload,
+                                        conv_id,
+                                        &interface_name,
+                                    )
+                                    .await;
                                     let event_payload = serde_json::json!({
                                         "conversation_id": conv_id,
                                         "content": bus_result.content,
@@ -584,6 +590,23 @@ impl Orchestrator {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
+        }
+    }
+
+    /// Publish a turn's result on [`topic::TURN_COMPLETED`] for background
+    /// consumers, leaving the `turn.result` reply to the submitter alone.
+    async fn announce_completed_turn(
+        &self,
+        payload: serde_json::Value,
+        conversation_id: Uuid,
+        interface: &str,
+    ) {
+        let announcement = PublishRequest::new(topic::TURN_COMPLETED, payload)
+            .with_agent_id(self.agent_id.clone())
+            .with_conversation_id(conversation_id)
+            .with_interface(interface);
+        if let Err(e) = self.bus.publish(announcement).await {
+            warn!(%conversation_id, error = %e, "Failed to publish turn.completed");
         }
     }
 

@@ -137,7 +137,7 @@ pub async fn send_message(
     }
 
     // Title generation is owned by the title-generator worker (consumer of
-    // `turn.result`), not this handler. See `crates/runtime/src/title_generator.rs`.
+    // `turn.completed`), not this handler. See `crates/runtime/src/title_generator.rs`.
 
     // Generate a unique ID for this orchestrator run.
     let run_id = Uuid::new_v4();
@@ -850,7 +850,7 @@ pub async fn quick_message(
     };
 
     // Create a new conversation with no title; the title-generator worker
-    // (consumer of `turn.result`) will produce one once the conversation has
+    // (consumer of `turn.completed`) will produce one once the conversation has
     // accumulated enough material.
     let conv = match store.create_conversation(None).await {
         Ok(c) => c,
