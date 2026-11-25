@@ -7,9 +7,10 @@ use anyhow::Result;
 
 use assistant_core::types::agent::OrgConfig;
 
-use crate::args::{AccountCommand, ApiKeysCommand, Cli, Command, SkillCommand};
+use crate::args::{AccountCommand, AdminCommand, ApiKeysCommand, Cli, Command, SkillCommand};
 use crate::{
-    cmd_account, cmd_backup, cmd_doctor, cmd_login, cmd_persona, cmd_reset, cmd_skill, cmd_webui,
+    cmd_account, cmd_admin, cmd_backup, cmd_doctor, cmd_login, cmd_persona, cmd_reset, cmd_skill,
+    cmd_webui,
 };
 
 /// Run the subcommand in `cli` if it is a one-shot one.
@@ -58,6 +59,11 @@ pub async fn run_one_shot(
             }
             AccountCommand::ChangePassword => {
                 cmd_account::cmd_account_change_password(&cli.api_key, &cli.server).await
+            }
+        },
+        Command::Admin { command } => match command {
+            AdminCommand::ResetPassword { email, org } => {
+                cmd_admin::cmd_admin_reset_password(email, org).await
             }
         },
         _ => return None,

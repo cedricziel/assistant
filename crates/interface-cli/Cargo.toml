@@ -19,6 +19,7 @@ name = "assistant_interface_cli"
 path = "src/lib.rs"
 
 [dependencies]
+assistant-auth = { path = "../auth" }
 assistant-core = { path = "../core" }
 assistant-storage = { path = "../storage" }
 assistant-llm-provider = { path = "../llm-provider" }

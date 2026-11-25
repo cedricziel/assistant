@@ -122,6 +122,27 @@ pub enum Command {
         #[command(subcommand)]
         command: AccountCommand,
     },
+    /// Administer this installation locally, without signing in.
+    Admin {
+        #[command(subcommand)]
+        command: AdminCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum AdminCommand {
+    /// Set a new password for a user and sign them out everywhere.
+    ///
+    /// Reads the password from the terminal and writes to org.db directly, so
+    /// it works when nobody can sign in.
+    #[command(name = "reset-password")]
+    ResetPassword {
+        /// Email address of the user.
+        email: String,
+        /// Slug of the organization the user belongs to.
+        #[arg(long, default_value = "default")]
+        org: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -430,6 +451,40 @@ mod cli_parse_tests {
         // Verify the env annotation exists by checking that --api-key accepts a value.
         let cli = Cli::try_parse_from(["assistant", "--api-key", "my_key", "status"]).unwrap();
         assert_eq!(cli.api_key.as_deref(), Some("my_key"));
+    }
+
+    #[test]
+    fn parses_admin_reset_password_with_default_org() {
+        let cli =
+            Cli::try_parse_from(["assistant", "admin", "reset-password", "a@b.example"]).unwrap();
+        match cli.command {
+            Some(Command::Admin {
+                command: super::AdminCommand::ResetPassword { email, org },
+            }) => {
+                assert_eq!(email, "a@b.example");
+                assert_eq!(org, "default");
+            }
+            _ => panic!("expected admin reset-password"),
+        }
+    }
+
+    #[test]
+    fn parses_admin_reset_password_with_org() {
+        let cli = Cli::try_parse_from([
+            "assistant",
+            "admin",
+            "reset-password",
+            "a@b.example",
+            "--org",
+            "acme",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Admin {
+                command: super::AdminCommand::ResetPassword { ref org, .. }
+            }) if org == "acme"
+        ));
     }
 
     #[test]
