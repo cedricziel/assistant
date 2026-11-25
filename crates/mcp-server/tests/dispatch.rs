@@ -167,6 +167,7 @@ async fn tools_call_install_skill_installs_from_a_local_path() {
         stubs.catalog,
         allow_everything(),
         skills_dir.path().to_path_buf(),
+        stubs.listeners,
     )
     .with_install_registry(install_registry().await);
     let client = connect(server).await;

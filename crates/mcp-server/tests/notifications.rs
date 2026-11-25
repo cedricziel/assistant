@@ -7,6 +7,7 @@ mod common;
 use std::collections::HashSet;
 use std::time::Duration;
 
+use assistant_mcp_server::ListChangeListeners;
 use common::*;
 use rmcp::ServiceExt;
 use rmcp::model::{GetMeta, ProtocolVersion, ServerNotification, SubscriptionFilter};
@@ -26,7 +27,7 @@ async fn initialize_advertises_list_changed_for_tools_resources_and_prompts() {
 
 #[tokio::test]
 async fn listening_session_is_notified_when_another_session_installs_a_skill() {
-    let server = installing_server().await;
+    let server = installing_server(default_stubs()).await;
     let modern = ClientLifecycleMode::Discover {
         preferred_versions: vec![ProtocolVersion::V_2026_07_28],
     };
@@ -69,7 +70,7 @@ async fn listening_session_is_notified_when_another_session_installs_a_skill() {
 
 #[tokio::test]
 async fn legacy_session_receives_classic_notifications_when_a_skill_is_installed() {
-    let server = installing_server().await;
+    let server = installing_server(default_stubs()).await;
     let (recorder, mut received) = Recorder::new(ProtocolVersion::V_2025_11_25);
     let _legacy = recorder
         .serve(spawn_server(server.clone()))
@@ -91,4 +92,26 @@ async fn legacy_session_receives_classic_notifications_when_a_skill_is_installed
     ] {
         assert!(kinds.contains(&expected), "{expected:?} in {kinds:?}");
     }
+}
+
+#[tokio::test]
+async fn servers_built_separately_share_listeners_passed_to_them() {
+    // The HTTP endpoint builds a server per request, so listeners must live
+    // outside any one server.
+    let listeners = ListChangeListeners::default();
+    let listening_server = default_stubs()
+        .listeners(listeners.clone())
+        .server(allow_everything());
+    let installing_server = installing_server(default_stubs().listeners(listeners)).await;
+    let (recorder, mut received) = Recorder::new(ProtocolVersion::V_2025_11_25);
+    let _legacy = recorder
+        .serve(spawn_server(listening_server))
+        .await
+        .expect("handshake");
+    let installer = connect(installing_server).await;
+
+    let (_source, params) = install_params("fresh-skill");
+    installer.call_tool(params).await.unwrap();
+
+    assert_eq!(next_received(&mut received).await, Received::ToolsChanged);
 }

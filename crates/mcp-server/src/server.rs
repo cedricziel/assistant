@@ -53,12 +53,15 @@ pub struct AssistantMcpServer {
 }
 
 impl AssistantMcpServer {
+    /// Builds a server that tells `listeners` when installed skills change and
+    /// registers its own listening sessions with them.
     pub fn new(
         orchestrator: Arc<dyn OrchestrationEngine>,
         executor: Arc<dyn ToolDispatcher>,
         catalog: Arc<dyn SkillCatalog>,
         policy: PermissionPolicy,
         user_skills_dir: PathBuf,
+        listeners: ListChangeListeners,
     ) -> Self {
         Self {
             catalog,
@@ -67,7 +70,7 @@ impl AssistantMcpServer {
             policy,
             user_skills_dir,
             install_registry: None,
-            listeners: ListChangeListeners::default(),
+            listeners,
         }
     }
 

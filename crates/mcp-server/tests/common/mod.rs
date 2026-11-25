@@ -9,7 +9,9 @@ use assistant_core::auth::AuthContext;
 use assistant_core::permission::PermissionPolicy;
 use assistant_core::tool::ToolDispatcher;
 use assistant_core::types::permissions::PermissionsConfig;
-use assistant_mcp_server::{AssistantMcpServer, serve_transport, with_identity};
+use assistant_mcp_server::{
+    AssistantMcpServer, ListChangeListeners, serve_transport, with_identity,
+};
 use assistant_runtime::{OrchestrationEngine, StubOrchestrationEngine, TurnResult};
 use assistant_skills::{SkillDef, SkillSource};
 use assistant_storage::{InMemorySkillCatalog, SkillCatalog, SkillRegistry, StorageLayer};
@@ -63,6 +65,7 @@ pub struct Stubs {
     pub orchestrator: Arc<dyn OrchestrationEngine>,
     pub executor: Arc<dyn ToolDispatcher>,
     pub catalog: Arc<dyn SkillCatalog>,
+    pub listeners: ListChangeListeners,
 }
 
 pub fn default_stubs() -> Stubs {
@@ -70,6 +73,7 @@ pub fn default_stubs() -> Stubs {
         orchestrator: Arc::new(StubOrchestrationEngine::new()),
         executor: Arc::new(StubToolDispatcher::new()),
         catalog: Arc::new(InMemorySkillCatalog::new()),
+        listeners: ListChangeListeners::default(),
     }
 }
 
@@ -81,6 +85,11 @@ impl Stubs {
 
     pub fn executor(mut self, executor: Arc<dyn ToolDispatcher>) -> Self {
         self.executor = executor;
+        self
+    }
+
+    pub fn listeners(mut self, listeners: ListChangeListeners) -> Self {
+        self.listeners = listeners;
         self
     }
 
@@ -97,6 +106,7 @@ impl Stubs {
             self.catalog,
             policy,
             skills_dir,
+            self.listeners,
         )
     }
 
@@ -199,9 +209,10 @@ pub fn resource_text(result: &ReadResourceResult) -> String {
     }
 }
 
-/// A server whose `install-skill` tool installs into a fresh directory.
-pub async fn installing_server() -> AssistantMcpServer {
-    default_stubs()
+/// A server built from `stubs` whose `install-skill` tool installs into a
+/// fresh directory.
+pub async fn installing_server(stubs: Stubs) -> AssistantMcpServer {
+    stubs
         .server(allow_everything())
         .with_install_registry(install_registry().await)
 }

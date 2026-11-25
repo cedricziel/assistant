@@ -2,8 +2,7 @@
 //!
 //! `2026-07-28` sessions receive them only on the `subscriptions/listen`
 //! streams they opened; `2025-11-25` sessions, which negotiated through
-//! `initialize`, receive the classic notifications. One registry is shared by
-//! every clone of the handler, so a change made in one session reaches all.
+//! `initialize`, receive the classic notifications.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,6 +12,11 @@ use rmcp::service::{Peer, SubscriptionContext, SubscriptionSink};
 use tokio::sync::Mutex;
 use tracing::debug;
 
+/// The sessions to tell when installed skills change.
+///
+/// Clones share one registry. Whoever builds servers owns it and passes it to
+/// each one, so a change made through one server reaches the sessions of all
+/// of them.
 #[derive(Clone, Default)]
 pub struct ListChangeListeners {
     inner: Arc<Mutex<Registry>>,

@@ -30,6 +30,7 @@ use assistant_core::{
     MessageBus, apply_agent_context, default_workspace_dir, load_server_config, server_config_path,
     set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
+use assistant_mcp_server::ListChangeListeners;
 use assistant_runtime::{OrgContexts, SpaceRuntimes, SpaceSupervisor, init_tracing};
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use axum::{Extension, Router, http::StatusCode, routing::get};
@@ -629,6 +630,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         spaces: space_resolver.clone(),
         runtimes: runtimes.clone(),
         issuer: base_url.clone(),
+        listeners: ListChangeListeners::default(),
     };
 
     // -- Management API states (orgs, users, spaces, members, API keys) ------
