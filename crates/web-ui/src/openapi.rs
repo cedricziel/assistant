@@ -354,6 +354,7 @@ pub struct ApiErrorResponse {
         // OAuth2 endpoints
         crate::oauth::authorize::authorize_get,
         crate::oauth::authorize::authorize_post,
+        crate::oauth::authorize::identify_post,
         crate::oauth::token::token,
         crate::oauth::register::register,
         crate::oauth::device::device_initiate,
@@ -560,6 +561,7 @@ pub struct ApiErrorResponse {
             crate::oauth::token::TokenRequest,
             crate::oauth::token::TokenResponse,
             crate::oauth::authorize::AuthorizeForm,
+            crate::oauth::authorize::IdentifyForm,
             crate::oauth::device::DeviceInitiateRequest,
             crate::oauth::device::DeviceVerifyForm,
             crate::oauth::revoke::RevokeRequest,

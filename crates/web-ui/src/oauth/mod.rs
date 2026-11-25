@@ -66,6 +66,7 @@ pub fn oauth_router() -> Router<OAuthState> {
         // Authorization endpoint.
         .route("/oauth/authorize", get(authorize::authorize_get))
         .route("/oauth/authorize", post(authorize::authorize_post))
+        .route("/oauth/authorize/identify", post(authorize::identify_post))
         // OIDC IdP callback (receives code from external IdP).
         .route("/oauth/callback", get(callback::callback))
         // Password-mode redirect completion (returns code as JSON).
@@ -594,7 +595,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn authorize_get_without_org_renders_form_even_when_an_oidc_org_exists() {
+    async fn authorize_get_without_org_does_not_redirect_even_when_an_oidc_org_exists() {
         let state = test_state().await;
         let idp = wiremock::MockServer::start().await;
         test_support::mount_idp(&idp).await;
@@ -869,7 +870,7 @@ mod tests {
         // Step 2: POST /oauth/authorize with credentials + PKCE challenge.
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
+            "email=alice%40example.com&password=secret123&org=test&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
         );
         let resp = app
             .oneshot(
@@ -973,7 +974,7 @@ mod tests {
         // Authorize (get auth code with PKCE challenge).
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
+            "email=alice%40example.com&password=secret123&org=test&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
         );
         let resp = app
             .oneshot(
@@ -1075,7 +1076,7 @@ mod tests {
 
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
+            "email=alice%40example.com&password=secret123&org=test&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
         );
         let resp = app
             .oneshot(
@@ -1188,7 +1189,7 @@ mod tests {
         // Authorize.
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
+            "email=alice%40example.com&password=secret123&org=test&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
         );
         let resp = app
             .oneshot(
@@ -1381,9 +1382,19 @@ mod tests {
         email: &str,
         password: &str,
     ) -> axum::response::Response {
+        attempt_login_in(state, client_id, "test", email, password).await
+    }
+
+    async fn attempt_login_in(
+        state: &OAuthState,
+        client_id: &str,
+        org: &str,
+        email: &str,
+        password: &str,
+    ) -> axum::response::Response {
         let (_verifier, challenge) = test_pkce();
         let form = format!(
-            "email={}&password={password}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256",
+            "email={}&password={password}&org={org}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256",
             urlencoding::encode(email)
         );
         build_app(state.clone())
@@ -1539,7 +1550,7 @@ mod tests {
         let client_id = register_test_client(state).await;
         let (_verifier, challenge) = test_pkce();
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}{method_param}"
+            "email=alice%40example.com&password=secret123&org=test&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}{method_param}"
         );
         build_app(state.clone())
             .oneshot(
@@ -1622,5 +1633,442 @@ mod tests {
             String::from_utf8_lossy(&body).contains(r#"name="code_challenge_method" value="S256""#),
             "form must round-trip the challenge method"
         );
+    }
+
+    // -- Email-first sign-in --
+
+    /// Create a user in `org_id`; an empty `password` makes an IdP-only user.
+    async fn seed_user(state: &OAuthState, id: &str, org_id: &str, email: &str, password: &str) {
+        let now = chrono::Utc::now();
+        state
+            .org_storage
+            .user_store()
+            .create_user(&User {
+                id: assistant_core::identity::UserId::from(id),
+                org_id: OrgId::from(org_id),
+                email: email.into(),
+                name: id.into(),
+                password_hash: if password.is_empty() {
+                    String::new()
+                } else {
+                    assistant_auth::password::hash_password(password).unwrap()
+                },
+                idp_issuer: None,
+                idp_subject: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+    }
+
+    /// POST `/oauth/authorize/identify` with the given extra form fields.
+    async fn identify_with(
+        state: &OAuthState,
+        client_id: &str,
+        email: &str,
+        extra: &str,
+    ) -> axum::response::Response {
+        // A fixed challenge keeps two identify responses comparable.
+        let challenge = "fixed-challenge";
+        let form = format!(
+            "email={}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&state=mystate&code_challenge={challenge}{extra}",
+            urlencoding::encode(email)
+        );
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize/identify")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn identify(
+        state: &OAuthState,
+        client_id: &str,
+        email: &str,
+    ) -> axum::response::Response {
+        identify_with(state, client_id, email, "&code_challenge_method=S256").await
+    }
+
+    #[tokio::test]
+    async fn authorize_get_without_org_asks_for_the_email() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = authorize(&state, &client_id, None).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_text(resp).await;
+        assert!(
+            html.contains(r#"action="/oauth/authorize/identify""#),
+            "{html}"
+        );
+        assert!(!html.contains(r#"type="password""#), "{html}");
+        for field in [
+            format!(r#"name="client_id" value="{client_id}""#),
+            r#"name="redirect_uri" value="http://localhost/cb""#.to_string(),
+            r#"name="state" value="mystate""#.to_string(),
+            r#"name="code_challenge_method" value="S256""#.to_string(),
+            r#"name="code_challenge" value=""#.to_string(),
+            r#"name="scope" value="""#.to_string(),
+        ] {
+            assert!(html.contains(&field), "missing {field} in {html}");
+        }
+    }
+
+    #[tokio::test]
+    async fn identify_sends_a_sole_oidc_match_to_its_idp_with_a_login_hint() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        seed_user(&state, "usr_carol", "org_acme", "carol@example.com", "").await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = identify(&state, &client_id, "carol@example.com").await;
+
+        assert!(resp.status().is_redirection(), "got {}", resp.status());
+        let location = location(&resp);
+        assert!(
+            location.starts_with(&format!("{}/authorize?", idp.uri())),
+            "{location}"
+        );
+        assert!(location.contains("client_id=oidc-client"), "{location}");
+        assert!(
+            location.contains("login_hint=carol%40example.com"),
+            "{location}"
+        );
+        let idp_state = url::Url::parse(&location)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .map(|(_, v)| v.into_owned())
+            .unwrap();
+        let pending = state.oidc_sessions.take(&idp_state).await.unwrap();
+        assert_eq!(pending.org_id, OrgId::from("org_acme"));
+        assert_eq!(pending.client_state.as_deref(), Some("mystate"));
+    }
+
+    #[tokio::test]
+    async fn identify_shows_the_password_form_for_a_sole_password_match() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = identify(&state, &client_id, "alice@example.com").await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_text(resp).await;
+        assert!(html.contains(r#"action="/oauth/authorize""#), "{html}");
+        assert!(html.contains(r#"name="org" value="test""#), "{html}");
+        assert!(html.contains(r#"value="alice@example.com""#), "{html}");
+        assert!(html.contains(r#"type="password""#), "{html}");
+    }
+
+    #[tokio::test]
+    async fn identify_escapes_the_email_it_echoes() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+        let email = r#""><b>x@example.com"#;
+        seed_user(&state, "usr_x", "org_test", email, "pw").await;
+
+        let html = body_text(identify(&state, &client_id, email).await).await;
+
+        assert!(!html.contains("<b>x@"), "{html}");
+        assert!(html.contains("&quot;&gt;&lt;b&gt;x@example.com"), "{html}");
+    }
+
+    #[tokio::test]
+    async fn identify_asks_for_the_org_when_the_email_is_unknown_or_ambiguous() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_globex",
+            "globex",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        test_support::seed_org(&state.org_storage, "org_acme", "acme", "password").await;
+        seed_user(&state, "usr_d1", "org_acme", "dup@example.com", "pw").await;
+        seed_user(&state, "usr_d2", "org_globex", "dup@example.com", "pw").await;
+        let client_id = register_test_client(&state).await;
+
+        let ambiguous = identify(&state, &client_id, "dup@example.com").await;
+        let unknown = identify(&state, &client_id, "ghost@example.com").await;
+
+        assert_eq!(ambiguous.status(), StatusCode::OK);
+        assert_eq!(unknown.status(), StatusCode::OK);
+        let ambiguous = body_text(ambiguous).await;
+        let unknown = body_text(unknown).await;
+        assert_eq!(
+            ambiguous.replace("dup@example.com", "ghost@example.com"),
+            unknown,
+            "both cases must render the same page"
+        );
+        for leaked in ["acme", "globex", "Test Org"] {
+            assert!(!ambiguous.contains(leaked), "{leaked} leaked: {ambiguous}");
+        }
+        assert!(ambiguous.contains(r#"method="GET""#), "{ambiguous}");
+        assert!(
+            ambiguous.contains(r#"action="/oauth/authorize""#),
+            "{ambiguous}"
+        );
+        assert!(ambiguous.contains(r#"name="org""#), "{ambiguous}");
+        for field in [
+            r#"name="response_type" value="code""#,
+            r#"name="login_hint" value="dup@example.com""#,
+            r#"name="state" value="mystate""#,
+            r#"name="code_challenge_method" value="S256""#,
+        ] {
+            assert!(ambiguous.contains(field), "missing {field}: {ambiguous}");
+        }
+    }
+
+    #[tokio::test]
+    async fn identify_applies_the_same_request_checks_as_the_authorize_page() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+
+        let plain = identify_with(
+            &state,
+            &client_id,
+            "alice@example.com",
+            "&code_challenge_method=plain",
+        )
+        .await;
+        let no_method = identify_with(&state, &client_id, "alice@example.com", "").await;
+        let unknown_client = identify(&state, "no-such-client", "alice@example.com").await;
+        let no_email = identify(&state, &client_id, "  ").await;
+        let no_challenge = build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize/identify")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "email=a%40b.c&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge_method=S256"
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        for (what, resp) in [
+            ("plain", plain),
+            ("missing method", no_method),
+            ("unknown client", unknown_client),
+            ("blank email", no_email),
+            ("missing challenge", no_challenge),
+        ] {
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{what}");
+        }
+    }
+
+    #[tokio::test]
+    async fn authorize_get_with_a_login_hint_prefills_the_password_form() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+        let (_verifier, challenge) = test_pkce();
+
+        let resp = build_app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&code_challenge={challenge}&code_challenge_method=S256&org=test&login_hint=alice%40example.com"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let html = body_text(resp).await;
+        assert!(html.contains(r#"name="org" value="test""#), "{html}");
+        assert!(html.contains(r#"value="alice@example.com""#), "{html}");
+    }
+
+    #[tokio::test]
+    async fn authorize_get_forwards_the_login_hint_to_the_idp() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        let client_id = register_test_client(&state).await;
+        let (_verifier, challenge) = test_pkce();
+
+        let resp = build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&code_challenge={challenge}&code_challenge_method=S256&org=acme&login_hint=dana%40example.com"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let location = location(&resp);
+        assert!(
+            location.contains("login_hint=dana%40example.com"),
+            "{location}"
+        );
+    }
+
+    #[tokio::test]
+    async fn authorize_get_without_a_login_hint_sends_none_to_the_idp() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = authorize(&state, &client_id, Some("acme")).await;
+
+        assert!(!location(&resp).contains("login_hint"));
+    }
+
+    /// A second password org whose user shares alice's email but not her password.
+    async fn seed_namesake_org(state: &OAuthState) {
+        test_support::seed_org(&state.org_storage, "org_other", "other", "password").await;
+        seed_user(
+            state,
+            "usr_alice2",
+            "org_other",
+            "alice@example.com",
+            "other-pass",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn password_login_authenticates_against_the_selected_org_only() {
+        let state = test_state().await;
+        seed_namesake_org(&state).await;
+        let client_id = register_test_client(&state).await;
+
+        for (org, password, expected) in [
+            ("test", "secret123", StatusCode::SEE_OTHER),
+            ("other", "other-pass", StatusCode::SEE_OTHER),
+            ("test", "other-pass", StatusCode::UNAUTHORIZED),
+            ("other", "secret123", StatusCode::UNAUTHORIZED),
+        ] {
+            let resp =
+                attempt_login_in(&state, &client_id, org, "alice@example.com", password).await;
+            assert_eq!(resp.status(), expected, "org={org} password={password}");
+        }
+    }
+
+    #[tokio::test]
+    async fn password_login_issues_the_code_for_the_selected_orgs_user() {
+        let state = test_state().await;
+        seed_namesake_org(&state).await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = attempt_login_in(
+            &state,
+            &client_id,
+            "other",
+            "alice@example.com",
+            "other-pass",
+        )
+        .await;
+
+        let code = url::Url::parse(&location(&resp))
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "code")
+            .map(|(_, v)| v.into_owned())
+            .unwrap();
+        let codes = state.org_storage.auth_code_store();
+        let stored = assistant_core::auth::AuthCodeStore::take_code(&codes, &code)
+            .await
+            .unwrap()
+            .expect("code was stored");
+        assert_eq!(stored.user_id, "usr_alice2");
+    }
+
+    #[tokio::test]
+    async fn password_login_is_refused_for_an_oidc_org() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        seed_user(&state, "usr_carol", "org_acme", "carol@example.com", "pw").await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = attempt_login_in(&state, &client_id, "acme", "carol@example.com", "pw").await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn password_login_is_refused_for_an_unknown_org() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = attempt_login_in(
+            &state,
+            &client_id,
+            "no-such-org",
+            "alice@example.com",
+            "secret123",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn lockout_in_one_org_does_not_lock_the_namesake_in_another() {
+        let (state, _clock) = test_state_with_clock().await;
+        seed_namesake_org(&state).await;
+        let client_id = register_lockout_client(&state).await;
+        for _ in 0..3 {
+            attempt_login_in(&state, &client_id, "test", "alice@example.com", "wrong").await;
+        }
+
+        let resp = attempt_login_in(
+            &state,
+            &client_id,
+            "other",
+            "alice@example.com",
+            "other-pass",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     }
 }

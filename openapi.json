@@ -7933,7 +7933,7 @@
         "tags": [
           "oauth"
         ],
-        "summary": "GET /oauth/authorize — render login form.",
+        "summary": "GET /oauth/authorize — render the email step, the password form, or\nredirect to the org's IdP.",
         "operationId": "authorize_get",
         "parameters": [
           {
@@ -8017,7 +8017,19 @@
           {
             "name": "org",
             "in": "query",
-            "description": "Slug of the org to sign in to. An org in OIDC mode redirects to its\nown identity provider; without this parameter the password form is\nshown.",
+            "description": "Slug of the org to sign in to. An org in OIDC mode redirects to its\nown identity provider; a password org shows the password form. Without\nthis parameter the page asks for the user's email to find the org.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "login_hint",
+            "in": "query",
+            "description": "Email the user already entered. Prefills the password form and is\npassed on to the org's identity provider as `login_hint`.",
             "required": false,
             "schema": {
               "type": [
@@ -8029,7 +8041,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Login form HTML",
+            "description": "Email form (no `org`) or password form (password org), as HTML",
             "content": {
               "text/html": {}
             }
@@ -8064,7 +8076,7 @@
         "tags": [
           "oauth"
         ],
-        "summary": "POST /oauth/authorize — validate credentials, generate auth code, redirect.",
+        "summary": "POST /oauth/authorize — validate one org's password credentials, generate\nan auth code, redirect.",
         "operationId": "authorize_post",
         "requestBody": {
           "content": {
@@ -8081,7 +8093,7 @@
             "description": "Redirect with authorization code"
           },
           "400": {
-            "description": "Invalid request"
+            "description": "Invalid request, unknown org, or the org uses single sign-on"
           },
           "401": {
             "description": "Invalid credentials"
@@ -8091,6 +8103,61 @@
           },
           "500": {
             "description": "Internal server error"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/oauth/authorize/identify": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "POST /oauth/authorize/identify — find the org an email signs in to.",
+        "description": "A sole match continues in that org (IdP redirect or password form); no\nmatch or several get the same org-slug form so the response does not say\nwhich case applied.",
+        "operationId": "identify_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentifyForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Password form (sole password-org match) or org-slug form, as HTML",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "303": {
+            "description": "Redirect to the matching org's external IdP (OIDC mode)"
+          },
+          "400": {
+            "description": "Invalid parameters",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded; see the Retry-After header"
+          },
+          "500": {
+            "description": "Internal server error, or the org is in OIDC mode but has no OIDC settings",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "502": {
+            "description": "The org's IdP could not be reached",
+            "content": {
+              "text/html": {}
+            }
           }
         },
         "security": [
@@ -9879,6 +9946,7 @@
         "type": "object",
         "description": "Form fields for POST /oauth/authorize (password credential submission).",
         "required": [
+          "org",
           "client_id",
           "redirect_uri"
         ],
@@ -9904,6 +9972,10 @@
               "string",
               "null"
             ]
+          },
+          "org": {
+            "type": "string",
+            "description": "Slug of the org the user signs in to. Emails are only unique per org."
           },
           "password": {
             "type": [
@@ -11015,6 +11087,52 @@
           "scheme": {
             "type": "string",
             "description": "The HTTP Authentication scheme (e.g., \"Bearer\")."
+          }
+        }
+      },
+      "IdentifyForm": {
+        "type": "object",
+        "description": "Form fields for POST /oauth/authorize/identify (the email-first step).",
+        "required": [
+          "email",
+          "client_id",
+          "redirect_uri"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "code_challenge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code_challenge_method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Must be `S256`."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email used to find the org the user signs in to."
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

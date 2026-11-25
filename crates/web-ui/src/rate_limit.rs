@@ -3,6 +3,7 @@
 //! Two independent defences:
 //!
 //! - a per-client-IP token bucket in front of `/login`, `/oauth/authorize`,
+//!   `/oauth/authorize/identify` (it reveals whether an email exists),
 //!   `/oauth/token`, the device flow, `/oauth/revoke` (one bucket) and
 //!   `/oauth/register` (a stricter one), enforced by [`enforce_ip_limits`];
 //! - a per-account failed-login lockout, used by `POST /oauth/authorize`.
@@ -250,6 +251,7 @@ fn classify(method: &Method, path: &str) -> Option<Class> {
     match path {
         "/login"
         | "/oauth/authorize"
+        | "/oauth/authorize/identify"
         | "/oauth/token"
         | "/oauth/device"
         | "/oauth/device/verify"
@@ -469,6 +471,7 @@ mod tests {
         Router::new()
             .route("/login", post(ok).get(ok))
             .route("/oauth/token", post(ok))
+            .route("/oauth/authorize/identify", post(ok))
             .route("/oauth/register", post(ok))
             .route("/api/things", post(ok))
             .layer(axum::middleware::from_fn_with_state(
@@ -516,6 +519,28 @@ mod tests {
             .parse()
             .unwrap();
         assert!((1..=20).contains(&retry), "unexpected Retry-After {retry}");
+    }
+
+    #[tokio::test]
+    async fn the_email_identify_step_shares_the_auth_bucket() {
+        let clock = FakeClock::new_at_seed();
+        let app = app(limits(&clock, false), "10.0.0.1");
+        for _ in 0..3 {
+            assert_eq!(
+                status(&app, "POST", "/oauth/authorize/identify").await,
+                StatusCode::OK
+            );
+        }
+        assert_eq!(
+            status(&app, "POST", "/oauth/authorize/identify").await,
+            StatusCode::TOO_MANY_REQUESTS,
+            "the identify step reveals whether an email exists, so it is throttled"
+        );
+        assert_eq!(
+            status(&app, "POST", "/oauth/token").await,
+            StatusCode::TOO_MANY_REQUESTS,
+            "and it drains the same bucket as the credential endpoints"
+        );
     }
 
     #[tokio::test]
