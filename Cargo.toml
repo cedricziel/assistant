@@ -213,11 +213,16 @@ toml = { workspace = true }
 [profile.dev]
 # macOS: avoid dsymutil bottleneck at link time
 split-debuginfo = "unpacked"
+# Line tables keep backtraces and panics readable while cutting target-dir
+# size and link time; use a local override for full debugger info.
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 # Compile third-party deps at opt-level 1; dramatically speeds up first build
 # of heavy crates without hurting iteration speed
 opt-level = 1
+# Third-party debuginfo is rarely used and dominates target-dir size.
+debug = false
 
 [profile.release]
 opt-level = 3
