@@ -139,6 +139,15 @@ impl ToolExecutor {
             .retain(|name, _| !name.starts_with(prefix));
     }
 
+    /// The registered handler named `name`.
+    pub fn handler(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
+        self.tool_handlers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(name)
+            .cloned()
+    }
+
     /// Returns all registered tool handlers.
     pub fn list_tools(&self) -> Vec<Arc<dyn ToolHandler>> {
         self.tool_handlers

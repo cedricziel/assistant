@@ -424,15 +424,11 @@ impl Orchestrator {
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
     ) -> DispatchOutcome {
-        let requires_confirm = match overlay.get(name) {
-            Some(handler) => handler.requires_confirmation(),
-            None => self
-                .executor
-                .list_tools()
-                .iter()
-                .find(|h| h.name() == name)
-                .is_some_and(|h| h.requires_confirmation()),
-        };
+        let requires_confirm = overlay
+            .get(name)
+            .cloned()
+            .or_else(|| self.executor.handler(name))
+            .is_some_and(|h| h.requires_confirmation());
 
         let authorization = self
             .authorize_tool_call(name, params, ctx, requires_confirm, task_context(history))

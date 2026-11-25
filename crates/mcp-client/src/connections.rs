@@ -279,15 +279,8 @@ impl IntegrationConnections {
 
     /// Drop every connection that has been idle for the idle timeout.
     pub async fn evict_idle(&self) {
-        let slots: Vec<_> = self
-            .slots
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-            .cloned()
-            .collect();
         let now = self.clock.now_instant();
-        for slot in slots {
+        for slot in self.all_slots() {
             // A slot in use is not idle.
             let Ok(mut slot) = slot.try_lock() else {
                 continue;
@@ -300,20 +293,22 @@ impl IntegrationConnections {
 
     /// Connections currently open.
     pub async fn connection_count(&self) -> usize {
-        let slots: Vec<_> = self
-            .slots
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-            .cloned()
-            .collect();
         let mut open = 0;
-        for slot in slots {
+        for slot in self.all_slots() {
             if slot.lock().await.live.is_some() {
                 open += 1;
             }
         }
         open
+    }
+
+    fn all_slots(&self) -> Vec<Arc<AsyncMutex<Slot>>> {
+        self.slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect()
     }
 
     fn idle(&self, live: &Live, now: Instant) -> bool {
