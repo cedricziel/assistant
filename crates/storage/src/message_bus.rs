@@ -7,6 +7,10 @@
 //! Routing is handled via metadata columns (`agent_id`, `user_id`,
 //! `conversation_id`, `batch_id`) and dynamic WHERE-clause construction
 //! in [`claim_filtered`](MessageBus::claim_filtered).
+//!
+//! Every claim increments `delivery_count`. [`nack_delayed`](MessageBus::nack_delayed)
+//! stamps `visible_at` so the message stays unclaimable until the delay has
+//! passed.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,7 +31,7 @@ const SELECT_COLS: &str = "\
     user_id, agent_id, \
     conversation_id, interface, reply_to, \
     correlation_id, causation_id, batch_id, \
-    created_at, claimed_at, claimed_by";
+    created_at, claimed_at, claimed_by, delivery_count";
 
 /// SQLite-backed message bus.
 pub struct SqliteMessageBus {
@@ -48,6 +52,22 @@ impl SqliteMessageBus {
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
         self
+    }
+}
+
+impl SqliteMessageBus {
+    /// Return a claimed message to `pending`, hidden until `visible_at` when set.
+    async fn release(&self, message_id: Uuid, visible_at: Option<DateTime<Utc>>) -> Result<()> {
+        sqlx::query(
+            "UPDATE bus_messages \
+             SET status = 'pending', claimed_at = NULL, claimed_by = NULL, visible_at = ?2 \
+             WHERE id = ?1",
+        )
+        .bind(message_id.to_string())
+        .bind(visible_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 
@@ -111,14 +131,18 @@ impl MessageBus for SqliteMessageBus {
         // Claim the oldest pending message matching the optional routing
         // filters. Every value is emitted via `push_bind`; only the constant
         // `SELECT_COLS` column list is pushed as raw SQL.
-        let mut builder: QueryBuilder<Sqlite> =
-            QueryBuilder::new("UPDATE bus_messages SET status = 'claimed', claimed_at = ");
+        let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(
+            "UPDATE bus_messages SET status = 'claimed', delivery_count = delivery_count + 1, \
+             claimed_at = ",
+        );
         builder.push_bind(now);
         builder.push(", claimed_by = ");
         builder.push_bind(worker_id);
         builder.push(" WHERE id = ( SELECT id FROM bus_messages WHERE topic = ");
         builder.push_bind(topic);
-        builder.push(" AND status = 'pending'");
+        builder.push(" AND status = 'pending' AND (visible_at IS NULL OR visible_at <= ");
+        builder.push_bind(now);
+        builder.push(")");
 
         if let Some(ref agent) = filter.agent_id {
             builder.push(" AND agent_id = ").push_bind(agent);
@@ -166,14 +190,15 @@ impl MessageBus for SqliteMessageBus {
     }
 
     async fn nack(&self, message_id: Uuid) -> Result<()> {
-        sqlx::query(
-            "UPDATE bus_messages SET status = 'pending', claimed_at = NULL, claimed_by = NULL \
-             WHERE id = ?1",
-        )
-        .bind(message_id.to_string())
-        .execute(&self.pool)
-        .await?;
+        self.release(message_id, None).await?;
         debug!(id = %message_id, "nacked bus message");
+        Ok(())
+    }
+
+    async fn nack_delayed(&self, message_id: Uuid, delay: Duration) -> Result<()> {
+        let visible_at = self.clock.now() + chrono::Duration::from_std(delay)?;
+        self.release(message_id, Some(visible_at)).await?;
+        debug!(id = %message_id, delay_secs = delay.as_secs(), "nacked bus message with delay");
         Ok(())
     }
 
@@ -283,7 +308,7 @@ fn parse_row(r: sqlx::sqlite::SqliteRow) -> Result<BusMessage> {
         created_at: r.get("created_at"),
         claimed_at: r.get("claimed_at"),
         claimed_by: r.get("claimed_by"),
-        delivery_count: 1,
+        delivery_count: r.get::<i64, _>("delivery_count").max(0) as u32,
     })
 }
 
@@ -438,6 +463,7 @@ impl MessageBus for InMemoryMessageBus {
             e.msg.status = MessageStatus::Claimed;
             e.msg.claimed_at = Some(now);
             e.msg.claimed_by = Some(worker_id.to_string());
+            e.msg.delivery_count += 1;
             return Ok(Some(e.msg.clone()));
         }
         Ok(None)
@@ -452,11 +478,17 @@ impl MessageBus for InMemoryMessageBus {
     }
 
     async fn nack(&self, message_id: Uuid) -> Result<()> {
+        self.nack_delayed(message_id, Duration::ZERO).await
+    }
+
+    async fn nack_delayed(&self, message_id: Uuid, delay: Duration) -> Result<()> {
+        let visible_at = self.clock.now() + chrono::Duration::from_std(delay)?;
         let mut state = self.lock();
         if let Some(e) = state.by_id.get_mut(&message_id) {
             e.msg.status = MessageStatus::Pending;
             e.msg.claimed_at = None;
             e.msg.claimed_by = None;
+            e.visible_at = visible_at;
         }
         Ok(())
     }
@@ -538,6 +570,7 @@ impl MessageBus for InMemoryMessageBus {
 mod tests {
     use super::*;
     use crate::StorageLayer;
+    use assistant_core::clock::FakeClock;
 
     async fn bus() -> (StorageLayer, SqliteMessageBus) {
         let s = StorageLayer::new_in_memory().await.unwrap();
@@ -923,6 +956,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_delivery_count_increments_across_nack_and_reclaim() {
+        let (_s, bus) = bus().await;
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
+
+        for expected in 1..=3u32 {
+            let msg = bus.claim("q", "w1").await.unwrap().unwrap();
+            assert_eq!(
+                msg.delivery_count, expected,
+                "delivery {expected} should report count {expected}"
+            );
+            bus.nack(id).await.unwrap();
+        }
+
+        let listed = bus.list("q", None, 10).await.unwrap();
+        assert_eq!(listed[0].delivery_count, 3, "list reports persisted count");
+    }
+
+    #[tokio::test]
+    async fn test_delivery_count_survives_reap_stale() {
+        let clock = Arc::new(FakeClock::new_at_seed());
+        let (_s, bus) = bus().await;
+        let bus = bus.with_clock(clock.clone());
+        bus.publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
+
+        bus.claim("q", "w1").await.unwrap().unwrap();
+        clock.advance(Duration::from_secs(600));
+        assert_eq!(bus.reap_stale(Duration::from_secs(60)).await.unwrap(), 1);
+
+        let again = bus.claim("q", "w2").await.unwrap().unwrap();
+        assert_eq!(again.delivery_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_nack_delayed_hides_message_until_delay_elapses() {
+        let clock = Arc::new(FakeClock::new_at_seed());
+        let (_s, bus) = bus().await;
+        let bus = bus.with_clock(clock.clone());
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
+        bus.claim("q", "w1").await.unwrap().unwrap();
+
+        bus.nack_delayed(id, Duration::from_secs(30)).await.unwrap();
+        assert!(
+            bus.claim("q", "w1").await.unwrap().is_none(),
+            "message must not be claimable immediately after nack_delayed"
+        );
+
+        clock.advance(Duration::from_secs(29));
+        assert!(
+            bus.claim("q", "w1").await.unwrap().is_none(),
+            "message must stay hidden before the delay elapses"
+        );
+
+        clock.advance(Duration::from_secs(2));
+        let msg = bus
+            .claim("q", "w1")
+            .await
+            .unwrap()
+            .expect("message claimable once the delay has passed");
+        assert_eq!(msg.id, id);
+        assert_eq!(msg.delivery_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_plain_nack_after_delayed_nack_is_immediately_claimable() {
+        let clock = Arc::new(FakeClock::new_at_seed());
+        let (_s, bus) = bus().await;
+        let bus = bus.with_clock(clock.clone());
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
+        bus.claim("q", "w1").await.unwrap().unwrap();
+        bus.nack_delayed(id, Duration::from_secs(3600))
+            .await
+            .unwrap();
+        // Operator / reaper style release: delay no longer applies.
+        bus.nack(id).await.unwrap();
+
+        assert!(bus.claim("q", "w1").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
     async fn test_fail_marks_permanent() {
         let (_s, bus) = bus().await;
 
@@ -1077,5 +1200,27 @@ mod tests {
         let cutoff = Utc::now() - chrono::Duration::days(1);
         let purged = bus.purge(cutoff).await.unwrap();
         assert_eq!(purged, 0, "recent done messages should not be purged");
+    }
+
+    // -- in-memory bus parity -----------------------------------------------
+
+    #[tokio::test]
+    async fn test_in_memory_delivery_count_and_nack_delay() {
+        let clock = Arc::new(FakeClock::new_at_seed());
+        let bus = InMemoryMessageBus::new().with_clock(clock.clone());
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
+
+        let first = bus.claim("q", "w1").await.unwrap().unwrap();
+        assert_eq!(first.delivery_count, 1);
+
+        bus.nack_delayed(id, Duration::from_secs(30)).await.unwrap();
+        assert!(bus.claim("q", "w1").await.unwrap().is_none());
+
+        clock.advance(Duration::from_secs(31));
+        let second = bus.claim("q", "w1").await.unwrap().unwrap();
+        assert_eq!(second.delivery_count, 2);
     }
 }

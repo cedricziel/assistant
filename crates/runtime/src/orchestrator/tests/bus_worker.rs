@@ -349,6 +349,89 @@ async fn with_submit_timeout_respected() {
     );
 }
 
+/// A persistently transient LLM error must stop after `MAX_TURN_REDELIVERIES`
+/// deliveries and fail the submit with a terminal error result, instead of redelivering until timeout.
+///
+/// The bus runs on a [`FakeClock`] that a helper task advances, so the real
+/// 30–240 s redelivery backoff does not slow the test down.
+#[tokio::test]
+async fn persistent_transient_error_stops_at_redelivery_cap() {
+    use assistant_core::MAX_TURN_REDELIVERIES;
+    use assistant_core::clock::FakeClock;
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(429).set_body_string("rate limit exceeded"))
+        .mount(&server)
+        .await;
+
+    let mut config = AssistantConfig::default();
+    config.memory.enabled = false;
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let llm: Arc<dyn LlmProvider> = Arc::new(
+        LlmClient::new(LlmClientConfig {
+            model: "test".to_string(),
+            base_url: server.uri(),
+            timeout_secs: 10,
+            retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
+        })
+        .unwrap(),
+    );
+    let executor = Arc::new(ToolExecutor::new(
+        storage.clone(),
+        llm.clone(),
+        registry.clone(),
+        Arc::new(config.clone()),
+    ));
+    let clock = Arc::new(FakeClock::new_at_seed());
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus().with_clock(clock.clone()));
+    let orch = Arc::new(
+        Orchestrator::new(llm, storage, executor.clone(), registry, bus, &config)
+            .with_submit_timeout(20),
+    );
+    executor.set_subagent_runner(orch.clone());
+
+    let worker_orch = orch.clone();
+    let worker = tokio::spawn(async move { worker_orch.run_worker("test-worker").await });
+    let ticker_clock = clock.clone();
+    let ticker = tokio::spawn(async move {
+        loop {
+            ticker_clock.advance(Duration::from_secs(300));
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
+
+    let result = orch
+        .submit_turn(
+            &AuthContext::system(),
+            "hello",
+            Uuid::new_v4(),
+            Interface::Cli,
+            None,
+        )
+        .await;
+    worker.abort();
+    ticker.abort();
+
+    let turn = result.expect("submit must return the terminal failure result, not time out");
+    assert!(
+        turn.had_errors,
+        "terminal result must be flagged as an error"
+    );
+    assert!(
+        turn.answer.contains("exceeded retry cap"),
+        "expected retry-cap failure, got: {}",
+        turn.answer
+    );
+    let requests = server.received_requests().await.unwrap().len();
+    assert_eq!(
+        requests, MAX_TURN_REDELIVERIES as usize,
+        "LLM should be called exactly once per delivery up to the cap"
+    );
+}
+
 #[tokio::test]
 async fn failed_turn_propagates_error() {
     // Verifies that when the LLM returns an error, run_turn propagates Err.

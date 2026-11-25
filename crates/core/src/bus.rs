@@ -337,8 +337,9 @@ pub trait MessageBus: Send + Sync {
     ///
     /// The backend will wait at least `delay` before making the message
     /// available again.  NATS JetStream implements this via
-    /// `AckKind::Nak(Some(delay))`; the SQLite bus falls back to an
-    /// immediate [`nack`](MessageBus::nack).
+    /// `AckKind::Nak(Some(delay))`; the SQLite and in-memory buses hold the
+    /// message back with a visible-after timestamp. The default falls back to
+    /// an immediate [`nack`](MessageBus::nack).
     async fn nack_delayed(&self, message_id: Uuid, delay: Duration) -> Result<()> {
         let _ = delay;
         self.nack(message_id).await
