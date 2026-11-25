@@ -3,11 +3,8 @@
 //! Contains the permission gate, tool execution through the global executor,
 //! result recording (metrics, OTel, persistence), and tool-call history helpers.
 
-use std::sync::Arc;
-
 use assistant_core::{
-    Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ToolCallItem, ToolHandler,
-    ToolSpec,
+    Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ToolCallItem, ToolSpec,
     permission::{Outcome, PermissionRequest},
     types::conversation::ExecutionContext,
     types::conversation::Message,
@@ -16,6 +13,7 @@ use assistant_core::{
 use assistant_storage::AttachmentStore as _AttachmentStoreTrait;
 use assistant_storage::conversations::ConversationStore;
 use assistant_storage::{SkillExecution, SkillOutcome};
+use assistant_tool_executor::ToolOverlay;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Span as _;
 use tokio::sync::mpsc;
@@ -420,17 +418,21 @@ impl Orchestrator {
         turn_index: i64,
         turn_attachments: &mut Vec<Attachment>,
         turn_attachment_ids: &mut Vec<Uuid>,
-        tool_handlers: &[Arc<dyn ToolHandler>],
+        overlay: &ToolOverlay,
         active_skill: &mut Option<String>,
         instrument_span: &tracing::Span,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
     ) -> DispatchOutcome {
-        let requires_confirm = tool_handlers
-            .iter()
-            .find(|h| h.name() == name)
-            .map(|h| h.requires_confirmation())
-            .unwrap_or(false);
+        let requires_confirm = match overlay.get(name) {
+            Some(handler) => handler.requires_confirmation(),
+            None => self
+                .executor
+                .list_tools()
+                .iter()
+                .find(|h| h.name() == name)
+                .is_some_and(|h| h.requires_confirmation()),
+        };
 
         let authorization = self
             .authorize_tool_call(name, params, ctx, requires_confirm, task_context(history))
@@ -478,7 +480,7 @@ impl Orchestrator {
         let start = std::time::Instant::now();
         let exec_result = self
             .executor
-            .execute(name, params_map, ctx)
+            .execute_with(overlay, name, params_map, ctx)
             .instrument(instrument_span.clone())
             .await;
         let elapsed = start.elapsed();

@@ -9,15 +9,15 @@ use anyhow::Result;
 use assistant_core::types::conversation::{ExecutionContext, Interface, Message, TurnIdentity};
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
-    LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec,
-    context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type, is_text_mime_type,
-    strip_html_comments,
+    LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec, TurnScope,
+    TurnToolSource, context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type,
+    is_text_mime_type, strip_html_comments,
 };
 use assistant_storage::{
     AttachmentStore as _AttachmentStoreTrait, SkillRegistry, StorageLayer,
     conversations::{ConversationStore, SqliteConversationStore},
 };
-use assistant_tool_executor::ToolExecutor;
+use assistant_tool_executor::{ToolExecutor, ToolOverlay};
 use assistant_transcription::AudioStore;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,
@@ -263,6 +263,16 @@ pub struct Orchestrator {
     /// scheduler-related comparisons. Defaults to `Arc::new(SystemClock)`;
     /// tests inject a `FakeClock` via [`Self::with_clock`].
     pub(crate) clock: Arc<dyn assistant_core::clock::Clock>,
+    /// Where each turn gets the tools only it may see, with the space it is
+    /// asked for.
+    pub(crate) turn_tool_source: Option<TurnToolBinding>,
+}
+
+/// A [`TurnToolSource`] bound to the space this orchestrator runs.
+pub(crate) struct TurnToolBinding {
+    source: Arc<dyn TurnToolSource>,
+    org_slug: String,
+    space_slug: String,
 }
 
 impl Orchestrator {
@@ -324,7 +334,38 @@ impl Orchestrator {
             skill_executions,
             learning_config: config.learning.clone(),
             clock: Arc::new(assistant_core::clock::SystemClock),
+            turn_tool_source: None,
         }
+    }
+
+    /// Give every turn the tools `source` returns for `(org_slug, space_slug)`
+    /// and the turn's user. They exist for that turn only, are checked before
+    /// the executor's registry, and go through the same permission gate.
+    pub fn with_turn_tool_source(
+        mut self,
+        source: Arc<dyn TurnToolSource>,
+        org_slug: impl Into<String>,
+        space_slug: impl Into<String>,
+    ) -> Self {
+        self.turn_tool_source = Some(TurnToolBinding {
+            source,
+            org_slug: org_slug.into(),
+            space_slug: space_slug.into(),
+        });
+        self
+    }
+
+    /// The tools this turn alone may use.
+    async fn turn_overlay(&self, identity: &TurnIdentity) -> ToolOverlay {
+        let Some(binding) = &self.turn_tool_source else {
+            return ToolOverlay::default();
+        };
+        let scope = TurnScope {
+            org_slug: &binding.org_slug,
+            space_slug: &binding.space_slug,
+            user_id: identity.user_id.as_ref(),
+        };
+        ToolOverlay::new(binding.source.tools_for_turn(&scope).await)
     }
 
     /// Override the `submit_turn` timeout for this orchestrator instance.
@@ -737,7 +778,9 @@ impl Orchestrator {
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
         let llm = self.llm_for(conversation_id).await?;
         let provider_caps = llm.capabilities();
-        let global_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
+        let overlay = self.turn_overlay(&identity).await;
+        let global_specs =
+            Self::filter_tool_specs(self.executor.to_specs_with(&overlay), &provider_caps);
         let all_specs: Vec<ToolSpec> = ext_specs
             .iter()
             .cloned()
@@ -926,7 +969,6 @@ impl Orchestrator {
                     .await;
 
                     let has_real_calls = tool_call_items.iter().any(|t| t.name != "end_turn");
-                    let tool_handlers = self.executor.list_tools();
 
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
@@ -1024,7 +1066,7 @@ impl Orchestrator {
                                     turn_index,
                                     &mut turn_attachments,
                                     &mut turn_attachment_ids,
-                                    &tool_handlers,
+                                    &overlay,
                                     &mut active_skill,
                                     &builtin_span,
                                     token_sink.as_ref(),
@@ -1139,7 +1181,9 @@ impl Orchestrator {
         // 4. Load all registered tool specs.
         let llm = self.llm_for(conversation_id).await?;
         let provider_caps = llm.capabilities();
-        let tool_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
+        let overlay = self.turn_overlay(&identity).await;
+        let tool_specs =
+            Self::filter_tool_specs(self.executor.to_specs_with(&overlay), &provider_caps);
 
         // 5. Build the system prompt fresh from disk.
         let system_prompt = self.compose_system_prompt(&interface).await;
@@ -1356,8 +1400,6 @@ impl Orchestrator {
                     .instrument(iteration_span.clone())
                     .await;
 
-                    let tool_handlers = self.executor.list_tools();
-
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
@@ -1386,7 +1428,7 @@ impl Orchestrator {
                                 turn_index,
                                 &mut turn_attachments,
                                 &mut turn_attachment_ids,
-                                &tool_handlers,
+                                &overlay,
                                 &mut active_skill,
                                 &iteration_span,
                                 token_sink.as_ref(),
