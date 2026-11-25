@@ -472,6 +472,37 @@ async fn resources_read_auxiliary_file_returns_contents() {
 }
 
 #[tokio::test]
+async fn resources_read_aux_file_outside_skill_dir_is_not_read() {
+    use std::fs;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("foo");
+    fs::create_dir_all(dir.join("scripts")).unwrap();
+    fs::write(tmp.path().join("secret.txt"), "top secret").unwrap();
+
+    let mut skill = make_skill("foo");
+    skill.dir = dir;
+
+    let (o, e, _) = default_stubs();
+    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![skill])) as Arc<dyn SkillCatalog>;
+    let resp = call(
+        make_request(
+            30,
+            "resources/read",
+            json!({"uri": "skills://foo/scripts/../../secret.txt"}),
+        ),
+        o,
+        e,
+        reg,
+    )
+    .await;
+    assert!(
+        resp.result.is_none(),
+        "a path escaping the skill dir must not be served: {resp:?}"
+    );
+    assert_eq!(resp.error.map(|e| e.code), Some(-32602));
+}
+
+#[tokio::test]
 async fn resources_read_aux_file_missing_returns_error() {
     use std::fs;
     let tmp = tempfile::tempdir().expect("tempdir");

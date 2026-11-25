@@ -4,8 +4,8 @@ Each numbered group is one PR in the stack, in order.
 
 ## 1. Fix skill resource traversal (PR 1)
 
-- [ ] 1.1 Add a failing test in `crates/mcp-server/tests/dispatch.rs` that reads `skills://<name>/scripts/../../<file>` and expects resource-not-found; confirm red
-- [ ] 1.2 Reject resolved paths outside the skill directory (canonicalize and check prefix) and verify the test passes
+- [x] 1.1 Add a failing test in `crates/mcp-server/tests/dispatch.rs` that reads `skills://<name>/scripts/../../<file>` and expects resource-not-found; confirm red
+- [x] 1.2 Reject resolved paths outside the skill directory (canonicalize and check prefix) and verify the test passes
 
 ## 2. Workspace rmcp and server handler on stdio (PR 2)
 
