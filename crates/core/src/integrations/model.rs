@@ -161,19 +161,38 @@ impl IntegrationPolicy {
     ///
     /// Org-layer integrations are managed by org admins and never restricted.
     pub fn permits(&self, integration: &Integration) -> bool {
-        if integration.layer == IntegrationLayer::Org {
-            return true;
+        self.install_denial(integration.layer, integration.catalog_entry_id.as_deref())
+            .is_none()
+    }
+
+    /// Why this policy forbids installing at `layer`, or `None` when it allows
+    /// it. `catalog_entry_id` is `None` for a custom URL.
+    pub fn install_denial(
+        &self,
+        layer: IntegrationLayer,
+        catalog_entry_id: Option<&str>,
+    ) -> Option<&'static str> {
+        if layer == IntegrationLayer::Org {
+            return None;
         }
-        if integration.layer == IntegrationLayer::User && !self.allow_user_integrations {
-            return false;
+        if layer == IntegrationLayer::User && !self.allow_user_integrations {
+            return Some("org policy does not allow personal integrations");
         }
-        match &integration.catalog_entry_id {
-            None => self.allow_custom_urls,
-            Some(entry) => match self.catalog_mode {
-                CatalogMode::All => true,
-                CatalogMode::None => false,
-                CatalogMode::Allowlist => self.allowed_catalog_ids.contains(entry),
-            },
+        match catalog_entry_id {
+            None if !self.allow_custom_urls => {
+                Some("org policy does not allow custom integration URLs")
+            }
+            None => None,
+            Some(_) if self.catalog_mode == CatalogMode::None => {
+                Some("org policy does not allow catalog integrations")
+            }
+            Some(entry)
+                if self.catalog_mode == CatalogMode::Allowlist
+                    && !self.allowed_catalog_ids.iter().any(|id| id == entry) =>
+            {
+                Some("org policy does not allow this catalog entry")
+            }
+            Some(_) => None,
         }
     }
 }
@@ -281,4 +300,88 @@ pub trait IntegrationCredentialStore: Send + Sync {
         expected_updated_at: DateTime<Utc>,
         credential: &StoredCredential,
     ) -> Result<bool>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn policy(f: impl FnOnce(&mut IntegrationPolicy)) -> IntegrationPolicy {
+        let mut policy = IntegrationPolicy::default_for(OrgId::from("org_1"));
+        f(&mut policy);
+        policy
+    }
+
+    #[test]
+    fn org_layer_installs_are_never_denied() {
+        let strict = policy(|p| {
+            p.catalog_mode = CatalogMode::None;
+            p.allow_user_integrations = false;
+        });
+        assert_eq!(strict.install_denial(IntegrationLayer::Org, None), None);
+        assert_eq!(
+            strict.install_denial(IntegrationLayer::Org, Some("curated/x")),
+            None
+        );
+    }
+
+    #[test]
+    fn default_policy_allows_catalog_installs_but_not_custom_urls() {
+        let default = policy(|_| {});
+        assert_eq!(
+            default.install_denial(IntegrationLayer::Space, Some("curated/x")),
+            None
+        );
+        assert!(
+            default
+                .install_denial(IntegrationLayer::Space, None)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn allowlist_denies_entries_outside_it() {
+        let allowlist = policy(|p| {
+            p.catalog_mode = CatalogMode::Allowlist;
+            p.allowed_catalog_ids = vec!["curated/a".into()];
+        });
+        assert_eq!(
+            allowlist.install_denial(IntegrationLayer::User, Some("curated/a")),
+            None
+        );
+        assert!(
+            allowlist
+                .install_denial(IntegrationLayer::User, Some("curated/b"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn mode_none_denies_every_catalog_install_below_the_org() {
+        let none = policy(|p| p.catalog_mode = CatalogMode::None);
+        assert!(
+            none.install_denial(IntegrationLayer::Space, Some("curated/a"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn user_layer_needs_allow_user_integrations() {
+        let no_users = policy(|p| p.allow_user_integrations = false);
+        assert!(
+            no_users
+                .install_denial(IntegrationLayer::User, Some("curated/a"))
+                .is_some()
+        );
+        assert_eq!(
+            no_users.install_denial(IntegrationLayer::Space, Some("curated/a")),
+            None
+        );
+    }
+
+    #[test]
+    fn custom_urls_are_allowed_once_the_policy_says_so() {
+        let custom = policy(|p| p.allow_custom_urls = true);
+        assert_eq!(custom.install_denial(IntegrationLayer::User, None), None);
+    }
 }
