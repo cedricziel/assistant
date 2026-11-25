@@ -151,6 +151,10 @@ mod tests {
                     .set_body_json(json!({"jsonrpc": "2.0", "id": id, "result": result}))
             };
             match body["method"].as_str().unwrap_or_default() {
+                // A server from before `server/discover`: the client falls back to `initialize`.
+                "server/discover" => ResponseTemplate::new(200).set_body_json(
+                    json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}}),
+                ),
                 "initialize" => reply(json!({
                     "protocolVersion": body["params"]["protocolVersion"],
                     "capabilities": {"tools": {}},
