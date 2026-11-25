@@ -532,7 +532,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "cron",
- "dirs",
  "glob",
  "jsonschema",
  "reqwest",

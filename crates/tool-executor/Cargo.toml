@@ -24,7 +24,6 @@ scraper = { workspace = true }
 glob = { workspace = true }
 chrono = { workspace = true }
 cron = { workspace = true }
-dirs = { workspace = true }
 uuid = { workspace = true }
 whatlang = { workspace = true }
 stop-words = { workspace = true }
