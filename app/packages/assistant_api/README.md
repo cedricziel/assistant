@@ -408,6 +408,7 @@ Authentication schemes defined for the API:
  - **api_keys:write**: Create and revoke API keys
  - **conversations:read**: Read conversations
  - **conversations:write**: Create and send messages
+ - **mcp:execute**: Call tools through the MCP endpoint
  - **org:manage**: Full organization management
  - **personas:read**: Read personas
  - **personas:write**: Create and update personas
@@ -428,6 +429,7 @@ Authentication schemes defined for the API:
  - **api_keys:write**: Create and revoke API keys
  - **conversations:read**: Read conversations
  - **conversations:write**: Create and send messages
+ - **mcp:execute**: Call tools through the MCP endpoint
  - **org:manage**: Full organization management
  - **personas:read**: Read personas
  - **personas:write**: Create and update personas

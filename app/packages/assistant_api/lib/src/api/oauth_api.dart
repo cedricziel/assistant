@@ -35,6 +35,7 @@ class OauthApi {
   /// * [codeChallenge]
   /// * [codeChallengeMethod] - Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected.
   /// * [scope]
+  /// * [resource] - RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API.
   /// * [org] - Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; a password org shows the password form. Without this parameter the page asks for the user's email to find the org.
   /// * [loginHint] - Email the user already entered. Prefills the password form and is passed on to the org's identity provider as `login_hint`.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -54,6 +55,7 @@ class OauthApi {
     String? codeChallenge,
     String? codeChallengeMethod,
     String? scope,
+    String? resource,
     String? org,
     String? loginHint,
     CancelToken? cancelToken,
@@ -91,6 +93,8 @@ class OauthApi {
           _serializers, codeChallengeMethod, const FullType(String)),
       r'scope':
           encodeQueryParameter(_serializers, scope, const FullType(String)),
+      r'resource':
+          encodeQueryParameter(_serializers, resource, const FullType(String)),
       r'org': encodeQueryParameter(_serializers, org, const FullType(String)),
       r'login_hint':
           encodeQueryParameter(_serializers, loginHint, const FullType(String)),
@@ -119,6 +123,7 @@ class OauthApi {
   /// * [codeChallengeMethod] - Must be `S256`.
   /// * [email]
   /// * [password]
+  /// * [resource] - RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API.
   /// * [scope]
   /// * [state]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -138,6 +143,7 @@ class OauthApi {
     String? codeChallengeMethod,
     String? email,
     String? password,
+    String? resource,
     String? scope,
     String? state,
     CancelToken? cancelToken,
@@ -178,6 +184,8 @@ class OauthApi {
             _serializers, password, const FullType(String)),
         r'redirect_uri': encodeQueryParameter(
             _serializers, redirectUri, const FullType(String)),
+        r'resource': encodeQueryParameter(
+            _serializers, resource, const FullType(String)),
         r'scope':
             encodeQueryParameter(_serializers, scope, const FullType(String)),
         r'state':
@@ -606,6 +614,7 @@ class OauthApi {
   /// * [redirectUri]
   /// * [codeChallenge]
   /// * [codeChallengeMethod] - Must be `S256`.
+  /// * [resource] - RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API.
   /// * [scope]
   /// * [state]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -623,6 +632,7 @@ class OauthApi {
     required String redirectUri,
     String? codeChallenge,
     String? codeChallengeMethod,
+    String? resource,
     String? scope,
     String? state,
     CancelToken? cancelToken,
@@ -660,6 +670,8 @@ class OauthApi {
             encodeQueryParameter(_serializers, email, const FullType(String)),
         r'redirect_uri': encodeQueryParameter(
             _serializers, redirectUri, const FullType(String)),
+        r'resource': encodeQueryParameter(
+            _serializers, resource, const FullType(String)),
         r'scope':
             encodeQueryParameter(_serializers, scope, const FullType(String)),
         r'state':
@@ -946,6 +958,7 @@ class OauthApi {
   /// * [deviceCode] - Device code (for device code grant).
   /// * [redirectUri]
   /// * [refreshToken] - Refresh token (for `refresh_token` grant).
+  /// * [resource] - RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. On `authorization_code` and `refresh_token` it must equal the resource the grant was authorized for; omit it to inherit that one. The device code grant takes it here, as the device authorization request carries none.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -963,6 +976,7 @@ class OauthApi {
     String? deviceCode,
     String? redirectUri,
     String? refreshToken,
+    String? resource,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -1002,6 +1016,8 @@ class OauthApi {
             _serializers, redirectUri, const FullType(String)),
         r'refresh_token': encodeQueryParameter(
             _serializers, refreshToken, const FullType(String)),
+        r'resource': encodeQueryParameter(
+            _serializers, resource, const FullType(String)),
       };
     } catch (error, stackTrace) {
       throw DioException(

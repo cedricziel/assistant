@@ -16,6 +16,7 @@ Name | Type | Description | Notes
 **registrationEndpoint** | **String** |  | 
 **responseTypesSupported** | **BuiltList&lt;String&gt;** |  | 
 **revocationEndpoint** | **String** |  | 
+**scopesSupported** | **BuiltList&lt;String&gt;** | Scopes an OAuth client can request. | 
 **tokenEndpoint** | **String** |  | 
 **tokenEndpointAuthMethodsSupported** | **BuiltList&lt;String&gt;** |  | 
 

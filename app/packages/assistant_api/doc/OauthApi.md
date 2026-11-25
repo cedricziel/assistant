@@ -24,7 +24,7 @@ Method | HTTP request | Description
 
 
 # **authorizeGet**
-> authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, org, loginHint)
+> authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, resource, org, loginHint)
 
 GET /oauth/authorize — render the email step, the password form, or redirect to the org's IdP.
 
@@ -40,11 +40,12 @@ final String state = state_example; // String |
 final String codeChallenge = codeChallenge_example; // String | 
 final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected.
 final String scope = scope_example; // String | 
+final String resource = resource_example; // String | RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API.
 final String org = org_example; // String | Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; a password org shows the password form. Without this parameter the page asks for the user's email to find the org.
 final String loginHint = loginHint_example; // String | Email the user already entered. Prefills the password form and is passed on to the org's identity provider as `login_hint`.
 
 try {
-    api.authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, org, loginHint);
+    api.authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, resource, org, loginHint);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->authorizeGet: $e\n');
 }
@@ -61,6 +62,7 @@ Name | Type | Description  | Notes
  **codeChallenge** | **String**|  | [optional] 
  **codeChallengeMethod** | **String**| Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected. | [optional] 
  **scope** | **String**|  | [optional] 
+ **resource** | **String**| RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API. | [optional] 
  **org** | **String**| Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; a password org shows the password form. Without this parameter the page asks for the user's email to find the org. | [optional] 
  **loginHint** | **String**| Email the user already entered. Prefills the password form and is passed on to the org's identity provider as `login_hint`. | [optional] 
 
@@ -80,7 +82,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **authorizePost**
-> authorizePost(clientId, org, redirectUri, codeChallenge, codeChallengeMethod, email, password, scope, state)
+> authorizePost(clientId, org, redirectUri, codeChallenge, codeChallengeMethod, email, password, resource, scope, state)
 
 POST /oauth/authorize — validate one org's password credentials, generate an auth code, redirect.
 
@@ -96,11 +98,12 @@ final String codeChallenge = codeChallenge_example; // String |
 final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`.
 final String email = email_example; // String | 
 final String password = password_example; // String | 
+final String resource = resource_example; // String | RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API.
 final String scope = scope_example; // String | 
 final String state = state_example; // String | 
 
 try {
-    api.authorizePost(clientId, org, redirectUri, codeChallenge, codeChallengeMethod, email, password, scope, state);
+    api.authorizePost(clientId, org, redirectUri, codeChallenge, codeChallengeMethod, email, password, resource, scope, state);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->authorizePost: $e\n');
 }
@@ -117,6 +120,7 @@ Name | Type | Description  | Notes
  **codeChallengeMethod** | **String**| Must be `S256`. | [optional] 
  **email** | **String**|  | [optional] 
  **password** | **String**|  | [optional] 
+ **resource** | **String**| RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API. | [optional] 
  **scope** | **String**|  | [optional] 
  **state** | **String**|  | [optional] 
 
@@ -358,7 +362,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **identifyPost**
-> identifyPost(clientId, email, redirectUri, codeChallenge, codeChallengeMethod, scope, state)
+> identifyPost(clientId, email, redirectUri, codeChallenge, codeChallengeMethod, resource, scope, state)
 
 POST /oauth/authorize/identify — find the org an email signs in to.
 
@@ -374,11 +378,12 @@ final String email = email_example; // String | Email used to find the org the u
 final String redirectUri = redirectUri_example; // String | 
 final String codeChallenge = codeChallenge_example; // String | 
 final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`.
+final String resource = resource_example; // String | RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API.
 final String scope = scope_example; // String | 
 final String state = state_example; // String | 
 
 try {
-    api.identifyPost(clientId, email, redirectUri, codeChallenge, codeChallengeMethod, scope, state);
+    api.identifyPost(clientId, email, redirectUri, codeChallenge, codeChallengeMethod, resource, scope, state);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->identifyPost: $e\n');
 }
@@ -393,6 +398,7 @@ Name | Type | Description  | Notes
  **redirectUri** | **String**|  | 
  **codeChallenge** | **String**|  | [optional] 
  **codeChallengeMethod** | **String**| Must be `S256`. | [optional] 
+ **resource** | **String**| RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. Omit it for a token for the web API. | [optional] 
  **scope** | **String**|  | [optional] 
  **state** | **String**|  | [optional] 
 
@@ -536,7 +542,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **token**
-> TokenResponse token(grantType, clientId, code, codeVerifier, deviceCode, redirectUri, refreshToken)
+> TokenResponse token(grantType, clientId, code, codeVerifier, deviceCode, redirectUri, refreshToken, resource)
 
 POST /oauth/token
 
@@ -552,9 +558,10 @@ final String codeVerifier = codeVerifier_example; // String | PKCE verifier (RFC
 final String deviceCode = deviceCode_example; // String | Device code (for device code grant).
 final String redirectUri = redirectUri_example; // String | 
 final String refreshToken = refreshToken_example; // String | Refresh token (for `refresh_token` grant).
+final String resource = resource_example; // String | RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. On `authorization_code` and `refresh_token` it must equal the resource the grant was authorized for; omit it to inherit that one. The device code grant takes it here, as the device authorization request carries none.
 
 try {
-    final response = api.token(grantType, clientId, code, codeVerifier, deviceCode, redirectUri, refreshToken);
+    final response = api.token(grantType, clientId, code, codeVerifier, deviceCode, redirectUri, refreshToken, resource);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->token: $e\n');
@@ -572,6 +579,7 @@ Name | Type | Description  | Notes
  **deviceCode** | **String**| Device code (for device code grant). | [optional] 
  **redirectUri** | **String**|  | [optional] 
  **refreshToken** | **String**| Refresh token (for `refresh_token` grant). | [optional] 
+ **resource** | **String**| RFC 8707 resource the token is for. Only the MCP endpoint URL (`<public base URL>/mcp`) is accepted; any other value is rejected as `invalid_target`. On `authorization_code` and `refresh_token` it must equal the resource the grant was authorized for; omit it to inherit that one. The device code grant takes it here, as the device authorization request carries none. | [optional] 
 
 ### Return type
 

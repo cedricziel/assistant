@@ -20,6 +20,7 @@ part 'server_metadata.g.dart';
 /// * [registrationEndpoint]
 /// * [responseTypesSupported]
 /// * [revocationEndpoint]
+/// * [scopesSupported] - Scopes an OAuth client can request.
 /// * [tokenEndpoint]
 /// * [tokenEndpointAuthMethodsSupported]
 @BuiltValue()
@@ -48,6 +49,10 @@ abstract class ServerMetadata
 
   @BuiltValueField(wireName: r'revocation_endpoint')
   String get revocationEndpoint;
+
+  /// Scopes an OAuth client can request.
+  @BuiltValueField(wireName: r'scopes_supported')
+  BuiltList<String> get scopesSupported;
 
   @BuiltValueField(wireName: r'token_endpoint')
   String get tokenEndpoint;
@@ -120,6 +125,11 @@ class _$ServerMetadataSerializer
     yield serializers.serialize(
       object.revocationEndpoint,
       specifiedType: const FullType(String),
+    );
+    yield r'scopes_supported';
+    yield serializers.serialize(
+      object.scopesSupported,
+      specifiedType: const FullType(BuiltList, [FullType(String)]),
     );
     yield r'token_endpoint';
     yield serializers.serialize(
@@ -211,6 +221,13 @@ class _$ServerMetadataSerializer
             specifiedType: const FullType(String),
           ) as String;
           result.revocationEndpoint = valueDes;
+          break;
+        case r'scopes_supported':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType(BuiltList, [FullType(String)]),
+          ) as BuiltList<String>;
+          result.scopesSupported.replace(valueDes);
           break;
         case r'token_endpoint':
           final valueDes = serializers.deserialize(

@@ -24,6 +24,8 @@ class _$ServerMetadata extends ServerMetadata {
   @override
   final String revocationEndpoint;
   @override
+  final BuiltList<String> scopesSupported;
+  @override
   final String tokenEndpoint;
   @override
   final BuiltList<String> tokenEndpointAuthMethodsSupported;
@@ -40,6 +42,7 @@ class _$ServerMetadata extends ServerMetadata {
       required this.registrationEndpoint,
       required this.responseTypesSupported,
       required this.revocationEndpoint,
+      required this.scopesSupported,
       required this.tokenEndpoint,
       required this.tokenEndpointAuthMethodsSupported})
       : super._();
@@ -62,6 +65,7 @@ class _$ServerMetadata extends ServerMetadata {
         registrationEndpoint == other.registrationEndpoint &&
         responseTypesSupported == other.responseTypesSupported &&
         revocationEndpoint == other.revocationEndpoint &&
+        scopesSupported == other.scopesSupported &&
         tokenEndpoint == other.tokenEndpoint &&
         tokenEndpointAuthMethodsSupported ==
             other.tokenEndpointAuthMethodsSupported;
@@ -78,6 +82,7 @@ class _$ServerMetadata extends ServerMetadata {
     _$hash = $jc(_$hash, registrationEndpoint.hashCode);
     _$hash = $jc(_$hash, responseTypesSupported.hashCode);
     _$hash = $jc(_$hash, revocationEndpoint.hashCode);
+    _$hash = $jc(_$hash, scopesSupported.hashCode);
     _$hash = $jc(_$hash, tokenEndpoint.hashCode);
     _$hash = $jc(_$hash, tokenEndpointAuthMethodsSupported.hashCode);
     _$hash = $jf(_$hash);
@@ -95,6 +100,7 @@ class _$ServerMetadata extends ServerMetadata {
           ..add('registrationEndpoint', registrationEndpoint)
           ..add('responseTypesSupported', responseTypesSupported)
           ..add('revocationEndpoint', revocationEndpoint)
+          ..add('scopesSupported', scopesSupported)
           ..add('tokenEndpoint', tokenEndpoint)
           ..add('tokenEndpointAuthMethodsSupported',
               tokenEndpointAuthMethodsSupported))
@@ -150,6 +156,12 @@ class ServerMetadataBuilder
   set revocationEndpoint(String? revocationEndpoint) =>
       _$this._revocationEndpoint = revocationEndpoint;
 
+  ListBuilder<String>? _scopesSupported;
+  ListBuilder<String> get scopesSupported =>
+      _$this._scopesSupported ??= ListBuilder<String>();
+  set scopesSupported(ListBuilder<String>? scopesSupported) =>
+      _$this._scopesSupported = scopesSupported;
+
   String? _tokenEndpoint;
   String? get tokenEndpoint => _$this._tokenEndpoint;
   set tokenEndpoint(String? tokenEndpoint) =>
@@ -179,6 +191,7 @@ class ServerMetadataBuilder
       _registrationEndpoint = $v.registrationEndpoint;
       _responseTypesSupported = $v.responseTypesSupported.toBuilder();
       _revocationEndpoint = $v.revocationEndpoint;
+      _scopesSupported = $v.scopesSupported.toBuilder();
       _tokenEndpoint = $v.tokenEndpoint;
       _tokenEndpointAuthMethodsSupported =
           $v.tokenEndpointAuthMethodsSupported.toBuilder();
@@ -225,6 +238,7 @@ class ServerMetadataBuilder
             responseTypesSupported: responseTypesSupported.build(),
             revocationEndpoint: BuiltValueNullFieldError.checkNotNull(
                 revocationEndpoint, r'ServerMetadata', 'revocationEndpoint'),
+            scopesSupported: scopesSupported.build(),
             tokenEndpoint: BuiltValueNullFieldError.checkNotNull(
                 tokenEndpoint, r'ServerMetadata', 'tokenEndpoint'),
             tokenEndpointAuthMethodsSupported:
@@ -241,6 +255,9 @@ class ServerMetadataBuilder
 
         _$failedField = 'responseTypesSupported';
         responseTypesSupported.build();
+
+        _$failedField = 'scopesSupported';
+        scopesSupported.build();
 
         _$failedField = 'tokenEndpointAuthMethodsSupported';
         tokenEndpointAuthMethodsSupported.build();

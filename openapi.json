@@ -8015,6 +8015,18 @@
             }
           },
           {
+            "name": "resource",
+            "in": "query",
+            "description": "RFC 8707 resource the token is for. Only the MCP endpoint URL\n(`<public base URL>/mcp`) is accepted; any other value is rejected as\n`invalid_target`. Omit it for a token for the web API.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "org",
             "in": "query",
             "description": "Slug of the org to sign in to. An org in OIDC mode redirects to its\nown identity provider; a password org shows the password form. Without\nthis parameter the page asks for the user's email to find the org.",
@@ -8558,7 +8570,7 @@
             }
           },
           "400": {
-            "description": "Invalid grant",
+            "description": "Invalid grant, or `invalid_target` for an unknown `resource`",
             "content": {
               "application/json": {
                 "schema": {
@@ -9986,6 +9998,13 @@
           "redirect_uri": {
             "type": "string"
           },
+          "resource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 8707 resource the token is for. Only the MCP endpoint URL\n(`<public base URL>/mcp`) is accepted; any other value is rejected as\n`invalid_target`. Omit it for a token for the web API."
+          },
           "scope": {
             "type": [
               "string",
@@ -11126,6 +11145,13 @@
           },
           "redirect_uri": {
             "type": "string"
+          },
+          "resource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 8707 resource the token is for. Only the MCP endpoint URL\n(`<public base URL>/mcp`) is accepted; any other value is rejected as\n`invalid_target`. Omit it for a token for the web API."
           },
           "scope": {
             "type": [
@@ -12599,7 +12625,8 @@
           "response_types_supported",
           "grant_types_supported",
           "token_endpoint_auth_methods_supported",
-          "code_challenge_methods_supported"
+          "code_challenge_methods_supported",
+          "scopes_supported"
         ],
         "properties": {
           "authorization_endpoint": {
@@ -12634,6 +12661,13 @@
           },
           "revocation_endpoint": {
             "type": "string"
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scopes an OAuth client can request."
           },
           "token_endpoint": {
             "type": "string"
@@ -13439,6 +13473,13 @@
               "null"
             ],
             "description": "Refresh token (for `refresh_token` grant)."
+          },
+          "resource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 8707 resource the token is for. Only the MCP endpoint URL\n(`<public base URL>/mcp`) is accepted; any other value is rejected as\n`invalid_target`. On `authorization_code` and `refresh_token` it must\nequal the resource the grant was authorized for; omit it to inherit\nthat one. The device code grant takes it here, as the device\nauthorization request carries none."
           }
         }
       },
@@ -14279,6 +14320,7 @@
               "api_keys:write": "Create and revoke API keys",
               "conversations:read": "Read conversations",
               "conversations:write": "Create and send messages",
+              "mcp:execute": "Call tools through the MCP endpoint",
               "org:manage": "Full organization management",
               "personas:read": "Read personas",
               "personas:write": "Create and update personas",
@@ -14297,6 +14339,7 @@
               "api_keys:write": "Create and revoke API keys",
               "conversations:read": "Read conversations",
               "conversations:write": "Create and send messages",
+              "mcp:execute": "Call tools through the MCP endpoint",
               "org:manage": "Full organization management",
               "personas:read": "Read personas",
               "personas:write": "Create and update personas",
