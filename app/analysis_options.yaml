@@ -14,6 +14,10 @@ analyzer:
   # code are not actionable; fix them by updating the spec and regenerating.
   exclude:
     - packages/assistant_api/**
+    - build/**
+    - ios/**
+    - web/**
+    - macos/**
 
 linter:
   # The lint rules applied to this project can be customized in the
