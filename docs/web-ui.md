@@ -1,9 +1,10 @@
 # Web UI
 
-The assistant ships an optional web UI for inspecting traces, logs,
-metrics, managing Persona A2A Profiles, and configuring webhooks. It runs through
-the unified `assistant` binary (`assistant webui serve`) and reads from
-the same SQLite database the runtime writes to.
+The assistant ships an optional web UI for chatting with Personas, managing
+skills, Persona A2A Profiles and webhooks. It runs through the unified
+`assistant` binary (`assistant webui serve`) and reads from the same SQLite
+database the runtime writes to. Telemetry is not shown here: it is exported
+over OTLP ([docs/opentelemetry.md](opentelemetry.md)).
 
 ## Quick start
 
@@ -55,33 +56,6 @@ right to expand, left to collapse. Mouse drags are ignored.
 
 Collapse state persists across reloads under the `SharedPreferences` key
 `assistant.sidebarCollapsed` (localStorage on web).
-
-## Trace detail — tool call cards
-
-Tool invocations performed by the agent are recorded as OpenTelemetry spans
-named `execute_tool <tool_name>` with the following attributes:
-
-| Attribute                                           | Description                                                    |
-| --------------------------------------------------- | -------------------------------------------------------------- |
-| `tool_name`                                         | Tool the agent invoked (e.g. `file-read`, `bash`, `web-fetch`) |
-| `tool_params`                                       | JSON-encoded parameter object                                  |
-| `tool_status`                                       | `ok`, `error`, or `denied`                                     |
-| `tool_observation`                                  | Output returned to the model (success path)                    |
-| `tool_error`                                        | Error / denial message (failure / denied path)                 |
-| `duration_ms`                                       | Execution duration                                             |
-| `iteration` / `turn` / `interface` / `active_skill` | ReAct loop context                                             |
-
-The trace detail screen (`/traces/{id}`) renders these spans as dedicated
-**tool-call cards** with:
-
-- Status icon + colour pill: ✓ (`tertiary`) for `ok`, ✕ (`error`) for `error`,
-  ⊘ (amber) for `denied`, ? (neutral) when unknown.
-- Side-by-side **Params** / **Output** panes when expanded (vertical stack
-  on viewports narrower than 600 dp).
-- A `Show all attributes` toggle to reveal the full attribute map.
-
-Spans that don't match this shape (LLM chat calls, orchestrator spans, etc.)
-keep the generic span card.
 
 ## Theme
 
@@ -154,7 +128,7 @@ assistant webui serve --listen 0.0.0.0:8080 --no-secure-cookie --auth-token chan
 
 All unmatched paths are handled by the embedded Flutter web app (SPA
 fallback). The app uses the REST API below to drive the chat,
-persona switching, traces, logs, and skills views.
+persona switching, and skills views.
 
 ## REST API (`/api/*`)
 
@@ -171,9 +145,6 @@ These endpoints power the Flutter app and are also consumable directly:
 | `/api/personas`                        | GET    | List personas                                     |
 | `/api/personas/active`                 | POST   | Switch active persona                             |
 | `/api/personas/{id}/skills`            | GET    | List skills for a persona                         |
-| `/api/traces`                          | GET    | List traces (supports limit/offset/filter params) |
-| `/api/traces/{id}`                     | GET    | Get trace with span breakdown                     |
-| `/api/logs`                            | GET    | List log entries (supports filter params)         |
 | `/api/orgs`                            | GET    | List organizations (filtered by user access)      |
 | `/api/orgs`                            | POST   | Create organization                               |
 | `/api/orgs/{id}`                       | GET    | Get organization details                          |
@@ -218,7 +189,6 @@ See [authentication.md](authentication.md) for flow details.
 
 | Route                    | Description                                                                |
 | ------------------------ | -------------------------------------------------------------------------- |
-| `/analytics`             | Metrics dashboard — token usage, model comparison, tool stats, error rates |
 | `/agents`                | A2A Profile management — list, create, edit, delete                        |
 | `/agents/{id}/card.json` | Raw A2A Profile card JSON                                                  |
 | `/webhooks`              | Webhook management — list, create, toggle, rotate secrets                  |
@@ -280,8 +250,6 @@ assistant webui serve
 │   │   ├── mod.rs              # /api/conversations + /api/conversations/{id}/messages (SSE)
 │   │   ├── personas.rs         # /api/personas, /api/personas/active
 │   │   ├── skills.rs           # /api/personas/{id}/skills
-│   │   ├── traces.rs           # /api/traces, /api/traces/{id}
-│   │   ├── logs.rs             # /api/logs
 │   │   ├── orgs.rs             # /api/orgs CRUD
 │   │   ├── users.rs            # /api/orgs/{org}/users CRUD
 │   │   ├── spaces.rs           # /api/orgs/{org}/spaces CRUD + members

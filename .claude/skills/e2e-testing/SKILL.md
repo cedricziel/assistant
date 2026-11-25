@@ -51,7 +51,7 @@ npx playwright test --update-snapshots
 npm run test:update
 
 # Run a single test
-npx playwright test -g "traces page"
+npx playwright test -g "skills list page"
 
 # Run only desktop viewport
 npx playwright test --project=desktop-chrome

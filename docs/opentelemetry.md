@@ -8,9 +8,9 @@ correlation — is OTLP export to your own stack, queried there with TraceQL,
 LogQL, PromQL, or whatever your backend speaks. See
 [ADR-0010](adr/adr-0010-external-observability.md).
 
-A small local SQLite store runs by default alongside OTLP. It exists to power
-the built-in trace/log/metric viewers on a single-node install — a debugging
-convenience, not a warehouse. Turn it off with `exporter = "none"`.
+The assistant keeps no local telemetry store, API or viewer: OTLP is the only
+output ([ADR-0011](adr/adr-0011-otlp-only-telemetry.md)). With no OTLP
+endpoint configured, telemetry is a no-op and only console logging runs.
 
 ## Quick start
 
@@ -18,7 +18,7 @@ OTLP export turns on as soon as **any** non-empty `OTEL_EXPORTER_OTLP_*`
 variable is set.
 
 ```sh
-# Local SQLite viewers only (default — no OTLP)
+# No endpoint: telemetry is off, console logs only (default)
 assistant
 
 # Send all signals to an OTLP collector
@@ -37,9 +37,6 @@ OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://mimir:8080/otlp/v1/metrics \
 OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.example.com \
 OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer my-token" \
   assistant
-
-# Ship everything off-box and keep nothing locally
-OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318 assistant   # + exporter = "none"
 
 # Kill switch — no providers, no exporters, console logs only
 OTEL_SDK_DISABLED=true assistant
@@ -133,7 +130,8 @@ OTel specification; tune them if you are dropping telemetry under load.
 
 `crates/runtime/tests/otlp_env_config.rs` exercises the endpoint, headers,
 protocol, compression, and resource-attribute variables end to end against a
-real HTTP server; `otlp_sdk_disabled.rs` covers the kill switch. Both are
+real HTTP server; `otlp_sdk_disabled.rs` covers the kill switch, and `otlp_unconfigured.rs` pins
+the no-op default. All are
 integration tests because `init_tracing` installs global state and the tests
 mutate the process environment.
 
@@ -143,23 +141,12 @@ In `~/.assistant/config.toml`:
 
 ```toml
 [observability]
-exporter = "sqlite"    # "sqlite" (default) or "none"
 trace_content = false  # Capture full LLM message content in spans (default: false)
 ```
 
-`exporter` controls **only** the local SQLite store, and only its **write**
-side. OTLP export is independent and always additive, so with
-`exporter = "sqlite"` the two destinations run side by side.
-
-With `exporter = "none"`, new telemetry goes to OTLP alone. The built-in
-viewers keep working and keep serving whatever rows were written to SQLite
-earlier — the local store is no longer appended to, not emptied. Delete the
-`distributed_traces`, `logs`, and `metric_points` tables if you want the
-history gone too.
-
-> The removed `"iceberg"` and `"both"` values are rejected at parse time
-> rather than silently downgraded, so a stale config fails loudly. See
-> [ADR-0010](adr/adr-0010-external-observability.md).
+There is no exporter setting: where telemetry goes is decided by the
+`OTEL_*` environment variables above. A leftover `exporter = "..."` key from
+an older config is ignored.
 
 `trace_content = true` records `gen_ai.input.messages`,
 `gen_ai.output.messages`, `gen_ai.system_instructions`, and
@@ -234,8 +221,9 @@ records via `OpenTelemetryTracingBridge`. Each log record carries:
 - Trace/span context (when emitted inside an active span)
 - Structured attributes from tracing fields
 
-`sqlx` targets are suppressed to prevent a feedback loop (SQLite exporter
-INSERT -> tracing event -> bridge -> exporter -> INSERT -> ...).
+`sqlx` query events and the HTTP client internals (`h2`, `hyper_util`) are
+filtered out of the bridge so that exporting a record does not generate
+records that are exported in turn.
 
 ## Metrics
 
@@ -293,19 +281,14 @@ Every signal carries a shared OTel `Resource`:
               ┌──────────────┼──────────────┐
               ▼              ▼              ▼
         TracerProvider  LoggerProvider  MeterProvider
-          │      │        │      │       │      │
-          ▼      ▼        ▼      ▼       ▼      ▼
-       SQLite  OTLP    SQLite  OTLP   SQLite  OTLP
-       export  HTTP    export  HTTP   export  HTTP
-          │      │        │      │       │      │
-          ▼      ▼        ▼      ▼       ▼      ▼
-       Web UI  Tempo/   Web UI  Loki/  Web UI  Mimir/
-       viewers Jaeger   viewers  ...   viewers  ...
+              │              │              │
+              ▼              ▼              ▼
+          OTLP HTTP      OTLP HTTP      OTLP HTTP
+              │              │              │
+              ▼              ▼              ▼
+        Tempo/Jaeger/…   Loki/…        Mimir/Prometheus/…
 ```
 
-With `exporter = "sqlite"` (the default) and OTLP env vars set, both
-destinations run side by side. The SQLite exporters power the built-in web UI
-viewers; the OTLP exporters send data to your collector of choice — which is
-where anything beyond local debugging should live. `exporter = "none"` drops
-the left-hand branch: new signals then go only to OTLP, though the viewers
-still read any rows SQLite already holds.
+The providers exist only when OTLP is configured and `OTEL_SDK_DISABLED` is
+not `true`. Retention, dashboards and querying (TraceQL, LogQL, PromQL) are
+the backend's job. `assistant doctor` reports whether OTLP export is on.
