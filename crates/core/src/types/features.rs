@@ -1,5 +1,5 @@
 //! Per-feature runtime configuration (memory, compaction, learning, titling,
-//! push notifications).
+//! push notifications, integrations).
 
 use serde::{Deserialize, Serialize};
 
@@ -254,6 +254,39 @@ pub struct NotificationsConfig {
     /// Base64url-encoded VAPID public key (P-256). Auto-generated if absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vapid_public_key: Option<String>,
+}
+
+/// Integrations configuration (`[integrations]` section).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IntegrationsConfig {
+    /// Upstream integrations.sh catalog (`[integrations.catalog]`).
+    #[serde(default)]
+    pub catalog: CatalogConfig,
+}
+
+/// Where the server fetches the integrations catalog from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogConfig {
+    /// When `false` the server never contacts `source_url` and serves an
+    /// empty catalog.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// URL of the catalog JSON document.
+    #[serde(default = "default_catalog_source_url")]
+    pub source_url: String,
+}
+
+impl Default for CatalogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            source_url: default_catalog_source_url(),
+        }
+    }
+}
+
+fn default_catalog_source_url() -> String {
+    "https://integrations.sh/api.json".to_string()
 }
 
 #[cfg(test)]

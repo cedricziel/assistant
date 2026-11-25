@@ -19,6 +19,7 @@ import 'package:assistant_api/src/api/capabilities_api.dart';
 import 'package:assistant_api/src/api/catalog_api.dart';
 import 'package:assistant_api/src/api/commands_api.dart';
 import 'package:assistant_api/src/api/conversations_api.dart';
+import 'package:assistant_api/src/api/integrations_api.dart';
 import 'package:assistant_api/src/api/interfaces_api.dart';
 import 'package:assistant_api/src/api/members_api.dart';
 import 'package:assistant_api/src/api/messages_api.dart';
@@ -213,6 +214,12 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   ConversationsApi getConversationsApi() {
     return ConversationsApi(dio, serializers);
+  }
+
+  /// Get IntegrationsApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  IntegrationsApi getIntegrationsApi() {
+    return IntegrationsApi(dio, serializers);
   }
 
   /// Get InterfacesApi instance, base route and serializer can be overridden by a given but be careful,

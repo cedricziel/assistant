@@ -2,6 +2,7 @@ mod a2a;
 pub mod api;
 pub(crate) mod audio_store;
 pub mod auth;
+pub mod catalog_sync;
 mod cors;
 pub(crate) mod errors;
 mod flutter_assets;
@@ -356,6 +357,13 @@ async fn run_with_args(args: Args) -> Result<()> {
         );
     }
 
+    // -- Integrations catalog: disk cache now, refreshed in the background ------
+    let catalog_sync = Arc::new(
+        catalog_sync::CatalogSync::new(server_config.integrations.catalog.clone(), &base_path)
+            .context("Failed to set up the integrations catalog sync")?,
+    );
+    catalog_sync.start().await;
+
     // -- Push dispatcher (built here so AppState can hold a reference) -------
     let push_dispatcher_for_state = if !vapid_private_key.is_empty() {
         Some(Arc::new(PushDispatcher::new(vapid_private_key.clone())))
@@ -640,6 +648,9 @@ async fn run_with_args(args: Args) -> Result<()> {
     let catalog_api_state = api::catalog::CatalogApiState {
         org_storage: org_storage.clone(),
     };
+    let integrations_api_state = api::integrations::IntegrationsApiState {
+        catalog: catalog_sync,
+    };
     let interfaces_api_state = api::interfaces::InterfacesApiState {
         org_storage: org_storage.clone(),
     };
@@ -687,6 +698,9 @@ async fn run_with_args(args: Args) -> Result<()> {
                 .merge(api::api_keys::api_keys_router().with_state(api_keys_api_state))
                 .merge(api::account::account_router().with_state(account_api_state))
                 .merge(api::catalog::catalog_api_router().with_state(catalog_api_state))
+                .merge(
+                    api::integrations::integrations_api_router().with_state(integrations_api_state),
+                )
                 .merge(api::interfaces::interfaces_api_router().with_state(interfaces_api_state))
                 .merge(api::bindings::bindings_api_router().with_state(bindings_api_state))
                 .merge(api::templates::templates_api_router().with_state(templates_api_state))

@@ -35,6 +35,10 @@ import 'package:assistant_api/src/model/authentication_info.dart';
 import 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/binding_response.dart';
 import 'package:assistant_api/src/model/cancel_task_request.dart';
+import 'package:assistant_api/src/model/catalog_auth_kind_response.dart';
+import 'package:assistant_api/src/model/catalog_auth_response.dart';
+import 'package:assistant_api/src/model/catalog_entry_list_response.dart';
+import 'package:assistant_api/src/model/catalog_entry_summary.dart';
 import 'package:assistant_api/src/model/catalog_item_response.dart';
 import 'package:assistant_api/src/model/change_password_request.dart';
 import 'package:assistant_api/src/model/client_credentials_o_auth_flow.dart';
@@ -185,6 +189,10 @@ part 'serializers.g.dart';
   AuthorizationCodeOAuthFlow,
   BindingResponse,
   CancelTaskRequest,
+  CatalogAuthKindResponse,
+  CatalogAuthResponse,
+  CatalogEntryListResponse,
+  CatalogEntrySummary,
   CatalogItemResponse,
   ChangePasswordRequest,
   ClientCredentialsOAuthFlow,

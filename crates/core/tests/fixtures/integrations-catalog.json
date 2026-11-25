@@ -1,0 +1,600 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-25T09:47:10.053Z",
+  "data": [
+    {
+      "id": "curated/axiom-co-mcp",
+      "kind": "mcp",
+      "slug": "axiom-co-mcp",
+      "name": "Axiom",
+      "description": "Axiom's API lets agents ingest and query machine data and manage observability resources. Its hosted MCP server exposes query, monitor, notifier, and dashboard tools.",
+      "icon": "https://www.google.com/s2/favicons?domain=axiom.co&sz=64",
+      "domain": "axiom.co",
+      "categories": [
+        "observability",
+        "data",
+        "devtools"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "axiom.co/mcp",
+      "connectUrl": "https://mcp.axiom.co/mcp",
+      "auth": {
+        "kind": "oauth"
+      }
+    },
+    {
+      "id": "curated/deepwiki-com-mcp",
+      "kind": "mcp",
+      "slug": "deepwiki-com",
+      "name": "DeepWiki",
+      "description": "DeepWiki's public MCP server lets agents inspect a repository's wiki structure, read generated documentation, and ask questions grounded in a codebase.",
+      "icon": "https://www.google.com/s2/favicons?domain=deepwiki.com&sz=64",
+      "domain": "deepwiki.com",
+      "categories": [
+        "developer-tools",
+        "documentation",
+        "search"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "connectUrl": "https://mcp.deepwiki.com/mcp",
+      "auth": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "curated/exa-ai-mcp",
+      "kind": "mcp",
+      "slug": "exa-ai",
+      "name": "Exa",
+      "description": "Exa gives agents web search and page contents through its Search API, structured collection building through Websets, and live search tools through a hosted MCP server.",
+      "icon": "https://www.google.com/s2/favicons?domain=exa.ai&sz=64",
+      "domain": "exa.ai",
+      "categories": [
+        "search",
+        "ai",
+        "data"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "connectUrl": "https://mcp.exa.ai/mcp",
+      "auth": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "curated/figma-com-mcp",
+      "kind": "mcp",
+      "slug": "figma-com-mcp",
+      "name": "Figma",
+      "description": "Figma's REST API lets agents inspect files, comments, components, variables, projects, and webhooks. Its hosted MCP server supplies authenticated design context and canvas tools.",
+      "icon": "https://www.google.com/s2/favicons?domain=figma.com&sz=64",
+      "domain": "figma.com",
+      "categories": [
+        "design",
+        "collaboration",
+        "devtools"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "figma.com/mcp",
+      "connectUrl": "https://mcp.figma.com/mcp",
+      "auth": {
+        "kind": "oauth"
+      }
+    },
+    {
+      "id": "curated/github-com-mcp",
+      "kind": "mcp",
+      "slug": "github-com",
+      "name": "GitHub",
+      "description": "GitHub exposes more agent-callable surface area than almost any service: an official remote MCP server, a fully-specified REST API, a GraphQL API, and the `gh` CLI. Pick the format that fits your agent — they all reach the same data.",
+      "icon": "https://www.google.com/s2/favicons?domain=github.com&sz=64",
+      "domain": "github.com",
+      "categories": [
+        "developer-tools",
+        "version-control"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "github.com/api",
+      "connectUrl": "https://api.githubcopilot.com/mcp/",
+      "auth": {
+        "kind": "mixed",
+        "header": "Authorization: Bearer {pat}",
+        "note": "OAuth in supporting clients, or a PAT bearer header anywhere else."
+      }
+    },
+    {
+      "id": "curated/linear-app-mcp",
+      "kind": "mcp",
+      "slug": "linear-app",
+      "name": "Linear",
+      "description": "Linear's entire product runs on its public GraphQL API, and its hosted MCP server gives agents the same tools the official integrations use: create and update issues, manage projects, and coordinate cycles.",
+      "icon": "https://www.google.com/s2/favicons?domain=linear.app&sz=64",
+      "domain": "linear.app",
+      "categories": [
+        "productivity",
+        "project-management"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "linear.app/mcp",
+      "connectUrl": "https://mcp.linear.app/mcp",
+      "auth": {
+        "kind": "oauth"
+      }
+    },
+    {
+      "id": "curated/notion-com-mcp",
+      "kind": "mcp",
+      "slug": "notion-com",
+      "name": "Notion",
+      "description": "Notion's hosted MCP server lets agents search, create, and reorganize workspace content. The REST API underneath uses internal integrations with explicit page-level sharing — a natural permission boundary for agents.",
+      "icon": "https://www.notion.so/images/notion-logo-block-main.svg",
+      "domain": "notion.com",
+      "categories": [
+        "productivity",
+        "knowledge-base"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "notion.com/mcp",
+      "connectUrl": "https://mcp.notion.com/mcp",
+      "auth": {
+        "kind": "oauth"
+      }
+    },
+    {
+      "id": "curated/posthog-com-mcp",
+      "kind": "mcp",
+      "slug": "posthog-com",
+      "name": "PostHog",
+      "description": "PostHog's MCP server exposes 50+ tools: run HogQL, build insights and dashboards, manage feature flags. Agents can answer 'what changed in signups last week?' against real product data.",
+      "icon": "https://www.google.com/s2/favicons?domain=posthog.com&sz=64",
+      "domain": "posthog.com",
+      "categories": [
+        "analytics",
+        "developer-tools"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "posthog.com/api",
+      "connectUrl": "https://mcp.posthog.com/mcp",
+      "auth": {
+        "kind": "api_key",
+        "header": "Authorization: Bearer {phx_key}"
+      }
+    },
+    {
+      "id": "curated/resend-com-mcp",
+      "kind": "mcp",
+      "slug": "resend-com",
+      "name": "Resend",
+      "description": "Resend is an email API built for developers. The official MCP server exposes sending, contacts, audiences, broadcasts, and domain management; the REST API is small enough for an agent to learn in one read.",
+      "icon": "https://www.google.com/s2/favicons?domain=resend.com&sz=64",
+      "domain": "resend.com",
+      "categories": [
+        "email",
+        "communication",
+        "developer-tools"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "resend.com/api",
+      "auth": {
+        "kind": "api_key"
+      }
+    },
+    {
+      "id": "curated/sentry-io-mcp",
+      "kind": "mcp",
+      "slug": "sentry-io",
+      "name": "Sentry",
+      "description": "Sentry's hosted MCP server gives agents direct access to issues, events, releases, and Seer root-cause runs — the context a coding agent needs to fix what's actually broken in production.",
+      "icon": "https://www.google.com/s2/favicons?domain=sentry.dev&sz=64",
+      "domain": "sentry.io",
+      "categories": [
+        "observability",
+        "developer-tools"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "sentry.io/mcp",
+      "connectUrl": "https://mcp.sentry.dev/mcp",
+      "auth": {
+        "kind": "oauth"
+      }
+    },
+    {
+      "id": "curated/stripe-com-mcp",
+      "kind": "mcp",
+      "slug": "stripe-com",
+      "name": "Stripe",
+      "description": "Stripe ships an official MCP server with documentation search and account tools, a meticulously specified REST API, and the Stripe CLI. Restricted API keys make it one of the safest services to hand to an autonomous agent.",
+      "icon": "https://www.google.com/s2/favicons?domain=stripe.com&sz=64",
+      "domain": "stripe.com",
+      "categories": [
+        "payments",
+        "financial-services"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "stripe.com/mcp",
+      "connectUrl": "https://mcp.stripe.com",
+      "auth": {
+        "kind": "mixed",
+        "header": "Authorization: Bearer {restricted_key}",
+        "note": "OAuth in supporting clients; restricted-key bearer header for autonomous agents. Local stdio alternative: npx -y @stripe/mcp@latest"
+      }
+    },
+    {
+      "id": "mcp/atlassian",
+      "kind": "mcp",
+      "slug": "atlassian",
+      "name": "Atlassian Rovo",
+      "description": "Atlassian’s Rovo MCP Server enables secure, permission-aware access to Jira and Confluence from external AI tools like Claude. It supports summarization, creation, and multi-step actions, helping teams tap into structured enterprise knowled",
+      "url": "https://community.atlassian.com/forums/Atlassian-Platform-articles/Using-the-Atlassian-Remote-MCP-Server-beta/ba-p/3005104",
+      "icon": "https://integrations.sh/logo/atlassian.com",
+      "domain": "atlassian.com",
+      "categories": [
+        "productivity"
+      ],
+      "feeds": [
+        "claude",
+        "openai"
+      ],
+      "popularity": 21377,
+      "providerId": "atlassian.com/mcp",
+      "connectUrl": "https://mcp.atlassian.com/v1/mcp",
+      "auth": {
+        "kind": "oauth"
+      }
+    },
+    {
+      "id": "mcp/miro",
+      "kind": "mcp",
+      "slug": "miro",
+      "name": "Miro",
+      "description": "Access your board content and create content inside Miro from Claude. Use your teams workshops, technical specs and more in your AI workflows.",
+      "url": "https://developers.miro.com/docs/miro-mcp",
+      "icon": "https://integrations.sh/logo/miro.com",
+      "domain": "miro.com",
+      "categories": [
+        "code",
+        "productivity",
+        "design"
+      ],
+      "feeds": [
+        "claude",
+        "openai"
+      ],
+      "popularity": 19208,
+      "providerId": "miro.com/mcp",
+      "connectUrl": "https://mcp.miro.com/"
+    },
+    {
+      "id": "mcp/cloudflare",
+      "kind": "mcp",
+      "slug": "cloudflare",
+      "name": "Cloudflare Developer Platform",
+      "description": "Enables users to build applications on Cloudflare Workers using built-in storage, AI, and compute primitives. Deploy code to production, create and query databases, manage KV stores, and more.",
+      "url": "https://www.support.cloudflare.com/",
+      "icon": "https://integrations.sh/logo/cloudflare.com",
+      "domain": "cloudflare.com",
+      "categories": [
+        "code"
+      ],
+      "feeds": [
+        "claude"
+      ],
+      "popularity": 17154,
+      "providerId": "cloudflare.com/bindings/mcp",
+      "connectUrl": "https://bindings.mcp.cloudflare.com/mcp"
+    },
+    {
+      "id": "discovered/aside-com-mcp",
+      "kind": "mcp",
+      "slug": "aside-com",
+      "name": "aside.com",
+      "description": "Aside is an AI browser that performs tasks across websites, accounts, browsing history, and files. Its help center documents browser features, AI-provider configuration, account use, and local developer tools.",
+      "icon": "https://integrations.sh/logo/aside.com",
+      "domain": "aside.com",
+      "categories": [],
+      "feeds": [
+        "discovered"
+      ],
+      "connectUrl": "command: aside mcp"
+    },
+    {
+      "id": "discovered/hookdeck-com-mcp",
+      "kind": "mcp",
+      "slug": "hookdeck-com",
+      "name": "hookdeck.com",
+      "description": "Hookdeck provides webhook infrastructure products for receiving and routing inbound webhooks (Event Gateway) and for sending outbound webhooks to customers (Outpost). It offers both managed services and open-source/self-hosted components fo",
+      "icon": "https://integrations.sh/logo/hookdeck.com",
+      "domain": "hookdeck.com",
+      "categories": [],
+      "feeds": [
+        "discovered"
+      ],
+      "connectUrl": "stdio:hookdeck gateway mcp"
+    },
+    {
+      "id": "discovered/kakao-golf-mcp",
+      "kind": "mcp",
+      "slug": "kakao-golf",
+      "name": "kakao.golf",
+      "description": "kakao.golf is a golf reservation service operated by Kakao VX, showing tee times, regional searches, and booking-related content on its website. Public evidence of developer-facing integrations beyond the detected MCP endpoint was not found",
+      "icon": "https://integrations.sh/logo/kakao.golf",
+      "domain": "kakao.golf",
+      "categories": [],
+      "feeds": [
+        "discovered"
+      ],
+      "connectUrl": "http://www.kakao.golf/.well-known/mcp/server-card.json"
+    },
+    {
+      "id": "curated/exa",
+      "kind": "openapi",
+      "slug": "exa",
+      "standalone": true,
+      "name": "Exa",
+      "description": "Web search built for AIs, including search, page contents, answers, and research.",
+      "icon": "https://www.google.com/s2/favicons?domain=exa.ai&sz=64",
+      "domain": "exa.ai",
+      "categories": [
+        "search",
+        "ai",
+        "data"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "exa.ai/api",
+      "connectUrl": "https://raw.githubusercontent.com/exa-labs/openapi-spec/refs/heads/master/exa-openapi-spec.yaml",
+      "auth": {
+        "kind": "api_key",
+        "header": "x-api-key: {api_key}"
+      }
+    },
+    {
+      "id": "curated/figma-com-openapi",
+      "kind": "openapi",
+      "slug": "figma-com",
+      "name": "Figma",
+      "description": "Figma's REST API lets agents inspect files, comments, components, variables, projects, and webhooks. Its hosted MCP server supplies authenticated design context and canvas tools.",
+      "icon": "https://www.google.com/s2/favicons?domain=figma.com&sz=64",
+      "domain": "figma.com",
+      "categories": [
+        "design",
+        "collaboration",
+        "devtools"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "figma.com/api",
+      "connectUrl": "https://raw.githubusercontent.com/figma/rest-api-spec/refs/heads/main/openapi/openapi.yaml",
+      "specOverrides": [
+        {
+          "op": "replace",
+          "path": "/components/securitySchemes/OAuth2/flows/authorizationCode/scopes",
+          "value": {
+            "current_user:read": "",
+            "file_comments:read": "",
+            "file_comments:write": "",
+            "file_content:read": "",
+            "file_dev_resources:read": "",
+            "file_dev_resources:write": "",
+            "file_metadata:read": "",
+            "file_versions:read": "",
+            "library_assets:read": "",
+            "library_content:read": "",
+            "project_metadata:read": "",
+            "projects:read": "",
+            "team_library_content:read": "",
+            "webhooks:read": "",
+            "webhooks:write": ""
+          }
+        }
+      ],
+      "auth": {
+        "kind": "api_key",
+        "header": "X-Figma-Token: {token}"
+      }
+    },
+    {
+      "id": "curated/github-com-openapi",
+      "kind": "openapi",
+      "slug": "github-com-openapi",
+      "name": "GitHub",
+      "description": "GitHub exposes more agent-callable surface area than almost any service: an official remote MCP server, a fully-specified REST API, a GraphQL API, and the `gh` CLI. Pick the format that fits your agent — they all reach the same data.",
+      "icon": "https://www.google.com/s2/favicons?domain=github.com&sz=64",
+      "domain": "github.com",
+      "categories": [
+        "developer-tools",
+        "version-control"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "github.com/api",
+      "connectUrl": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json",
+      "auth": {
+        "kind": "token",
+        "header": "Authorization: Bearer {pat}"
+      }
+    },
+    {
+      "id": "curated/spotify-com-openapi",
+      "kind": "openapi",
+      "slug": "spotify-com",
+      "name": "Spotify",
+      "description": "Spotify's Web API covers search, playlists, libraries, and playback control. OAuth is mandatory for anything user-specific, with the client-credentials flow available for catalog-only access.",
+      "icon": "https://www.google.com/s2/favicons?domain=spotify.com&sz=64",
+      "domain": "spotify.com",
+      "categories": [
+        "media",
+        "entertainment"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "spotify.com/api",
+      "connectUrl": "https://raw.githubusercontent.com/sonallux/spotify-web-api/refs/heads/main/official-spotify-open-api.yml",
+      "auth": {
+        "kind": "oauth",
+        "header": "Authorization: Bearer {access_token}"
+      }
+    },
+    {
+      "id": "curated/anilist-co-graphql",
+      "kind": "graphql",
+      "slug": "anilist-co",
+      "name": "AniList",
+      "description": "AniList's GraphQL API lets agents search public anime, manga, character, staff, and user data. OAuth unlocks private user data and mutations such as updating media lists.",
+      "icon": "https://www.google.com/s2/favicons?domain=anilist.co&sz=64",
+      "domain": "anilist.co",
+      "categories": [
+        "entertainment",
+        "media",
+        "social"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "anilist.co/api",
+      "connectUrl": "https://graphql.anilist.co",
+      "auth": {
+        "kind": "mixed",
+        "header": "Authorization: Bearer {access_token}",
+        "note": "Public queries work unauthenticated, while all mutations and access to private user data require an OAuth access token."
+      }
+    },
+    {
+      "id": "curated/github-com-graphql",
+      "kind": "graphql",
+      "slug": "github-com-graphql",
+      "name": "GitHub",
+      "description": "GitHub exposes more agent-callable surface area than almost any service: an official remote MCP server, a fully-specified REST API, a GraphQL API, and the `gh` CLI. Pick the format that fits your agent — they all reach the same data.",
+      "icon": "https://www.google.com/s2/favicons?domain=github.com&sz=64",
+      "domain": "github.com",
+      "categories": [
+        "developer-tools",
+        "version-control"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "github.com/api",
+      "connectUrl": "https://api.github.com/graphql",
+      "auth": {
+        "kind": "token",
+        "header": "Authorization: Bearer {pat}"
+      }
+    },
+    {
+      "id": "curated/linear-app-graphql",
+      "kind": "graphql",
+      "slug": "linear-app-graphql",
+      "name": "Linear",
+      "description": "Linear's entire product runs on its public GraphQL API, and its hosted MCP server gives agents the same tools the official integrations use: create and update issues, manage projects, and coordinate cycles.",
+      "icon": "https://www.google.com/s2/favicons?domain=linear.app&sz=64",
+      "domain": "linear.app",
+      "categories": [
+        "productivity",
+        "project-management"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "linear.app/api",
+      "connectUrl": "https://api.linear.app/graphql",
+      "auth": {
+        "kind": "api_key",
+        "header": "Authorization: {api_key}",
+        "note": "Personal API keys go in the Authorization header with no Bearer prefix; OAuth tokens use Bearer."
+      }
+    },
+    {
+      "id": "curated/github-com-cli",
+      "kind": "cli",
+      "slug": "github-com-cli",
+      "name": "GitHub",
+      "description": "GitHub exposes more agent-callable surface area than almost any service: an official remote MCP server, a fully-specified REST API, a GraphQL API, and the `gh` CLI. Pick the format that fits your agent — they all reach the same data.",
+      "icon": "https://www.google.com/s2/favicons?domain=github.com&sz=64",
+      "domain": "github.com",
+      "categories": [
+        "developer-tools",
+        "version-control"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "github.com/api"
+    },
+    {
+      "id": "curated/neon-com-cli",
+      "kind": "cli",
+      "slug": "neon-com-cli",
+      "name": "Neon",
+      "description": "Neon's public API manages projects, branches, databases, and compute endpoints. The hosted MCP server exposes the same management surface over OAuth. API keys are Bearer tokens created in the console.",
+      "icon": "https://neon.com/favicon/favicon.svg",
+      "domain": "neon.com",
+      "categories": [
+        "database",
+        "devtools"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "neon.tech/api"
+    },
+    {
+      "id": "discovered/agent-guild-5d5r-onrender-com-mcp",
+      "kind": "mcp",
+      "slug": "agent-guild-5d5r-onrender-com",
+      "name": "agent-guild-5d5r.onrender.com",
+      "description": "Agent Guild on this domain exposes a REST-style HTTP API, a hosted public MCP server at `/mcp`, and an A2A JSON-RPC endpoint at `/a2a`; documented credentials are `X-API-Key` member keys and `X-Guild-Caller-Proof` request proofs, while the ",
+      "icon": "https://integrations.sh/logo/agent-guild-5d5r.onrender.com",
+      "domain": "agent-guild-5d5r.onrender.com",
+      "categories": [],
+      "feeds": [
+        "discovered"
+      ]
+    },
+    {
+      "id": "crafted/missing-name-mcp",
+      "kind": "mcp",
+      "slug": "missing-name",
+      "description": "Linear's entire product runs on its public GraphQL API, and its hosted MCP server gives agents the same tools the official integrations use: create and update issues, manage projects, and coordinate cycles.",
+      "icon": "https://www.google.com/s2/favicons?domain=linear.app&sz=64",
+      "domain": "linear.app",
+      "categories": [
+        "productivity",
+        "project-management"
+      ],
+      "feeds": [
+        "curated"
+      ],
+      "providerId": "linear.app/mcp",
+      "connectUrl": "https://mcp.linear.app/mcp",
+      "auth": {
+        "kind": "oauth"
+      }
+    }
+  ]
+}

@@ -1417,6 +1417,154 @@
         ]
       }
     },
+    "/api/integrations/catalog": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`GET /api/integrations/catalog` — search the integrations catalog.",
+        "operationId": "list_catalog_entries",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive text matched against name, domain and description.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "description": "Only entries in this category (case-insensitive).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size. Default 50, maximum 200.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "`next_cursor` of the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of catalog entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntryListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query or cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/catalog/{id}": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`GET /api/integrations/catalog/{id}` — get one catalog entry.",
+        "operationId": "get_catalog_entry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Catalog entry id, e.g. `curated/linear-app-mcp`. It contains one slash; send it as is or percent-encoded.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The catalog entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntrySummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such catalog entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
     "/api/messages/{id}/audio": {
       "get": {
         "tags": [
@@ -8571,6 +8719,119 @@
           }
         }
       },
+      "CatalogAuthKindResponse": {
+        "type": "string",
+        "description": "How a catalog entry authenticates.",
+        "enum": [
+          "none",
+          "header",
+          "oauth",
+          "mixed",
+          "unknown"
+        ]
+      },
+      "CatalogAuthResponse": {
+        "type": "object",
+        "description": "Authentication hints of a catalog entry.",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "header_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Header to send, for `header` and `mixed` entries whose template parsed."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CatalogAuthKindResponse"
+          },
+          "placeholder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the placeholder the user fills in, e.g. `api_key`."
+          },
+          "value_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Literal text before the secret in the header value, e.g. `Bearer `."
+          }
+        }
+      },
+      "CatalogEntryListResponse": {
+        "type": "object",
+        "description": "One page of catalog search results.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntrySummary"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` to fetch the next page; absent on the last page."
+          }
+        }
+      },
+      "CatalogEntrySummary": {
+        "type": "object",
+        "description": "One installable remote MCP server from the integrations.sh catalog.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "domain",
+          "categories",
+          "connect_url",
+          "auth"
+        ],
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/CatalogAuthResponse"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "connect_url": {
+            "type": "string",
+            "description": "HTTPS endpoint of the remote MCP server."
+          },
+          "description": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "icon_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Upstream catalog id, e.g. `curated/linear-app-mcp`. Contains a slash."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "CatalogItemResponse": {
         "type": "object",
         "required": [
@@ -12038,6 +12299,10 @@
     {
       "name": "catalog",
       "description": "Catalog management — publish, list, and remove shared resources; manage space subscriptions"
+    },
+    {
+      "name": "integrations",
+      "description": "Integrations — search the cached integrations.sh catalog of remote MCP servers"
     },
     {
       "name": "interfaces",
