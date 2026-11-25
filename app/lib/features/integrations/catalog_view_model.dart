@@ -87,6 +87,9 @@ const Object _keep = Object();
 class CatalogViewModel extends AsyncNotifier<CatalogState> {
   Timer? _debounce;
 
+  /// Text typed since the last fetch; set while the debounce timer is armed.
+  String? _pendingQuery;
+
   /// Incremented per first-page fetch so a slower, superseded response is
   /// dropped instead of overwriting newer results.
   int _generation = 0;
@@ -102,19 +105,25 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
   /// Updates the search text; the fetch runs once typing pauses.
   void setQuery(String query) {
     _debounce?.cancel();
-    _debounce = Timer(catalogSearchDebounce, () => _refetch(query: query));
+    _pendingQuery = query;
+    _debounce = Timer(
+      catalogSearchDebounce,
+      () => _refetch(query: _takePending()),
+    );
   }
 
   /// Filters by [category]; selecting the active one (or null) clears it.
   Future<void> selectCategory(String? category) {
-    _debounce?.cancel();
     final current = state.value?.category;
-    return _refetch(category: category == current ? null : category);
+    return _refetch(
+      query: _takePending(),
+      category: category == current ? null : category,
+    );
   }
 
   /// Drops the search text and the category filter.
   Future<void> clearFilters() {
-    _debounce?.cancel();
+    _takePending();
     return _refetch(query: '', category: null);
   }
 
@@ -130,7 +139,7 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
     );
     try {
       final page = await _fetchPage(current, cursor: cursor);
-      if (generation != _generation) return;
+      if (_isStale(generation)) return;
       final latest = state.requireValue;
       state = AsyncData(
         latest.copyWith(
@@ -141,7 +150,7 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
         ),
       );
     } catch (_) {
-      if (generation != _generation) return;
+      if (_isStale(generation)) return;
       state = AsyncData(
         state.requireValue.copyWith(isLoadingMore: false, loadMoreFailed: true),
       );
@@ -149,7 +158,7 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
   }
 
   /// Re-runs the current search after a failure.
-  Future<void> retry() => _refetch();
+  Future<void> retry() => _refetch(query: _takePending());
 
   Future<void> _refetch({String? query, Object? category = _keep}) async {
     final current = state.value ?? const CatalogState();
@@ -162,13 +171,29 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
       error: null,
     );
     state = AsyncData(next);
-    state = AsyncData(await _fetchFirstPage(next));
+    final result = await _fetchFirstPage(next);
+    if (!ref.mounted) return;
+    state = AsyncData(result);
+  }
+
+  /// The notifier was disposed, or a newer first-page fetch superseded
+  /// [generation].
+  bool _isStale(int generation) => !ref.mounted || generation != _generation;
+
+  /// Returns the text typed during the debounce window, if any, and disarms
+  /// the timer so it cannot fire a second fetch.
+  String? _takePending() {
+    _debounce?.cancel();
+    final pending = _pendingQuery;
+    _pendingQuery = null;
+    return pending;
   }
 
   Future<CatalogState> _fetchFirstPage(CatalogState request) async {
     final generation = ++_generation;
     try {
       final page = await _fetchPage(request);
+      if (!ref.mounted) return request;
       if (generation != _generation) return state.value ?? request;
       return request.copyWith(
         items: page.items,
@@ -177,6 +202,7 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
         isLoading: false,
       );
     } catch (e) {
+      if (!ref.mounted) return request;
       if (generation != _generation) return state.value ?? request;
       return request.copyWith(
         items: const [],
@@ -192,7 +218,9 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
     String? cursor,
   }) async {
     final api = ref.read(apiClientProvider);
-    if (api == null) throw StateError('Not connected');
+    if (api == null) {
+      throw const _CatalogLoadException('Not connected to a server.');
+    }
     final query = request.query;
     final response = await api.integrations.listCatalogEntries(
       q: query.isEmpty ? null : query,
@@ -201,18 +229,24 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
       cursor: cursor,
     );
     final data = response.data;
-    if (data == null) throw StateError('Empty catalog response');
+    if (data == null) {
+      throw const _CatalogLoadException(
+        'The server sent an unexpected response.',
+      );
+    }
     return (items: data.items.toList(), nextCursor: data.nextCursor);
   }
 
-  /// A short, user-readable reason; Dio's own message is a multi-line essay.
+  /// A short, user-readable reason; Dio's own message is a multi-line essay
+  /// and other exceptions carry internals.
   String _describe(Object error) {
+    if (error is _CatalogLoadException) return error.message;
     if (error is DioException) {
       final status = error.response?.statusCode;
       if (status != null) return 'The server answered with status $status.';
       return 'The server could not be reached.';
     }
-    return error.toString();
+    return 'Something went wrong while loading the catalog.';
   }
 
   List<String> _mergeCategories(
@@ -222,6 +256,13 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
     final merged = {...known, for (final item in items) ...item.categories};
     return merged.toList()..sort();
   }
+}
+
+/// A load failure whose [message] is safe to show.
+class _CatalogLoadException implements Exception {
+  const _CatalogLoadException(this.message);
+
+  final String message;
 }
 
 final catalogViewModelProvider =

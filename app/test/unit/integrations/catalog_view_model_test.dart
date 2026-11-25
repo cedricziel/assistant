@@ -25,7 +25,7 @@ class _Call {
 class _FakeIntegrationsApi extends IntegrationsApi {
   _FakeIntegrationsApi(this._handler) : super(Dio(), standardSerializers);
 
-  final Future<CatalogEntryListResponse> Function(_Call call) _handler;
+  final Future<CatalogEntryListResponse?> Function(_Call call) _handler;
   final List<_Call> calls = [];
 
   @override
@@ -91,7 +91,7 @@ CatalogEntryListResponse _page(
 }
 
 ({ProviderContainer container, _FakeIntegrationsApi api}) _setup(
-  Future<CatalogEntryListResponse> Function(_Call call) handler,
+  Future<CatalogEntryListResponse?> Function(_Call call) handler,
 ) {
   final api = _FakeIntegrationsApi(handler);
   final container = ProviderContainer(
@@ -166,7 +166,7 @@ void main() {
 
       final state = await t.container.read(catalogViewModelProvider.future);
 
-      expect(state.error, contains('boom'));
+      expect(state.error, 'Something went wrong while loading the catalog.');
       expect(state.items, isEmpty);
     });
 
@@ -200,6 +200,25 @@ void main() {
       final state = await t.container.read(catalogViewModelProvider.future);
 
       expect(state.error, 'The server could not be reached.');
+    });
+
+    test('hides internal error text from the user', () async {
+      final t = _setup((_) async => throw StateError('secret detail'));
+      addTearDown(t.container.dispose);
+
+      final state = await t.container.read(catalogViewModelProvider.future);
+
+      expect(state.error, isNot(contains('secret')));
+      expect(state.error, isNot(contains('Bad state')));
+    });
+
+    test('describes an empty response body', () async {
+      final t = _setup((_) async => null);
+      addTearDown(t.container.dispose);
+
+      final state = await t.container.read(catalogViewModelProvider.future);
+
+      expect(state.error, 'The server sent an unexpected response.');
     });
 
     test('retry reloads after an error', () async {
@@ -255,6 +274,60 @@ void main() {
           t.container.read(catalogViewModelProvider).requireValue.query,
           'lin',
         );
+        t.container.dispose();
+      });
+    });
+
+    test('a category tap inside the debounce window keeps the typed text', () {
+      fakeAsync((async) {
+        final t = _setup((_) async => _page([_entry('linear')]));
+        async.flushMicrotasks();
+        final notifier = t.container.read(catalogViewModelProvider.notifier);
+
+        notifier.setQuery('lin');
+        async.elapse(const Duration(milliseconds: 100));
+        notifier.selectCategory('dev');
+        async.flushMicrotasks();
+
+        expect(t.api.calls.last.q, 'lin');
+        expect(t.api.calls.last.category, 'dev');
+        final calls = t.api.calls.length;
+
+        async.elapse(catalogSearchDebounce);
+        async.flushMicrotasks();
+        expect(t.api.calls, hasLength(calls), reason: 'timer was consumed');
+        t.container.dispose();
+      });
+    });
+
+    test('retry inside the debounce window keeps the typed text', () {
+      fakeAsync((async) {
+        final t = _setup((_) async => _page([_entry('linear')]));
+        async.flushMicrotasks();
+        final notifier = t.container.read(catalogViewModelProvider.notifier);
+
+        notifier.setQuery('lin');
+        notifier.retry();
+        async.flushMicrotasks();
+
+        expect(t.api.calls.last.q, 'lin');
+        t.container.dispose();
+      });
+    });
+
+    test('clearFilters discards a pending search', () {
+      fakeAsync((async) {
+        final t = _setup((_) async => _page([_entry('linear')]));
+        async.flushMicrotasks();
+        final notifier = t.container.read(catalogViewModelProvider.notifier);
+
+        notifier.setQuery('lin');
+        notifier.clearFilters();
+        async.elapse(catalogSearchDebounce);
+        async.flushMicrotasks();
+
+        expect(t.api.calls.last.q, isNull);
+        expect(t.api.calls, hasLength(2));
         t.container.dispose();
       });
     });
@@ -425,5 +498,37 @@ void main() {
 
       expect(t.api.calls.where((c) => c.cursor == 'c1'), hasLength(1));
     });
+
+    // Leaving the screen disposes the provider while a request is in flight.
+    for (final failing in [false, true]) {
+      for (final loadMore in [false, true]) {
+        final label =
+            '${loadMore ? 'loadMore' : 'a refetch'} '
+            '${failing ? 'failing' : 'finishing'} after dispose does not throw';
+        test(label, () async {
+          final gate = Completer<CatalogEntryListResponse>();
+          final t = _setup((call) {
+            if (call.cursor == 'c1' || call.category == 'dev') {
+              return gate.future;
+            }
+            return Future.value(_page([_entry('github')], nextCursor: 'c1'));
+          });
+          await t.container.read(catalogViewModelProvider.future);
+          final notifier = t.container.read(catalogViewModelProvider.notifier);
+          final pending = loadMore
+              ? notifier.loadMore()
+              : notifier.selectCategory('dev');
+
+          t.container.dispose();
+          if (failing) {
+            gate.completeError(Exception('late'));
+          } else {
+            gate.complete(_page([_entry('slack')]));
+          }
+
+          await pending;
+        });
+      }
+    }
   });
 }
