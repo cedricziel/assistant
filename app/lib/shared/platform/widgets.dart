@@ -166,7 +166,7 @@ export 'package:material_ui/material_ui.dart'
         RoundSliderThumbShape,
         SliderComponentShape,
         // Colors class — Material's named colour catalog. The
-        // check_no_raw_colors.sh gate still fires on every Colors.X usage
+        // check_no_raw_colors.sh gate still fires on every direct use of a Colors member
         // outside lib/shared/theme/ (except Colors.transparent), so re-exporting
         // the class is safe — direct usage is enforced at a different layer.
         Colors,
