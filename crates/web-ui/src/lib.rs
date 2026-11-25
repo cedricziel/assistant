@@ -363,6 +363,16 @@ async fn run_with_args(args: Args) -> Result<()> {
             Arc::new(move |h| register.register_ambient_tool(h)),
             Arc::new(move |prefix| unregister.unregister_tools_by_prefix(prefix)),
         );
+
+        // Offer the skills servers publish, in every space.
+        let skills = runtimes.clone();
+        mcp_manager.spawn_skill_sync(
+            assistant_mcp_client::McpSkillSource::new(&base_path),
+            Arc::new(move |server, published| {
+                let skills = skills.clone();
+                Box::pin(async move { skills.set_ambient_skills(&server, published).await })
+            }),
+        );
     }
 
     // -- Integrations catalog: disk cache now, refreshed in the background ------

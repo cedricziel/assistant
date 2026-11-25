@@ -10,7 +10,8 @@ use anyhow::{Context, Result};
 use rmcp::ClientServiceExt;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams, ContentBlock,
-    GetTaskParams, ProtocolVersion, ServerPeerInfo, SubscriptionFilter, Task, TaskPayload, Tool,
+    GetTaskParams, ProtocolVersion, ReadResourceRequestParams, ResourceContents, ServerPeerInfo,
+    Skill, SubscriptionFilter, Task, TaskPayload, Tool,
 };
 use rmcp::service::{ClientLifecycleMode, Peer, RoleClient, RunningService, ServiceError};
 use rmcp::transport::IntoTransport;
@@ -171,6 +172,39 @@ impl McpClient {
                 "tools/call '{name}' timed out after {}s",
                 self.tool_timeout.as_secs()
             ),
+        }
+    }
+
+    /// Whether the server advertises the Skills extension.
+    pub fn supports_skills(&self) -> bool {
+        self.peer
+            .peer_info()
+            .is_some_and(|info| info.capabilities.supports_skills())
+    }
+
+    /// Every skill the server lists (handles pagination).
+    pub async fn list_skills(&self) -> Result<Vec<Skill>> {
+        self.peer
+            .list_all_skills()
+            .await
+            .context("skills/list request failed")
+    }
+
+    /// The bytes of the resource at `uri`: a text resource's UTF-8 or a
+    /// binary one's decoded content.
+    pub async fn read_resource_bytes(&self, uri: &str) -> Result<Vec<u8>> {
+        let result = self
+            .peer
+            .read_resource(ReadResourceRequestParams::new(uri))
+            .await
+            .with_context(|| format!("resources/read '{uri}' request failed"))?;
+        match result.contents.into_iter().next() {
+            Some(ResourceContents::TextResourceContents { text, .. }) => Ok(text.into_bytes()),
+            Some(ResourceContents::BlobResourceContents { blob, .. }) => {
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, blob)
+                    .with_context(|| format!("'{uri}' is not valid base64"))
+            }
+            _ => anyhow::bail!("resources/read '{uri}' returned no content"),
         }
     }
 

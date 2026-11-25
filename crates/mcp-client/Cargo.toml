@@ -11,6 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 assistant-core = { path = "../core" }
+assistant-skills = { path = "../skills" }
 futures = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
@@ -29,6 +30,7 @@ http = "1"
 reqwest = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 # Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
 assistant-core = { path = "../core", features = ["test-tls"] }
 tokio = { workspace = true, features = ["test-util", "io-util", "macros"] }

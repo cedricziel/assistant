@@ -22,7 +22,7 @@ use tracing::{info, warn};
 use assistant_core::tool::{ToolHandler, TurnToolSource};
 use assistant_core::types::agent::OrgConfig;
 use assistant_core::{LlmProvider, MessageBus};
-use assistant_skills::SkillSource;
+use assistant_skills::{SkillDef, SkillSource};
 use assistant_storage::{
     OrgPoolFactory, PersonaStore as _, ScopedMessageBus, StorageLayer, registry::SkillRegistry,
 };
@@ -87,6 +87,8 @@ pub struct SpaceRuntimes {
     submit_timeout_secs: Option<u64>,
     turn_tool_source: Option<Arc<dyn TurnToolSource>>,
     ambient_tools: RwLock<Vec<Arc<dyn ToolHandler>>>,
+    /// Skills each external MCP server publishes, keyed by server name.
+    ambient_skills: RwLock<HashMap<String, Vec<SkillDef>>>,
     slots: Mutex<HashMap<SpaceKey, Slot>>,
     builtins_synced: AtomicBool,
 }
@@ -107,6 +109,7 @@ impl SpaceRuntimes {
             submit_timeout_secs: None,
             turn_tool_source: None,
             ambient_tools: RwLock::new(Vec::new()),
+            ambient_skills: RwLock::new(HashMap::new()),
             slots: Mutex::new(HashMap::new()),
             builtins_synced: AtomicBool::new(false),
         }
@@ -228,6 +231,28 @@ impl SpaceRuntimes {
         }
     }
 
+    /// Replace the skills `server` publishes in every space, including spaces
+    /// opened later. An empty list removes them.
+    pub async fn set_ambient_skills(&self, server: &str, skills: Vec<SkillDef>) {
+        {
+            let mut ambient = self
+                .ambient_skills
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            if skills.is_empty() {
+                ambient.remove(server);
+            } else {
+                ambient.insert(server.to_owned(), skills.clone());
+            }
+        }
+        for runtime in self.loaded() {
+            runtime
+                .registry
+                .set_mcp_skills(server, skills.clone())
+                .await;
+        }
+    }
+
     async fn build(&self, org_slug: &str, space_slug: &str) -> Result<Arc<SpaceRuntime>> {
         let OrgContext { config, llm } = self.orgs.get(org_slug)?;
         let storage = self.pools.space_storage(org_slug, space_slug).await?;
@@ -235,6 +260,14 @@ impl SpaceRuntimes {
         storage.persona_store().ensure_exists(&agent_id).await?;
 
         let registry = Arc::new(self.load_registry(&storage, &config).await?);
+        let ambient_skills = self
+            .ambient_skills
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        for (server, skills) in ambient_skills {
+            registry.set_mcp_skills(&server, skills).await;
+        }
         let executor = Arc::new(ToolExecutor::new(
             storage.clone(),
             llm.clone(),
@@ -603,6 +636,45 @@ mod tests {
         let gamma = runtimes.get("acme", "gamma").await.unwrap();
         assert!(!has_tool(&alpha, "mcp-echo"));
         assert!(!has_tool(&gamma, "mcp-echo"));
+    }
+
+    fn mcp_skill(server: &str, name: &str) -> assistant_skills::SkillDef {
+        assistant_skills::SkillDef {
+            name: format!("{server}__{name}"),
+            description: "remote".into(),
+            license: None,
+            compatibility: None,
+            allowed_tools: Vec::new(),
+            metadata: HashMap::new(),
+            body: "body".into(),
+            dir: std::path::PathBuf::from("/nonexistent"),
+            source: SkillSource::Mcp {
+                server: server.into(),
+            },
+        }
+    }
+
+    async fn has_skill(rt: &SpaceRuntime, name: &str) -> bool {
+        rt.registry.get(name).await.is_some()
+    }
+
+    #[tokio::test]
+    async fn ambient_skills_reach_existing_and_later_spaces() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runtimes = runtimes(tmp.path());
+        let alpha = runtimes.get("acme", "alpha").await.unwrap();
+
+        runtimes
+            .set_ambient_skills("remote", vec![mcp_skill("remote", "deploy")])
+            .await;
+        let beta = runtimes.get("acme", "beta").await.unwrap();
+        assert!(has_skill(&alpha, "remote__deploy").await);
+        assert!(has_skill(&beta, "remote__deploy").await);
+
+        runtimes.set_ambient_skills("remote", Vec::new()).await;
+        let gamma = runtimes.get("acme", "gamma").await.unwrap();
+        assert!(!has_skill(&alpha, "remote__deploy").await);
+        assert!(!has_skill(&gamma, "remote__deploy").await);
     }
 
     #[tokio::test]

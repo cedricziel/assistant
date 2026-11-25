@@ -22,6 +22,7 @@ use assistant_core::types::skills_mcp::{McpServerEntry, McpTransportConfig, McpT
 use crate::bridge::{self, McpToolHandler};
 use crate::client::McpClient;
 use crate::handler::StaleTools;
+use crate::skills::{McpSkillSource, SkillPublisher};
 
 /// Maximum number of consecutive reconnection attempts before giving up on a
 /// server until the next health-check cycle.
@@ -501,6 +502,37 @@ impl McpClientManager {
                         manager.refresh_stale_servers(&reg, &unreg).await;
                     }
                 }
+            }
+        })
+    }
+
+    /// Every configured server with its client, `None` while disconnected.
+    pub async fn connections(&self) -> Vec<(String, Option<Arc<McpClient>>)> {
+        let mut connections: Vec<_> = self
+            .servers
+            .read()
+            .await
+            .iter()
+            .map(|(name, state)| (name.clone(), state.client.clone()))
+            .collect();
+        connections.sort_by(|a, b| a.0.cmp(&b.0));
+        connections
+    }
+
+    /// Spawn a background task that publishes each server's verified skills
+    /// now and on every health-check interval, so a changed manifest is
+    /// re-verified and a disconnected server's skills are withdrawn.
+    pub fn spawn_skill_sync(
+        self: &Arc<Self>,
+        source: McpSkillSource,
+        publish: SkillPublisher,
+    ) -> tokio::task::JoinHandle<()> {
+        let manager = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(HEALTH_CHECK_INTERVAL);
+            loop {
+                ticker.tick().await;
+                source.sync(&manager.connections().await, &publish).await;
             }
         })
     }

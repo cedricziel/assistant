@@ -53,6 +53,7 @@ pub async fn cmd_skill(db_path: &Path, config: &OrgConfig, command: &SkillComman
                     SkillSource::User => "user",
                     SkillSource::Project => "project",
                     SkillSource::Installed => "installed",
+                    SkillSource::Mcp { .. } => "mcp",
                 };
                 println!("{:<30} {:<12} {}", s.name, source, s.description);
             }

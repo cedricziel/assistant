@@ -196,6 +196,16 @@ impl SkillRegistry {
         Ok(())
     }
 
+    /// Replace the skills `server` publishes, in memory only.
+    ///
+    /// Remote skills are not persisted: a server that is gone or whose skill
+    /// no longer verifies must not come back from an earlier run.
+    pub async fn set_mcp_skills(&self, server: &str, skills: Vec<SkillDef>) {
+        let mut registry = self.skills.write().await;
+        registry.retain(|_, s| !matches!(&s.source, SkillSource::Mcp { server: s } if s == server));
+        registry.extend(skills.into_iter().map(|s| (s.name.clone(), s)));
+    }
+
     /// Reload a skill from disk by re-reading its `SKILL.md`.
     pub async fn reload(&self, name: &str) -> Result<()> {
         use assistant_skills::parse_skill_dir;
@@ -300,6 +310,9 @@ impl SkillRegistry {
             SkillSource::Project => {
                 anyhow::bail!("Cannot edit project-scoped skill '{}' via the UI", name)
             }
+            SkillSource::Mcp { .. } => {
+                anyhow::bail!("Cannot edit skill '{}': an MCP server publishes it", name)
+            }
             _ => {}
         }
 
@@ -370,6 +383,9 @@ impl SkillRegistry {
             }
             SkillSource::Project => {
                 anyhow::bail!("Cannot delete project-scoped skill '{}' via the UI", name);
+            }
+            SkillSource::Mcp { .. } => {
+                anyhow::bail!("Cannot delete skill '{}': an MCP server publishes it", name);
             }
             _ => {}
         }
@@ -623,6 +639,49 @@ mod tests {
             dir: dir.to_path_buf(),
             source: SkillSource::User,
         }
+    }
+
+    fn make_mcp_skill(server: &str, name: &str) -> SkillDef {
+        SkillDef {
+            name: format!("{server}__{name}"),
+            source: SkillSource::Mcp {
+                server: server.into(),
+            },
+            ..make_skill(name)
+        }
+    }
+
+    #[tokio::test]
+    async fn set_mcp_skills_replaces_only_that_servers_skills_and_skips_the_database() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let registry = SkillRegistry::new(storage.pool.clone()).await.unwrap();
+        registry.register(make_skill("local")).await.unwrap();
+
+        registry
+            .set_mcp_skills(
+                "acme",
+                vec![make_mcp_skill("acme", "a"), make_mcp_skill("acme", "b")],
+            )
+            .await;
+        registry
+            .set_mcp_skills("other", vec![make_mcp_skill("other", "c")])
+            .await;
+        registry
+            .set_mcp_skills("acme", vec![make_mcp_skill("acme", "b")])
+            .await;
+
+        let names: Vec<String> = registry.list().await.into_iter().map(|s| s.name).collect();
+        assert_eq!(
+            names,
+            ["acme__b", "local", "other__c"],
+            "acme lost `a`; local and other's skills stay"
+        );
+        let rows: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM skills WHERE name LIKE '%\\_\\_%' ESCAPE '\\'")
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(rows.0, 0, "remote skills are not persisted");
     }
 
     #[tokio::test]
