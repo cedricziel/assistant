@@ -57,6 +57,11 @@ jobs:
         if: steps.filter.outputs.flutter == 'true'
         run: flutter test
 
+      # Goldens run here: CI is Linux, where the baselines are generated.
+      - name: Run assistant_ui tests
+        if: steps.filter.outputs.flutter == 'true'
+        run: cd packages/assistant_ui && flutter test
+
   # Regenerates the Dart client with the generator version pinned in the
   # Makefile and fails when the committed output differs. Not a required check.
   api-client-drift:
