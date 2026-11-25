@@ -106,7 +106,7 @@ foreground / background pairs meet WCAG AA on both light and dark themes
 | `--auth-token`       | `ASSISTANT_WEB_TOKEN`       | _(required)_                | Token used for Bearer auth                                |
 | `--listen`           |                             | `127.0.0.1:8080`            | Address to bind                                           |
 | `--db-path`          |                             | `~/.assistant/assistant.db` | Path to the SQLite database                               |
-| `--cors-origin`      | `ASSISTANT_WEB_CORS_ORIGIN` | _(wildcard)_                | Restrict CORS to a specific origin (e.g. macOS app URL)   |
+| `--cors-origin`      | `ASSISTANT_WEB_CORS_ORIGIN` | _(none: same-origin)_       | Allowed cross-origin `http(s)://host[:port]` origins; repeat the flag or comma-separate. An invalid value aborts startup |
 | `--no-secure-cookie` |                             | `false`                     | Disable `Secure` attribute on session cookies (see below) |
 | `--auth-rate-limit-per-minute` | `ASSISTANT_WEB_AUTH_RATE_LIMIT` | `30` | Credential-endpoint requests per client IP per minute (see below) |
 | `--register-rate-limit-per-hour` | `ASSISTANT_WEB_REGISTER_RATE_LIMIT` | `10` | Dynamic client registrations per client IP per hour |
