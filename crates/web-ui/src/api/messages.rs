@@ -60,8 +60,9 @@ pub struct SendMessageRequest {
 pub struct QuickMessageRequest {
     /// The message text to send to the assistant.
     pub message: String,
-    /// Optional persona ID to route the message to a specific persona.
-    /// When absent, the server's active persona is used.
+    /// Optional persona ID to run the message as. Must name the persona this
+    /// instance serves; any other existing persona is rejected with 422.
+    /// Unknown IDs and an absent value fall back to the server's active persona.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persona_id: Option<String>,
     /// Optional context text to include with the message (e.g. clipboard
@@ -754,6 +755,7 @@ pub async fn stream_run_events(
         (status = 400, description = "Empty message"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
+        (status = 422, description = "persona_id names a persona this instance does not serve"),
         (status = 500, description = "Internal server error"),
     ),
     security(("bearer_token" = []))
@@ -780,6 +782,21 @@ pub async fn quick_message(
         let persona_store =
             assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
         if persona_store.get(pid).await.ok().flatten().is_some() {
+            // The shared orchestrator and its bus worker only process
+            // conversations owned by their own persona, so a turn for any
+            // other persona would fail after the conversation was created.
+            if pid != state.orchestrator_ref.agent_id() {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(serde_json::json!({
+                        "error": format!(
+                            "Persona '{pid}' is not served by this instance (serving '{}')",
+                            state.orchestrator_ref.agent_id()
+                        )
+                    })),
+                )
+                    .into_response();
+            }
             pid.clone()
         } else {
             state.agent_id.read().await.clone()
@@ -1925,13 +1942,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quick_message_with_persona_id_routes_to_persona() {
+    async fn quick_message_with_serving_persona_id_runs_turn_as_that_persona() {
         let server = MockServer::start().await;
         mount_llm_reply(&server, "persona answer").await;
 
         let (state, storage) = test_state(&server.uri()).await;
+        let serving = state.orchestrator_ref.agent_id().to_string();
 
-        // Create a persona so it can be resolved.
+        let persona_store =
+            assistant_storage::personas::SqlitePersonaStore::new(storage.pool.clone());
+        if persona_store.get(&serving).await.unwrap().is_none() {
+            persona_store.create(&serving, "Serving").await.unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"message": "hello", "persona_id": serving}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(
+            json["answer"].as_str().unwrap(),
+            "persona answer",
+            "turn must complete rather than report a failure as the answer"
+        );
+        let conv_id: Uuid = json["conversation_id"].as_str().unwrap().parse().unwrap();
+
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), &serving);
+        assert!(
+            store.get_conversation(conv_id).await.unwrap().is_some(),
+            "conversation should exist under the serving persona"
+        );
+    }
+
+    #[tokio::test]
+    async fn quick_message_with_persona_not_served_by_orchestrator_is_rejected() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "must not run").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+
         let persona_store =
             assistant_storage::personas::SqlitePersonaStore::new(storage.pool.clone());
         persona_store.create("reviewer", "Reviewer").await.unwrap();
@@ -1948,17 +2008,18 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), StatusCode::CREATED);
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let json = body_json(resp.into_body()).await;
-        let conv_id: Uuid = json["conversation_id"].as_str().unwrap().parse().unwrap();
-
-        // Conversation should be scoped to the "reviewer" persona.
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "reviewer");
-        let conv = store.get_conversation(conv_id).await.unwrap();
         assert!(
-            conv.is_some(),
-            "conversation should exist under 'reviewer' persona"
+            json["error"].as_str().unwrap().contains("reviewer"),
+            "error should name the unserved persona: {json}"
         );
+
+        let (conversations,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM conversations")
+            .fetch_one(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(conversations, 0, "no conversation should be created");
     }
 
     #[tokio::test]

@@ -387,6 +387,15 @@ impl Orchestrator {
         self
     }
 
+    /// The persona this orchestrator runs turns as.
+    ///
+    /// Turns, workspace files and the bus worker claim filter are all scoped
+    /// to this id, so a conversation owned by another persona cannot be
+    /// processed here.
+    pub fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
     /// Return the path to this persona's HEARTBEAT.md.
     ///
     /// Always derived from `agent_id` so it stays consistent even if the

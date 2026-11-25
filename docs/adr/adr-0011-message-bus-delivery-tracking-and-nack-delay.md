@@ -19,7 +19,7 @@ production).
 
 ## Decision
 
-- Migration `043_bus_delivery_tracking.sql` adds two columns to
+- Migration `044_bus_delivery_tracking.sql` adds two columns to
   `bus_messages`:
   - `delivery_count INTEGER NOT NULL DEFAULT 0`, incremented in the same
     statement that claims the message. The first delivery reports `1`, as

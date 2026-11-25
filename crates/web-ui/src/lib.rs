@@ -2,13 +2,13 @@ mod a2a;
 pub mod api;
 pub(crate) mod audio_store;
 pub mod auth;
-pub(crate) mod backends;
 pub(crate) mod errors;
 mod flutter_assets;
 pub mod install;
 mod oauth;
 mod openapi;
 pub(crate) mod push;
+pub mod space;
 pub mod sw_version;
 
 use assistant_storage::PersonaStore as _;
@@ -43,10 +43,6 @@ use axum::{
     Extension, Router,
     http::StatusCode,
     routing::{get, post},
-};
-use backends::{
-    LogBackend, MetricsBackend, SqliteLogBackend, SqliteMetricsBackend, SqliteTraceBackend,
-    TraceBackend,
 };
 use clap::Parser;
 use serde_json::json;
@@ -90,14 +86,6 @@ struct Args {
     /// When empty or absent the server starts without legacy-token auth.
     #[arg(long, env = "ASSISTANT_WEB_TOKEN")]
     auth_token: Option<String>,
-
-    /// Maximum number of traces to show on the traces page
-    #[arg(long, default_value_t = 200)]
-    trace_limit: i64,
-
-    /// Maximum number of logs to show on the logs page
-    #[arg(long, default_value_t = 500)]
-    log_limit: i64,
 
     /// Disable the `Secure` attribute on session cookies.
     /// Useful when running behind a VPN or firewall over plain HTTP on a
@@ -155,20 +143,9 @@ pub(crate) struct AppState {
     pub(crate) pool: SqlitePool,
     pub(crate) agent_id: Arc<RwLock<String>>,
     pub(crate) registry: Arc<SkillRegistry>,
-    // Configured at startup, threaded through API state, but the per-endpoint
-    // limits live on the backend trait objects rather than being read here.
-    // Kept on `AppState` so future routes that need them don't have to
-    // re-thread them. Remove once a route reads them.
-    #[allow(dead_code)]
-    pub(crate) trace_limit: i64,
-    #[allow(dead_code)]
-    pub(crate) log_limit: i64,
     pub(crate) bus_kind: BusKind,
     pub(crate) nats_url: Option<String>,
     pub(crate) nats_token: Option<String>,
-    pub(crate) trace_backend: Arc<dyn TraceBackend>,
-    pub(crate) log_backend: Arc<dyn LogBackend>,
-    pub(crate) metrics_backend: Arc<dyn MetricsBackend>,
     pub(crate) push_dispatcher: Option<Arc<PushDispatcher>>,
 }
 
@@ -317,7 +294,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         config.llm.base_url = base_url;
     }
 
-    let _otel_guard = init_tracing(storage.pool.clone(), &config.observability).await?;
+    let _otel_guard = init_tracing()?;
 
     // -- VAPID key provisioning (once, at startup) ---------------------------
     //
@@ -414,22 +391,6 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let registry = Arc::new(registry);
 
-    // The built-in viewers always read from the local SQLite telemetry store.
-    // `[observability] exporter` gates the *write* side only: with
-    // `exporter = "none"` no new spans/logs/metrics are persisted here, but
-    // rows written earlier stay queryable and keep showing up in the viewers.
-    // Fresh telemetry in that configuration lives solely in whatever OTLP
-    // backend the deployment points at.
-    let (trace_backend, log_backend, metrics_backend): (
-        Arc<dyn TraceBackend>,
-        Arc<dyn LogBackend>,
-        Arc<dyn MetricsBackend>,
-    ) = (
-        Arc::new(SqliteTraceBackend::new(storage.pool.clone())),
-        Arc::new(SqliteLogBackend::new(storage.pool.clone())),
-        Arc::new(SqliteMetricsBackend::new(storage.pool.clone())),
-    );
-
     // -- Push dispatcher (built here so AppState can hold a reference) -------
     let push_store_for_state = Arc::new(storage.push_subscription_store());
     let push_dispatcher_for_state = if !vapid_private_key.is_empty() {
@@ -445,8 +406,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         pool: storage.pool.clone(),
         agent_id: Arc::new(RwLock::new(selected_agent.clone())),
         registry: registry.clone(),
-        trace_limit: args.trace_limit,
-        log_limit: args.log_limit,
         bus_kind: config.bus.kind.clone(),
         nats_url: config
             .bus
@@ -458,9 +417,6 @@ async fn run_with_args(args: Args) -> Result<()> {
             .token
             .clone()
             .or_else(|| std::env::var("NATS_TOKEN").ok()),
-        trace_backend,
-        log_backend,
-        metrics_backend,
         push_dispatcher: push_dispatcher_for_state,
     };
 
@@ -712,14 +668,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
-    let traces_api_state = api::traces::TracesApiState {
-        trace_backend: state.trace_backend.clone(),
-    };
-
-    let logs_api_state = api::logs::LogsApiState {
-        log_backend: state.log_backend.clone(),
-    };
-
     let skills_api_state = api::skills::SkillsApiState {
         pool: storage.pool.clone(),
         registry: state.registry.clone(),
@@ -732,11 +680,6 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let agents_api_state = api::agents::AgentsApiState {
         agent_store: agents_api_store,
-    };
-
-    let analytics_api_state = api::analytics::AnalyticsApiState {
-        metrics_backend: state.metrics_backend.clone(),
-        agent_id: state.agent_id.clone(),
     };
 
     // Only mount the push API when a real VAPID keypair was provisioned.
@@ -899,12 +842,9 @@ async fn run_with_args(args: Args) -> Result<()> {
             api::api_router()
                 .with_state(api_state)
                 .merge(api::personas::personas_router().with_state(persona_api_state))
-                .merge(api::traces::traces_router().with_state(traces_api_state))
-                .merge(api::logs::logs_router().with_state(logs_api_state))
                 .merge(api::skills::skills_router().with_state(skills_api_state))
                 .merge(api::webhooks::webhooks_api_router().with_state(webhooks_api_state))
                 .merge(api::agents::agents_api_router().with_state(agents_api_state))
-                .merge(api::analytics::analytics_api_router().with_state(analytics_api_state))
                 .merge(api::workflows::workflows_api_router().with_state(workflows_api_state))
                 .merge(api::orgs::orgs_api_router().with_state(orgs_api_state))
                 .merge(api::users::users_api_router().with_state(users_api_state))

@@ -241,7 +241,7 @@ async fn generate_refinement(
     llm: &dyn LlmProvider,
     skill_name: &str,
     current_body: &str,
-    stats: &assistant_storage::TraceStats,
+    stats: &assistant_storage::SkillStats,
 ) -> Result<Option<String>> {
     let user_msg = format!(
         "Skill: {skill_name}\n\n\
@@ -317,7 +317,7 @@ mod tests {
         Capabilities, ChatHistoryMessage, LlmResponse, LlmResponseMeta, StreamChunk, ToolSpec,
         ToolSupport,
     };
-    use assistant_storage::TraceStats;
+    use assistant_storage::SkillStats;
     use async_trait::async_trait;
     use tokio::sync::mpsc;
 
@@ -378,7 +378,7 @@ mod tests {
 
     /// Mock stats provider that returns configurable stats.
     struct MockStatsProvider {
-        stats: TraceStats,
+        stats: SkillStats,
     }
 
     #[async_trait]
@@ -387,7 +387,7 @@ mod tests {
             &self,
             _skill_name: &str,
             _window: i64,
-        ) -> anyhow::Result<TraceStats> {
+        ) -> anyhow::Result<SkillStats> {
             Ok(self.stats.clone())
         }
     }
@@ -444,7 +444,7 @@ mod tests {
 
         // Stats show only 3 executions (below threshold of 10).
         let stats_provider = MockStatsProvider {
-            stats: TraceStats {
+            stats: SkillStats {
                 skill_name: "test-skill".to_string(),
                 total: 3,
                 success_count: 1,
@@ -504,7 +504,7 @@ mod tests {
 
         // Stats show high error rate (60%).
         let stats_provider = MockStatsProvider {
-            stats: TraceStats {
+            stats: SkillStats {
                 skill_name: "flaky-skill".to_string(),
                 total: 10,
                 success_count: 4,
@@ -579,7 +579,7 @@ mod tests {
 
         // Stats show post-apply error rate of 0.5 (exceeds threshold + regression_threshold = 0.3).
         let stats_provider = MockStatsProvider {
-            stats: TraceStats {
+            stats: SkillStats {
                 skill_name: "regressing-skill".to_string(),
                 total: 10,
                 success_count: 5,
@@ -636,7 +636,7 @@ mod tests {
 
         // Stats show low error rate (0.1) — below threshold + regression_threshold (0.3).
         let stats_provider = MockStatsProvider {
-            stats: TraceStats {
+            stats: SkillStats {
                 skill_name: "stable-skill".to_string(),
                 total: 10,
                 success_count: 9,

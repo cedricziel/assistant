@@ -37,10 +37,8 @@ pub mod conversation_broadcaster;
 pub mod conversation_events;
 pub mod conversations;
 pub mod interface_instance_store;
-pub mod logs;
 pub mod memory_chunks;
 pub mod message_bus;
-pub mod metrics;
 pub mod migration;
 pub mod org_storage;
 pub mod org_store;
@@ -51,9 +49,9 @@ pub mod push_subscriptions;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
+pub mod skill_stats;
 pub mod slack_threads;
 pub mod space_store;
-pub mod traces;
 pub mod user_store;
 pub mod webhooks;
 pub mod workflows;
@@ -80,15 +78,10 @@ pub use conversations::{
     ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
 };
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
-pub use logs::{InMemoryLogStore, LogStats, LogStore, RecordedLog, SqliteLogStore};
 pub use memory_chunks::{
     FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,
 };
 pub use message_bus::{InMemoryMessageBus, SqliteMessageBus};
-pub use metrics::{
-    InMemoryMetricsStore, MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord,
-    SqliteMetricsStore, TimeSeriesPoint, ToolUsageStats,
-};
 pub use org_storage::OrgStorageLayer;
 pub use org_store::SqliteOrgStore;
 pub use persona_skill_access::{
@@ -110,14 +103,11 @@ pub use registry::{InMemorySkillCatalog, SkillCatalog, SkillRegistry};
 pub use scheduled_tasks::{
     InMemoryScheduledTaskStore, ScheduledTask, ScheduledTaskStore, SqliteScheduledTaskStore,
 };
+pub use skill_stats::{SkillStats, SkillStatsProvider, UnavailableSkillStats};
 pub use slack_threads::{
     InMemorySlackActiveThreadStore, SlackActiveThreadStore, SqliteSlackActiveThreadStore,
 };
 pub use space_store::{SqliteMembershipStore, SqliteSpaceStore};
-pub use traces::{
-    InMemoryTraceStore, RecordedSpan, SkillStatsProvider, SqliteTraceStore, TraceFilter,
-    TraceStats, TraceStore, TraceSummary,
-};
 pub use user_store::SqliteUserStore;
 pub use webhooks::{InMemoryWebhookStore, SqliteWebhookStore, WebhookRecord, WebhookStore};
 pub use workflows::{
@@ -176,19 +166,9 @@ impl StorageLayer {
         Ok(Self { pool })
     }
 
-    /// Convenience: build a `SqliteTraceStore` backed by this pool.
-    pub fn trace_store(&self) -> SqliteTraceStore {
-        SqliteTraceStore::new(self.pool.clone())
-    }
-
     /// Convenience: build a [`ConversationEventStore`] backed by this pool.
     pub fn conversation_event_store(&self) -> SqliteConversationEventStore {
         SqliteConversationEventStore::new(self.pool.clone())
-    }
-
-    /// Convenience: build a `SqliteLogStore` backed by this pool.
-    pub fn log_store(&self) -> SqliteLogStore {
-        SqliteLogStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `SqliteConversationStore` backed by this pool.
@@ -239,16 +219,6 @@ impl StorageLayer {
     /// Convenience: build a [`SqliteMessageBus`] backed by this pool.
     pub fn message_bus(&self) -> SqliteMessageBus {
         SqliteMessageBus::new(self.pool.clone())
-    }
-
-    /// Convenience: build a [`MetricsStore`] backed by this pool.
-    pub fn metrics_store(&self) -> SqliteMetricsStore {
-        SqliteMetricsStore::new(self.pool.clone())
-    }
-
-    /// Convenience: build a [`MetricsStore`] scoped to a Persona.
-    pub fn metrics_store_for_agent(&self, agent_id: &str) -> SqliteMetricsStore {
-        SqliteMetricsStore::for_agent(self.pool.clone(), agent_id)
     }
 
     /// Convenience: build a [`WebhookStore`] backed by this pool.
@@ -485,8 +455,12 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             include_str!("../../../migrations/042_a2a_tasks.sql"),
         ),
         (
-            "043_bus_delivery_tracking",
-            include_str!("../../../migrations/043_bus_delivery_tracking.sql"),
+            "043_drop_local_telemetry",
+            include_str!("../../../migrations/043_drop_local_telemetry.sql"),
+        ),
+        (
+            "044_bus_delivery_tracking",
+            include_str!("../../../migrations/044_bus_delivery_tracking.sql"),
         ),
     ];
 
@@ -521,6 +495,30 @@ mod tests {
 
     use super::StorageLayer;
 
+    /// Telemetry is emitted over OTLP only; the tables the SQLite exporter
+    /// wrote to must not exist after migration.
+    #[tokio::test]
+    async fn local_telemetry_tables_are_dropped() -> Result<()> {
+        let storage = StorageLayer::new_in_memory().await?;
+
+        for table in [
+            "distributed_traces",
+            "logs",
+            "metric_points",
+            "metric_scopes",
+            "resources",
+        ] {
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?",
+            )
+            .bind(table)
+            .fetch_one(&storage.pool)
+            .await?;
+            assert_eq!(exists, 0, "table `{table}` must be dropped");
+        }
+        Ok(())
+    }
+
     #[tokio::test]
     async fn upgrade_from_pre_agent_scope_db_succeeds() -> Result<()> {
         let db_path = temp_db_path();
@@ -532,7 +530,6 @@ mod tests {
         assert!(column_exists(pool, "conversations", "agent_id").await?);
         assert!(column_exists(pool, "scheduled_tasks", "agent_id").await?);
         assert!(column_exists(pool, "webhooks", "agent_id").await?);
-        assert!(column_exists(pool, "metric_points", "agent_id").await?);
 
         let applied: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM _migrations WHERE name IN ('017_assistant_agents', '018_agent_scope_tasks_webhooks', '019_metrics_agent_scope', '026_personas')",

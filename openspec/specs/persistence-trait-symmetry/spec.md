@@ -12,9 +12,6 @@ In-scope persistence components include the following stores currently exposed a
 - `ConversationStore`
 - `ConversationEventStore`
 - `CommandEventStore`
-- `TraceStore`
-- `LogStore`
-- `MetricsStore`
 - `AttachmentStore`
 - `AudioStore`
 - `AgentStore`

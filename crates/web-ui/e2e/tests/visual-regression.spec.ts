@@ -493,18 +493,6 @@ test.describe("Authenticated pages", () => {
     expect(b?.title).toBe("E2E test conversation");
   });
 
-  test("REST API: GET /api/traces returns JSON array", async ({ page }) => {
-    const { status, body } = await apiGet(page, "/api/traces");
-    expect(status, "GET /api/traces should return 200").toBe(200);
-    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
-  });
-
-  test("REST API: GET /api/logs returns JSON array", async ({ page }) => {
-    const { status, body } = await apiGet(page, "/api/logs");
-    expect(status, "GET /api/logs should return 200").toBe(200);
-    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
-  });
-
   test("REST API: GET /api/personas/{id}/skills returns JSON array", async ({
     page,
   }) => {
@@ -555,17 +543,6 @@ test.describe("Authenticated pages", () => {
     const { status, body } = await apiGet(page, "/api/agents");
     expect(status, "GET /api/agents should return 200").toBe(200);
     expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
-  });
-
-  test("REST API: GET /api/analytics returns summary object", async ({
-    page,
-  }) => {
-    const { status, body } = await apiGet(page, "/api/analytics?window=24");
-    expect(status, "GET /api/analytics should return 200").toBe(200);
-    const b = body as Record<string, unknown>;
-    expect(typeof b?.total_requests, "should have total_requests").toBe(
-      "number",
-    );
   });
 
   test("workflow editor - new workflow (all viewports)", async ({ page }) => {

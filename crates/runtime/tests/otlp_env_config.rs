@@ -24,11 +24,9 @@
 
 use std::time::Duration;
 
-use assistant_core::types::observability::{ObservabilityConfig, OtelExporter};
 use assistant_runtime::telemetry::init_tracing;
 use opentelemetry::global;
 use opentelemetry::trace::{Tracer, TracerProvider};
-use sqlx::SqlitePool;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
@@ -70,19 +68,7 @@ async fn otlp_export_is_configured_entirely_from_env_vars() {
         std::env::set_var("OTEL_BSP_SCHEDULE_DELAY", "100");
     }
 
-    let pool = SqlitePool::connect("sqlite::memory:")
-        .await
-        .expect("in-memory sqlite pool");
-
-    // `exporter = "none"` isolates the OTLP path: anything the mock receives
-    // got there through the env-var-configured OTLP exporter.
-    let observability = ObservabilityConfig {
-        exporter: OtelExporter::None,
-        trace_content: false,
-    };
-
-    let guard = init_tracing(pool, &observability)
-        .await
+    let guard = init_tracing()
         .expect("init_tracing must succeed with OTLP env vars set")
         .expect("an OtelGuard must be returned when OTLP is configured");
 

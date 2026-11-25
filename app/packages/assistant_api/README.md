@@ -78,7 +78,6 @@ Class | Method | HTTP request | Description
 [*AgentsApi*](doc/AgentsApi.md) | [**registerAgent**](doc/AgentsApi.md#registeragent) | **POST** /api/agents | &#x60;POST /api/agents&#x60; — register a new agent.
 [*AgentsApi*](doc/AgentsApi.md) | [**setDefaultAgent**](doc/AgentsApi.md#setdefaultagent) | **POST** /api/agents/{id}/set-default | &#x60;POST /api/agents/{id}/set-default&#x60; — set an agent as the default.
 [*AgentsApi*](doc/AgentsApi.md) | [**updateAgent**](doc/AgentsApi.md#updateagent) | **PUT** /api/agents/{id} | &#x60;PUT /api/agents/{id}&#x60; — update an agent&#39;s card.
-[*AnalyticsApi*](doc/AnalyticsApi.md) | [**getAnalytics**](doc/AnalyticsApi.md#getanalytics) | **GET** /api/analytics | &#x60;GET /api/analytics&#x60; — get aggregated usage analytics for a time window.
 [*ApiKeysApi*](doc/ApiKeysApi.md) | [**createApiKey**](doc/ApiKeysApi.md#createapikey) | **POST** /api/users/me/api-keys | &#x60;POST /api/users/me/api-keys&#x60; — create a new scoped API key.
 [*ApiKeysApi*](doc/ApiKeysApi.md) | [**deleteApiKey**](doc/ApiKeysApi.md#deleteapikey) | **DELETE** /api/users/me/api-keys/{id} | &#x60;DELETE /api/users/me/api-keys/{id}&#x60; — revoke an API key.
 [*ApiKeysApi*](doc/ApiKeysApi.md) | [**listApiKeys**](doc/ApiKeysApi.md#listapikeys) | **GET** /api/users/me/api-keys | &#x60;GET /api/users/me/api-keys&#x60; — list the caller&#39;s API keys.
@@ -115,7 +114,6 @@ Class | Method | HTTP request | Description
 [*InterfacesApi*](doc/InterfacesApi.md) | [**createInterface**](doc/InterfacesApi.md#createinterface) | **POST** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — create an interface instance.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**deleteInterface**](doc/InterfacesApi.md#deleteinterface) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}&#x60; — delete an interface instance.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**listInterfaces**](doc/InterfacesApi.md#listinterfaces) | **GET** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — list interface instances.
-[*LogsApi*](doc/LogsApi.md) | [**listLogs**](doc/LogsApi.md#listlogs) | **GET** /api/logs | &#x60;GET /api/logs&#x60; — list recent log entries, newest first.
 [*MembersApi*](doc/MembersApi.md) | [**addMember**](doc/MembersApi.md#addmember) | **POST** /api/orgs/{org_id}/spaces/{space_id}/members | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/members&#x60; — add a member.
 [*MembersApi*](doc/MembersApi.md) | [**listMembers**](doc/MembersApi.md#listmembers) | **GET** /api/orgs/{org_id}/spaces/{space_id}/members | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/members&#x60; — list space members.
 [*MembersApi*](doc/MembersApi.md) | [**removeMember**](doc/MembersApi.md#removemember) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/members/{user_id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}&#x60; — remove member.
@@ -169,8 +167,6 @@ Class | Method | HTTP request | Description
 [*TemplatesApi*](doc/TemplatesApi.md) | [**createFromTemplate**](doc/TemplatesApi.md#createfromtemplate) | **POST** /api/orgs/{org_id}/spaces/{space_id}/personas/from-template | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/personas/from-template&#x60; — create a persona from a template.
 [*TemplatesApi*](doc/TemplatesApi.md) | [**listTemplates**](doc/TemplatesApi.md#listtemplates) | **GET** /api/orgs/{org_id}/catalog/templates | &#x60;GET /api/orgs/{org_id}/catalog/templates&#x60; — list available persona templates.
 [*TemplatesApi*](doc/TemplatesApi.md) | [**onboardingStatus**](doc/TemplatesApi.md#onboardingstatus) | **GET** /api/users/me/onboarding-status | &#x60;GET /api/users/me/onboarding-status&#x60; — check if user has created at least one persona.
-[*TracesApi*](doc/TracesApi.md) | [**getTrace**](doc/TracesApi.md#gettrace) | **GET** /api/traces/{trace_id} | &#x60;GET /api/traces/{trace_id}&#x60; — get a single trace with span breakdown.
-[*TracesApi*](doc/TracesApi.md) | [**listTraces**](doc/TracesApi.md#listtraces) | **GET** /api/traces | &#x60;GET /api/traces&#x60; — list recent traces, newest first.
 [*UsersApi*](doc/UsersApi.md) | [**createUser**](doc/UsersApi.md#createuser) | **POST** /api/orgs/{org_id}/users | &#x60;POST /api/orgs/{org_id}/users&#x60; — create/invite a user.
 [*UsersApi*](doc/UsersApi.md) | [**deleteUser**](doc/UsersApi.md#deleteuser) | **DELETE** /api/orgs/{org_id}/users/{id} | &#x60;DELETE /api/orgs/{org_id}/users/{id}&#x60; — remove a user (org-admin only).
 [*UsersApi*](doc/UsersApi.md) | [**getUser**](doc/UsersApi.md#getuser) | **GET** /api/orgs/{org_id}/users/{id} | &#x60;GET /api/orgs/{org_id}/users/{id}&#x60; — get user detail.
@@ -214,7 +210,6 @@ Class | Method | HTTP request | Description
  - [AgentProvider](doc/AgentProvider.md)
  - [AgentSkill](doc/AgentSkill.md)
  - [AgentSummary](doc/AgentSummary.md)
- - [AnalyticsSummaryResponse](doc/AnalyticsSummaryResponse.md)
  - [ApiErrorResponse](doc/ApiErrorResponse.md)
  - [ApiKeySecurityScheme](doc/ApiKeySecurityScheme.md)
  - [ApiKeySummary](doc/ApiKeySummary.md)
@@ -259,12 +254,10 @@ Class | Method | HTTP request | Description
  - [InterfaceInstanceResponse](doc/InterfaceInstanceResponse.md)
  - [ListTaskPushNotificationConfigsResponse](doc/ListTaskPushNotificationConfigsResponse.md)
  - [ListTasksResponse](doc/ListTasksResponse.md)
- - [LogEntryResponse](doc/LogEntryResponse.md)
  - [MemberEntry](doc/MemberEntry.md)
  - [Message](doc/Message.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
- - [ModelUsageResponse](doc/ModelUsageResponse.md)
  - [MutualTlsSecurityScheme](doc/MutualTlsSecurityScheme.md)
  - [OAuth2SecurityScheme](doc/OAuth2SecurityScheme.md)
  - [OAuthErrorResponse](doc/OAuthErrorResponse.md)
@@ -300,7 +293,6 @@ Class | Method | HTTP request | Description
  - [SkillEntryResponse](doc/SkillEntryResponse.md)
  - [SpaceDetail](doc/SpaceDetail.md)
  - [SpaceSummary](doc/SpaceSummary.md)
- - [SpanEntryResponse](doc/SpanEntryResponse.md)
  - [SseStatusEvent](doc/SseStatusEvent.md)
  - [SseSubagentCompletedEvent](doc/SseSubagentCompletedEvent.md)
  - [SseSubagentStartedEvent](doc/SseSubagentStartedEvent.md)
@@ -323,12 +315,8 @@ Class | Method | HTTP request | Description
  - [TaskStatus](doc/TaskStatus.md)
  - [TaskStatusUpdateEvent](doc/TaskStatusUpdateEvent.md)
  - [TemplateResponse](doc/TemplateResponse.md)
- - [TimeSeriesResponse](doc/TimeSeriesResponse.md)
  - [TokenResponse](doc/TokenResponse.md)
  - [ToolCallSummary](doc/ToolCallSummary.md)
- - [ToolUsageResponse](doc/ToolUsageResponse.md)
- - [TraceDetailResponse](doc/TraceDetailResponse.md)
- - [TraceSummaryResponse](doc/TraceSummaryResponse.md)
  - [TurnState](doc/TurnState.md)
  - [TurnStatusResponse](doc/TurnStatusResponse.md)
  - [UnsubscribeRequest](doc/UnsubscribeRequest.md)

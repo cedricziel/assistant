@@ -76,10 +76,12 @@ migration coverage without disk state leakage between tests.
 All library crates MUST use `tracing` macros (`debug!`, `info!`, `warn!`, `error!`).
 `println!` is NEVER permitted in library crates.
 The ReAct orchestration loop MUST emit OpenTelemetry spans for each turn.
-Structured trace data MUST be persisted to SQLite via the `opentelemetry-exporter-sqlite` crate.
+Telemetry MUST leave the process over OTLP only; the assistant MUST NOT keep a local telemetry
+store (see ADR-0012).
 
-**Rationale**: Passive trace logging enables the self-improvement feedback loop (skill refinement
-proposals) and makes runtime behavior inspectable without modifying code.
+**Rationale**: Emitting standard OpenTelemetry makes runtime behavior inspectable in any
+observability backend without modifying code, and keeps storage, retention and querying out of
+the assistant.
 
 ### V. Simplicity and YAGNI
 

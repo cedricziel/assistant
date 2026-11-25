@@ -1,9 +1,10 @@
 ---
 name: observability
 description: >
-  Practical observability guide for this workspace. Includes where traces, logs,
-  and metrics are persisted in SQLite and quick query patterns for debugging.
-  Use when investigating runtime behavior, incidents, or telemetry quality.
+  Practical observability guide for this workspace. Covers how the assistant
+  emits traces, logs, and metrics over OTLP, how to turn export on, and what to
+  query in the backend. Use when investigating runtime behavior, incidents, or
+  telemetry quality.
 license: MIT
 ---
 
@@ -12,107 +13,57 @@ license: MIT
 Use this skill when you need to diagnose behavior via telemetry in this
 repository.
 
-The SQLite tables below are the _local_ telemetry store — a debugging
-convenience for a single-node install, populated by the SQLite OTel exporters
-and enabled by default (`[observability] exporter = "sqlite"`). Anything
-beyond that lives in an external backend reached over OTLP; query it there
-with TraceQL/LogQL/PromQL rather than expecting long-term history here. See
-`docs/opentelemetry.md` and `docs/adr/adr-0010-external-observability.md`.
+The assistant keeps **no local telemetry store**. Traces, logs, and metrics
+leave the process over OTLP/HTTP (protobuf) only, and are queried in whatever
+backend receives them (TraceQL, LogQL, PromQL, …). There are no
+`distributed_traces`, `logs`, or `metric_points` tables, no `/api/traces`,
+`/api/logs`, or `/api/analytics` endpoints, and no trace, log, or analytics
+screens in the app. See `docs/opentelemetry.md` and
+`docs/adr/adr-0012-otlp-only-telemetry.md`.
 
-## Telemetry Storage Tables
+## Turn export on
 
-- Traces: `distributed_traces`
-  - Source: OpenTelemetry spans
-  - Key columns: `span_id`, `trace_id`, `parent_span_id`, `name`,
-    `service_name`, `start_time`, `end_time`, `duration_ms`, `attributes`
-  - Tool-oriented columns: `tool_name`, `tool_status`, `tool_observation`,
-    `tool_error`, `conversation_id`, `turn`
-  - Decoupling note: `conversation_id` is intentionally not a foreign key to
-    `conversations` (telemetry must remain standalone)
+Export is installed when any non-empty `OTEL_EXPORTER_OTLP_*` variable is set
+and `OTEL_SDK_DISABLED` is not `true`. With neither, telemetry is a no-op and
+only console logging (`RUST_LOG`) runs.
 
-- Logs: `logs`
-  - Source: OpenTelemetry log records
-  - Key columns: `id`, `timestamp`, `severity_number`, `severity_text`, `body`,
-    `service_name`, `target`, `attributes`
-  - Trace correlation columns: `trace_id`, `span_id`
-
-- Metrics: `metric_points` (with `resources` and `metric_scopes`)
-  - `metric_points` stores datapoints for counters, gauges, histograms
-  - Key columns: `metric_name`, `metric_kind`, `value`, `count`, `sum`, `min`,
-    `max`, `recorded_at`, `attributes`, plus denormalized
-    `model`/`provider`/`operation`/`skill`/`interface`/`agent_id`
-  - `resources` stores deduplicated resource attributes via fingerprint
-  - `metric_scopes` stores instrumentation scope `(name, version)`
-
-## Quick Query Hints
-
-- Recent trace failures by tool
-
-```sql
-SELECT start_time, service_name, tool_name, tool_status, tool_error, trace_id, span_id
-FROM distributed_traces
-WHERE tool_status = 'error'
-ORDER BY start_time DESC
-LIMIT 50;
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 assistant
 ```
 
-- Logs for a given trace
+- Use the HTTP port (`4318`), not gRPC (`4317`).
+- The generic endpoint gets `/v1/traces`, `/v1/logs`, `/v1/metrics` appended;
+  per-signal endpoints are used verbatim.
+- `assistant doctor` reports whether OTLP export is on.
+- Set `[observability] trace_content = true` to record full LLM message
+  content on spans. It may contain PII.
 
-```sql
-SELECT timestamp, severity_text, target, body
-FROM logs
-WHERE trace_id = ?
-ORDER BY timestamp ASC;
-```
+## What is emitted
 
-- Latest metric series for one metric name
+- Traces (tracer `assistant.orchestrator`): `conversation` root span,
+  `chat {model}` per LLM call, `execute_tool {name}` per tool call.
+  Tool spans carry `tool_name`, `tool_status` (`ok`, `error`, `denied`, …),
+  `tool_error`, `conversation_id`, `turn`, and `active_skill`.
+- Logs: `tracing` events from `assistant_*` crates, bridged to OTel log
+  records with trace and span context.
+- Metrics (meter `assistant-runtime`): GenAI token usage and operation
+  duration, plus `assistant.turn.*`, `assistant.tool.*`, and
+  `assistant.error.count`.
 
-```sql
-SELECT recorded_at, metric_kind, value, count, sum, model, provider, operation
-FROM metric_points
-WHERE metric_name = ?
-ORDER BY recorded_at DESC
-LIMIT 200;
-```
+The full attribute and metric reference is in `docs/opentelemetry.md`.
 
-## Join Patterns
+## Debugging hints
 
-- Metric metadata joins
+- Pivot on `trace_id`: find the failing span, then pull the logs with the
+  same `trace_id`.
+- Failing tools: filter spans on `tool_status = error` and group by
+  `tool_name`.
+- Nothing arrives: confirm the endpoint is the HTTP one, check for
+  `OTEL_SDK_DISABLED=true`, and run with `RUST_LOG=opentelemetry=debug`.
+  `crates/runtime/tests/otlp_env_config.rs` shows a working configuration.
+- High cardinality: keep it in span attributes, not metric attributes.
 
-```sql
-SELECT mp.recorded_at, mp.metric_name, mp.metric_kind, mp.value,
-       r.attributes AS resource_attrs, ms.name AS scope_name, ms.version AS scope_version
-FROM metric_points mp
-JOIN resources r ON r.id = mp.resource_id
-JOIN metric_scopes ms ON ms.id = mp.scope_id
-WHERE mp.recorded_at >= datetime('now', '-1 day')
-ORDER BY mp.recorded_at DESC
-LIMIT 200;
-```
+## Not telemetry
 
-- Trace + log correlation
-
-```sql
-SELECT t.start_time, t.name AS span_name, t.tool_name, t.tool_status,
-       l.timestamp, l.severity_text, l.body
-FROM distributed_traces t
-LEFT JOIN logs l ON l.trace_id = t.trace_id AND (l.span_id = t.span_id OR l.span_id IS NULL)
-WHERE t.trace_id = ?
-ORDER BY l.timestamp ASC;
-```
-
-## Operational Tips
-
-- Prefer filtering by indexed columns first (`start_time`, `timestamp`,
-  `recorded_at`, `trace_id`, `metric_name`, `service_name`).
-- Keep high-cardinality details in JSON `attributes`; use denormalized columns
-  for dashboards and fast predicates.
-- Use `trace_id` as the primary pivot when moving between spans and logs.
-- For metrics, inspect both `value` (scalar) and histogram fields
-  (`count`/`sum`/`bounds`/`bucket_counts`) before concluding behavior.
-
-## Known Limits
-
-- `u64` metrics are currently skipped by the SQLite metrics exporter; if you
-  need those series in SQLite dashboards, emit compatible numeric types
-  (`i64`/`f64`) or add `u64` handling in the exporter.
+`conversation_events` (the durable SSE replay log), `command_events`, and
+conversation messages are product data in the space database. They stay.
