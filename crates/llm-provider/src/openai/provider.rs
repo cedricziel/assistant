@@ -477,6 +477,7 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                         ContentBlock::Text(text) => {
                             Some(InputContent::InputText(InputTextContent {
                                 text: text.clone(),
+                                prompt_cache_breakpoint: None,
                             }))
                         }
                         ContentBlock::Image { media_type, data } => {
@@ -486,6 +487,7 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                                     detail: async_openai::types::responses::ImageDetail::Auto,
                                     file_id: None,
                                     image_url: Some(data_uri),
+                                    prompt_cache_breakpoint: None,
                                 },
                             ))
                         }
@@ -521,6 +523,8 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                         id: None,
                         status: Some(OutputStatus::Completed),
                         namespace: None,
+                        r#async: None,
+                        caller: None,
                     })));
                 }
             }
@@ -530,10 +534,13 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                 let call_id = find_preceding_call_id(&items);
                 items.push(InputItem::Item(Item::FunctionCallOutput(
                     FunctionCallOutputItemParam {
-                        call_id,
+                        call_id: Some(call_id),
                         output: FunctionCallOutput::Text(content.clone()),
                         id: None,
                         status: None,
+                        caller: None,
+                        name: None,
+                        namespace: None,
                     },
                 )));
             }
@@ -558,7 +565,7 @@ fn find_preceding_call_id(items: &[InputItem]) -> String {
                 function_call_ids.push(fc.call_id.clone());
             }
             InputItem::Item(Item::FunctionCallOutput(fco)) => {
-                matched_ids.push(fco.call_id.clone());
+                matched_ids.extend(fco.call_id.clone());
             }
             _ => {}
         }
@@ -585,6 +592,9 @@ fn tool_spec_to_responses(tool: &ToolSpec) -> Tool {
         parameters: Some(tool.normalized_params_schema()),
         strict: Some(false),
         defer_loading: None,
+        r#async: None,
+        output_schema: None,
+        allowed_callers: None,
     })
 }
 
@@ -618,6 +628,7 @@ fn build_web_search_tool(cfg: &OpenAIWebSearchConfig) -> Tool {
         user_location,
         search_context_size,
         search_content_types: None,
+        external_web_access: None,
     })
 }
 
@@ -812,7 +823,7 @@ mod tests {
                 InputItem::Item(Item::FunctionCallOutput(fco)),
             ) => {
                 assert_eq!(fc.call_id, "call_123");
-                assert_eq!(fco.call_id, "call_123");
+                assert_eq!(fco.call_id.as_deref(), Some("call_123"));
             }
             _ => panic!("Expected FunctionCall and FunctionCallOutput"),
         }
@@ -999,12 +1010,17 @@ mod tests {
                 id: None,
                 status: Some(OutputStatus::Completed),
                 namespace: None,
+                r#async: None,
+                caller: None,
             })),
             InputItem::Item(Item::FunctionCallOutput(FunctionCallOutputItemParam {
-                call_id: "call_1".to_string(),
+                call_id: Some("call_1".to_string()),
                 output: FunctionCallOutput::Text("done".to_string()),
                 id: None,
                 status: None,
+                caller: None,
+                name: None,
+                namespace: None,
             })),
             InputItem::Item(Item::FunctionCall(FunctionToolCall {
                 arguments: "{}".to_string(),
@@ -1013,6 +1029,8 @@ mod tests {
                 id: None,
                 status: Some(OutputStatus::Completed),
                 namespace: None,
+                r#async: None,
+                caller: None,
             })),
         ];
         // call_1 is matched, call_2 is unmatched → should return call_2
