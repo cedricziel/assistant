@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    CallToolRequestParams, CallToolResponse, CallToolResult, CompleteRequestParams, CompleteResult,
+    ContentBlock, GetPromptRequestParams, GetPromptResponse, Implementation, ListPromptsResult,
     ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
     ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
     ServerConfig, Tool,
@@ -25,7 +26,7 @@ use assistant_storage::{SkillCatalog, SkillRegistry};
 use assistant_tool_executor::install_skill_from_source;
 
 use crate::identity::{Caller, resolve_caller};
-use crate::resources;
+use crate::{prompts, resources};
 
 const RUN_PROMPT: &str = "run-prompt";
 const INSTALL_SKILL: &str = "install-skill";
@@ -178,8 +179,10 @@ fn required_str<'a>(input: &'a Value, name: &str) -> Result<&'a str, ErrorData> 
 pub(crate) fn server_info() -> ServerConfig {
     ServerConfig::new(
         ServerCapabilities::builder()
-            .enable_tools()
+            .enable_completions()
+            .enable_prompts()
             .enable_resources()
+            .enable_tools()
             .build(),
     )
     .with_server_info(Implementation::new(
@@ -297,5 +300,31 @@ impl ServerHandler for AssistantMcpServer {
         resources::read(self.catalog.as_ref(), &request.uri)
             .await
             .map(Into::into)
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(prompts::list(self.catalog.as_ref()).await)
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        prompts::get(self.catalog.as_ref(), &request)
+            .await
+            .map(Into::into)
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        prompts::complete(self.catalog.as_ref(), &request).await
     }
 }

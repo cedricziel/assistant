@@ -5,6 +5,7 @@
 
 mod http;
 mod identity;
+mod prompts;
 mod resources;
 mod server;
 
