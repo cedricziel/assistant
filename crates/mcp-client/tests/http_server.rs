@@ -213,6 +213,24 @@ async fn bridged_tool_call_reaches_the_server_and_returns_its_text() {
 }
 
 #[tokio::test]
+async fn server_side_call_error_becomes_error_output_naming_the_tool() {
+    let server = serve(&Script::new(&["fail"])).await;
+    let mgr = McpClientManager::start(&[entry("remote", &server.uri(), McpTrustLevel::Trust)])
+        .await
+        .unwrap();
+    let handler = mgr.tool_handlers().await.remove(0);
+
+    let out = handler.run(HashMap::new(), &ctx()).await.unwrap();
+
+    assert!(!out.success, "an RPC error must not be reported as success");
+    assert!(
+        out.content.contains("'fail'") && out.content.contains("tool exploded"),
+        "content was: {}",
+        out.content
+    );
+}
+
+#[tokio::test]
 async fn tool_listing_error_leaves_server_disconnected_with_no_tools() {
     let script = Script::new(&["alpha"]);
     script.list_fails.store(true, Ordering::SeqCst);
