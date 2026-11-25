@@ -406,6 +406,37 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("integrations catalog page (error state)", async ({ page }) => {
+    await page.route(/\/api\/integrations\/catalog(\?.*)?$/, (route) =>
+      route.fulfill({ status: 500, json: { error: "catalog unavailable" } }),
+    );
+    await navigateAndSettle(page, "/integrations");
+    await expect(page).toHaveScreenshot("integrations-error.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("integrations catalog entry detail", async ({ page }) => {
+    await mockCatalog(page, CATALOG_FIXTURE);
+    await navigateAndSettle(page, "/integrations");
+    // Flutter builds its semantics tree only after the (off-screen)
+    // accessibility placeholder is activated; the tile then shows up as a
+    // button whose label holds its text.
+    await page
+      .getByRole("button", { name: "Enable accessibility" })
+      .evaluate((el) => (el as HTMLElement).click());
+    await page
+      .getByRole("button", { name: /Linear/ })
+      .first()
+      .click();
+    await page.waitForTimeout(CSS_SETTLE_MS * 2);
+    await expect(page).toHaveScreenshot("integrations-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
   test("agents list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/agents");
     await expect(page).toHaveScreenshot("agents-empty.png", {
@@ -662,5 +693,22 @@ test.describe("Authenticated pages", () => {
       });
       expect(hasOverflow, `viewport overflow on ${route}`).toBeFalsy();
     }
+  });
+});
+
+test.describe("Authenticated pages (light theme)", () => {
+  test.use({ colorScheme: "light" });
+
+  test.beforeEach(async ({ page }) => {
+    await loginFlutter(page);
+  });
+
+  test("integrations catalog page (light)", async ({ page }) => {
+    await mockCatalog(page, CATALOG_FIXTURE);
+    await navigateAndSettle(page, "/integrations");
+    await expect(page).toHaveScreenshot("integrations-catalog-light.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
   });
 });
