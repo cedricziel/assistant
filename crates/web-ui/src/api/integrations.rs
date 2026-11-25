@@ -47,18 +47,18 @@ use error::ApiError;
 
 mod authz;
 mod error;
-mod manage;
-mod policy;
-mod spaces;
+pub mod manage;
+pub mod policy;
+pub mod spaces;
 #[cfg(test)]
 mod testing;
 pub mod types;
 
-pub use manage::{
+use manage::{
     create_integration, delete_integration, get_integration, list_integrations, update_integration,
 };
-pub use policy::{get_integration_policy, put_integration_policy};
-pub use spaces::{delete_space_access, put_space_access};
+use policy::{get_integration_policy, put_integration_policy};
+use spaces::{delete_space_access, put_space_access};
 
 // -- State -------------------------------------------------------------------
 
@@ -690,6 +690,37 @@ mod tests {
                 content.get("application/json").is_none(),
                 "{path}: {content}"
             );
+        }
+    }
+
+    #[test]
+    fn every_management_route_is_documented_with_the_plain_text_401() {
+        use utoipa::OpenApi;
+
+        let spec = serde_json::to_value(crate::openapi::ApiDoc::openapi()).unwrap();
+        let routes = [
+            ("/api/integrations", ["get", "post"].as_slice()),
+            (
+                "/api/integrations/{id}",
+                ["get", "patch", "delete"].as_slice(),
+            ),
+            ("/api/integrations/policy", ["get", "put"].as_slice()),
+            (
+                "/api/integrations/{id}/spaces/{space_id}",
+                ["put", "delete"].as_slice(),
+            ),
+        ];
+
+        for (path, methods) in routes {
+            for method in methods {
+                let operation = &spec["paths"][path][method];
+                assert!(operation.is_object(), "{method} {path} is not documented");
+                let content = &operation["responses"]["401"]["content"];
+                assert!(
+                    content.get("text/plain").is_some(),
+                    "{method} {path}: {content}"
+                );
+            }
         }
     }
 }
