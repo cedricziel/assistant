@@ -2,7 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'nav_shell.dart';
+import 'nav/sidebar_collapsed_provider.dart';
 
 /// Left edge zone (in logical pixels) where a touch-drag is recognised as
 /// a sidebar toggle gesture.

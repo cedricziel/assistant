@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:assistant_app/shared/edge_swipe_sidebar_toggle.dart';
-import 'package:assistant_app/shared/nav_shell.dart';
+import 'package:assistant_app/shared/nav/sidebar_collapsed_provider.dart';
 
 Widget _harness({required Widget child, required ProviderContainer container}) {
   return UncontrolledProviderScope(

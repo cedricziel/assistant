@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:assistant_app/shared/nav_shell.dart';
+import 'package:assistant_app/shared/nav/sidebar_collapsed_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
