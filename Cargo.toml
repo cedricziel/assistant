@@ -139,7 +139,7 @@ sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runti
 # cron expression parsing
 cron = "0.17"
 # HTML parsing for web-fetch builtin
-scraper = { version = "0.27", default-features = false }
+scraper = { version = "0.29", default-features = false }
 # Glob pattern matching for file-glob builtin
 glob = "0.3"
 # Image decoding, encoding, and resizing (attachment serving)
