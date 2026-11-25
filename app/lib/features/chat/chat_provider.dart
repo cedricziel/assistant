@@ -11,7 +11,9 @@ import '../connection/connection_provider.dart';
 import 'chat_history_mapping.dart';
 import 'chat_models.dart';
 import 'chat_stream_errors.dart';
+import 'chat_stream_session.dart';
 import 'chat_timeline_reducers.dart';
+import 'chat_turn_transitions.dart';
 import 'conversation_list_provider.dart';
 
 export 'chat_history_mapping.dart';
@@ -20,15 +22,7 @@ export 'conversation_list_provider.dart';
 
 /// Manages the active chat conversation.
 class ChatNotifier extends AsyncNotifier<ChatState> {
-  bool _cancelled = false;
-  bool _draining = false;
-  StreamController<String>? _thinkingController;
-
-  void _closeThinkingController() {
-    final c = _thinkingController;
-    _thinkingController = null;
-    if (c != null) unawaited(c.close());
-  }
+  final _session = ChatStreamSession();
 
   /// Update the in-flight turn-status snapshot to reflect a newly-received
   /// SSE event of [kind]. No-op when no turn is in flight (snapshot null).
@@ -86,10 +80,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Also feeds tokens to the thinking stream for incremental rendering.
   void _onThinkingEvent(ChatState chatState, ThinkingEvent event) {
     // Feed token to the thinking stream controller.
-    _thinkingController?.add(event.content);
+    _session.thinking?.add(event.content);
 
     final msgs = List<ChatMessage>.from(chatState.messages);
-    applyThinkingEvent(msgs, event, tokenStream: _thinkingController?.stream);
+    applyThinkingEvent(msgs, event, tokenStream: _session.thinking?.stream);
     state = AsyncData(chatState.copyWith(messages: msgs));
   }
 
@@ -101,11 +95,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final msgs = List<ChatMessage>.from(chatState.messages);
     reduce(msgs);
     state = AsyncData(chatState.copyWith(messages: msgs));
-  }
-
-  /// Advance the replay cursor past [event].
-  void _advanceSeq(StreamEvent event) {
-    _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
   }
 
   /// Apply [event] when it is a mid-turn event shared by the text, voice and
@@ -207,32 +196,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     required String conversationId,
     required String userMsgId,
   }) {
-    _closeThinkingController();
-    final msgs = List<ChatMessage>.from(chatState.messages);
-    // Mark thinking entries as complete (no longer streaming).
-    completeStreamingThinkingEntries(msgs);
-    // Mark user message as successfully acknowledged.
-    setMessageStatus(msgs, userMsgId, MessageStatus.ok);
-    // Replace streaming placeholder with final assistant message, preserving
-    // audio id. Tool calls are separate timeline entries.
-    final assistantId =
-        event.messageId ?? 'assistant-${DateTime.now().millisecondsSinceEpoch}';
-    final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
-    if (idx != -1) {
-      final placeholder = msgs[idx];
-      msgs[idx] = ChatMessage(
-        id: assistantId,
-        role: 'assistant',
-        content: event.content,
-        audioId: placeholder.audioId,
-        ttsAvailable: placeholder.ttsAvailable,
-      );
-    }
+    _session.closeThinking();
     state = AsyncData(
-      ChatState(
+      completedTurnState(
+        chatState,
         conversationId: conversationId,
-        messages: msgs,
-        pendingQueue: chatState.pendingQueue,
+        userMsgId: userMsgId,
+        assistantId:
+            event.messageId ??
+            'assistant-${DateTime.now().millisecondsSinceEpoch}',
+        content: event.content,
       ),
     );
   }
@@ -244,17 +217,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     ErrorEvent event, {
     required String userMsgId,
   }) {
-    _closeThinkingController();
-    final msgs = List<ChatMessage>.from(chatState.messages)
-      ..removeWhere((m) => m.id == streamingPlaceholderId);
-    setMessageStatus(msgs, userMsgId, MessageStatus.failed);
+    _session.closeThinking();
     state = AsyncData(
-      chatState.copyWith(
-        messages: msgs,
-        isSending: false,
-        streamingContent: '',
+      abortedTurnState(
+        chatState,
+        failedUserMsgId: userMsgId,
         error: event.message,
-        clearCurrentTurnStatus: true,
+        clearTurnStatus: true,
       ),
     );
   }
@@ -272,46 +241,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     state = AsyncData(chatState.copyWith(messages: msgs));
   }
 
-  /// Run ID of the most recent (or current) orchestrator run.
-  /// Captured from the `RunStartedEvent` so we can reconnect if the stream drops.
-  String? _currentRunId;
-
-  /// Sequence number of the last event received from the current run.
-  /// Used as the `since` cursor when requesting event-log replay.
-  int _lastSeq = 0;
-
-  /// When `true`, a transient connection error occurred and silent recovery
-  /// should be attempted on app resume (via [attemptReconnect]).
-  bool _needsReconnect = false;
-
-  /// User message ID from the interrupted stream (for replay status updates).
-  String? _disconnectedUserMsgId;
-
-  /// Conversation ID at the time the stream was interrupted.
-  String? _disconnectedConversationId;
-
-  /// Maximum number of replay retries with exponential backoff before
-  /// deferring to app-resume reconnection.
-  static const _maxStreamRetries = 3;
-
-  /// Base delay for exponential backoff between retries (1s, 2s, 4s).
-  static const _baseRetryDelay = Duration(seconds: 1);
-
-  /// How long to wait after Send for the first non-[RunStartedEvent] from
-  /// the SSE stream before treating the stream as stalled and falling back
-  /// to a direct conversation fetch.
-  ///
-  /// Motivated by iOS Dio / dart:io HttpClient buffering: the response
-  /// headers arrive (so [RunStartedEvent] fires from the `X-Run-Id`
-  /// header) but no body chunks reach the parser until the connection
-  /// closes, leaving the user staring at "jumpy dots" until the byte-
-  /// level 90 s heartbeat finally trips. 12 s is short enough to feel
-  /// responsive and long enough to absorb a brief first-token delay.
-  static const _initialStallTimeout = Duration(seconds: 12);
-
   /// Whether a transient stream interruption occurred that should be retried
   /// on app resume.
-  bool get needsReconnect => _needsReconnect;
+  bool get needsReconnect => _session.needsReconnect;
 
   @override
   Future<ChatState> build() async {
@@ -340,7 +272,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Queued messages in [ChatState.pendingQueue] are preserved and will
   /// continue to drain after the cancel.
   void cancelStream() {
-    _cancelled = true;
+    _session.cancelled = true;
     final current = state.value ?? const ChatState();
     final msgs = List<ChatMessage>.from(current.messages)
       ..removeWhere((m) => m.id == streamingPlaceholderId);
@@ -356,7 +288,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   /// Load an existing conversation by ID.
   Future<void> loadConversation(String conversationId) async {
-    _resetReconnectState();
+    _session.clearDisconnected();
     state = AsyncData(
       (state.value ?? const ChatState()).copyWith(
         isLoadingHistory: true,
@@ -392,7 +324,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   /// Start a fresh conversation (no conversation ID set).
   void clearConversation() {
-    _resetReconnectState();
+    _session.clearDisconnected();
     state = const AsyncData(ChatState());
   }
 
@@ -415,7 +347,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// call could not be made (no run id, no client, or transport error).
   Future<TurnState?> requestCancelTurn() async {
     final api = _api;
-    final runId = _currentRunId;
+    final runId = _session.runId;
     final convId = state.value?.conversationId;
     if (api == null || runId == null || convId == null) {
       return null;
@@ -489,7 +421,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
 
     // Kick off drain if not already running.
-    if (!_draining) {
+    if (!_session.draining) {
       _drainQueue();
     }
   }
@@ -510,7 +442,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   /// Retry a failed message.
   ///
-  /// If a [_currentRunId] is available, attempts to reconnect via the event-log
+  /// If a [_session.runId] is available, attempts to reconnect via the event-log
   /// replay endpoint before re-sending the message.  Falls back to re-sending
   /// on 404 (unknown run) or 410 (events pruned).
   Future<void> retryMessage(ChatMessage msg) async {
@@ -518,14 +450,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final current = state.value ?? const ChatState();
     final conversationId = current.conversationId;
 
-    if (api != null && _currentRunId != null && conversationId != null) {
+    if (api != null && _session.runId != null && conversationId != null) {
       // Attempt replay before re-sending.
       final replayed = await _replayRun(
         api,
         conversationId,
         msg.id,
-        _currentRunId!,
-        _lastSeq,
+        _session.runId!,
+        _session.lastSeq,
       );
       if (replayed) return;
     }
@@ -574,15 +506,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         runId,
         since: since,
       )) {
-        if (_cancelled) break;
+        if (_session.cancelled) break;
         final chatState = state.value ?? const ChatState();
 
         if (_applyTurnEvent(chatState, event)) {
-          _advanceSeq(event);
+          _session.advance(event);
         } else if (event is RunStartedEvent) {
-          _advanceSeq(event);
+          _session.advance(event);
         } else if (event is DoneEvent) {
-          _advanceSeq(event);
+          _session.advance(event);
           _finishTurn(
             chatState,
             event,
@@ -591,14 +523,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           );
           return true;
         } else if (event is AgentErrorEvent) {
-          _advanceSeq(event);
+          _session.advance(event);
           final ms = List<ChatMessage>.from(chatState.messages)
             ..removeWhere((m) => m.id == streamingPlaceholderId);
           setMessageStatus(ms, userMsgId, MessageStatus.failed);
           state = AsyncData(chatState.copyWith(messages: ms, isSending: false));
           return false;
         } else if (event is ErrorEvent) {
-          _advanceSeq(event);
+          _session.advance(event);
           return false;
         }
       }
@@ -608,15 +540,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       final status = e.response?.statusCode;
       if (status == 404 || status == 410) {
         // Restore UI to clean failed state.
-        final chatState = state.value ?? const ChatState();
-        final ms = List<ChatMessage>.from(chatState.messages)
-          ..removeWhere((m) => m.id == streamingPlaceholderId);
-        setMessageStatus(ms, userMsgId, MessageStatus.failed);
         state = AsyncData(
-          chatState.copyWith(
-            messages: ms,
-            isSending: false,
-            streamingContent: '',
+          abortedTurnState(
+            state.value ?? const ChatState(),
+            failedUserMsgId: userMsgId,
           ),
         );
         return false;
@@ -629,11 +556,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   /// Pop messages from [ChatState.pendingQueue] and stream them one at a time.
   ///
-  /// A [_draining] guard prevents re-entrant calls. The loop continues until
+  /// A [_session.draining] guard prevents re-entrant calls. The loop continues until
   /// the queue is empty; try/finally ensures the flag is always cleared.
   Future<void> _drainQueue() async {
-    if (_draining) return;
-    _draining = true;
+    if (_session.draining) return;
+    _session.draining = true;
     try {
       while (ref.mounted) {
         final current = state.value ?? const ChatState();
@@ -652,7 +579,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         );
       }
     } finally {
-      _draining = false;
+      _session.draining = false;
     }
   }
 
@@ -665,12 +592,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final api = _api;
     if (api == null) return;
 
-    _cancelled = false;
+    _session.cancelled = false;
     final current = state.value ?? const ChatState();
 
     // Create a broadcast stream controller for token-by-token rendering.
     final tokenController = StreamController<String>.broadcast();
-    _thinkingController = StreamController<String>.broadcast();
+    _session.openThinking();
 
     // Show a placeholder user message while transcribing.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
@@ -700,13 +627,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // Arm the same initial-stall watchdog used by the text path. The voice
     // SSE response carries TranscriptEvent + token/status events; any event
     // counts as progress. Until the first event arrives, a quiet interval
-    // of [_initialStallTimeout] probes the server: a `running` reply keeps
+    // of [ChatStreamSession.initialStallTimeout] probes the server: a `running` reply keeps
     // the sink open (iOS Dio buffering safety net), anything else recovers.
     var sawProgress = false;
     final source = api
         .sendVoiceMessage(conversationId, audioBytes, mimeType)
         .timeout(
-          _initialStallTimeout,
+          ChatStreamSession.initialStallTimeout,
           onTimeout: (sink) {
             if (sawProgress) return;
             unawaited(
@@ -722,7 +649,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     try {
       await for (final event in source) {
-        if (_cancelled) break;
+        if (_session.cancelled) break;
         sawProgress = true;
         final chatState = state.value ?? const ChatState();
 
@@ -757,55 +684,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
     } catch (e) {
       unawaited(tokenController.close());
-      _closeThinkingController();
-
-      // Transient error with a run ID: retry with exponential backoff.
-      if (isTransientStreamError(e) && _currentRunId != null) {
-        for (var attempt = 0; attempt < _maxStreamRetries; attempt++) {
-          await Future<void>.delayed(_baseRetryDelay * (1 << attempt));
-          if (_cancelled || !ref.mounted) return;
-
-          final replayed = await _replayRun(
-            api,
-            conversationId,
-            userMsgId,
-            _currentRunId!,
-            _lastSeq,
-          );
-          if (replayed) return;
-        }
-
-        // All retries exhausted — defer to app resume.
-        _needsReconnect = true;
-        _disconnectedUserMsgId = userMsgId;
-        _disconnectedConversationId = conversationId;
-
-        final chatState = state.value ?? const ChatState();
-        final msgs = List<ChatMessage>.from(chatState.messages)
-          ..removeWhere((m) => m.id == streamingPlaceholderId);
-        state = AsyncData(
-          chatState.copyWith(
-            messages: msgs,
-            isSending: false,
-            streamingContent: '',
-            clearStatusMessage: true,
-          ),
-        );
-        return;
-      }
-
-      final chatState = state.value ?? const ChatState();
-      final msgs = List<ChatMessage>.from(chatState.messages)
-        ..removeWhere((m) => m.id == streamingPlaceholderId);
-      setMessageStatus(msgs, userMsgId, MessageStatus.failed);
-      state = AsyncData(
-        chatState.copyWith(
-          messages: msgs,
-          isSending: false,
-          streamingContent: '',
-          error: friendlyStreamErrorMessage(e),
-        ),
-      );
+      await _handleStreamFailure(api, e, conversationId, userMsgId);
     }
   }
 
@@ -819,15 +698,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final api = _api;
     if (api == null) return;
 
-    _cancelled = false;
-    _currentRunId = null;
-    _lastSeq = 0;
-    _resetReconnectState();
+    _session.beginTurn();
     final current = state.value ?? const ChatState();
 
     // Create broadcast stream controllers for token-by-token rendering.
     final tokenController = StreamController<String>.broadcast();
-    _thinkingController = StreamController<String>.broadcast();
+    _session.openThinking();
 
     // Add user message with status=sending and assistant streaming placeholder.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
@@ -856,7 +732,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     // Arm the initial-stall watchdog as a per-event timeout on the SSE
     // stream. Until we see a UI-visible event (anything other than
-    // [RunStartedEvent]), a quiet interval of [_initialStallTimeout]
+    // [RunStartedEvent]), a quiet interval of [ChatStreamSession.initialStallTimeout]
     // probes the server to disambiguate iOS Dio buffering (server still
     // running — keep the sink open) from a dead turn (recover via
     // [_recoverStalledStream]). After progress has been observed, the
@@ -870,7 +746,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
         )
         .timeout(
-          _initialStallTimeout,
+          ChatStreamSession.initialStallTimeout,
           onTimeout: (sink) {
             if (sawProgress) return;
             unawaited(
@@ -887,13 +763,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // Stream SSE events.
     try {
       await for (final event in source) {
-        if (_cancelled) break;
+        if (_session.cancelled) break;
         final chatState = state.value ?? const ChatState();
 
         if (event is RunStartedEvent) {
           // Capture the run ID for potential reconnect; don't change UI.
-          _currentRunId = event.runId;
-          _advanceSeq(event);
+          _session.runId = event.runId;
+          _session.advance(event);
           // Open the turn-status snapshot used by the progress card.
           state = AsyncData(
             chatState.copyWith(
@@ -910,9 +786,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // watchdog won't fire on subsequent quiet periods.
         sawProgress = true;
         if (_applyTurnEvent(chatState, event, tokenSink: tokenController)) {
-          _advanceSeq(event);
+          _session.advance(event);
         } else if (event is DoneEvent) {
-          _advanceSeq(event);
+          _session.advance(event);
           unawaited(tokenController.close());
           _finishTurn(
             chatState,
@@ -922,7 +798,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           );
           return;
         } else if (event is ErrorEvent) {
-          _advanceSeq(event);
+          _session.advance(event);
           unawaited(tokenController.close());
           _failTurn(chatState, event, userMsgId: userMsgId);
           return;
@@ -961,61 +837,67 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
     } catch (e) {
       unawaited(tokenController.close());
-      _closeThinkingController();
-      if (!ref.mounted) return;
+      await _handleStreamFailure(api, e, conversationId, userMsgId);
+    }
+  }
 
-      // Transient error with a run ID: retry with exponential backoff,
-      // then defer to app-resume reconnection if all retries fail.
-      if (isTransientStreamError(e) && _currentRunId != null) {
-        for (var attempt = 0; attempt < _maxStreamRetries; attempt++) {
-          await Future<void>.delayed(_baseRetryDelay * (1 << attempt));
-          if (_cancelled || !ref.mounted) return;
+  /// Recover from an exception that ended a turn's event stream.
+  ///
+  /// A transient error with a run ID retries the event-log replay with
+  /// exponential backoff, then defers to app-resume reconnection if every
+  /// retry fails. Anything else fails the turn immediately.
+  Future<void> _handleStreamFailure(
+    ApiClient api,
+    Object error,
+    String conversationId,
+    String userMsgId,
+  ) async {
+    _session.closeThinking();
+    if (!ref.mounted) return;
 
-          final replayed = await _replayRun(
-            api,
-            conversationId,
-            userMsgId,
-            _currentRunId!,
-            _lastSeq,
-          );
-          if (replayed) return;
-        }
+    if (isTransientStreamError(error) && _session.runId != null) {
+      for (
+        var attempt = 0;
+        attempt < ChatStreamSession.maxStreamRetries;
+        attempt++
+      ) {
+        await Future<void>.delayed(ChatStreamSession.retryDelay(attempt));
+        if (_session.cancelled || !ref.mounted) return;
 
-        // All retries exhausted — defer to app resume.
-        _needsReconnect = true;
-        _disconnectedUserMsgId = userMsgId;
-        _disconnectedConversationId = conversationId;
-
-        final chatState = state.value ?? const ChatState();
-        final msgs = List<ChatMessage>.from(chatState.messages)
-          ..removeWhere((m) => m.id == streamingPlaceholderId);
-        state = AsyncData(
-          chatState.copyWith(
-            messages: msgs,
-            isSending: false,
-            streamingContent: '',
-            clearStatusMessage: true,
-            clearCurrentTurnStatus: true,
-          ),
+        final replayed = await _replayRun(
+          api,
+          conversationId,
+          userMsgId,
+          _session.runId!,
+          _session.lastSeq,
         );
-        return;
+        if (replayed) return;
       }
 
-      // Non-transient error or no run ID: show error immediately.
-      final chatState = state.value ?? const ChatState();
-      final msgs = List<ChatMessage>.from(chatState.messages)
-        ..removeWhere((m) => m.id == streamingPlaceholderId);
-      setMessageStatus(msgs, userMsgId, MessageStatus.failed);
+      // All retries exhausted — defer to app resume.
+      _session.markDisconnected(
+        userMsgId: userMsgId,
+        conversationId: conversationId,
+      );
       state = AsyncData(
-        chatState.copyWith(
-          messages: msgs,
-          isSending: false,
-          streamingContent: '',
-          error: friendlyStreamErrorMessage(e),
-          clearCurrentTurnStatus: true,
+        abortedTurnState(
+          state.value ?? const ChatState(),
+          clearStatusMessage: true,
+          clearTurnStatus: true,
         ),
       );
+      return;
     }
+
+    // Non-transient error or no run ID: show error immediately.
+    state = AsyncData(
+      abortedTurnState(
+        state.value ?? const ChatState(),
+        failedUserMsgId: userMsgId,
+        error: friendlyStreamErrorMessage(error),
+        clearTurnStatus: true,
+      ),
+    );
   }
 
   /// Called from the initial-stall watchdog's `onTimeout`. Probes the
@@ -1034,19 +916,19 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     required EventSink<StreamEvent> sink,
     required bool Function() sawProgress,
   }) async {
-    if (sawProgress() || _cancelled) return;
+    if (sawProgress() || _session.cancelled) return;
     final api = _api;
-    final runId = _currentRunId;
+    final runId = _session.runId;
     if (api == null || runId == null) {
       // RunStarted hasn't fired yet (or no client) — no run id to probe.
       // Fall back to the legacy recovery path so the dots state still
       // resolves within the watchdog window.
       await _recoverStalledStream(conversationId, userMsgId);
-      if (!_cancelled) sink.close();
+      if (!_session.cancelled) sink.close();
       return;
     }
     final state = await api.turnStatus(conversationId, runId);
-    if (sawProgress() || _cancelled) return;
+    if (sawProgress() || _session.cancelled) return;
     if (state == TurnState.running) {
       // Server says the turn is still in flight — leave the sink open.
       // The chat-stream-progress-ux card already shows a stalled UI past
@@ -1056,11 +938,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     }
     // completed / errored / unknown / null (probe failed) → recover.
     await _recoverStalledStream(conversationId, userMsgId);
-    if (!_cancelled) sink.close();
+    if (!_session.cancelled) sink.close();
   }
 
   /// Recover from a stalled SSE stream by fetching the conversation
-  /// directly. Triggered by the [_initialStallTimeout] watchdog when the
+  /// directly. Triggered by the [ChatStreamSession.initialStallTimeout] watchdog when the
   /// stream produces no UI-visible event in time — primarily the iOS
   /// case where Dio buffers the chunked body until the connection
   /// closes.
@@ -1072,8 +954,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     String conversationId,
     String userMsgId,
   ) async {
-    if (_cancelled || !ref.mounted) return;
-    _cancelled = true; // stop the await-for loop on its next iteration
+    if (_session.cancelled || !ref.mounted) return;
+    _session.cancelled = true; // stop the await-for loop on its next iteration
 
     // Step 1: clear the placeholder synchronously so the user immediately
     // sees that the stream stalled and gets out of the dots state.
@@ -1125,16 +1007,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     required String error,
   }) {
     if (!ref.mounted) return;
-    final msgs = List<ChatMessage>.from(from.messages)
-      ..removeWhere((m) => m.id == streamingPlaceholderId);
-    setMessageStatus(msgs, userMsgId, MessageStatus.failed);
     state = AsyncData(
-      from.copyWith(
-        messages: msgs,
-        isSending: false,
-        streamingContent: '',
+      abortedTurnState(
+        from,
+        failedUserMsgId: userMsgId,
         error: error,
-        clearCurrentTurnStatus: true,
+        clearTurnStatus: true,
       ),
     );
   }
@@ -1154,29 +1032,25 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// `pendingQueue` arriving at this hook is an unambiguous signal to
   /// re-kick the drain.
   Future<void> attemptReconnect() async {
-    if (!_needsReconnect) {
+    final disconnected = _session.takeDisconnected();
+    if (disconnected == null) {
       // No interrupted stream to recover, but still kick the drain if
       // there are queued messages and nothing is processing them. This
       // is a defence-in-depth net for races elsewhere in the state
       // machine.
-      if (!_draining && (state.value?.pendingQueue.isNotEmpty ?? false)) {
+      if (!_session.draining &&
+          (state.value?.pendingQueue.isNotEmpty ?? false)) {
         unawaited(_drainQueue());
       }
       return;
     }
 
-    // Clear immediately to prevent re-entrant calls.
-    _needsReconnect = false;
-
     final api = _api;
-    final conversationId = _disconnectedConversationId;
-    final userMsgId = _disconnectedUserMsgId;
-    final runId = _currentRunId;
+    final conversationId = disconnected.conversationId;
+    final userMsgId = disconnected.userMsgId;
+    final runId = _session.runId;
 
-    _disconnectedUserMsgId = null;
-    _disconnectedConversationId = null;
-
-    if (api == null || conversationId == null) return;
+    if (api == null) return;
 
     // Surface the recovery work as a banner — set BEFORE any await so
     // the UI shows "Reconnecting…" promptly. Cleared in every exit path.
@@ -1185,14 +1059,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     try {
       // Strategy 1: Replay from last event sequence.
-      if (runId != null && userMsgId != null) {
+      if (runId != null) {
         try {
           final replayed = await _replayRun(
             api,
             conversationId,
             userMsgId,
             runId,
-            _lastSeq,
+            _session.lastSeq,
           );
           if (replayed) return;
         } catch (_) {
@@ -1214,9 +1088,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
       // Both strategies failed: restore messages and show friendly error.
       final msgs = List<ChatMessage>.from(preLoadMessages);
-      if (userMsgId != null) {
-        setMessageStatus(msgs, userMsgId, MessageStatus.failed);
-      }
+      setMessageStatus(msgs, userMsgId, MessageStatus.failed);
       state = AsyncData(
         ChatState(
           conversationId: conversationId,
@@ -1231,13 +1103,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         state = AsyncData(s.copyWith(isReconnecting: false));
       }
     }
-  }
-
-  /// Clears deferred reconnection state.
-  void _resetReconnectState() {
-    _needsReconnect = false;
-    _disconnectedUserMsgId = null;
-    _disconnectedConversationId = null;
   }
 }
 
