@@ -2,6 +2,7 @@ mod a2a;
 pub mod api;
 pub(crate) mod audio_store;
 pub mod auth;
+pub mod catalog_sync;
 mod cors;
 pub(crate) mod errors;
 mod flutter_assets;
