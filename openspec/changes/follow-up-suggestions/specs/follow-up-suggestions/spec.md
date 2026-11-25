@@ -196,6 +196,27 @@ The chat view model SHALL complete the turn and clear `isSending` when `DoneEven
 - **WHEN** the user sends any message
 - **THEN** `ChatState.suggestions` SHALL be empty
 
+### Requirement: Suggestions are not restored from history
+
+Suggestions SHALL NOT be stored on messages or returned by the conversation history endpoints. Opening or reloading a conversation from history SHALL show no suggestion chips and SHALL start no suggestion listener. Chips SHALL appear only for a live run and for a run the client reconnects to, because the listener starts when that run's `done` frame is read.
+
+#### Scenario: Reopened conversation shows no chips
+
+- **GIVEN** a conversation whose last turn produced suggestions an hour ago
+- **WHEN** the user opens it from the conversation list
+- **THEN** `ChatState.suggestions` SHALL be empty AND no replay request SHALL be made for the old run
+
+#### Scenario: History carries no suggestions
+
+- **WHEN** a client fetches `GET /api/conversations/{id}`
+- **THEN** the response SHALL contain no suggestions field
+
+#### Scenario: Reconnected run still shows chips
+
+- **GIVEN** the client lost its POST stream and replays the run through `_replayRun`
+- **WHEN** the replay reads `done` with a `message_id` and the run later persists `suggestions`
+- **THEN** the chips SHALL be shown
+
 ### Requirement: SuggestionChips element
 
 `app/packages/assistant_ui` SHALL provide a pure `SuggestionChips(prompts, onSelected, enabled)` that renders one chip per prompt, keyed `suggestion_chip_<index>`, in a wrapping row inside a semantics container labelled "Suggested follow-ups". Each chip SHALL expose button semantics labelled with its prompt and a target of at least 48×48 dp. Tapping a chip SHALL call `onSelected(prompt)` unless `enabled` is false. An empty list SHALL render nothing. The widget SHALL have a widgetbook use-case and a golden test, and SHALL appear in `kAssistantUiElements`.

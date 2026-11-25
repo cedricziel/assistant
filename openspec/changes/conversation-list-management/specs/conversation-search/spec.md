@@ -46,7 +46,7 @@
 
 ### Requirement: Conversations are searchable by title and message text
 
-`GET /api/conversations/search?q={q}&limit={n}` SHALL return a bare JSON array of `ConversationSearchSummary` (operationId `search_conversations`). It SHALL require an authenticated caller with read access to the space, and SHALL be scoped to the caller's user and the active agent, exactly like `GET /api/conversations`. `q` is split on whitespace into at most 8 tokens. Each token matches as a prefix against indexed message text and as a substring against the title. Titles and message text SHALL be compared with the same folding: case-insensitive and with diacritics removed. All tokens must match. Tokens of one character SHALL apply to titles only; when no token has two or more characters, only titles are searched. FTS5 operators in `q` SHALL be treated as literal text. A conversation SHALL appear at most once. Title matches SHALL rank before message-only matches, and message matches SHALL rank by best bm25. Archived conversations SHALL be included and carry `archived_at`. `limit` defaults to 20 and is capped at 50. A blank `q`, a `q` longer than 200 Unicode scalar values, or one with more than 8 tokens SHALL return `400` with the `{"error": ...}` envelope.
+`GET /api/conversations/search?q={q}&limit={n}` SHALL return a bare JSON array of `ConversationSearchSummary` (operationId `search_conversations`). It SHALL require an authenticated caller with read access to the space, and SHALL be scoped to the caller's user and the active agent, exactly like `GET /api/conversations`. `q` is split on whitespace into at most 8 tokens. Each token matches as a prefix against indexed message text and as a substring against the title. Titles and message text SHALL be compared with the same folding: case-insensitive and with diacritics removed. Every required token must match somewhere in the conversation: a token is satisfied when the conversation's title contains it or when at least one of its indexed messages does, and different tokens MAY be satisfied by different messages, or by the title and a message. Tokens of one character SHALL match titles only and SHALL NOT be required when at least one token has two or more characters; when no token has two or more characters, every token is required and only titles are searched. Thinking steps SHALL NOT be searched. FTS5 operators in `q` SHALL be treated as literal text. A conversation SHALL appear at most once. A conversation whose title matches at least one token SHALL rank before message-only conversations, and message matches SHALL rank by the best bm25 of any of the conversation's messages. Archived conversations SHALL be included and carry `archived_at`. `limit` defaults to 20 and is capped at 50. A blank `q`, a `q` longer than 200 Unicode scalar values, or one with more than 8 tokens SHALL return `400` with the `{"error": ...}` envelope.
 
 #### Scenario: Message text match
 
@@ -60,10 +60,25 @@
 - **WHEN** the caller searches `q=lisbon`
 - **THEN** T precedes M in the result
 
-#### Scenario: All tokens must match
+#### Scenario: Every token must match somewhere in the conversation
 
+- **GIVEN** conversation A has one message mentioning "Lisbon" and a later, different message mentioning "hotel"
+- **AND** conversation B only mentions "Lisbon"
 - **WHEN** the caller searches `q=lisbon hotel`
-- **THEN** only conversations whose title or a single message contains both tokens are returned
+- **THEN** the result contains A and not B
+- **AND** A's `matches` include a snippet highlighting "Lisbon" and a snippet highlighting "hotel"
+
+#### Scenario: Tokens may be split between title and messages
+
+- **GIVEN** conversation T is titled "Lisbon trip" and has a message mentioning "hotel"
+- **WHEN** the caller searches `q=lisbon hotel`
+- **THEN** the result contains T with "Lisbon" highlighted in `title_segments` and one match for the "hotel" message
+
+#### Scenario: Thinking text is not searched
+
+- **GIVEN** conversation A has an assistant row `<think>Lisbon is cheaper in May</think>` and no other mention of Lisbon
+- **WHEN** the caller searches `q=lisbon`
+- **THEN** the result does not contain A
 
 #### Scenario: Non-ASCII titles fold like message text
 
@@ -77,6 +92,12 @@
 - **WHEN** the caller searches `q=t`
 - **THEN** only conversations whose title contains "t" are returned
 - **AND** no `matches` are returned
+
+#### Scenario: A one-character token is not required alongside a longer one
+
+- **GIVEN** conversation A has a message mentioning "Lisbon" and a title without the letter "q"
+- **WHEN** the caller searches `q=lisbon q`
+- **THEN** the result contains A
 
 #### Scenario: Query syntax is literal
 

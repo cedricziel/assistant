@@ -2,7 +2,7 @@
 
 ### Requirement: Tool result events carry the tool's structured data
 
-`OrchestratorEvent::ToolResult` SHALL carry `data: Option<serde_json::Value>` populated from `ToolOutput.data` of the executed tool. The SSE projector SHALL include it as a `data` field on the `tool_result` frame, and on the inner payload of the `subagent_tool_result` frame, only when it is present. When `data` is absent the frame payload SHALL be byte-identical to the payload produced before this change.
+`OrchestratorEvent::ToolResult` SHALL carry `data: Option<serde_json::Value>` populated from `ToolOutput.data` of the executed tool. The SSE projector SHALL include it as a `data` field on the `tool_result` frame only when it is present. The `subagent_tool_result` frame SHALL NOT carry `data`: subagent tool calls render as compact rows. When `data` is absent, and for every `subagent_tool_result` frame, the frame payload SHALL be byte-identical to the payload produced before this change.
 
 #### Scenario: Data flows into the tool_result frame
 
@@ -16,10 +16,11 @@
 - **THEN** the projected `tool_result` payload SHALL NOT contain a `data` key
 - **AND** the committed projection golden file for that frame sequence SHALL match byte for byte
 
-#### Scenario: Subagent tool results carry data
+#### Scenario: Subagent tool results carry no data
 
 - **WHEN** a subagent's tool returns structured data
-- **THEN** the `subagent_tool_result` frame's inner `data` object SHALL contain that structured data under its own `data` key
+- **THEN** the `subagent_tool_result` frame's inner object SHALL NOT contain a `data` key
+- **AND** the frame SHALL otherwise match the pre-change payload
 
 #### Scenario: Denied calls carry no data
 
@@ -83,7 +84,7 @@ Truncating a tool observation to the display limit for the `result` field, both 
 
 ### Requirement: Tool status reflects tool-level failure
 
-Dispatch SHALL report status `error` when the executor returns `Ok(output)` with `output.success == false`, in the `tool_result` event, in the persisted `tool_status` and in the `tool.result` webhook payload, exactly as for an executor `Err`. A denied call SHALL remain `denied`. A `bash` command that runs to completion with a non-zero exit code SHALL remain `ok`, because `bash` reports it as a successful tool run.
+Dispatch SHALL report status `error` when the executor returns `Ok(output)` with `output.success == false`, in the `tool_result` event, in the persisted `tool_status` and in the `tool.result` webhook payload, exactly as for an executor `Err`. A denied call SHALL remain `denied`. A `bash` command that exits with a non-zero code SHALL return `success = false`, and is therefore reported as `error`; its observation text and terminal `data` SHALL be unchanged apart from that flag. A `bash` command that exits with code 0 SHALL be `ok`.
 
 #### Scenario: ToolOutput::error yields status error
 
@@ -98,10 +99,23 @@ Dispatch SHALL report status `error` when the executor returns `Ok(output)` with
 - **WHEN** an MCP tool returns a `CallToolResult` with `is_error = true`
 - **THEN** the `tool_result` frame SHALL have `status: "error"`
 
-#### Scenario: Non-zero bash exit is not a tool error
+#### Scenario: Non-zero bash exit is a tool error
 
 - **WHEN** `bash` runs `false`
-- **THEN** the `tool_result` frame SHALL have `status: "ok"` and terminal `data` with `exit_code = 1`
+- **THEN** the `tool_result` frame SHALL have `status: "error"` and terminal `data` with `exit_code = 1`
+- **AND** the persisted tool row SHALL have `tool_status = "error"`
+- **AND** the text observation sent to the LLM SHALL be identical to the observation produced for the same exit before this change
+
+#### Scenario: Zero bash exit is ok
+
+- **WHEN** `bash` runs `true`
+- **THEN** the `tool_result` frame SHALL have `status: "ok"`
+
+#### Scenario: Non-zero bash exit counts against an active skill
+
+- **GIVEN** a skill is active
+- **WHEN** `bash` exits non-zero
+- **THEN** the skill execution outcome SHALL be recorded as a failure, as for any tool returning `success = false`
 
 ### Requirement: Tool rows persist call id, status and data
 
@@ -183,11 +197,13 @@ The following built-ins SHALL populate `ToolOutput.data` with the named contract
 | `file-read`                              | `code_file`    | `path`, `language?`, `content`, `truncated`, `total_chars`                                                                                                                    |
 | `file-edit`, `file-write`                | `code_diff`    | `path`, `language?`, `operation` (`edit` / `create` / `overwrite`), `hunks[{old_start, old_lines, new_start, new_lines, lines[{op, text}]}]`, `added`, `removed`, `truncated` |
 | `list-tasks`, `process` (`action: list`) | `data_table`   | `columns[{key, label, type?}]`, `rows[]`, `truncated`, `total_rows`                                                                                                           |
+| `plan-update`                            | `plan`         | `title?` (≤ 120 chars), `steps[{title, status}]` (≤ 50 steps, `title` ≤ 200 chars, `status` one of `pending`, `in_progress`, `completed`, `failed`, `skipped`)                  |
 
 #### Scenario: Failing bash command
 
 - **WHEN** `bash` runs `false`
 - **THEN** `data.kind` SHALL be `"terminal"` with `exit_code = 1` and `timed_out = false`
+- **AND** the result SHALL be an error (wire status `error`)
 
 #### Scenario: Timed-out bash command
 
@@ -199,6 +215,18 @@ The following built-ins SHALL populate `ToolOutput.data` with the named contract
 
 - **WHEN** `web-fetch` receives a 404 response
 - **THEN** the result SHALL be an error (wire status `error`) carrying `link_preview` data with `status = 404` and `final_url` set
+
+#### Scenario: plan-update publishes a plan
+
+- **WHEN** `plan-update` is called with a title and five steps, three `completed`
+- **THEN** `data` SHALL be a `plan` with those steps and statuses
+- **AND** the text observation SHALL read `Plan updated: 3/5 steps completed`
+- **AND** the call SHALL need no approval and have no side effect
+
+#### Scenario: plan-update rejects invalid input
+
+- **WHEN** `plan-update` is called with a step whose `status` is `"done"`, or with more than 50 steps
+- **THEN** the result SHALL be an error naming the problem (wire status `error`) and `data` SHALL be `None`
 
 #### Scenario: No scheduled tasks
 

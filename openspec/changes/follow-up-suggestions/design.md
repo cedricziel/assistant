@@ -48,7 +48,7 @@ The suggestion phase lives in the shared turn runner (`stream_turn_to_sse`) and 
 
 `quick_message` (`:783`) does not use the runner. Messenger, CLI, MCP, scheduler and A2A turns never reach it.
 
-Voice is excluded as a product decision, not a technical one: once chat-stop-cancels-turn gives voice a run log, the runner could deliver chips there too. Voice is a hands-free flow where the reply is spoken, and tappable text chips do not fit it. Quick-message callers are machines. The gate is a flag, so either decision can be reversed with a one-line change and a test.
+Voice is excluded as a product decision (final), not a technical one: once chat-stop-cancels-turn gives voice a run log, the runner could deliver chips there too. Voice is a hands-free flow where the reply is spoken, and tappable text chips do not fit it. Quick-message callers are machines. The gate is a flag, so the decision can be reversed later with a one-line change and a test. There is no config knob for it.
 
 Alternative: infer the gate from `Interface::Web`. Voice is also `Interface::Web`, so this would turn suggestions on for voice as soon as it moves onto the runner. Rejected.
 
@@ -61,7 +61,9 @@ max_suggestions = 3   # 1..=5; values outside are clamped
 timeout_secs = 10     # 1..=15; values outside are clamped; whole-phase budget
 ```
 
-`SuggestionsConfig` sits next to `TitlingConfig` in `features.rs` and becomes `OrgConfig.suggestions`, with `#[serde(default)]`. `effective_max()` and `effective_timeout()` clamp. The upper timeout bound of 15 s is a protocol constant (`SUGGESTIONS_MAX_TIMEOUT_SECS`) that the client's listen window (D8) is derived from. A space reads it from `SpaceRuntime.config`. The call uses the org's main LLM. A cheaper per-feature model waits for the same `LlmProvider` model-selection knob that titling is waiting for (see the `TitlingConfig` doc comment).
+`SuggestionsConfig` sits next to `TitlingConfig` in `features.rs` and becomes `OrgConfig.suggestions`, with `#[serde(default)]`. `effective_max()` and `effective_timeout()` clamp. The upper timeout bound of 15 s is a protocol constant (`SUGGESTIONS_MAX_TIMEOUT_SECS`) that the client's listen window (D8) is derived from. A space reads it from `SpaceRuntime.config`.
+
+**Default `enabled = true` (decided).** The feature exists to be seen: an off-by-default switch would leave most installs without chips and without the cost signal that tells operators to tune it. It matches `[titling]`, which is also an extra short call per conversation and also on by default. The cost is bounded (one non-streamed call under 300 tokens out, clamped timeout, abort when the client leaves) and documented next to the `enabled = false` remedy in `docs/operations/configuration.md`. The call uses the org's main LLM. A cheaper per-feature model waits for the same `LlmProvider` model-selection knob that titling is waiting for (see the `TitlingConfig` doc comment).
 
 ### D4. Post-`done` phase: the POST stream closes at `done`, suggestions arrive on the run tail
 
@@ -96,7 +98,9 @@ Each item is an object, so a later `title` or `label` (assistant-ui `ThreadSugge
 
 ### D6. Persist in the run log; no `messages` column
 
-The `suggestions` row goes into `conversation_events` like any other frame, so replay with `since=N` returns it and the 24 h TTL applies. Suggestions are not stored on `messages`, and `GET` conversation history does not return them. Reopening a conversation hours later should not offer stale next steps. This is the product choice flagged in the open questions.
+The `suggestions` row goes into `conversation_events` like any other frame, so replay with `since=N` returns it and the 24 h TTL applies. Suggestions are not stored on `messages`, and `GET` conversation history does not return them. Reopening a conversation hours later should not offer stale next steps.
+
+**Decided: chips return only for live runs and runs the client reconnects to.** A client that reattaches to an in-flight or just-finished run (`_replayRun`) still gets chips from the run log, because the listener starts at that run's `done`. Loading a conversation from history starts no listener and shows no chips, and `ConversationDetail` carries no suggestions field. Persisting them would need a `messages.suggestions` column, a history field, and a rule for when they go stale. Next steps for an old conversation are better generated against what the user is doing now, not what was true when the turn ended.
 
 ### D7. The run, not `done`, bounds the replay stream; status reads "has a terminal row"
 
@@ -120,6 +124,8 @@ On `DoneEvent` with a `messageId`, the view model starts a `FollowUpListener` (a
 
 The view model cancels the listener (closing the HTTP connection, which ends the server's replay tail and lets D4's watchdog abort the call) when `sendMessage`/`_streamMessage` starts a new turn, when the conversation is loaded, cleared or switched, and on dispose. The listener's stream is wrapped by chat-stop-cancels-turn's `_untilDetached` like every other source, so a detach also ends it. `sendMessage`, `loadConversation`, `clearConversation` and conversation switches clear `suggestions`. message-branching PR 12, which moves stream consumption into `chat_stream_session.dart`, extracts this design as it stands after PR 7b.
 
+**Accepted cost: one extra replay request per completed turn (decided).** The client opens it only when suggestions can arrive (a `done` with a `message_id`); it is short-lived, ends at `finish_run`, and is cancelled by the next send. It buys a POST stream that closes at `done`, which is what keeps iOS Dio from waiting out the suggestion phase. The client has no way to learn the org's `[suggestions].enabled`, so it does not try: a disabled org makes the replay close at `finish_run` immediately after `done`.
+
 Alternatives considered:
 
 - **Convert both loops to `StreamIterator` and keep reading the same stream in the background.** Requires the POST stream to stay open (rejected in D4), and the background reader shares `_session` with the next turn: `beginTurn()` resets `runId`/`lastSeq`, and a late `advance()` from the old run would set the new run's replay cursor to the wrong `since`. Rejected.
@@ -136,11 +142,13 @@ The app wiring stays in `features/chat`, in small adapters rather than in the 62
 
 ### D10. Storing and editing starter prompts
 
-Migration `NNN_persona_starter_prompts.sql` runs `ALTER TABLE personas ADD COLUMN starter_prompts TEXT NOT NULL DEFAULT '[]'`, a JSON array. Its number comes from the cross-change stack plan (otherwise the next free after `045_skill_executions.sql` at implementation time), and it is registered in `run_migrations` (`crates/storage/src/lib.rs:297`). `seed_database_through_016` (`:562`) is a fixed test fixture and stays unchanged. `PersonaRecord.starter_prompts: Vec<String>`. `PersonaStore::set_starter_prompts(id, &[String])` is implemented for both `Sqlite` and `InMemory` (ADR-0009). Malformed JSON in the column reads as an empty list with a `warn!`; it never panics.
+Migration `051_persona_starter_prompts.sql` runs `ALTER TABLE personas ADD COLUMN starter_prompts TEXT NOT NULL DEFAULT '[]'`, a JSON array. Its number, 051, is pre-allocated by the cross-change stack plan (046 to 050 belong to sibling changes). It is registered in `run_migrations` (`crates/storage/src/lib.rs:297`) and in any other migration list in that file that the stack plan requires; `seed_database_through_016` (`:562`) is a fixed test fixture and stays unchanged. `PersonaRecord.starter_prompts: Vec<String>`. `PersonaStore::set_starter_prompts(id, &[String])` is implemented for both `Sqlite` and `InMemory` (ADR-0009). Malformed JSON in the column reads as an empty list with a `warn!`; it never panics.
 
-API: `PersonaDetail.starter_prompts: Vec<String>`, always present and possibly empty. `PATCH /api/personas/{id}` (`operationId: update_persona`) takes the body `UpdatePersonaRequest { starter_prompts?: Vec<String> }` and returns `200 PersonaDetail`. If a field is absent, it is left unchanged, so `{}` is a no-op that still returns `200`; `[]` clears the list. Validation fails with `400 {"error": ...}` when there are more than 4 prompts, or when a prompt is empty after trimming or longer than 200 characters. Lengths count Unicode scalar values (Rust `chars().count()`), after trimming. Prompts are stored trimmed. Write access follows the existing Persona write rules (`Access::Write` gives `403`, `get_accessible` gives `404`). `PersonaSummary` stays flat (openspec/config.yaml forbids nested collections on summaries).
+API: `PersonaDetail.starter_prompts: Vec<String>`, always present and possibly empty. `PATCH /api/personas/{id}` (`operationId: update_persona`) takes the body `UpdatePersonaRequest { starter_prompts?: Vec<String> }` and returns `200 PersonaDetail`. If a field is absent, it is left unchanged, so `{}` is a no-op that still returns `200`; `[]` clears the list. Validation fails with `400 {"error": ...}` when there are more than 4 prompts, or when a prompt is empty after trimming or longer than 200 characters. Lengths count Unicode scalar values (Rust `chars().count()`), after trimming. Prompts are stored trimmed. Permissions (decided): the caller needs space write access (`Access::Write`, else `403`), and the Persona must be accessible (`get_accessible`, else `404`). Beyond that, the caller must be the Persona's owner for a personal Persona (`owner_user_id` equals the caller), or a space admin (`Access::Admin`) for an org-owned Persona (`owner_user_id IS NULL`); any other caller gets `403`. A plain member can therefore edit their own Personas but not the shared ones. This is stricter than the sibling skill-access `PATCH`, which only asks for `Access::Write`, because starters are shown to every member of the org on a shared Persona. `PersonaDetail.can_edit_starter_prompts: bool` applies the same rule on `GET`, so the client offers the editor only when the save would succeed. `PersonaSummary` stays flat (openspec/config.yaml forbids nested collections on summaries).
 
-Client: the editor builds on `personaDetailProvider` instead of fetching `getPersona` a second time. After a successful `updatePersona`, it invalidates `personaDetailProvider(id)` and `activePersonaStarterPromptsProvider`, so the detail screen and the chat empty state show the new list.
+**No org-level fallback (decided).** A Persona with no starters keeps today's fixed empty-state copy. A second, org-wide list would need its own storage, API, editor and permission rule, and would blur which prompts belong to which Persona. An admin who wants starters everywhere sets them on the org-owned Personas.
+
+Client: the editor builds on `personaDetailProvider` instead of fetching `getPersona` a second time. The Persona detail screen shows the list read-only when `can_edit_starter_prompts` is false. After a successful `updatePersona`, it invalidates `personaDetailProvider(id)` and `activePersonaStarterPromptsProvider`, so the detail screen and the chat empty state show the new list.
 
 Alternative: a `STARTERS.md` file slot (`PERSONA_FILE_SLOTS`, `personas.rs:41`). It costs no migration, but it is unstructured, needs ad-hoc line parsing, and file slots resolve under the install root rather than the space. Rejected.
 
@@ -148,7 +156,7 @@ Alternative: a `STARTERS.md` file slot (`PERSONA_FILE_SLOTS`, `personas.rs:41`).
 
 - **Ollama contention**: the suggestion call can hold up the user's next turn on a single GPU. Mitigations: the clamped budget (at most 15 s), the listener watchdog that aborts when the client leaves or starts a new turn (D4, D8), and `enabled = false`, all documented.
 - **Disconnect detection**: the watchdog relies on the replay tail dropping its broadcast receiver when the client goes away. The tail `select!`s on `sse_tx.closed()`, but hyper may notice a dropped connection only on its next write (keep-alive pings every 15 s, `crates/web-ui/src/api/mod.rs:73`). The timeout bounds the worst case.
-- **One extra request per turn**: the client opens a replay subscription after every `done` when suggestions are enabled. It is short-lived (closes at `finish_run`) and cheap.
+- **One extra request per turn (accepted)**: the client opens a replay subscription after every `done`. It is short-lived (closes at `finish_run`) and cheap; see D8.
 - **Off-topic or unsafe suggestions**: suggestions are only text the user must tap, and they are sent as an ordinary user message, so nothing runs without the user's action. The parser caps length and count.
 - **Lifecycle change ripples**: the POST stream keeps its "closes at the terminal frame" behaviour. Only the replay stream changes: a replay client now waits up to `timeout_secs` longer after `done` before it closes. A client that stops at `done` still works.
 - **Shared runner interlock**: the phase lives in `stream_turn_to_sse` from message-branching PR 5. If this change landed first and put the phase in `send_message`, the extraction would move it, and voice (chat-stop-cancels-turn PR 6) would inherit it. PR 3 therefore depends on message-branching PR 5 and adds the `suggestions` flag that voice sets to `false`.
@@ -157,11 +165,8 @@ Alternative: a `STARTERS.md` file slot (`PERSONA_FILE_SLOTS`, `personas.rs:41`).
 
 ## Migration Plan
 
-One additive column (D10). There is no backfill and no compatibility shim. Existing Personas start with `[]`.
+One additive column (D10, migration 051). There is no backfill and no compatibility shim. Existing Personas start with `[]`.
 
 ## Open Questions
 
-1. Should `[suggestions].enabled` default to `true` (like `[titling]`) or `false`, given the extra cost per turn? The draft says `true`.
-2. Should chips come back when a conversation is reopened later? That needs a `messages.suggestions` column and a history field. The draft says no.
-3. Should Personas with no starters fall back to org-level default starters? The draft says no: the empty state keeps today's copy.
-4. Should voice turns get suggestions once voice has a run log? The draft says no (D2).
+None. The earlier questions are decided: `[suggestions].enabled` defaults to `true` (D3); chips do not return when a conversation is reopened from history (D6); org-level fallback starters do not exist (D10); voice turns get no suggestions (D2); the extra replay request per turn is accepted (D8); starters on an org-owned Persona are edited by a space admin, and on a personal Persona by its owner (D10).

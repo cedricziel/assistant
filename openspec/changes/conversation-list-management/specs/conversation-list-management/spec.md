@@ -2,7 +2,7 @@
 
 ### Requirement: Conversation metadata is edited through one partial PATCH
 
-`PATCH /api/conversations/{id}` SHALL accept `UpdateConversationRequest { title?: string, pinned?: boolean, archived?: boolean }`, apply all supplied fields in one transaction, emit exactly one `ConversationUpserted` event, and return `200` with the full `ConversationSummary`. A body with none of the fields SHALL return `400`. A body that does not deserialize (malformed JSON or a field of the wrong type) SHALL return `400`. A supplied `title` SHALL be trimmed. An empty trimmed title, or one longer than 200 Unicode scalar values, SHALL return `400`. A supplied `title` SHALL set `title_locked = 1`, whether or not the title was already locked. The route SHALL require write access to the space; a caller with read-only access SHALL receive `403`. All `400`, `403`, `404` and `409` responses from this route SHALL use the `{"error": "..."}` envelope, and so SHALL the `404` of every route that loads a conversation through the shared ownership check. A conversation owned by another user SHALL return `404`.
+`PATCH /api/conversations/{id}` SHALL accept `UpdateConversationRequest { title?: string, pinned?: boolean, archived?: boolean }`, apply all supplied fields in one transaction, emit exactly one `ConversationUpserted` event, and return `200` with the full `ConversationSummary`. A body with none of the fields SHALL return `400`. A body that does not deserialize (malformed JSON or a field of the wrong type) SHALL return `400`. A supplied `title` SHALL be trimmed. An empty trimmed title, or one longer than 200 Unicode scalar values, SHALL return `400`. A supplied `title` SHALL set `title_locked = 1`, whether or not the title was already locked. The route SHALL require write access to the space; a caller with read-only access SHALL receive `403`. All `400`, `403` and `404` responses from this route SHALL use the `{"error": "..."}` envelope, and so SHALL the `404` of every route that loads a conversation through the shared ownership check. A conversation owned by another user SHALL return `404`.
 
 #### Scenario: Rename trims and locks
 
@@ -96,7 +96,7 @@ The system SHALL store a nullable `pinned_at` timestamp per conversation. `{"pin
 
 The system SHALL store a nullable `archived_at` timestamp per conversation. `{"archived": true}` SHALL set it and clear `pinned_at`. `{"archived": false}` SHALL clear it. `GET /api/conversations` and the stream `snapshot` SHALL exclude archived conversations. `GET /api/conversations?archived=true` SHALL return only archived conversations, ordered by `archived_at` descending. Persisting a message with role `user`, through `save_message` or through a branch insert (edit and resend), SHALL clear `archived_at`. Messages with other roles SHALL NOT.
 
-A conversation SHALL never be pinned and archived at once, and the store SHALL enforce this inside the update statement rather than by the order in which fields are applied. `{"pinned": true, "archived": true}` SHALL return `400`. `{"pinned": true}` for an archived conversation SHALL return `409` and change nothing. `{"pinned": true, "archived": false}` SHALL unarchive and pin.
+A conversation SHALL never be pinned and archived at once, and the store SHALL enforce this inside the update statement rather than by the order in which fields are applied. `{"pinned": true, "archived": true}` SHALL return `400`. `{"pinned": true}` for an archived conversation SHALL clear `archived_at` and set `pinned_at` in one update and emit one `upserted`; it SHALL NOT return an error. `{"pinned": true, "archived": false}` SHALL behave the same. `{"pinned": false}` alone SHALL leave `archived_at` unchanged. Concurrent writes SHALL resolve last-writer-wins with the invariant intact.
 
 #### Scenario: Archived conversation leaves the main list
 
@@ -134,12 +134,13 @@ A conversation SHALL never be pinned and archived at once, and the store SHALL e
 - **THEN** the response is `400` with an `error` field
 - **AND** the conversation is unchanged
 
-#### Scenario: Pinning an archived conversation conflicts
+#### Scenario: Pinning an archived conversation unarchives and pins it
 
 - **GIVEN** A is archived
 - **WHEN** a client sends `{"pinned": true}` for A
-- **THEN** the response is `409` with an `error` field
-- **AND** A keeps its `archived_at` and has no `pinned_at`
+- **THEN** the response is `200` with a `pinned_at` and no `archived_at`
+- **AND** `GET /api/conversations` lists A in the pinned group
+- **AND** subscribers receive one `upserted` for A
 
 #### Scenario: Unarchive and pin together
 
@@ -147,12 +148,19 @@ A conversation SHALL never be pinned and archived at once, and the store SHALL e
 - **WHEN** a client sends `{"pinned": true, "archived": false}`
 - **THEN** A has a `pinned_at` and no `archived_at`
 
+#### Scenario: Unpinning does not unarchive or archive
+
+- **GIVEN** A is archived
+- **WHEN** a client sends `{"pinned": false}` for A
+- **THEN** A keeps its `archived_at` and has no `pinned_at`
+
 #### Scenario: Archive racing a pin from another tab
 
 - **GIVEN** tab 1 and tab 2 both show A as unpinned and unarchived
 - **WHEN** tab 1 archives A and then tab 2 pins A
-- **THEN** tab 2 receives `409`
-- **AND** A stays archived and unpinned
+- **THEN** both responses are `200`
+- **AND** A ends pinned and unarchived
+- **AND** at no point does A have both `pinned_at` and `archived_at`
 
 ### Requirement: The conversation stream carries list metadata
 
@@ -236,7 +244,7 @@ The Flutter conversation list SHALL render a "Pinned" group above the remaining 
 
 ### Requirement: Conversation rows offer platform-appropriate actions
 
-Each conversation row SHALL offer Rename, Pin/Unpin, Archive/Unarchive and Delete. The package `ConversationListView` SHALL emit `onRequestActions(ConversationActionRequest)` on long-press, on secondary tap, and from a trailing overflow button. `ConversationActionRequest` SHALL carry the `item`, the `PointerDeviceKind` of the pointer that started the gesture (`null` for keyboard activation), the global pointer `position` (`null` for the overflow button), and the overflow button's global `anchorRect` (`null` for row gestures). The button is shown while the row is hovered, focused or selected. The view SHALL emit `onTogglePin(item)` on a start-to-end swipe and keep the row in place, and SHALL keep end-to-start swipe as delete with caller-supplied confirmation.
+Each conversation row SHALL offer Rename, Pin/Unpin, Archive/Unarchive and Delete. The package `ConversationListView` SHALL emit `onRequestActions(ConversationActionRequest)` on long-press, on secondary tap, and from a trailing overflow button. `ConversationActionRequest` SHALL carry the `item`, the `PointerDeviceKind` of the pointer that started the gesture (`null` for keyboard activation), the global pointer `position` (`null` for the overflow button), and the overflow button's global `anchorRect` (`null` for row gestures). The button is shown while the row is hovered, focused or selected. Swipe SHALL remain a delete gesture only (end-to-start, with caller-supplied confirmation). Pin and Unpin SHALL be offered only in the menu and the action sheet, never as a swipe. For a row in the "Archived" section, Pin SHALL pin and unarchive it.
 
 The app SHALL choose the presentation from the request:
 
@@ -279,11 +287,18 @@ Rename SHALL open `showAdaptiveTextInputDialog`, prefilled with the current titl
 - **THEN** its overflow button is visible and focusable
 - **AND** activating it emits `onRequestActions` with a `null` kind, a `null` position and the button's `anchorRect`
 
-#### Scenario: Swipe right pins without removing the row
+#### Scenario: Swipe does not pin
 
 - **WHEN** the user swipes a row start-to-end
-- **THEN** `onTogglePin` fires once
-- **AND** the row stays in the list
+- **THEN** nothing happens and the row stays in the list
+- **AND** Pin is reachable only through the menu or the action sheet
+
+#### Scenario: Pin from an archived row
+
+- **GIVEN** the "Archived" section lists A
+- **WHEN** the user chooses Pin in A's menu
+- **THEN** the app sends `PATCH {"pinned": true}`
+- **AND** A leaves the "Archived" section and appears in the "Pinned" group
 
 #### Scenario: Rename dialog submits a trimmed title
 

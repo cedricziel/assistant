@@ -12,6 +12,12 @@ The bubble's interactive descendants (links, code-block copy buttons) SHALL rema
 - **WHEN** its semantics are inspected
 - **THEN** a container node SHALL have a label starting with "Ada" AND the message text SHALL be reachable as a descendant node
 
+#### Scenario: Stopped label survives reload
+
+- **GIVEN** a conversation reloaded from history whose last assistant row carries the persisted stopped `finish_reason`, so its `ChatMessage.status` is `stopped`
+- **WHEN** the conversation renders with `senderLabel: 'Ada'`
+- **THEN** the bubble's container label SHALL be "Ada, stopped"
+
 #### Scenario: Status is part of the label
 
 - **WHEN** a user bubble with status `failed` renders with `senderLabel: 'You'`
@@ -94,7 +100,7 @@ A pure `ChatAnnouncer` policy SHALL map these events to announcements, sent thro
 - `TurnCompleted`: polite "{Persona} replied: {excerpt}", where the excerpt is the reply converted from markdown to plain text and cut to at most 200 characters at a word boundary, followed by "…" when cut;
 - `TurnStopped`: polite "Response stopped";
 - `TurnFailed`: assertive "Response failed: {message}";
-- `TurnStalled`: polite "Still working", at most once per turn, and not while the turn is awaiting input (between `TurnAwaitingInput` and `TurnInputResolved`);
+- `TurnStalled`: polite "Still working", at most once per turn, and not while the turn is awaiting input (between `TurnAwaitingInput` and `TurnInputResolved`). `TurnStarted` SHALL reset the per-turn stall count and the awaiting-input flag;
 - `TurnAwaitingInput`: its polite `announcement` text.
 
 Throttling SHALL follow one model. A polite announcement is held in a single slot. When the slot goes from empty to full, its deadline is set to the announcement's time plus 1.5 s, and it is spoken when the deadline passes. A polite announcement that arrives while the slot is full SHALL replace the held text and keep the deadline. An assertive announcement SHALL be spoken at once and SHALL drop any held polite announcement.
@@ -141,6 +147,18 @@ Token frames SHALL NOT produce announcements. The streaming message SHALL NOT be
 - **GIVEN** a live turn whose stream drops and is resumed by replay
 - **WHEN** the replayed `done` is applied
 - **THEN** `TurnCompleted{source: replay}` SHALL be emitted AND the completion SHALL be announced once
+
+#### Scenario: Abandoned approval does not suppress the next stall announcement
+
+- **GIVEN** `TurnAwaitingInput` was emitted and the turn was then abandoned without `TurnInputResolved` (the user edited the message, so the server auto-cancelled the pending approval)
+- **WHEN** a new turn emits `TurnStarted` and later `TurnStalled`
+- **THEN** "Still working" SHALL be sent for the new turn
+
+#### Scenario: Completion names the Persona and excerpts the reply
+
+- **GIVEN** a Persona named "Ada" and a completed reply
+- **WHEN** the completion is announced
+- **THEN** the text SHALL be "Ada replied: " followed by the excerpt, AND SHALL NOT be only the Persona name or the full reply
 
 #### Scenario: History load is silent
 
@@ -215,7 +233,15 @@ Indeterminate progress indicators MAY keep animating, because they convey status
 
 ### Requirement: Accessibility guidelines are tested in both themes
 
-`app/test/widget/features/chat/chat_accessibility_test.dart` SHALL pump the chat screen with a fixture conversation (user message, assistant reply with code and a link, tool call, thinking entry, timing indicator, error banner) in light and dark themes, and SHALL assert `labeledTapTargetGuideline`, `textContrastGuideline`, and that every node with a tap action has a non-empty label. The `assistant_ui` package SHALL include semantics tests for `MessageBubble`, `TimelineEntryShell`, `Composer`, `CodeBlock` and `MessageTimingIndicator`.
+`app/test/widget/features/chat/chat_accessibility_test.dart` SHALL pump the chat screen with a fixture conversation (user message, assistant reply with code and a link and timing, tool call, thinking entry, error banner) in light and dark themes, with the "Show response timing" preference overridden to on so the timing indicator is present, and SHALL assert `labeledTapTargetGuideline`, `textContrastGuideline`, and that every node with a tap action has a non-empty label. The `assistant_ui` package SHALL include semantics tests for `MessageBubble`, `TimelineEntryShell`, `Composer`, `CodeBlock` and `MessageTimingIndicator`.
+
+#### Scenario: Timing indicator is absent by default and passes when on
+
+- **GIVEN** the fixture screen with the preference at its default
+- **WHEN** it is pumped
+- **THEN** no `MessageTimingIndicator` SHALL be present AND the guidelines SHALL pass
+- **WHEN** the preference is overridden to on
+- **THEN** the indicator SHALL be present, labelled with the timing sentence, AND the guidelines SHALL pass
 
 #### Scenario: Suite runs in CI
 

@@ -11,8 +11,10 @@ The user chose the A2UI protocol rendered by Flutter's GenUI SDK. Research shows
 - The tool is offered only on **interactive web turns at subagent depth 0** (`ExecutionContext.interactive`, added by `tool-approval-prompts`, plus `Interface::Web`). Quick-message, voice, messenger, CLI, MCP, A2A and scheduled turns never see it. The tool is registered only after the client can render surfaces, so `main` never offers a surface nobody can see.
 - New `OrchestratorEvent::SurfaceUpdate` → SSE event `surface_update`. It is stored in the event log, so replay re-surfaces it. The streamed-turn runner keeps persisting frames after the client disconnects, so a reload during a wait does not lose later frames.
 - New `ui_surfaces` table in space.db behind a `SurfaceStore` trait with InMemory and Sqlite implementations. Surfaces are anchored to their tool call (`tool_call_id`, or tool-call message id plus call index) and reload from history through `ConversationDetail.surfaces`, because the event log expires after 24h (`crates/storage/src/conversation_events.rs:20`).
-- User actions take one of two routes. **While the turn waits** (`wait_for_action: true`), the action travels on the interaction channel owned by `tool-approval-prompts`, as a new interaction kind `surface_action` that renders no card of its own. **After the turn has ended**, it arrives as a new user turn through `SendMessageRequest.surface_action`. The visible user message is server-built; the structured block the LLM sees is synthesized from the `ui_surfaces` row on every history rebuild.
-- Client: `SurfaceFrame` element plus the `SurfaceRecord` model in `assistant_ui` (pure). The A2UI renderer adapter lives in `app/lib/features/chat/a2ui/` because `a2ui_flutter` is outside the package allowlist. The allowlist is **not** amended.
+- Link safety: `Image.url` allows any `https:` host unless the org narrows it with `[ui] image_hosts`. `openUrl` to a host outside the org allowlist `[ui] link_hosts` (empty by default) shows the destination and asks before opening. The client reads the allowlist from `GET /api/capabilities` (`ui.link_hosts`).
+- A surface is answerable until the next user turn. After that it is read-only and labelled closed. The state is derived (no user message follows its anchor on the active path), not stored; the post-turn route answers `410` for a closed surface.
+- User actions take one of two routes. **While the turn waits** (`wait_for_action: true`), the action travels on the interaction channel owned by `tool-approval-prompts`, as a new interaction kind `surface_action` that renders no card of its own. **After the turn has ended**, it arrives as a new user turn through `SendMessageRequest.surface_action`. The visible user message is server-built (`Submitted “<title>”`, shown with a "via form" marker); the structured block the LLM sees is synthesized from the `ui_surfaces` row on every history rebuild.
+- Client: `SurfaceFrame` element plus the `SurfaceRecord` model in `assistant_ui` (pure). The A2UI renderer adapter lives in `app/lib/features/chat/a2ui/` because `a2ui_flutter` is outside the package allowlist. The allowlist is **not** amended. Surface content is Material on every platform, including iOS and macOS (accepted for v1).
 - ADR-0019.
 
 ## Capabilities
@@ -28,7 +30,7 @@ The user chose the A2UI protocol rendered by Flutter's GenUI SDK. Research shows
 
 ## Impact
 
-- **Crates**: new `assistant-a2ui`; `core` (ToolSpec flag, `[ui]` org config), `tool-executor`, `runtime` (event, dispatch hook, projectors, history synthesis, interaction kind handler), `storage` (migration, store), `web-ui` (DTOs, runner, OpenAPI).
+- **Crates**: new `assistant-a2ui`; `core` (ToolSpec flag, `[ui]` org config with `image_hosts` and `link_hosts`), `tool-executor`, `runtime` (event, dispatch hook, projectors, history synthesis, interaction kind handler), `storage` (migration `049_ui_surfaces`, store), `web-ui` (DTOs, runner, capabilities `ui.link_hosts`, OpenAPI).
 - **Not touched**: the `messages` table and the `Message` struct. Surface metadata lives only in `ui_surfaces`, so this change stays out of the contended Message-struct lane.
 - **App**: `assistant_ui` (model, frame, stories, goldens); `app/` adds `a2ui_flutter` and `a2ui_core`, pinned exactly.
 - **Visual change**: yes. Surfaces are new timeline entries. **Playwright baselines will move.**
@@ -43,3 +45,5 @@ The user chose the A2UI protocol rendered by Flutter's GenUI SDK. Research shows
 - Persona-authored, saved UI templates.
 - Updating or closing surfaces after the user has submitted them. There is no `closed` state and no `deleteSurface`.
 - Cupertino-styled surface widgets (D10).
+- Keeping a surface answerable after a later user turn, or reopening a closed one.
+- Per-link trust prompts that remember a choice; the confirmation is asked every time for hosts outside the allowlist.

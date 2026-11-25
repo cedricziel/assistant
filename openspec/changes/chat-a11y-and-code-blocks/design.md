@@ -124,7 +124,9 @@ So `ChatNotifier` emits explicit lifecycle events on a broadcast stream (`ChatNo
 | `TurnStalled`                                           | the status age crosses `kTurnStallThreshold`, from a timer the notifier arms on each status update                                      | polite "Still working", once per turn, suppressed while awaiting input                                                          |
 | `TurnAwaitingInput{announcement}` / `TurnInputResolved` | emitted by tool-approval-prompts PR 16 when an interaction is pending / resolved                                                        | the emitter's text (polite); sets and clears the "awaiting input" flag                                                          |
 
-Loading a conversation's history emits **no** lifecycle events, so it is silent by construction. A reconnect that resumes a turn the user started (or a run that was still active when the conversation was opened) emits `TurnCompleted{source: replay}` when it finishes, and that **is** announced: the user is waiting for it.
+Loading a conversation's history emits **no** lifecycle events, so it is silent by construction. A reconnect that resumes a turn the user started (or a run that was still active when the conversation was opened) emits `TurnCompleted{source: replay}` when it finishes, and that **is** announced: the user is waiting for it. This is a final decision: a reconnect replay is announced exactly like a live completion, because from the listener's side the reply they were waiting for has arrived.
+
+`TurnStarted` also resets the per-turn flags (the "Still working" count and the awaiting-input flag). A turn abandoned while an approval was pending (message-branching auto-cancels a pending approval when the user edits, regenerates or switches branch) therefore cannot leave the flag set and suppress the next turn's stall announcement, and no new lifecycle event is needed for that path. The user started that action, so it is not announced.
 
 `ChatAnnouncer` (`app/lib/features/chat/chat_announcer.dart`) is a pure policy over this event stream plus a clock, producing `Announcement{text, assertive}`. A thin `ChatAnnouncementSink` calls `SemanticsService.sendAnnouncement(View.of(context), text, TextDirection.ltr, assertiveness:)` (`announce` is deprecated in Flutter 3.50.1, `packages/flutter/lib/src/semantics/semantics_service.dart:51-56,81-92`). It lives in the app because it reacts to `chatProvider`, and the package stays free of platform channels. Other features (tool-approval-prompts, code copy) announce through the same sink so throttling is global.
 
@@ -141,7 +143,10 @@ Alternatives:
 
 - (a) Mark the bubble `liveRegion: true`. Rejected: per-token chatter.
 - (b) Derive announcements from `(previous ChatState, next ChatState)`. Rejected: see the first paragraph.
-- (c) Announce the full reply. Rejected as the default because long replies would monopolise the reader. Open question for the user.
+- (c) Announce the full reply. Rejected: long replies would monopolise the reader, and the transcript is one keystroke away.
+- (d) Announce the Persona name only ("Ada replied"). Rejected: the user then has to navigate to the message to learn whether it needs attention. The excerpt is the first 200 characters, so a short answer is heard whole.
+
+**Decided (final):** completion is announced as "{Persona} replied: {excerpt}", with the excerpt as described in the table (plain text, at most 200 characters, cut at a word boundary, "…" when cut).
 
 ## Decision 5: Message semantics shape
 
@@ -149,6 +154,8 @@ Alternatives:
 
 - `sender` is a new required `senderLabel` parameter. The app passes "You" for the user's own messages and the active Persona's name for assistant messages (`chat_screen.dart:313`).
 - `status` is one of ", sending", ", failed", ", responding", ", stopped" (`MessageStatus.stopped`, from chat-stop-cancels-turn), or empty.
+
+The `stopped` status reaches the bubble from `ChatMessage.status`. A live stop sets it through chat-stop-cancels-turn PR 4, and a reloaded conversation sets it from the persisted `finish_reason` (chat-stop-cancels-turn PR 2a and 5c), so the ", stopped" label survives a reload with no work in this change beyond the label itself.
 
 The content stays as child nodes rather than merged, so links, code-block copy buttons and actions remain individually focusable. `TypingIndicator` carries `Semantics(label: 'typing')`, and under reduced motion it renders its dots static. `MessageActions` is a separate container after the bubble in traversal order.
 
@@ -165,6 +172,8 @@ The content stays as child nodes rather than merged, so links, code-block copy b
 Effect (pane = window − 241 px with the expanded sidebar, window − 73 px with the collapsed one, window below 768 px): the list moves from inline to the drawer for windows of **701–1008 px with the sidebar expanded** and **701–840 px with it collapsed**. The 701–767 px overlap with the bottom nav disappears.
 
 **Sidebar animation.** The sidebar animates its width over 200 ms (`material_wide_layout.dart:19,41-46`), so the pane width passes through intermediate values. The decision is a pure function of the current pane width and the animation is monotonic, so it flips at most once per toggle. An open drawer is closed when the layout flips to inline (the `Scaffold` no longer has a drawer). A widget test toggles the sidebar at 900 px and asserts exactly one flip and no exceptions.
+
+**Decided (final):** `ChatScreen` compares its own pane width. The user accepted the behaviour change for windows of 701–1008 px (sidebar expanded) and 701–840 px (collapsed), where the list now lives in the drawer. A region is split into list and detail only when the region itself is wide enough, which is the same rule `adaptive-shell` applies to the window.
 
 Alternatives:
 
@@ -197,7 +206,7 @@ The client cannot count tokens (chunks are not tokens) and loses everything on r
 
 **On the wire.**
 
-- **`done` frame:** today an untyped `serde_json::json!` (`messages.rs:416-434`) with no OpenAPI schema (the 200 response of `POST /api/conversations/{id}/messages` is `{"text/event-stream": {}}`; components have `SseTokenEvent` and siblings, no done event). This change introduces a typed `SseDoneEvent { role, content, message_id?, attachment_ids?, timing?: MessageTimingSummary }` (`utoipa::ToSchema`), registers it in `openapi.rs` components next to `SseTokenEvent` (`openapi.rs:52,546`), and builds the terminal `done` frame from it in the shared runner `stream_turn_to_sse` (message-branching PR 6). Voice turns use the same runner after chat-stop-cancels-turn PR 3, so there is one build site. The terminal frame is already persisted to `conversation_event_store` (`messages.rs:452-456`), so replay carries `timing` with no new event type.
+- **`done` frame:** today an untyped `serde_json::json!` (`messages.rs:416-434`) with no OpenAPI schema (the 200 response of `POST /api/conversations/{id}/messages` is `{"text/event-stream": {}}`; components have `SseTokenEvent` and siblings, no done event). This change introduces a typed `SseDoneEvent { role, content, message_id?, attachment_ids?, timing?: MessageTimingSummary }` (`utoipa::ToSchema`), registers it in `openapi.rs` components next to `SseTokenEvent` (`openapi.rs:52,546`), and builds the terminal `done` frame from it in the shared runner `stream_turn_to_sse` (the extraction PR owned by message-branching, PR 5 in the stack plan). Voice turns use the same runner after chat-stop-cancels-turn PR 3, so there is one build site. The server measures, stores and sends timing for every eligible turn regardless of the client preference in Decision 9: replay frames are shared by all viewers, and storing it keeps old replies' timing available if the user turns the preference on later. The terminal frame is already persisted to `conversation_event_store` (`messages.rs:452-456`), so replay carries `timing` with no new event type.
 - **History:** `MessageSummary.timing: Option<MessageTimingSummary>` for the assistant row that has a timing row, loaded with one `get_for_conversation` call per request.
 - **tokens/s:** clients compute `output_tokens / (decode_ms / 1000)`, shown only when both are present and `decode_ms ≥ 250`. Durations are integer milliseconds, not timestamps, so the RFC 3339 rule does not apply.
 
@@ -213,7 +222,7 @@ Alternatives:
 
 ## Decision 8: Timing display
 
-`MessageTimingIndicator(timing)` is a package element. `buildMessageActions` places it **first** in `MessageActions.trailing` (a `List<Widget>`; feedback follows it, chat-element-library PR 8a) for finished assistant messages that have `timing`.
+`MessageTimingIndicator(timing)` is a package element. `buildMessageActions` places it **first** in `MessageActions.trailing` (a `List<Widget>`; feedback follows it, chat-element-library PR 8a) for finished assistant messages that have `timing`, **only when the "Show response timing" preference (Decision 9) is on**. The builder takes the preference as a plain `bool showResponseTiming` argument, so the package element stays free of app state.
 
 - It is a **focusable button** in the `MessageActionButton` style (24×24 minimum hit area) showing a 14 px `Icons.speed_outlined` glyph, wrapped in a `Tooltip` with a `GlobalKey<TooltipState>`.
 - Material's tooltip (Flutter 3.50.1) shows on mouse hover and, with `triggerMode: TooltipTriggerMode.tap`, on tap. It does **not** show on keyboard focus: `RawTooltip` installs only the recogniser for its trigger mode (`widgets/raw_tooltip.dart:683-698`), and its only focus use is Escape-to-dismiss (`:596-615`). So the button calls `TooltipState.ensureTooltipVisible()` when it gains focus and when it is activated (Enter, Space or tap), which also covers touch. Long-press is not a trigger: it adds a second gesture for the same result.
@@ -222,13 +231,29 @@ Alternatives:
 
 Formatting rules: values under 10 s show one decimal, 10 s to under 60 s show whole seconds, longer values show "1 m 5 s". Missing parts are dropped.
 
+## Decision 9: Response timing is shown only when the user turns on "Show response timing"
+
+The preference is **off by default**. Timing numbers are useful to a minority (people comparing models or debugging slow turns) and are visual noise on every reply for everyone else, so the default chat looks the same as today and the indicator is opt-in.
+
+- **Storage.** A per-device preference in `SharedPreferences` under `assistant.showResponseTiming` (boolean, absent means `false`), exposed as `showResponseTimingProvider`, an `AsyncNotifier<bool>` modelled on `sidebarCollapsedProvider` (`shared/nav/sidebar_collapsed_provider.dart`): reads and writes are wrapped in `try`/`catch`, a failed read means `false`, and a write updates state first. It lives in `app/lib/features/settings/response_timing_preference.dart`.
+- **Control.** `SettingsScreen` gains a "Show response timing" switch row with the subtitle "Show first-token time, total time and tokens per second under finished replies." The switch has a semantics label equal to its title and toggles on Enter, Space and tap.
+- **Gating.** `ChatScreen` watches the provider and passes `showResponseTiming` to `buildMessageActions`. With the preference off, `timing` is still parsed and stored on `ChatMessage`, and the indicator is simply not built; turning the preference on shows the indicator on every finished reply that has timing, including ones already on screen and loaded history.
+- **Scope.** Server behaviour does not depend on the preference (Decision 7).
+
+Alternatives:
+
+- (a) Always show the icon (the earlier default). Rejected by the user decision: noise for most users.
+- (b) A server-side per-user preference. Rejected: there is no user UI-preference store today, it would add an endpoint, an `openapi.json` change and a regenerated client for one boolean, and the sidebar collapse state already follows the per-device pattern.
+- (c) Have the server omit `timing` when the preference is off. Rejected: replay frames are shared, the stored value would be lost for later, and it couples measurement to presentation.
+
 ## Risks / Trade-offs
 
 - **`highlight` 0.7.0 is unmaintained.** Mitigated by the single call site and the swap path above, and it adds no weight. Its grammars lag highlight.js 11, so some newer syntax (for example Rust let-else) colours imperfectly.
 - **Highlighting cost on huge blocks.** Mitigated by the 20k-character cap and the LRU.
 - **Visual baseline moves.** The code block gains a header bar, and the timing icon appears. Never merge Playwright PNGs by hand: after a rebase, regenerate with the e2e-testing skill and record the diff in the PR body.
 - **Announcements depend on platform support.** On web, Flutter's semantics tree must be enabled (it is, once an assistive technology is detected or the user activates the "Enable accessibility" placeholder). The sink is a no-op in tests unless the accessibility channel is mocked, and the tests mock it.
-- **Breakpoint behaviour change** for windows of 701–1008 px (sidebar expanded) or 701–840 px (collapsed): the user sees a drawer where an inline list used to be. Open question for the user.
+- **Breakpoint behaviour change** for windows of 701–1008 px (sidebar expanded) or 701–840 px (collapsed): the user sees a drawer where an inline list used to be. Accepted (Decision 6).
+- **Timing is undiscoverable by default.** The indicator is hidden until the user finds the setting. Accepted; C12's docs name the setting in the "Response timing" section.
 - **Timing excludes server queue wait.** `t0` is the start of the orchestrator turn, not request arrival. The per-conversation worker queue is normally empty, so the difference is negligible.
 - **ttft includes forwarder lag.** In production the instant is taken when the forwarder receives the chunk, not when the provider produces it. The 64-slot channel is normally drained, so the lag is microseconds.
 - **Providers without usage** (for example OpenAI-compatible streaming without `stream_options.include_usage`) show no tok/s. Honest, but uneven across providers.
@@ -236,12 +261,6 @@ Formatting rules: values under 10 s show one decimal, 10 s to under 60 s show wh
 
 ## Migration Plan
 
-- New table only, with no backfill. Old messages have no timing and show no indicator.
-- The migration `NNN_message_timings.sql` takes the number the cross-change stack plan pre-allocates to this change; without an allocation, the next free number after `045_skill_executions.sql` at implementation time. It is registered in the `run_migrations` list in `crates/storage/src/lib.rs` (`:273`, list ending at `:472`).
+- New table only, with no backfill. Old messages have no timing and show no indicator. The preference needs no migration: an absent key reads as off.
+- The migration is `053_message_timings.sql`, the number the cross-change stack plan pre-allocates to this change (`openspec/chat-ui-parity-stack.md`). It is registered in the `run_migrations` list in `crates/storage/src/lib.rs` (`:273`, list ending at `:472`).
 - Rollback: the table is additive. Reverting the code leaves it unused.
-
-## Open Questions
-
-1. **Completion announcement content.** The default announces "{Persona} replied:" plus a 200-character excerpt. The alternatives are the name only, or the full reply. _User decision._
-2. **Timing visibility.** The default shows the timing icon on every finished assistant reply. The alternative hides it behind a "Show response timing" preference. _User decision._
-3. **Chat inline-list rule.** Comparing the pane width moves the conversation list into the drawer for windows of 701–1008 px with the sidebar expanded (701–840 px collapsed). The alternative compares the window width against 768 and keeps a narrow message column. _User decision._

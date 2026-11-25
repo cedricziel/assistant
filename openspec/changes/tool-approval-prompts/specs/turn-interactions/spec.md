@@ -279,6 +279,15 @@ synthetic terminal frame, it SHALL first append
   and then `agent_error{reason: cancelled}`
 - **AND** a later respond call SHALL return `410`
 
+#### Scenario: Branching while waiting
+
+- **WHEN** the owner edits or regenerates a message while an approval for the
+  conversation's running turn is pending
+- **THEN** the waiting turn SHALL be cancelled through the same path as Stop,
+  the interaction SHALL end `cancelled` (with `interaction_resolved` before the
+  terminal frame), the tool SHALL NOT run, AND the new branch's turn SHALL
+  start
+
 #### Scenario: Orphaned run closed by the sweep
 
 - **WHEN** the recovery sweep appends a synthetic terminal frame to a run with
@@ -289,7 +298,7 @@ synthetic terminal frame, it SHALL first append
 ### Requirement: Interaction timeout is configurable per org
 
 `[permissions] interaction_timeout_secs` in `org.toml` SHALL set the expiry for
-every interaction kind, with a default of `600`. Values outside `30..=3600`
+every interaction kind, with a default of `600` (10 minutes). Values outside `30..=3600`
 SHALL fail config loading with an error naming the key. `expires_at` SHALL NOT
 be later than the turn's own deadline.
 

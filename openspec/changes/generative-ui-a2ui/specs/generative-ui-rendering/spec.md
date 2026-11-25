@@ -16,7 +16,7 @@ The client SHALL parse the SSE event `surface_update` into a `SurfaceUpdateEvent
 
 ### Requirement: Surfaces render as timeline entries inside a pure frame
 
-`assistant_ui` SHALL provide `TimelineEntryType.surface`, a pure `SurfaceRecord` model, and a `SurfaceFrame` element rendered in the timeline entry shell's body slot. `SurfaceFrame` SHALL take only constructor data (title, status, fallback text, error flag, pending flag, awaiting-input flag, an optional content widget) and callbacks, and SHALL perform no I/O. With no content widget, or when the error flag is set, the frame SHALL show the fallback text. A `submitted` surface SHALL be rendered read-only, labelled as submitted. A surface whose turn waits on it SHALL use `EntryState.awaitingInput`. `SurfaceFrame` SHALL have widgetbook stories for active, awaiting input, pending, submitted, error and fallback-only states, plus golden tests in light and dark themes.
+`assistant_ui` SHALL provide `TimelineEntryType.surface`, a pure `SurfaceRecord` model, and a `SurfaceFrame` element rendered in the timeline entry shell's body slot. `SurfaceFrame` SHALL take only constructor data (title, status, answerable flag, fallback text, error flag, pending flag, awaiting-input flag, an optional content widget) and callbacks, and SHALL perform no I/O. With no content widget, or when the error flag is set, the frame SHALL show the fallback text. A `submitted` surface SHALL be rendered read-only, labelled as submitted. An `active` surface that is not answerable (a later user message exists) SHALL be rendered read-only, labelled "Closed". A surface whose turn waits on it SHALL use `EntryState.awaitingInput`. `SurfaceFrame` SHALL have widgetbook stories for active, awaiting input, pending, submitted, closed, error and fallback-only states, plus golden tests in light and dark themes.
 
 #### Scenario: Fallback when the renderer fails
 
@@ -28,6 +28,17 @@ The client SHALL parse the SSE event `surface_update` into a `SurfaceUpdateEvent
 - **WHEN** a surface has status `submitted`
 - **THEN** its inputs and buttons are disabled
 - **AND** the frame shows a "Submitted" label
+
+#### Scenario: Closed surface is read-only
+
+- **WHEN** a surface has status `active` and `answerable` false
+- **THEN** its inputs and buttons are disabled and no action fires
+- **AND** the frame shows a "Closed" label
+
+#### Scenario: Surface closes when the user sends another message
+
+- **WHEN** the user sends a message while an earlier surface is `active`
+- **THEN** that surface becomes closed in place, without a reload
 
 #### Scenario: Waiting surface
 
@@ -60,7 +71,12 @@ The adapter's `Image` implementation SHALL load same-origin `/api/attachments/{i
 
 ### Requirement: Surfaces inherit the app theme
 
-Rendered surfaces SHALL take colours and typography from the active app `ThemeData`, with light and dark both supported, and shapes and padding from `AssistantRadius` and `AssistantSpacing`. Surfaces SHALL NOT read any theme carried in A2UI messages. Surface content SHALL use Material widgets on every platform; this is an accepted deviation from the adaptive-widgets rule, recorded in the design.
+Rendered surfaces SHALL take colours and typography from the active app `ThemeData`, with light and dark both supported, and shapes and padding from `AssistantRadius` and `AssistantSpacing`. Surfaces SHALL NOT read any theme carried in A2UI messages. Surface content SHALL use Material widgets on every platform, including iOS and macOS; this is an accepted v1 deviation from the adaptive-widgets rule, recorded in the design. The surface chrome and the link-confirmation dialog SHALL follow the adaptive-widgets rule.
+
+#### Scenario: Apple platforms
+
+- **WHEN** a surface with a TextField and a Button renders under the iOS or macOS target platform
+- **THEN** both are the Material widgets, as the pinned widget test shows
 
 #### Scenario: Dark mode
 
@@ -69,21 +85,56 @@ Rendered surfaces SHALL take colours and typography from the active app `ThemeDa
 
 ### Requirement: Client enforces the URL policy and regex input cap on resolved values
 
-The client SHALL apply the same URL policy as the server to every resolved image URL and `openUrl` target, including values bound through `@path`. Images that violate the policy SHALL render a placeholder. Links that violate it SHALL be disabled. `openUrl` SHALL launch only through the app's `url_launcher` callback and only from a user gesture. The `regex` function SHALL evaluate at most 1,000 characters of input; longer input SHALL fail the check without running the pattern.
+The client SHALL apply the same URL policy as the server to every resolved image URL and `openUrl` target, including values bound through `@path`. Images that violate the policy SHALL render a placeholder. Links that violate it SHALL be disabled. `openUrl` SHALL launch only through the app's `url_launcher` callback and only from a user gesture. Any image `https:` host SHALL be accepted by the client policy; the server enforces `[ui] image_hosts`. The `regex` function SHALL evaluate at most 1,000 characters of input; longer input SHALL fail the check without running the pattern.
 
 #### Scenario: Bound URL resolves to an unsafe scheme
 
 - **WHEN** an Image `url` is bound to a data-model value that the user changed to `data:image/png;base64,...`
 - **THEN** the image is not loaded and a placeholder is shown
 
+#### Scenario: Any https image host renders
+
+- **WHEN** an Image uses an `https:` URL on a host the app has not seen before
+- **THEN** the image loads
+
 #### Scenario: Long input to a regex check
 
 - **WHEN** a TextField with a `regex` check receives 5,000 characters
 - **THEN** the check fails immediately without evaluating the pattern
 
+### Requirement: openUrl outside the link allowlist asks before opening
+
+The client SHALL read `ui.link_hosts` from `GET /api/capabilities` for the selected space. When the user triggers `openUrl`, the client SHALL open an `https:` target without a prompt only if its host equals an entry of `ui.link_hosts` (case-insensitive, exact). For every other `https:` target, and for every `mailto:` target, the client SHALL first show a confirmation dialog that displays the full destination, with Open and Cancel actions, and SHALL launch only after Open. Cancel SHALL launch nothing. A target that violates the URL policy SHALL stay disabled and SHALL NOT reach the dialog. When the capabilities call fails or returns no list, the client SHALL treat the list as empty. The dialog SHALL use adaptive dialog widgets.
+
+#### Scenario: Host outside the allowlist
+
+- **WHEN** the user taps a Button whose `openUrl` is `https://example.org/a` and `ui.link_hosts` does not contain `example.org`
+- **THEN** a dialog shows `https://example.org/a`
+- **AND** nothing launches until the user taps Open
+
+#### Scenario: Cancel
+
+- **WHEN** the dialog is shown and the user taps Cancel
+- **THEN** the launcher is not called
+
+#### Scenario: Host on the allowlist
+
+- **WHEN** `ui.link_hosts` contains `docs.example` and the user taps an `openUrl` to `https://DOCS.example/x`
+- **THEN** the link opens through the launcher with no dialog
+
+#### Scenario: mailto always asks
+
+- **WHEN** the user taps an `openUrl` to `mailto:a@example.org`
+- **THEN** the dialog shows the address before anything launches
+
+#### Scenario: Capabilities unavailable
+
+- **WHEN** the capabilities call fails
+- **THEN** every `openUrl` asks first
+
 ### Requirement: Actions are sent on the right route
 
-When the user triggers an A2UI `action`, the client SHALL send it on the interaction channel if a pending `interaction_requested` of kind `surface_action` names this surface's `surface_id` and the turn is still running. The client SHALL NOT render a generic interaction card for kind `surface_action`. In every other case it SHALL send a new message with an empty `message` and `surface_action` populated, through `ApiClient.streamMessages`, queued like any message sent while a turn is running. While the request is in flight, the surface SHALL show a pending state. `streamMessages` SHALL surface the HTTP status on its `ErrorEvent`. On a 409 for a submitted surface, the client SHALL mark the surface submitted and SHALL NOT retry. On a 410 from the respond endpoint, the client SHALL drop the interaction and send the action on the post-turn route.
+When the user triggers an A2UI `action`, the client SHALL send it on the interaction channel if a pending `interaction_requested` of kind `surface_action` names this surface's `surface_id` and the turn is still running. The client SHALL NOT render a generic interaction card for kind `surface_action`. In every other case it SHALL send a new message with an empty `message` and `surface_action` populated, through `ApiClient.streamMessages`, queued like any message sent while a turn is running. While the request is in flight, the surface SHALL show a pending state. `streamMessages` SHALL surface the HTTP status on its `ErrorEvent`. On a 409 for a submitted surface, the client SHALL mark the surface submitted and SHALL NOT retry. On a 410 from the respond endpoint, the client SHALL drop the interaction and send the action on the post-turn route. On a 410 from the post-turn route, the client SHALL mark the surface closed and SHALL NOT retry.
 
 #### Scenario: Post-turn submit
 
@@ -109,6 +160,16 @@ When the user triggers an A2UI `action`, the client SHALL send it on the interac
 - **THEN** the timeline shows no interaction card
 - **AND** the matching surface's entry state becomes `awaitingInput`
 
+#### Scenario: Post-turn action on a closed surface
+
+- **WHEN** the post-turn request fails with an `ErrorEvent` whose status is 410
+- **THEN** the surface is marked closed and no retry is made
+
+#### Scenario: Submit bubble text
+
+- **WHEN** a post-turn action is submitted for a form whose Button carries a model-authored `userMessage`
+- **THEN** the user bubble reads `Submitted “<title>”` with the "via form" marker, and the `userMessage` is not shown
+
 #### Scenario: Interaction expired before the tap
 
 - **WHEN** the respond call returns 410
@@ -116,13 +177,18 @@ When the user triggers an A2UI `action`, the client SHALL send it on the interac
 
 ### Requirement: Surfaces reload from conversation history
 
-When a conversation loads, the client SHALL map `ConversationDetail.surfaces` into surface timeline entries at the position of the tool call they are anchored to: the call whose `tool_call_id` matches, or, when the provider gave no id, the call at `anchor_call_index` in the message `anchor_message_id`. The client SHALL NOT match surfaces by turn order. Successful `render-surface` tool calls SHALL NOT render as chips; failed ones SHALL render as ordinary error chips. Submitted surfaces SHALL show their submitted values, and the user message named by `action_message_id` SHALL carry the "Submitted via form" marker.
+When a conversation loads, the client SHALL map `ConversationDetail.surfaces` into surface timeline entries at the position of the tool call they are anchored to: the call whose `tool_call_id` matches, or, when the provider gave no id, the call at `anchor_call_index` in the message `anchor_message_id`. The client SHALL NOT match surfaces by turn order. Successful `render-surface` tool calls SHALL NOT render as chips; failed ones SHALL render as ordinary error chips. Submitted surfaces SHALL show their submitted values, and the user message named by `action_message_id` SHALL carry the "Submitted via form" marker. An `active` surface SHALL be operable only when the server's `answerable` is true; otherwise it SHALL render closed.
 
 #### Scenario: History shows surface instead of chip
 
 - **WHEN** a conversation that contains a `render-surface` call and its surface is loaded
 - **THEN** the timeline shows a surface entry at that position
 - **AND** it shows no `render-surface` tool chip for that call
+
+#### Scenario: Earlier-turn surface reloads closed
+
+- **WHEN** a conversation loads in which a user message follows an `active` surface
+- **THEN** the surface renders closed and read-only
 
 #### Scenario: Failed call before a retry
 

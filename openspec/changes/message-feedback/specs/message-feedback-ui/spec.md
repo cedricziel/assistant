@@ -108,9 +108,9 @@ Changing a rating SHALL update the visible selection immediately, then call `PUT
 - **WHEN** a feedback call for a message is in flight
 - **THEN** that message's comment Send action SHALL be disabled until the call settles
 
-### Requirement: Optional comment after a negative vote
+### Requirement: Optional comment after a vote
 
-Choosing negative SHALL open `FeedbackCommentField` below the message's actions. Submitting SHALL send `PUT .../feedback` with the negative rating and the comment. Dismissing SHALL keep the rating without a comment. Choosing positive or clearing the rating SHALL close the field. A stored comment SHALL prefill the field when it is reopened by choosing negative again.
+Choosing either rating, positive or negative, SHALL open `FeedbackCommentField` below the message's actions. Submitting SHALL send `PUT .../feedback` with the current rating and the comment. Dismissing SHALL keep the rating without a comment. Switching to the other rating SHALL send the new rating without a comment and reopen the field empty. Clearing the rating SHALL close the field. A stored comment SHALL prefill the field when it is reopened by choosing the same rating again.
 
 #### Scenario: Add a comment to a negative vote
 
@@ -118,7 +118,31 @@ Choosing negative SHALL open `FeedbackCommentField` below the message's actions.
 - **WHEN** they type "wrong file" and submit
 - **THEN** the client SHALL send `{"rating": "negative", "comment": "wrong file"}` and close the field
 
-#### Scenario: Positive vote does not prompt
+#### Scenario: Add a comment to a positive vote
 
+- **GIVEN** the user chose positive on a message
+- **WHEN** they type "clear and short" and submit
+- **THEN** the client SHALL send `{"rating": "positive", "comment": "clear and short"}` and close the field
+
+#### Scenario: Both ratings open the comment field
+
+- **WHEN** the user chooses positive on one message and negative on another
+- **THEN** a comment field SHALL be shown for each, and neither SHALL require text to keep the rating
+
+#### Scenario: Dismissing keeps the rating
+
+- **GIVEN** the comment field is open after a vote
+- **WHEN** the user dismisses it
+- **THEN** the rating SHALL stay selected and no further request SHALL be sent
+
+#### Scenario: Switching rating drops the comment
+
+- **GIVEN** a message rated `negative` with comment "wrong file"
 - **WHEN** the user chooses positive
-- **THEN** no comment field SHALL be shown
+- **THEN** the client SHALL send `{"rating": "positive"}` without a comment and the field SHALL reopen empty
+
+#### Scenario: Clearing closes the field
+
+- **GIVEN** the comment field is open
+- **WHEN** the user taps the selected rating to clear it
+- **THEN** the field SHALL close

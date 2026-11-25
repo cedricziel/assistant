@@ -22,7 +22,7 @@ The `personas` table in `space.db` SHALL have a `starter_prompts` column holding
 
 ### Requirement: Persona API exposes and updates starter prompts
 
-`PersonaDetail` SHALL include `starter_prompts` (an array, always present). `PATCH /api/personas/{id}` (`operationId: update_persona`) SHALL take `UpdatePersonaRequest { starter_prompts?: string[] }`. It SHALL store the prompts trimmed and return `200` with the updated `PersonaDetail`. A field that is absent SHALL leave its value unchanged. More than 4 prompts, or a prompt that is empty after trimming or longer than 200 characters, SHALL return `400` with `{"error": "..."}`. Lengths SHALL count Unicode scalar values after trimming. An unknown or inaccessible Persona SHALL return `404`. A caller without space write access SHALL get `403`. The route SHALL be documented in `openapi.json`.
+`PersonaDetail` SHALL include `starter_prompts` (an array, always present) and `can_edit_starter_prompts` (a boolean that is true exactly when the caller may `PATCH` this Persona's starters). `PATCH /api/personas/{id}` (`operationId: update_persona`) SHALL take `UpdatePersonaRequest { starter_prompts?: string[] }`. It SHALL store the prompts trimmed and return `200` with the updated `PersonaDetail`. A field that is absent SHALL leave its value unchanged. More than 4 prompts, or a prompt that is empty after trimming or longer than 200 characters, SHALL return `400` with `{"error": "..."}`. Lengths SHALL count Unicode scalar values after trimming. An unknown or inaccessible Persona SHALL return `404`. A caller without space write access SHALL get `403`. For a personal Persona (owner set) only its owner SHALL be allowed to update starters. For an org-owned Persona (no owner) only a space admin (or org admin) SHALL be allowed. Any other caller with write access SHALL get `403` and nothing SHALL be stored. The route SHALL be documented in `openapi.json`.
 
 #### Scenario: Update starters
 
@@ -60,6 +60,25 @@ The `personas` table in `space.db` SHALL have a `starter_prompts` column holding
 - **WHEN** `PATCH /api/personas/missing` is sent
 - **THEN** the response SHALL be `404` with an `error` field
 
+#### Scenario: Owner edits a personal Persona
+
+- **GIVEN** a Persona owned by the caller, who is a space member
+- **WHEN** the caller sends `PATCH /api/personas/p1` with valid starters
+- **THEN** the response SHALL be `200` AND `can_edit_starter_prompts` SHALL be `true`
+
+#### Scenario: Space admin edits an org-owned Persona
+
+- **GIVEN** an org-owned Persona and a caller who is a space admin
+- **WHEN** the caller sends `PATCH /api/personas/p1` with valid starters
+- **THEN** the response SHALL be `200`
+
+#### Scenario: Member cannot edit an org-owned Persona
+
+- **GIVEN** an org-owned Persona and a caller who is a space member but not an admin
+- **WHEN** the caller sends `PATCH /api/personas/p1`
+- **THEN** the response SHALL be `403` AND nothing SHALL be stored
+- **AND** `GET /api/personas/p1` for that caller SHALL report `can_edit_starter_prompts == false`
+
 #### Scenario: Read-only caller
 
 - **GIVEN** a caller with read-only access to the space
@@ -68,7 +87,7 @@ The `personas` table in `space.db` SHALL have a `starter_prompts` column holding
 
 ### Requirement: Starter prompts are editable in the Persona screens
 
-The Persona detail screen SHALL show a "Starter prompts" section that lists the current prompts and opens an editor. The editor SHALL allow adding (up to 4), editing, reordering and removing prompts. It SHALL validate the same limits as the API before saving, and it SHALL save through `update_persona`. The view model SHALL expose loading, error and success states. After a successful save, the Persona detail and the chat empty state SHALL show the new list without a manual refresh.
+The Persona detail screen SHALL show a "Starter prompts" section that lists the current prompts and opens an editor. The editor SHALL allow adding (up to 4), editing, reordering and removing prompts. It SHALL validate the same limits as the API before saving, and it SHALL save through `update_persona`. When `can_edit_starter_prompts` is false, the section SHALL list the prompts read-only and SHALL NOT offer the editor. The view model SHALL expose loading, error and success states. After a successful save, the Persona detail and the chat empty state SHALL show the new list without a manual refresh.
 
 #### Scenario: Save from the editor
 
@@ -81,6 +100,11 @@ The Persona detail screen SHALL show a "Starter prompts" section that lists the 
 - **WHEN** the user opens a new chat
 - **THEN** the empty state SHALL show the saved starters
 
+#### Scenario: No edit permission hides the editor
+
+- **GIVEN** an org-owned Persona viewed by a member who is not an admin
+- **THEN** the "Starter prompts" section SHALL list the prompts AND SHALL NOT offer an edit action
+
 #### Scenario: Fifth prompt is blocked
 
 - **GIVEN** 4 prompts in the editor
@@ -88,7 +112,7 @@ The Persona detail screen SHALL show a "Starter prompts" section that lists the 
 
 ### Requirement: Empty chat shows the active Persona's starter prompts
 
-When the thread is empty, the chat screen SHALL render `StarterPrompts` with the active Persona's `starter_prompts` in `ThreadEmptyState.starters`. Tapping a starter SHALL call `ChatNotifier.sendMessage(prompt)`. If the Persona has no starters, or while the Persona is loading or failed to load, only the default empty-state copy SHALL render.
+When the thread is empty, the chat screen SHALL render `StarterPrompts` with the active Persona's `starter_prompts` in `ThreadEmptyState.starters`. Tapping a starter SHALL call `ChatNotifier.sendMessage(prompt)`. If the Persona has no starters, or while the Persona is loading or failed to load, only the default empty-state copy SHALL render. There SHALL be no org-level fallback list: starters come only from the active Persona.
 
 #### Scenario: Starter tap sends
 
@@ -98,7 +122,7 @@ When the thread is empty, the chat screen SHALL render `StarterPrompts` with the
 
 #### Scenario: No starters keeps default copy
 
-- **GIVEN** the active Persona has no starters
+- **GIVEN** the active Persona has no starters, whatever other Personas in the org have
 - **THEN** the empty state SHALL show "Start a conversation" and no starter cards
 
 ### Requirement: StarterPrompts element

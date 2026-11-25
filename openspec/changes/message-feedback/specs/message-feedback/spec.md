@@ -155,7 +155,7 @@ After every successful set, and after every clear that removed a record, the ser
 - `assistant.message.id`;
 - `assistant.feedback.has_comment`.
 
-When the message has a stored traceparent, the event SHALL carry that trace id and span id as its trace context. The comment text SHALL be recorded as `gen_ai.evaluation.explanation` only when `[observability] trace_content` is enabled. For each emitted event, the server SHALL increment the counter `assistant.feedback.count` with attributes `rating` (`positive`, `negative` or `cleared`) and `agent_id`; the counter counts feedback events, not current votes. Telemetry failures SHALL NOT fail the request.
+When the message has a stored traceparent, the event SHALL carry that trace id and span id as its trace context. The comment text SHALL NOT be exported in any telemetry signal, under any configuration, including `[observability] trace_content`: the event SHALL NOT carry `gen_ai.evaluation.explanation` or any attribute holding comment text, and the comment SHALL stay in the space database. For each emitted event, the server SHALL increment the counter `assistant.feedback.count` with attributes `rating` (`positive`, `negative` or `cleared`) and `agent_id`; the counter counts feedback events, not current votes. Telemetry failures SHALL NOT fail the request.
 
 #### Scenario: Event is parented to the evaluated span
 
@@ -163,11 +163,17 @@ When the message has a stored traceparent, the event SHALL carry that trace id a
 - **WHEN** the caller rates it `negative`
 - **THEN** one `gen_ai.evaluation.result` log record SHALL be exported with that trace id and span id, `score.label` `negative` and `score.value` -1.0
 
-#### Scenario: Comment text gated by trace_content
+#### Scenario: Comment text is never exported
 
-- **GIVEN** `trace_content` is disabled
-- **WHEN** the caller rates with a comment
-- **THEN** the event SHALL have `assistant.feedback.has_comment` true and no `gen_ai.evaluation.explanation`
+- **GIVEN** `trace_content` is either enabled or disabled
+- **WHEN** the caller rates `positive` or `negative` with the comment "secret-token-123"
+- **THEN** the event SHALL have `assistant.feedback.has_comment` true
+- **AND** it SHALL have no `gen_ai.evaluation.explanation` and no attribute value containing "secret-token-123"
+
+#### Scenario: Vote without a comment
+
+- **WHEN** the caller rates without a comment
+- **THEN** the event SHALL have `assistant.feedback.has_comment` false
 
 #### Scenario: Clearing a vote emits a cleared event without a score value
 

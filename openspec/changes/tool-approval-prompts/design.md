@@ -206,7 +206,7 @@ row and fires the local oneshot if this process holds one. A `pending` row
 whose `waiter_seen_at` is older than 45 s has no live waiter: the route
 compare-and-sets it to `expired` and answers `410`.
 
-**Events across the boundary.** The run event relay (PR 10) carries every
+**Events across the boundary.** The run event relay (PR 7b) carries every
 `OrchestratorEvent` from the turn process to the HTTP process. `send_message`
 sets `SubmitOptions { relay_events: true }`. When the worker finds no local
 sink for such a turn (`worker.rs:188`), it publishes each event on bus topic
@@ -217,6 +217,12 @@ feeds the events into the same channel as the local sink. It selects over
 that channel and the turn result, so it ends when the turn ends, not only
 when the channel closes. This fixes streaming in the split topology in
 general. Today nothing streams there (see Context).
+
+_Decision (final)._ The relay ships in this change, over `space.db` and the
+bus, not as a separate change that this one depends on. Without it the
+interaction events never reach the browser in the packaged topology, so
+splitting it out would only add an extra dependency edge. It lands as PR 7b
+(before the interaction events in PR 7c), and it is correct on its own.
 
 **One writer for the event log.** SSE sequence numbers stay owned by the
 runner in the HTTP process. The turn emits request and resolution events
@@ -235,6 +241,15 @@ and returns every row of the run with `resolution_emitted = false`. That
 includes a row whose compare-and-set won just before the turn was cancelled.
 The runner writes one `interaction_resolved` per returned row, with its stored
 outcome, _before_ the terminal `done`/`agent_error` frame.
+
+**Branching while waiting.** `message-branching` edit and regenerate cancel the
+conversation's running turn through the same path as Stop before they start the
+new branch's turn (the decision there is to auto-cancel a pending approval
+rather than refuse with `409`). This change adds no second path. The runner's
+end-of-run cleanup above ends the pending interaction `cancelled`, so the old
+branch keeps a "Cancelled" receipt and the tool never runs. Cancel stays
+per-process (see Risks), so in the split topology the interaction resolves when
+the turn actually ends, as for Stop.
 
 **Restart.** A `pending` row with a stale `waiter_seen_at` is dead. The respond
 route expires it lazily (above). `reap_stale_and_recover` (`scheduler/reap.rs`)
@@ -292,7 +307,9 @@ pub enum ConfirmationAnswer { AllowOnce, AllowAlways, RejectOnce, RejectAlways, 
   turn runner for `send_message`, `edit_message` and `regenerate_message`
   (`message-branching` PR 7); the CLI REPL (`main.rs:504-511`). Left `false`
   by: the one-shot CLI command (`main.rs:196-201`), quick-message, voice, A2A,
-  scheduler, messenger and subagent turns. `generative-ui-a2ui` gates its
+  scheduler, messenger and subagent turns. The runner sets the flag for web
+  turns only in the final "enable" PR (D9); PR 6b adds the plumbing and leaves
+  every web caller at `false`. `generative-ui-a2ui` gates its
   rich-client tools on the same flag (`ctx.interactive && depth == 0`).
 - `ExecutionContext` gains `run_id: Option<Uuid>` (from the bus `batch_id`).
 - `InteractiveConfirmation { broker, rules }` is the web implementation.
@@ -318,7 +335,8 @@ Tokio worker for minutes, and it cannot express "always".
 
 `tool_permission_rules` (space.db): `id`, `user_id`, `effect` (`allow |
 deny`), `rule` (grammar text), `created_at`, `source_interaction_id?`, with a
-unique key on (`user_id`, `effect`, `rule`). Core gets a `UserRuleSource`
+unique key on (`user_id`, `effect`, `rule`). The store lists by user or by
+space, and deletes with an optional owner filter (D4a). Core gets a `UserRuleSource`
 trait (`async fn rules_for(&self, user_id) -> UserRules`). The runtime
 implements it over the store, and `PermissionPolicy::with_user_rules` attaches
 it.
@@ -366,9 +384,56 @@ confinement before `Ask` (`static_rules.rs:62-72,301-304`). A file tool only
 reaches `Ask` through a configured ask rule, and then "always" is withheld
 anyway. It falls under "every other tool" if that ever changes.
 
-**Scope.** Rules apply to every turn carrying that user's identity in that
-space (`ctx.user_id`, through the space's own store), whatever the interface.
-See the open question.
+**Scope (decision, final).** Rules apply to every turn carrying that user's
+identity in that space (`ctx.user_id`, through the space's own store),
+whatever the interface: interactive web chat, scheduled tasks, messenger turns
+and the rest. Non-interactive turns never prompt. They only _consult_ saved
+rules, so a saved allow lets a scheduled `git status` run unattended and a saved
+deny blocks it, while an unmatched call is still denied on `Ask` as today. The
+alternative, scoping rules to interactive web turns, would make a user answer
+the same question again in every scheduled run, and would leave a saved deny
+unenforced there. The cost is that "always" is sticky across interfaces. The
+card, the settings section and the docs say so next to the button
+(Risks).
+
+**Never "always" for dangerous commands (decision, final).** Shells,
+interpreters, command wrappers and destructive commands get allow-once and
+reject-once only. Both "always" options are withheld, as are they for any
+command with a shell metacharacter and for configured ask rules. The reason is
+that a saved `bash(python3*)` or `bash(rm*)` would permit arbitrary code or
+data loss for every future turn, including unattended ones (see Scope), and
+one prompt later costs a click. The derivation is pure and every name in the
+lists has a unit test (PR 5a).
+
+### D4a. Space admins list and revoke members' saved rules
+
+Decision (final): space admins can see and revoke the saved rules of every
+member of their space. The reasons are operational. Rules apply to unattended
+turns (D4), so an admin needs a way to remove one that was granted too widely,
+without having to impersonate the user, and a leaver's rules should not
+outlive their access.
+
+- `GET /api/tool-permission-rules` keeps returning the caller's rows. With
+  `?scope=space`, a caller with `Access::Admin` (space admin or org admin, see
+  `space.rs`) gets every user's rows in the selected space. Each
+  `ToolPermissionRuleSummary` carries `user_id`. Other callers get `403` for
+  `scope=space`.
+- `DELETE /api/tool-permission-rules/{id}` deletes the caller's own rule. An
+  admin may also delete any rule in the selected space. A member asking for
+  another user's rule still gets `404`, and a rule from another space is `404`
+  for everyone.
+- An admin revoke logs `info!(target: "assistant::permission", "tool
+permission rule revoked", actor_user_id, owner_user_id, rule, rule_id)`.
+- Admins can revoke, not create, and not answer. "Answering from a different
+  user, or delegating approvals to admins" stays a non-goal: an admin cannot
+  approve a member's pending call and cannot edit a rule's pattern.
+- Client: `ToolApprovalsSection` gains a "Members' approvals" group, shown when
+  the caller's role is space admin or org admin. The server enforces the role
+  independently.
+- Trade-off: an admin sees the rule text of other members, such as
+  `bash(git status*)`. Rule text is derived from a command prefix, never
+  arguments beyond the first non-flag token, so it carries little personal
+  data, and admins can already read the space's conversations.
 
 _Alternatives._ (a) Write rules into `org.toml`. Rejected: that file is
 org-wide and operator-owned, and the decision was per space and per user.
@@ -397,6 +462,14 @@ broker access through `ExecutionContext` (a plain `Debug + Clone` struct), and
 it would show up in non-interactive turns.
 
 ### D6. Timeouts, and keeping the turn alive
+
+Decision (final): approvals and questions expire after **10 minutes**, and an
+unanswered interaction pushes the owner after **30 seconds**. Ten minutes is
+long enough to walk away and come back, and short enough that a forgotten
+prompt does not hold a worker and a conversation for hours. The org can move it
+within `30..=3600` s. Thirty seconds avoids buzzing a user who is looking at
+the screen, and is quick enough that a user who looked away still answers
+within the timeout. The push delay is fixed, not configurable.
 
 - `[permissions] interaction_timeout_secs` in `org.toml`, default `600`,
   allowed range `30..=3600`. The value is validated at load. It applies to
@@ -433,7 +506,11 @@ it would show up in non-interactive turns.
   `ToolCallSummary` and the client `ToolCallRecord` through
   `tool-result-renderers` S4 and C1. Without an id, it falls back to the same
   per-turn ordinal join `tool-result-renderers` uses, then to the end of the
-  turn.
+  turn. The list covers every run of the conversation, including runs on
+  branches that are no longer active (`message-branching`). The client only
+  attaches receipts to tool calls and turns it renders, so an interaction from
+  an inactive branch shows nowhere and is not parked on an unrelated turn. If
+  the user switches back, the receipt reappears with its branch.
 - **Push.** `push_subscriptions` gains a nullable `user_id`, which `POST
 /api/push/subscribe` fills from the caller. Rows without a user get no
   approval pushes, and there is no backfill. If an interaction is still
@@ -455,8 +532,8 @@ it would show up in non-interactive turns.
   `rendersCard`), `ApprovalCard` and `QuestionCard`. Both take constructor
   data plus callbacks, and each ships widgetbook stories for `pending`,
   `submitting`, `resolved(each decision)`, `expired`, `cancelled` and
-  `unknown kind`, with goldens. `PermissionRuleTile` (for settings) also
-  lives in the package.
+  `unknown kind`, with goldens. `PermissionRuleTile` (for settings, with an optional owner label for the
+  admin group of D4a) also lives in the package.
 - **Seams from `chat-element-library`, no parallel pattern.**
   - A `tool_approval` interaction with a `tool_call_id` renders its
     `ApprovalCard` in the `ToolCallBody.footer` of the matching tool call
@@ -490,17 +567,25 @@ it would show up in non-interactive turns.
   `ChatAnnouncer`, which also suppresses its "Still working" stall
   announcement while input is awaited.
 
-### D9. Dormant until the client can answer
+### D9. Dormant until the client can answer; no feature flag
 
 Making web turns wait on `Ask` before the client can render a card would turn
 an instant denial into a 10-minute hang, because today's client drops unknown
 events (`api_client.dart:599-790`). The same goes for offering `ask-user`
-before `QuestionCard` exists. Every server PR therefore lands dormant: the
-production bootstraps do not call `SpaceRuntimes::with_interactions()`, so the
-callback is `None` (deny on `Ask`, as today) and the overlay has no `ask-user`.
-Tests call it explicitly. One small server PR, "enable interactions", calls it
-in the orchestrator and web-ui bootstraps, and it merges only after the client
-PRs for approvals and questions. No config flag, so no dead option survives.
+before `QuestionCard` exists.
+
+Decision (final): reorder the stack instead of gating it. Every server PR
+lands dormant: the production bootstraps do not call
+`SpaceRuntimes::with_interactions()`, so the callback is `None` (deny on `Ask`,
+as today) and the overlay has no `ask-user`. Tests call it explicitly. One
+small server PR, "enable interactions" (PR 20a), calls it in the orchestrator
+and web-ui bootstraps and sets `interactive` for web send, edit and
+regenerate, and it merges only after the client PRs that render and answer
+approvals (PR 16) and questions (PR 17) are in. There is no config flag and no
+runtime toggle, so no dead option survives and no operator can turn on a state
+the client cannot handle. The cost is that the stack's last server PR depends
+on the last client PRs, which the cross-change plan reflects. Rollback is a
+revert of PR 20a alone.
 
 ### D10. Size limits
 
@@ -525,9 +610,10 @@ PRs for approvals and questions. No config flag, so no dead option survives.
   workers (`turns.rs:236`, `chat-stop-cancels-turn` design). In the split
   topology, Stop while waiting resolves the interaction `cancelled` only once
   the turn actually ends. Fixing cross-process cancel is out of scope here.
-- **"Always" is sticky across interfaces** (D4 scope). A user who allows
-  `bash(git push*)` in chat has also allowed it for their scheduled tasks.
-  The UI states this next to the button.
+- **"Always" is sticky across interfaces** (D4 scope, decided). A user who
+  allows `bash(git status*)` in chat has also allowed it for their scheduled
+  tasks and messenger turns. The card states this next to the button, the
+  settings section repeats it, and admins can revoke (D4a).
 - **Rule suggestion is heuristic.** A suggestion that is too narrow just means
   another prompt later. One that is too broad is the real risk, so shells,
   interpreters and destructive commands never get one, the derivation is pure
@@ -548,14 +634,20 @@ Archive order for the shared `turn-status-api` spec: `chat-stop-cancels-turn`,
 then `follow-up-suggestions`, then this change, whose MODIFIED delta is
 rebased on follow-up-suggestions' text.
 
+## Product decisions
+
+All final; none is open. Recorded here so the reasons survive.
+
+| Decision                                                  | Choice                                                                           | Where  |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------- | ------ |
+| Web/orchestrator process split                            | Cross-process channel over `space.db` and the bus, relay included in this change | D2     |
+| Scope of saved "always" rules                             | All of the user's turns in the space, including scheduled and messenger turns    | D4     |
+| Admins list and revoke other members' rules               | Yes, space admins (and org admins), revoke only                                  | D4a    |
+| Approval timeout and push delay                           | 10 min (org-tunable `30..=3600` s) and 30 s                                      | D6     |
+| "Always allow" for shells, interpreters, destructive cmds | Never. Allow-once and reject-once only                                           | D4     |
+| Server-before-client rollout                              | Reorder the stack: the enable PR lands after the client cards. No feature flag   | D9     |
+| Branching while an approval is pending                    | Auto-cancel it (`message-branching`); the card ends "Cancelled"                  | D2, D7 |
+
 ## Open Questions
 
-1. Should saved "always" rules apply to that user's non-interactive turns too
-   (scheduled tasks, messenger turns), or only to interactive web turns?
-   (Current design: all of the user's turns in the space.)
-2. Should space admins be able to list and revoke other members' saved rules?
-   (Current design: each user sees only their own.)
-3. Is a 10-minute default approval timeout and a 30 s push delay right?
-4. The run event relay (D2) also makes token streaming work in the split
-   topology, where today nothing streams. Is that welcome in this change, or
-   should it be split out as its own change that this one depends on?
+None.

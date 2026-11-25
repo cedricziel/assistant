@@ -13,7 +13,7 @@
 - **History.** `get_conversation` builds `MessageSummary` from `load_history` and drops `System` and `Tool` rows (`conversations.rs:401-526`, struct at `:105`). Attachments are preloaded once into a `HashMap` (`conversations.rs:424-439`).
 - **Traces.** Each turn runs under `interface.submit_turn`, then `turn`, then `chat {model}` (`worker.rs:747`, `orchestrator/mod.rs:1644-1671`, `:1241`). `start_llm_span` uses `global::tracer`. `traceparent_from_context` and `context_from_traceparent` go through `global::get_text_map_propagator` (`otel_spans.rs:86-102`), which is a no-op until `telemetry::init` installs `TraceContextPropagator`, and that happens only when OTLP export is enabled (`telemetry.rs:98-107`).
 - **Telemetry pipeline.** Logs reach OTLP only through `OpenTelemetryTracingBridge` (`telemetry.rs:136-137`). No global logger provider is registered. No test in `crates/` uses `InMemorySpanExporter` or `InMemoryLogExporter` yet; runtime has `opentelemetry_sdk` `testing` as a dev-dependency (`crates/runtime/Cargo.toml:49`). `crates/runtime/tests/` already holds process-isolated telemetry tests (`otlp_sdk_disabled.rs`, `otlp_unconfigured.rs`).
-- **Orchestrator internals.** `Orchestrator.trace_content` is `pub(crate)` (`orchestrator/mod.rs:218`). `MetricsRecorder` is created from the global meter and stored on the Orchestrator (`metrics.rs:23-26`, `orchestrator/mod.rs:233`). web-ui reaches the space's orchestrator through `state.runtime(&ctx)` (`messages.rs:148`).
+- **Orchestrator internals.** `MetricsRecorder` is created from the global meter and stored on the Orchestrator (`metrics.rs:23-26`, `orchestrator/mod.rs:233`). web-ui reaches the space's runtime through `state.runtime(&ctx)` (`messages.rs:148`); feedback telemetry does not need it.
 - **Client.** `ChatMessage` (`app/lib/features/chat/chat_models.dart:77`) is mapped from history in `chat_history_mapping.dart:32`. Live replies take `event.messageId` or fall back to `assistant-<ts>` (`chat_provider.dart:206`). `ChatNotifier` replaces the whole message list on `loadConversation` (`chat_provider.dart:290-313`), on stall recovery (`:975-994`) and on reconnect fallback (`:1078-1095`). message-branching reloads the detail after every terminal frame (`message-branching/specs/chat-branch-ui/spec.md`).
 
 ## Decision 1: One row per (message, user), replaced in full by an atomic upsert
@@ -77,10 +77,10 @@ CREATE INDEX idx_message_feedback_user ON message_feedback (user_id);
 - **Emitting.** `record_user_feedback(FeedbackTelemetry { … })` in `otel_spans.rs`:
   1. builds a context from the stored traceparent with the local propagator and attaches it;
   2. emits `tracing::info!(name: "gen_ai.evaluation.result", target: "gen_ai.evaluation.result", …)`. The bridge turns it into a log record, and the SDK logger fills its trace context from the attached context.
-- **Attributes:** `gen_ai.evaluation.name = "user_feedback"`; `gen_ai.evaluation.score.label` ∈ {`positive`, `negative`, `cleared`}; `gen_ai.evaluation.score.value` = 1.0 or −1.0, **omitted on `cleared`** so that averaging backends do not count a clear as a neutral vote; `gen_ai.conversation.id`; `gen_ai.agent.id`; `assistant.message.id`; `assistant.feedback.has_comment`; `gen_ai.evaluation.explanation` (the comment) only when `trace_content` is on. We do not set `gen_ai.response.id` from our message UUID.
+- **Attributes:** `gen_ai.evaluation.name = "user_feedback"`; `gen_ai.evaluation.score.label` ∈ {`positive`, `negative`, `cleared`}; `gen_ai.evaluation.score.value` = 1.0 or −1.0, **omitted on `cleared`** so that averaging backends do not count a clear as a neutral vote; `gen_ai.conversation.id`; `gen_ai.agent.id`; `assistant.message.id`; `assistant.feedback.has_comment`. We do not set `gen_ai.response.id` from our message UUID, and we never set `gen_ai.evaluation.explanation`: **comment text is never exported**, whatever `[observability] trace_content` says (see the rationale below).
 - **When to emit.** After every successful PUT, and after a DELETE only when `clear` returned `true`. An idempotent DELETE with nothing stored emits nothing.
 - **Metric.** `assistant.feedback.count`, a `u64` counter with `rating` ∈ {`positive`, `negative`, `cleared`} and `agent_id`. It counts feedback **events**, not current votes; current state is the latest event per `assistant.message.id`.
-- **Ownership in web-ui.** `ApiState` holds `Arc<dyn FeedbackTelemetrySink>`. The production sink, `OtelFeedbackTelemetrySink` in runtime, owns its own `MetricsRecorder::new()` (built from the global meter, same as the Orchestrator's) and calls `record_user_feedback`. `trace_content` comes from a new public accessor `Orchestrator::trace_content() -> bool` on the space runtime's orchestrator, passed in `FeedbackTelemetry`.
+- **Ownership in web-ui.** `ApiState` holds `Arc<dyn FeedbackTelemetrySink>`. The production sink, `OtelFeedbackTelemetrySink` in runtime, owns its own `MetricsRecorder::new()` (built from the global meter, same as the Orchestrator's) and calls `record_user_feedback`. `FeedbackTelemetry` carries no comment text, only `has_comment`, so the sink needs neither the orchestrator nor a `trace_content` accessor.
 - **Test isolation.** Global OTel state is process-wide and unit tests run in parallel, so:
   - `traceparent_from_span` and `record_user_feedback` are unit-tested with **local** providers only: a local `SdkTracerProvider` for a valid span, a no-op span for the invalid case, and a local `SdkLoggerProvider` with `InMemoryLogExporter` wired through `OpenTelemetryTracingBridge` under `tracing::subscriber::with_default` (thread-scoped), in plain `#[test]` functions;
   - the end-to-end "saved row carries the chat span's traceparent" case needs `global::tracer`, so it lives in its own integration-test binary, `crates/runtime/tests/final_answer_traceparent.rs`, with one test that installs a global provider. The "no provider" case is `crates/runtime/tests/final_answer_traceparent_disabled.rs`, a separate binary that installs nothing.
@@ -93,6 +93,9 @@ CREATE INDEX idx_message_feedback_user ON message_feedback (user_id);
 - Correlation by attribute only, with no stored traceparent. No schema change, but misses the SHOULD and forces a join in every query.
 - Emitting through the OTel Logs API directly. Rejected: no global logger provider (`telemetry.rs:119-147`).
 - Using the global propagator for format and parse. Rejected: it is a no-op without OTLP, which makes tests depend on process-global setup.
+
+- **Comment text stays in `space.db` (final decision).** Free-text complaints often quote user data, tool output or credentials, and `trace_content` is an operator switch for prompts and answers that operators flip for debugging, not a consent to export what a user wrote about a reply. `has_comment` still lets an operator count commented votes and find the message id, and read the comment through the database if they have a legitimate need. Exporting later is a purely additive change (a new attribute), so nothing is lost by starting closed. **Alternatives:** export under `trace_content` (rejected: couples a debugging switch to user-authored content); a separate `[observability] export_feedback_comments` flag (rejected: a new setting nobody asked for).
+- **`cleared` is a first-class event (final decision).** A clear emits an event with label `cleared` and no score value, and increments the counter with `rating=cleared`. Without it, the OTLP stream would show a vote forever after the user withdrew it, and "current state is the latest event per message" would be false. **Alternative:** emit nothing on clear. Rejected for that reason.
 
 These choices are recorded as an amendment to ADR-0012 (PR 4): persisted domain rows may carry a W3C traceparent so that later, out-of-band events are emitted as span-parented log records.
 
@@ -110,30 +113,35 @@ These choices are recorded as an amendment to ADR-0012 (PR 4): persisted domain 
   2. **Stale callbacks are no-ops.** A success or rollback callback first checks that the current state's `conversationId` is the one the call started in and that the message id is still present. Otherwise it updates only `confirmed` and shows no snackbar.
   3. **Rollback target.** On failure, the controller drops the rest of that message's queue and restores `confirmed`, the last server-confirmed value, not the immediately preceding optimistic value.
   4. **In-flight state.** While a message has a call in flight, the controller exposes `isPending(id)`. The buttons stay enabled (later taps are queued) and the comment field's Send is disabled.
-- **Comment flow.** Choosing negative opens `FeedbackCommentField` below the actions row. Submitting re-PUTs `{rating, comment}`. Positive does not open it; changing or clearing the vote closes it. Open state is local UI state keyed by message id.
+- **Comment flow (final decision: optional on both ratings).** Choosing either rating opens `FeedbackCommentField` below the actions row. Submitting re-PUTs `{rating, comment}` with the current rating. Dismissing keeps the rating without a comment. Switching to the other rating sends `{rating}` with no comment (PUT is a full replace, and a comment written for one verdict does not carry to the opposite one) and reopens the field empty. Clearing the vote closes the field. A stored comment prefills the field when it reopens for the same rating. Open state is local UI state keyed by message id. The field is the same for both ratings, so positive votes can say what worked, which is useful to operators and costs one optional tap.
 
 **Alternatives:**
 
 - A modal comment dialog. Rejected: interrupts reading; assistant-ui's default is inline.
+- Comment field on negative only. Rejected: the user asked for it on both, and positive notes are as actionable as negative ones.
 - A separate feedback `Map` in `ChatState`. Rejected: rendering reads per-message fields, and history mapping is the single seed point.
 - A single `trailing: Widget?` with feedback owning it. Rejected: chat-a11y's timing indicator needs the same slot.
 
+## Decision 5: The visible UI ships after message-branching's non-destructive compaction
+
+- **Rule.** PR 7b, the PR that puts thumbs in the chat thread, depends on message-branching's non-destructive compaction PR (its D5: summaries replace `replace_history`). Until then no user can create a vote, so no vote can be deleted by the cascade. PR 1 to PR 5 and PR 7a add storage, endpoints, telemetry, elements and an unwired controller; they are safe to merge earlier because the app does not call them.
+- **Why not ship early and accept loss.** A vote that silently disappears after a long conversation compacts is worse than no vote: the user sees the thumb, then it is gone, and the telemetry event says it was cleared by nobody.
+- **Why not keep votes across `replace_history`.** It would need an id remap table inside a code path that message-branching deletes outright. Waiting is cheaper.
+- **Guard.** PR 7b adds a runtime regression test that a vote survives `maybe_compact`, so reintroducing destructive compaction fails CI.
+- **Alternative.** Hide the UI behind a flag until D5 lands. Rejected: the repo prefers ordering the stack over feature flags (tool-approval-prompts took the same decision).
+
 ## Risks / Trade-offs
 
-- **Compaction deletes voted rows.** `replace_history` deletes and re-inserts messages with new ids (`conversations.rs:369-386`, `compaction.rs:355-370`), and the cascade drops their feedback. OTLP events survive. message-branching D5 removes `replace_history`.
+- **Compaction would delete voted rows, so we ship after it is fixed.** Today `replace_history` deletes and re-inserts messages with new ids (`conversations.rs:369-386`, `compaction.rs:355-370`), and the cascade would drop their feedback. message-branching D5 replaces it with non-destructive summaries and deletes `replace_history`. The cross-PR rule (Decision 5) keeps the visible UI behind that change.
 - **Shared `messages` lane.** Ordering is binding: message-branching PR 1, then tool-result-renderers S3, then this change's PR 3, then message-branching PR 8. PR 3 owns `persist_final_answer`/`FinalAnswerMeta`.
 - **Shared `MessageSummary`.** The feedback preload follows the attachments-map pattern and rebases freely on the other projections.
 - **Telemetry volume.** One event per click is negligible.
+- **Operators cannot read comments in OTLP.** Intentional (Decision 3). They see `has_comment` and the message id, and the comment stays in `space.db`.
 - **Spec churn.** Attribute names are constants in `otel_spans.rs`, as the existing `GEN_AI_*` strings are (`:28-32`).
 - **Trace retention.** The event may point at an expired trace; it still carries conversation, message and Persona ids.
 
 ## Migration Plan
 
-- Two forward-only migrations: `NNN_message_feedback.sql` and `NNN_message_traceparent.sql` (`ALTER TABLE messages ADD COLUMN traceparent TEXT`).
-- Numbers come from the cross-change pre-allocation in the stack plan; without one, the next free after `045_skill_executions` (`crates/storage/src/lib.rs:472`). Each is registered in the `run_migrations` list (`lib.rs:297`). The second list in `lib.rs`, `seed_database_through_016` (`:562`), is a test fixture that stops at 016 and is not changed.
+- Two forward-only migrations: `message_feedback.sql` and `message_traceparent.sql` (`ALTER TABLE messages ADD COLUMN traceparent TEXT`).
+- Numbers come from the cross-change pre-allocation in `openspec/chat-ui-parity-stack.md` (`050_message_feedback`, `057_message_traceparent` at the time of writing); the stack plan is authoritative, and without one the next free number after the highest on `main` applies. Each is registered in the `run_migrations` list (`lib.rs:297`). The second list in `lib.rs`, `seed_database_through_016` (`:562`), is a test fixture that stops at 016 and is not changed.
 - No backfill: existing rows have no traceparent, and their events are emitted unparented.
-
-## Open Questions
-
-- Should a positive vote also offer the comment field? The design opens it only on negative.
-- Is `[observability] trace_content` the right gate for exporting comment text, or should comments never leave `space.db`?

@@ -208,7 +208,7 @@ When an element needs a platform-adaptive primitive or an I/O-backed widget, it 
 
 `ToolCallBody` SHALL call the `resolve` function of the nearest `ToolResultRendererScope` with the record. If it returns a non-null widget, that widget SHALL render the tool details. The package SHALL NOT define how resolution works (tool-name override, data kinds, parsing); the scope's provider owns that. Otherwise `GenericToolResultView` SHALL render the arguments as indented JSON and the result as monospace text, as today. Status icons SHALL follow the `tool-call-display` capability (spinner, check, cross, prohibition).
 
-Tool calls inside `SubagentBody`'s inner timeline SHALL keep today's compact row (icon, tool name, status icon; `streaming_timeline_entry.dart:470-499`), SHALL NOT expand, and SHALL NOT consult the resolver. Any per-tool rendering inside a subagent is out of scope for this change.
+Tool calls inside `SubagentBody`'s inner timeline SHALL keep today's compact row (icon, tool name, status icon; `streaming_timeline_entry.dart:470-499`) at every density, SHALL NOT expand, and SHALL NOT consult the resolver. Rich tool renderers do not appear inside subagent timelines. Subagent tool calls are not given an opt-in by this change or by tool-result-renderers.
 
 #### Scenario: Resolver result wins
 
@@ -332,15 +332,27 @@ Tool calls inside `SubagentBody`'s inner timeline SHALL keep today's compact row
 - **WHEN** the app builds today's actions through `MessageActions`
 - **THEN** each SHALL keep its existing widget `Key`: `stop_action`, `read_aloud_action`, `copy_action`, `share_action`, `save_action` and `retry_button`
 
+#### Scenario: Stopped message keeps its label and Copy
+
+- **GIVEN** an assistant message with status `MessageStatus.stopped`, whether it was just stopped or reloaded from history (chat-stop-cancels-turn persists the finish reason)
+- **WHEN** the app builds its actions through `buildMessageActions`
+- **THEN** a `stopped_label` reading "Stopped" SHALL replace the Stop action AND the Copy action SHALL remain
+
 ### Requirement: Thread layout exposes banner and above-composer slots
 
-`ChatThreadLayout` SHALL arrange, top to bottom: a `banners` list, the `thread`, an `aboveComposer` list and the `composer`. It SHALL render each list in the order given and SHALL render nothing for an empty list. `ChatScreen` SHALL pass `banners: [error banner, history-loading indicator]` and `aboveComposer: [ReconnectBanner, TurnProgressCard]`, each item only when it renders today, so the vertical order of today's screen (`chat_screen.dart:416-459,578-583`) is unchanged. Siblings SHALL append their above-composer items after `TurnProgressCard` unless their own spec states another position.
+`ChatThreadLayout` SHALL arrange, top to bottom: a `banners` list, the `thread`, an `aboveComposer` list and the `composer`. It SHALL render each list in the order given and SHALL render nothing for an empty list. `ChatScreen` SHALL pass `banners: [error banner, history-loading indicator]` and `aboveComposer: [ReconnectBanner, TurnProgressCard]`, each item only when it renders today, so the vertical order of today's screen (`chat_screen.dart:416-459,578-583`) is unchanged. `ReconnectBanner` SHALL keep its current position, the first item of `aboveComposer`, directly above `TurnProgressCard` and the composer; this change and its siblings SHALL NOT move it. Siblings SHALL append their above-composer items after `TurnProgressCard` unless their own spec states another position.
 
 #### Scenario: Above-composer items keep order
 
 - **GIVEN** `aboveComposer: [A, B]`
 - **WHEN** the layout renders
 - **THEN** A SHALL appear above B AND both SHALL appear directly above the composer
+
+#### Scenario: Reconnect banner stays above the composer
+
+- **GIVEN** a reconnect in progress and no active turn
+- **WHEN** the chat screen renders
+- **THEN** `ReconnectBanner` SHALL render below the thread and directly above the composer, and SHALL NOT render at the top of the screen
 
 #### Scenario: Chat screen keeps today's vertical order
 
@@ -451,7 +463,14 @@ Tool calls inside `SubagentBody`'s inner timeline SHALL keep today's compact row
 
 ### Requirement: Conversation list view is pure
 
-`ConversationListView` SHALL render a list of package `ConversationListItem`s (id, title, updatedAt), an optional `header`, and an optional `trailingBuilder` per item. Relative dates SHALL be computed against an injected `now` (defaulting to `DateTime.now()`). It SHALL emit `onSelect`. Deletion SHALL go through a single `Future<bool> Function(String id) onDelete` that the caller implements as confirm-then-delete; the row SHALL be dismissed only when it resolves to `true`, so a declined confirmation or a failed delete leaves the row in place, as `conversation_list.dart:123-140` does today. Selection highlighting is not part of this change; conversation-list-management may add it.
+`ConversationListView` SHALL render a list of package `ConversationListItem`s (id, title, updatedAt), an optional `header`, and an optional `trailingBuilder` per item. Relative dates SHALL be computed against an injected `now` (defaulting to `DateTime.now()`). It SHALL emit `onSelect`. Deletion SHALL go through a single `Future<bool> Function(String id) onDelete` that the caller implements as confirm-then-delete; the row SHALL be dismissed only when it resolves to `true`, so a declined confirmation or a failed delete leaves the row in place, as `conversation_list.dart:123-140` does today. The view SHALL NOT highlight any row as selected and SHALL expose no selection parameter: the sidebar looks as it does today. conversation-list-management adds a `selectedId` parameter in its own change and is the one that turns the highlight on.
+
+#### Scenario: No row is highlighted
+
+- **GIVEN** a list of items, one of which is the conversation currently open in the chat pane
+- **WHEN** the view renders
+- **THEN** every row SHALL render with the same, unhighlighted style (images unchanged from the characterization goldens)
+- **AND** the view SHALL declare no `selectedId` or equivalent parameter
 
 #### Scenario: Selection is delegated
 

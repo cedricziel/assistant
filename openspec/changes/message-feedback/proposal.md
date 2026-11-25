@@ -9,8 +9,8 @@ Operators already read turns in their OTLP backend through the `chat {model}` sp
 - **Storage.** A `message_feedback` table in `space.db`: one row per (message, user), rating `positive` | `negative`, optional comment, timestamps, `ON DELETE CASCADE` from `messages`. A `MessageFeedbackStore` trait with `Sqlite*`/`InMemory*` impls (ADR-0009).
 - **Turn trace link.** Final-answer rows store the W3C `traceparent` of the `chat {model}` span in a nullable `messages.traceparent` column.
 - **REST.** `PUT` and `DELETE /api/conversations/{id}/messages/{message_id}/feedback`. `GET /api/conversations/{id}` adds the caller's vote as `MessageSummary.feedback`.
-- **Telemetry.** A `gen_ai.evaluation.result` log event in the reply's trace, labelled `positive`, `negative` or `cleared`. Comment text is exported only when `[observability] trace_content` is on. A counter `assistant.feedback.count{rating, agent_id}`.
-- **Client.** Pure `FeedbackButtons` and `FeedbackCommentField` elements in `app/packages/assistant_ui`, with widgetbook stories and goldens. Riverpod wiring in `app/lib/features/chat/`: optimistic updates with rollback, seeded from history.
+- **Telemetry.** A `gen_ai.evaluation.result` log event in the reply's trace, labelled `positive`, `negative` or `cleared` (clearing a vote emits an event). Comment text never leaves `space.db`: the event carries only `assistant.feedback.has_comment`, whatever `[observability] trace_content` says. A counter `assistant.feedback.count{rating, agent_id}`.
+- **Client.** Pure `FeedbackButtons` and `FeedbackCommentField` elements in `app/packages/assistant_ui`, with widgetbook stories and goldens. The optional comment field opens after either vote, positive or negative. Riverpod wiring in `app/lib/features/chat/`: optimistic updates with rollback, seeded from history.
 - **ADR.** An amendment to ADR-0012 records storing trace context on persisted rows for late, span-parented events.
 
 ## Capabilities
@@ -28,9 +28,10 @@ None. chat-element-library is an unarchived change. This change uses its `Messag
 
 - **Crates:** `assistant-storage` (two migrations, the store), `assistant-core` (`Message.traceparent`), `assistant-runtime` (traceparent capture, telemetry helper, metric), `assistant-web-ui` (routes, history projection, `openapi.json`).
 - **App:** two `assistant_ui` elements, the feedback controller and history mapping, the regenerated `assistant_api`.
+- **Ship order.** The visible UI (PR 7b) lands only after message-branching's non-destructive compaction (its D5), so a vote can never be deleted by `replace_history`. The server PRs can merge earlier because nothing in the app calls them yet.
 - **Visual change:** trailing thumbs appear under every finished assistant reply, so the chat Playwright screenshot baselines move.
 - **User-facing docs: yes.** A short section in `docs/web-ui.md` on rating replies, and the event and metric reference in `docs/opentelemetry.md`.
-- **Siblings:** needs chat-element-library PR 3 and PR 8a. Shares the `Message` struct lane (after tool-result-renderers S3) and the `MessageActions` trailing list (after chat-a11y's timing indicator).
+- **Siblings:** needs chat-element-library PR 3 and PR 8a. Shares the `Message` struct lane (after tool-result-renderers S3) and the `MessageActions` trailing list (after chat-a11y's timing indicator). PR 7b also needs message-branching's non-destructive compaction PR (D5) and chat-element-library PR 8b.
 
 ### Non-goals
 
@@ -38,4 +39,5 @@ None. chat-element-library is an unarchived change. This change uses its `Messag
 - Feedback on user, tool, thinking or subagent entries, or on messenger interfaces.
 - Star scales, multi-dimensional ratings or preset reason categories.
 - Feeding feedback back into the Persona, skills or prompts.
-- Keeping feedback on rows that compaction deletes before message-branching lands.
+- Exporting comment text to OTLP, under any setting. Comments stay in `space.db`.
+- Keeping feedback on rows that destructive compaction deletes. The UI ships after message-branching D5 removes `replace_history`, so the case never arises.

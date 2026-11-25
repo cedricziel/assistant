@@ -1,10 +1,11 @@
 # Tasks: chat-a11y-and-code-blocks
 
-This change is a stack of 18 PRs. Each stays under about 500 changed lines (the generated `app/packages/assistant_api` diff, `openapi.json` and golden PNGs do not count) and leaves `main` shippable. Every PR starts with a failing test (TDD): write it, run it, confirm RED, then implement.
+This change is a stack of 19 PRs. Each stays under about 500 changed lines (the generated `app/packages/assistant_api` diff, `openapi.json` and golden PNGs do not count) and leaves `main` shippable. Every PR starts with a failing test (TDD): write it, run it, confirm RED, then implement.
 
 **Rules that apply to every PR:**
 
-- **Migrations.** `NNN_message_timings.sql` takes the number the cross-change stack plan pre-allocates to this change. Without an allocation, use the next free number after `045_skill_executions.sql` at implementation time and record it in the plan. Register it in the `run_migrations` list in `crates/storage/src/lib.rs` (`:273`, list ending at `:472`).
+- **Migrations.** `053_message_timings.sql` is the number the cross-change stack plan (`openspec/chat-ui-parity-stack.md`) pre-allocates to this change. Register it in both migration lists in the `run_migrations` list in `crates/storage/src/lib.rs` (the `run_migrations` list, `:273`, ending at `:472`).
+- **Decisions.** The product decisions in `openspec/chat-ui-parity-decisions.md` for this change are final and are encoded in design.md Decisions 4, 6 and 9: announce "{Persona} replied: {200-character excerpt}", including after a reconnect replay; compare the chat pane width for the list breakpoint; show timing only behind the "Show response timing" preference, off by default.
 - **Generated files.** Never hand-merge `openapi.json`, `app/packages/assistant_api` or Playwright PNGs. After a rebase, rerun `make dump-openapi && make generate-flutter-client`, regenerate baselines with the e2e-testing skill, and record the visual diff in the PR body.
 - **Panic-free.** No `unwrap`, `expect` or `panic` in production Rust.
 - **Client element PRs** follow chat-element-library's per-element checklist: a `kAssistantUiElements` entry, a widgetbook use-case, a `golden`-tagged test in light and dark, an `ELEMENTS.md` row update, and `flutter analyze --fatal-infos` and `flutter test` green in both the app and the package.
@@ -22,12 +23,13 @@ Client:  C1 (breakpoints) ──────────────────
          C6 (bubble/timeline semantics) ────────────────────────────────────────────────────┤
          C7 (labels/targets) ── C8 (focus order) ───────────────────────────────────────────┤
          C9 (reduced motion) ───────────────────────────────────────────────────────────────┤
-         C10 (timing element) ──────────────────────────── C11 (timing wiring, needs S3) ───┴─ C12 ─ C13
+         C10 (timing element) ─┐                                                             │
+         C10b (timing setting) ┴─ C11 (timing wiring, needs S3) ───────────────────────────┴─ C12 ─ C13
 ```
 
-- **Start immediately, in parallel:** S1, S2a and C2a. None needs a sibling.
+- **Start immediately, in parallel:** S1, S2a, C2a and C10b. None needs a sibling.
 - **After S1 and S2a:** S2b, then S2c (S2c also needs message-feedback PR 3, `persist_final_answer`).
-- **S3** needs S2c, message-branching PR 6 (`stream_turn_to_sse` runner extraction) and chat-stop-cancels-turn PR 3 (voice on the runner).
+- **S3** needs S2c, message-branching's shared runner extraction PR (`stream_turn_to_sse`; PR 5 in the stack plan), chat-stop-cancels-turn PR 3 (voice on the runner), and merges after message-branching's edit/regenerate-on-the-runner PR (PR 7 in the stack plan), per the runner hotspot rule.
 - **C1** after chat-element-library PR 5a (`ThreadDensityScope`).
 - **C2b** after C2a and chat-stop-cancels-turn PR 4 and PR 5b (stopped reconciliation, `stopTurn`, `_untilDetached`).
 - **C3** after chat-element-library PR 1. **C4** after C3 and chat-element-library PR 3. C4 **unblocks tool-result-renderers C7**.
@@ -35,10 +37,14 @@ Client:  C1 (breakpoints) ──────────────────
 - **C6** after chat-element-library PR 5b and PR 8b, and chat-stop-cancels-turn PR 4 (`MessageStatus.stopped`, moved by chat-element-library PR 4).
 - **C7** after chat-element-library PR 9, PR 11a and PR 11b. **C8** after C7 (and so after chat-element-library PR 11a, which takes `isStopping`).
 - **C9** after chat-element-library PR 8b (`TypingIndicator`) and PR 10 (`ThreadViewport`).
-- **C10** after chat-element-library PR 3 and PR 4, in parallel with all server PRs.
-- **C11** after S3, C10 and chat-element-library PR 8a (`MessageActions.trailing` list, timing first).
-- **C12** (guideline suite and docs) after everything above. **C13** (archive) after chat-element-library is archived.
-- **Run in parallel with each other once their dependencies have merged:** S1/S2a/C2a; C1, C3–C10; and every client PR with every server PR except C11.
+- **C10** after chat-element-library PR 3 and PR 4, in parallel with all server PRs. **C10b** needs only the existing settings screen and `shared_preferences`.
+- **C11** after S3, C10, C10b and chat-element-library PR 8a (`MessageActions.trailing` list, timing first).
+- **C12** (guideline suite and docs) after everything above and chat-stop-cancels-turn PR 5c (reloaded "Stopped"). **C13** (archive) after chat-element-library is archived.
+- **Run in parallel with each other once their dependencies have merged:** S1/S2a/C2a/C10b; C1, C3–C10; and every client PR with every server PR except C11.
+
+## Stack placement
+
+The cross-change plan (`openspec/chat-ui-parity-stack.md`) schedules this change's PRs in waves. Wave 1: S1. Wave 2: C2 (C2a, C2b after STOP PR 4), C3. Wave 3: C4, C10 (and C10b alongside it). Wave 4: S2 (S2a, S2b, S2c via the `FinalAnswerMeta` helper), C1, C7, C9. Wave 5: S3 (after message-branching PR 7), C8. Wave 6: C11. Wave 7: C5, C6. Wave 8: C12 (after chat-element-library is archived), then C13.
 
 ## Sibling coordination
 
@@ -46,19 +52,21 @@ Client:  C1 (breakpoints) ──────────────────
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | chat-element-library         | This change amends its allowlist and `ChatMarkdownScope` (MODIFIED delta copied verbatim from its current text). chat-element-library archives **first**; C13 re-diffs the delta before archiving.                                                                                                                                        |
 | tool-result-renderers        | Its C7 depends on C4 (`CodeBlock`). It must not add a highlighter of its own.                                                                                                                                                                                                                                                             |
-| message-branching            | PR 6 extracts the SSE loop once as `stream_turn_to_sse(…, RunOptions)`. S3 edits that runner, never `send_message`. Its `messages`-lane PR 10 (`model`) and this change's S2c both extend message-feedback's `FinalAnswerMeta`.                                                                                                           |
-| message-feedback             | PR 3 introduces `persist_final_answer(…, FinalAnswerMeta)`. S2c adds `timing` to `FinalAnswerMeta` instead of editing each save site. Its FeedbackButtons follow the timing indicator in `MessageActions.trailing` (`buildMessageActions` composes timing, then feedback).                                                                |
-| chat-stop-cancels-turn       | Order: its PR 3 (voice on the runner) lands before S3, so S3 has one `done` build site. Its PR 4 (`MessageStatus.stopped`, `AgentErrorEvent`) and PR 5a/5b (`stopTurn`, `isStopping`, `_untilDetached`) land before C2b (`TurnStopped`), C6 (", stopped") and C8 (the "Stopping…" state).                                                 |
-| tool-approval-prompts        | Its "Approval needed" announcement goes through this change's `ChatAnnouncer` by emitting `TurnAwaitingInput` / `TurnInputResolved`; its PR 16 depends on C2b. "Still working" is suppressed while awaiting input.                                                                                                                        |
+| message-branching            | The shared-runner PR (PR 5 in the stack plan) extracts the SSE loop once as `stream_turn_to_sse(…, RunOptions)`. S3 edits that runner, never `send_message`, and merges after the edit/regenerate-on-the-runner PR (PR 7). Its `model` PR (`messages.model`) and this change's S2c both extend message-feedback's `FinalAnswerMeta`. When branching auto-cancels a pending approval on edit, regenerate or branch switch, the announcer needs no new event: `TurnStarted` resets the awaiting-input flag (C2a).                                                                                                           |
+| message-feedback             | PR 3 introduces `persist_final_answer(…, FinalAnswerMeta)`. S2c adds `timing` to `FinalAnswerMeta` instead of editing each save site. Its FeedbackButtons follow the timing indicator in `MessageActions.trailing` (`buildMessageActions` composes timing, then feedback); with the timing preference off the timing slot is empty and feedback still renders. It ships after message-branching's non-destructive compaction, which does not affect `message_timings` (no foreign key to `messages`).                                                                |
+| chat-stop-cancels-turn       | Order: its PR 3 (voice on the runner) lands before S3, so S3 has one `done` build site. Its PR 4 (`MessageStatus.stopped`, `AgentErrorEvent`) and PR 5a/5b (`stopTurn`, `isStopping`, `_untilDetached`) land before C2b (`TurnStopped`), C6 (", stopped") and C8 (the "Stopping…" state). Its PR 2a (persisted `finish_reason`) and PR 5c ("Stopped" after reload) make the ", stopped" label survive a reload; C12 asserts that.                                                 |
+| tool-approval-prompts        | Its "Approval needed" announcement goes through this change's `ChatAnnouncer` by emitting `TurnAwaitingInput` / `TurnInputResolved`; its PR 16 (approval in chat, which lands after the client cards because approvals are not feature-flagged) depends on C2b. "Still working" is suppressed while awaiting input. Its settings section PR (18a) and C10b both edit `settings_screen.dart` and the `settings.png` baseline: either order works, the later PR rebases and regenerates the baseline.                                                                                                                        |
 | follow-up-suggestions        | Client stream lane order is chat-stop PR 4 → PR 5a/5b → follow-up-suggestions PR 7 → message-branching PR 18 (stream edit and regenerate). C2b hooks `_finishTurn`, `_failTurn` and the stopped reconciliation, not the loop, and rebases onto whatever part of the lane has landed. Its conversation-event-log delta modifies a different requirement than this change's. |
 | conversation-list-management | Owns any keyboard or semantic alternative to swipe-to-delete. C12's guideline suite pumps the list, so it must pass after that change too. `get_conversation` preloads (S3 timing) follow the attachments-map pattern and rebase freely.                                                                                                  |
 | all `StreamEvent` editors    | C11 adds a field (`DoneEvent.timing`), not a subclass, so it breaks no exhaustive switch. It lands in the wave the stack plan assigns to it and updates every `DoneEvent` constructor.                                                                                                                                                    |
 
 ---
 
-## S1: `feat(storage): add message timing store`
+## PR S1 — `feat(storage): add message timing store`
 
-Layer: server · Depends on: none · Parallel with: S2a, C2a and every client PR
+Layer: server
+Depends on: none
+Parallel with: S2a, C2a and every client PR
 
 - [ ] S1.0 Fix the malformed main spec `openspec/specs/chat-auto-scroll/spec.md`, which starts with a delta header (`## ADDED Requirements`, line 1): replace it with `## Purpose` plus `## Requirements`, so that archiving this change's MODIFIED delta works. Do the same for `openspec/specs/conversation-event-log/spec.md` unless follow-up-suggestions PR 2 (its task 1.0) has already done it. Run `openspec validate --specs --strict` and confirm both are clean.
 - [ ] S1.1 RED: a `MessageTimingStore` contract suite in `crates/storage` run against both implementations:
@@ -71,21 +79,25 @@ Layer: server · Depends on: none · Parallel with: S2a, C2a and every client PR
   Confirm RED.
 
 - [ ] S1.2 Add `TurnTiming { time_to_first_token_ms: Option<u64>, total_ms: u64, output_tokens: Option<u64>, decode_ms: Option<u64> }` (`Serialize`, `Deserialize`, `Clone`, `PartialEq`, `Debug`) to `assistant_core`, next to `LlmResponseMeta` (`crates/core/src/llm/types.rs:91`).
-- [ ] S1.3 Add migration `migrations/NNN_message_timings.sql`: `message_timings(message_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, time_to_first_token_ms INTEGER, total_ms INTEGER NOT NULL, output_tokens INTEGER, decode_ms INTEGER)` plus an index on `conversation_id`. No foreign key to `messages` (design Decision 7). Register it in `run_migrations`.
+- [ ] S1.3 Add migration `migrations/053_message_timings.sql`: `message_timings(message_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, time_to_first_token_ms INTEGER, total_ms INTEGER NOT NULL, output_tokens INTEGER, decode_ms INTEGER)` plus an index on `conversation_id`. No foreign key to `messages` (design Decision 7). Register it in both migration lists in `crates/storage/src/lib.rs`.
 - [ ] S1.4 Implement `MessageTimingStore` (`#[async_trait]`, `put(conversation_id, message_id, &TurnTiming)`, `get_for_conversation`), `SqliteMessageTimingStore` and `InMemoryMessageTimingStore` (ADR-0009 pair, `tokio::sync::RwLock`). Expose `StorageLayer::message_timing_store()` and re-export through `assistant_test_support::prelude`. Confirm GREEN.
 - [ ] S1.5 `make lint && make format && cargo test -p assistant-storage` green.
 
-## S2a: `test(llm-provider): timed streaming scripts for ScriptedLlmProvider`
+## PR S2a — `test(llm-provider): timed streaming scripts for ScriptedLlmProvider`
 
-Layer: server · Depends on: none · Parallel with: S1, C2a and every client PR
+Layer: server
+Depends on: none
+Parallel with: S1, C2a and every client PR
 
 - [ ] S2a.1 RED, in `crates/llm-provider/src/scripted.rs` tests: with `with_timed_streaming_calls(clock, calls)`, a consumer that records `clock.now_instant()` immediately after each `recv()` sees exactly the scripted offsets (`[200 ms, 1500 ms]` from the call start), the call returns after `advance_before_return`, and two calls consume two separate scripts in order (today one chunk queue is drained by every call, `scripted.rs:93-96`). Run on the current-thread runtime. Confirm RED.
 - [ ] S2a.2 Implement `TimedCall { steps: Vec<(Duration, StreamChunk)>, advance_before_return: Duration }` and `with_timed_streaming_calls(FakeClock, Vec<TimedCall>)`. For each step: advance the clock, `send` the chunk, then wait until the channel is drained (`tx.capacity() == tx.max_capacity()`, `tokio::task::yield_now()` in between) before the next advance. Canned responses (and their `LlmResponseMeta.output_tokens`) still come from `with_canned_responses`. Confirm GREEN.
 - [ ] S2a.3 `make lint && make format && cargo test -p assistant-llm-provider` green.
 
-## S2b: `refactor(runtime): carry TurnTiming on TurnResult and across the bus`
+## PR S2b — `refactor(runtime): carry TurnTiming on TurnResult and across the bus`
 
-Layer: server · Depends on: S1 · Parallel with: S2a, client PRs
+Layer: server
+Depends on: S1
+Parallel with: S2a, client PRs
 
 - [ ] S2b.1 RED:
   - in `crates/core/src/bus_messages.rs` tests: a bus `TurnResult` with `timing: None` serialises without a `timing` key, and a payload without `timing` deserialises (`serde(default)`);
@@ -96,9 +108,11 @@ Layer: server · Depends on: S1 · Parallel with: S2a, client PRs
 - [ ] S2b.2 Add `timing: Option<TurnTiming>` to the orchestrator `TurnResult` (`orchestrator/mod.rs:80-99`) and to `bus_messages::TurnResult` (`crates/core/src/bus_messages.rs:107-128`, `#[serde(default, skip_serializing_if = "Option::is_none")]`). Copy it in both extracted conversions. Set `timing: None` at every other constructor: `mod.rs:1097`, `mod.rs:1369`, `turn_control.rs:53`, `turn_control.rs:145`, `worker.rs:489`, `orchestration.rs:153,184`, `interface_trait.rs:211`, `title_generator.rs:680,739`, `crates/web-ui/src/a2a/handlers.rs:942`, `crates/mcp-server/tests/io_loop.rs:153,160`, `crates/mcp-server/tests/dispatch.rs:167`. Confirm GREEN.
 - [ ] S2b.3 `make lint && make format && cargo test -p assistant-core -p assistant-runtime -p assistant-web-ui -p assistant-mcp-server` green.
 
-## S2c: `feat(runtime): measure turn timing in run_turn_core`
+## PR S2c — `feat(runtime): measure turn timing in run_turn_core`
 
-Layer: server · Depends on: S1, S2a, S2b, message-feedback PR 3 (`persist_final_answer`, `FinalAnswerMeta`) · Parallel with: client PRs
+Layer: server
+Depends on: S1, S2a, S2b, message-feedback PR 3 (`persist_final_answer`, `FinalAnswerMeta`)
+Parallel with: client PRs
 
 - [ ] S2c.1 RED: orchestrator tests with `FakeClock` (`Orchestrator::with_clock`, `orchestrator/mod.rs:385`) and the S2a timed script, on the current-thread runtime. Cases (the message-timing spec scenarios):
   - `run_turn_streaming`: text at 800 ms, return at 3,000 ms, 120 output tokens → `{ttft 800, total 3000, output 120, decode 2200}`;
@@ -118,9 +132,12 @@ Layer: server · Depends on: S1, S2a, S2b, message-feedback PR 3 (`persist_final
 - [ ] S2c.3 At the final answer (`mod.rs:1325-1340`), build `TurnTiming` with `total_ms` taken just before the save. Add `timing: Option<TurnTiming>` to `FinalAnswerMeta` and have `persist_final_answer` `put` it through `MessageTimingStore` after the message is saved, logging failures with `warn!`. Return it on `TurnResult.timing`. `run_turn_with_tools_impl` passes `timing: None` (no message id, design Decision 7). Confirm GREEN.
 - [ ] S2c.4 `make lint && make format && cargo test -p assistant-runtime` green.
 
-## S3: `feat(web-ui): typed done frame with timing, and timing in history`
+## PR S3 — `feat(web-ui): typed done frame with timing, and timing in history`
 
-Layer: server · Depends on: S2c, message-branching PR 6 (`stream_turn_to_sse`), chat-stop-cancels-turn PR 3 (voice on the runner) · Parallel with: client PRs · Unblocks: C11
+Layer: server
+Depends on: S2c, message-branching's shared runner extraction PR (`stream_turn_to_sse`; PR 5 in the stack plan), chat-stop-cancels-turn PR 3 (voice on the runner); merge after message-branching's edit/regenerate-on-the-runner PR (PR 7 in the stack plan)
+Parallel with: client PRs
+Unblocks: C11
 
 - [ ] S3.1 RED, in `crates/web-ui/src/api/messages.rs` tests (next to `send_message_done_event_contains_message_id`):
   - the `done` data contains `timing.total_ms` as an integer, and absent fields are omitted, not `null`;
@@ -135,9 +152,11 @@ Layer: server · Depends on: S2c, message-branching PR 6 (`stream_turn_to_sse`),
 - [ ] S3.4 Run `make dump-openapi` and `make generate-flutter-client` (see the `openapi-sync` skill), and commit `openapi.json` and the regenerated `app/packages/assistant_api`.
 - [ ] S3.5 `make lint && make format && make test` green.
 
-## C1: `refactor(app): shared layout breakpoint tokens`
+## PR C1 — `refactor(app): shared layout breakpoint tokens`
 
-Layer: client · Depends on: chat-element-library PR 5a (`ThreadDensityScope`) · Parallel with: C2–C10, all server PRs
+Layer: client
+Depends on: chat-element-library PR 5a (`ThreadDensityScope`)
+Parallel with: C2–C10b, all server PRs
 
 - [ ] C1.1 RED: `app/test/unit/layout_breakpoints_lint_test.dart` scans every Dart file under `app/lib` with the two patterns from the layout-breakpoints spec (`\b(width|maxWidth)\s*[<>]=?\s*([0-9]|_?k[A-Z]\w*)` and `const double _?k\w*Breakpoint`) against a **file-scoped** allowlist of exactly `shared/layout/breakpoints.dart` and `features/workflows/workflow_editor_screen.dart`. A second test runs the matcher on the fixture lines from the spec ("Lint catches the forms in use today"). Confirm RED: it hits `chat_screen.dart:302` and `nav_shell.dart:14,59`.
 - [ ] C1.2 RED: in the `chat_screen_test.dart` widget tests:
@@ -154,9 +173,12 @@ Layer: client · Depends on: chat-element-library PR 5a (`ThreadDensityScope`) �
 - [ ] C1.5 Update `.claude/skills/ux-principles/SKILL.md:58-68`: replace the 640/900 table with `Breakpoints.wide` (768) and the pane-width rule, and point to `adaptive-shell` REQ-5.
 - [ ] C1.6 Run Playwright (`crates/web-ui/e2e`, `.claude/skills/e2e-testing`). Baselines with viewports of 701–1008 px may change. Regenerate, review each diff, and list them in the PR body.
 
-## C2a: `feat(app): ChatAnnouncer policy and announcement sink`
+## PR C2a — `feat(app): ChatAnnouncer policy and announcement sink`
 
-Layer: client · Depends on: none · Parallel with: everything · Unblocks: C2b, C5
+Layer: client
+Depends on: none
+Parallel with: everything
+Unblocks: C2b, C5
 
 - [ ] C2a.1 RED: `app/test/unit/chat/chat_announcer_test.dart` drives the pure `ChatAnnouncer` with lifecycle events and a fake clock, asserting `(time, text, assertive)` for each case in the chat-accessibility spec:
   - start at 0 and completion at 4 s → "Ada is responding" at 1.5 s and "Ada replied: Hello there" at 5.5 s (markdown stripped);
@@ -166,15 +188,20 @@ Layer: client · Depends on: none · Parallel with: everything · Unblocks: C2b,
   - `TurnStopped` → "Response stopped";
   - `TurnStalled` twice in one turn → one "Still working"; `TurnStalled` between `TurnAwaitingInput` and `TurnInputResolved` → none;
   - `TurnCompleted{source: replay}` is announced like a live one;
+  - the completion text is "{Persona} replied: {excerpt}", never the name alone or the full reply;
+  - `TurnAwaitingInput` with no `TurnInputResolved`, then `TurnStarted` and `TurnStalled` for the next turn → "Still working" is announced (`TurnStarted` resets the per-turn flags, so an approval auto-cancelled by an edit, regenerate or branch switch cannot suppress it);
   - a stream of 200 token updates produces nothing (tokens are not lifecycle events).
 
   Confirm RED.
 
-- [ ] C2a.2 Implement `app/lib/features/chat/chat_announcer.dart`: the sealed `ChatLifecycleEvent` family (`TurnStarted`, `TurnCompleted{content, source}`, `TurnStopped`, `TurnFailed{message}`, `TurnStalled`, `TurnAwaitingInput{announcement}`, `TurnInputResolved`, each with `at`), the policy with the held-slot throttle, `say(text, {assertive})` for other features, `markdownToPlainText` (strips emphasis, links keeping their text, fences replaced with "code block", headings and list markers), `ChatAnnouncementSink` (wraps `SemanticsService.sendAnnouncement(View.of(context), …, assertiveness:)`), and `chatAnnouncerProvider` so tests can override the sink. Confirm GREEN.
+- [ ] C2a.2 Implement `app/lib/features/chat/chat_announcer.dart`: the sealed `ChatLifecycleEvent` family (`TurnStarted`, `TurnCompleted{content, source}`, `TurnStopped`, `TurnFailed{message}`, `TurnStalled`, `TurnAwaitingInput{announcement}`, `TurnInputResolved`, each with `at`), the policy with the held-slot throttle (`TurnStarted` resets the stall count and the awaiting-input flag), `say(text, {assertive})` for other features, `markdownToPlainText` (strips emphasis, links keeping their text, fences replaced with "code block", headings and list markers), `ChatAnnouncementSink` (wraps `SemanticsService.sendAnnouncement(View.of(context), …, assertiveness:)`), and `chatAnnouncerProvider` so tests can override the sink. Confirm GREEN.
 
-## C2b: `feat(app): turn lifecycle events drive chat announcements`
+## PR C2b — `feat(app): turn lifecycle events drive chat announcements`
 
-Layer: client · Depends on: C2a, chat-stop-cancels-turn PR 4 and PR 5b · Parallel with: C3–C10 · Unblocks: tool-approval-prompts PR 16
+Layer: client
+Depends on: C2a, chat-stop-cancels-turn PR 4 and PR 5b
+Parallel with: C3–C10b
+Unblocks: tool-approval-prompts PR 16
 
 - [ ] C2b.1 RED, in the `chat_provider` tests (fake clock, scripted streams):
   - a live turn emits `TurnStarted` then `TurnCompleted{source: live}`;
@@ -189,9 +216,11 @@ Layer: client · Depends on: C2a, chat-stop-cancels-turn PR 4 and PR 5b · Paral
 - [ ] C2b.2 Add `ChatNotifier.lifecycle` (broadcast stream) and emit from the placeholder insertion, `_finishTurn` (only for a turn tracked as in flight), `_failTurn`, the stopped reconciliation, and a stall `Timer` re-armed on each status update. Do not touch the stream loop itself (see "Sibling coordination", client stream lane). Confirm GREEN.
 - [ ] C2b.3 RED, then GREEN: a widget test mocks `SystemChannels.accessibility` with `TestDefaultBinaryMessengerBinding`, runs a scripted turn through `ChatScreen`, advances the fake clock, and asserts one `announce` message carries the completion text. Wire `ChatNotifier.lifecycle` into the announcer in `ChatScreen`. Add a test asserting no node in the streaming bubble has the `isLiveRegion` flag.
 
-## C3: `feat(app): add highlighter and contrast-checked code themes to assistant_ui`
+## PR C3 — `feat(app): add highlighter and contrast-checked code themes to assistant_ui`
 
-Layer: client · Depends on: chat-element-library PR 1 · Parallel with: S*, C1, C2a
+Layer: client
+Depends on: chat-element-library PR 1
+Parallel with: S*, C1, C2a
 
 - [ ] C3.1 RED: update `app/test/unit/assistant_ui_boundary_test.dart` to the amended allowlist `{flutter, flutter_smooth_markdown, material_ui, highlight}`, plus the rules that `package:highlight/` is only imported under `lib/src/highlight/` and that `Clipboard.` / `SemanticsService.` are never referenced in package source. Confirm RED, because `highlight` is not yet a dependency.
 - [ ] C3.2 Add `highlight: 0.7.0` to `app/packages/assistant_ui/pubspec.yaml`, the version `app/pubspec.lock:647` already resolves. Confirm GREEN for C3.1. Verify `pubspec.lock` gains no new package.
@@ -209,9 +238,12 @@ Layer: client · Depends on: chat-element-library PR 1 · Parallel with: S*, C1,
 - [ ] C3.5 RED: `test/theme/code_theme_contrast_test.dart` computes the WCAG ratio of every token colour in `CodeTheme.light` / `CodeTheme.dark` against that theme's own `background` and requires at least 4.5. Confirm RED.
 - [ ] C3.6 Add `lib/src/theme/code_theme.dart` with a `background` per theme and token colours ported from highlight.js `a11y-light` / `a11y-dark` (MIT, with an attribution comment; source also in `flutter_highlight-0.7.0/lib/themes/a11y-*.dart`). Adjust any colour that fails C3.5 and record the change in a comment. Confirm GREEN.
 
-## C4: `feat(app): CodeBlock element`
+## PR C4 — `feat(app): CodeBlock element`
 
-Layer: client · Depends on: C3, chat-element-library PR 3 · Parallel with: C1, C2, C6–C10 · Unblocks: tool-result-renderers C7
+Layer: client
+Depends on: C3, chat-element-library PR 3
+Parallel with: C1, C2, C6–C10b
+Unblocks: tool-result-renderers C7
 
 - [ ] C4.1 RED: `packages/assistant_ui/test/code_block_test.dart`, covering the chat-code-blocks scenarios:
   - the language label, with `text` when absent;
@@ -230,9 +262,11 @@ Layer: client · Depends on: C3, chat-element-library PR 3 · Parallel with: C1,
 - [ ] C4.2 Implement `CodeBlock` (`lib/src/code/code_block.dart`): header in `SelectionContainer.disabled`, a `MessageActionButton`-style copy control (a local primitive if chat-element-library PR 8a has not landed; switch to `MessageActionButton` in C5), a `Text.rich` body on `CodeTheme.background`. Export it from the barrel. Confirm GREEN.
 - [ ] C4.3 Add the registry entry, widgetbook use-cases (rust, plain, long line, copied state, light and dark) and goldens. `ELEMENTS.md` has no code-block row: list `CodeBlock` among the seams and primitives with no assistant-ui counterpart (the paragraph after the table), and note on row 14 that the `CodeBlock` highlighter is available.
 
-## C5: `feat(app): render markdown code fences through CodeBlock`
+## PR C5 — `feat(app): render markdown code fences through CodeBlock`
 
-Layer: client · Depends on: C2a, C4, chat-element-library PR 7a (`ChatMarkdownScope`) and PR 8b · Parallel with: C6–C10
+Layer: client
+Depends on: C2a, C4, chat-element-library PR 7a (`ChatMarkdownScope`) and PR 8b
+Parallel with: C6–C10b
 
 - [ ] C5.1 RED: in `packages/assistant_ui/test/chat_markdown_scope_test.dart`, `onCopyCode` defaults to null, and a `CodeBlock` with no `onCopy` uses the scope's callback. In `test/message_body_test.dart`:
   - a `python` fence renders one `CodeBlock`, both streaming and final;
@@ -245,9 +279,11 @@ Layer: client · Depends on: C2a, C4, chat-element-library PR 7a (`ChatMarkdownS
 - [ ] C5.3 RED, then GREEN: a chat screen widget test mocks `SystemChannels.platform` (`Clipboard.setData`) and `SystemChannels.accessibility`; activating copy on a reply's fence writes the code and announces "Code copied". In `ChatScreen`, install `onCopyCode` using `Clipboard.setData` and `ChatAnnouncer.say`.
 - [ ] C5.4 Regenerate the Playwright `chat.png` baseline (the code block gains a header bar). Review the diff and record it in the PR body.
 
-## C6: `feat(app): semantics for message bubbles and timeline headers`
+## PR C6 — `feat(app): semantics for message bubbles and timeline headers`
 
-Layer: client · Depends on: chat-element-library PR 5b and PR 8b, chat-stop-cancels-turn PR 4 · Parallel with: C4, C5, C7–C10
+Layer: client
+Depends on: chat-element-library PR 5b and PR 8b, chat-stop-cancels-turn PR 4
+Parallel with: C4, C5, C7–C10b
 
 - [ ] C6.1 RED: `packages/assistant_ui/test/message_bubble_semantics_test.dart`:
   - the container label starts with `senderLabel`;
@@ -269,9 +305,12 @@ Layer: client · Depends on: chat-element-library PR 5b and PR 8b, chat-stop-can
 
 - [ ] C6.4 Replace the shell header `GestureDetector` (lifted from `streaming_timeline_entry.dart:585`) with `FocusableActionDetector` plus `InkWell`. Keep the existing pin and auto-collapse behaviour, and keep every chat-element-library shell test green. Confirm GREEN.
 
-## C7: `fix(app): label icon-only chat controls and size their targets`
+## PR C7 — `fix(app): label icon-only chat controls and size their targets`
 
-Layer: client · Depends on: chat-element-library PR 9, PR 11a and PR 11b · Parallel with: C4–C6, C9, C10 · Unblocks: C8
+Layer: client
+Depends on: chat-element-library PR 9, PR 11a and PR 11b
+Parallel with: C4–C6, C9, C10, C10b
+Unblocks: C8
 
 - [ ] C7.1 RED, in `packages/assistant_ui/test/composer/composer_semantics_test.dart` and `attachment_tray_test.dart`, every row of the label table in the chat-accessibility spec that lives in the package:
   - `send_button` "Send message", `stop_button` "Stop response" and "Stopping…" when `isStopping`;
@@ -285,9 +324,11 @@ Layer: client · Depends on: chat-element-library PR 9, PR 11a and PR 11b · Par
 - [ ] C7.2 Add the tooltips and labels in `Composer`, `AttachmentTray`, `ThreadErrorBanner` and `ThreadViewport`. Restructure the attachment tile so the remove control sits **inside** its top-right corner (24×24 hit box, 18 px icon) instead of `Positioned(top: -4, right: -4)` with `BoxConstraints()` (`chat_input_row.dart:201-211`). Confirm GREEN.
 - [ ] C7.3 RED, then GREEN, in the app: the drawer menu button is labelled "Open conversations" (`chat_screen.dart:346-355`) and the image-viewer close button "Close image" (`message_attachments.dart:310-316`). `MessageActionButton` hit areas are at least 24×24.
 
-## C8: `feat(app): composer focus order and keyboard flow`
+## PR C8 — `feat(app): composer focus order and keyboard flow`
 
-Layer: client · Depends on: C7 (and so chat-element-library PR 11a with `isStopping`) · Parallel with: C5, C6, C9, C10
+Layer: client
+Depends on: C7 (and so chat-element-library PR 11a with `isStopping`)
+Parallel with: C5, C6, C9, C10, C10b
 
 - [ ] C8.1 RED: `packages/assistant_ui/test/composer/composer_focus_test.dart`:
   - three Tabs from attach go to voice, then the input, then send;
@@ -301,9 +342,11 @@ Layer: client · Depends on: C7 (and so chat-element-library PR 11a with `isStop
 
 - [ ] C8.2 Use the default `ReadingOrderTraversalPolicy` with a `FocusTraversalGroup` around the composer, with no manual ordering (the `ux-principles` rule). Send and stop hand focus over through a composer-owned `FocusNode`; the stop handler requests input focus before invoking `onStop`. Add an Escape `Shortcuts` entry that calls the slash menu's `onDismiss`. Confirm GREEN.
 
-## C9: `feat(app): honour reduced motion in thread viewport and typing indicator`
+## PR C9 — `feat(app): honour reduced motion in thread viewport and typing indicator`
 
-Layer: client · Depends on: chat-element-library PR 8b (`TypingIndicator`) and PR 10 (`ThreadViewport`) · Parallel with: C5–C8, C10
+Layer: client
+Depends on: chat-element-library PR 8b (`TypingIndicator`) and PR 10 (`ThreadViewport`)
+Parallel with: C5–C8, C10, C10b
 
 - [ ] C9.1 RED: in `packages/assistant_ui/test/thread_viewport_test.dart`:
   - with `disableAnimations`, the scroll-to-bottom button, auto-scroll and conversation open land on `maxScrollExtent` after one `pump()`;
@@ -313,9 +356,11 @@ Layer: client · Depends on: chat-element-library PR 8b (`TypingIndicator`) and 
 
 - [ ] C9.2 `ThreadViewport` uses `jumpTo` when `MediaQuery.disableAnimationsOf(context)` and `animateTo` otherwise (lifted from `chat_screen.dart:77,149`). `TypingIndicator` stops its controller and renders static dots under reduced motion. Confirm GREEN.
 
-## C10: `feat(app): MessageTiming model and MessageTimingIndicator element`
+## PR C10 — `feat(app): MessageTiming model and MessageTimingIndicator element`
 
-Layer: client · Depends on: chat-element-library PR 3 and PR 4 · Parallel with: S1–S3, C1–C9
+Layer: client
+Depends on: chat-element-library PR 3 and PR 4
+Parallel with: S1–S3, C1–C9, C10b
 
 - [ ] C10.1 RED: `packages/assistant_ui/test/models/message_timing_test.dart`:
   - `MessageTiming.fromJson` ignores unknown keys and tolerates absent optional fields;
@@ -338,42 +383,69 @@ Layer: client · Depends on: chat-element-library PR 3 and PR 4 · Parallel with
 
 - [ ] C10.4 Add the registry entry, widgetbook use-cases (full, total only, focused, light and dark) and goldens.
 
-## C11: `feat(app): show per-message timing from done frames and history`
+## PR C10b — `feat(app): "Show response timing" preference and settings switch`
 
-Layer: client · Depends on: S3, C10, chat-element-library PR 8a (`MessageActions.trailing` list) · Parallel with: C5–C9, C12 prep
+Layer: client
+Depends on: none (uses the existing settings screen and `shared_preferences`)
+Parallel with: every other PR
+Unblocks: C11
+
+- [ ] C10b.1 RED: `app/test/unit/settings/response_timing_preference_test.dart` with `SharedPreferences.setMockInitialValues`:
+  - with no stored value, `showResponseTimingProvider` yields `false`;
+  - `set(true)` updates state first, writes `assistant.showResponseTiming`, and a fresh container reads `true`;
+  - a `SharedPreferences` that throws on read yields `false` without throwing, and one that throws on write keeps the in-memory state.
+
+  In `app/test/widget/features/settings/settings_screen_test.dart`: the screen shows a "Show response timing" switch row with its subtitle, off by default; tapping it turns the provider on; the switch has the semantics label "Show response timing" and toggles on Space and Enter. Confirm RED.
+
+- [ ] C10b.2 Add `app/lib/features/settings/response_timing_preference.dart`: `kShowResponseTimingPrefsKey = 'assistant.showResponseTiming'` and `showResponseTimingProvider`, an `AsyncNotifier<bool>` modelled on `sidebarCollapsedProvider` (`try`/`catch` around every read and write, `debugPrint` on failure). Add the switch row to `settings_screen.dart` using the existing `AdaptiveListSection` pattern. Confirm GREEN.
+- [ ] C10b.3 Regenerate the Playwright `settings.png` baseline (one new row), review the diff and record it in the PR body. If tool-approval-prompts PR 18a has landed, rebase and regenerate instead of merging the PNG.
+- [ ] C10b.4 `make lint-flutter && make test-flutter` green.
+
+## PR C11 — `feat(app): show per-message timing from done frames and history`
+
+Layer: client
+Depends on: S3, C10, C10b, chat-element-library PR 8a (`MessageActions.trailing` list)
+Parallel with: C5–C9, C12 prep
 
 - [ ] C11.1 RED:
   - in `app/test/unit/api/stream_event_test.dart` and the `api_client.dart` parser tests: a `done` frame with `timing` yields `DoneEvent.timing`, a frame without it yields null, and a malformed `timing` is ignored without dropping the event;
   - in `chat_history_mapping` tests: `MessageSummary.timing` maps to `ChatMessage.timing` on the right row;
   - in the `chat_provider` tests: after a scripted `done` with timing the final assistant message carries it, and replay through `GET …/events/stream?since=N` yields the same;
-  - in `message_actions_builder_test.dart`: `buildMessageActions` puts the timing indicator first in `trailing`, before feedback.
+  - in `message_actions_builder_test.dart`: with `showResponseTiming: true`, `buildMessageActions` puts the timing indicator first in `trailing`, before feedback; with `showResponseTiming: false` (the default) it builds none even when the message has timing, and feedback still renders.
 
   Confirm RED.
 
 - [ ] C11.2 Add `timing` to `DoneEvent` (`app/lib/api/models/stream_event.dart`) and to the `done` parsing in `api_client.dart:656-671`; update every `DoneEvent` constructor. Pass it through `_finishTurn` and `completedTurnState`. Map it in `chat_history_mapping.dart` from the regenerated `MessageSummary`. Confirm GREEN.
-- [ ] C11.3 RED, then GREEN: a widget test checks that a finished assistant reply with timing shows `MessageTimingIndicator` in `MessageActions.trailing`, and that a streaming reply or one without timing shows none. Wire it in `features/chat/message_actions_builder.dart`.
-- [ ] C11.4 Regenerate the Playwright baselines that show finished assistant replies (the timing glyph) and record the diffs in the PR body.
+- [ ] C11.3 RED, then GREEN: a widget test checks that, with the preference on, a finished assistant reply with timing shows `MessageTimingIndicator` in `MessageActions.trailing`, and that a streaming reply or one without timing shows none. With the preference off (the default) no reply shows one while `ChatMessage.timing` is still populated; flipping the provider to on shows the indicator on every finished reply with timing, including already-rendered and history-loaded ones, without reloading the conversation. Add a `showResponseTiming` argument to `buildMessageActions` in `features/chat/message_actions_builder.dart`, and have `ChatScreen` watch `showResponseTimingProvider` and pass it.
+- [ ] C11.4 Playwright baselines do not change (the preference is off by default, so no timing glyph renders); confirm with the e2e run and record that in the PR body.
 
-## C12: `test(app): chat accessibility guideline suite and user docs`
+## PR C12 — `test(app): chat accessibility guideline suite and user docs`
 
-Layer: client · Depends on: S3, C1–C11
+Layer: client
+Depends on: S3, C1–C11 (including C10b), chat-stop-cancels-turn PR 5c ("Stopped" after reload)
+Parallel with: none
 
 - [ ] C12.1 RED: add `app/test/widget/features/chat/chat_accessibility_test.dart`. It pumps `ChatScreen` with the fixture conversation in light and dark themes:
   - a user message with an attachment;
-  - an assistant reply with a code fence, a link and timing;
+  - an assistant reply with a code fence, a link and timing (with `showResponseTimingProvider` overridden to on; a second pump at the default asserts no `MessageTimingIndicator` renders and the guidelines still pass);
   - a tool call;
   - a thinking entry;
-  - an error banner.
+  - an error banner;
+  - a conversation reloaded from history whose last reply is stopped (persisted `finish_reason`), asserting the bubble label "Ada, stopped".
+
+  A second test in the same file pumps the settings screen and asserts the "Show response timing" switch is labelled and meets `labeledTapTargetGuideline`.
 
   It asserts `labeledTapTargetGuideline`, `textContrastGuideline`, and that every node with a tap action has a non-empty label. Any failure is a bug to fix here, not an exception to add. GREEN.
 
-- [ ] C12.2 User docs (config.yaml: user-facing features are documented in `docs/`). Add to `docs/web-ui.md` a "Response timing" section (what first token, total and tok/s mean, why tok/s is missing for some providers, that timing is absent on older messages and on Slack/Mattermost) and an "Accessibility" section (screen-reader announcements and their throttling, keyboard operation of the composer, timeline entries and code copy, reduced-motion behaviour, the 768 px layout rule).
-- [ ] C12.3 Run a manual screen-reader pass: VoiceOver on macOS desktop and on Safari web with semantics enabled, and TalkBack on an Android emulator if available. Send a message and check that the start and completion announcements are each heard once. Stop a reply and check "Response stopped". Copy code and check "Code copied". Tab through the composer and onto a timing indicator. Expand a tool call with the keyboard. Record the results in the PR body.
+- [ ] C12.2 User docs (config.yaml: user-facing features are documented in `docs/`). Add to `docs/web-ui.md` a "Response timing" section (that it is off by default and how to turn it on under Settings, "Show response timing", per device; what first token, total and tok/s mean, why tok/s is missing for some providers, that timing is absent on older messages and on Slack/Mattermost) and an "Accessibility" section (screen-reader announcements, that completion is announced as the Persona name plus the first 200 characters of the reply, including after a reconnect, and their throttling, keyboard operation of the composer, timeline entries and code copy, reduced-motion behaviour, the 768 px layout rule).
+- [ ] C12.3 Run a manual screen-reader pass: VoiceOver on macOS desktop and on Safari web with semantics enabled, and TalkBack on an Android emulator if available. Send a message and check that the start and completion announcements are each heard once. Stop a reply and check "Response stopped". Copy code and check "Code copied". With the preference on, Tab through the composer and onto a timing indicator. Expand a tool call with the keyboard. Record the results in the PR body.
 - [ ] C12.4 `make lint && make format && make test && make lint-flutter && make test-flutter` green.
 
-## C13: `chore(openspec): archive chat-a11y-and-code-blocks`
+## PR C13 — `chore(openspec): archive chat-a11y-and-code-blocks`
 
-Layer: none (specs only) · Depends on: C12, chat-element-library archived (its PR 13.8)
+Layer: none (specs only)
+Depends on: C12, chat-element-library archived (its PR 13.8)
+Parallel with: none
 
 - [ ] C13.1 Re-diff `specs/chat-element-library/spec.md` here against the archived `openspec/specs/chat-element-library/spec.md`. Both MODIFIED requirements must equal the archived text except for the `highlight` allowlist, the `Clipboard`/`SemanticsService` rule and `ChatMarkdownScope.onCopyCode`. Update the delta if the sibling changed.
 - [ ] C13.2 `openspec validate chat-a11y-and-code-blocks --strict`, then `openspec archive chat-a11y-and-code-blocks`. This applies the `chat-auto-scroll` (reduced motion) and `conversation-event-log` (`done.timing`) deltas; do not hand-edit those main specs.
@@ -382,5 +454,6 @@ Layer: none (specs only) · Depends on: C12, chat-element-library archived (its 
 
 - No ADR: none of the decisions changes architecture. They are a side table, an element, an app-side announcer, a typed SSE schema and a token file.
 - API changes: `done.timing` (with a new `SseDoneEvent` schema) and `MessageSummary.timing`. S3 carries `openapi.json`, `make dump-openapi` and `make generate-flutter-client`.
+- No user-facing preference API: "Show response timing" is a per-device `SharedPreferences` boolean (C10b), so there is no server or `openapi.json` change for it.
 - One package dependency: `highlight` 0.7.0 is added to the `assistant_ui` allowlist. It is already in the lockfile.
 - The guideline suite (C12) is deliberately last so it measures the finished state. Each earlier PR carries its own targeted semantics tests.

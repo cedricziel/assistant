@@ -17,10 +17,10 @@ The render widgets are already close to pure. `StreamingTimelineEntry` takes `(m
   - `ChatThreadLayout` slots (`banners`, `aboveComposer`) for interaction cards and follow-up chips;
   - a `starters` slot on `ThreadEmptyState`;
   - `ChatMarkdownScope` for markdown plugins and code-block builders;
-  - a pure `ConversationListView` whose delete callback returns whether the row may be dismissed.
+  - a pure `ConversationListView` whose delete callback returns whether the row may be dismissed. It highlights no selected row; conversation-list-management adds `selectedId` and turns the highlight on.
 - Composer family: `Composer`, `SlashCommandMenu`, `AttachmentTray`, `QueuedMessageBubble`. The app injects platform-adaptive and I/O widgets (text field, voice recorder) through slots.
 - `app/widgetbook/` gallery (widgetbook 3.25.0), the `kAssistantUiElements` registry, and golden tests. Characterization goldens of today's app widgets are captured before any extraction and must be reproduced byte for byte.
-- ADR-0020 records the package boundary, the pub workspace and the allowlist amendment rule, which bind the sibling changes.
+- ADR-0021 records the package boundary, the pub workspace and the allowlist amendment rule, which bind the sibling changes. (0020 belongs to tool-result-renderers.)
 - Dead `tool_call_chip.dart` and `timeline_section.dart` are deleted, with their tests. Neither is referenced from `lib/`.
 - `ELEMENTS.md` keeps a verdict for each of the 59 assistant-ui elements (37 rows plus one 22-element Generative category row), now marking the ones siblings adopt.
 
@@ -36,7 +36,8 @@ The render widgets are already close to pure. `StreamingTimelineEntry` takes `(m
 
 ## Impact
 
-- **Code**: new `app/packages/assistant_ui/` and `app/widgetbook/`; new `docs/adr/adr-0020-assistant-ui-element-package.md`. `app/lib/features/chat/` shrinks. The app's `pubspec.yaml` becomes a pub workspace root. CI runs package tests.
+- **Code**: new `app/packages/assistant_ui/` and `app/widgetbook/`; new `docs/adr/adr-0021-assistant-ui-element-package.md`. `app/lib/features/chat/` shrinks. The app's `pubspec.yaml` becomes a pub workspace root. CI runs package tests.
 - **Visual change**: none intended. This is a behaviour-preserving extraction, and existing widget `Key`s are kept. Characterization goldens guard the timeline, bubble and composer; the Playwright chat baselines current on `main` must not move in any PR of this change.
+- **Settled product decisions**: no selection highlight in the conversation list here (conversation-list-management turns it on); subagent tool calls stay compact rows and never use rich renderers; `ReconnectBanner` stays above the composer. See design.md Decision 8.
 - **Non-goals**: sealing `ChatMessage`; reasoning step timelines (P5); mentions; the context ring (P4); a composer model picker; any server change; the siblings' own features. This change provides their slots, not their contents.
 - **User-facing documentation**: not needed. A contributor `README.md` ships in the package.

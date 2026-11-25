@@ -146,7 +146,7 @@ The edit, regenerate and switch-branch endpoints SHALL require `Access::Write` o
 
 ### Requirement: Editing a user message creates a sibling branch and runs a turn
 
-The system SHALL provide `POST /api/conversations/{id}/messages/{message_id}/edit` (operationId `edit_message`) accepting `EditMessageRequest { message }`. It SHALL insert a new user message as a sibling of `message_id` (same parent), make it the active leaf, run a turn whose history is the new message's ancestor chain, and stream the response with the same SSE frames as `POST /api/conversations/{id}/messages`. The original message and its descendants SHALL remain stored. Editing a message that is not on the active path SHALL be accepted and SHALL make the new branch active.
+The system SHALL provide `POST /api/conversations/{id}/messages/{message_id}/edit` (operationId `edit_message`) accepting `EditMessageRequest { message }`. It SHALL insert a new user message as a sibling of `message_id` (same parent), make it the active leaf, run a turn whose history is the new message's ancestor chain, and stream the response with the same SSE frames as `POST /api/conversations/{id}/messages`. The original message and its descendants SHALL remain stored. Editing a message that is not on the active path SHALL be accepted and SHALL make the new branch active. The new message SHALL carry the original message's attachments forward: every attachment of the original SHALL also be attached to the new message, and the turn's history SHALL include them. The edit request changes the text only. Editing SHALL be accepted whichever interface created the conversation.
 
 #### Scenario: Edit streams a new reply on a new branch
 
@@ -159,6 +159,25 @@ The system SHALL provide `POST /api/conversations/{id}/messages/{message_id}/edi
 
 - **WHEN** U1 has replies A1 (inactive, followed by U2) and A1' (active), and the client edits U2
 - **THEN** U2' is a child of A1, the active path is U1 → A1 → U2' → A2', and the LLM history contains A1 and not A1'
+
+#### Scenario: Editing a message with attachments
+
+- **WHEN** U2 has attachments X and Y and the client edits U2 with "corrected text"
+- **THEN** U2' lists X and Y as its attachments, and U2 still lists them
+- **AND** the LLM history for the turn includes X and Y on U2'
+- **AND** no attachment bytes are copied
+
+#### Scenario: Redelivered edit does not duplicate attachment links
+
+- **WHEN** an edit of an attachment-bearing U2 fails transiently after U2' was saved and is redelivered
+- **THEN** U2' lists each attachment exactly once
+
+#### Scenario: Editing in a conversation a messenger also uses
+
+- **WHEN** a conversation that a Slack interface created has the active path U1 → A1 and a web member edits U1
+- **THEN** the edit is accepted and U1' becomes the active branch
+- **AND** nothing is posted to the Slack thread
+- **AND** the next Slack message in that conversation is appended under the active leaf of the edited branch
 
 #### Scenario: Editing a non-user message is rejected
 
@@ -179,6 +198,20 @@ The system SHALL provide `POST /api/conversations/{id}/messages/{message_id}/edi
 
 - **WHEN** the SSE connection drops while an edit of U2 is streaming and the turn completes on the server
 - **THEN** `GET /api/conversations/{id}` lists U1 → A1 → U2' → A2' and U2' carries `branch: {index: 1, count: 2}`
+
+### Requirement: Attachments can be shared across message versions
+
+The system SHALL store extra attachment references in a `message_attachment_links(message_id, attachment_id)` table with a composite primary key and `ON DELETE CASCADE` on both foreign keys. `AttachmentStore::list_for_message` SHALL return the attachments whose `message_id` matches plus those reached through a link. `AttachmentStore::carry_forward(from_message_id, to_message_id)` SHALL link every attachment of the source message to the target and SHALL be idempotent. Deleting a conversation SHALL remove its links.
+
+#### Scenario: Carry forward is idempotent
+
+- **WHEN** `carry_forward(U2, U2')` is called twice
+- **THEN** `list_for_message(U2')` returns each attachment of U2 once
+
+#### Scenario: Original keeps its attachments
+
+- **WHEN** `carry_forward(U2, U2')` has run
+- **THEN** `list_for_message(U2)` is unchanged
 
 ### Requirement: Regenerating creates a sibling reply
 
@@ -223,7 +256,7 @@ Every row a turn persists SHALL carry the turn's `run_id`: the request id when p
 
 ### Requirement: Cancelling a branch turn keeps the tree consistent
 
-When a web turn is cancelled, the partial reply the runner persists SHALL follow the turn's anchor. For a regenerate that has persisted no row, the partial reply SHALL be saved as a child of U. Otherwise it SHALL be appended to the run's own leaf. The "already saved" race guard SHALL consider only rows carrying the run's `run_id`.
+When a web turn is cancelled, the partial reply the runner persists SHALL follow the turn's anchor. For a regenerate that has persisted no row, the partial reply SHALL be saved as a child of U. Otherwise it SHALL be appended to the run's own leaf. The "already saved" race guard SHALL consider only rows carrying the run's `run_id`. The saved row SHALL carry the cancelled `finish_reason` persisted by `chat-stop-cancels-turn`. A cancel that leaves no text SHALL still persist the short stopped row that change specifies, anchored by the same rule. A turn cancelled before a worker claimed it SHALL persist nothing and SHALL leave the active leaf where it was.
 
 #### Scenario: Cancel a regenerate before its first row
 
@@ -236,6 +269,17 @@ When a web turn is cancelled, the partial reply the runner persists SHALL follow
 - **WHEN** a regenerate of U has persisted a tool-call row and streamed "Partial" when the user cancels it
 - **THEN** "Partial" is appended after the tool-call row on the new branch and no row is added under the old reply
 
+#### Scenario: Cancel a regenerate before any text
+
+- **WHEN** a regenerate of U is cancelled after the worker claimed it and before any text or row was produced
+- **THEN** a "_Stopped._" assistant message with the cancelled `finish_reason` is stored as a child of U and is the active leaf
+- **AND** the old reply is a sibling version
+
+#### Scenario: Cancel before a worker claims the turn
+
+- **WHEN** a regenerate of U is cancelled before any worker claims it
+- **THEN** no row is stored and the old reply is still the active leaf
+
 #### Scenario: Cancel an edit
 
 - **WHEN** an edit has saved U' and streamed "Partial" when the user cancels it
@@ -243,13 +287,18 @@ When a web turn is cancelled, the partial reply the runner persists SHALL follow
 
 ### Requirement: Regenerate with a different model
 
-`RegenerateMessageRequest.model`, when present, SHALL be either the org's `[llm] model` or an entry in `[llm] available_models`. The turn SHALL run on a provider for that model with the org's provider kind, endpoint, and credentials. The override SHALL apply to that turn only and SHALL NOT change the conversation's `/model` setting. Each persisted assistant message SHALL record the model name that produced it in `messages.model`.
+`RegenerateMessageRequest.model`, when present, SHALL be either the org's `[llm] model` or an entry in `[llm] available_models`. The turn SHALL run on a provider for that model with the org's provider kind, endpoint, and credentials. Any member with write access to the space MAY use any listed model. The override SHALL apply to that turn only and SHALL NOT change the conversation's `/model` setting. Each persisted assistant message SHALL record the model name that produced it in `messages.model`.
 
 #### Scenario: Regenerate on an allowed model
 
 - **WHEN** `available_models = ["model-b"]`, the default is `model-a`, and the client regenerates with `{"model": "model-b"}`
 - **THEN** the new reply is produced by `model-b` and its `MessageSummary.model` is `"model-b"`
 - **AND** the next normal send uses `model-a`
+
+#### Scenario: A non-admin member may regenerate with a listed model
+
+- **WHEN** a member with write access who is not a space admin regenerates with a model in `available_models`
+- **THEN** the turn runs on that model
 
 #### Scenario: Unknown model is rejected
 
@@ -310,12 +359,23 @@ The system SHALL provide `POST /api/conversations/{id}/switch-branch` (operation
 
 ### Requirement: One orchestrator-owned registry tracks in-flight turns
 
-The orchestrator SHALL own a single registry of in-flight turns per conversation, which replaces the web, channel-runner and CLI `active_turns` maps and backs `/stop` and `/status`. Acquiring a lease SHALL be an atomic check-and-insert. Shared leases SHALL be refused while an exclusive lease is held. Exclusive leases SHALL be refused while any lease is held. Every lease SHALL be released on every exit path, including errors, cancellation and a dropped handler. Web handlers SHALL acquire the lease before submitting the turn. `send_message` SHALL take a shared lease. Edit and regenerate SHALL take an exclusive lease for the whole turn. Switch-branch SHALL take an exclusive lease for its update. The worker SHALL take a shared lease for every claimed turn not already registered, and SHALL defer such a turn with a delayed nack while an exclusive lease is held. The registry is per process.
+The orchestrator SHALL own a single registry of in-flight turns per conversation, which replaces the web, channel-runner and CLI `active_turns` maps and backs `/stop` and `/status`. Acquiring a lease SHALL be an atomic check-and-insert. Shared leases SHALL be refused while an exclusive lease is held. Exclusive leases SHALL be refused while any lease is held. Every lease SHALL be released on every exit path, including errors, cancellation and a dropped handler. Web handlers SHALL acquire the lease before submitting the turn. `send_message` SHALL take a shared lease. Edit and regenerate SHALL take an exclusive lease for the whole turn. Switch-branch SHALL take an exclusive lease for its update. A `send_message` request SHALL be refused with 409 while an exclusive lease is held. The worker SHALL take a shared lease for every claimed turn not already registered, and SHALL defer such a turn with a delayed nack while an exclusive lease is held. The registry is per process.
 
 #### Scenario: Switch during a running turn
 
 - **WHEN** a turn is streaming for conversation C and the client calls switch-branch on C
 - **THEN** the response is 409 with an `{"error": ...}` body and the active leaf is unchanged
+
+#### Scenario: Send during an edit
+
+- **WHEN** an edit turn is running for conversation C and the client posts a message to C
+- **THEN** the response is 409 with an `{"error": ...}` body and no user message is stored
+
+#### Scenario: Messenger turn deferred during a regenerate
+
+- **WHEN** a regenerate turn holds the exclusive lease for conversation C and a messenger turn for C is claimed by a worker
+- **THEN** the worker defers the messenger turn with a delayed nack and does not run it
+- **AND** once the lease is released the redelivered turn runs and appends under the active leaf
 
 #### Scenario: Two rapid edits
 
@@ -337,9 +397,40 @@ The orchestrator SHALL own a single registry of in-flight turns per conversation
 - **WHEN** a web turn is running for conversation C and the user runs `/stop` in C
 - **THEN** the turn is cancelled
 
+### Requirement: Branch operations cancel a turn that is waiting for the user
+
+When edit, regenerate or switch-branch finds the conversation's exclusive lease refused, and every in-flight run of that conversation has a pending interaction (a tool approval, a question or a surface wait), the system SHALL cancel those runs through the same path as `/stop`, wait up to 10 seconds for their leases to be released, and then acquire the exclusive lease and proceed. The cancelled interactions SHALL resolve as `cancelled` and the gated tool call SHALL NOT run. When any in-flight run has no pending interaction, the system SHALL return 409 and cancel nothing. When the leases are not released within the wait, the system SHALL return 409.
+
+#### Scenario: Edit while an approval is pending
+
+- **WHEN** a turn is blocked on a pending approval for a `bash` call and the client edits an earlier message
+- **THEN** the approval resolves as `cancelled` and the `bash` call does not run
+- **AND** the edit is accepted and streams a new reply on a new branch
+- **AND** the old branch ends with a stopped reply
+
+#### Scenario: Regenerate while a question is pending
+
+- **WHEN** a turn is blocked on an `ask-user` question and the client regenerates the previous reply
+- **THEN** the question resolves as `cancelled` and the regenerate is accepted
+
+#### Scenario: Switch while an approval is pending
+
+- **WHEN** a turn is blocked on a pending approval and the client switches to another branch
+- **THEN** the approval resolves as `cancelled` and the response is 200 with the new path
+
+#### Scenario: Working turn is not cancelled
+
+- **WHEN** a turn is streaming text with no pending interaction and the client calls edit
+- **THEN** the response is 409 and the turn keeps running
+
+#### Scenario: Run does not release in time
+
+- **WHEN** the cancelled run's lease is still held after 10 seconds
+- **THEN** the response is 409 with an `{"error": ...}` body
+
 ### Requirement: Branch runs reuse the existing SSE frame set
 
-Edit and regenerate SHALL emit no new SSE event types and SHALL be driven by the same streamed-turn runner as `send_message`, with `interactive` and `suggestions` enabled. The `run_started` payload of text, edit and regenerate runs SHALL include `user_message_id`: the id under which the run will persist its user message (for regenerate, the existing message U). It SHALL survive replay via `GET /api/conversations/{id}/runs/{run_id}/events/stream`.
+Edit and regenerate SHALL emit no new SSE event types and SHALL be driven by the same streamed-turn runner as `send_message`, with the same `interactive` setting as `send_message` and with `suggestions` enabled. The three entry points SHALL build their run options through one shared constructor, so a change to web-turn interactivity applies to all of them together. The `run_started` payload of text, edit and regenerate runs SHALL include `user_message_id`: the id under which the run will persist its user message (for regenerate, the existing message U). It SHALL survive replay via `GET /api/conversations/{id}/runs/{run_id}/events/stream`.
 
 #### Scenario: run_started identifies the answered message
 
@@ -352,7 +443,12 @@ Edit and regenerate SHALL emit no new SSE event types and SHALL be driven by the
 - **WHEN** a client sends a message and the turn completes
 - **THEN** the persisted user message's id equals `run_started.user_message_id`
 
-#### Scenario: Branch turns are interactive
+#### Scenario: Branch turns are as interactive as send
 
-- **WHEN** an edit or regenerate turn reaches a tool call whose permission decision is Ask
+- **WHEN** web turns are interactive (`tool-approval-prompts` has enabled them) and an edit or regenerate turn reaches a tool call whose permission decision is Ask
 - **THEN** the turn is marked interactive and the call surfaces as an approval prompt instead of being auto-denied
+
+#### Scenario: Interactivity is not enabled by this change
+
+- **WHEN** web turns are not yet interactive
+- **THEN** edit and regenerate turns are not interactive either, and an Ask decision is denied as it is for `send_message`

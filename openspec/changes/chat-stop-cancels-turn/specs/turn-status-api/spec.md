@@ -6,7 +6,7 @@ The server SHALL expose `POST /api/conversations/{conversationId}/turns/{turnId}
 
 The endpoint is idempotent: it always returns `200 OK` with a `TurnStatusResponse` body in the same shape as the status read. Cancelling a turn that is already `completed`, `errored`, or `unknown` is a no-op; the response simply reports the current state.
 
-The server SHALL fire the cancellation only when the run's recorded conversation matches `{conversationId}`. A cancel SHALL take effect even when no worker has claimed the turn request yet: a worker that later claims a cancelled request SHALL acknowledge and skip it without running the turn, and SHALL NOT release any other turn's token sink. When a cancelled turn has produced non-empty assistant text, the runtime SHALL persist that text as the turn's assistant message, so conversation history and the next LLM turn contain it.
+The server SHALL fire the cancellation only when the run's recorded conversation matches `{conversationId}`. A cancel SHALL take effect even when no worker has claimed the turn request yet: a worker that later claims a cancelled request SHALL acknowledge and skip it without running the turn, and SHALL NOT release any other turn's token sink. When a cancelled turn's user message was saved, the runtime SHALL persist the turn's streamed assistant text as its assistant message, or the placeholder "_Stopped._" when no text streamed, so conversation history and the next LLM turn contain a reply. That message SHALL carry `finish_reason: "cancelled"`. A turn cancelled before it started saves nothing.
 
 #### Scenario: Cancelling a running turn returns 200 with current state
 
@@ -20,14 +20,19 @@ The server SHALL fire the cancellation only when the run's recorded conversation
 #### Scenario: Cancelled partial reply is persisted
 
 - **WHEN** a turn is cancelled after streaming the text "Partial answer"
-- **THEN** the conversation history SHALL contain an assistant message with content "Partial answer" after the turn's user message
+- **THEN** the conversation history SHALL contain an assistant message with content "Partial answer" and `finish_reason: "cancelled"` after the turn's user message
 - **THEN** the final `agent_error` event SHALL carry `message_id` set to that message's UUID
 
-#### Scenario: Cancelled turn with no text persists nothing
+#### Scenario: Cancelled turn with no text persists a placeholder
 
-- **WHEN** a turn is cancelled before any token was streamed
-- **THEN** no assistant message SHALL be persisted for the turn
-- **THEN** the final `agent_error` event SHALL omit `message_id`
+- **WHEN** a turn is cancelled after its user message was saved and before any token was streamed
+- **THEN** the conversation history SHALL contain an assistant message "_Stopped._" with `finish_reason: "cancelled"` after the turn's user message
+- **THEN** the final `agent_error` event SHALL carry `partial_content: "_Stopped._"` and `message_id` set to that message's UUID
+
+#### Scenario: Whitespace-only text counts as no text
+
+- **WHEN** a turn is cancelled after streaming only whitespace
+- **THEN** the server SHALL persist the "_Stopped._" placeholder, not the whitespace
 
 #### Scenario: Partial reply after a tool call is persisted
 
@@ -38,18 +43,21 @@ The server SHALL fire the cancellation only when the run's recorded conversation
 
 - **WHEN** a turn is cancelled with streamed text and persisting the partial fails
 - **THEN** the final `agent_error` event SHALL still be emitted, with `partial_content` and without `message_id`
+- **THEN** no title announcement SHALL be made for the turn
 
 #### Scenario: Cancel racing a just-persisted final answer does not duplicate it
 
 - **WHEN** the runtime persisted the turn's final assistant text message (non-empty content, no tool calls) and the cancel is then observed
 - **THEN** the server SHALL NOT persist a second assistant message for that turn
 - **THEN** `message_id` on the final event SHALL be the already-persisted message's UUID
+- **THEN** that message's `finish_reason` SHALL stay unset
 
 #### Scenario: Cancel before a worker claims the request
 
 - **WHEN** `submit_turn` has published a turn request, no worker has claimed it, and the turn is cancelled
 - **THEN** a worker that later claims the request SHALL acknowledge it without invoking the LLM or any tool
 - **THEN** the SSE stream SHALL end at once with `agent_error {"reason":"cancelled","user_message_persisted":false,...}`, without waiting for a worker to claim the request
+- **THEN** no assistant message, including the "_Stopped._" placeholder, SHALL be persisted, and the final event SHALL omit `message_id`
 
 #### Scenario: A stale cancelled request does not steal a newer turn's stream
 
@@ -76,6 +84,47 @@ The server SHALL fire the cancellation only when the run's recorded conversation
 - **THEN** the response SHALL NOT be `404` — same disambiguation rationale as the status endpoint
 
 ## ADDED Requirements
+
+### Requirement: Stopped replies are marked with a finish reason
+
+The `messages` table SHALL have a nullable `finish_reason` column, added by a migration, and existing rows SHALL read as `NULL`. The only value this change writes is `"cancelled"`, on the assistant message persisted for a cancelled turn. `GET /api/conversations/{id}` SHALL return it as the optional `finish_reason` string on `MessageSummary`, and SHALL omit the field when it is unset.
+
+#### Scenario: History exposes the finish reason
+
+- **WHEN** a turn was cancelled and its partial reply persisted
+- **THEN** `GET /api/conversations/{id}` SHALL list that assistant message with `finish_reason: "cancelled"`
+- **THEN** every other message SHALL omit `finish_reason`
+
+#### Scenario: Existing messages are unaffected by the migration
+
+- **WHEN** the migration runs on a database that holds messages
+- **THEN** every existing message SHALL have no `finish_reason`
+- **THEN** `GET /api/conversations/{id}` SHALL return the same messages as before
+
+### Requirement: A stopped first turn still gets a title
+
+When the runtime persists a cancelled turn's reply and the turn's user message has non-empty text, it SHALL announce `turn.completed` for that turn so the title generator can run under its usual eligibility rules. It SHALL NOT announce `turn.completed` when it persisted nothing (the race guard found the turn's own final answer, persisting failed, or the turn was cancelled before it started), or when the user message has no text.
+
+#### Scenario: Stopped first turn is titled
+
+- **WHEN** the first turn of an untitled conversation is stopped and its reply (partial or "_Stopped._") is persisted
+- **THEN** `turn.completed` SHALL be announced for the conversation with the persisted `message_id`
+- **THEN** the title generator SHALL treat it like any other completed turn
+
+#### Scenario: Cancelled before start is not titled
+
+- **WHEN** a turn is cancelled before a worker claims it
+- **THEN** no `turn.completed` SHALL be announced
+
+#### Scenario: No duplicate announcement on the finish race
+
+- **WHEN** the worker already saved and announced the turn's final answer before the cancel was observed
+- **THEN** the runtime SHALL NOT announce `turn.completed` a second time
+
+#### Scenario: Attachment-only message
+
+- **WHEN** the stopped turn's user message has no text
+- **THEN** the reply SHALL be persisted but no `turn.completed` SHALL be announced
 
 ### Requirement: Voice turns share the run lifecycle
 

@@ -37,8 +37,11 @@ expired`). Responses are idempotent. Only the turn's owner may answer, and
   and keep denying on `Ask`.
 - **Approval options** `allow_once`, `allow_always`, `reject_once`,
   `reject_always`. The "always" answers save a per-space, per-user rule in the
-  existing `tool(pattern)` grammar. A new pipeline stage applies the rule, and
-  users can list and revoke rules over REST and in a settings section.
+  existing `tool(pattern)` grammar. A new pipeline stage applies the rule to every one of that user's
+  turns in the space, including scheduled and messenger turns. Users can list
+  and revoke their rules over REST and in a settings section, and space admins
+  can list and revoke their members' rules. "Always" is never offered for
+  shells, interpreters, command wrappers or destructive commands.
 - **`ask-user` tool**: one to four questions, each with options and/or free
   text, answered through the same channel. Only interactive turns get it.
 - **Client**: `ApprovalCard` and `QuestionCard` in `assistant_ui`, shown inline
@@ -47,8 +50,10 @@ expired`). Responses are idempotent. Only the turn's owner may answer, and
   still pending after 30 s pushes to the turn owner.
 - Turn status gains `awaiting_input`. Bus claims get a heartbeat so a long wait
   does not get the turn redelivered.
-- Every server PR lands dormant. One final server PR switches interactions on,
-  after the client can render and answer them.
+- Every server PR lands dormant. The stack is ordered so the one server PR that
+  switches interactions on lands after the client cards render and answer
+  them. There is no feature flag.
+- Branching (edit or regenerate) while an approval is pending cancels it.
 - ADR-0017.
 
 ## Capabilities
@@ -72,7 +77,8 @@ expired`). Responses are idempotent. Only the turn's owner may answer, and
 ## Impact
 
 - Rust: `core`, `runtime`, `storage` (two space.db tables, a nullable
-  `push_subscriptions.user_id`, a `turn.event` bus topic), `web-ui`,
+  `push_subscriptions.user_id`, a `turn.event` bus topic; migrations 047,
+  048 and 059 from the stack plan), `web-ui`,
   `interface-cli`, `bus-nats`. Regenerated `openapi.json` and `assistant_api`.
 - Edits the shared turn runner extracted by `message-branching` PR 5, never
   `send_message` directly.
@@ -80,7 +86,8 @@ expired`). Responses are idempotent. Only the turn's owner may answer, and
   `features/settings`, `features/notifications` and `app/web/sw.js`. Cards use
   `chat-element-library`'s `ToolCallBody.footer`, `EntryState.awaitingInput`
   and the parameterised `TurnProgressCard`.
-- **Visual change**: new cards, a new settings section, and a new turn label.
+- **Visual change**: new cards, a new settings section (with an admin group),
+  and a new turn label.
   **Playwright baselines will move.**
 - **User-facing docs: yes.** `docs/tool-permissions.md` (approvals, saved
   rules) and a new `docs/chat/approvals-and-questions.md`.
@@ -91,6 +98,7 @@ expired`). Responses are idempotent. Only the turn's owner may answer, and
   deny-on-`Ask`).
 - Approving subagent calls (subagents stay non-interactive).
 - Editing a saved rule's pattern, or creating rules by hand in the UI.
-- Answering from a different user, or delegating approvals to admins.
+- Answering from a different user, or delegating approvals to admins. (Admins
+  can revoke members' saved rules, not answer or create them.)
 - Cross-process turn cancellation (`cancel_turn` stays in-process; see
   `chat-stop-cancels-turn`).

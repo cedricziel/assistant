@@ -117,7 +117,7 @@ The `done` SSE frame of every web turn run through the shared turn runner (`POST
 
 ### Requirement: Client shows timing in message meta
 
-The client SHALL parse `timing` from `DoneEvent` and from history `MessageSummary` into a package `MessageTiming` model on `ChatMessage.timing`, ignoring unknown fields. For finished assistant messages with timing, the app SHALL place a `MessageTimingIndicator` first in the `MessageActions` `trailing` list.
+The client SHALL parse `timing` from `DoneEvent` and from history `MessageSummary` into a package `MessageTiming` model on `ChatMessage.timing`, ignoring unknown fields. For finished assistant messages with timing, and only while the "Show response timing" preference is on, the app SHALL place a `MessageTimingIndicator` first in the `MessageActions` `trailing` list. The client SHALL parse and keep `timing` whether or not the preference is on.
 
 The indicator SHALL be a focusable button showing a small speed glyph, with a hit area of at least 24×24 logical pixels. Its tooltip SHALL appear on mouse hover, on keyboard focus, and on activation (tap, Enter or Space), without platform branching. The tooltip text SHALL be `formatMessageTiming(timing)`, for example "First token 0.8 s · Total 12.4 s · 42 tok/s". The semantics label SHALL be `describeMessageTiming(timing)`, for example "Response timing: first token 0.8 seconds, total 12.4 seconds, 42 tokens per second".
 
@@ -136,7 +136,7 @@ The indicator SHALL be a focusable button showing a small speed glyph, with a hi
 
 #### Scenario: Indicator appears after done
 
-- **GIVEN** a live turn whose `done` frame carries timing
+- **GIVEN** the "Show response timing" preference is on AND a live turn whose `done` frame carries timing
 - **WHEN** the reply finishes
 - **THEN** a `MessageTimingIndicator` SHALL appear in that message's actions
 
@@ -164,6 +164,45 @@ The indicator SHALL be a focusable button showing a small speed glyph, with a hi
 
 #### Scenario: Reload keeps timing
 
-- **GIVEN** a conversation whose last reply has stored timing
+- **GIVEN** the preference is on AND a conversation whose last reply has stored timing
 - **WHEN** the conversation is reopened
 - **THEN** the indicator SHALL be present on that reply
+
+### Requirement: Response timing display is an opt-in per-device preference
+
+The app SHALL expose a "Show response timing" setting that is **off by default**. It SHALL be a boolean stored per device in `SharedPreferences` under `assistant.showResponseTiming` and exposed through `showResponseTimingProvider`, where an absent key, a read failure or a write failure SHALL behave as off and SHALL NOT throw. `SettingsScreen` SHALL show a switch row titled "Show response timing" with a subtitle explaining that it shows first-token time, total time and tokens per second under finished replies. The switch SHALL be operable by keyboard and SHALL carry a semantics label equal to its title.
+
+The preference SHALL only gate display. The server SHALL measure, persist and send timing regardless of it, and the client SHALL keep `ChatMessage.timing` populated. Turning the preference on SHALL show the indicator on every finished assistant reply that has timing, including replies already on screen and replies loaded from history, and turning it off SHALL remove them, in both cases without reloading the conversation.
+
+#### Scenario: Off by default
+
+- **GIVEN** a fresh install with no stored preference AND a finished assistant reply whose timing is present
+- **WHEN** the reply renders
+- **THEN** no `MessageTimingIndicator` SHALL render AND `ChatMessage.timing` SHALL still hold the timing
+
+#### Scenario: Turning it on shows existing replies
+
+- **GIVEN** a conversation on screen with two finished replies that have timing and the preference off
+- **WHEN** the user turns the switch on in settings and returns to the chat
+- **THEN** both replies SHALL show a `MessageTimingIndicator` without a reload
+
+#### Scenario: Preference persists across launches
+
+- **WHEN** the user turns the switch on and the app is restarted
+- **THEN** the provider SHALL read `true` AND the indicator SHALL show
+
+#### Scenario: Storage failure falls back to off
+
+- **GIVEN** a `SharedPreferences` that throws on read
+- **WHEN** the provider builds
+- **THEN** it SHALL yield `false` AND SHALL NOT throw
+
+#### Scenario: Switch is accessible
+
+- **WHEN** the settings screen renders
+- **THEN** the "Show response timing" switch SHALL have a semantics label "Show response timing", a toggled state, and a hit area of at least 48×48 logical pixels
+
+#### Scenario: Server does not depend on the preference
+
+- **WHEN** a turn completes with the preference off
+- **THEN** the `done` frame and the stored `message_timings` row SHALL still contain the timing

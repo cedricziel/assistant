@@ -65,7 +65,10 @@ without a callback SHALL deny `Ask` outcomes.
 `suggested_rule` as an `allow` or `deny` rule in the space's
 `tool_permission_rules` store, keyed to the answering user. The rule text SHALL
 come from the stored interaction, never from the request body. Saving the same
-(user, effect, rule) twice SHALL keep one row.
+(user, effect, rule) twice SHALL keep one row. A saved rule SHALL apply to every
+turn that carries the saving user's identity in that space, whatever the
+interface, including scheduled-task and messenger turns. Non-interactive turns
+SHALL only consult saved rules and SHALL NOT create interactions.
 
 #### Scenario: Allow always
 
@@ -81,6 +84,26 @@ come from the stored interaction, never from the request body. Saving the same
   `git status --short`
 - **THEN** the pipeline SHALL allow it with `decider = "user-rules"` AND no
   interaction SHALL be created
+
+#### Scenario: Saved allow applies to scheduled and messenger turns
+
+- **GIVEN** a user saved `bash(git status*)` through an approval in web chat
+- **WHEN** a scheduled task or a messenger turn carrying that user's identity
+  in the same space calls `bash` with `git status --short`
+- **THEN** the pipeline SHALL allow it with `decider = "user-rules"` AND no
+  interaction SHALL be created
+
+#### Scenario: Saved deny applies to non-interactive turns
+
+- **GIVEN** a user saved a deny rule through `reject_always`
+- **WHEN** a scheduled task of that user in the same space makes a matching call
+- **THEN** the call SHALL be denied without a prompt
+
+#### Scenario: Unmatched call on a non-interactive turn
+
+- **WHEN** a non-interactive turn makes a call that no saved rule matches and
+  the pipeline yields `Ask`
+- **THEN** the call SHALL be denied AND no interaction SHALL be created
 
 #### Scenario: Rules are per user and per space
 
@@ -160,6 +183,18 @@ be escaped.
 - **THEN** there SHALL be no suggestion AND the options SHALL be `allow_once`,
   `reject_once`
 
+#### Scenario: Wrapper command
+
+- **WHEN** the command is `env FOO=1 make build` or `xargs rm`
+- **THEN** there SHALL be no suggestion AND the options SHALL be `allow_once`,
+  `reject_once`
+
+#### Scenario: Shell with flags
+
+- **WHEN** the command is `bash -lc "make"`
+- **THEN** there SHALL be no suggestion AND the options SHALL be `allow_once`,
+  `reject_once`
+
 #### Scenario: Web fetch
 
 - **WHEN** the URL is `https://docs.rs/tokio/latest/tokio/`
@@ -169,11 +204,13 @@ be escaped.
 
 The server SHALL expose `GET /api/tool-permission-rules` (`operationId:
 list_tool_permission_rules`), which returns a bare array of
-`ToolPermissionRuleSummary` (`id`, `effect`, `rule`, `tool_name`,
+`ToolPermissionRuleSummary` (`id`, `user_id`, `effect`, `rule`, `tool_name`,
 `created_at`) for the caller in the selected space. It SHALL also expose
 `DELETE /api/tool-permission-rules/{id}` (`operationId:
 delete_tool_permission_rule`), which returns `204`. A rule belonging to another
-user SHALL return `404`. Both routes SHALL be documented in `openapi.json`.
+user SHALL return `404` to a caller who is not a space admin. Both routes SHALL
+be documented in `openapi.json`, and every error SHALL use the `{"error": …}`
+envelope.
 
 #### Scenario: Revoke
 
@@ -186,19 +223,79 @@ user SHALL return `404`. Both routes SHALL be documented in `openapi.json`.
 - **WHEN** a member lists rules
 - **THEN** only rules they saved in that space SHALL be returned
 
+#### Scenario: Viewer cannot revoke
+
+- **WHEN** a caller with only viewer access deletes a rule
+- **THEN** the response SHALL be `403`
+
+### Requirement: Space admins can list and revoke members' saved rules
+
+`GET /api/tool-permission-rules` SHALL accept `scope=own` (default) or
+`scope=space`. With `scope=space`, a caller with admin access to the selected
+space (space admin or org admin) SHALL receive every user's saved rules in that
+space, each with its `user_id`. Any other caller SHALL receive `403`. A space
+admin SHALL be able to delete any rule in the selected space through `DELETE
+/api/tool-permission-rules/{id}`. A rule of another space SHALL return `404`.
+Each admin revoke SHALL be logged with the acting admin, the rule's owner, the
+rule text and the rule id. Admins SHALL NOT be able to create rules, edit a
+rule, or answer a member's interaction.
+
+#### Scenario: Admin lists the space's rules
+
+- **GIVEN** two members have each saved a rule in the space
+- **WHEN** a space admin requests `GET /api/tool-permission-rules?scope=space`
+- **THEN** both rules SHALL be returned, each with its owner's `user_id`
+
+#### Scenario: Member cannot list the space's rules
+
+- **WHEN** a member requests `scope=space`
+- **THEN** the response SHALL be `403`
+
+#### Scenario: Admin revokes a member's rule
+
+- **WHEN** a space admin deletes a rule saved by another member
+- **THEN** the response SHALL be `204`, the member's next matching call SHALL
+  prompt again (or be denied on a non-interactive turn), AND a `tool
+permission rule revoked` event SHALL be logged naming both users
+
+#### Scenario: Member cannot revoke another member's rule
+
+- **WHEN** a member deletes a rule saved by another member
+- **THEN** the response SHALL be `404` AND the rule SHALL remain
+
+#### Scenario: Admin of another space
+
+- **WHEN** an admin of space A deletes a rule that belongs to space B
+- **THEN** the response SHALL be `404`
+
 ### Requirement: Settings show saved approvals
 
 The settings screen SHALL have a "Tool approvals" section that lists the
 current space's saved rules, grouped as Allowed and Denied, with each rule's
-text and creation date and a revoke action. It SHALL have explicit loading,
-error and empty states. The `PermissionRuleTile` row widget SHALL live in
-`assistant_ui`.
+text and creation date and a revoke action, and SHALL state that saved
+approvals apply to all of the user's turns in the space. For a space admin or
+org admin it SHALL also show a "Members' approvals" group listing the other
+members' rules, each labelled with its owner, with the same revoke action. It
+SHALL have explicit loading, error and empty states. The `PermissionRuleTile`
+row widget SHALL live in `assistant_ui`.
 
 #### Scenario: Empty state
 
 - **WHEN** the user has no saved rules in the space
 - **THEN** the section SHALL say that no approvals are saved and explain that
   "Always allow" on an approval card adds one
+
+#### Scenario: Admin group
+
+- **WHEN** a space admin opens the section
+- **THEN** it SHALL show the "Members' approvals" group with each member's
+  rules labelled by owner
+
+#### Scenario: No admin group for members
+
+- **WHEN** a member or viewer opens the section
+- **THEN** the "Members' approvals" group SHALL NOT be shown AND no
+  `scope=space` request SHALL be made
 
 #### Scenario: Revoke from settings
 
@@ -237,6 +334,13 @@ outcome. It SHALL ship widgetbook stories and goldens for every state.
 - **WHEN** the conversation is reloaded after the approval was answered
 - **THEN** the card SHALL render from `ConversationDetail.interactions` as a
   receipt such as "Allowed once" or "Always allowed · bash(git status*)"
+
+#### Scenario: Receipt on an inactive branch
+
+- **WHEN** the conversation was edited or regenerated after the approval, so
+  the approved tool call is no longer on the active branch
+- **THEN** no receipt SHALL be shown for it AND switching back to that branch
+  SHALL show it again
 
 #### Scenario: Accessible actions
 

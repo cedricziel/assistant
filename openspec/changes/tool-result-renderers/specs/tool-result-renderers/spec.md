@@ -2,7 +2,7 @@
 
 ### Requirement: The client carries tool data from stream and history to the tool-call record
 
-`ToolResultEvent`, `SubagentToolResultEvent` and `ToolCallRecord` SHALL expose an optional `data` map. The SSE parser SHALL read it from `tool_result` and `subagent_tool_result` frames, the timeline reducer SHALL copy it onto the resolved record, and history mapping SHALL copy `ToolCallSummary.data` and `tool_call_id` onto the reconstructed record. A frame whose `data` is not a JSON object SHALL be handled as if `data` were absent; the event itself SHALL NOT be dropped.
+`ToolResultEvent` and `ToolCallRecord` SHALL expose an optional `data` map. The SSE parser SHALL read it from `tool_result` frames (`subagent_tool_result` frames carry none and `SubagentToolResultEvent` SHALL NOT gain a `data` field), the timeline reducer SHALL copy it onto the resolved record, and history mapping SHALL copy `ToolCallSummary.data` and `tool_call_id` onto the reconstructed record. A frame whose `data` is not a JSON object SHALL be handled as if `data` were absent; the event itself SHALL NOT be dropped.
 
 #### Scenario: Live frame populates the record
 
@@ -81,13 +81,42 @@ When no renderer applies, `chat-element-library`'s `GenericToolResultView` SHALL
 
 ### Requirement: Renderers honour status and density
 
-At `TimelineDensity.compact`, `registry.build` SHALL return the resolved renderer's one-line `summary` widget instead of its full view; the summary renders in the tool-call body, and the entry header label stays as `chat-element-library` defines it. At `normal` and `expanded`, the renderer's full view SHALL be the body. A `denied` record SHALL always use the fallback. An `error` record SHALL use the renderer when the data parses, and SHALL keep the existing force-expanded-on-error behaviour. A `pending` record SHALL render no body.
+The tool-call entry SHALL stay collapsed behind its header at every density, for every kind including `terminal` and `code_diff`, and SHALL open only when the user activates it or when its status is `error` (the existing force-expand-on-error behaviour). A completed `ok` call SHALL NOT auto-expand.
+
+When the entry is open at `normal` or `expanded` density, the body SHALL be the resolved renderer's full view.
+
+At `TimelineDensity.compact`, `registry.build` SHALL return a widget that shows the renderer's one-line `summary` with an expand affordance. Activating it SHALL replace the summary with the renderer's full view; activating again SHALL restore the summary. The affordance SHALL be a button with a semantics label ("Show full result" / "Hide full result"). The summary renders in the tool-call body, and the entry header label stays as `chat-element-library` defines it.
+
+A `denied` record SHALL always use the fallback. An `error` record SHALL use the renderer when the data parses. A `pending` record SHALL render no body.
 
 #### Scenario: Compact summary
 
 - **GIVEN** a terminal payload with `exit_code = 2` and 14 stderr lines
 - **WHEN** rendered at compact density
-- **THEN** the body SHALL show only a single line such as `exit 2 · 14 lines stderr`, and not the terminal view
+- **THEN** the body SHALL show a single line such as `exit 2 · 14 lines stderr` and an expand affordance, and not the terminal view
+
+#### Scenario: Compact tap expands the full view
+
+- **GIVEN** the compact summary from the previous scenario
+- **WHEN** the user activates it
+- **THEN** `TerminalResultView` SHALL replace the summary line
+- **AND** activating the "Hide full result" control SHALL restore the summary line
+
+#### Scenario: Successful terminal run stays collapsed
+
+- **GIVEN** a completed `bash` record with status `ok` and a valid `terminal` payload, at normal density
+- **THEN** the entry SHALL be collapsed behind its header and one-line summary
+- **AND** it SHALL open to `TerminalResultView` only when the user activates it
+
+#### Scenario: Diff stays collapsed
+
+- **GIVEN** a completed `file-edit` record with a valid `code_diff` payload, at normal density
+- **THEN** the entry SHALL be collapsed until the user activates it
+
+#### Scenario: Non-zero bash exit opens expanded
+
+- **GIVEN** a `bash` record with status `error` and terminal data with `exit_code = 1`, at normal density
+- **THEN** the entry SHALL be open and `TerminalResultView` SHALL render with a failure badge
 
 #### Scenario: Error with valid data
 
@@ -178,15 +207,16 @@ Every renderer SHALL have widgetbook use-cases for a valid payload, an invalid p
 
 ### Requirement: The chat screen installs the registry through the resolver scope
 
-`ChatScreen` SHALL construct the registry from `defaultToolResultRenderers()` once and SHALL install `ToolResultRendererScope(resolve: registry.build)` above the message list. It SHALL NOT pass the registry to `ToolCallBody` by constructor. Tool calls inside a `SubagentBody`'s inner timeline SHALL resolve through the same scope. Link handling SHALL come from the `ChatMarkdownScope` that `ChatScreen` already installs with `MarkdownLinkHandler`. No renderer SHALL read Riverpod state.
+`ChatScreen` SHALL construct the registry from `defaultToolResultRenderers()` once and SHALL install `ToolResultRendererScope(resolve: registry.build)` above the message list. It SHALL NOT pass the registry to `ToolCallBody` by constructor. Tool calls inside a `SubagentBody`'s inner timeline SHALL NOT resolve through the scope; they stay compact rows. Link handling SHALL come from the `ChatMarkdownScope` that `ChatScreen` already installs with `MarkdownLinkHandler`. No renderer SHALL read Riverpod state.
 
 #### Scenario: Opening a source link from the chat
 
 - **WHEN** the user activates a source row in a live chat
 - **THEN** the link SHALL open through `MarkdownLinkHandler`, the same way as a link in message markdown
 
-#### Scenario: Subagent tool call uses a rich view
+#### Scenario: Subagent tool call stays a compact row
 
-- **GIVEN** a subagent whose inner `bash` call carries a valid `terminal` payload
+- **GIVEN** a subagent whose inner `bash` call has a result
 - **WHEN** the subagent entry is expanded in the chat
-- **THEN** the inner tool call SHALL render `TerminalResultView`
+- **THEN** the inner tool call SHALL render as a compact row
+- **AND** no `TerminalResultView` or other result view SHALL render inside the subagent timeline

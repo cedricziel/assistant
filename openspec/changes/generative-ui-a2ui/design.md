@@ -58,7 +58,7 @@ The vendored catalog (with `common_types.json` inlined) lives in `crates/a2ui/ca
 `render-surface` has two modes:
 
 - **Create** (no `surface_id`): `title`, `fallback_text` and `components` are required; `data_model`, `send_data_model` (default true) and, once enabled, `wait_for_action` (default false) are optional. The server builds `createSurface`.
-- **Update** (`surface_id` set): at least one of `components` (upserted by id → `updateComponents`) or `data_updates` (`[{path: JSON Pointer, value}]`, `value: null` deletes → one `updateDataModel` per entry). `title` and `fallback_text` are optional and replace the stored values. The surface must be `active` and in the same conversation.
+- **Update** (`surface_id` set): at least one of `components` (upserted by id → `updateComponents`) or `data_updates` (`[{path: JSON Pointer, value}]`, `value: null` deletes → one `updateDataModel` per entry). `title` and `fallback_text` are optional and replace the stored values. The surface must be `active`, in the same conversation and created in the current turn (D12); an earlier-turn surface is already closed, so the model creates a new one.
 
 All validation limits (D3) apply to the **merged** surface after an update. Every successful call, create or update, counts toward the 5-per-turn cap.
 
@@ -111,11 +111,11 @@ A status change (`active → submitted`) re-emits `surface_update` with empty `m
 
 ### D6. Persistence: `ui_surfaces` in space.db
 
-Columns: `id` (uuid), `conversation_id` (FK, cascade), `turn`, `anchor_message_id` (the tool-call message), `anchor_call_index`, `tool_call_id?`, `title`, `fallback_text`, `catalog_id`, `protocol_version`, `components_json`, `data_model_json`, `send_data_model`, `status` (`active|submitted`), `action_json?`, `action_message_id?`, `created_at`, `updated_at`. `SurfaceStore` trait with `InMemorySurfaceStore` and `SqliteSurfaceStore` (ADR-0009). Migration `NNN_ui_surfaces.sql`; the number comes from the pre-allocated migration plan shared by the sibling changes and is registered in every migration list in `crates/storage/src/lib.rs`.
+Columns: `id` (uuid), `conversation_id` (FK, cascade), `turn`, `anchor_message_id` (the tool-call message), `anchor_call_index`, `tool_call_id?`, `title`, `fallback_text`, `catalog_id`, `protocol_version`, `components_json`, `data_model_json`, `send_data_model`, `status` (`active|submitted`), `action_json?`, `action_message_id?`, `created_at`, `updated_at`. `SurfaceStore` trait with `InMemorySurfaceStore` and `SqliteSurfaceStore` (ADR-0009). Migration `049_ui_surfaces.sql`; `049` is the number pre-allocated to this change in the cross-change stack plan, registered in every migration list in `crates/storage/src/lib.rs`. `status` stays `active|submitted`: closure by a later user turn is derived (D12), so no further migration is needed.
 
 `persist_tool_calls` (`dispatch.rs:88`) returns the tool-call message id so the hook can anchor the surface to `(anchor_message_id, anchor_call_index)`.
 
-`ConversationDetail` gains `surfaces: Vec<SurfaceSummary>` (attachments-map preload pattern). Each carries a synthesized single `createSurface` with the current components and data model, the anchor fields, `tool_call_id`, `status`, `submitted_action` and `action_message_id`. Surfaces are filtered to those whose `anchor_message_id` is among the returned messages, so once message-branching returns only the active path, surfaces of abandoned branches drop out with no extra code.
+`ConversationDetail` gains `surfaces: Vec<SurfaceSummary>` (attachments-map preload pattern). Each carries a synthesized single `createSurface` with the current components and data model, the anchor fields, `tool_call_id`, `status`, `answerable` (D12), `submitted_action` and `action_message_id`. Surfaces are filtered to those whose `anchor_message_id` is among the returned messages, so once message-branching returns only the active path, surfaces of abandoned branches drop out with no extra code.
 
 **Matching to chips** is exact, never by turn order:
 
@@ -130,12 +130,13 @@ _Alternative_: rebuild from `tool_calls_json` arguments. Rejected, because argum
 
 - No code: only catalog components and functions.
 - URLs: `Image.url` must be `https:` or a same-origin `/api/attachments/{id}` owned by the same conversation. `openUrl` targets must be `https:` or `mailto:`. Literal and initial bound values are checked on the server (D3). Values that change later through user input are checked by the client's `UrlPolicy` on resolution.
-- `[ui] image_hosts` (new `UiConfig` section on `OrgConfig`, `crates/core/src/types/agent.rs:45`): when set, `https:` image hosts must match the list. Default: unset (any `https:` host). See open question 1.
+- `[ui] image_hosts` (new `UiConfig` section on `OrgConfig`, `crates/core/src/types/agent.rs:45`): when set, `https:` image hosts must match the list. **Decision: the default is unset, which allows any `https:` host.** Rationale: surfaces are for showing the user things the model found (charts, product shots, maps), and a default allowlist would break most of that for every org. Accepted trade-off: an arbitrary host can see the user's IP and timing when the image loads (a beacon). Orgs that care set `image_hosts`; the docs say so (PR 21). The server enforces the list, so the client does not need it.
+- `[ui] link_hosts` (same section): hosts whose `openUrl` targets open without a prompt. Default: empty, so every `openUrl` asks (D11).
 - Attachment images: the client overrides the catalog's `Image` with an app implementation that loads `/api/attachments/{id}` through the authenticated HTTP client (bearer + space headers, as `message_attachments.dart:196` does) and applies `UrlPolicy`. The stock Image has no header hook.
-- `openUrl` goes through the app's `url_launcher` callback, only from a user gesture.
+- `openUrl` goes through the app's `url_launcher` callback, only from a user gesture, and only after the confirmation in D11 unless the host is in `[ui] link_hosts`.
 - Regex evaluation: the server rejects backtracking-prone patterns (D3). The client also caps the input it passes to `regex` at 1,000 characters and treats longer input as failing the check.
 - `Icon.svgPath` is path data only, capped at 4 KiB.
-- Actions are accepted only from callers that pass `caller_can_post` (`messages.rs:44`), for `active` surfaces of that conversation, with an action `name` declared by a Button in that surface.
+- Actions are accepted only from callers that pass `caller_can_post` (`messages.rs:44`), for `active`, answerable surfaces of that conversation (D12), with an action `name` declared by a Button in that surface.
 
 ### D8. Two action routes, one surface state machine
 
@@ -144,7 +145,10 @@ active ──in-turn interaction resolved─────────────
 active ──post-turn surface_action (no turn in flight)▶ submitted
 submitted ──post-turn turn fails to start───────────▶ active (rolled back)
 active ──interaction expired / cancelled / declined─▶ active
+active ──a later user message on the active path────▶ closed (derived, not stored; read-only)
 ```
+
+`closed` is the read-side form of `active` plus `answerable = false` (D12). It has no stored status and no transition back.
 
 **In-turn** (`wait_for_action: true`):
 
@@ -156,24 +160,25 @@ active ──interaction expired / cancelled / declined─▶ active
    - `renders_card = false`: the client shows no interaction card; the `SurfaceFrame` is the card and enters `EntryState.awaitingInput`.
    - `progress_label`: "Waiting for your input"; `push_copy`: "Your input is needed".
    - Expiry uses the same `[permissions] interaction_timeout_secs`.
-4. Outcomes: `resolved` → `mark_submitted`, status `surface_update`, observation. If `mark_submitted` loses (the surface was submitted another way in a race), the observation says the user already submitted it in a new message. `decline` (generic) → observation "the user dismissed the form"; surface stays `active`. `expired` → "the user has not answered yet"; stays `active`. `cancelled` (turn cancel) → stays `active`.
+4. Outcomes: `resolved` → `mark_submitted`, status `surface_update`, observation. If `mark_submitted` loses (the surface was submitted another way in a race), the observation says the user already submitted it in a new message. `decline` (generic) → observation "the user dismissed the form"; surface stays `active`. `expired` → "the user has not answered yet"; stays `active`. `cancelled` (turn cancel, or the auto-cancel that message-branching applies to every pending interaction when the user starts an edit or regenerate) → stays `active`; after a branch the surface's anchor is off the active path, so it is no longer returned.
 5. A respond that gets `410` (expired/cancelled) makes the client drop the interaction and fall back to the post-turn route.
 
 **Post-turn**: `SendMessageRequest` gains `surface_action: Option<SurfaceActionRequest>` (`surface_id`, `name`, `source_component_id`, `context`, `data_model?`). With it, `message` must be empty. The handler, in order:
 
-1. Validate ownership, `active`, declared name; `context` + `data_model` serialized ≤ 64 KiB (else 413).
-2. If `conversation_turn_in_flight` (message-branching D7) → 409. A turn waiting on this surface's interaction is in flight, so this one guard also closes the race between the two routes; the client queues the action like any message sent during a turn (`chat-message-queue`).
-3. `mark_submitted(surface_id, action, action_message_id = pre-assigned user_message_id)`: one compare-and-set (`status = 'active'`) that stores the action and the link. A loser gets 409.
-4. Persist the user message with **server-built** visible content `Submitted “<title>”`, and start the turn through the runner with a lead frame: a status `surface_update` written right after `run_started`.
-5. If the turn fails to start (submit error before `run_started`), `SurfaceStore::reopen(surface_id, action_message_id)` rolls the status back to `active` (CAS on the same link) and the handler returns the error. The surface stays answerable.
+1. Validate ownership, `active`, declared name (else 400). If the surface is not answerable (a user message follows its anchor on the active path, D12) → 410.
+2. `context` + `data_model` serialized ≤ 64 KiB (else 413).
+3. If `conversation_turn_in_flight` (message-branching D7) → 409. A turn waiting on this surface's interaction is in flight, so this one guard also closes the race between the two routes; the client queues the action like any message sent during a turn (`chat-message-queue`).
+4. `mark_submitted(surface_id, action, action_message_id = pre-assigned user_message_id)`: one compare-and-set (`status = 'active'`) that stores the action and the link. A loser gets 409.
+5. Persist the user message with **server-built** visible content `Submitted “<title>”`, and start the turn through the runner with a lead frame: a status `surface_update` written right after `run_started`.
+6. If the turn fails to start (submit error before `run_started`), `SurfaceStore::reopen(surface_id, action_message_id)` rolls the status back to `active` (CAS on the same link) and the handler returns the error. The surface stays answerable.
 
-**What the LLM sees**: `prepare_history` builds a `SurfaceActionMap` (`message_id → block`) from `ui_surfaces` rows with an `action_message_id`, the same way `build_attachment_map` works (`mod.rs:1586`). `messages_to_chat_history` prepends `[surface_action surface_id=… name=…]` plus the context and data model JSON to those user messages, including the current one. The stored content stays the visible text, and every later rebuild re-synthesizes the block. The model-authored `userMessage` is not shown as user speech; the client renders the bubble with a "Submitted via form" marker using `SurfaceSummary.action_message_id`.
+**What the LLM sees**: `prepare_history` builds a `SurfaceActionMap` (`message_id → block`) from `ui_surfaces` rows with an `action_message_id`, the same way `build_attachment_map` works (`mod.rs:1586`). `messages_to_chat_history` prepends `[surface_action surface_id=… name=…]` plus the context and data model JSON to those user messages, including the current one. The stored content stays the visible text, and every later rebuild re-synthesizes the block. **Decision: the bubble reads `Submitted “<title>”` with a "via form" marker.** The model-authored `userMessage` is never shown as user speech: it is text the user did not write, and showing it would put words in their mouth. The client renders the marker using `SurfaceSummary.action_message_id`.
 
 _Alternatives_ for storage: (a) store the block in `messages.content` and strip it in the DTO and client. Rejected: every consumer must strip it, and it puts surface metadata into the contended `messages` lane. (b) A new `messages` column. Rejected for the same lane reason.
 
 _Alternative_ for the route race: let a post-turn action resolve a pending interaction. Rejected: it would need a cross-store transaction between `ui_surfaces` and `interactions`; the in-flight guard already serializes the routes, and the client routes in-turn answers to the respond endpoint anyway.
 
-Surfaces are **single-shot**: once submitted they are read-only and show the submitted values.
+Surfaces are **single-shot**: once submitted they are read-only and show the submitted values. Message-branching's plain-send rule (409 during an edit or regenerate) is unchanged for the post-turn route.
 
 ### D9. Where the renderer lives
 
@@ -187,7 +192,34 @@ Surfaces are **single-shot**: once submitted they are read-only and show the sub
 
 v1.0 has no surface theme, so styling comes from the host. `a2ui_flutter` renders framework-Material widgets; the app's `MaterialUiCompatibilityBridge` publishes the framework `ThemeData` (`legacy_theme.dart`), so components inherit `assistantLightTheme()`/`assistantDarkTheme()`. `A2uiSurfaceView` wraps the surface in a `Theme` override for `AssistantRadius`/`AssistantSpacing`. Goldens cover light and dark.
 
-**Accepted deviation**: the repo's adaptive-widgets rule (`openspec/config.yaml`, Cupertino on iOS/macOS) is not applied inside surfaces. Buttons, fields and the `DateTimeInput` picker are Material on every platform. Overriding them would mean re-implementing most of the catalog and tracking a 0.x package's internals. The surface chrome (`SurfaceFrame`) follows the app rules. See open question 3.
+**Decision, accepted for v1**: the repo's adaptive-widgets rule (`openspec/config.yaml`, Cupertino on iOS/macOS) is not applied inside surfaces. Buttons, fields and the `DateTimeInput` picker are Material on every platform. Overriding them would mean re-implementing most of the catalog and tracking a 0.x package's internals. The surface chrome (`SurfaceFrame`) and the link-confirmation dialog (D11) follow the app rules. A widget test pins the Material widget types under iOS and macOS platform overrides so a later switch is deliberate.
+
+### D11. `openUrl` asks before leaving the app
+
+**Decision**: an `openUrl` target outside the org allowlist shows its destination and asks before opening.
+
+- The allowlist is `[ui] link_hosts` in `org.toml` (D7), exact hostnames, case-insensitive. It is empty by default, so by default every link asks. A host in the list opens without a prompt.
+- The prompt shows the full URL with the host emphasised, and Open and Cancel. It appears only after the user gesture that triggered `openUrl`, and Open is a second gesture. Cancel launches nothing.
+- `mailto:` targets always ask and show the address, because there is no host to trust.
+- The client learns the list from `GET /api/capabilities` as `ui.link_hosts` (the endpoint is already space-scoped and returns `ServerCapabilities`; PR 7b adds one additive object). A failed or missing capabilities call is treated as an empty list, so the failure mode is more prompts, never fewer.
+- The dialog is app chrome and uses the adaptive dialog (Cupertino on iOS and macOS).
+- Links that violate the URL policy (`javascript:`, `data:`, `http:`) never reach the prompt; they are disabled (D7).
+
+_Alternatives_: never prompt (rejected: a model-authored label can hide the destination); prompt once per host and remember (rejected for v1: needs per-user storage, and the org allowlist covers the trusted case).
+
+### D12. A surface is answerable until the next user turn
+
+**Decision**: a surface can be answered while no user message follows its anchor message on the active path. After that it is read-only and labelled "Closed".
+
+- **Derived, not stored.** `ConversationDetail.surfaces[].answerable` is computed by one helper, `surface_answerable(path_messages, surface)`: `status == active` and no user message after `anchor_message_id` on the returned path. The post-turn route uses the same helper and answers `410` for a closed surface (distinct from `409`, which means submitted or a turn in flight). No migration and no background job.
+- **Why the next user turn.** The model's next reply has already been written against the state of the conversation after that message; an answer to an older form would arrive out of context. It also keeps one live form per moment, which matches the single-shot model (D8).
+- **In-turn waits** are unaffected: the turn is in flight, so no later user message can exist (a message typed meanwhile is queued, and a surface answer that races it gets `409` from the in-flight guard).
+- **After an expired or declined wait** the surface stays `active` and answerable post-turn until the next user message.
+- **The model** can update only a surface created in the current turn (D2); once the user speaks again, the surface is closed to the model too.
+- **Branching**: edit and regenerate move the active path, so the surface of an abandoned branch leaves `surfaces` (D6) and a closed-by-a-later-message surface stays closed. No extra rule.
+- **Client**: the server value wins on load. Live, the client flips every `active` surface to closed in place when it sends a user message (send, edit, regenerate or a queued send), and on a `410` from the post-turn route.
+
+_Alternative_: a stored `closed` status written when the next turn starts. Rejected: a write on the hot send path, a rollback case if the send fails, and it would put a second writer on `ui_surfaces`.
 
 ## Risks
 
@@ -196,11 +228,6 @@ v1.0 has no surface theme, so styling comes from the host. `a2ui_flutter` render
 - **Prompt tokens**: the inlined component schemas are large. Trimmed catalog, no `instructions`, a spec-size test (budget 6 KiB).
 - **Strict tool schemas** (OpenAI strict mode) reject `oneOf`. `params_schema` keeps `components` as `array<object>` with a `component` enum; full validation is server-side.
 - **Sibling dependencies**: gating needs tool-approval PR 6; the hook lands on tool-result-renderers' `finalize_tool`; the post-turn route needs message-branching PR 4/5/7; the in-turn route needs tool-approval PR 7/8. Server PRs that need none of these (types, validation, storage, event) start immediately.
-- **Contended files**: `messages.rs` runner, `stream_event.dart`/`api_client.dart` sealed events, `conversations.rs` detail. This change edits the runner only after message-branching PR 5, adds one `StreamEvent` subclass and updates every exhaustive switch over it, and adds `surfaces` as an additive preload.
-
-## Open questions
-
-1. Image hosts: allow any `https:` host by default, or only own attachments plus the org allowlist? (Arbitrary hosts let a surface beacon to third parties.)
-2. Should `openUrl` to a host outside the allowlist ask for confirmation showing the destination?
-3. Is Material-styled surface content on iOS/macOS acceptable (D10), or must surfaces be Cupertino there before this ships?
-4. The submitted-action bubble reads `Submitted “<title>”` with a "via form" marker. Should it instead show the model-authored `userMessage` (friendlier, but text the user did not write)?
+- **Link prompt fatigue.** With an empty default allowlist every link asks. Orgs add trusted hosts to `[ui] link_hosts`; the prompt is the safer default and cheap to loosen.
+- **Image beacons.** Any `https:` image host is allowed by default (D7). Documented; `[ui] image_hosts` narrows it.
+- **Contended files**: `messages.rs` runner, `stream_event.dart`/`api_client.dart` sealed events, `conversations.rs` detail, `ServerCapabilities`. This change edits the runner only after message-branching PR 5, adds one `StreamEvent` subclass and updates every exhaustive switch over it, and adds `surfaces` as an additive preload.

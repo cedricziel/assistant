@@ -42,7 +42,7 @@ While a stop is in progress, the client SHALL expose `ChatState.isStopping == tr
 
 ### Requirement: Cancelled terminal frame keeps the partial reply as a stopped message
 
-When the client receives `agent_error` with `reason: "cancelled"` on the live, voice or replay stream, it SHALL turn the streaming placeholder into an assistant message whose content is the frame's `partial_content`, falling back to the client's accumulated streaming content when `partial_content` is empty. The message SHALL have status `MessageStatus.stopped`. Its id SHALL be the frame's `message_id` when present. The originating user message SHALL be marked `ok`. Tool calls of that turn still `pending` SHALL become `ToolCallStatus.cancelled`, and active timeline entries SHALL be completed. No error banner SHALL be shown. The same reconciliation SHALL apply whoever triggered the cancel.
+When the client receives `agent_error` with `reason: "cancelled"` on the live, voice or replay stream, it SHALL turn the streaming placeholder into an assistant message whose content is the frame's `partial_content`, falling back to the client's accumulated streaming content when `partial_content` is empty. When the user stopped before any text streamed, the server persists the placeholder "_Stopped._" and sends it as `partial_content`, so the client shows it like any other partial. The message SHALL have status `MessageStatus.stopped`. Its id SHALL be the frame's `message_id` when present. The originating user message SHALL be marked `ok`. Tool calls of that turn still `pending` SHALL become `ToolCallStatus.cancelled`, and active timeline entries SHALL be completed. No error banner SHALL be shown. The same reconciliation SHALL apply whoever triggered the cancel.
 
 #### Scenario: Partial text survives Stop
 
@@ -51,9 +51,15 @@ When the client receives `agent_error` with `reason: "cancelled"` on the live, v
 - **THEN** the conversation SHALL show an assistant message with id `M`, content "The capital of France" and status `stopped`
 - **THEN** the message's action row SHALL show a "Stopped" label in place of the Stop action
 
-#### Scenario: Nothing streamed yet
+#### Scenario: Stopped before any text
 
-- **WHEN** the cancelled frame has empty `partial_content` and no tokens were streamed
+- **WHEN** no tokens were streamed and the cancelled frame carries `partial_content: "_Stopped._"` and `message_id: "M"`
+- **THEN** the conversation SHALL show an assistant message with id `M`, content "_Stopped._" and status `stopped`
+- **THEN** tool-call and thinking entries already shown for the turn SHALL remain, with pending tool calls marked `cancelled`
+
+#### Scenario: Nothing streamed and nothing persisted
+
+- **WHEN** the cancelled frame has empty `partial_content`, no `message_id` and no tokens were streamed (the server could not persist the placeholder)
 - **THEN** the streaming placeholder SHALL be removed and no assistant message SHALL be added
 - **THEN** tool-call and thinking entries already shown for the turn SHALL remain, with pending tool calls marked `cancelled`
 
@@ -66,7 +72,7 @@ When the client receives `agent_error` with `reason: "cancelled"` on the live, v
 #### Scenario: Turn cancelled before it started
 
 - **WHEN** the client receives `agent_error {"reason":"cancelled","user_message_persisted":false,...}`
-- **THEN** the placeholder SHALL be removed
+- **THEN** the placeholder SHALL be removed and no stopped assistant message SHALL be shown
 - **THEN** the user message SHALL be marked `failed` with Retry available, and `ChatState.error` SHALL be null
 
 #### Scenario: Partial reply that the server could not persist
@@ -84,6 +90,26 @@ When the client receives `agent_error` with `reason: "cancelled"` on the live, v
 
 - **WHEN** the client receives `agent_error` with `reason: "error"`, an unknown reason, or a non-JSON body
 - **THEN** the placeholder SHALL be removed, the user message SHALL be marked `failed`, and the frame's message SHALL be surfaced as the chat error
+
+### Requirement: A stopped reply still shows Stopped after reload
+
+When the client loads conversation history, it SHALL map a message whose `finish_reason` is `"cancelled"` to `MessageStatus.stopped`. Such a message SHALL render the same "Stopped" label and normal Copy action as in the live session. Messages without a `finish_reason` SHALL map as before.
+
+#### Scenario: Reload keeps the Stopped label
+
+- **WHEN** a reply was stopped and the user reloads the conversation
+- **AND** the history contains that assistant message with `finish_reason: "cancelled"`
+- **THEN** the message SHALL have status `stopped` and show the "Stopped" label
+
+#### Scenario: Stopped before any text, after reload
+
+- **WHEN** the user stopped before any text streamed and reloads the conversation
+- **THEN** the history SHALL show an assistant message "_Stopped._" with status `stopped` after the user message
+
+#### Scenario: Ordinary replies are unchanged
+
+- **WHEN** the history contains an assistant message without `finish_reason`
+- **THEN** it SHALL map to status `ok` and show no "Stopped" label
 
 ### Requirement: The finish-vs-stop race resolves to whichever terminal frame the server sent
 
