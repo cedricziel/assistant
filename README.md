@@ -7,7 +7,7 @@ A minimalist, self-improving personal AI assistant written in Rust.
 
 - **Local-first** — runs entirely on your machine via [Ollama](https://ollama.com)
 - **Agent Skills native** — skills are portable `SKILL.md` directories following the [agentskills.io](https://agentskills.io) open standard
-- **Self-improving** — proposes SKILL.md refinements for human review (currently inactive, see [Self-improvement](#self-improvement))
+- **Self-improving** — proposes SKILL.md refinements for human review (see [Self-improvement](#self-improvement))
 - **MCP server** — exposes skills via the [Model Context Protocol](https://modelcontextprotocol.io) so Claude Code and other tools can discover and invoke them
 - **Multi-interface** — single `assistant` binary runs orchestrator, workers, web UI, MCP, and chat interfaces via subcommands
 - **Ambient skills** — active interfaces register their capabilities (e.g. `slack-post`) into the skill executor so the Persona can use them from any context
@@ -168,19 +168,13 @@ Or via the MCP `install_skill` tool when connecting from Claude Code.
 
 ## Self-improvement
 
-> **Currently inactive.** Skill execution statistics used to be read from the
-> local trace store, which was removed when telemetry became OTLP-only
-> ([ADR-0012](docs/adr/adr-0012-otlp-only-telemetry.md)). `self-analyze`
-> reports that no statistics are available and the improvement task is not
-> scheduled until a replacement lands.
-
-The intended flow is below. When you run:
+Enable it with `[learning] enabled = true`. The `skill-self-improve` scheduled task then reviews skills periodically, and you can trigger it by hand. When you run:
 
 ```
 assistant> Analyse the web-fetch skill and suggest improvements
 ```
 
-The assistant invokes `self-analyze`, queries the recent execution stats, sends them along with the current SKILL.md to Ollama, and stores the proposed improvement in the database. Review and apply it:
+The assistant invokes `self-analyze`, reads the skill's recent execution stats (calls, errors, duration, common errors), sends them along with the current SKILL.md to Ollama, and stores the proposed improvement in the database. Review and apply it:
 
 ```
 assistant> /review

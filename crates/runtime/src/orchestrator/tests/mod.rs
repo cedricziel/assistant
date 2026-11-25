@@ -216,6 +216,7 @@ impl ToolHandler for MockExtTool {
     }
 }
 
+mod active_skill;
 mod bus_worker;
 mod dispatch;
 mod end_turn;
@@ -225,5 +226,6 @@ mod model_override;
 mod multimodal;
 mod permission;
 mod sanitize;
+mod skill_executions;
 mod streaming;
 mod subagent;
