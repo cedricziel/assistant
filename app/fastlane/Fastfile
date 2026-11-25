@@ -2,9 +2,11 @@
 #
 # Usage:
 #   bundle exec fastlane ios beta             — build and upload to TestFlight
-#   bundle exec fastlane ios release          — build and submit to App Store
+#   bundle exec fastlane ios submit           — send a version's TestFlight build to App Review
 #   bundle exec fastlane mac provision        — sync macOS development profiles
 #   bundle exec fastlane mac sign_and_notarize — sign + notarize the macOS .app
+
+require_relative "lib/app_store_release"
 
 default_platform(:ios)
 
@@ -12,6 +14,9 @@ IOS_REQUIRED_ENV_VARS = %w[
   APP_STORE_CONNECT_API_KEY_KEY_ID
   APP_STORE_CONNECT_API_KEY_ISSUER_ID
   APP_STORE_CONNECT_API_KEY_KEY
+].freeze
+
+MATCH_REQUIRED_ENV_VARS = %w[
   MATCH_GIT_URL
   MATCH_PASSWORD
 ].freeze
@@ -40,6 +45,9 @@ platform :ios do
   end
 
   private_lane :build_ios do
+    missing = MATCH_REQUIRED_ENV_VARS.reject { |v| ENV[v] && !ENV[v].empty? }
+    UI.user_error!("Missing required environment variables:\n  #{missing.join("\n  ")}") unless missing.empty?
+
     # Sync certificates and provisioning profiles (readonly in CI).
     match(type: "appstore")
 
@@ -81,26 +89,36 @@ platform :ios do
     gym
   end
 
+  desc "Build and upload to TestFlight (internal testers)"
+  desc "  RELEASE_NOTES_FILE  plain text for \"What to Test\""
   lane :beta do
     build_ios
-
-    # Upload to TestFlight.
-    pilot(
-      skip_waiting_for_build_processing: true
-    )
+    upload_to_testflight(**AppStoreRelease.testflight_options(AppStoreRelease.release_notes(ENV["RELEASE_NOTES_FILE"])))
   end
 
-  lane :release do
-    build_ios
+  desc "Send a version's TestFlight build to App Review; nothing is rebuilt"
+  desc "  version:X.Y.Z  the version to submit (default: pubspec.yaml)"
+  desc "  dry_run:true   update the version and its notes but do not submit"
+  desc "  RELEASE_NOTES_FILE  plain text for \"What's New\""
+  lane :submit do |options|
+    version = options[:version].to_s.strip
+    version = AppStoreRelease.pubspec_version(File.read(File.expand_path("../pubspec.yaml", __dir__))) if version.empty?
 
-    # Submit to App Store review.
-    deliver(
-      submit_for_review:        true,
-      automatic_release:        false,
-      force:                    true,
-      skip_screenshots:         true,
-      skip_metadata:            true
-    )
+    app = Spaceship::ConnectAPI::App.find(AppStoreRelease::APP_IDENTIFIER)
+    UI.user_error!("No App Store Connect app record for #{AppStoreRelease::APP_IDENTIFIER}") unless app
+    states = app.get_app_store_versions(filter: { platform: "IOS", versionString: version })
+                .map { |v| v.app_store_state || v.app_version_state }
+    if AppStoreRelease.already_submitted?(states)
+      UI.important("#{version} is already in review or released; leaving it alone")
+      next
+    end
+
+    upload_to_app_store(**AppStoreRelease.submit_options(
+      version: version,
+      dry_run: options[:dry_run].to_s == "true",
+      notes: AppStoreRelease.release_notes(ENV["RELEASE_NOTES_FILE"]),
+      review: AppStoreRelease.app_review_information(ENV)
+    ))
   end
 end
 

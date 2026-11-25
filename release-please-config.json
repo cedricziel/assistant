@@ -8,6 +8,8 @@
       "component": "assistant",
       "release-type": "rust",
       "include-component-in-tag": false,
+      "draft": true,
+      "prerelease": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {

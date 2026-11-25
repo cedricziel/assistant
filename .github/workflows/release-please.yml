@@ -1,5 +1,16 @@
 name: Release Please
 
+# Merging the release PR creates a draft release, which the next step publishes
+# as a `vX.Y.Z` pre-release. release-please marks a release as a pre-release
+# only below 1.0.0, so the publish step sets it for every version, and its
+# GITHUB_TOKEN fires no release event that could start app-store.yml. This
+# workflow then builds the release: binaries, the macOS app, Docker images, OS
+# packages, and an iOS build uploaded to TestFlight with the release notes as
+# "What to Test".
+#
+# Promoting the pre-release to a full release in the GitHub UI sends its
+# TestFlight build to App Review (app-store.yml).
+
 on:
   push:
     branches: [main]
@@ -24,6 +35,12 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Publish draft as pre-release
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ steps.release.outputs.tag_name }}" --repo "${{ github.repository }}" --draft=false --prerelease
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: ${{ steps.release.outputs.release_created == 'true' }}
@@ -395,6 +412,18 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
           working-directory: app
+
+      - name: Fetch release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          raw="$RUNNER_TEMP/release_notes_raw.md"
+          file="$RUNNER_TEMP/release_notes.txt"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$raw" || : > "$raw"
+          # Notes must never block an upload: without them TestFlight shows none.
+          python3 ../scripts/plain_release_notes.py < "$raw" > "$file" || : > "$file"
+          echo "RELEASE_NOTES_FILE=$file" >> "$GITHUB_ENV"
 
       - name: Run Fastlane beta lane
         run: bundle exec fastlane ios beta
