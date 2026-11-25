@@ -1616,11 +1616,17 @@ mod tests {
         // Clone the broadcaster before state is moved into `app()`.
         let broadcaster = state.run_broadcaster.clone();
 
-        // Spawn a task that delivers live events after a brief delay so the
-        // HTTP handler has time to subscribe before events are sent.
+        // Spawn a task that delivers live events once the HTTP handler has
+        // subscribed; broadcast drops events sent before any receiver exists.
         let run_id_for_task = run_id;
         tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
+            tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+                while broadcast_tx.receiver_count() == 0 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("handler never subscribed to the run broadcaster");
             let _ = broadcast_tx.send(assistant_storage::LiveEvent {
                 sequence: 1,
                 event_type: "token".to_string(),
