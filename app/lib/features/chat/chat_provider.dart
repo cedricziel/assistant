@@ -103,10 +103,173 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     state = AsyncData(chatState.copyWith(messages: msgs));
   }
 
-  /// Handle status updates from a subagent (currently just triggers rebuild).
-  void _onSubagentStatusEvent(ChatState chatState, SubagentStatusEvent event) {
-    // Status events from subagents don't need special handling yet;
-    // the UI will reflect them via the subagent timeline entry.
+  /// Advance the replay cursor past [event].
+  void _advanceSeq(StreamEvent event) {
+    _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
+  }
+
+  /// Apply [event] when it is a mid-turn event shared by the text, voice and
+  /// replay paths, and report whether it was handled.
+  ///
+  /// Run start, transcript and terminal events differ per path and stay with
+  /// the callers. Token text is also pushed to [tokenSink] for incremental
+  /// rendering when the caller has one.
+  bool _applyTurnEvent(
+    ChatState chatState,
+    StreamEvent event, {
+    StreamController<String>? tokenSink,
+  }) {
+    switch (event) {
+      case TokenEvent():
+        tokenSink?.add(event.token);
+        _onTokenEvent(chatState, event);
+      case StatusEvent():
+        _onStatusEvent(chatState, event);
+        _bumpTurnStatus(TurnEventKind.status);
+      case ToolResultEvent():
+        _onToolResultEvent(chatState, event);
+        _bumpTurnStatus(TurnEventKind.toolResult, toolName: event.toolName);
+      case ThinkingEvent():
+        _onThinkingEvent(chatState, event);
+        _bumpTurnStatus(TurnEventKind.thinking);
+      case SubagentStartedEvent():
+        _reduceMessages(
+          chatState,
+          (msgs) => applySubagentStartedEvent(msgs, event),
+        );
+        _bumpTurnStatus(TurnEventKind.subagentStarted, toolName: event.task);
+      case SubagentCompletedEvent():
+        _reduceMessages(
+          chatState,
+          (msgs) => applySubagentCompletedEvent(msgs, event),
+        );
+        _bumpTurnStatus(TurnEventKind.subagentCompleted);
+      case SubagentTokenEvent():
+        _reduceMessages(
+          chatState,
+          (msgs) => applySubagentTokenEvent(msgs, event),
+        );
+      case SubagentThinkingEvent():
+        _reduceMessages(
+          chatState,
+          (msgs) => applySubagentThinkingEvent(msgs, event),
+        );
+      case SubagentToolResultEvent():
+        _reduceMessages(
+          chatState,
+          (msgs) => applySubagentToolResultEvent(msgs, event),
+        );
+      case SubagentStatusEvent():
+        // Subagent status lines are not rendered; the subagent timeline entry
+        // already reflects progress through its token and tool-result events.
+        break;
+      case AudioReadyEvent():
+        _onAudioReadyEvent(chatState, event);
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  /// Append a streamed answer token to the assistant placeholder.
+  void _onTokenEvent(ChatState chatState, TokenEvent event) {
+    final newContent = chatState.streamingContent + event.token;
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    // On first token, mark all timeline entries as stale (answer is
+    // streaming — collapse previous thinking/tool/subagent entries).
+    if (chatState.streamingContent.isEmpty) {
+      markTimelineEntriesStale(msgs);
+    }
+    final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
+    if (idx != -1) {
+      msgs[idx].content = newContent;
+    }
+    state = AsyncData(
+      chatState.copyWith(
+        messages: msgs,
+        streamingContent: newContent,
+        clearStatusMessage: true,
+        // Resuming text generation — clear any active tool name.
+        currentTurnStatus: chatState.currentTurnStatus?.copyWith(
+          lastEventKind: TurnEventKind.token,
+          lastEventAt: DateTime.now(),
+          clearToolName: true,
+        ),
+      ),
+    );
+  }
+
+  /// Replace the streaming placeholder with the final assistant message and
+  /// reset per-turn state, keeping the pending queue.
+  void _finishTurn(
+    ChatState chatState,
+    DoneEvent event, {
+    required String conversationId,
+    required String userMsgId,
+  }) {
+    _closeThinkingController();
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    // Mark thinking entries as complete (no longer streaming).
+    completeStreamingThinkingEntries(msgs);
+    // Mark user message as successfully acknowledged.
+    setMessageStatus(msgs, userMsgId, MessageStatus.ok);
+    // Replace streaming placeholder with final assistant message, preserving
+    // audio id. Tool calls are separate timeline entries.
+    final assistantId =
+        event.messageId ?? 'assistant-${DateTime.now().millisecondsSinceEpoch}';
+    final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
+    if (idx != -1) {
+      final placeholder = msgs[idx];
+      msgs[idx] = ChatMessage(
+        id: assistantId,
+        role: 'assistant',
+        content: event.content,
+        audioId: placeholder.audioId,
+        ttsAvailable: placeholder.ttsAvailable,
+      );
+    }
+    state = AsyncData(
+      ChatState(
+        conversationId: conversationId,
+        messages: msgs,
+        pendingQueue: chatState.pendingQueue,
+      ),
+    );
+  }
+
+  /// Drop the streaming placeholder, mark the user message failed (kept for
+  /// retry) and surface the server-reported error.
+  void _failTurn(
+    ChatState chatState,
+    ErrorEvent event, {
+    required String userMsgId,
+  }) {
+    _closeThinkingController();
+    final msgs = List<ChatMessage>.from(chatState.messages)
+      ..removeWhere((m) => m.id == streamingPlaceholderId);
+    setMessageStatus(msgs, userMsgId, MessageStatus.failed);
+    state = AsyncData(
+      chatState.copyWith(
+        messages: msgs,
+        isSending: false,
+        streamingContent: '',
+        error: event.message,
+        clearCurrentTurnStatus: true,
+      ),
+    );
+  }
+
+  /// Store the synthesized-audio id on the streaming assistant placeholder.
+  void _onAudioReadyEvent(ChatState chatState, AudioReadyEvent event) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
+    if (idx != -1) {
+      msgs[idx] = msgs[idx].copyWith(
+        audioId: event.audioId,
+        ttsAvailable: true,
+      );
+    }
+    state = AsyncData(chatState.copyWith(messages: msgs));
   }
 
   /// Run ID of the most recent (or current) orchestrator run.
@@ -414,59 +577,28 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (_cancelled) break;
         final chatState = state.value ?? const ChatState();
 
-        if (event is RunStartedEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-        } else if (event is TokenEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          final newContent = chatState.streamingContent + event.token;
-          final ms = List<ChatMessage>.from(chatState.messages);
-          if (chatState.streamingContent.isEmpty) {
-            markTimelineEntriesStale(ms);
-          }
-          final idx = ms.indexWhere((m) => m.id == streamingPlaceholderId);
-          if (idx != -1) ms[idx].content = newContent;
-          state = AsyncData(
-            chatState.copyWith(
-              messages: ms,
-              streamingContent: newContent,
-              clearStatusMessage: true,
-            ),
-          );
-        } else if (event is StatusEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          _onStatusEvent(chatState, event);
-        } else if (event is ToolResultEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          _onToolResultEvent(chatState, event);
+        if (_applyTurnEvent(chatState, event)) {
+          _advanceSeq(event);
+        } else if (event is RunStartedEvent) {
+          _advanceSeq(event);
         } else if (event is DoneEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          final ms = List<ChatMessage>.from(chatState.messages);
-          setMessageStatus(ms, userMsgId, MessageStatus.ok);
-          final aIdx = ms.indexWhere((m) => m.id == streamingPlaceholderId);
-          if (aIdx != -1) {
-            ms[aIdx] = ChatMessage(
-              id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
-              role: 'assistant',
-              content: event.content,
-            );
-          }
-          state = AsyncData(
-            ChatState(
-              conversationId: conversationId,
-              messages: ms,
-              pendingQueue: chatState.pendingQueue,
-            ),
+          _advanceSeq(event);
+          _finishTurn(
+            chatState,
+            event,
+            conversationId: conversationId,
+            userMsgId: userMsgId,
           );
           return true;
         } else if (event is AgentErrorEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
+          _advanceSeq(event);
           final ms = List<ChatMessage>.from(chatState.messages)
             ..removeWhere((m) => m.id == streamingPlaceholderId);
           setMessageStatus(ms, userMsgId, MessageStatus.failed);
           state = AsyncData(chatState.copyWith(messages: ms, isSending: false));
           return false;
         } else if (event is ErrorEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
+          _advanceSeq(event);
           return false;
         }
       }
@@ -538,6 +670,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     // Create a broadcast stream controller for token-by-token rendering.
     final tokenController = StreamController<String>.broadcast();
+    _thinkingController = StreamController<String>.broadcast();
 
     // Show a placeholder user message while transcribing.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
@@ -593,6 +726,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         sawProgress = true;
         final chatState = state.value ?? const ChatState();
 
+        if (_applyTurnEvent(chatState, event, tokenSink: tokenController)) {
+          continue;
+        }
         if (event is TranscriptEvent) {
           // Update the user bubble with the actual spoken text.
           final msgs = List<ChatMessage>.from(chatState.messages);
@@ -604,113 +740,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             );
           }
           state = AsyncData(chatState.copyWith(messages: msgs));
-        } else if (event is TokenEvent) {
-          tokenController.add(event.token);
-          final newContent = chatState.streamingContent + event.token;
-          final msgs = List<ChatMessage>.from(chatState.messages);
-          if (chatState.streamingContent.isEmpty) {
-            markTimelineEntriesStale(msgs);
-          }
-          final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
-          if (idx != -1) msgs[idx].content = newContent;
-          state = AsyncData(
-            chatState.copyWith(
-              messages: msgs,
-              streamingContent: newContent,
-              clearStatusMessage: true,
-            ),
-          );
-        } else if (event is StatusEvent) {
-          _onStatusEvent(chatState, event);
-        } else if (event is ToolResultEvent) {
-          _onToolResultEvent(chatState, event);
-        } else if (event is ThinkingEvent) {
-          _onThinkingEvent(chatState, event);
-        } else if (event is SubagentStartedEvent) {
-          _reduceMessages(
-            chatState,
-            (msgs) => applySubagentStartedEvent(msgs, event),
-          );
-        } else if (event is SubagentCompletedEvent) {
-          _reduceMessages(
-            chatState,
-            (msgs) => applySubagentCompletedEvent(msgs, event),
-          );
-        } else if (event is SubagentTokenEvent) {
-          _reduceMessages(
-            chatState,
-            (msgs) => applySubagentTokenEvent(msgs, event),
-          );
-        } else if (event is SubagentThinkingEvent) {
-          _reduceMessages(
-            chatState,
-            (msgs) => applySubagentThinkingEvent(msgs, event),
-          );
-        } else if (event is SubagentToolResultEvent) {
-          _reduceMessages(
-            chatState,
-            (msgs) => applySubagentToolResultEvent(msgs, event),
-          );
-        } else if (event is SubagentStatusEvent) {
-          _onSubagentStatusEvent(chatState, event);
-        } else if (event is AudioReadyEvent) {
-          // Store audioId on the streaming assistant message for auto-play.
-          final msgs = List<ChatMessage>.from(chatState.messages);
-          final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
-          if (idx != -1) {
-            msgs[idx] = msgs[idx].copyWith(
-              audioId: event.audioId,
-              ttsAvailable: true,
-            );
-          }
-          state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is DoneEvent) {
           unawaited(tokenController.close());
-          final msgs = List<ChatMessage>.from(chatState.messages);
-          // User bubble is already correct from TranscriptEvent; just ensure ok status.
-          setMessageStatus(msgs, userMsgId, MessageStatus.ok);
-          // Preserve tool call records and audio id on the final message.
-          final assistantId =
-              event.messageId ??
-              'assistant-${DateTime.now().millisecondsSinceEpoch}';
-          final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
-          if (idx != -1) {
-            final placeholder = msgs[idx];
-            msgs[idx] = ChatMessage(
-              id: assistantId,
-              role: 'assistant',
-              content: event.content,
-              audioId: placeholder.audioId,
-              ttsAvailable: placeholder.ttsAvailable,
-            );
-          }
-          state = AsyncData(
-            ChatState(
-              conversationId: conversationId,
-              messages: msgs,
-              pendingQueue: chatState.pendingQueue,
-            ),
+          _finishTurn(
+            chatState,
+            event,
+            conversationId: conversationId,
+            userMsgId: userMsgId,
           );
           return;
         } else if (event is ErrorEvent) {
           unawaited(tokenController.close());
-          final msgs = List<ChatMessage>.from(chatState.messages)
-            ..removeWhere((m) => m.id == streamingPlaceholderId);
-          setMessageStatus(msgs, userMsgId, MessageStatus.failed);
-          state = AsyncData(
-            chatState.copyWith(
-              messages: msgs,
-              isSending: false,
-              streamingContent: '',
-              error: event.message,
-              clearCurrentTurnStatus: true,
-            ),
-          );
+          _failTurn(chatState, event, userMsgId: userMsgId);
           return;
         }
       }
     } catch (e) {
       unawaited(tokenController.close());
+      _closeThinkingController();
 
       // Transient error with a run ID: retry with exponential backoff.
       if (isTransientStreamError(e) && _currentRunId != null) {
@@ -846,7 +893,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (event is RunStartedEvent) {
           // Capture the run ID for potential reconnect; don't change UI.
           _currentRunId = event.runId;
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
+          _advanceSeq(event);
           // Open the turn-status snapshot used by the progress card.
           state = AsyncData(
             chatState.copyWith(
@@ -862,121 +909,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // Any non-RunStartedEvent counts as progress — the initial-stall
         // watchdog won't fire on subsequent quiet periods.
         sawProgress = true;
-        if (event is TokenEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          tokenController.add(event.token);
-          final newContent = chatState.streamingContent + event.token;
-          final msgs = List<ChatMessage>.from(chatState.messages);
-          // On first token, mark all timeline entries as stale (answer is
-          // streaming — collapse previous thinking/tool/subagent entries).
-          if (chatState.streamingContent.isEmpty) {
-            markTimelineEntriesStale(msgs);
-          }
-          final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
-          if (idx != -1) {
-            msgs[idx].content = newContent;
-          }
-          state = AsyncData(
-            chatState.copyWith(
-              messages: msgs,
-              streamingContent: newContent,
-              clearStatusMessage: true,
-              // Resuming text generation — clear any active tool name.
-              currentTurnStatus: chatState.currentTurnStatus?.copyWith(
-                lastEventKind: TurnEventKind.token,
-                lastEventAt: DateTime.now(),
-                clearToolName: true,
-              ),
-            ),
-          );
-        } else if (event is StatusEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          _onStatusEvent(chatState, event);
-          _bumpTurnStatus(TurnEventKind.status);
-        } else if (event is ToolResultEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          _onToolResultEvent(chatState, event);
-          _bumpTurnStatus(TurnEventKind.toolResult, toolName: event.toolName);
-        } else if (event is ThinkingEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          _onThinkingEvent(chatState, event);
-          _bumpTurnStatus(TurnEventKind.thinking);
-        } else if (event is SubagentStartedEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          _reduceMessages(
-            chatState,
-            (msgs) => applySubagentStartedEvent(msgs, event),
-          );
-          _bumpTurnStatus(TurnEventKind.subagentStarted, toolName: event.task);
-        } else if (event is SubagentCompletedEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          _reduceMessages(
-            chatState,
-            (msgs) => applySubagentCompletedEvent(msgs, event),
-          );
-          _bumpTurnStatus(TurnEventKind.subagentCompleted);
+        if (_applyTurnEvent(chatState, event, tokenSink: tokenController)) {
+          _advanceSeq(event);
         } else if (event is DoneEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
+          _advanceSeq(event);
           unawaited(tokenController.close());
-          _closeThinkingController();
-          final msgs = List<ChatMessage>.from(chatState.messages);
-          // Mark thinking entries as complete (no longer streaming).
-          completeStreamingThinkingEntries(msgs);
-          // Mark user message as successfully acknowledged.
-          setMessageStatus(msgs, userMsgId, MessageStatus.ok);
-          // Replace streaming placeholder with final assistant message,
-          // preserving audio id. Tool calls are separate timeline entries.
-          final assistantId =
-              event.messageId ??
-              'assistant-${DateTime.now().millisecondsSinceEpoch}';
-          final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
-          if (idx != -1) {
-            final placeholder = msgs[idx];
-            msgs[idx] = ChatMessage(
-              id: assistantId,
-              role: 'assistant',
-              content: event.content,
-              audioId: placeholder.audioId,
-              ttsAvailable: placeholder.ttsAvailable,
-            );
-          }
-          state = AsyncData(
-            ChatState(
-              conversationId: conversationId,
-              messages: msgs,
-              pendingQueue: chatState.pendingQueue,
-            ),
+          _finishTurn(
+            chatState,
+            event,
+            conversationId: conversationId,
+            userMsgId: userMsgId,
           );
-          // Refresh conversation list to update timestamps/titles.
           return;
-        } else if (event is AudioReadyEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
-          final msgs = List<ChatMessage>.from(chatState.messages);
-          final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
-          if (idx != -1) {
-            msgs[idx] = msgs[idx].copyWith(
-              audioId: event.audioId,
-              ttsAvailable: true,
-            );
-          }
-          state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is ErrorEvent) {
-          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
+          _advanceSeq(event);
           unawaited(tokenController.close());
-          _closeThinkingController();
-          final msgs = List<ChatMessage>.from(chatState.messages)
-            ..removeWhere((m) => m.id == streamingPlaceholderId);
-          // Mark user message as failed (keep it in the list for retry).
-          setMessageStatus(msgs, userMsgId, MessageStatus.failed);
-          state = AsyncData(
-            chatState.copyWith(
-              messages: msgs,
-              isSending: false,
-              streamingContent: '',
-              error: event.message,
-              clearCurrentTurnStatus: true,
-            ),
-          );
+          _failTurn(chatState, event, userMsgId: userMsgId);
           return;
         }
       }
