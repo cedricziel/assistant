@@ -5,6 +5,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use assistant_auth::oidc::{IdTokenClaims, Jwk, JwksResponse, OidcDiscovery};
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::OrgId;
 use assistant_core::store::{OrgOidcConfig, OrgOidcConfigStore, OrgStore, Organization};
 use assistant_storage::OrgStorageLayer;
@@ -107,7 +108,7 @@ pub(crate) async fn discovery_hits(server: &MockServer) -> usize {
 
 /// Create an org with the given auth mode.
 pub(crate) async fn seed_org(storage: &OrgStorageLayer, id: &str, slug: &str, auth_mode: &str) {
-    let now = Utc::now();
+    let now = SystemClock.now();
     storage
         .org_store()
         .create_org(&Organization {
@@ -152,7 +153,7 @@ pub(crate) async fn seed_oidc_org(
     seed_org(storage, id, slug, "oidc").await;
     storage
         .oidc_config_store()
-        .upsert_oidc_config(&oidc_config(id, issuer, client_id, Utc::now()))
+        .upsert_oidc_config(&oidc_config(id, issuer, client_id, SystemClock.now()))
         .await
         .unwrap();
 }
