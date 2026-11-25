@@ -33,6 +33,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(CatalogEntryListResponse.serializer)
       ..add(CatalogEntrySummary.serializer)
       ..add(CatalogItemResponse.serializer)
+      ..add(CatalogMode.serializer)
       ..add(ChangePasswordRequest.serializer)
       ..add(ClientCredentialsOAuthFlow.serializer)
       ..add(ClientInfoSchema.serializer)
@@ -48,6 +49,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(CreateBindingRequest.serializer)
       ..add(CreateConversationRequest.serializer)
       ..add(CreateFromTemplateRequest.serializer)
+      ..add(CreateIntegrationRequest.serializer)
       ..add(CreateInterfaceInstanceRequest.serializer)
       ..add(CreateOrgRequest.serializer)
       ..add(CreatePersonaRequest.serializer)
@@ -57,12 +59,22 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(CreateTaskPushNotificationConfigRequest.serializer)
       ..add(CreateUserRequest.serializer)
       ..add(CreateWebhookRequest.serializer)
+      ..add(CredentialMode.serializer)
+      ..add(CredentialResponse.serializer)
       ..add(DeviceCodeOAuthFlow.serializer)
       ..add(DeviceCodeResponseSchema.serializer)
       ..add(ErrorBody.serializer)
       ..add(ExecuteCommandRequest.serializer)
       ..add(HttpAuthSecurityScheme.serializer)
       ..add(ImplicitOAuthFlow.serializer)
+      ..add(IntegrationAuthKind.serializer)
+      ..add(IntegrationDetail.serializer)
+      ..add(IntegrationLayer.serializer)
+      ..add(IntegrationListResponse.serializer)
+      ..add(IntegrationPolicyResponse.serializer)
+      ..add(IntegrationStatus.serializer)
+      ..add(IntegrationSummary.serializer)
+      ..add(IntegrationTrust.serializer)
       ..add(InterfaceInstanceResponse.serializer)
       ..add(ListTaskPushNotificationConfigsResponse.serializer)
       ..add(ListTasksResponse.serializer)
@@ -77,6 +89,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(OnboardingStatusResponse.serializer)
       ..add(OpenIdConnectSecurityScheme.serializer)
       ..add(OrgDetail.serializer)
+      ..add(OrgOidcConfigResponse.serializer)
       ..add(OrgSummary.serializer)
       ..add(PasswordOAuthFlow.serializer)
       ..add(PersonaDetail.serializer)
@@ -87,6 +100,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(PersonaSummary.serializer)
       ..add(PublishCatalogItemRequest.serializer)
       ..add(PushNotificationConfig.serializer)
+      ..add(PutOrgOidcConfigRequest.serializer)
       ..add(QuickMessageRequest.serializer)
       ..add(QuickMessageResponse.serializer)
       ..add(RegisterAgentRequest.serializer)
@@ -100,9 +114,13 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ServerCapabilities.serializer)
       ..add(ServerMetadata.serializer)
       ..add(SetActivePersonaRequest.serializer)
+      ..add(SetCredentialRequest.serializer)
       ..add(SetSkillAccessModeRequest.serializer)
+      ..add(SetSpaceAccessRequest.serializer)
       ..add(SkillDetail.serializer)
       ..add(SkillEntryResponse.serializer)
+      ..add(SpaceAccessEntry.serializer)
+      ..add(SpaceAccessMode.serializer)
       ..add(SpaceDetail.serializer)
       ..add(SpaceSummary.serializer)
       ..add(SseStatusEvent.serializer)
@@ -127,6 +145,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(TaskStatus.serializer)
       ..add(TaskStatusUpdateEvent.serializer)
       ..add(TemplateResponse.serializer)
+      ..add(TestIntegrationResponse.serializer)
       ..add(TokenResponse.serializer)
       ..add(ToolCallSummary.serializer)
       ..add(TurnState.serializer)
@@ -136,6 +155,8 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(UpdateConversationRequest.serializer)
       ..add(UpdateCurrentUserRequest.serializer)
       ..add(UpdateCurrentUserResponse.serializer)
+      ..add(UpdateIntegrationPolicyRequest.serializer)
+      ..add(UpdateIntegrationRequest.serializer)
       ..add(UpdateMemberRequest.serializer)
       ..add(UpdateOrgRequest.serializer)
       ..add(UpdateSkillRequest.serializer)
@@ -187,14 +208,17 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(CommandArgResponse)]),
           () => ListBuilder<CommandArgResponse>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(IntegrationSummary)]),
+          () => ListBuilder<IntegrationSummary>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(MessageSummary)]),
           () => ListBuilder<MessageSummary>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
           () => ListBuilder<PersonaFileSlot>())
       ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(String)]),
-          () => ListBuilder<String>())
+          const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
+          () => ListBuilder<SpaceAccessEntry>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
@@ -228,6 +252,27 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(IntegrationLayer)]),
+          () => ListBuilder<IntegrationLayer>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

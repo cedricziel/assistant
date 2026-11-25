@@ -65,10 +65,19 @@ use crate::api::{
         CommandArgResponse, CommandDefResponse, CommandEventResponse, ExecuteCommandRequest,
     },
     integrations::{
-        CatalogAuthKindResponse, CatalogAuthResponse, CatalogEntryListResponse, CatalogEntrySummary,
+        CatalogAuthKindResponse, CatalogAuthResponse, CatalogEntryListResponse,
+        CatalogEntrySummary,
+        types::{
+            CatalogMode, CreateIntegrationRequest, CredentialMode, CredentialResponse,
+            IntegrationAuthKind, IntegrationDetail, IntegrationLayer, IntegrationListResponse,
+            IntegrationPolicyResponse, IntegrationStatus, IntegrationSummary, IntegrationTrust,
+            SetCredentialRequest, SetSpaceAccessRequest, SpaceAccessEntry, SpaceAccessMode,
+            TestIntegrationResponse, UpdateIntegrationPolicyRequest, UpdateIntegrationRequest,
+        },
     },
     interfaces::{CreateInterfaceInstanceRequest, InterfaceInstanceResponse},
     members::{AddMemberRequest, MemberEntry, UpdateMemberRequest},
+    org_oidc::{OrgOidcConfigResponse, PutOrgOidcConfigRequest},
     orgs::{CreateOrgRequest, OrgDetail, OrgSummary, UpdateOrgRequest},
     personas::{
         AddSkillAccessRequest, CreatePersonaRequest, PersonaDetail, PersonaFileContent,
@@ -226,6 +235,9 @@ impl Modify for SecuritySchemesAddon {
 ///
 /// OAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`]
 /// (RFC 6749 §5.2) and are intentionally exempt.
+///
+/// One more exception: a `401 Unauthorized` is sent by the auth middleware
+/// before any handler runs, as the plain text `Unauthorized`, not as JSON.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct ErrorBody {
     /// Human-readable error message.
@@ -342,6 +354,7 @@ pub struct ApiErrorResponse {
         // OAuth2 endpoints
         crate::oauth::authorize::authorize_get,
         crate::oauth::authorize::authorize_post,
+        crate::oauth::authorize::identify_post,
         crate::oauth::token::token,
         crate::oauth::register::register,
         crate::oauth::device::device_initiate,
@@ -356,6 +369,9 @@ pub struct ApiErrorResponse {
         crate::api::orgs::create_org,
         crate::api::orgs::get_org,
         crate::api::orgs::update_org,
+        crate::api::org_oidc::get_org_oidc,
+        crate::api::org_oidc::put_org_oidc,
+        crate::api::org_oidc::delete_org_oidc,
         // User management
         crate::api::users::list_users,
         crate::api::users::create_user,
@@ -393,6 +409,19 @@ pub struct ApiErrorResponse {
         // Integrations catalog
         crate::api::integrations::list_catalog_entries,
         crate::api::integrations::get_catalog_entry,
+        // Integrations
+        crate::api::integrations::manage::list_integrations,
+        crate::api::integrations::manage::create_integration,
+        crate::api::integrations::manage::get_integration,
+        crate::api::integrations::manage::update_integration,
+        crate::api::integrations::manage::delete_integration,
+        crate::api::integrations::policy::get_integration_policy,
+        crate::api::integrations::policy::put_integration_policy,
+        crate::api::integrations::connection::test_integration,
+        crate::api::integrations::credentials::set_credential,
+        crate::api::integrations::credentials::clear_credential,
+        crate::api::integrations::spaces::put_space_access,
+        crate::api::integrations::spaces::delete_space_access,
         // Interface instances
         crate::api::interfaces::create_interface,
         crate::api::interfaces::list_interfaces,
@@ -532,6 +561,7 @@ pub struct ApiErrorResponse {
             crate::oauth::token::TokenRequest,
             crate::oauth::token::TokenResponse,
             crate::oauth::authorize::AuthorizeForm,
+            crate::oauth::authorize::IdentifyForm,
             crate::oauth::device::DeviceInitiateRequest,
             crate::oauth::device::DeviceVerifyForm,
             crate::oauth::revoke::RevokeRequest,
@@ -548,6 +578,8 @@ pub struct ApiErrorResponse {
             OrgDetail,
             CreateOrgRequest,
             UpdateOrgRequest,
+            OrgOidcConfigResponse,
+            PutOrgOidcConfigRequest,
             // User management types
             UserSummary,
             UserDetail,
@@ -580,6 +612,25 @@ pub struct ApiErrorResponse {
             CatalogEntryListResponse,
             CatalogAuthResponse,
             CatalogAuthKindResponse,
+            IntegrationLayer,
+            IntegrationAuthKind,
+            CredentialMode,
+            IntegrationTrust,
+            SpaceAccessMode,
+            CatalogMode,
+            IntegrationStatus,
+            IntegrationSummary,
+            IntegrationDetail,
+            IntegrationListResponse,
+            SpaceAccessEntry,
+            SetCredentialRequest,
+            CredentialResponse,
+            TestIntegrationResponse,
+            CreateIntegrationRequest,
+            UpdateIntegrationRequest,
+            IntegrationPolicyResponse,
+            UpdateIntegrationPolicyRequest,
+            SetSpaceAccessRequest,
             // Interface instance types
             InterfaceInstanceResponse,
             CreateInterfaceInstanceRequest,
@@ -639,7 +690,7 @@ pub struct ApiErrorResponse {
         (name = "catalog",
          description = "Catalog management — publish, list, and remove shared resources; manage space subscriptions"),
         (name = "integrations",
-         description = "Integrations — search the cached integrations.sh catalog of remote MCP servers"),
+         description = "Integrations — remote MCP servers installed at the org, space or user layer, the org policy that limits them, and the cached integrations.sh catalog"),
         (name = "interfaces",
          description = "Interface instances — create, list, and delete per-space interface configurations"),
         (name = "bindings",

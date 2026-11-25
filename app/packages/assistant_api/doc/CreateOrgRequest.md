@@ -8,7 +8,7 @@ import 'package:assistant_api/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**authMode** | **String** | Auth mode: `\"password\"` or `\"oidc\"`. | [optional] 
+**authMode** | **String** | Must be `\"password\"` if set; switch to `\"oidc\"` after configuring `PUT /api/orgs/{id}/oidc`. | [optional] 
 **name** | **String** |  | 
 **slug** | **String** |  | 
 

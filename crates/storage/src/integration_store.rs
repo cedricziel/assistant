@@ -1,4 +1,5 @@
-//! SQLite-backed [`IntegrationStore`] and [`IntegrationCredentialStore`].
+//! SQLite-backed [`IntegrationStore`], [`IntegrationCredentialStore`] and
+//! [`IntegrationHealthStore`].
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -9,8 +10,8 @@ use sqlx::{Row, SqlitePool};
 use assistant_core::identity::{OrgId, SpaceId, UserId};
 use assistant_core::integrations::{
     CatalogMode, CredentialKind, CredentialStatus, Integration, IntegrationCredentialStore,
-    IntegrationFilter, IntegrationPolicy, IntegrationStore, IntegrationStoreError, SpaceAccess,
-    SpaceAccessMode, StoredCredential,
+    IntegrationFilter, IntegrationHealth, IntegrationHealthStore, IntegrationPolicy,
+    IntegrationStore, IntegrationStoreError, SpaceAccess, SpaceAccessMode, StoredCredential,
 };
 
 // Macros rather than consts: sqlx accepts only `&'static str` literals.
@@ -35,6 +36,80 @@ pub struct SqliteIntegrationStore {
 }
 
 impl SqliteIntegrationStore {
+    /// `expected_updated_at`, when set, must equal the stored one.
+    async fn update_checked(
+        &self,
+        i: &Integration,
+        expected_updated_at: Option<DateTime<Utc>>,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let current = sqlx::query(
+            "SELECT catalog_entry_id, connect_url, updated_at FROM integrations WHERE id = ?",
+        )
+        .bind(&i.id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("loading integration {}", i.id))?;
+        let Some(current) = current else {
+            return Ok(false);
+        };
+        if let Some(expected) = expected_updated_at
+            && current.try_get::<DateTime<Utc>, _>("updated_at")? != expected
+        {
+            return Err(IntegrationStoreError::Stale { id: i.id.clone() }.into());
+        }
+        let from_catalog = current
+            .try_get::<Option<String>, _>("catalog_entry_id")?
+            .is_some();
+        let url_changed = current.try_get::<String, _>("connect_url")? != i.connect_url;
+        if from_catalog && url_changed {
+            return Err(IntegrationStoreError::ConnectUrlImmutable { id: i.id.clone() }.into());
+        }
+
+        sqlx::query(
+            "UPDATE integrations SET slug = ?, name = ?, connect_url = ?, auth_kind = ?,
+                    header_name = ?, header_value_prefix = ?, credential_mode = ?, trust = ?,
+                    enabled = ?, oauth_client_id_override = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(&i.slug)
+        .bind(&i.name)
+        .bind(&i.connect_url)
+        .bind(i.auth_kind.as_str())
+        .bind(&i.header_name)
+        .bind(&i.header_value_prefix)
+        .bind(i.credential_mode.as_str())
+        .bind(i.trust.as_str())
+        .bind(i.enabled)
+        .bind(&i.oauth_client_id_override)
+        .bind(i.updated_at)
+        .bind(&i.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_write_error(e, &i.slug, &format!("updating integration {}", i.id)))?;
+
+        if url_changed {
+            // Credentials were issued for the old host; never send them to the new one.
+            sqlx::query("DELETE FROM integration_credentials WHERE integration_id = ?")
+                .bind(&i.id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("dropping credentials of integration {}", i.id))?;
+            sqlx::query("DELETE FROM integration_health WHERE integration_id = ?")
+                .bind(&i.id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("dropping health of integration {}", i.id))?;
+            sqlx::query("DELETE FROM integration_oauth_states WHERE integration_id = ?")
+                .bind(&i.id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("dropping OAuth state of integration {}", i.id))?;
+        }
+        tx.commit().await?;
+        Ok(true)
+    }
+
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
@@ -164,61 +239,15 @@ impl IntegrationStore for SqliteIntegrationStore {
     }
 
     async fn update(&self, i: &Integration) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
-        let current =
-            sqlx::query("SELECT catalog_entry_id, connect_url FROM integrations WHERE id = ?")
-                .bind(&i.id)
-                .fetch_optional(&mut *tx)
-                .await
-                .with_context(|| format!("loading integration {}", i.id))?;
-        let Some(current) = current else {
-            return Ok(false);
-        };
-        let from_catalog = current
-            .try_get::<Option<String>, _>("catalog_entry_id")?
-            .is_some();
-        let url_changed = current.try_get::<String, _>("connect_url")? != i.connect_url;
-        if from_catalog && url_changed {
-            return Err(IntegrationStoreError::ConnectUrlImmutable { id: i.id.clone() }.into());
-        }
+        self.update_checked(i, None).await
+    }
 
-        sqlx::query(
-            "UPDATE integrations SET slug = ?, name = ?, connect_url = ?, auth_kind = ?,
-                    header_name = ?, header_value_prefix = ?, credential_mode = ?, trust = ?,
-                    enabled = ?, oauth_client_id_override = ?, updated_at = ?
-             WHERE id = ?",
-        )
-        .bind(&i.slug)
-        .bind(&i.name)
-        .bind(&i.connect_url)
-        .bind(i.auth_kind.as_str())
-        .bind(&i.header_name)
-        .bind(&i.header_value_prefix)
-        .bind(i.credential_mode.as_str())
-        .bind(i.trust.as_str())
-        .bind(i.enabled)
-        .bind(&i.oauth_client_id_override)
-        .bind(i.updated_at)
-        .bind(&i.id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| map_write_error(e, &i.slug, &format!("updating integration {}", i.id)))?;
-
-        if url_changed {
-            // Credentials were issued for the old host; never send them to the new one.
-            sqlx::query("DELETE FROM integration_credentials WHERE integration_id = ?")
-                .bind(&i.id)
-                .execute(&mut *tx)
-                .await
-                .with_context(|| format!("dropping credentials of integration {}", i.id))?;
-            sqlx::query("DELETE FROM integration_oauth_states WHERE integration_id = ?")
-                .bind(&i.id)
-                .execute(&mut *tx)
-                .await
-                .with_context(|| format!("dropping OAuth state of integration {}", i.id))?;
-        }
-        tx.commit().await?;
-        Ok(true)
+    async fn update_if_unchanged(
+        &self,
+        i: &Integration,
+        expected_updated_at: DateTime<Utc>,
+    ) -> Result<bool> {
+        self.update_checked(i, Some(expected_updated_at)).await
     }
 
     async fn delete(&self, id: &str) -> Result<bool> {
@@ -447,5 +476,110 @@ impl IntegrationCredentialStore for SqliteIntegrationCredentialStore {
         .await
         .with_context(|| format!("swapping credential of integration {}", c.integration_id))?;
         Ok(result.rows_affected() > 0)
+    }
+}
+
+/// SQLite-backed [`IntegrationHealthStore`].
+pub struct SqliteIntegrationHealthStore {
+    pool: SqlitePool,
+}
+
+impl SqliteIntegrationHealthStore {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+/// The primary key column for a subject; `''` is the shared one.
+fn subject_key(subject: Option<&UserId>) -> &str {
+    subject.map_or("", |user| user.0.as_str())
+}
+
+#[async_trait]
+impl IntegrationHealthStore for SqliteIntegrationHealthStore {
+    async fn record_connected(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+        tool_count: u32,
+        at: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO integration_health
+               (integration_id, subject_key, subject_user_id, reachable,
+                last_connected_at, tool_count, last_error, checked_at)
+             VALUES (?, ?, ?, 1, ?, ?, NULL, ?)
+             ON CONFLICT (integration_id, subject_key) DO UPDATE SET
+               reachable = 1, last_connected_at = excluded.last_connected_at,
+               tool_count = excluded.tool_count, last_error = NULL,
+               checked_at = excluded.checked_at",
+        )
+        .bind(integration_id)
+        .bind(subject_key(subject))
+        .bind(subject.map(|u| u.0.as_str()))
+        .bind(at)
+        .bind(i64::from(tool_count))
+        .bind(at)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("recording connection of integration {integration_id}"))?;
+        Ok(())
+    }
+
+    async fn record_failed(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+        error: &str,
+        at: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO integration_health
+               (integration_id, subject_key, subject_user_id, reachable, last_error, checked_at)
+             VALUES (?, ?, ?, 0, ?, ?)
+             ON CONFLICT (integration_id, subject_key) DO UPDATE SET
+               reachable = 0, last_error = excluded.last_error,
+               checked_at = excluded.checked_at",
+        )
+        .bind(integration_id)
+        .bind(subject_key(subject))
+        .bind(subject.map(|u| u.0.as_str()))
+        .bind(error)
+        .bind(at)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("recording failure of integration {integration_id}"))?;
+        Ok(())
+    }
+
+    async fn get(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+    ) -> Result<Option<IntegrationHealth>> {
+        let row = sqlx::query(
+            "SELECT reachable, last_connected_at, tool_count, last_error, checked_at
+             FROM integration_health WHERE integration_id = ? AND subject_key = ?",
+        )
+        .bind(integration_id)
+        .bind(subject_key(subject))
+        .fetch_optional(&self.pool)
+        .await
+        .with_context(|| format!("loading health of integration {integration_id}"))?;
+        row.map(|row| {
+            Ok(IntegrationHealth {
+                integration_id: integration_id.to_owned(),
+                subject_user_id: subject.cloned(),
+                reachable: row.try_get("reachable")?,
+                last_connected_at: row.try_get("last_connected_at")?,
+                tool_count: row
+                    .try_get::<Option<i64>, _>("tool_count")?
+                    .map(u32::try_from)
+                    .transpose()?,
+                last_error: row.try_get("last_error")?,
+                checked_at: row.try_get("checked_at")?,
+            })
+        })
+        .transpose()
     }
 }

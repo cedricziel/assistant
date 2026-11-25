@@ -11,6 +11,7 @@ mod contract {
     pub mod conversation_event_store;
     pub mod conversation_store;
     pub mod integration_credential_store;
+    pub mod integration_health_store;
     pub mod integration_store;
     pub mod push_subscription_store;
     pub mod refinements_store;

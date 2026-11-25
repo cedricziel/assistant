@@ -22,6 +22,8 @@ class _$CatalogEntrySummary extends CatalogEntrySummary {
   @override
   final String id;
   @override
+  final BuiltList<IntegrationLayer> installableLayers;
+  @override
   final String name;
 
   factory _$CatalogEntrySummary(
@@ -36,6 +38,7 @@ class _$CatalogEntrySummary extends CatalogEntrySummary {
       required this.domain,
       this.iconUrl,
       required this.id,
+      required this.installableLayers,
       required this.name})
       : super._();
   @override
@@ -58,6 +61,7 @@ class _$CatalogEntrySummary extends CatalogEntrySummary {
         domain == other.domain &&
         iconUrl == other.iconUrl &&
         id == other.id &&
+        installableLayers == other.installableLayers &&
         name == other.name;
   }
 
@@ -71,6 +75,7 @@ class _$CatalogEntrySummary extends CatalogEntrySummary {
     _$hash = $jc(_$hash, domain.hashCode);
     _$hash = $jc(_$hash, iconUrl.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
+    _$hash = $jc(_$hash, installableLayers.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -86,6 +91,7 @@ class _$CatalogEntrySummary extends CatalogEntrySummary {
           ..add('domain', domain)
           ..add('iconUrl', iconUrl)
           ..add('id', id)
+          ..add('installableLayers', installableLayers)
           ..add('name', name))
         .toString();
   }
@@ -126,6 +132,12 @@ class CatalogEntrySummaryBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
+  ListBuilder<IntegrationLayer>? _installableLayers;
+  ListBuilder<IntegrationLayer> get installableLayers =>
+      _$this._installableLayers ??= ListBuilder<IntegrationLayer>();
+  set installableLayers(ListBuilder<IntegrationLayer>? installableLayers) =>
+      _$this._installableLayers = installableLayers;
+
   String? _name;
   String? get name => _$this._name;
   set name(String? name) => _$this._name = name;
@@ -144,6 +156,7 @@ class CatalogEntrySummaryBuilder
       _domain = $v.domain;
       _iconUrl = $v.iconUrl;
       _id = $v.id;
+      _installableLayers = $v.installableLayers.toBuilder();
       _name = $v.name;
       _$v = null;
     }
@@ -179,6 +192,7 @@ class CatalogEntrySummaryBuilder
             iconUrl: iconUrl,
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'CatalogEntrySummary', 'id'),
+            installableLayers: installableLayers.build(),
             name: BuiltValueNullFieldError.checkNotNull(
                 name, r'CatalogEntrySummary', 'name'),
           );
@@ -189,6 +203,9 @@ class CatalogEntrySummaryBuilder
         auth.build();
         _$failedField = 'categories';
         categories.build();
+
+        _$failedField = 'installableLayers';
+        installableLayers.build();
       } catch (e) {
         throw BuiltValueNestedFieldError(
             r'CatalogEntrySummary', _$failedField, e.toString());

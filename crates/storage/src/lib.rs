@@ -29,6 +29,7 @@ pub mod integration_store;
 pub mod interface_instance_store;
 pub mod memory_chunks;
 pub mod message_bus;
+pub mod org_oidc_config_store;
 pub mod org_storage;
 pub mod org_store;
 pub mod persona_skill_access;
@@ -68,12 +69,15 @@ pub use conversation_events::{
 pub use conversations::{
     ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
 };
-pub use integration_store::{SqliteIntegrationCredentialStore, SqliteIntegrationStore};
+pub use integration_store::{
+    SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
+};
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use memory_chunks::{
     FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,
 };
 pub use message_bus::{InMemoryMessageBus, SqliteMessageBus};
+pub use org_oidc_config_store::SqliteOrgOidcConfigStore;
 pub use org_storage::OrgStorageLayer;
 pub use org_store::SqliteOrgStore;
 pub use persona_skill_access::{

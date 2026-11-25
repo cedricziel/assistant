@@ -75,7 +75,6 @@ pub async fn cmd_backup(args: &BackupArgs) -> Result<()> {
     let opts = BackupOptions {
         install_dir,
         output_path,
-        db_path: None,
     };
 
     let result = BackupEngine::new().run(opts).await?;

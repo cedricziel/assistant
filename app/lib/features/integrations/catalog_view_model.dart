@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../connection/connection_provider.dart';
+import 'integration_failure.dart';
 
 /// Search-as-you-type delay before a query hits the server.
 const catalogSearchDebounce = Duration(milliseconds: 300);
@@ -241,11 +242,7 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
   /// and other exceptions carry internals.
   String _describe(Object error) {
     if (error is _CatalogLoadException) return error.message;
-    if (error is DioException) {
-      final status = error.response?.statusCode;
-      if (status != null) return 'The server answered with status $status.';
-      return 'The server could not be reached.';
-    }
+    if (error is DioException) return describeIntegrationFailure(error).message;
     return 'Something went wrong while loading the catalog.';
   }
 

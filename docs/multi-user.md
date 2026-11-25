@@ -229,13 +229,18 @@ Re-copy them from `GET /workflows/{id}/webhook-secrets`.
 
 ## OIDC federation (optional)
 
-The server can delegate authentication to an external OIDC provider
-(e.g., Keycloak, Auth0, Google Workspace):
+Each org can delegate sign-in to its own external OIDC provider (Keycloak,
+Auth0, Google Workspace). An org admin configures it through the API, and
+the setting applies to that org only:
 
-1. Configure the OIDC provider in the server settings
-2. `GET /oauth/authorize` redirects to the IdP login page
-3. `GET /oauth/callback` receives the authorization code from the IdP
-4. The server exchanges it for an ID token, creates or updates the local
-   user, and issues its own JWT + refresh token
+1. `PUT /api/orgs/{id}/oidc` stores the issuer, client ID, and secret.
+2. `PATCH /api/orgs/{id}` with `{"auth_mode": "oidc"}` turns it on.
+3. `GET /oauth/authorize` finds the user's org from the email (or from
+   `?org=<slug>`) and redirects to that org's IdP.
+4. `GET /oauth/callback` receives the code. The server exchanges it for an ID
+   token, finds or creates the user in that org, and issues its own JWT and
+   refresh token.
 
-This enables SSO without managing passwords locally.
+Other orgs on the same server keep password sign-in or use their own IdP.
+See [Per-org OIDC](authentication.md#per-org-oidc) and
+[Set up OIDC sign-in for an org](operations/org-oidc-sign-in.md).

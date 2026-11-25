@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::CatalogResourceType;
 use crate::identity::{OrgId, Role, SpaceId, UserId};
+use crate::integrations::Sealed;
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -113,6 +114,28 @@ pub struct PersonaBinding {
     pub persona_id: String,
     pub interface_instance_id: String,
     pub created_at: DateTime<Utc>,
+}
+
+/// Per-org OpenID Connect settings. An org with `auth_mode = "oidc"` signs
+/// its users in through this identity provider.
+///
+/// The client secret is stored sealed; callers seal and open it with
+/// [`oidc_client_secret_aad`](crate::integrations::oidc_client_secret_aad).
+#[derive(Clone, Debug)]
+pub struct OrgOidcConfig {
+    pub org_id: OrgId,
+    /// Issuer URL; discovery reads `{issuer_url}/.well-known/openid-configuration`.
+    pub issuer_url: String,
+    /// Our client_id registered with the IdP.
+    pub client_id: String,
+    /// `None` for public clients using PKCE.
+    pub client_secret: Option<Sealed>,
+    /// Create a user on first login instead of rejecting unknown identities.
+    pub auto_provision: bool,
+    /// Email domains allowed to sign in; empty allows any domain.
+    pub allowed_email_domains: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +245,14 @@ pub trait BindingStore: Send + Sync {
     async fn get_binding(&self, id: &str) -> Result<Option<PersonaBinding>>;
     async fn list_bindings(&self, space_id: &SpaceId) -> Result<Vec<PersonaBinding>>;
     async fn delete_binding(&self, id: &str) -> Result<bool>;
+}
+
+/// Per-org OIDC settings, at most one per org.
+#[async_trait]
+pub trait OrgOidcConfigStore: Send + Sync {
+    async fn get_oidc_config(&self, org_id: &OrgId) -> Result<Option<OrgOidcConfig>>;
+    async fn upsert_oidc_config(&self, config: &OrgOidcConfig) -> Result<()>;
+    async fn delete_oidc_config(&self, org_id: &OrgId) -> Result<bool>;
 }
 
 // ---------------------------------------------------------------------------
@@ -785,6 +816,46 @@ impl BindingStore for InMemoryBindingStore {
         let len_before = bindings.len();
         bindings.retain(|b| b.id != id);
         Ok(bindings.len() < len_before)
+    }
+}
+
+/// In-memory per-org OIDC config store.
+#[derive(Default)]
+pub struct InMemoryOrgOidcConfigStore {
+    configs: Mutex<HashMap<OrgId, OrgOidcConfig>>,
+}
+
+#[async_trait]
+impl OrgOidcConfigStore for InMemoryOrgOidcConfigStore {
+    async fn get_oidc_config(&self, org_id: &OrgId) -> Result<Option<OrgOidcConfig>> {
+        Ok(self
+            .configs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(org_id)
+            .cloned())
+    }
+
+    async fn upsert_oidc_config(&self, config: &OrgOidcConfig) -> Result<()> {
+        let mut configs = self
+            .configs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut stored = config.clone();
+        if let Some(existing) = configs.get(&config.org_id) {
+            stored.created_at = existing.created_at;
+        }
+        configs.insert(config.org_id.clone(), stored);
+        Ok(())
+    }
+
+    async fn delete_oidc_config(&self, org_id: &OrgId) -> Result<bool> {
+        Ok(self
+            .configs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(org_id)
+            .is_some())
     }
 }
 
@@ -1459,5 +1530,147 @@ mod tests {
 
         assert!(store.delete_binding("bind_1").await.unwrap());
         assert!(!store.delete_binding("bind_1").await.unwrap());
+    }
+
+    // -- OrgOidcConfigStore --
+
+    fn make_oidc_config(org_id: &str, issuer: &str) -> OrgOidcConfig {
+        OrgOidcConfig {
+            org_id: OrgId::from(org_id),
+            issuer_url: issuer.into(),
+            client_id: "assistant".into(),
+            client_secret: Some(Sealed {
+                ciphertext: vec![1, 2, 3],
+                nonce: vec![4; 12],
+                key_id: "key_1".into(),
+            }),
+            auto_provision: true,
+            allowed_email_domains: vec!["acme.com".into()],
+            created_at: now(),
+            updated_at: now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn oidc_config_get_missing_returns_none() {
+        let store = InMemoryOrgOidcConfigStore::default();
+        let found = store.get_oidc_config(&OrgId::from("org_1")).await.unwrap();
+        assert!(found.is_none(), "no config was stored for org_1");
+    }
+
+    #[tokio::test]
+    async fn oidc_config_upsert_then_get() {
+        let store = InMemoryOrgOidcConfigStore::default();
+        store
+            .upsert_oidc_config(&make_oidc_config("org_1", "https://idp.acme.com"))
+            .await
+            .unwrap();
+
+        let found = store
+            .get_oidc_config(&OrgId::from("org_1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.issuer_url, "https://idp.acme.com");
+        assert_eq!(found.allowed_email_domains, vec!["acme.com".to_string()]);
+        assert_eq!(
+            found.client_secret,
+            make_oidc_config("org_1", "x").client_secret,
+            "the sealed secret should round-trip"
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_config_upsert_replaces_existing() {
+        let store = InMemoryOrgOidcConfigStore::default();
+        store
+            .upsert_oidc_config(&make_oidc_config("org_1", "https://old.example"))
+            .await
+            .unwrap();
+        store
+            .upsert_oidc_config(&make_oidc_config("org_1", "https://new.example"))
+            .await
+            .unwrap();
+
+        let found = store
+            .get_oidc_config(&OrgId::from("org_1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            found.issuer_url, "https://new.example",
+            "second upsert should replace the first"
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_config_upsert_keeps_the_first_created_at() {
+        let store = InMemoryOrgOidcConfigStore::default();
+        let first = make_oidc_config("org_1", "https://old.example");
+        let mut second = make_oidc_config("org_1", "https://new.example");
+        second.created_at = first.created_at + chrono::Duration::hours(1);
+        store.upsert_oidc_config(&first).await.unwrap();
+        store.upsert_oidc_config(&second).await.unwrap();
+
+        let found = store
+            .get_oidc_config(&OrgId::from("org_1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.issuer_url, "https://new.example");
+        assert_eq!(
+            found.created_at, first.created_at,
+            "replacing a config must not move its creation time"
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_config_is_scoped_per_org() {
+        let store = InMemoryOrgOidcConfigStore::default();
+        store
+            .upsert_oidc_config(&make_oidc_config("org_1", "https://one.example"))
+            .await
+            .unwrap();
+        store
+            .upsert_oidc_config(&make_oidc_config("org_2", "https://two.example"))
+            .await
+            .unwrap();
+
+        let one = store
+            .get_oidc_config(&OrgId::from("org_1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(one.issuer_url, "https://one.example");
+    }
+
+    #[tokio::test]
+    async fn oidc_config_delete() {
+        let store = InMemoryOrgOidcConfigStore::default();
+        store
+            .upsert_oidc_config(&make_oidc_config("org_1", "https://idp.acme.com"))
+            .await
+            .unwrap();
+
+        assert!(
+            store
+                .delete_oidc_config(&OrgId::from("org_1"))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .delete_oidc_config(&OrgId::from("org_1"))
+                .await
+                .unwrap(),
+            "second delete should report nothing removed"
+        );
+        assert!(
+            store
+                .get_oidc_config(&OrgId::from("org_1"))
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

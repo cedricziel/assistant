@@ -197,7 +197,7 @@ impl Default for LearningConfig {
 /// Conversation title-generator configuration (`[titling]` section).
 ///
 /// Controls when the background title-generator worker assigns titles to
-/// conversations.  The worker consumes `turn.result` from the message bus
+/// conversations.  The worker consumes `turn.completed` from the message bus
 /// and is shared across every interface, so this single block governs
 /// titling for web, CLI, MCP, scheduler, and all messenger adapters.
 ///
@@ -207,7 +207,7 @@ impl Default for LearningConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TitlingConfig {
     /// Master switch (default: `true`).  When `false`, the worker still
-    /// consumes and acks `turn.result` messages but never calls the LLM.
+    /// consumes and acks `turn.completed` messages but never calls the LLM.
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Minimum turn number at which an otherwise-unlocked conversation

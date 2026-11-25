@@ -79,10 +79,9 @@ mod tests {
 
     use super::*;
 
-    /// Upper bound only: the turn normally completes in well under a second,
-    /// but instrumented builds under parallel load can be orders of magnitude
-    /// slower. The test waits on the turn result, never on this deadline.
-    const TURN_DEADLINE: Duration = Duration::from_secs(120);
+    /// Upper bound only: the turn normally completes in well under a second.
+    /// The test waits on the turn result, never on this deadline.
+    const TURN_DEADLINE: Duration = Duration::from_secs(30);
 
     #[tokio::test]
     async fn the_orchestrator_service_works_every_spaces_turn_queue() {

@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:assistant_app/features/account/account_provider.dart';
 import 'package:assistant_app/features/account/account_screen.dart';
+import 'package:assistant_app/router/app_router.dart';
+import 'package:go_router/go_router.dart';
 
 UserDetail _user({
   String id = 'user-1',
@@ -28,6 +30,37 @@ AccountState _state({UserDetail? user, bool isOidc = false, String? issuer}) {
 }
 
 void main() {
+  group('AccountScreen connections entry', () {
+    testWidgets('opens Connections', (tester) async {
+      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final router = GoRouter(
+        routes: [
+          GoRoute(path: '/', builder: (_, _) => const AccountScreen()),
+          GoRoute(
+            path: AppRoutes.connections,
+            builder: (_, _) => const Text('connections page'),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            accountProvider.overrideWith(() => _StubAccountNotifier(_state())),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Connections'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('connections page'), findsOneWidget);
+    });
+  });
+
   group('AccountScreen', () {
     testWidgets(
       'renders name, email, and password sections for password-mode',

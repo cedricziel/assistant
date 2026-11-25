@@ -11,7 +11,8 @@ use assistant_core::store::UserStore;
 use assistant_storage::OrgStorageLayer;
 
 /// Adapts [`OrgStorageLayer`] to the [`OidcUserStore`] trait so the OIDC
-/// callback can provision and look up users.
+/// callback can provision and look up users. Every lookup is scoped to
+/// `org_id`: an org's IdP must never reach accounts in another org.
 pub struct OrgOidcUserStore {
     storage: std::sync::Arc<OrgStorageLayer>,
     /// The org that OIDC-provisioned users belong to.
@@ -30,7 +31,7 @@ impl OidcUserStore for OrgOidcUserStore {
         let user = self
             .storage
             .user_store()
-            .get_user_by_idp(issuer, subject)
+            .get_user_by_idp_in_org(&self.org_id, issuer, subject)
             .await?;
         Ok(user.map(|u| u.id))
     }
@@ -39,7 +40,7 @@ impl OidcUserStore for OrgOidcUserStore {
         let user = self
             .storage
             .user_store()
-            .get_user_by_email_any(email)
+            .get_user_by_email(&self.org_id, email)
             .await?;
         Ok(user.map(|u| u.id))
     }
@@ -187,5 +188,65 @@ mod tests {
 
         let found = store.find_by_email("nobody@example.com").await.unwrap();
         assert!(found.is_none());
+    }
+
+    async fn seed_other_org_user(storage: &OrgStorageLayer) {
+        let now = chrono::Utc::now();
+        storage
+            .org_store()
+            .create_org(&Organization {
+                id: OrgId::from("org_other"),
+                name: "Other Org".into(),
+                slug: "other".into(),
+                auth_mode: "oidc".into(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+        storage
+            .user_store()
+            .create_user(&assistant_core::store::User {
+                id: UserId::from("usr_victim"),
+                org_id: OrgId::from("org_other"),
+                email: "victim@example.com".into(),
+                name: "Victim".into(),
+                password_hash: String::new(),
+                idp_issuer: Some("https://idp.example.com".into()),
+                idp_subject: Some("sub_victim".into()),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn find_by_email_ignores_users_in_other_orgs() {
+        let storage = setup().await;
+        seed_other_org_user(&storage).await;
+        let store = OrgOidcUserStore::new(storage, OrgId::from("org_test"));
+
+        let found = store.find_by_email("victim@example.com").await.unwrap();
+        assert!(
+            found.is_none(),
+            "an org's IdP must not reach accounts in another org"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_by_idp_ignores_users_in_other_orgs() {
+        let storage = setup().await;
+        seed_other_org_user(&storage).await;
+        let store = OrgOidcUserStore::new(storage, OrgId::from("org_test"));
+
+        let found = store
+            .find_by_idp("https://idp.example.com", "sub_victim")
+            .await
+            .unwrap();
+        assert!(
+            found.is_none(),
+            "orgs sharing an IdP must not share accounts"
+        );
     }
 }

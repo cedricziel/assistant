@@ -67,18 +67,19 @@ runs in multi-user mode with full OAuth2 support.
 
 ### OAuth2 endpoints
 
-| Method | Path                                      | Description                                                |
-| ------ | ----------------------------------------- | ---------------------------------------------------------- |
-| POST   | `/oauth/register`                         | Dynamic client registration (RFC 7591)                     |
-| GET    | `/oauth/authorize`                        | Authorization endpoint (renders login or redirects to IdP) |
-| POST   | `/oauth/authorize`                        | Submit credentials, issue authorization code               |
-| GET    | `/oauth/callback`                         | OIDC IdP callback                                          |
-| POST   | `/oauth/token`                            | Token exchange (auth code, refresh, device code)           |
-| POST   | `/oauth/device`                           | Initiate device authorization (RFC 8628)                   |
-| GET    | `/oauth/device/verify`                    | User-facing code entry page                                |
-| POST   | `/oauth/device/verify`                    | Submit device code + credentials                           |
-| POST   | `/oauth/revoke`                           | Token revocation (RFC 7009)                                |
-| GET    | `/.well-known/oauth-authorization-server` | Server metadata (RFC 8414)                                 |
+| Method | Path                                      | Description                                                         |
+| ------ | ----------------------------------------- | ------------------------------------------------------------------- |
+| POST   | `/oauth/register`                         | Dynamic client registration (RFC 7591)                              |
+| GET    | `/oauth/authorize`                        | Authorization endpoint (email form, password form, or IdP redirect) |
+| POST   | `/oauth/authorize/identify`               | Find the org an email signs in to                                   |
+| POST   | `/oauth/authorize`                        | Submit org + credentials, issue authorization code                  |
+| GET    | `/oauth/callback`                         | OIDC IdP callback                                                   |
+| POST   | `/oauth/token`                            | Token exchange (auth code, refresh, device code)                    |
+| POST   | `/oauth/device`                           | Initiate device authorization (RFC 8628)                            |
+| GET    | `/oauth/device/verify`                    | User-facing code entry page                                         |
+| POST   | `/oauth/device/verify`                    | Submit device code + org slug + credentials                         |
+| POST   | `/oauth/revoke`                           | Token revocation (RFC 7009)                                         |
+| GET    | `/.well-known/oauth-authorization-server` | Server metadata (RFC 8414)                                          |
 
 ### Grant types
 
@@ -87,6 +88,92 @@ runs in multi-user mode with full OAuth2 support.
 | `authorization_code`                           | Browser-based apps (Flutter web/macOS) |
 | `urn:ietf:params:oauth:grant-type:device_code` | CLI and headless devices               |
 | `refresh_token`                                | Silent token renewal                   |
+
+### Sign-in flow
+
+Emails are unique per org, not per server, so every sign-in resolves an org
+first. `GET /oauth/authorize` does it one of two ways:
+
+- **With `?org=<slug>`**, it goes straight to that org. An org in OIDC mode
+  redirects to its IdP. A password org shows the password form with the org
+  fixed. An unknown slug is a 400.
+- **Without `org`**, it shows an email form that posts to
+  `POST /oauth/authorize/identify`. If exactly one account has that email,
+  the flow continues in that account's org: an OIDC org redirects to its IdP
+  with the email as `login_hint`, and a password org shows the password form.
+  If no account matches, or accounts in several orgs match, the page shows
+  the same "enter the name of your organization" form. That form continues at
+  `GET /oauth/authorize?org=<slug>&login_hint=<email>`.
+
+`POST /oauth/authorize` requires the `org` field and looks the user up in
+that org only. An org in OIDC mode refuses it with a 400. The failed-login
+lockout counts per org and email, so the same address in two orgs has two
+counters.
+
+`POST /oauth/device/verify` takes an org slug the same way, so the device
+flow signs in to one org's password accounts. Accounts in an OIDC org have no
+local password and cannot use it.
+
+The identify step tells a caller whether an address has an account and, for
+one match, which sign-in method its org uses. It shares the per-IP auth rate
+limit (`--auth-rate-limit-per-minute`, env `ASSISTANT_WEB_AUTH_RATE_LIMIT`,
+default 30) with the other credential endpoints. See
+[ADR-0016](adr/adr-0016-per-org-oidc.md) for why this is accepted.
+
+### Per-org OIDC
+
+OIDC is configured per org, not per server. Each org can point at its own IdP
+(Keycloak, Auth0, Google Workspace, and so on) or stay on passwords. The
+server still issues its own JWTs after the IdP login.
+
+Org admins manage the settings with these endpoints. The caller must be an
+admin of the org in the path.
+
+| Method | Path                  | Description                                               | Status codes            |
+| ------ | --------------------- | --------------------------------------------------------- | ----------------------- |
+| GET    | `/api/orgs/{id}/oidc` | Read the settings                                         | 200, 401, 403, 404      |
+| PUT    | `/api/orgs/{id}/oidc` | Create or replace the settings                            | 200, 400, 401, 403, 404 |
+| DELETE | `/api/orgs/{id}/oidc` | Remove the settings. Refused while `auth_mode` is `oidc`. | 204, 401, 403, 404, 409 |
+
+`PUT` body fields:
+
+| Field                   | Notes                                                                                                                                                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `issuer_url`            | `https`, or `http` for `localhost` and loopback addresses. Stored as sent, minus surrounding whitespace. Discovery compares it byte for byte with the `issuer` in the IdP's discovery document, so a trailing slash matters. |
+| `client_id`             | Required.                                                                                                                                                                                                                    |
+| `client_secret`         | Write-only. Omit it to keep the stored secret, send `null` to clear it. Public clients leave it unset.                                                                                                                       |
+| `auto_provision`        | Defaults to `true`. When `false`, only users who already exist can sign in.                                                                                                                                                  |
+| `allowed_email_domains` | Bare domains such as `example.com`, lowercased on save. Empty allows any domain.                                                                                                                                             |
+
+Responses carry `has_client_secret` and never the secret. The server stores
+the secret sealed with its `SecretBox` key (`secrets.key` or
+`ASSISTANT_SECRETS_KEY`), the same key that protects integration credentials.
+Restoring `org.db` without that key leaves the secret unreadable. Set it again
+with `PUT`.
+
+`PATCH /api/orgs/{id}` accepts `auth_mode` values `password` and `oidc`.
+Switching to `oidc` returns 409 until the org has OIDC settings. `POST
+/api/orgs` creates `password` orgs only. For the steps, see
+[Set up OIDC sign-in for an org](operations/org-oidc-sign-in.md).
+
+Register this redirect URI at the IdP: `{server base URL}/oauth/callback`.
+The server asks for the scopes `openid email profile`.
+
+How the server handles the IdP:
+
+- It discovers each org's IdP on first use and caches the result until the
+  org's settings change. A failed discovery is not cached, so the next sign-in
+  retries. The IdP's signing keys (JWKS) are fetched once per discovery. After
+  key rotation at the IdP, update the org's settings or restart the server.
+- The callback signs the user in to the org that started the login, never
+  another. It looks the user up in that org by (issuer, subject). If none
+  matches, it looks up the email. Linking an existing account by email
+  requires `email_verified: true` in the ID token, otherwise the login fails.
+  If there is still no match and `auto_provision` is on, it creates the user.
+- The email-domain allow-list is checked first and ignores case. A token
+  without an email fails when an allow-list is set.
+- If the org's discovery fails at sign-in, the user sees a 502. An org in
+  `oidc` mode with no settings returns a 500.
 
 ### Token format
 
@@ -293,7 +380,8 @@ confirmation don't match.
 ### OIDC-managed accounts
 
 When a user's organization runs in OIDC mode (`auth_mode = "oidc"`),
-identity is owned by the upstream identity provider. The PATCH and
+identity is owned by the identity provider that org configured (see
+[Per-org OIDC](#per-org-oidc)). The PATCH and
 password-change endpoints return:
 
 ```http

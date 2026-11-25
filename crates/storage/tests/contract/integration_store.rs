@@ -12,6 +12,7 @@ use assistant_storage::OrgStorageLayer;
 pub struct Fixture {
     pub store: Arc<dyn IntegrationStore>,
     pub credentials: Arc<dyn IntegrationCredentialStore>,
+    pub health: Arc<dyn IntegrationHealthStore>,
     /// Kept so the SQLite pool outlives the stores.
     pub layer: Option<OrgStorageLayer>,
 }
@@ -31,6 +32,7 @@ pub async fn sqlite() -> Fixture {
     Fixture {
         store: Arc::new(layer.integration_store()),
         credentials: Arc::new(layer.integration_credential_store()),
+        health: Arc::new(layer.integration_health_store()),
         layer: Some(layer),
     }
 }
@@ -38,9 +40,11 @@ pub async fn sqlite() -> Fixture {
 pub fn memory() -> Fixture {
     let store = InMemoryIntegrationStore::new();
     let credentials = store.credential_store();
+    let health = store.health_store();
     Fixture {
         store: Arc::new(store),
         credentials,
+        health,
         layer: None,
     }
 }
@@ -252,6 +256,45 @@ async fn update_changes_mutable_fields_only(fx: Fixture) {
     let mut ghost = original.clone();
     ghost.id = "missing".into();
     assert!(!fx.store.update(&ghost).await.unwrap());
+}
+
+async fn update_if_unchanged_rejects_a_stale_version(fx: Fixture) {
+    let original = integration("int_1", IntegrationLayer::Org, None, None, "linear");
+    fx.store.create(&original).await.unwrap();
+
+    let mut first = original.clone();
+    first.name = "First".into();
+    first.updated_at = at(10);
+    assert!(
+        fx.store
+            .update_if_unchanged(&first, original.updated_at)
+            .await
+            .unwrap()
+    );
+
+    let mut second = original.clone();
+    second.enabled = false;
+    second.updated_at = at(20);
+    let err = fx
+        .store
+        .update_if_unchanged(&second, original.updated_at)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.downcast_ref::<IntegrationStoreError>(),
+        Some(&IntegrationStoreError::Stale { id: "int_1".into() })
+    );
+    let got = fx.store.get("int_1").await.unwrap().unwrap();
+    assert_eq!(got, first, "the stale write changed nothing");
+
+    let mut ghost = original.clone();
+    ghost.id = "missing".into();
+    assert!(
+        !fx.store
+            .update_if_unchanged(&ghost, original.updated_at)
+            .await
+            .unwrap()
+    );
 }
 
 async fn update_to_a_taken_slug_conflicts(fx: Fixture) {
@@ -611,6 +654,10 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_update_mutable_only() {
                 update_changes_mutable_fields_only($ctor).await;
+            }
+            #[tokio::test]
+            async fn t_update_if_unchanged() {
+                update_if_unchanged_rejects_a_stale_version($ctor).await;
             }
             #[tokio::test]
             async fn t_update_slug_conflict() {

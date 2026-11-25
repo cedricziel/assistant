@@ -2,6 +2,10 @@ import 'package:assistant_api/assistant_api.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:go_router/go_router.dart';
+
+import '../../router/app_router.dart';
+import '../integrations/caller_roles.dart';
 import 'admin_providers.dart';
 
 /// Admin screen with tabs for user, space, and catalog management.
@@ -40,6 +44,14 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin'),
+        actions: [
+          if (ref.watch(callerRolesProvider).value?.isOrgAdmin ?? false)
+            IconButton(
+              icon: const Icon(Icons.hub_outlined),
+              tooltip: 'Organization integrations',
+              onPressed: () => context.push(AppRoutes.adminIntegrations),
+            ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
@@ -293,10 +305,21 @@ class _SpaceTile extends ConsumerWidget {
         leading: Icon(Icons.workspaces, color: colorScheme.primary),
         title: Text(space.name),
         subtitle: Text(space.slug),
-        trailing: IconButton(
-          icon: Icon(Icons.delete_outline, color: colorScheme.error),
-          tooltip: 'Delete space',
-          onPressed: () => _confirmDelete(context, ref),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.hub_outlined),
+              tooltip: '${space.name} integrations',
+              onPressed: () =>
+                  context.push(AppRoutes.adminSpaceIntegrationsFor(space.id)),
+            ),
+            IconButton(
+              icon: Icon(Icons.delete_outline, color: colorScheme.error),
+              tooltip: 'Delete space',
+              onPressed: () => _confirmDelete(context, ref),
+            ),
+          ],
         ),
       ),
     );

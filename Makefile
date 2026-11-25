@@ -142,10 +142,14 @@ validate-openapi: openapi.json
 # Requires: docker
 OPENAPI_GENERATOR_VERSION := 7.22.0
 
+# The client is generated from a copy of the spec with info.version pinned,
+# so a release-please version bump leaves the generated code unchanged.
 generate-flutter-client: openapi.json
+	mkdir -p target
+	jq '.info.version = "0.0.0"' openapi.json > target/openapi-client.json
 	docker run --rm --user "$$(id -u):$$(id -g)" -v "$(CURDIR):/local" \
 	  openapitools/openapi-generator-cli:v$(OPENAPI_GENERATOR_VERSION) generate \
-	  -i /local/openapi.json \
+	  -i /local/target/openapi-client.json \
 	  -g dart-dio \
 	  -o /local/app/packages/assistant_api \
 	  -c /local/app/openapi-generator.yaml \

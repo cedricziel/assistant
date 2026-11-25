@@ -1,9 +1,13 @@
 import 'package:assistant_api/assistant_api.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/platform/widgets.dart';
 import '../../shared/theme/assistant_spacing.dart';
 import 'auth_kind_badge.dart';
+import 'caller_roles.dart';
 import 'catalog_entry_tile.dart';
+import 'install_integration_sheet.dart';
+import 'install_integration_view_model.dart';
 
 /// Opens the detail sheet for [entry].
 Future<void> showCatalogEntryDetail(
@@ -21,13 +25,13 @@ Future<void> showCatalogEntryDetail(
 }
 
 /// Description, domain, connect URL and auth requirements of one entry.
-class CatalogEntryDetailSheet extends StatelessWidget {
+class CatalogEntryDetailSheet extends ConsumerWidget {
   const CatalogEntryDetailSheet({super.key, required this.entry});
 
   final CatalogEntrySummary entry;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final muted = TextStyle(color: theme.colorScheme.onSurfaceVariant);
 
@@ -87,15 +91,9 @@ class CatalogEntryDetailSheet extends StatelessWidget {
           const SizedBox(height: AssistantSpacing.xs),
           Text(authRequirement(entry.auth)),
           const SizedBox(height: AssistantSpacing.xl),
-          const Align(
+          Align(
             alignment: Alignment.centerRight,
-            child: Tooltip(
-              message: 'Coming soon',
-              child: AdaptiveButton.filled(
-                onPressed: null,
-                child: Text('Install'),
-              ),
-            ),
+            child: _InstallButton(entry: entry),
           ),
         ],
       ),
@@ -121,4 +119,39 @@ String _headerHint(CatalogAuthResponse auth) {
   if (name == null) return '';
   final value = '${auth.valuePrefix ?? ''}{${auth.placeholder ?? 'value'}}';
   return ', sent in the $name header as $value';
+}
+
+/// Opens the install sheet when the caller may install [entry] anywhere, and
+/// says why not otherwise.
+class _InstallButton extends ConsumerWidget {
+  const _InstallButton({required this.entry});
+
+  final CatalogEntrySummary entry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final roles = ref.watch(callerRolesProvider);
+    final (message, args) = switch (roles) {
+      AsyncData(:final value) => switch (installArgsForEntry(entry, value)) {
+        null => (
+          'Your role or your organization\'s policy does not allow installing this.',
+          null,
+        ),
+        final args => (null, args),
+      },
+      AsyncError() => ('Could not check what you may install.', null),
+      _ => ('Checking what you may install…', null),
+    };
+
+    final button = AdaptiveButton.filled(
+      onPressed: args == null ? null : () => _open(context, args),
+      child: const Text('Install'),
+    );
+    return message == null ? button : Tooltip(message: message, child: button);
+  }
+
+  void _open(BuildContext context, InstallArgs args) {
+    final navigator = Navigator.of(context)..pop();
+    showInstallIntegrationSheet(navigator.context, args);
+  }
 }

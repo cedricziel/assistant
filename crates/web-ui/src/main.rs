@@ -9,5 +9,6 @@
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    assistant_core::tls::install_ring();
     assistant_web_ui::run_from_env().await
 }

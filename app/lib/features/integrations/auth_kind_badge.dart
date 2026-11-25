@@ -41,22 +41,43 @@ class AuthKindBadge extends StatelessWidget {
       ),
     };
 
+    return StatusPill(label: label, textColor: text, fillColor: fill);
+  }
+}
+
+/// Small bordered pill with a coloured fill, shared by the badges here.
+class StatusPill extends StatelessWidget {
+  const StatusPill({
+    super.key,
+    required this.label,
+    required this.textColor,
+    required this.fillColor,
+  });
+
+  final String label;
+
+  /// Also tints the border; use the on-container colour of [fillColor].
+  final Color textColor;
+  final Color fillColor;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AssistantSpacing.sm,
         vertical: 3,
       ),
       decoration: BoxDecoration(
-        color: fill,
+        color: fillColor,
         borderRadius: BorderRadius.circular(AssistantRadius.md),
-        border: Border.all(color: text.withValues(alpha: 0.4)),
+        border: Border.all(color: textColor.withValues(alpha: 0.4)),
       ),
       child: Text(
         label,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: text,
+          color: textColor,
         ),
       ),
     );

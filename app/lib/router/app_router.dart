@@ -21,6 +21,9 @@ import '../features/personas/persona_file_editor_screen.dart';
 import '../features/personas/personas_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/integrations/catalog_browser_screen.dart';
+import '../features/integrations/connections_screen.dart';
+import '../features/integrations/org_integrations_screen.dart';
+import '../features/integrations/space_integrations_screen.dart';
 import '../features/skills/skill_create_edit_screen.dart';
 import '../features/skills/skill_detail_screen.dart';
 import '../features/skills/skills_screen.dart';
@@ -60,8 +63,15 @@ class AppRoutes {
   static const agentDetail = '/agents/:id';
   static const settings = '/settings';
   static const settingsAccount = '/settings/account';
+  static const connections = '/settings/account/connections';
   static const integrations = '/integrations';
   static const admin = '/admin';
+  static const adminIntegrations = '/admin/integrations';
+  static const adminSpaceIntegrations = '/admin/spaces/:spaceId/integrations';
+
+  /// The integrations page of one space.
+  static String adminSpaceIntegrationsFor(String spaceId) =>
+      '/admin/spaces/$spaceId/integrations';
   static const apiKeys = '/api-keys';
   static const spaceSelector = '/spaces';
   static const onboarding = '/onboarding';
@@ -339,6 +349,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.admin,
             builder: (context, state) => const AdminScreen(),
+            routes: [
+              GoRoute(
+                path: 'integrations',
+                builder: (context, state) => const OrgIntegrationsScreen(),
+              ),
+              GoRoute(
+                path: 'spaces/:spaceId/integrations',
+                builder: (context, state) => SpaceIntegrationsScreen(
+                  spaceId: state.pathParameters['spaceId']!,
+                ),
+              ),
+            ],
           ),
 
           // -- API Keys -----------------------------------------------------
@@ -355,6 +377,12 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: 'account',
                 builder: (context, state) => const AccountScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'connections',
+                    builder: (context, state) => const ConnectionsScreen(),
+                  ),
+                ],
               ),
             ],
           ),

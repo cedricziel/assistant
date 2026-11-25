@@ -29,7 +29,10 @@ All runtime data lives under `~/.assistant/`. The multi-org layout:
 
 - `server.toml` — process-wide settings, loaded once at startup: message bus (`[bus]`), external MCP servers (`[mcp]`), Web Push keys (`[notifications]`)
 - `orgs/{slug}/org.toml` — per-org settings, loaded when the org's first space is used: LLM providers (`[llm]`), Persona, memory, skills, permissions, messenger and speech credentials. A space gets its LLM and settings from its own org.
-- `orgs/{slug}/org.db` — org-level database (users, spaces, memberships, API keys, OAuth clients)
+- `org.db` — org-level database at the install root (users, spaces, memberships, API keys, OAuth clients, integration credentials)
+- `secrets.key`, `jwt_secret` — keys for integration credentials and issued JWTs; `assistant backup` includes them
+- `agents/{id}/`, `skills/` — install-root persona workspaces and user skills
+- `cache/` — regenerable downloads (integrations catalog); not backed up
 - `orgs/{slug}/spaces/{space}/space.db` — space-level database (conversations, messages, personas, scheduled tasks)
 - `orgs/{slug}/spaces/{space}/agents/{id}/` — per-persona agent workspace
 - `orgs/{slug}/spaces/{space}/skills/` — space-local skills
@@ -44,7 +47,7 @@ There is no migration from the old single-user layout (`~/.assistant/assistant.d
 The assistant runs its own OAuth2 Authorization Server (`assistant-auth` crate). Two modes:
 
 - **Password mode** — local email/password credentials, server issues JWTs
-- **OIDC mode** — delegates authentication to an external IdP (Keycloak, Auth0, etc.), server still issues its own JWTs for authorization
+- **OIDC mode** — delegates authentication to an external IdP (Keycloak, Auth0, etc.), server still issues its own JWTs for authorization. Configured per org through `PUT /api/orgs/{id}/oidc` plus `auth_mode: "oidc"` on the org, not through server flags or `org.toml`. See `docs/authentication.md`.
 
 Key OAuth2 endpoints: `/oauth/authorize`, `/oauth/token`, `/oauth/register` (RFC 7591 dynamic client registration), `/oauth/device` (RFC 8628 device code flow), `/.well-known/oauth-authorization-server` (RFC 8414 metadata).
 

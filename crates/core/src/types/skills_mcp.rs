@@ -44,6 +44,28 @@ pub struct McpConfig {
     pub servers: Vec<McpServerEntry>,
 }
 
+/// Server names starting with one of these would collide with integration
+/// tools, which are named `mcp__{layer}_{slug}__{tool}`.
+pub const RESERVED_MCP_SERVER_PREFIXES: [&str; 3] = ["org_", "space_", "user_"];
+
+impl McpConfig {
+    /// Fails when a server is named with a prefix reserved for integration tools.
+    pub fn check_names(&self) -> anyhow::Result<()> {
+        match self
+            .servers
+            .iter()
+            .find_map(|s| Some((s, s.reserved_prefix()?)))
+        {
+            Some((server, prefix)) => anyhow::bail!(
+                "MCP server '{}' uses the reserved prefix '{prefix}': names starting with {} are reserved for integration tools",
+                server.name,
+                RESERVED_MCP_SERVER_PREFIXES.join(", ")
+            ),
+            None => Ok(()),
+        }
+    }
+}
+
 /// An external MCP server the assistant connects to as a client.
 ///
 /// Tools discovered from the server are registered with the prefix
@@ -66,6 +88,15 @@ pub struct McpServerEntry {
     /// Trust level controlling safety-gate behaviour for this server's tools.
     #[serde(default)]
     pub trust: McpTrustLevel,
+}
+
+impl McpServerEntry {
+    /// The reserved prefix this server's name starts with, if any.
+    pub fn reserved_prefix(&self) -> Option<&'static str> {
+        RESERVED_MCP_SERVER_PREFIXES
+            .into_iter()
+            .find(|prefix| self.name.starts_with(prefix))
+    }
 }
 
 /// How to connect to an external MCP server.

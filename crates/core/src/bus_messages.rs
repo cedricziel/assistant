@@ -31,7 +31,14 @@ use uuid::Uuid;
 /// and consumers of a given topic.
 pub mod topic {
     pub const TURN_REQUEST: &str = "turn.request";
+    /// The reply to one `turn.request`, consumed by whoever submitted it.
     pub const TURN_RESULT: &str = "turn.result";
+    /// Announces a successful turn to background consumers (titling).
+    ///
+    /// Separate from [`TURN_RESULT`] because a SQLite bus claim is exclusive:
+    /// a background consumer of `turn.result` takes the reply its submitter
+    /// is waiting for. Payload: [`TurnResult`](super::TurnResult).
+    pub const TURN_COMPLETED: &str = "turn.completed";
     pub const TURN_STATUS: &str = "turn.status";
     pub const TOOL_EXECUTE: &str = "tool.execute";
     pub const TOOL_RESULT: &str = "tool.result";

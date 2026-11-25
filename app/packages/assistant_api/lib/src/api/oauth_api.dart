@@ -24,7 +24,7 @@ class OauthApi {
 
   const OauthApi(this._dio, this._serializers);
 
-  /// GET /oauth/authorize — render login form.
+  /// GET /oauth/authorize — render the email step, the password form, or redirect to the org&#39;s IdP.
   ///
   ///
   /// Parameters:
@@ -35,6 +35,8 @@ class OauthApi {
   /// * [codeChallenge]
   /// * [codeChallengeMethod] - Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected.
   /// * [scope]
+  /// * [org] - Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; a password org shows the password form. Without this parameter the page asks for the user's email to find the org.
+  /// * [loginHint] - Email the user already entered. Prefills the password form and is passed on to the org's identity provider as `login_hint`.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -52,6 +54,8 @@ class OauthApi {
     String? codeChallenge,
     String? codeChallengeMethod,
     String? scope,
+    String? org,
+    String? loginHint,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -87,6 +91,9 @@ class OauthApi {
           _serializers, codeChallengeMethod, const FullType(String)),
       r'scope':
           encodeQueryParameter(_serializers, scope, const FullType(String)),
+      r'org': encodeQueryParameter(_serializers, org, const FullType(String)),
+      r'login_hint':
+          encodeQueryParameter(_serializers, loginHint, const FullType(String)),
     };
 
     final _response = await _dio.request<Object>(
@@ -101,11 +108,12 @@ class OauthApi {
     return _response;
   }
 
-  /// POST /oauth/authorize — validate credentials, generate auth code, redirect.
+  /// POST /oauth/authorize — validate one org&#39;s password credentials, generate an auth code, redirect.
   ///
   ///
   /// Parameters:
   /// * [clientId]
+  /// * [org] - Slug of the org the user signs in to. Emails are only unique per org.
   /// * [redirectUri]
   /// * [codeChallenge]
   /// * [codeChallengeMethod] - Must be `S256`.
@@ -124,6 +132,7 @@ class OauthApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> authorizePost({
     required String clientId,
+    required String org,
     required String redirectUri,
     String? codeChallenge,
     String? codeChallengeMethod,
@@ -164,6 +173,7 @@ class OauthApi {
             _serializers, codeChallengeMethod, const FullType(String)),
         r'email':
             encodeQueryParameter(_serializers, email, const FullType(String)),
+        r'org': encodeQueryParameter(_serializers, org, const FullType(String)),
         r'password': encodeQueryParameter(
             _serializers, password, const FullType(String)),
         r'redirect_uri': encodeQueryParameter(
@@ -513,6 +523,7 @@ class OauthApi {
   ///
   /// Parameters:
   /// * [email] - Email for authentication.
+  /// * [org] - Slug of the org the user signs in to. Emails are only unique per org.
   /// * [password] - Password for authentication.
   /// * [userCode]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -526,6 +537,7 @@ class OauthApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> deviceVerifySubmit({
     required String email,
+    required String org,
     required String password,
     required String userCode,
     CancelToken? cancelToken,
@@ -555,10 +567,103 @@ class OauthApi {
       _bodyData = <String, dynamic>{
         r'email':
             encodeQueryParameter(_serializers, email, const FullType(String)),
+        r'org': encodeQueryParameter(_serializers, org, const FullType(String)),
         r'password': encodeQueryParameter(
             _serializers, password, const FullType(String)),
         r'user_code': encodeQueryParameter(
             _serializers, userCode, const FullType(String)),
+      };
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final _response = await _dio.request<Object>(
+      _path,
+      data: _bodyData,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    return _response;
+  }
+
+  /// POST /oauth/authorize/identify — find the org an email signs in to.
+  /// A sole match continues in that org (IdP redirect or password form); no match or several get the same org-slug form so the response does not say which case applied.
+  ///
+  /// Parameters:
+  /// * [clientId]
+  /// * [email] - Email used to find the org the user signs in to.
+  /// * [redirectUri]
+  /// * [codeChallenge]
+  /// * [codeChallengeMethod] - Must be `S256`.
+  /// * [scope]
+  /// * [state]
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future]
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<void>> identifyPost({
+    required String clientId,
+    required String email,
+    required String redirectUri,
+    String? codeChallenge,
+    String? codeChallengeMethod,
+    String? scope,
+    String? state,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/oauth/authorize/identify';
+    final _options = Options(
+      method: r'POST',
+      headers: <String, dynamic>{
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[],
+        ...?extra,
+      },
+      contentType: 'application/x-www-form-urlencoded',
+      validateStatus: validateStatus,
+    );
+
+    dynamic _bodyData;
+
+    try {
+      _bodyData = <String, dynamic>{
+        r'client_id': encodeQueryParameter(
+            _serializers, clientId, const FullType(String)),
+        r'code_challenge': encodeQueryParameter(
+            _serializers, codeChallenge, const FullType(String)),
+        r'code_challenge_method': encodeQueryParameter(
+            _serializers, codeChallengeMethod, const FullType(String)),
+        r'email':
+            encodeQueryParameter(_serializers, email, const FullType(String)),
+        r'redirect_uri': encodeQueryParameter(
+            _serializers, redirectUri, const FullType(String)),
+        r'scope':
+            encodeQueryParameter(_serializers, scope, const FullType(String)),
+        r'state':
+            encodeQueryParameter(_serializers, state, const FullType(String)),
       };
     } catch (error, stackTrace) {
       throw DioException(

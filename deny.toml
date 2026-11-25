@@ -42,6 +42,13 @@ confidence-threshold = 0.8
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
+# One crypto backend: ring. aws-lc-rs/aws-lc-sys compile a C library through
+# cmake. Configure the offending crate with its ring (or no-provider) feature.
+deny = [
+    { crate = "aws-lc-rs", reason = "ring is the only crypto backend" },
+    { crate = "aws-lc-sys", reason = "ring is the only crypto backend" },
+    { crate = "cmake", reason = "only needed to build aws-lc-sys" },
+]
 
 [sources]
 unknown-registry = "deny"

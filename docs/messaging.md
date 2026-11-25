@@ -55,6 +55,7 @@ Personas or users exist. Consumers filter what they care about at claim time.
 | `turn.request`     | Interface     | Orchestrator     | User sent a message                 |
 | `turn.status`      | Orchestrator  | Interface        | Status update (thinking, tools ...) |
 | `turn.result`      | Orchestrator  | Interface        | Final answer ready                  |
+| `turn.completed`   | Orchestrator  | Title generator  | Turn succeeded (background work)    |
 | `tool.execute`     | Orchestrator  | Tool executor    | Run a tool                          |
 | `tool.result`      | Tool executor | Orchestrator     | Tool output                         |
 | `agent.spawn`      | Persona       | Agent supervisor | Create a Subagent Process           |
@@ -68,15 +69,16 @@ Each topic has a corresponding Rust struct in `assistant_core::bus_messages`
 that defines the payload shape at compile time. Topic names are constants in
 `assistant_core::topic`.
 
-| Topic          | Constant              | Envelope struct |
-| -------------- | --------------------- | --------------- |
-| `turn.request` | `topic::TURN_REQUEST` | `TurnRequest`   |
-| `turn.result`  | `topic::TURN_RESULT`  | `TurnResult`    |
-| `turn.status`  | `topic::TURN_STATUS`  | `TurnStatus`    |
-| `tool.execute` | `topic::TOOL_EXECUTE` | `ToolExecute`   |
-| `tool.result`  | `topic::TOOL_RESULT`  | `ToolResult`    |
-| `agent.spawn`  | `topic::AGENT_SPAWN`  | `AgentSpawn`    |
-| `agent.report` | `topic::AGENT_REPORT` | `AgentReport`   |
+| Topic            | Constant                | Envelope struct |
+| ---------------- | ----------------------- | --------------- |
+| `turn.request`   | `topic::TURN_REQUEST`   | `TurnRequest`   |
+| `turn.result`    | `topic::TURN_RESULT`    | `TurnResult`    |
+| `turn.completed` | `topic::TURN_COMPLETED` | `TurnResult`    |
+| `turn.status`    | `topic::TURN_STATUS`    | `TurnStatus`    |
+| `tool.execute`   | `topic::TOOL_EXECUTE`   | `ToolExecute`   |
+| `tool.result`    | `topic::TOOL_RESULT`    | `ToolResult`    |
+| `agent.spawn`    | `topic::AGENT_SPAWN`    | `AgentSpawn`    |
+| `agent.report`   | `topic::AGENT_REPORT`   | `AgentReport`   |
 
 ### Publishing with typed envelopes
 

@@ -55,6 +55,11 @@ impl OrgStorageLayer {
         super::org_store::SqliteOrgStore::new(self.pool.clone())
     }
 
+    /// Build a [`SqliteOrgOidcConfigStore`](super::org_oidc_config_store::SqliteOrgOidcConfigStore).
+    pub fn oidc_config_store(&self) -> super::org_oidc_config_store::SqliteOrgOidcConfigStore {
+        super::org_oidc_config_store::SqliteOrgOidcConfigStore::new(self.pool.clone())
+    }
+
     /// Build a [`SqliteUserStore`](super::user_store::SqliteUserStore).
     pub fn user_store(&self) -> super::user_store::SqliteUserStore {
         super::user_store::SqliteUserStore::new(self.pool.clone())
@@ -120,6 +125,13 @@ impl OrgStorageLayer {
     }
 
     /// Build a [`SqliteIntegrationCredentialStore`](super::integration_store::SqliteIntegrationCredentialStore).
+    pub fn integration_health_store(
+        &self,
+    ) -> super::integration_store::SqliteIntegrationHealthStore {
+        super::integration_store::SqliteIntegrationHealthStore::new(self.pool.clone())
+    }
+
+    /// Build a [`SqliteIntegrationCredentialStore`](super::integration_store::SqliteIntegrationCredentialStore).
     pub fn integration_credential_store(
         &self,
     ) -> super::integration_store::SqliteIntegrationCredentialStore {
@@ -175,6 +187,14 @@ async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "007_user_token_version",
             include_str!("../../../migrations/org/007_user_token_version.sql"),
+        ),
+        (
+            "008_integration_health",
+            include_str!("../../../migrations/org/008_integration_health.sql"),
+        ),
+        (
+            "009_org_oidc_configs",
+            include_str!("../../../migrations/org/009_org_oidc_configs.sql"),
         ),
     ];
 

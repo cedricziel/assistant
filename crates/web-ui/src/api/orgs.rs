@@ -8,6 +8,8 @@
 //! | POST   | `/api/orgs`       | Create an organization    |
 //! | GET    | `/api/orgs/{id}`  | Get org detail            |
 //! | PATCH  | `/api/orgs/{id}`  | Update org settings       |
+//!
+//! OIDC settings live in [`super::org_oidc`].
 
 use assistant_core::clock::{Clock, SystemClock};
 use std::sync::Arc;
@@ -24,7 +26,8 @@ use serde::{Deserialize, Serialize};
 use assistant_core::OrgStore;
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::OrgId;
-use assistant_core::store::Organization;
+use assistant_core::integrations::SecretBox;
+use assistant_core::store::{OrgOidcConfigStore, Organization};
 use assistant_storage::OrgStorageLayer;
 
 use crate::errors::json_error;
@@ -35,6 +38,7 @@ use crate::openapi::ErrorBody;
 #[derive(Clone)]
 pub struct OrgsApiState {
     pub org_storage: Arc<OrgStorageLayer>,
+    pub secrets: Arc<SecretBox>,
 }
 
 // -- Request/response types --------------------------------------------------
@@ -64,7 +68,8 @@ pub struct OrgDetail {
 pub struct CreateOrgRequest {
     pub name: String,
     pub slug: String,
-    /// Auth mode: `"password"` or `"oidc"`.
+    /// Must be `"password"` if set; switch to `"oidc"` after configuring
+    /// `PUT /api/orgs/{id}/oidc`.
     pub auth_mode: Option<String>,
 }
 
@@ -147,12 +152,20 @@ pub async fn create_org(
         return json_error(StatusCode::BAD_REQUEST, "name and slug are required");
     }
 
+    // OIDC needs settings, which only exist once the org does.
+    if body.auth_mode.as_deref().is_some_and(|m| m != "password") {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "new orgs start with auth_mode \"password\"; configure OIDC afterwards",
+        );
+    }
+
     let now = SystemClock.now();
     let org = Organization {
         id: OrgId::from(format!("org_{}", uuid::Uuid::new_v4())),
         name: body.name,
         slug: body.slug,
-        auth_mode: body.auth_mode.unwrap_or_else(|| "password".into()),
+        auth_mode: "password".into(),
         created_at: now,
         updated_at: now,
     };
@@ -231,6 +244,8 @@ pub async fn get_org(
     request_body = UpdateOrgRequest,
     responses(
         (status = 200, description = "Organization updated", body = OrgDetail),
+        (status = 400, description = "Unknown auth_mode", body = ErrorBody),
+        (status = 409, description = "auth_mode oidc without OIDC settings", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 403, description = "Forbidden", body = ErrorBody),
         (status = 404, description = "Not found", body = ErrorBody),
@@ -266,6 +281,33 @@ pub async fn update_org(
         org.name = name;
     }
     if let Some(auth_mode) = body.auth_mode {
+        match auth_mode.as_str() {
+            "password" => {}
+            "oidc" => match state
+                .org_storage
+                .oidc_config_store()
+                .get_oidc_config(&org_id)
+                .await
+            {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return json_error(
+                        StatusCode::CONFLICT,
+                        "configure OIDC settings before switching auth_mode to oidc",
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("failed to get OIDC config: {e}");
+                    return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
+                }
+            },
+            _ => {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    "auth_mode must be \"password\" or \"oidc\"",
+                );
+            }
+        }
         org.auth_mode = auth_mode;
     }
     org.updated_at = SystemClock.now();
@@ -289,6 +331,7 @@ pub async fn update_org(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assistant_core::integrations::SecretBox;
     use axum::body::Body;
     use axum::http::Request;
     use std::collections::HashMap;
@@ -330,7 +373,10 @@ mod tests {
 
     async fn setup_state() -> OrgsApiState {
         let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
-        OrgsApiState { org_storage }
+        OrgsApiState {
+            org_storage,
+            secrets: Arc::new(SecretBox::from_key([7; 32])),
+        }
     }
 
     #[tokio::test]

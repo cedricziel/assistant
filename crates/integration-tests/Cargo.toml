@@ -1,11 +1,12 @@
 [package]
 name = "assistant-integration-tests"
-version = "0.1.165"
+version = "0.2.0"
 edition.workspace = true
 publish = false
 
 [dev-dependencies]
-assistant-core = { path = "../core" }
+# `test-tls` installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
+assistant-core = { path = "../core", features = ["test-tls"] }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-storage = { path = "../storage" }
 assistant-runtime = { path = "../runtime" }

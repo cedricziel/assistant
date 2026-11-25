@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.1.165"
+    "version": "0.2.0"
   },
   "servers": [
     {
@@ -1417,6 +1417,164 @@
         ]
       }
     },
+    "/api/integrations": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`GET /api/integrations` — list the integrations the caller may see.",
+        "description": "Members see the org-layer integrations offered to their spaces, the\nintegrations of spaces they belong to, and their own user-layer ones. Org\nadmins see everything, including other users' integrations (without\ncredential material).",
+        "operationId": "list_integrations",
+        "parameters": [
+          {
+            "name": "layer",
+            "in": "query",
+            "description": "Only integrations of this layer.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/IntegrationLayer"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "query",
+            "description": "Only integrations in use in this space: its own space-layer ones, plus\nthe org-layer ones offered to it that it has not opted out of. User-layer\nintegrations belong to no space and are never returned. Without this\nfilter, opted-out org integrations are listed too, so a space can opt\nback in.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The visible integrations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`POST /api/integrations` — install an integration.",
+        "description": "Org admins install at the org layer; space admins (or org admins) at the\nspace layer; anyone at the user layer. The org policy limits the space and\nuser layers (`403`). A catalog install copies its URL and auth template\nfrom the catalog index.",
+        "operationId": "create_integration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIntegrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not install at this layer, or the org policy forbids it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such space",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The slug is already taken in this layer and owner scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid, e.g. a bad slug or missing auth details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
     "/api/integrations/catalog": {
       "get": {
         "tags": [
@@ -1546,6 +1704,827 @@
           },
           "404": {
             "description": "No such catalog entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/policy": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`GET /api/integrations/policy` — the org's integration policy.",
+        "description": "Open to every member: the install flow needs to explain what is allowed.",
+        "operationId": "get_integration_policy",
+        "responses": {
+          "200": {
+            "description": "The policy; the default when an org admin never saved one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationPolicyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`PUT /api/integrations/policy` — replace the org's integration policy.",
+        "description": "Org admins only. Tightening it deletes nothing: integrations that no longer\ncomply report status `blocked_by_policy` and contribute no tools.",
+        "operationId": "put_integration_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIntegrationPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The new policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationPolicyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an org admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/{id}": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`GET /api/integrations/{id}` — get one integration.",
+        "description": "`404` when the caller may not see it, including another user's personal\nintegration. Org admins are the exception: they can read a personal\nintegration's metadata (never its credential) so they can remove it.",
+        "operationId": "get_integration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The integration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it (another user's personal integration, except to org admins)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`DELETE /api/integrations/{id}` — remove an integration and its credentials.",
+        "description": "Org admins may remove any user's personal integration.",
+        "operationId": "delete_integration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may see but not remove it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`PATCH /api/integrations/{id}` — update an integration.",
+        "description": "Layer, owner, catalog entry, auth kind and credential mode are fixed at\ninstall time. A catalog install cannot change its URL or header template;\nmoving a custom URL deletes its stored credentials. A change that races\nwith another one on the same integration fails with `409` instead of\noverwriting it.",
+        "operationId": "update_integration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIntegrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated integration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may see but not change it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The slug is already taken, or another request changed the integration since it was read (reload and retry)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid slug or a field that cannot change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/{id}/credential": {
+      "put": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`PUT /api/integrations/{id}/credential` — store the header credential.",
+        "description": "For a `shared` integration the credential is the integration's own and\nneeds someone who manages its layer. For a `per_user` one it is the\ncaller's, and anyone who can see the integration may set theirs. A personal\nintegration's credential is its owner's alone.",
+        "operationId": "set_credential",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored. Only whether a credential exists is reported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not set this credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The integration changed while the credential was saved; the credential was not kept",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The integration takes no header credential, or the value or header name is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`DELETE /api/integrations/{id}/credential` — remove the header credential.",
+        "description": "Same permissions as setting it.",
+        "operationId": "clear_credential",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed; `has_credential` is false",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not clear this credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The integration takes no header credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/{id}/spaces/{space_id}": {
+      "put": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`PUT /api/integrations/{id}/spaces/{space_id}` — add a space row.",
+        "description": "`mode: allow` (org admins) restricts the integration to the spaces that have\nan allow row. `mode: opt_out` (admins of that space, or org admins) removes\nit from that space.",
+        "operationId": "put_space_access",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Org-layer integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSpaceAccessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The row now in place (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceAccessEntry"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not set this row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration or space, or the caller may not see the integration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not an org-layer integration, or an invalid mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`DELETE /api/integrations/{id}/spaces/{space_id}?mode=` — remove a space row.",
+        "description": "The `mode` query parameter names the row (`allow` or `opt_out`) and has the\nsame permissions as `PUT`. Removing a row that does not exist succeeds.\n\nRemoving the last `allow` row does not hide the integration everywhere: with\nno `allow` rows left it is offered to every space again, except those that\nopted out.",
+        "operationId": "delete_space_access",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Org-layer integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "description": "Which row to remove.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpaceAccessMode"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The row is gone"
+          },
+          "400": {
+            "description": "Missing or invalid `mode`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not remove this row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration or space, or the caller may not see the integration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not an org-layer integration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/{id}/test": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`POST /api/integrations/{id}/test` — connect and list the tools.",
+        "description": "Uses the credential the caller's turns would use: the shared one, or their\nown for a per-user integration. A personal integration can be tested only\nby its owner. A failed connection is still a `200` with `ok: false` and the\nerror, and marks the integration `unreachable` until a connection works.\nThe error names a kind (`HTTP <status>`, `timeout`, `connection failed`,\n`protocol error`), never the raw transport error. An integration can be\ntested once every few seconds per caller (`429` with `Retry-After`).",
+        "operationId": "test_integration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The test ran; `ok` says whether it connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestIntegrationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not use this integration's credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The integration changed while the test ran; test again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The integration cannot be used by the caller now: disabled, blocked by policy, or no usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Tested again too soon; wait the number of seconds in `Retry-After`",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "Seconds until the integration may be tested again"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1838,6 +2817,16 @@
               }
             }
           },
+          "400": {
+            "description": "Unknown auth_mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized",
             "content": {
@@ -1860,6 +2849,252 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "auth_mode oidc without OIDC settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{id}/oidc": {
+      "get": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`GET /api/orgs/{id}/oidc` — get the org's OIDC settings.",
+        "operationId": "get_org_oidc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OIDC settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgOidcConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No OIDC settings for this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`PUT /api/orgs/{id}/oidc` — create or replace the org's OIDC settings.",
+        "operationId": "put_org_oidc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutOrgOidcConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OIDC settings saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgOidcConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Org not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`DELETE /api/orgs/{id}/oidc` — remove the org's OIDC settings.",
+        "description": "Refused while the org's `auth_mode` is `\"oidc\"`.",
+        "operationId": "delete_org_oidc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "OIDC settings removed"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No OIDC settings for this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Org still uses OIDC sign-in",
             "content": {
               "application/json": {
                 "schema": {
@@ -6698,7 +7933,7 @@
         "tags": [
           "oauth"
         ],
-        "summary": "GET /oauth/authorize — render login form.",
+        "summary": "GET /oauth/authorize — render the email step, the password form, or\nredirect to the org's IdP.",
         "operationId": "authorize_get",
         "parameters": [
           {
@@ -6778,20 +8013,56 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "org",
+            "in": "query",
+            "description": "Slug of the org to sign in to. An org in OIDC mode redirects to its\nown identity provider; a password org shows the password form. Without\nthis parameter the page asks for the user's email to find the org.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "login_hint",
+            "in": "query",
+            "description": "Email the user already entered. Prefills the password form and is\npassed on to the org's identity provider as `login_hint`.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Login form HTML",
+            "description": "Email form (no `org`) or password form (password org), as HTML",
             "content": {
               "text/html": {}
             }
           },
           "303": {
-            "description": "Redirect to external IdP (OIDC mode)"
+            "description": "Redirect to the org's external IdP (OIDC mode)"
           },
           "400": {
-            "description": "Invalid parameters",
+            "description": "Invalid parameters or unknown org",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "500": {
+            "description": "Org is in OIDC mode but has no OIDC settings",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "502": {
+            "description": "The org's IdP could not be reached",
             "content": {
               "text/html": {}
             }
@@ -6805,7 +8076,7 @@
         "tags": [
           "oauth"
         ],
-        "summary": "POST /oauth/authorize — validate credentials, generate auth code, redirect.",
+        "summary": "POST /oauth/authorize — validate one org's password credentials, generate\nan auth code, redirect.",
         "operationId": "authorize_post",
         "requestBody": {
           "content": {
@@ -6822,7 +8093,7 @@
             "description": "Redirect with authorization code"
           },
           "400": {
-            "description": "Invalid request"
+            "description": "Invalid request, unknown org, or the org uses single sign-on"
           },
           "401": {
             "description": "Invalid credentials"
@@ -6832,6 +8103,61 @@
           },
           "500": {
             "description": "Internal server error"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/oauth/authorize/identify": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "POST /oauth/authorize/identify — find the org an email signs in to.",
+        "description": "A sole match continues in that org (IdP redirect or password form); no\nmatch or several get the same org-slug form so the response does not say\nwhich case applied.",
+        "operationId": "identify_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentifyForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Password form (sole password-org match) or org-slug form, as HTML",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "303": {
+            "description": "Redirect to the matching org's external IdP (OIDC mode)"
+          },
+          "400": {
+            "description": "Invalid parameters",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded; see the Retry-After header"
+          },
+          "500": {
+            "description": "Internal server error, or the org is in OIDC mode but has no OIDC settings",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "502": {
+            "description": "The org's IdP could not be reached",
+            "content": {
+              "text/html": {}
+            }
           }
         },
         "security": [
@@ -7095,7 +8421,7 @@
             }
           },
           "400": {
-            "description": "Invalid or expired code",
+            "description": "Invalid or expired code, unknown org, or the org uses single sign-on",
             "content": {
               "text/html": {}
             }
@@ -8620,6 +9946,7 @@
         "type": "object",
         "description": "Form fields for POST /oauth/authorize (password credential submission).",
         "required": [
+          "org",
           "client_id",
           "redirect_uri"
         ],
@@ -8645,6 +9972,10 @@
               "string",
               "null"
             ]
+          },
+          "org": {
+            "type": "string",
+            "description": "Slug of the org the user signs in to. Emails are only unique per org."
           },
           "password": {
             "type": [
@@ -8796,7 +10127,8 @@
           "domain",
           "categories",
           "connect_url",
-          "auth"
+          "auth",
+          "installable_layers"
         ],
         "properties": {
           "auth": {
@@ -8827,6 +10159,13 @@
           "id": {
             "type": "string",
             "description": "Upstream catalog id, e.g. `curated/linear-app-mcp`. Contains a slash."
+          },
+          "installable_layers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IntegrationLayer"
+            },
+            "description": "The layers the caller may install this entry at now: the ones they may\nwrite to and the org policy allows."
           },
           "name": {
             "type": "string"
@@ -8859,6 +10198,15 @@
             "type": "string"
           }
         }
+      },
+      "CatalogMode": {
+        "type": "string",
+        "description": "Which catalog entries lower layers may install.",
+        "enum": [
+          "all",
+          "allowlist",
+          "none"
+        ]
       },
       "ChangePasswordRequest": {
         "type": "object",
@@ -9266,6 +10614,107 @@
           }
         }
       },
+      "CreateIntegrationRequest": {
+        "type": "object",
+        "description": "Body of `POST /api/integrations`.\n\nName exactly one of `catalog_entry_id` and `connect_url`.",
+        "required": [
+          "layer"
+        ],
+        "properties": {
+          "auth_kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationAuthKind",
+                "description": "Required for a custom URL and for a catalog entry whose auth kind is\nunknown (choose `none`, `header` or `oauth`). A `mixed` catalog entry\nmay be narrowed to `header` or `oauth`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "catalog_entry_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Install this catalog entry. Its URL, auth kind and header template are\ncopied at install time."
+          },
+          "connect_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Install a custom remote MCP server. Needs `name` and `auth_kind`."
+          },
+          "credential_mode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CredentialMode",
+                "description": "Defaults to `per_user` for OAuth and `shared` otherwise. User-layer\nintegrations are always `per_user`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Defaults to `true`."
+          },
+          "header_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Header that carries the credential. Required for `header` auth on a\ncustom URL or an unknown catalog entry; rejected when the catalog\nentry supplies its own template."
+          },
+          "header_value_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Text before the secret in the header value. Same rules as `header_name`."
+          },
+          "layer": {
+            "$ref": "#/components/schemas/IntegrationLayer"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Defaults to the catalog entry's name. Required for a custom URL."
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Kebab-case, 1–32 characters. Defaults to the catalog entry's slug."
+          },
+          "space_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required for the space layer, rejected otherwise."
+          },
+          "trust": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationTrust",
+                "description": "Defaults to `confirm`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "CreateInterfaceInstanceRequest": {
         "type": "object",
         "required": [
@@ -9294,7 +10743,7 @@
               "string",
               "null"
             ],
-            "description": "Auth mode: `\"password\"` or `\"oidc\"`."
+            "description": "Must be `\"password\"` if set; switch to `\"oidc\"` after configuring\n`PUT /api/orgs/{id}/oidc`."
           },
           "name": {
             "type": "string"
@@ -9445,6 +10894,34 @@
           }
         }
       },
+      "CredentialMode": {
+        "type": "string",
+        "description": "Whose credential an integration uses.",
+        "enum": [
+          "shared",
+          "per_user"
+        ]
+      },
+      "CredentialResponse": {
+        "type": "object",
+        "description": "Whether a credential is stored for the caller's subject. The value itself is\nnever returned.",
+        "required": [
+          "has_credential"
+        ],
+        "properties": {
+          "has_credential": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the credential was last set; absent when there is none."
+          }
+        }
+      },
       "DeviceCodeOAuthFlow": {
         "type": "object",
         "description": "OAuth 2.0 Device Code flow configuration (RFC 8628).",
@@ -9536,6 +11013,7 @@
         "description": "Form fields for POST /oauth/device/verify.",
         "required": [
           "user_code",
+          "org",
           "email",
           "password"
         ],
@@ -9543,6 +11021,10 @@
           "email": {
             "type": "string",
             "description": "Email for authentication."
+          },
+          "org": {
+            "type": "string",
+            "description": "Slug of the org the user signs in to. Emails are only unique per org."
           },
           "password": {
             "type": "string",
@@ -9555,7 +11037,7 @@
       },
       "ErrorBody": {
         "type": "object",
-        "description": "Standard error envelope returned for every 4xx/5xx response from\n`/api/...` endpoints. Matches the project convention documented in\n`AGENTS.md`: `{\"error\": \"...message...\"}`.\n\nOAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`]\n(RFC 6749 §5.2) and are intentionally exempt.",
+        "description": "Standard error envelope returned for every 4xx/5xx response from\n`/api/...` endpoints. Matches the project convention documented in\n`AGENTS.md`: `{\"error\": \"...message...\"}`.\n\nOAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`]\n(RFC 6749 §5.2) and are intentionally exempt.\n\nOne more exception: a `401 Unauthorized` is sent by the auth middleware\nbefore any handler runs, as the plain text `Unauthorized`, not as JSON.",
         "required": [
           "error"
         ],
@@ -9613,6 +11095,52 @@
           }
         }
       },
+      "IdentifyForm": {
+        "type": "object",
+        "description": "Form fields for POST /oauth/authorize/identify (the email-first step).",
+        "required": [
+          "email",
+          "client_id",
+          "redirect_uri"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "code_challenge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code_challenge_method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Must be `S256`."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email used to find the org the user signs in to."
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "ImplicitOAuthFlow": {
         "type": "object",
         "description": "Deprecated: Use Authorization Code + PKCE instead.",
@@ -9642,6 +11170,318 @@
             }
           }
         }
+      },
+      "IntegrationAuthKind": {
+        "type": "string",
+        "description": "How an integration authenticates to its MCP server.",
+        "enum": [
+          "none",
+          "header",
+          "oauth",
+          "mixed"
+        ]
+      },
+      "IntegrationDetail": {
+        "type": "object",
+        "description": "An installed integration with its auth template and space rows.",
+        "required": [
+          "id",
+          "layer",
+          "slug",
+          "name",
+          "connect_url",
+          "auth_kind",
+          "credential_mode",
+          "trust",
+          "enabled",
+          "status",
+          "has_credential",
+          "space_access",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "auth_kind": {
+            "$ref": "#/components/schemas/IntegrationAuthKind"
+          },
+          "catalog_entry_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connect_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "credential_mode": {
+            "$ref": "#/components/schemas/CredentialMode"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "header_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Header that carries the credential, for `header` and `mixed` auth."
+          },
+          "header_value_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Text before the secret in the header value, e.g. `Bearer `."
+          },
+          "id": {
+            "type": "string",
+            "description": "`int_<uuid>`."
+          },
+          "last_connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "layer": {
+            "$ref": "#/components/schemas/IntegrationLayer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_user_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "space_access": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpaceAccessEntry"
+            },
+            "description": "Space rows of an org-layer integration, limited to the spaces the\ncaller belongs to unless the caller is an org admin."
+          },
+          "space_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/IntegrationStatus"
+          },
+          "tool_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "trust": {
+            "$ref": "#/components/schemas/IntegrationTrust"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IntegrationLayer": {
+        "type": "string",
+        "description": "Who owns an integration.",
+        "enum": [
+          "org",
+          "space",
+          "user"
+        ]
+      },
+      "IntegrationListResponse": {
+        "type": "object",
+        "description": "The integrations the caller may see.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IntegrationSummary"
+            }
+          }
+        }
+      },
+      "IntegrationPolicyResponse": {
+        "type": "object",
+        "description": "What lower layers may install in this org.",
+        "required": [
+          "catalog_mode",
+          "allowed_catalog_ids",
+          "allow_custom_urls",
+          "allow_user_integrations"
+        ],
+        "properties": {
+          "allow_custom_urls": {
+            "type": "boolean"
+          },
+          "allow_user_integrations": {
+            "type": "boolean"
+          },
+          "allowed_catalog_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Catalog entry ids allowed when `catalog_mode` is `allowlist`."
+          },
+          "catalog_mode": {
+            "$ref": "#/components/schemas/CatalogMode"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Absent until an org admin first saves the policy."
+          }
+        }
+      },
+      "IntegrationStatus": {
+        "type": "string",
+        "description": "Whether the caller can use an integration right now.",
+        "enum": [
+          "ready",
+          "needs_connection",
+          "auth_expired",
+          "unreachable",
+          "blocked_by_policy",
+          "disabled"
+        ]
+      },
+      "IntegrationSummary": {
+        "type": "object",
+        "description": "An installed integration, as listed.",
+        "required": [
+          "id",
+          "layer",
+          "slug",
+          "name",
+          "connect_url",
+          "auth_kind",
+          "credential_mode",
+          "trust",
+          "enabled",
+          "status",
+          "has_credential",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "auth_kind": {
+            "$ref": "#/components/schemas/IntegrationAuthKind"
+          },
+          "catalog_entry_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The catalog entry it was installed from; absent for a custom URL."
+          },
+          "connect_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "credential_mode": {
+            "$ref": "#/components/schemas/CredentialMode"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_credential": {
+            "type": "boolean",
+            "description": "Whether a credential is stored for the caller's subject: the shared\ncredential, or the caller's own for a per-user integration. The value\nitself is never returned."
+          },
+          "id": {
+            "type": "string",
+            "description": "`int_<uuid>`."
+          },
+          "last_connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The last time a connection for the caller's subject succeeded."
+          },
+          "layer": {
+            "$ref": "#/components/schemas/IntegrationLayer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The owner of a user-layer integration."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Unique within its layer and owner. Part of its tool names."
+          },
+          "space_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The space of a space-layer integration."
+          },
+          "status": {
+            "$ref": "#/components/schemas/IntegrationStatus",
+            "description": "Whether the caller can use it. For an org admin looking at another\nuser's integration, the status is the owner's."
+          },
+          "tool_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The number of tools that connection found.",
+            "minimum": 0
+          },
+          "trust": {
+            "$ref": "#/components/schemas/IntegrationTrust"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IntegrationTrust": {
+        "type": "string",
+        "description": "Whether tool calls need user confirmation.",
+        "enum": [
+          "confirm",
+          "trust"
+        ]
       },
       "InterfaceInstanceResponse": {
         "type": "object",
@@ -10053,6 +11893,47 @@
           }
         }
       },
+      "OrgOidcConfigResponse": {
+        "type": "object",
+        "description": "An org's OIDC settings as returned by the API. The client secret is never\nincluded.",
+        "required": [
+          "issuer_url",
+          "client_id",
+          "has_client_secret",
+          "auto_provision",
+          "allowed_email_domains",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "allowed_email_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Email domains allowed to sign in; empty allows any domain."
+          },
+          "auto_provision": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "has_client_secret": {
+            "type": "boolean",
+            "description": "Whether a client secret is stored."
+          },
+          "issuer_url": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
       "OrgSummary": {
         "type": "object",
         "description": "Summary of an organization.",
@@ -10352,6 +12233,40 @@
           "url": {
             "type": "string",
             "description": "The URL where the notification should be sent."
+          }
+        }
+      },
+      "PutOrgOidcConfigRequest": {
+        "type": "object",
+        "description": "Body for `PUT /api/orgs/{id}/oidc`.",
+        "required": [
+          "issuer_url",
+          "client_id"
+        ],
+        "properties": {
+          "allowed_email_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "auto_provision": {
+            "type": "boolean",
+            "description": "Defaults to `true`."
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Omit to keep the stored secret, `null` to clear it."
+          },
+          "issuer_url": {
+            "type": "string",
+            "description": "`https` URL, or `http` for `localhost` / loopback addresses."
           }
         }
       },
@@ -10743,6 +12658,27 @@
           }
         }
       },
+      "SetCredentialRequest": {
+        "type": "object",
+        "description": "Body of `PUT /api/integrations/{id}/credential`.",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "header_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The header that carries the value. Only accepted when the integration\nhas no header name yet, and then only from someone who manages its layer."
+          },
+          "value": {
+            "type": "string",
+            "format": "password",
+            "description": "The secret that fills the header template, e.g. the token after\n`Bearer `. Surrounding whitespace is dropped. It is stored encrypted\nand never returned."
+          }
+        }
+      },
       "SetSkillAccessModeRequest": {
         "type": "object",
         "description": "Body for `PATCH /api/personas/{id}/skill-access`.",
@@ -10753,6 +12689,18 @@
           "mode": {
             "type": "string",
             "description": "One of \"all\", \"whitelist\", or \"blacklist\"."
+          }
+        }
+      },
+      "SetSpaceAccessRequest": {
+        "type": "object",
+        "description": "Body of `PUT /api/integrations/{id}/spaces/{space_id}`.",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SpaceAccessMode"
           }
         }
       },
@@ -10803,6 +12751,30 @@
             "type": "string"
           }
         }
+      },
+      "SpaceAccessEntry": {
+        "type": "object",
+        "description": "One space row of an org-layer integration.",
+        "required": [
+          "space_id",
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SpaceAccessMode"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        }
+      },
+      "SpaceAccessMode": {
+        "type": "string",
+        "description": "An org-layer integration's relation to a space: `allow` restricts the\nintegration to listed spaces, `opt_out` is a space's own opt-out.",
+        "enum": [
+          "allow",
+          "opt_out"
+        ]
       },
       "SpaceDetail": {
         "type": "object",
@@ -11370,6 +13342,54 @@
           }
         }
       },
+      "TestIntegrationResponse": {
+        "type": "object",
+        "description": "The outcome of `POST /api/integrations/{id}/test`.",
+        "required": [
+          "ok",
+          "tool_names",
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the connection failed."
+          },
+          "last_connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "Whether a connection was made and its tools listed."
+          },
+          "status": {
+            "$ref": "#/components/schemas/IntegrationStatus",
+            "description": "The caller's status after this test."
+          },
+          "tool_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "tool_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tools the server offers, sorted. Empty when the test failed."
+          }
+        }
+      },
       "TokenRequest": {
         "type": "object",
         "description": "Standard OAuth2 token request (form-encoded per RFC 6749 §4.1.3).",
@@ -11593,6 +13613,87 @@
           },
           "user": {
             "$ref": "#/components/schemas/UserDetail"
+          }
+        }
+      },
+      "UpdateIntegrationPolicyRequest": {
+        "type": "object",
+        "description": "Body of `PUT /api/integrations/policy`. Replaces the whole policy.",
+        "required": [
+          "catalog_mode",
+          "allow_custom_urls",
+          "allow_user_integrations"
+        ],
+        "properties": {
+          "allow_custom_urls": {
+            "type": "boolean"
+          },
+          "allow_user_integrations": {
+            "type": "boolean"
+          },
+          "allowed_catalog_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "catalog_mode": {
+            "$ref": "#/components/schemas/CatalogMode"
+          }
+        }
+      },
+      "UpdateIntegrationRequest": {
+        "type": "object",
+        "description": "Body of `PATCH /api/integrations/{id}`. Absent fields stay as they are.\n\nThe layer, owner, catalog entry, auth kind and credential mode cannot\nchange: they decide whose credentials exist.",
+        "properties": {
+          "connect_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Custom URL integrations only. Changing it deletes the stored\ncredentials, so they cannot be sent to the new host."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "header_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Custom URL integrations only."
+          },
+          "header_value_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Custom URL integrations only."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trust": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationTrust"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -12303,7 +14404,7 @@
     },
     {
       "name": "integrations",
-      "description": "Integrations — search the cached integrations.sh catalog of remote MCP servers"
+      "description": "Integrations — remote MCP servers installed at the org, space or user layer, the org policy that limits them, and the cached integrations.sh catalog"
     },
     {
       "name": "interfaces",

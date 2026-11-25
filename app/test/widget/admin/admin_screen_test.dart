@@ -5,6 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:assistant_app/features/admin/admin_providers.dart';
 import 'package:assistant_app/features/admin/admin_screen.dart';
+import 'package:assistant_app/features/integrations/caller_roles.dart';
+import 'package:assistant_app/router/app_router.dart';
+import 'package:go_router/go_router.dart';
 
 // ---------------------------------------------------------------------------
 // Stubs
@@ -144,10 +147,95 @@ Widget _buildApp({
   );
 }
 
+Widget _buildRoutedApp({
+  required CallerRoles roles,
+  List<SpaceSummary> spaces = const [],
+}) {
+  final router = GoRouter(
+    routes: [
+      GoRoute(path: '/', builder: (_, _) => const AdminScreen()),
+      GoRoute(
+        path: AppRoutes.adminIntegrations,
+        builder: (_, _) => const Text('org integrations page'),
+      ),
+      GoRoute(
+        path: AppRoutes.adminSpaceIntegrations,
+        builder: (_, state) =>
+            Text('space integrations page ${state.pathParameters['spaceId']}'),
+      ),
+    ],
+  );
+  return ProviderScope(
+    overrides: [
+      adminUsersProvider.overrideWith(() => _StubUsersNotifier(const [])),
+      adminMembersProvider.overrideWith(() => _StubMembersNotifier(const [])),
+      adminCatalogProvider.overrideWith(() => _StubCatalogNotifier(const [])),
+      adminSpacesProvider.overrideWith(() => _StubSpacesNotifier(spaces)),
+      callerRolesProvider.overrideWith((ref) => roles),
+    ],
+    child: MaterialApp.router(routerConfig: router),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 
 void main() {
+  group('AdminScreen integrations entry points', () {
+    final space = SpaceSummary(
+      (b) => b
+        ..id = 's1'
+        ..name = 'Production'
+        ..slug = 'prod',
+    );
+
+    testWidgets('org admins can open the organization integrations', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildRoutedApp(
+          roles: CallerRoles(spaces: [space], roles: const {'s1': 'org_admin'}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Organization integrations'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('org integrations page'), findsOneWidget);
+    });
+
+    testWidgets('other roles do not get the organization entry', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildRoutedApp(
+          roles: CallerRoles(spaces: [space], roles: const {'s1': 'member'}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Organization integrations'), findsNothing);
+    });
+
+    testWidgets('a space opens its integrations', (tester) async {
+      await tester.pumpWidget(
+        _buildRoutedApp(
+          roles: CallerRoles(spaces: [space], roles: const {'s1': 'member'}),
+          spaces: [space],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Spaces'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Production integrations'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('space integrations page s1'), findsOneWidget);
+    });
+  });
+
   group('AdminScreen', () {
     testWidgets('shows tab bar with three tabs', (tester) async {
       await tester.pumpWidget(_buildApp());
