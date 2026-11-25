@@ -109,19 +109,6 @@ struct Args {
 
     #[command(flatten)]
     rate_limit: rate_limit::RateLimitArgs,
-
-    /// OIDC issuer URL (e.g. "https://auth.example.com/realms/main").
-    /// When set, the server uses OIDC for authentication instead of password login.
-    #[arg(long, env = "OIDC_ISSUER_URL")]
-    oidc_issuer_url: Option<String>,
-
-    /// OAuth2 client_id registered with the OIDC provider.
-    #[arg(long, env = "OIDC_CLIENT_ID")]
-    oidc_client_id: Option<String>,
-
-    /// OAuth2 client_secret for the OIDC provider (confidential clients).
-    #[arg(long, env = "OIDC_CLIENT_SECRET")]
-    oidc_client_secret: Option<String>,
 }
 
 #[derive(Clone)]
@@ -581,31 +568,6 @@ async fn run_with_args(args: Args) -> Result<()> {
             format!("{base_url}/oauth/device/verify"),
         ));
 
-        // Optionally discover an OIDC provider.
-        let (oidc_provider, oidc_sessions) = if let Some(ref issuer_url) = args.oidc_issuer_url {
-            let oidc_client_id = args
-                .oidc_client_id
-                .clone()
-                .unwrap_or_else(|| "assistant".to_string());
-            let config = assistant_auth::oidc::OidcConfig {
-                issuer_url: issuer_url.clone(),
-                client_id: oidc_client_id,
-                client_secret: args.oidc_client_secret.clone(),
-                auto_provision: true,
-                allowed_email_domains: None,
-            };
-            let provider = assistant_auth::oidc::OidcProvider::discover(config)
-                .await
-                .context("Failed to discover OIDC provider")?;
-            info!(issuer = %issuer_url, "OIDC provider discovered");
-            let sessions = Arc::new(oauth::oidc_sessions::PendingOidcSessionStore::new(
-                std::time::Duration::from_secs(300),
-            ));
-            (Some(Arc::new(provider)), Some(sessions))
-        } else {
-            (None, None)
-        };
-
         oauth::OAuthState {
             oauth2_server,
             jwt_manager: jwt_manager.clone(),
@@ -614,8 +576,12 @@ async fn run_with_args(args: Args) -> Result<()> {
             org_storage: org_storage.clone(),
             issuer: base_url.clone(),
             secure_cookie,
-            oidc_provider,
-            oidc_sessions,
+            oidc: Arc::new(oauth::oidc_registry::OidcProviderRegistry::new(
+                org_storage.clone(),
+            )),
+            oidc_sessions: Arc::new(oauth::oidc_sessions::PendingOidcSessionStore::new(
+                Duration::from_secs(300),
+            )),
             rate_limits: rate_limits.clone(),
         }
     };

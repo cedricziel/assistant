@@ -10,8 +10,6 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect};
 use serde::Deserialize;
 
-use assistant_core::identity::OrgId;
-
 use super::OAuthState;
 use super::oidc_bridge::OrgOidcUserStore;
 
@@ -77,19 +75,7 @@ pub async fn callback(
         }
     };
 
-    // Look up the pending OIDC session.
-    let sessions = match &state.oidc_sessions {
-        Some(s) => s,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Html("OIDC sessions not configured".to_string()),
-            )
-                .into_response();
-        }
-    };
-
-    let pending = match sessions.take(&oidc_state).await {
+    let pending = match state.oidc_sessions.take(&oidc_state).await {
         Some(p) => p,
         None => {
             return (
@@ -100,12 +86,21 @@ pub async fn callback(
         }
     };
 
-    let oidc = match &state.oidc_provider {
-        Some(p) => p,
-        None => {
+    let oidc = match state.oidc.provider_for(&pending.org_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            tracing::error!(org_id = %pending.org_id, "OIDC callback for an org without OIDC settings");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Html("OIDC provider not configured".to_string()),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!(org_id = %pending.org_id, "OIDC provider unavailable: {e:#}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Html("OIDC provider unavailable".to_string()),
             )
                 .into_response();
         }
@@ -127,10 +122,8 @@ pub async fn callback(
         }
     };
 
-    // Provision or look up the user.
-    // TODO: resolve org_id from OIDC config or pending session rather than
-    // hardcoding "default".  For now single-org deployments use "default".
-    let user_store = OrgOidcUserStore::new(state.org_storage.clone(), OrgId::from("default"));
+    // Provision or look up the user in the org that started the flow.
+    let user_store = OrgOidcUserStore::new(state.org_storage.clone(), pending.org_id.clone());
     let user_id = match oidc.provision_or_lookup(&claims, &user_store).await {
         Ok(id) => id,
         Err(e) => {
@@ -194,144 +187,26 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
     use tower::ServiceExt;
-
-    use assistant_auth::jwt::JwtKeyPair;
-    use assistant_auth::jwt::JwtManager;
-    use assistant_auth::oidc::{
-        IdTokenAudience, IdTokenClaims, JwksResponse, OidcConfig, OidcDiscovery, OidcProvider,
-    };
-    use assistant_core::identity::OrgId;
-    use assistant_core::store::{OrgStore, Organization};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    use assistant_auth::jwt::{JwtKeyPair, JwtManager};
+    use assistant_auth::oidc::{IdTokenAudience, IdTokenClaims};
+    use assistant_core::identity::OrgId;
+    use assistant_core::store::UserStore;
+
+    use super::super::oidc_registry::OidcProviderRegistry;
     use super::super::oidc_sessions::{PendingOidcSession, PendingOidcSessionStore};
+    use super::super::test_support::{mount_idp, seed_oidc_org, seed_org, sign_test_id_token};
     use super::*;
 
-    // -- RSA test key (same as in oidc.rs tests) --
-
-    const TEST_RSA_PRIVATE_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDfk5v7uyKn7Xee
-tzR7ZRsra2drSEZHQYOHfIv8bm2zSrHrFdUqmTL0t6mj1jPYXWNBVZCyiAzL2qiN
-dddT3kNBdpI80aMpIT3u/sOa5I0hq11nGAKeezGLqizOPcztgZQa3FYFve5HxnXT
-K9UkboBqhvIXKUx8fZsO8sFHdscS4VGrNn9VLPz8UjEOmJsJEiaqSjw4qx+1WsBj
-xTlQNqV/y/durbTCyNSUlRex1C4PEHGg+rr/yobUk9MqxGHNeKefKkSaDcij72lz
-osvxelXHLoonV54X9VrpMnXdWAw7yJ6LbWsA9MVoEiqDfnDFWcaFsfQeCq+1/Hnd
-b9jdEJPJAgMBAAECggEAYsYKSBzlUy44xkBnKcrBxZ12O7HbBpj9fGp8R+IbifXK
-g7MKEX9MQUww4IZ+Mi0T8CXWvuEXUiqAg7qXjmBn8zBorADr5fxfKcqY7UHizgiw
-w56abZy8h1j/4X/xHM69+V31jSTbdA9MN6aqTCWbizSiGLRwq6EsU17RH/rsOTzJ
-yiap+GgvDBHRSMLPbH+A7A9hNZh6I6Dv9KReGUmOEKVQpl9aetJfxsCkXII7ztUL
-HUQNZVluA2OqR1s7VpYO9yNmZoTtfqmUswIg2YaFXSjVgdDFNH6Rf3reufWehzKP
-45ufflne4FT3f8VFXe8+FonCZE5RF2tIawC2gusWfwKBgQD1vX9Q2V5wKg/nQq/6
-vVv370XmypVBajXvg0TP95E7p+EORGoDYj46LWNKZRifeGjavmM29jiqPnk8UZjC
-3qEmZILZC2/IdsR7hVpEn7uyedc2wBFSD5pYR9333VsV+rbBMmexO8DdviR8L4Tr
-8ESx+FsVnqkhBgGjQWjXOapf5wKBgQDo6Tlu1VZQ1ijLWYomeKDiKQloEHMSW3lP
-vgd1XqTYLrR7kv6935cK6dY0ZvcfA4HE6+RU4pene/vU6bMxvSJjwNwhRhOS7CGl
-k+5Mtdfq3+VhaXA5dmyYu2IrJ3WJg+9QjxAodek4kYx1W8MLJnKc2GzIuED+ewg0
-PuMXTcm4zwKBgC+z820MZSq8341zAppX++xrRFSC6uph5cpy3v7H/idodWXBnhq+
-DXpZqTad3WPHigM8hiH7NhDGQ96TsGXTtdCwHj5n2/E8LPQVdOpxX4xL3p1AN5yI
-btvIR6yACdiAbM2gLUTYZp4k9QwuZU0vvQYXQgc2X3qLofHBFssA5LPtAoGAI3/w
-zhDcQCP0QdJa+TQnqXEBywe+0kx4+AuJzXzoeT7dKXylMUGUHwi3KnOLNQHu1Jnz
-ynBjFxcRskkQlAM066loo/WvZBRzqG4cwzpwN496wdc1ULzZHoppExTHmHcwkcHM
-f65BJusgUn7zAo8QpxFhu1JCLceI35W6PUIQ/gcCgYEA34AmU6srEH6iJx7wFQez
-vsldAzUeGESZCNai30KZPeUrFxGHNcWU72xkBJnHnZCcAejKtW/XqKd4AWY25buV
-6vNdaNWeyJt50s+E8VTfGi2otEAiZh+dJxAmgLJ/PA0RDyBft2qGkKMSfS2PXdIr
-q2HMPOhMSkWZ+rP+jJ76H6s=
------END PRIVATE KEY-----"#;
-
-    const TEST_RSA_N: &str = "35Ob-7sip-13nrc0e2UbK2tna0hGR0GDh3yL_G5ts0qx6xXVKpky9Lepo9Yz2F1jQVWQsogMy9qojXXXU95DQXaSPNGjKSE97v7DmuSNIatdZxgCnnsxi6oszj3M7YGUGtxWBb3uR8Z10yvVJG6AaobyFylMfH2bDvLBR3bHEuFRqzZ_VSz8_FIxDpibCRImqko8OKsftVrAY8U5UDalf8v3bq20wsjUlJUXsdQuDxBxoPq6_8qG1JPTKsRhzXinnypEmg3Io-9pc6LL8XpVxy6KJ1eeF_Va6TJ13VgMO8iei21rAPTFaBIqg35wxVnGhbH0Hgqvtfx53W_Y3RCTyQ";
-    const TEST_RSA_E: &str = "AQAB";
-
-    fn sign_test_id_token(claims: &IdTokenClaims) -> String {
-        let encoding_key =
-            jsonwebtoken::EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_PEM.as_bytes()).unwrap();
-        let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
-        header.kid = Some("test-key-1".into());
-        jsonwebtoken::encode(&header, claims, &encoding_key).unwrap()
-    }
-
-    fn test_jwk() -> assistant_auth::oidc::Jwk {
-        assistant_auth::oidc::Jwk {
-            kty: "RSA".into(),
-            kid: Some("test-key-1".into()),
-            alg: Some("RS256".into()),
-            key_use: Some("sig".into()),
-            n: Some(TEST_RSA_N.into()),
-            e: Some(TEST_RSA_E.into()),
-            crv: None,
-            x: None,
-            y: None,
-        }
-    }
-
-    /// Set up a mock OIDC IdP (discovery, JWKS, token endpoint) and return
-    /// `(OidcProvider, MockServer)`.
-    async fn setup_idp() -> (OidcProvider, MockServer) {
-        let server = MockServer::start().await;
-        let issuer = server.uri();
-        let jwks_uri = format!("{issuer}/jwks");
-
-        let discovery = OidcDiscovery {
-            issuer: issuer.clone(),
-            authorization_endpoint: format!("{issuer}/authorize"),
-            token_endpoint: format!("{issuer}/token"),
-            userinfo_endpoint: None,
-            jwks_uri,
-            response_types_supported: vec!["code".into()],
-            subject_types_supported: vec!["public".into()],
-            id_token_signing_alg_values_supported: vec!["RS256".into()],
-        };
-
-        let jwks = JwksResponse {
-            keys: vec![test_jwk()],
-        };
-
-        Mock::given(method("GET"))
-            .and(path("/.well-known/openid-configuration"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&discovery))
-            .mount(&server)
-            .await;
-
-        Mock::given(method("GET"))
-            .and(path("/jwks"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&jwks))
-            .mount(&server)
-            .await;
-
-        let config = OidcConfig {
-            issuer_url: issuer,
-            client_id: "test-client".into(),
-            client_secret: None,
-            auto_provision: true,
-            allowed_email_domains: None,
-        };
-
-        let provider = OidcProvider::discover(config).await.unwrap();
-        (provider, server)
-    }
-
-    /// Build an `OAuthState` with OIDC support backed by the mock IdP.
-    async fn test_oidc_state(provider: OidcProvider) -> (OAuthState, Arc<PendingOidcSessionStore>) {
+    /// Build an `OAuthState` with no orgs; tests seed the orgs they need.
+    async fn test_oidc_state() -> (OAuthState, Arc<PendingOidcSessionStore>) {
         let org_storage = Arc::new(
             assistant_storage::OrgStorageLayer::new_in_memory()
                 .await
                 .unwrap(),
         );
-
-        // Seed a test org.
-        let now = chrono::Utc::now();
-        org_storage
-            .org_store()
-            .create_org(&Organization {
-                id: OrgId::from("default"),
-                name: "Default".into(),
-                slug: "default".into(),
-                auth_mode: "oidc".into(),
-                created_at: now,
-                updated_at: now,
-            })
-            .await
-            .unwrap();
 
         let jwt_kp = JwtKeyPair::generate().unwrap();
         let jwt_manager = Arc::new(JwtManager::new(
@@ -361,11 +236,11 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
             jwt_manager,
             client_registrar,
             device_manager,
-            org_storage,
+            org_storage: org_storage.clone(),
             issuer: "http://localhost".into(),
             secure_cookie: false,
-            oidc_provider: Some(Arc::new(provider)),
-            oidc_sessions: Some(sessions.clone()),
+            oidc: Arc::new(OidcProviderRegistry::new(org_storage)),
+            oidc_sessions: sessions.clone(),
             rate_limits: Arc::new(crate::rate_limit::RateLimits::new(
                 Arc::new(assistant_core::clock::SystemClock),
                 &crate::rate_limit::RateLimitArgs::default(),
@@ -381,12 +256,43 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
             .with_state(state)
     }
 
-    #[tokio::test]
-    async fn callback_exchanges_code_and_redirects() {
-        let (provider, server) = setup_idp().await;
-        let (state, sessions) = test_oidc_state(provider).await;
+    /// Start a mock IdP with discovery, JWKS, and a token endpoint that
+    /// returns an ID token for `email` addressed to `client_id`.
+    async fn idp_issuing_token_for(client_id: &str, email: &str) -> MockServer {
+        let server = MockServer::start().await;
+        mount_idp(&server).await;
 
-        // Register a client so the auth code can reference it.
+        let claims = IdTokenClaims {
+            iss: server.uri(),
+            sub: "idp-user-42".into(),
+            aud: IdTokenAudience::Single(client_id.into()),
+            exp: chrono::Utc::now().timestamp() + 3600,
+            iat: chrono::Utc::now().timestamp(),
+            nonce: None,
+            email: Some(email.into()),
+            email_verified: Some(true),
+            name: Some("Alice".into()),
+        };
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "idp-access-token",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "id_token": sign_test_id_token(&claims),
+            })))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    /// Register a client and park a pending session for `org_id`; returns the
+    /// `state` value the IdP would echo back.
+    async fn park_session(
+        state: &OAuthState,
+        sessions: &PendingOidcSessionStore,
+        org_id: &str,
+    ) -> String {
         let client_info = state
             .client_registrar
             .register(assistant_core::auth::ClientRegistration {
@@ -399,60 +305,46 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
             .await
             .unwrap();
 
-        // Insert a pending OIDC session.
-        let pending = PendingOidcSession::new(
-            client_info.client_id.clone(),
-            "http://localhost:9999/cb".into(),
-            None,
-            Some("client-state-xyz".into()),
-            None,
-        );
-        let oidc_state_param = sessions.insert(pending).await;
+        sessions
+            .insert(PendingOidcSession::new(
+                OrgId::from(org_id),
+                client_info.client_id,
+                "http://localhost:9999/cb".into(),
+                None,
+                Some("client-state-xyz".into()),
+                None,
+            ))
+            .await
+    }
 
-        // Mock the IdP token endpoint to return a signed id_token.
-        let claims = IdTokenClaims {
-            iss: server.uri(),
-            sub: "idp-user-42".into(),
-            aud: IdTokenAudience::Single("test-client".into()),
-            exp: chrono::Utc::now().timestamp() + 3600,
-            iat: chrono::Utc::now().timestamp(),
-            nonce: None,
-            email: Some("alice@example.com".into()),
-            email_verified: Some(true),
-            name: Some("Alice".into()),
-        };
-        let id_token = sign_test_id_token(&claims);
-
-        Mock::given(method("POST"))
-            .and(path("/token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "idp-access-token",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-                "id_token": id_token,
-            })))
-            .mount(&server)
-            .await;
-
-        let app = build_callback_app(state);
-        let resp = app
+    async fn call_callback(state: OAuthState, oidc_state: &str) -> axum::response::Response {
+        build_callback_app(state)
             .oneshot(
                 Request::builder()
                     .uri(format!(
-                        "/oauth/callback?code=idp-auth-code&state={oidc_state_param}"
+                        "/oauth/callback?code=idp-auth-code&state={oidc_state}"
                     ))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
-            .unwrap();
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn callback_exchanges_code_and_redirects() {
+        let (state, sessions) = test_oidc_state().await;
+        let idp = idp_issuing_token_for("test-client", "alice@example.com").await;
+        seed_oidc_org(&state.org_storage, "org_a", "a", &idp.uri(), "test-client").await;
+        let oidc_state = park_session(&state, &sessions, "org_a").await;
+
+        let resp = call_callback(state, &oidc_state).await;
 
         assert_eq!(
             resp.status(),
             StatusCode::SEE_OTHER,
             "callback should redirect (303)"
         );
-
         let location = resp.headers().get("location").unwrap().to_str().unwrap();
         assert!(
             location.starts_with("http://localhost:9999/cb?code="),
@@ -465,31 +357,69 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
     }
 
     #[tokio::test]
-    async fn callback_rejects_unknown_state() {
-        let (provider, _server) = setup_idp().await;
-        let (state, _sessions) = test_oidc_state(provider).await;
+    async fn callback_signs_user_into_the_pending_sessions_org() {
+        let (state, sessions) = test_oidc_state().await;
+        let idp_a = idp_issuing_token_for("client-a", "alice@example.com").await;
+        let idp_b = idp_issuing_token_for("client-b", "alice@example.com").await;
+        seed_oidc_org(&state.org_storage, "org_a", "a", &idp_a.uri(), "client-a").await;
+        seed_oidc_org(&state.org_storage, "org_b", "b", &idp_b.uri(), "client-b").await;
+        let oidc_state = park_session(&state, &sessions, "org_b").await;
 
-        let app = build_callback_app(state);
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/oauth/callback?code=some-code&state=bogus")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+        let resp = call_callback(state.clone(), &oidc_state).await;
+
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let users = state.org_storage.user_store();
+        assert!(
+            users
+                .get_user_by_email(&OrgId::from("org_b"), "alice@example.com")
+                .await
+                .unwrap()
+                .is_some(),
+            "user is provisioned in org B"
+        );
+        assert!(
+            users
+                .get_user_by_email(&OrgId::from("org_a"), "alice@example.com")
+                .await
+                .unwrap()
+                .is_none(),
+            "org A is untouched"
+        );
+        let token_calls_on_a = idp_a
+            .received_requests()
             .await
-            .unwrap();
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/token")
+            .count();
+        assert_eq!(token_calls_on_a, 0, "org A's IdP never saw the code");
+    }
+
+    #[tokio::test]
+    async fn callback_fails_when_the_session_org_has_no_oidc_config() {
+        let (state, sessions) = test_oidc_state().await;
+        seed_org(&state.org_storage, "org_a", "a", "oidc").await;
+        let oidc_state = park_session(&state, &sessions, "org_a").await;
+
+        let resp = call_callback(state, &oidc_state).await;
+
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn callback_rejects_unknown_state() {
+        let (state, _sessions) = test_oidc_state().await;
+
+        let resp = call_callback(state, "bogus").await;
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn callback_rejects_missing_code() {
-        let (provider, _server) = setup_idp().await;
-        let (state, _sessions) = test_oidc_state(provider).await;
+        let (state, _sessions) = test_oidc_state().await;
 
-        let app = build_callback_app(state);
-        let resp = app
+        let resp = build_callback_app(state)
             .oneshot(
                 Request::builder()
                     .uri("/oauth/callback?state=abc")
@@ -504,11 +434,9 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
 
     #[tokio::test]
     async fn callback_surfaces_idp_error() {
-        let (provider, _server) = setup_idp().await;
-        let (state, _sessions) = test_oidc_state(provider).await;
+        let (state, _sessions) = test_oidc_state().await;
 
-        let app = build_callback_app(state);
-        let resp = app
+        let resp = build_callback_app(state)
             .oneshot(
                 Request::builder()
                     .uri("/oauth/callback?error=access_denied&error_description=user+cancelled")

@@ -6,8 +6,11 @@
 use axum::Form;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Redirect};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::Deserialize;
+
+use assistant_core::identity::OrgId;
+use assistant_core::store::OrgStore;
 
 use super::oidc_sessions::PendingOidcSession;
 use super::{OAuthState, escape_html_attr};
@@ -25,6 +28,10 @@ pub struct AuthorizeQuery {
     /// defaults to `plain`) are rejected.
     pub code_challenge_method: Option<String>,
     pub scope: Option<String>,
+    /// Slug of the org to sign in to. An org in OIDC mode redirects to its
+    /// own identity provider; without this parameter the password form is
+    /// shown.
+    pub org: Option<String>,
 }
 
 /// Form fields for POST /oauth/authorize (password credential submission).
@@ -50,8 +57,10 @@ pub struct AuthorizeForm {
     params(AuthorizeQuery),
     responses(
         (status = 200, description = "Login form HTML", content_type = "text/html"),
-        (status = 303, description = "Redirect to external IdP (OIDC mode)"),
-        (status = 400, description = "Invalid parameters", content_type = "text/html"),
+        (status = 303, description = "Redirect to the org's external IdP (OIDC mode)"),
+        (status = 400, description = "Invalid parameters or unknown org", content_type = "text/html"),
+        (status = 500, description = "Org is in OIDC mode but has no OIDC settings", content_type = "text/html"),
+        (status = 502, description = "The org's IdP could not be reached", content_type = "text/html"),
     )
 )]
 pub async fn authorize_get(
@@ -89,26 +98,19 @@ pub async fn authorize_get(
         return resp;
     }
 
-    // -- OIDC mode: redirect to external IdP instead of rendering login form --
-    if let (Some(oidc), Some(sessions)) = (&state.oidc_provider, &state.oidc_sessions) {
-        let pending = PendingOidcSession::new(
-            raw_client_id.to_owned(),
-            raw_redirect_uri.to_owned(),
-            params.code_challenge.clone(),
-            params.state.clone(),
-            params.scope.clone(),
-        );
-        let oidc_state = sessions.insert(pending).await;
-
-        let our_callback = format!("{}/oauth/callback", state.issuer);
-        let idp_auth_url = format!(
-            "{}?response_type=code&client_id={}&redirect_uri={}&state={}&scope=openid%20email%20profile",
-            oidc.discovery().authorization_endpoint,
-            urlencoding::encode(oidc.client_id()),
-            urlencoding::encode(&our_callback),
-            urlencoding::encode(&oidc_state),
-        );
-        return Redirect::to(&idp_auth_url).into_response();
+    // -- OIDC org: redirect to its external IdP instead of rendering the form --
+    if let Some(slug) = params.org.as_deref() {
+        let org = match state.org_storage.org_store().get_org_by_slug(slug).await {
+            Ok(Some(org)) => org,
+            Ok(None) => return html_error(StatusCode::BAD_REQUEST, "unknown organization"),
+            Err(e) => {
+                tracing::error!("org lookup failed: {e:#}");
+                return html_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
+            }
+        };
+        if org.auth_mode == "oidc" {
+            return redirect_to_org_idp(&state, org.id, &params).await;
+        }
     }
 
     // -- Password mode: render login form --
@@ -147,6 +149,56 @@ pub async fn authorize_get(
     );
 
     Html(html).into_response()
+}
+
+fn html_error(status: StatusCode, message: &str) -> Response {
+    (status, Html(format!("error: {message}"))).into_response()
+}
+
+/// Send the user to `org_id`'s IdP, remembering the original request so the
+/// callback can finish it.
+async fn redirect_to_org_idp(
+    state: &OAuthState,
+    org_id: OrgId,
+    params: &AuthorizeQuery,
+) -> Response {
+    let oidc = match state.oidc.provider_for(&org_id).await {
+        Ok(Some(provider)) => provider,
+        Ok(None) => {
+            tracing::error!(%org_id, "org is in OIDC mode but has no OIDC settings");
+            return html_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "single sign-on is not configured for this organization",
+            );
+        }
+        Err(e) => {
+            tracing::error!(%org_id, "OIDC provider unavailable: {e:#}");
+            return html_error(
+                StatusCode::BAD_GATEWAY,
+                "the identity provider is unavailable",
+            );
+        }
+    };
+
+    let pending = PendingOidcSession::new(
+        org_id,
+        params.client_id.clone().unwrap_or_default(),
+        params.redirect_uri.clone().unwrap_or_default(),
+        params.code_challenge.clone(),
+        params.state.clone(),
+        params.scope.clone(),
+    );
+    let oidc_state = state.oidc_sessions.insert(pending).await;
+
+    let our_callback = format!("{}/oauth/callback", state.issuer);
+    let idp_auth_url = format!(
+        "{}?response_type=code&client_id={}&redirect_uri={}&state={}&scope=openid%20email%20profile",
+        oidc.discovery().authorization_endpoint,
+        urlencoding::encode(oidc.client_id()),
+        urlencoding::encode(&our_callback),
+        urlencoding::encode(&oidc_state),
+    );
+    Redirect::to(&idp_auth_url).into_response()
 }
 
 /// POST /oauth/authorize — validate credentials, generate auth code, redirect.

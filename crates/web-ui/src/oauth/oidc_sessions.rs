@@ -10,10 +10,15 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;
 
+use assistant_core::identity::OrgId;
+
 /// Parameters captured from the original `/oauth/authorize` request before
 /// redirecting to the external IdP.
 #[derive(Clone, Debug)]
 pub struct PendingOidcSession {
+    /// The org whose IdP the user was sent to. The callback exchanges the
+    /// code with that org's provider and signs the user into that org.
+    pub org_id: OrgId,
     /// The OAuth2 client_id that initiated the flow.
     pub client_id: String,
     /// The redirect_uri we should send the auth code to.
@@ -68,6 +73,7 @@ impl PendingOidcSessionStore {
 
 impl PendingOidcSession {
     pub fn new(
+        org_id: OrgId,
         client_id: String,
         redirect_uri: String,
         code_challenge: Option<String>,
@@ -75,6 +81,7 @@ impl PendingOidcSession {
         scope: Option<String>,
     ) -> Self {
         Self {
+            org_id,
             client_id,
             redirect_uri,
             code_challenge,
@@ -93,6 +100,7 @@ mod tests {
     async fn insert_and_take() {
         let store = PendingOidcSessionStore::new(Duration::from_secs(300));
         let session = PendingOidcSession::new(
+            OrgId::from("org-1"),
             "client-1".into(),
             "http://localhost/cb".into(),
             None,
@@ -104,6 +112,7 @@ mod tests {
         let recovered = store.take(&state).await;
         assert!(recovered.is_some());
         let s = recovered.unwrap();
+        assert_eq!(s.org_id, OrgId::from("org-1"));
         assert_eq!(s.client_id, "client-1");
         assert_eq!(s.client_state.as_deref(), Some("abc"));
 
@@ -115,6 +124,7 @@ mod tests {
     async fn expired_session_returns_none() {
         let store = PendingOidcSessionStore::new(Duration::from_millis(1));
         let session = PendingOidcSession::new(
+            OrgId::from("org-1"),
             "client-2".into(),
             "http://localhost/cb".into(),
             None,

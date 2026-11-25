@@ -8,9 +8,12 @@ pub mod callback;
 pub mod complete;
 pub mod device;
 pub mod oidc_bridge;
+pub mod oidc_registry;
 pub mod oidc_sessions;
 pub mod register;
 pub mod revoke;
+#[cfg(test)]
+mod test_support;
 pub mod token;
 
 use std::sync::Arc;
@@ -22,12 +25,12 @@ use assistant_auth::jwt::JwtManager;
 use assistant_auth::oauth2::clients::ClientRegistrar;
 use assistant_auth::oauth2::device::DeviceCodeManager;
 use assistant_auth::oauth2::server::OAuth2Server;
-use assistant_auth::oidc::OidcProvider;
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::UserId;
 use assistant_core::store::{MembershipStore, UserStore};
 use assistant_storage::OrgStorageLayer;
 
+use self::oidc_registry::OidcProviderRegistry;
 use self::oidc_sessions::PendingOidcSessionStore;
 
 /// Shared state for all OAuth2 endpoints.
@@ -47,10 +50,10 @@ pub struct OAuthState {
     pub issuer: String,
     /// When `true`, session cookies get the `Secure` attribute.
     pub secure_cookie: bool,
-    /// OIDC provider (present when `auth_mode = "oidc"`).
-    pub oidc_provider: Option<Arc<OidcProvider>>,
+    /// Per-org OIDC providers, discovered from each org's stored config.
+    pub oidc: Arc<OidcProviderRegistry>,
     /// Pending OIDC authorization sessions (state → original params).
-    pub oidc_sessions: Option<Arc<PendingOidcSessionStore>>,
+    pub oidc_sessions: Arc<PendingOidcSessionStore>,
     /// Rate limiters; the password endpoint uses the per-account lockout.
     pub rate_limits: Arc<crate::rate_limit::RateLimits>,
 }
@@ -320,11 +323,15 @@ mod tests {
             jwt_manager,
             client_registrar,
             device_manager,
-            org_storage,
+            org_storage: org_storage.clone(),
             issuer: "http://localhost".into(),
             secure_cookie: false,
-            oidc_provider: None,
-            oidc_sessions: None,
+            oidc: Arc::new(oidc_registry::OidcProviderRegistry::new(
+                org_storage.clone(),
+            )),
+            oidc_sessions: Arc::new(PendingOidcSessionStore::new(
+                std::time::Duration::from_secs(300),
+            )),
             rate_limits,
         };
         (state, clock)
@@ -445,111 +452,66 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn authorize_get_redirects_to_idp_in_oidc_mode() {
-        use assistant_auth::oidc::{Jwk, JwksResponse, OidcConfig, OidcDiscovery, OidcProvider};
-        use oidc_sessions::PendingOidcSessionStore;
-        use std::time::Duration;
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        // Stand up a mock IdP for OIDC discovery.
-        let server = MockServer::start().await;
-        let issuer = server.uri();
-        let discovery = OidcDiscovery {
-            issuer: issuer.clone(),
-            authorization_endpoint: format!("{issuer}/authorize"),
-            token_endpoint: format!("{issuer}/token"),
-            userinfo_endpoint: None,
-            jwks_uri: format!("{issuer}/jwks"),
-            response_types_supported: vec!["code".into()],
-            subject_types_supported: vec!["public".into()],
-            id_token_signing_alg_values_supported: vec!["RS256".into()],
-        };
-        let jwks = JwksResponse {
-            keys: vec![Jwk {
-                kty: "RSA".into(),
-                kid: Some("k1".into()),
-                alg: Some("RS256".into()),
-                key_use: Some("sig".into()),
-                n: Some("test".into()),
-                e: Some("AQAB".into()),
-                crv: None,
-                x: None,
-                y: None,
-            }],
-        };
-        Mock::given(method("GET"))
-            .and(path("/.well-known/openid-configuration"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&discovery))
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/jwks"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&jwks))
-            .mount(&server)
-            .await;
-
-        let oidc = OidcProvider::discover(OidcConfig {
-            issuer_url: issuer.clone(),
-            client_id: "oidc-client".into(),
-            client_secret: None,
-            auto_provision: true,
-            allowed_email_domains: None,
-        })
-        .await
-        .unwrap();
-
-        // Build state with OIDC provider.
-        let mut state = test_state().await;
-        let sessions = Arc::new(PendingOidcSessionStore::new(Duration::from_secs(300)));
-        state.oidc_provider = Some(Arc::new(oidc));
-        state.oidc_sessions = Some(sessions);
-
-        // Register a client.
-        let app = build_app(state.clone());
-        let reg_body = serde_json::json!({
-            "client_name": "OIDC Test",
-            "redirect_uris": ["http://localhost/cb"],
-            "grant_types": ["authorization_code"],
-            "response_types": ["code"]
-        });
-        let resp = app
+    /// GET `/oauth/authorize`, optionally selecting an org by slug.
+    async fn authorize(
+        state: &OAuthState,
+        client_id: &str,
+        org: Option<&str>,
+    ) -> axum::response::Response {
+        let (_verifier, challenge) = test_pkce();
+        let org_param = org.map(|o| format!("&org={o}")).unwrap_or_default();
+        build_app(state.clone())
             .oneshot(
                 Request::builder()
-                    .method("POST")
-                    .uri("/oauth/register")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                    .uri(format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&state=mystate&code_challenge={challenge}&code_challenge_method=S256{org_param}"))
+                    .body(Body::empty())
                     .unwrap(),
             )
             .await
-            .unwrap();
+            .unwrap()
+    }
+
+    fn location(resp: &axum::response::Response) -> String {
+        resp.headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    async fn body_text(resp: axum::response::Response) -> String {
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
             .unwrap();
-        let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let client_id = client["client_id"].as_str().unwrap();
+        String::from_utf8_lossy(&body).into_owned()
+    }
 
-        // GET /oauth/authorize should redirect to the IdP, not render a form.
-        let (_verifier, challenge) = test_pkce();
-        let app = build_app(state);
-        let resp = app.oneshot(
-            Request::builder()
-                .uri(format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&state=mystate&code_challenge={challenge}&code_challenge_method=S256"))
-                .body(Body::empty())
-                .unwrap(),
-        ).await.unwrap();
+    #[tokio::test]
+    async fn authorize_get_redirects_to_the_selected_orgs_idp() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        let client_id = register_test_client(&state).await;
 
-        // Should be a redirect (303 from Redirect::to).
+        let resp = authorize(&state, &client_id, Some("acme")).await;
+
         assert!(
             resp.status().is_redirection(),
             "OIDC authorize_get should redirect, got {}",
             resp.status()
         );
-        let location = resp.headers().get("location").unwrap().to_str().unwrap();
+        let location = location(&resp);
         assert!(
-            location.starts_with(&format!("{issuer}/authorize?")),
+            location.starts_with(&format!("{}/authorize?", idp.uri())),
             "should redirect to IdP authorize endpoint: {location}"
         );
         assert!(
@@ -560,6 +522,141 @@ mod tests {
             location.contains("scope=openid"),
             "should request openid scope: {location}"
         );
+    }
+
+    #[tokio::test]
+    async fn authorize_get_remembers_the_org_for_the_callback() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = authorize(&state, &client_id, Some("acme")).await;
+
+        let location = location(&resp);
+        let idp_state = url::Url::parse(&location)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .map(|(_, v)| v.into_owned())
+            .unwrap();
+        let pending = state.oidc_sessions.take(&idp_state).await.unwrap();
+        assert_eq!(pending.org_id, OrgId::from("org_acme"));
+        assert_eq!(pending.client_state.as_deref(), Some("mystate"));
+    }
+
+    #[tokio::test]
+    async fn authorize_get_routes_each_org_to_its_own_idp() {
+        let state = test_state().await;
+        let idp_a = wiremock::MockServer::start().await;
+        let idp_b = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp_a).await;
+        test_support::mount_idp(&idp_b).await;
+        test_support::seed_oidc_org(&state.org_storage, "org_a", "a", &idp_a.uri(), "client-a")
+            .await;
+        test_support::seed_oidc_org(&state.org_storage, "org_b", "b", &idp_b.uri(), "client-b")
+            .await;
+        let client_id = register_test_client(&state).await;
+
+        let to_a = location(&authorize(&state, &client_id, Some("a")).await);
+        let to_b = location(&authorize(&state, &client_id, Some("b")).await);
+
+        assert!(
+            to_a.starts_with(&format!("{}/authorize?", idp_a.uri())),
+            "{to_a}"
+        );
+        assert!(to_a.contains("client_id=client-a"), "{to_a}");
+        assert!(
+            to_b.starts_with(&format!("{}/authorize?", idp_b.uri())),
+            "{to_b}"
+        );
+        assert!(to_b.contains("client_id=client-b"), "{to_b}");
+    }
+
+    #[tokio::test]
+    async fn authorize_get_renders_form_for_password_org() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = authorize(&state, &client_id, Some("test")).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(body_text(resp).await.contains("Sign In"));
+    }
+
+    #[tokio::test]
+    async fn authorize_get_without_org_renders_form_even_when_an_oidc_org_exists() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = authorize(&state, &client_id, None).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(body_text(resp).await.contains("Sign In"));
+    }
+
+    #[tokio::test]
+    async fn authorize_get_rejects_unknown_org_slug() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = authorize(&state, &client_id, Some("no-such-org")).await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn authorize_get_reports_bad_gateway_when_idp_discovery_fails() {
+        let state = test_state().await;
+        // Nothing is mounted, so discovery returns 404.
+        let idp = wiremock::MockServer::start().await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = authorize(&state, &client_id, Some("acme")).await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        let body = body_text(resp).await;
+        assert!(
+            !body.contains(&idp.uri()),
+            "must not leak IdP details: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn authorize_get_reports_server_error_when_oidc_org_has_no_config() {
+        let state = test_state().await;
+        test_support::seed_org(&state.org_storage, "org_acme", "acme", "oidc").await;
+        let client_id = register_test_client(&state).await;
+
+        let resp = authorize(&state, &client_id, Some("acme")).await;
+
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]

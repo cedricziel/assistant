@@ -8013,6 +8013,18 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "org",
+            "in": "query",
+            "description": "Slug of the org to sign in to. An org in OIDC mode redirects to its\nown identity provider; without this parameter the password form is\nshown.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -8023,10 +8035,22 @@
             }
           },
           "303": {
-            "description": "Redirect to external IdP (OIDC mode)"
+            "description": "Redirect to the org's external IdP (OIDC mode)"
           },
           "400": {
-            "description": "Invalid parameters",
+            "description": "Invalid parameters or unknown org",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "500": {
+            "description": "Org is in OIDC mode but has no OIDC settings",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "502": {
+            "description": "The org's IdP could not be reached",
             "content": {
               "text/html": {}
             }
