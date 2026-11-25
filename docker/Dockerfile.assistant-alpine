@@ -8,7 +8,7 @@
 # TARGETARCH is injected automatically by Docker Buildx:
 #   linux/amd64  → TARGETARCH=amd64
 #   linux/arm64  → TARGETARCH=arm64
-FROM alpine:latest
+FROM alpine:3.24.4
 
 RUN apk add --no-cache ca-certificates ffmpeg \
     && addgroup -S assistant \
