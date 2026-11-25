@@ -10,7 +10,7 @@ use crate::secret::Secret;
 /// Rules use the grammar `tool-name` or `tool-name(pattern)`; see
 /// [`crate::permission`]. Config rules are *added* to the built-in rules;
 /// they cannot remove a built-in deny.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PermissionsConfig {
     /// Rules that always deny. Evaluated first; never reach the decision model.
@@ -31,6 +31,49 @@ pub struct PermissionsConfig {
     /// Decision model consulted for calls the static rules leave undecided.
     #[serde(default)]
     pub decision_model: DecisionModelConfig,
+    /// Seconds an approval or question waits for the user before it expires
+    /// (`30..=3600`).
+    #[serde(
+        default = "default_interaction_timeout_secs",
+        deserialize_with = "deserialize_interaction_timeout"
+    )]
+    pub interaction_timeout_secs: u64,
+}
+
+const DEFAULT_INTERACTION_TIMEOUT_SECS: u64 = 600;
+const INTERACTION_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 30..=3600;
+
+fn default_interaction_timeout_secs() -> u64 {
+    DEFAULT_INTERACTION_TIMEOUT_SECS
+}
+
+impl Default for PermissionsConfig {
+    fn default() -> Self {
+        Self {
+            deny: Vec::new(),
+            ask: Vec::new(),
+            allow: Vec::new(),
+            workspace_roots: Vec::new(),
+            limits: LimitsConfig::default(),
+            decision_model: DecisionModelConfig::default(),
+            interaction_timeout_secs: DEFAULT_INTERACTION_TIMEOUT_SECS,
+        }
+    }
+}
+
+fn deserialize_interaction_timeout<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<u64, D::Error> {
+    let secs = u64::deserialize(d)?;
+    if INTERACTION_TIMEOUT_RANGE.contains(&secs) {
+        Ok(secs)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "interaction_timeout_secs {secs} must be within {}..={}",
+            INTERACTION_TIMEOUT_RANGE.start(),
+            INTERACTION_TIMEOUT_RANGE.end()
+        )))
+    }
 }
 
 /// The decision model (`[permissions.decision_model]`).
@@ -157,6 +200,36 @@ workspace_roots = ["~/scratch"]
             err.contains("bash(oops"),
             "error should name the rule: {err}"
         );
+    }
+
+    #[test]
+    fn interaction_timeout_defaults_to_ten_minutes() {
+        assert_eq!(PermissionsConfig::default().interaction_timeout_secs, 600);
+        let cfg: PermissionsConfig = toml::from_str("deny = []").unwrap();
+        assert_eq!(cfg.interaction_timeout_secs, 600);
+    }
+
+    #[test]
+    fn interaction_timeout_accepts_the_whole_range() {
+        for secs in [30, 600, 3600] {
+            let cfg: PermissionsConfig =
+                toml::from_str(&format!("interaction_timeout_secs = {secs}")).unwrap();
+            assert_eq!(cfg.interaction_timeout_secs, secs);
+        }
+    }
+
+    #[test]
+    fn out_of_range_interaction_timeouts_name_the_key() {
+        for secs in [0, 29, 3601] {
+            let err =
+                toml::from_str::<PermissionsConfig>(&format!("interaction_timeout_secs = {secs}"))
+                    .unwrap_err()
+                    .to_string();
+            assert!(
+                err.contains("interaction_timeout_secs") && err.contains("30..=3600"),
+                "{secs}: {err}"
+            );
+        }
     }
 
     #[test]

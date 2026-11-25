@@ -4,12 +4,16 @@
 //!
 //! 1. [`StaticRules`] — deny / ask / allow rules, workspace confinement and
 //!    built-in hard-deny lists. Deny always wins and never reaches a model.
-//! 2. An optional decision model (any [`ToolDecider`]) for calls the static
-//!    rules leave undecided.
-//! 3. Fallback: the runtime asks a human (interactive turns) or denies.
+//! 2. Optionally the calling user's saved rules ([`UserRuleSource`]), woven
+//!    between the static stages: a saved deny applies before configured ask
+//!    rules, a saved allow only after them. Saved rules never outrank
+//!    operator configuration.
+//! 3. An optional decision model (any [`ToolDecider`]) for calls the rules
+//!    leave undecided.
+//! 4. Fallback: the runtime asks a human (interactive turns) or denies.
 //!
-//! [`PermissionPolicy::evaluate`] runs steps 1–2 and reports an [`Outcome`];
-//! step 3 lives in the runtime because it needs the confirmation callback.
+//! [`PermissionPolicy::evaluate`] runs steps 1–3 and reports an [`Outcome`];
+//! step 4 lives in the runtime because it needs the confirmation callback.
 
 mod path;
 mod policy;
@@ -19,6 +23,7 @@ mod static_rules;
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::identity::UserId;
 use crate::types::conversation::ExecutionContext;
 
 pub use path::{
@@ -110,6 +115,10 @@ impl Outcome {
 pub struct Resolution {
     pub outcome: Outcome,
     pub decision: Decision,
+    /// Whether an `Ask` may offer "always" answers. `false` when a configured
+    /// ask rule produced it: that rule means a human decides every time.
+    /// Only meaningful for [`Outcome::Ask`].
+    pub offers_always: bool,
 }
 
 impl Resolution {
@@ -120,7 +129,17 @@ impl Resolution {
             Verdict::Deny => Outcome::Deny,
             Verdict::Ask | Verdict::Abstain => Outcome::Ask,
         };
-        Self { outcome, decision }
+        Self {
+            outcome,
+            decision,
+            offers_always: true,
+        }
+    }
+
+    /// Withhold the "always" answers: the call needs a human every time.
+    pub fn without_always(mut self) -> Self {
+        self.offers_always = false;
+        self
     }
 
     /// Why the call must not run when no human can be asked, or `None` when
@@ -139,6 +158,22 @@ impl Resolution {
             )),
         }
     }
+}
+
+/// One user's saved rules for the space the policy runs in.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UserRules {
+    pub allow: Vec<Rule>,
+    pub deny: Vec<Rule>,
+}
+
+/// Where a [`PermissionPolicy`] reads the calling user's saved rules from.
+///
+/// The runtime implements it over the space's rule store. A lookup that fails
+/// returns no rules, so a storage fault cannot grant anything.
+#[async_trait]
+pub trait UserRuleSource: Send + Sync {
+    async fn rules_for(&self, user_id: &UserId) -> UserRules;
 }
 
 /// One stage of the pipeline.
