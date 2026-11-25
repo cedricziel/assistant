@@ -11,6 +11,7 @@ mod openapi;
 pub(crate) mod push;
 pub(crate) mod rate_limit;
 pub mod space;
+mod space_tasks;
 pub mod sw_version;
 
 use std::collections::HashMap;
@@ -26,17 +27,12 @@ use assistant_core::types::llm::LlmProviderKind;
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
     MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
-    set_runtime_workspace_dir, types::conversation::Interface, validate_agent_id,
+    set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
-use assistant_runtime::{Orchestrator, SpaceRuntimes, init_tracing};
+use assistant_runtime::{SpaceRuntimes, SpaceSupervisor, init_tracing};
 use assistant_storage::registry::SkillRegistry;
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
-use assistant_workflow::{
-    AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
-    spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
-};
-use assistant_workflow_http::HttpRequestActionExecutor;
 use axum::{Extension, Router, http::StatusCode, routing::get};
 use clap::Parser;
 use serde_json::json;
@@ -47,7 +43,6 @@ use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use utoipa::OpenApi as _;
 use utoipa_swagger_ui::SwaggerUi;
-use uuid::Uuid;
 
 use auth::WebAuthConfig;
 
@@ -142,26 +137,8 @@ pub(crate) struct AppState {
     pub(crate) push_dispatcher: Option<Arc<PushDispatcher>>,
 }
 
-struct OrchestratorTurnClient {
-    orchestrator: Arc<Orchestrator>,
-}
-
-#[async_trait::async_trait]
-impl AssistantTurnClient for OrchestratorTurnClient {
-    async fn submit_turn(&self, prompt: &str, conversation_id: Uuid) -> Result<String> {
-        let result = self
-            .orchestrator
-            .submit_turn(
-                &assistant_core::auth::AuthContext::system(),
-                prompt,
-                conversation_id,
-                Interface::Scheduler,
-                None,
-            )
-            .await?;
-        Ok(result.answer)
-    }
-}
+/// How often the server looks for spaces that were created or deleted.
+const SPACE_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The broker shared by every space, when `[bus] kind = "nats"`; otherwise each
 /// space uses the SQLite bus in its own database.
@@ -418,7 +395,6 @@ async fn run_with_args(args: Args) -> Result<()> {
     let storage = default_runtime.storage.clone();
     let registry = default_runtime.registry.clone();
     let orchestrator = default_runtime.orchestrator.clone();
-    let bus = default_runtime.bus.clone();
 
     // -- Push dispatcher (built here so AppState can hold a reference) -------
     let push_store_for_state = Arc::new(storage.push_subscription_store());
@@ -475,20 +451,13 @@ async fn run_with_args(args: Args) -> Result<()> {
     );
     let _ = webui_worker_plan;
 
-    // 6. Spawn workflow run processor (loop guardrails + action executors).
-    let turn_client = Arc::new(OrchestratorTurnClient {
-        orchestrator: orchestrator.clone(),
-    });
-    let action_executors: Vec<Arc<dyn WorkflowActionExecutor>> = vec![
-        Arc::new(AssistantTurnActionExecutor::new(turn_client)),
-        Arc::new(HttpRequestActionExecutor::default()),
-    ];
-    let _workflow_runner =
-        spawn_workflow_runner(storage.clone(), Duration::from_secs(2), action_executors);
-    let _workflow_schedule_adapter =
-        spawn_schedule_trigger_adapter(storage.clone(), Duration::from_secs(2));
-    let _workflow_event_adapter =
-        spawn_event_trigger_adapter(storage.clone(), bus.clone(), Duration::from_secs(2));
+    // Workflow runner and trigger adapters, one set per space.
+    let supervisor = Arc::new(SpaceSupervisor::new(
+        org_storage.clone(),
+        runtimes.clone(),
+        space_tasks::workflow_spawner(Duration::from_secs(2)),
+    ));
+    tokio::spawn(supervisor.run(SPACE_RECONCILE_INTERVAL));
 
     // -- Persona-scoped A2A profile store (filesystem-backed) --
     let agent_store = AgentStore::for_persona(&selected_agent)?;
