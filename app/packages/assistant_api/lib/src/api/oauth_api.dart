@@ -35,6 +35,7 @@ class OauthApi {
   /// * [codeChallenge]
   /// * [codeChallengeMethod] - Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected.
   /// * [scope]
+  /// * [org] - Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; without this parameter the password form is shown.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -52,6 +53,7 @@ class OauthApi {
     String? codeChallenge,
     String? codeChallengeMethod,
     String? scope,
+    String? org,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -87,6 +89,7 @@ class OauthApi {
           _serializers, codeChallengeMethod, const FullType(String)),
       r'scope':
           encodeQueryParameter(_serializers, scope, const FullType(String)),
+      r'org': encodeQueryParameter(_serializers, org, const FullType(String)),
     };
 
     final _response = await _dio.request<Object>(

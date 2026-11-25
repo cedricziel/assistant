@@ -23,7 +23,7 @@ Method | HTTP request | Description
 
 
 # **authorizeGet**
-> authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope)
+> authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, org)
 
 GET /oauth/authorize — render login form.
 
@@ -39,9 +39,10 @@ final String state = state_example; // String |
 final String codeChallenge = codeChallenge_example; // String | 
 final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected.
 final String scope = scope_example; // String | 
+final String org = org_example; // String | Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; without this parameter the password form is shown.
 
 try {
-    api.authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope);
+    api.authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, org);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->authorizeGet: $e\n');
 }
@@ -58,6 +59,7 @@ Name | Type | Description  | Notes
  **codeChallenge** | **String**|  | [optional] 
  **codeChallengeMethod** | **String**| Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected. | [optional] 
  **scope** | **String**|  | [optional] 
+ **org** | **String**| Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; without this parameter the password form is shown. | [optional] 
 
 ### Return type
 
