@@ -11,13 +11,13 @@ part 'create_org_request.g.dart';
 /// Body for `POST /api/orgs`.
 ///
 /// Properties:
-/// * [authMode] - Auth mode: `\"password\"` or `\"oidc\"`.
+/// * [authMode] - Must be `\"password\"` if set; switch to `\"oidc\"` after configuring `PUT /api/orgs/{id}/oidc`.
 /// * [name]
 /// * [slug]
 @BuiltValue()
 abstract class CreateOrgRequest
     implements Built<CreateOrgRequest, CreateOrgRequestBuilder> {
-  /// Auth mode: `\"password\"` or `\"oidc\"`.
+  /// Must be `\"password\"` if set; switch to `\"oidc\"` after configuring `PUT /api/orgs/{id}/oidc`.
   @BuiltValueField(wireName: r'auth_mode')
   String? get authMode;
 

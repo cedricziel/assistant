@@ -146,8 +146,11 @@ Class | Method | HTTP request | Description
 [*OauthApi*](doc/OauthApi.md) | [**revoke**](doc/OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh or access token.
 [*OauthApi*](doc/OauthApi.md) | [**token**](doc/OauthApi.md#token) | **POST** /oauth/token | POST /oauth/token
 [*OrgsApi*](doc/OrgsApi.md) | [**createOrg**](doc/OrgsApi.md#createorg) | **POST** /api/orgs | &#x60;POST /api/orgs&#x60; — create a new organization.
+[*OrgsApi*](doc/OrgsApi.md) | [**deleteOrgOidc**](doc/OrgsApi.md#deleteorgoidc) | **DELETE** /api/orgs/{id}/oidc | &#x60;DELETE /api/orgs/{id}/oidc&#x60; — remove the org&#39;s OIDC settings.
 [*OrgsApi*](doc/OrgsApi.md) | [**getOrg**](doc/OrgsApi.md#getorg) | **GET** /api/orgs/{id} | &#x60;GET /api/orgs/{id}&#x60; — get organization detail.
+[*OrgsApi*](doc/OrgsApi.md) | [**getOrgOidc**](doc/OrgsApi.md#getorgoidc) | **GET** /api/orgs/{id}/oidc | &#x60;GET /api/orgs/{id}/oidc&#x60; — get the org&#39;s OIDC settings.
 [*OrgsApi*](doc/OrgsApi.md) | [**listOrgs**](doc/OrgsApi.md#listorgs) | **GET** /api/orgs | &#x60;GET /api/orgs&#x60; — list organizations the user has access to.
+[*OrgsApi*](doc/OrgsApi.md) | [**putOrgOidc**](doc/OrgsApi.md#putorgoidc) | **PUT** /api/orgs/{id}/oidc | &#x60;PUT /api/orgs/{id}/oidc&#x60; — create or replace the org&#39;s OIDC settings.
 [*OrgsApi*](doc/OrgsApi.md) | [**updateOrg**](doc/OrgsApi.md#updateorg) | **PATCH** /api/orgs/{id} | &#x60;PATCH /api/orgs/{id}&#x60; — update organization settings.
 [*PersonasApi*](doc/PersonasApi.md) | [**addSkillAccess**](doc/PersonasApi.md#addskillaccess) | **POST** /api/personas/{id}/skill-access/skills | &#x60;POST /api/personas/{id}/skill-access/skills&#x60; — add a skill to the access list.
 [*PersonasApi*](doc/PersonasApi.md) | [**createPersona**](doc/PersonasApi.md#createpersona) | **POST** /api/personas | &#x60;POST /api/personas&#x60; — create a new persona.
@@ -295,6 +298,7 @@ Class | Method | HTTP request | Description
  - [OnboardingStatusResponse](doc/OnboardingStatusResponse.md)
  - [OpenIdConnectSecurityScheme](doc/OpenIdConnectSecurityScheme.md)
  - [OrgDetail](doc/OrgDetail.md)
+ - [OrgOidcConfigResponse](doc/OrgOidcConfigResponse.md)
  - [OrgSummary](doc/OrgSummary.md)
  - [PasswordOAuthFlow](doc/PasswordOAuthFlow.md)
  - [PersonaDetail](doc/PersonaDetail.md)
@@ -305,6 +309,7 @@ Class | Method | HTTP request | Description
  - [PersonaSummary](doc/PersonaSummary.md)
  - [PublishCatalogItemRequest](doc/PublishCatalogItemRequest.md)
  - [PushNotificationConfig](doc/PushNotificationConfig.md)
+ - [PutOrgOidcConfigRequest](doc/PutOrgOidcConfigRequest.md)
  - [QuickMessageRequest](doc/QuickMessageRequest.md)
  - [QuickMessageResponse](doc/QuickMessageResponse.md)
  - [RegisterAgentRequest](doc/RegisterAgentRequest.md)
