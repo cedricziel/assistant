@@ -8,7 +8,6 @@ use assistant_storage::{
     WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRunRecord, WorkflowStore,
 };
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::action::{WorkflowActionExecutor, WorkflowActionInput};
 
@@ -268,6 +267,7 @@ fn evaluate_condition(node: &WorkflowNode, trigger_payload: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use uuid::Uuid;
 
     use assistant_storage::{InMemoryWorkflowStore, WorkflowEdge, WorkflowExecutionLimits};
 
