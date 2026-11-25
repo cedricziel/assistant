@@ -6,7 +6,7 @@ Define how the assistant behaves as an MCP server: which protocol revisions it s
 ## ADDED Requirements
 
 ### Requirement: Protocol revisions
-The server SHALL speak MCP revision `2026-07-28` and SHALL also accept clients that negotiate `2025-11-25` through `initialize`. A request naming any other revision SHALL fail with the protocol's unsupported-version error, listing the supported revisions.
+The server SHALL speak MCP revision `2026-07-28` and SHALL also accept clients that negotiate `2025-11-25` through `initialize`. A per-request revision other than these SHALL fail with the protocol's unsupported-version error, listing the supported revisions. An `initialize` that proposes an unsupported revision SHALL be answered with a supported one, as the MCP lifecycle requires, and never with the unsupported revision.
 
 #### Scenario: Stateless client discovers the server
 - **WHEN** a client sends `server/discover` with protocol version `2026-07-28` in `_meta`
@@ -16,9 +16,32 @@ The server SHALL speak MCP revision `2026-07-28` and SHALL also accept clients t
 - **WHEN** a client sends `initialize` with protocol version `2025-11-25`
 - **THEN** the server completes the handshake at `2025-11-25` and serves tools and resources to that client
 
-#### Scenario: Unknown revision
-- **WHEN** a request carries protocol version `2024-11-05`
+#### Scenario: Unknown per-request revision
+- **WHEN** a request carries protocol version `2024-11-05` in `_meta`, as `2026-07-28` clients do
 - **THEN** the server rejects it with the unsupported-version error listing `2026-07-28` and `2025-11-25`
+
+#### Scenario: Initialize proposes an unknown revision
+- **WHEN** a client sends `initialize` with protocol version `2024-11-05`
+- **THEN** the server answers with protocol version `2025-11-25`, and the client decides whether to continue
+
+### Requirement: Caller identity
+Every `tools/call` SHALL run as the identity the request carries, bound to one space: the space named by the `x-space-id` header, or the caller's only space. The caller SHALL hold a role in that space or be an org admin, and a viewer SHALL NOT run tools. A request that carries no identity SHALL be rejected and SHALL NOT run as the system identity. Stdio callers carry the local system identity.
+
+#### Scenario: Tool call runs as the caller
+- **WHEN** a client holding the member role in one space calls a tool
+- **THEN** the tool runs with that user, org and space in its execution context
+
+#### Scenario: Token scopes do not gate tools
+- **WHEN** a member whose token carries only the `mcp:execute` scope calls a tool that the permission policy allows
+- **THEN** the tool runs
+
+#### Scenario: No identity
+- **WHEN** a request reaches the handler with no caller identity
+- **THEN** the call fails with an invalid-request error and no tool or turn runs
+
+#### Scenario: Viewer
+- **WHEN** a client holding the viewer role calls a tool
+- **THEN** the result has `isError: true` and no tool runs
 
 ### Requirement: Tools
 The server SHALL list the caller's available assistant tools plus `run-prompt` and `install-skill` in a deterministic order, each with an input schema, and SHALL execute `tools/call` under the permission policy that applies to the caller. A policy refusal SHALL be a tool result with `isError: true`, not a protocol error.
