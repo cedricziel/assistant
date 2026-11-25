@@ -56,6 +56,10 @@ use super::test_helpers::{TestSpace, body_bytes, multipart_body, state_over_in, 
 use super::webhooks::{WebhooksApiState, webhooks_api_router};
 use super::workflows::{WorkflowsApiState, workflows_api_router};
 use super::{ApiState, api_router};
+use crate::a2a;
+use crate::a2a::backend::RuntimeA2aBackend;
+use crate::a2a::handlers::{A2AState, build_default_agent_card};
+use crate::a2a::task_store::{A2aTaskStore as _, SqliteA2aTaskStore};
 
 const ORG_A: &str = "org_a";
 const ORG_B: &str = "org_b";
@@ -222,6 +226,7 @@ struct Tenancy {
     attachment_id: Uuid,
     webhook_id: String,
     workflow_id: String,
+    a2a_task_id: String,
 }
 
 impl Tenancy {
@@ -247,6 +252,15 @@ impl Tenancy {
             .merge(workflows_api_router().with_state(WorkflowsApiState {
                 spaces: api_state.spaces.clone(),
                 agent_id: agent_id.clone(),
+            }))
+            .merge(a2a::protected_router().with_state(A2AState {
+                spaces: api_state.spaces.clone(),
+                backend: Arc::new(RuntimeA2aBackend::new(
+                    api_state.runtimes.clone(),
+                    "default",
+                )),
+                agent_card: build_default_agent_card("http://localhost"),
+                agent_id: "default".to_string(),
             }))
             .merge(skills_router().with_state(SkillsApiState {
                 spaces: api_state.spaces.clone(),
@@ -279,6 +293,7 @@ impl Tenancy {
             attachment_id: Uuid::new_v4(),
             webhook_id: "wh_fixture".into(),
             workflow_id: String::new(),
+            a2a_task_id: String::new(),
         };
         tenancy.seed(&api_state).await;
         tenancy
@@ -339,6 +354,12 @@ impl Tenancy {
             .audio_store
             .insert(b"audio".to_vec(), "audio/mpeg".into())
             .await;
+
+        self.a2a_task_id = SqliteA2aTaskStore::new(self.a1.pool.clone(), "default")
+            .create_task(None)
+            .await
+            .unwrap()
+            .id;
 
         self.a1
             .persona_store()
@@ -1131,6 +1152,93 @@ async fn personas_follow_the_role_matrix() {
             assert_forbidden(&revoked, "member revokes skill access");
         }
     }
+}
+
+// -- A2A -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn a2a_foreign_org_selecting_a1_is_forbidden() {
+    let t = Tenancy::build().await;
+    let task = format!("/tasks/{}", t.a2a_task_id);
+    let message = Some(json!({"message": {
+        "messageId": "m1", "role": "ROLE_USER", "parts": [{"text": "hi"}]
+    }}));
+
+    for (who, what) in [(Who::Bob, "foreign org"), (Who::Carol, "sibling space")] {
+        assert_forbidden(&t.get(who, "/tasks", Some(A1)).await, what);
+        assert_forbidden(&t.get(who, &task, Some(A1)).await, what);
+        assert_forbidden(
+            &t.send(who, Method::POST, &format!("{task}/cancel"), Some(A1), None)
+                .await,
+            what,
+        );
+        assert_forbidden(
+            &t.send(
+                who,
+                Method::POST,
+                "/message/send",
+                Some(A1),
+                message.clone(),
+            )
+            .await,
+            what,
+        );
+    }
+}
+
+#[tokio::test]
+async fn a2a_tasks_stay_in_the_callers_own_space() {
+    let t = Tenancy::build().await;
+
+    let list = t.get(Who::Carol, "/tasks", None).await;
+    assert_eq!(list.status, StatusCode::OK);
+    assert!(
+        !list.json().to_string().contains(&t.a2a_task_id),
+        "carol's task list must not contain A1 tasks"
+    );
+    assert_not_found(
+        &t.get(Who::Carol, &format!("/tasks/{}", t.a2a_task_id), None)
+            .await,
+        "get A1 task",
+    );
+    assert_eq!(
+        t.get(Who::Alice, &format!("/tasks/{}", t.a2a_task_id), None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn a2a_viewers_read_but_cannot_cancel() {
+    let t = Tenancy::build().await;
+    let task = format!("/tasks/{}", t.a2a_task_id);
+
+    assert_eq!(t.get(Who::Vera, &task, None).await.status, StatusCode::OK);
+    assert_forbidden(
+        &t.send(
+            Who::Vera,
+            Method::POST,
+            &format!("{task}/cancel"),
+            None,
+            None,
+        )
+        .await,
+        "viewer cancels task",
+    );
+    assert_eq!(
+        t.send(
+            Who::Alice,
+            Method::POST,
+            &format!("{task}/cancel"),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::OK,
+        "member cancels task"
+    );
 }
 
 // -- Skills --------------------------------------------------------------------

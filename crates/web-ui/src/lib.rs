@@ -47,7 +47,6 @@ use auth::WebAuthConfig;
 
 use a2a::agent_store::AgentStore;
 use a2a::handlers::{A2AState, build_default_agent_card};
-use a2a::task_store::SqliteA2aTaskStore;
 use api::push::{PushApiState, push_api_router};
 use push::PushDispatcher;
 
@@ -391,7 +390,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         .await
         .context("Failed to open the default space runtime")?;
     let storage = default_runtime.storage.clone();
-    let orchestrator = default_runtime.orchestrator.clone();
 
     // -- Push dispatcher (built here so AppState can hold a reference) -------
     let push_store_for_state = Arc::new(storage.push_subscription_store());
@@ -480,13 +478,12 @@ async fn run_with_args(args: Args) -> Result<()> {
     harden_agent_card(&mut agent_card);
 
     let a2a_state = A2AState {
-        task_store: std::sync::Arc::new(SqliteA2aTaskStore::new(
-            storage.pool.clone(),
+        spaces: space_resolver.clone(),
+        backend: Arc::new(a2a::backend::RuntimeA2aBackend::new(
+            runtimes.clone(),
             selected_agent.clone(),
         )),
         agent_card,
-        orchestrator: orchestrator.clone(),
-        pool: storage.pool.clone(),
         agent_id: selected_agent.clone(),
     };
 

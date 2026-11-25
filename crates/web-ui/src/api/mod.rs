@@ -36,7 +36,7 @@ mod space_turn_tests;
 #[cfg(test)]
 mod tenancy_tests;
 #[cfg(test)]
-mod test_helpers;
+pub(crate) mod test_helpers;
 
 // -- Shared helpers ----------------------------------------------------------
 

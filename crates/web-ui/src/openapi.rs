@@ -91,7 +91,7 @@ use crate::api::{
 };
 
 /// Path prefixes of the data-plane routes, which act inside one space.
-const DATA_PLANE_PREFIXES: [&str; 10] = [
+const DATA_PLANE_PREFIXES: [&str; 14] = [
     "/api/conversations",
     "/api/quick-message",
     "/api/attachments",
@@ -102,6 +102,10 @@ const DATA_PLANE_PREFIXES: [&str; 10] = [
     "/api/push",
     "/api/webhooks",
     "/api/workflows",
+    "/api/personas",
+    "/api/skills",
+    "/message",
+    "/tasks",
 ];
 
 /// Documents the `X-Space-Id` header on every data-plane operation.
