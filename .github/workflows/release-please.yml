@@ -1,5 +1,13 @@
 name: Release Please
 
+# Merging the release PR cuts a `vX.Y.Z` tag and a GitHub pre-release
+# (`prerelease` in release-please-config.json). This workflow then builds that
+# release: binaries, the macOS app, Docker images, OS packages, and an iOS
+# build uploaded to TestFlight with the release notes as "What to Test".
+#
+# Promoting the pre-release to a full release in the GitHub UI sends its
+# TestFlight build to App Review (app-store.yml).
+
 on:
   push:
     branches: [main]
@@ -395,6 +403,18 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
           working-directory: app
+
+      - name: Fetch release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          raw="$RUNNER_TEMP/release_notes_raw.md"
+          file="$RUNNER_TEMP/release_notes.txt"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$raw" || : > "$raw"
+          # Notes must never block an upload: without them TestFlight shows none.
+          python3 ../scripts/plain_release_notes.py < "$raw" > "$file" || : > "$file"
+          echo "RELEASE_NOTES_FILE=$file" >> "$GITHUB_ENV"
 
       - name: Run Fastlane beta lane
         run: bundle exec fastlane ios beta
