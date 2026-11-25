@@ -98,7 +98,7 @@ jobs:
 
   build-macos-bundle:
     name: Build macOS Bundle (no-codesign)
-    runs-on: macos-26
+    runs-on: xcode-27
     needs: analyze-and-test
     if: needs.analyze-and-test.outputs.flutter == 'true'
     steps:
@@ -138,7 +138,7 @@ jobs:
 
   build-ios:
     name: Build iOS (no-codesign)
-    runs-on: macos-26
+    runs-on: xcode-27
     needs: analyze-and-test
     if: needs.analyze-and-test.outputs.flutter == 'true'
     defaults:
