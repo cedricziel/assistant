@@ -8,7 +8,7 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use tar::Archive;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::checksum::sha256_hex;
 use crate::manifest::BackupManifest;
@@ -29,8 +29,7 @@ pub fn write_tar_gz(
 
     let result = (|| -> Result<u64> {
         // The archive holds `secrets.key` and `jwt_secret`, so keep it private.
-        let file = create_fresh(&tmp_path, PRIVATE_MODE)
-            .with_context(|| format!("creating {:?}", tmp_path))?;
+        let file = create_private(&tmp_path).with_context(|| format!("creating {:?}", tmp_path))?;
         let gz = GzEncoder::new(file, Compression::default());
         let mut tar = tar::Builder::new(gz);
 
@@ -65,17 +64,17 @@ pub fn write_tar_gz(
     }
 }
 
-/// Mode for key material and the archives that hold it.
+/// Mode for key material, and for the archive that holds it.
 const PRIVATE_MODE: u32 = 0o600;
-/// Mode for other restored files, before the umask applies.
-const DEFAULT_MODE: u32 = 0o666;
+/// Mode for archive members and for restored files that did not exist before.
+const DEFAULT_MODE: u32 = 0o644;
 
-/// Create `path` as a new file with `mode` (Unix; ignored elsewhere).
+/// Create the archive's temporary file, readable by the owner only on Unix.
 ///
-/// Any existing file is removed first: the mode of a leftover file would
-/// survive a plain open, and `create_new` refuses to follow a symlink planted
-/// at `path`.
-fn create_fresh(path: &Path, mode: u32) -> std::io::Result<std::fs::File> {
+/// A leftover file at this path (from a crashed run) is removed first: its
+/// mode would survive a plain open, and `create_new` refuses to follow a
+/// symlink planted there.
+fn create_private(path: &Path) -> std::io::Result<std::fs::File> {
     match std::fs::remove_file(path) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -86,56 +85,167 @@ fn create_fresh(path: &Path, mode: u32) -> std::io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(mode);
+        options.mode(PRIVATE_MODE);
     }
-    #[cfg(not(unix))]
-    let _ = mode;
     options.open(path)
 }
 
-/// Delete the `-wal`/`-shm` files next to a database about to be replaced:
-/// SQLite would replay a stale WAL onto the restored database.
-fn remove_stale_sidecars(db: &Path) -> Result<()> {
+/// Mode a restored file gets: `0600` for key material, otherwise the mode of
+/// the file it replaces (an `org.toml` the user locked down stays locked
+/// down), otherwise [`DEFAULT_MODE`].
+#[cfg(unix)]
+fn restored_mode(dest: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    if is_private_file(dest) {
+        return PRIVATE_MODE;
+    }
+    std::fs::metadata(dest)
+        .map(|m| m.permissions().mode() & 0o7777)
+        .unwrap_or(DEFAULT_MODE)
+}
+
+/// `path` with `suffix` appended to its file name.
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// A file moved out of the way during a database replacement.
+struct SetAside {
+    original: PathBuf,
+    aside: PathBuf,
+}
+
+/// Move `db`'s `-wal` and `-shm` files to unique, newly created names next to
+/// them. Undoes its own moves if one fails.
+fn set_sidecars_aside(db: &Path) -> Result<Vec<SetAside>> {
+    let parent = db.parent().context("database path has no parent")?;
+    let mut moved: Vec<SetAside> = Vec::new();
     for suffix in ["-wal", "-shm"] {
-        let mut side = db.as_os_str().to_owned();
-        side.push(suffix);
-        match std::fs::remove_file(&side) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e).with_context(|| format!("removing stale {side:?}")),
+        let original = with_suffix(db, suffix);
+        if std::fs::symlink_metadata(&original).is_err() {
+            continue;
+        }
+        // Claim a unique name by creating it, then rename over our own file.
+        let claimed = tempfile::Builder::new()
+            .prefix(".pre-restore-")
+            .suffix(suffix)
+            .tempfile_in(parent)
+            .and_then(|f| f.keep().map_err(|e| e.error))
+            .map(|(_, path)| path);
+        let moved_one = claimed
+            .and_then(|aside| std::fs::rename(&original, &aside).map(|()| aside))
+            .with_context(|| format!("setting {original:?} aside"));
+        match moved_one {
+            Ok(aside) => moved.push(SetAside { original, aside }),
+            Err(e) => {
+                put_back(&moved);
+                return Err(e);
+            }
+        }
+    }
+    Ok(moved)
+}
+
+/// Move files set aside by [`set_sidecars_aside`] back to where they were.
+fn put_back(moved: &[SetAside]) {
+    for m in moved {
+        if let Err(e) = std::fs::rename(&m.aside, &m.original) {
+            warn!(
+                "could not put {:?} back at {:?}: {}; the file is kept at the first path",
+                m.aside, m.original, e
+            );
+        }
+    }
+}
+
+/// Write one restored file atomically.
+///
+/// The data goes to a uniquely named staging file in the destination
+/// directory, created with `create_new` so a user file is never touched, and
+/// is fsynced. For a database, the old `-wal`/`-shm` files are then renamed
+/// aside (never deleted yet), the staging file is renamed over `dest`, and
+/// only then are the asides deleted.
+///
+/// That order is what keeps a crash or a failed rename safe. Until the rename,
+/// no byte of the old database or its WAL is destroyed, and a failed rename
+/// puts the sidecars back. At no point do the new database and the old WAL sit
+/// side by side, which would make SQLite replay stale frames onto it. A crash
+/// between the two renames leaves the old database without its WAL, which
+/// survives under a `.pre-restore-*` name.
+fn write_restored(dest: &Path, data: &[u8]) -> Result<()> {
+    let parent = dest.parent().context("restore destination has no parent")?;
+    let mut prefix = std::ffi::OsString::from(".");
+    prefix.push(dest.file_name().unwrap_or_default());
+    prefix.push(".restore-");
+
+    let mut staging = tempfile::Builder::new()
+        .prefix(&prefix)
+        .suffix(".tmp")
+        .tempfile_in(parent)
+        .with_context(|| format!("creating a staging file in {parent:?}"))?;
+    staging
+        .write_all(data)
+        .and_then(|()| staging.as_file().sync_all())
+        .with_context(|| format!("writing {:?}", staging.path()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        staging
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(restored_mode(dest)))
+            .with_context(|| format!("setting the mode of {:?}", staging.path()))?;
+    }
+
+    let moved = if is_sqlite_db(dest) {
+        set_sidecars_aside(dest)?
+    } else {
+        Vec::new()
+    };
+    if let Err(e) = staging.persist(dest) {
+        put_back(&moved);
+        return Err(e.error).with_context(|| format!("replacing {dest:?}"));
+    }
+    for m in &moved {
+        if let Err(e) = std::fs::remove_file(&m.aside) {
+            warn!("could not remove {:?}: {}", m.aside, e);
         }
     }
     Ok(())
 }
 
-/// Write one restored file atomically: write and fsync `<dest>.tmp`, drop the
-/// stale side files of a database, then rename over `dest`. A failure before
-/// the rename leaves the existing file and its WAL untouched. Key material
-/// gets mode `0600`.
-fn write_restored(dest: &Path, data: &[u8]) -> Result<()> {
-    let mut tmp = dest.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-
-    let mode = if is_private_file(dest) {
-        PRIVATE_MODE
-    } else {
-        DEFAULT_MODE
-    };
-    let result = (|| -> Result<()> {
-        let mut file = create_fresh(&tmp, mode).with_context(|| format!("creating {tmp:?}"))?;
-        file.write_all(data)
-            .and_then(|()| file.sync_all())
-            .with_context(|| format!("writing {tmp:?}"))?;
-        if is_sqlite_db(dest) {
-            remove_stale_sidecars(dest)?;
-        }
-        std::fs::rename(&tmp, dest).with_context(|| format!("renaming {tmp:?} → {dest:?}"))
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
+/// Fsync every directory whose entries restore changed, so renamed files and
+/// newly created directories survive a crash. That is each ancestor of a
+/// restored file up to `install_dir`, and `install_dir`'s own parent.
+#[cfg(unix)]
+fn sync_restored_dirs<'a>(
+    install_dir: &Path,
+    dests: impl Iterator<Item = &'a PathBuf>,
+) -> Result<()> {
+    let mut dirs: std::collections::BTreeSet<&Path> = std::collections::BTreeSet::new();
+    for dest in dests {
+        dirs.extend(
+            dest.ancestors()
+                .skip(1)
+                .take_while(|d| d.starts_with(install_dir)),
+        );
     }
-    result
+    dirs.extend(install_dir.parent());
+    for dir in dirs {
+        std::fs::File::open(dir)
+            .and_then(|d| d.sync_all())
+            .with_context(|| format!("syncing directory {dir:?}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_restored_dirs<'a>(
+    _install_dir: &Path,
+    _dests: impl Iterator<Item = &'a PathBuf>,
+) -> Result<()> {
+    Ok(())
 }
 
 /// Refuse to restore through a symlink: neither `dest` nor any existing
@@ -161,10 +271,17 @@ fn ensure_no_symlink(install_dir: &Path, dest: &Path) -> Result<()> {
 }
 
 /// Append raw bytes as a tar entry with the given name.
+///
+/// Key material gets mode `0600`, because `tar xzf` extracts members with their
+/// archived mode (less the umask).
 fn append_bytes<W: Write>(tar: &mut tar::Builder<W>, name: &str, data: &[u8]) -> Result<()> {
     let mut header = tar::Header::new_gnu();
     header.set_size(data.len() as u64);
-    header.set_mode(0o644);
+    header.set_mode(if is_private_file(Path::new(name)) {
+        PRIVATE_MODE
+    } else {
+        DEFAULT_MODE
+    });
     header.set_cksum();
     tar.append_data(&mut header, name, data)
         .with_context(|| format!("appending '{}' to archive", name))?;
@@ -310,6 +427,7 @@ pub fn extract_tar_gz(
         write_restored(dest, data)?;
         debug!("restored {:?}", dest);
     }
+    sync_restored_dirs(install_dir, to_write.iter().map(|(dest, _)| dest))?;
 
     Ok((warnings, to_write.len()))
 }

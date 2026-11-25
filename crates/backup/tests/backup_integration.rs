@@ -355,6 +355,8 @@ async fn test_restore_drops_stale_wal_files_next_to_a_restored_database() {
     assert!(!target.path().join("org.db-wal").exists());
     assert!(!target.path().join("org.db-shm").exists());
     assert_eq!(read_rows(&target.path().join("org.db")).await, ["kept"]);
+    let leftovers = std::fs::read_dir(target.path()).unwrap().count();
+    assert_eq!(leftovers, 1, "only org.db may remain after a restore");
 }
 
 #[cfg(unix)]
@@ -422,12 +424,13 @@ async fn test_failed_restore_keeps_the_existing_database_and_its_wal() {
         .await
         .unwrap();
 
-    // A directory where the temporary file must go makes the write fail.
+    // A directory where the database belongs makes the final rename fail,
+    // after the temporary file was written.
     let target = TempDir::new().unwrap();
-    std::fs::write(target.path().join("org.db"), b"existing").unwrap();
+    std::fs::create_dir(target.path().join("org.db")).unwrap();
+    std::fs::write(target.path().join("org.db").join("x"), b"x").unwrap();
     std::fs::write(target.path().join("org.db-wal"), b"newest rows").unwrap();
-    std::fs::create_dir(target.path().join("org.db.tmp")).unwrap();
-    std::fs::write(target.path().join("org.db.tmp").join("x"), b"x").unwrap();
+    std::fs::write(target.path().join("org.db-shm"), b"index").unwrap();
 
     let result = RestoreEngine::new()
         .run(RestoreOptions {
@@ -437,16 +440,122 @@ async fn test_failed_restore_keeps_the_existing_database_and_its_wal() {
         })
         .await;
 
-    assert!(result.is_err(), "the write must fail");
-    assert_eq!(
-        std::fs::read(target.path().join("org.db")).unwrap(),
-        b"existing"
-    );
+    assert!(result.is_err(), "the rename must fail");
     assert_eq!(
         std::fs::read(target.path().join("org.db-wal")).unwrap(),
         b"newest rows",
-        "the WAL must survive a failed restore"
+        "the WAL must be put back after a failed restore"
     );
+    assert_eq!(
+        std::fs::read(target.path().join("org.db-shm")).unwrap(),
+        b"index"
+    );
+    let mut names: Vec<_> = std::fs::read_dir(target.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        ["org.db", "org.db-shm", "org.db-wal"],
+        "no staging or aside files may be left behind"
+    );
+}
+
+#[tokio::test]
+async fn test_restore_never_deletes_a_user_file_named_like_its_staging_file() {
+    let install_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    let draft = install_dir.path().join("agents/default/draft");
+    std::fs::create_dir_all(draft.parent().unwrap()).unwrap();
+    std::fs::write(&draft, b"from the backup").unwrap();
+    let archive = output_dir.path().join("backup.tar.gz");
+    BackupEngine::new()
+        .run(backup_opts(install_dir.path(), archive.clone()))
+        .await
+        .unwrap();
+
+    let target = TempDir::new().unwrap();
+    let bystander = target.path().join("agents/default/draft.tmp");
+    std::fs::create_dir_all(bystander.parent().unwrap()).unwrap();
+    std::fs::write(&bystander, b"newer work").unwrap();
+    RestoreEngine::new()
+        .run(RestoreOptions {
+            archive_path: archive,
+            install_dir: target.path().to_path_buf(),
+            force: true,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(std::fs::read(&bystander).unwrap(), b"newer work");
+    assert_eq!(
+        std::fs::read(target.path().join("agents/default/draft")).unwrap(),
+        b"from the backup"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_restore_keeps_the_mode_of_a_file_it_replaces() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let install_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    let rel = "orgs/acme/org.toml";
+    let source = install_dir.path().join(rel);
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::write(&source, b"from the backup").unwrap();
+    let archive = output_dir.path().join("backup.tar.gz");
+    BackupEngine::new()
+        .run(backup_opts(install_dir.path(), archive.clone()))
+        .await
+        .unwrap();
+
+    let target = TempDir::new().unwrap();
+    let existing = target.path().join(rel);
+    std::fs::create_dir_all(existing.parent().unwrap()).unwrap();
+    std::fs::write(&existing, b"old").unwrap();
+    std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o600)).unwrap();
+    RestoreEngine::new()
+        .run(RestoreOptions {
+            archive_path: archive,
+            install_dir: target.path().to_path_buf(),
+            force: true,
+        })
+        .await
+        .unwrap();
+
+    let mode = std::fs::metadata(&existing).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "a replaced 0600 file must stay 0600");
+    assert_eq!(std::fs::read(&existing).unwrap(), b"from the backup");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_archive_members_for_key_files_are_private() {
+    let install_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    for name in PRIVATE_FILES.into_iter().chain(["server.toml"]) {
+        std::fs::write(install_dir.path().join(name), b"x").unwrap();
+    }
+    let archive = output_dir.path().join("backup.tar.gz");
+    BackupEngine::new()
+        .run(backup_opts(install_dir.path(), archive.clone()))
+        .await
+        .unwrap();
+
+    let gz = flate2::read::GzDecoder::new(std::fs::File::open(&archive).unwrap());
+    let mut modes = std::collections::HashMap::new();
+    for entry in tar::Archive::new(gz).entries().unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.path().unwrap().to_string_lossy().into_owned();
+        modes.insert(name, entry.header().mode().unwrap() & 0o777);
+    }
+    for name in PRIVATE_FILES {
+        assert_eq!(modes[name], 0o600, "{name} must not extract world-readable");
+    }
+    assert_eq!(modes["server.toml"], 0o644);
 }
 
 #[cfg(unix)]

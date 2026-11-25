@@ -20,7 +20,7 @@ Not backed up: `backups/` (earlier archives), `cache/` (the integrations catalog
 
 `secrets.key` is part of the archive. Without it, the credentials stored in `org.db` cannot be decrypted. The archive also holds the OAuth tokens above. It is created with mode `0600`; treat it as a secret and store it accordingly.
 
-Symlinks found while walking `orgs/`, `agents/`, `skills/` and the state directories are skipped with a warning. The files listed individually at the install root are read through a symlink.
+Symlinks found while walking `orgs/`, `agents/`, `skills/` and the state directories, and those directories themselves when they are symlinks, are skipped with a warning. The files listed individually at the install root are read through a symlink.
 
 ## Commands
 
@@ -142,8 +142,8 @@ The first entry in every archive is `manifest.json`, which records the app versi
 - **Path-traversal protection** — entries with `..` components or destinations outside the install directory are skipped with a warning.
 - **Atomic write** — the archive is written to a `.tmp` file and renamed into place on success; the `.tmp` is deleted on any failure.
 - **SQLite safety** — every `.db` file is archived as a `VACUUM INTO` snapshot taken in one read transaction, so a running server cannot produce a torn copy. The snapshot includes rows still in the `-wal` file. `-wal` and `-shm` files are not archived, and restore deletes any that sit next to a restored database.
-- **Private keys** — restored `secrets.key`, `jwt_secret`, `openai-oauth.json` and `credentials.json` are written with mode `0600`.
-- **Crash-safe restore writes** — each file is written to `<name>.tmp`, fsynced, then renamed into place. The `-wal`/`-shm` files of a database are deleted only after its replacement is on disk, so a failed write keeps the existing database and its WAL.
+- **Private keys** — those four files are written with mode `0600` on restore and stored with mode `0600` in the archive, so `tar xzf` does not extract them world-readable.
+- **Crash-safe restore writes** — each file is written to a uniquely named staging file in its directory, fsynced and renamed into place, and the directories are fsynced afterwards. A replaced file keeps its mode. For a database, the old `-wal`/`-shm` files are renamed aside first and deleted only after the new database is in place; a failed replacement puts them back. A crash between the two renames leaves the old database and its WAL under a `.pre-restore-*` name.
 - **Symlinks** — restore refuses to write when the destination, or a directory above it inside the install directory, is a symlink. Nothing is written before every destination has been checked.
 
 ## Automating backups

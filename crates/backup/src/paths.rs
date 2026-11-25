@@ -68,8 +68,11 @@ pub fn discover_files(install_dir: &Path) -> Result<Vec<PathBuf>> {
     }
     for name in ROOT_DIRS {
         let dir = install_dir.join(name);
-        if dir.is_dir() {
-            collect_dir_files(&dir, &mut files)?;
+        // `is_dir` follows symlinks, so look at the link itself first.
+        match std::fs::symlink_metadata(&dir) {
+            Ok(meta) if meta.is_symlink() => warn_skipped_symlink(&dir),
+            Ok(meta) if meta.is_dir() => collect_dir_files(&dir, &mut files)?,
+            _ => {}
         }
     }
 
@@ -98,6 +101,13 @@ fn is_sqlite_sidecar(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.ends_with(".db-wal") || n.ends_with(".db-shm"))
+}
+
+fn warn_skipped_symlink(path: &Path) {
+    warn!(
+        "not backing up symlink {:?}: symlinks are not followed",
+        path
+    );
 }
 
 /// Recursively collect all regular files under `dir` in deterministic order.
@@ -314,6 +324,19 @@ mod tests {
         let found = relative(dir.path(), discover_files(dir.path()).unwrap());
 
         assert_eq!(found, ["orgs/acme/org.toml"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_root_directory_is_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        touch(outside.path(), "acme/org.toml");
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("orgs")).unwrap();
+
+        let found = discover_files(dir.path()).unwrap();
+
+        assert!(found.is_empty(), "archived through a symlink: {found:?}");
     }
 
     #[test]
