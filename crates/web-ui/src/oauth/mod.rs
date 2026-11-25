@@ -233,6 +233,7 @@ mod tests {
     use tower::ServiceExt;
 
     use assistant_auth::jwt::JwtKeyPair;
+    use assistant_core::auth::RefreshTokenStore;
     use assistant_core::identity::OrgId;
     use assistant_core::store::{OrgStore, Organization, User, UserStore};
 
@@ -654,6 +655,87 @@ mod tests {
             StatusCode::OK,
             "revoke should return 200 per RFC 7009"
         );
+    }
+
+    async fn revoke_token(state: &OAuthState, token: &str) -> StatusCode {
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/revoke")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("token={token}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    async fn alice_token_version(state: &OAuthState) -> u64 {
+        state
+            .org_storage
+            .user_store()
+            .session_state(&assistant_core::identity::UserId::from("usr_alice"))
+            .await
+            .unwrap()
+            .unwrap()
+            .token_version
+    }
+
+    #[tokio::test]
+    async fn revoking_a_refresh_token_ends_all_of_the_users_sessions() {
+        let state = test_state().await;
+        let web = state
+            .oauth2_server
+            .issue_token_pair("usr_alice", "webui", vec![])
+            .await
+            .unwrap();
+        let cli = state
+            .oauth2_server
+            .issue_token_pair("usr_alice", "cli", vec![])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            revoke_token(&state, &web.refresh_token).await,
+            StatusCode::OK
+        );
+
+        assert_eq!(alice_token_version(&state).await, 1, "access tokens voided");
+        let refresh_tokens = state.org_storage.refresh_token_store();
+        for token in [&web.refresh_token, &cli.refresh_token] {
+            assert!(
+                refresh_tokens.get_token(token).await.unwrap().is_none(),
+                "every refresh token of the user is revoked"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn revoking_an_access_token_ends_all_of_the_users_sessions() {
+        let state = test_state().await;
+        let identity = build_auth_context_for_user(&state.org_storage, "usr_alice", "webui")
+            .await
+            .unwrap()
+            .unwrap();
+        let jwt = state
+            .jwt_manager
+            .sign(&identity.ctx, "test", "Alice", identity.token_version)
+            .unwrap();
+
+        assert_eq!(revoke_token(&state, &jwt).await, StatusCode::OK);
+
+        assert_eq!(alice_token_version(&state).await, 1);
+    }
+
+    #[tokio::test]
+    async fn revoking_an_unknown_token_changes_nothing() {
+        let state = test_state().await;
+
+        assert_eq!(revoke_token(&state, "not-a-token").await, StatusCode::OK);
+
+        assert_eq!(alice_token_version(&state).await, 0);
     }
 
     #[tokio::test]

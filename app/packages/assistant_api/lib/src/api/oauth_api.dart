@@ -754,8 +754,8 @@ class OauthApi {
     );
   }
 
-  /// POST /oauth/revoke — revoke a refresh token.
-  ///
+  /// POST /oauth/revoke — revoke a refresh or access token.
+  /// Presenting either token proves possession, so no client authentication is needed. Revocation ends all of the token owner&#39;s sessions (every access token and refresh token), not just the one presented; this is the logout call.
   ///
   /// Parameters:
   /// * [token]

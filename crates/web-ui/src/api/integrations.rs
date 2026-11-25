@@ -233,6 +233,7 @@ mod tests {
     use assistant_auth::api_keys::InMemoryApiKeyStore;
     use assistant_auth::jwt::{JwtKeyPair, JwtManager};
     use assistant_auth::middleware::AuthState;
+    use assistant_auth::oauth2::server::InMemoryRefreshTokenStore;
     use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
     use assistant_core::store::{InMemoryMembershipStore, InMemoryUserStore};
     use assistant_core::types::features::CatalogConfig;
@@ -269,6 +270,7 @@ mod tests {
                 api_key_store: Arc::new(InMemoryApiKeyStore::new()),
                 users: Arc::new(InMemoryUserStore::default()),
                 memberships: Arc::new(InMemoryMembershipStore::default()),
+                refresh_tokens: Arc::new(InMemoryRefreshTokenStore::default()),
                 legacy_token: Some(TOKEN.into()),
                 legacy_context: Some(member_context()),
             },

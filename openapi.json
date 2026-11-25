@@ -5530,7 +5530,7 @@
         "tags": [
           "account"
         ],
-        "summary": "`POST /api/users/me/password` — change the caller's password and revoke\nall their refresh tokens. The current access JWT keeps working until it\nnaturally expires; API keys are untouched.",
+        "summary": "`POST /api/users/me/password` — change the caller's password and end all\ntheir sessions: every access JWT, including the one used for this call,\nand every refresh token is revoked. API keys are untouched.",
         "operationId": "change_password",
         "requestBody": {
           "content": {
@@ -7167,7 +7167,8 @@
         "tags": [
           "oauth"
         ],
-        "summary": "POST /oauth/revoke — revoke a refresh token.",
+        "summary": "POST /oauth/revoke — revoke a refresh or access token.",
+        "description": "Presenting either token proves possession, so no client authentication is\nneeded. Revocation ends all of the token owner's sessions (every access\ntoken and refresh token), not just the one presented; this is the logout\ncall.",
         "operationId": "revoke",
         "requestBody": {
           "content": {
@@ -10429,7 +10430,7 @@
       },
       "RevokeRequest": {
         "type": "object",
-        "description": "POST /oauth/revoke request body.\n\n`token_type_hint` (RFC 7009 §2.1) and `client_id` are accepted for\nspec compliance but currently informational — revocation looks up\ntokens by value alone. Kept on the struct so the OpenAPI surface\nmatches the RFC.",
+        "description": "POST /oauth/revoke request body.\n\n`token_type_hint` (RFC 7009 §2.1) and `client_id` are accepted for\nspec compliance but informational — revocation identifies the token by\nvalue alone. Kept on the struct so the OpenAPI surface matches the RFC.",
         "required": [
           "token"
         ],

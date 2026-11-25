@@ -625,6 +625,7 @@ async fn run_with_args(args: Args) -> Result<()> {
             api_key_store: api_key_store.clone(),
             users: Arc::new(org_storage.user_store()),
             memberships: Arc::new(org_storage.membership_store()),
+            refresh_tokens: Arc::new(org_storage.refresh_token_store()),
             legacy_token,
             legacy_context,
         },

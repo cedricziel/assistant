@@ -20,7 +20,7 @@ class AccountApi {
 
   const AccountApi(this._dio, this._serializers);
 
-  /// &#x60;POST /api/users/me/password&#x60; — change the caller&#39;s password and revoke all their refresh tokens. The current access JWT keeps working until it naturally expires; API keys are untouched.
+  /// &#x60;POST /api/users/me/password&#x60; — change the caller&#39;s password and end all their sessions: every access JWT, including the one used for this call, and every refresh token is revoked. API keys are untouched.
   ///
   ///
   /// Parameters:

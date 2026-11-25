@@ -19,7 +19,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::header::{COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
-use axum::http::{Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -27,6 +27,7 @@ use serde::Deserialize;
 
 use assistant_auth::api_keys;
 use assistant_auth::middleware::{AuthState, SessionError};
+use assistant_auth::session::revoke_sessions;
 use assistant_core::auth::AuthContext;
 
 // -- Configuration ----------------------------------------------------------
@@ -352,8 +353,30 @@ pub(crate) async fn login_submit(
     }
 }
 
-/// `POST /logout` — clear the session cookie and redirect to login.
-pub async fn logout(State(config): State<WebAuthConfig>) -> Response {
+/// `POST /logout` — end the caller's sessions, clear the session cookie and
+/// redirect to login.
+///
+/// Sessions are revoked server-side (see [`revoke_sessions`]), so the old
+/// cookie JWT is worthless even if it was copied elsewhere. A missing or
+/// invalid cookie still logs out cleanly.
+pub async fn logout(State(config): State<WebAuthConfig>, headers: HeaderMap) -> Response {
+    let auth = &config.auth_state;
+    let session_jwt = headers
+        .get(COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|cookies| extract_cookie(cookies, SESSION_COOKIE));
+    if let Some(jwt) = session_jwt
+        && let Ok(ctx) = auth.authenticate_jwt(jwt).await
+        && let Err(e) = revoke_sessions(
+            auth.users.as_ref(),
+            auth.refresh_tokens.as_ref(),
+            &ctx.user_id,
+        )
+        .await
+    {
+        tracing::error!(user_id = %ctx.user_id, "logout failed to revoke sessions: {e:#}");
+    }
+
     let secure = if config.secure_cookie { "; Secure" } else { "" };
     let cookie = format!(
         "{}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{}",
@@ -422,6 +445,7 @@ mod tests {
 
     use assistant_auth::api_keys::InMemoryApiKeyStore;
     use assistant_auth::jwt::{JwtKeyPair, JwtManager};
+    use assistant_auth::oauth2::server::InMemoryRefreshTokenStore;
     use assistant_core::identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
     use assistant_core::store::{
         InMemoryMembershipStore, InMemoryUserStore, MembershipStore, SpaceMembership, User,
@@ -490,6 +514,7 @@ mod tests {
                 api_key_store: Arc::new(InMemoryApiKeyStore::new()),
                 users,
                 memberships: memberships.clone(),
+                refresh_tokens: Arc::new(InMemoryRefreshTokenStore::default()),
                 legacy_token: Some("legacy-token-123".into()),
                 legacy_context: Some(make_admin_context()),
             },
@@ -964,6 +989,7 @@ mod tests {
                 api_key_store: Arc::new(InMemoryApiKeyStore::new()),
                 users: Arc::new(InMemoryUserStore::default()),
                 memberships: Arc::new(InMemoryMembershipStore::default()),
+                refresh_tokens: Arc::new(InMemoryRefreshTokenStore::default()),
                 legacy_token: None,
                 legacy_context: None,
             },
@@ -1153,6 +1179,65 @@ mod tests {
             StatusCode::OK,
             "same-origin login reaches the handler (wrong token re-renders the form)"
         );
+    }
+
+    #[tokio::test]
+    async fn logout_voids_the_session_cookie_jwt() {
+        let (config, jwt_sign) = test_config().await;
+        let token = jwt_sign
+            .sign(&make_user_context(), "acme", "Alice", 0)
+            .unwrap();
+        let users = config.auth_state.users.clone();
+        let auth_state = config.auth_state.clone();
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/logout")
+            .header("host", "example.com")
+            .header("origin", "https://example.com")
+            .header("cookie", format!("{SESSION_COOKIE}={token}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = session_router()
+            .with_state(config)
+            .oneshot(request)
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let state = users.session_state(&UserId::from("alice")).await.unwrap();
+        assert_eq!(state.unwrap().token_version, 1);
+        assert!(
+            matches!(
+                auth_state.authenticate_jwt(&token).await,
+                Err(SessionError::Rejected)
+            ),
+            "the cookie JWT must be dead after logout"
+        );
+    }
+
+    #[tokio::test]
+    async fn logout_with_a_bogus_cookie_revokes_nothing() {
+        let (config, _jwt_sign) = test_config().await;
+        let users = config.auth_state.users.clone();
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/logout")
+            .header("host", "example.com")
+            .header("origin", "https://example.com")
+            .header("cookie", format!("{SESSION_COOKIE}=not-a-jwt"))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = session_router()
+            .with_state(config)
+            .oneshot(request)
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let state = users.session_state(&UserId::from("alice")).await.unwrap();
+        assert_eq!(state.unwrap().token_version, 0);
     }
 
     #[tokio::test]

@@ -7,14 +7,17 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 
+use assistant_auth::session::revoke_sessions;
+use assistant_core::auth::RefreshTokenStore as _;
+use assistant_core::identity::UserId;
+
 use super::{OAuthError, OAuthErrorResponse, OAuthState};
 
 /// POST /oauth/revoke request body.
 ///
 /// `token_type_hint` (RFC 7009 §2.1) and `client_id` are accepted for
-/// spec compliance but currently informational — revocation looks up
-/// tokens by value alone. Kept on the struct so the OpenAPI surface
-/// matches the RFC.
+/// spec compliance but informational — revocation identifies the token by
+/// value alone. Kept on the struct so the OpenAPI surface matches the RFC.
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct RevokeRequest {
     pub token: String,
@@ -26,7 +29,12 @@ pub struct RevokeRequest {
     pub client_id: Option<String>,
 }
 
-/// POST /oauth/revoke — revoke a refresh token.
+/// POST /oauth/revoke — revoke a refresh or access token.
+///
+/// Presenting either token proves possession, so no client authentication is
+/// needed. Revocation ends all of the token owner's sessions (every access
+/// token and refresh token), not just the one presented; this is the logout
+/// call.
 #[utoipa::path(
     post,
     path = "/oauth/revoke",
@@ -40,11 +48,11 @@ pub struct RevokeRequest {
     )
 )]
 pub async fn revoke(
-    State(_state): State<OAuthState>,
+    State(state): State<OAuthState>,
     Form(req): Form<RevokeRequest>,
 ) -> impl IntoResponse {
     // Per RFC 7009, the revocation endpoint always returns 200 even if the
-    // token is already invalid. We only need to handle refresh tokens for now.
+    // token is already invalid.
     if req.token.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -56,10 +64,34 @@ pub async fn revoke(
             .into_response();
     }
 
-    // Accept the revocation silently — the token will naturally expire.
-    // Full revocation support (marking tokens as consumed) will be added
-    // when the refresh token store is wired through here.
-    StatusCode::OK.into_response()
+    match revoke_owner_sessions(&state, &req.token).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => {
+            tracing::error!("token revocation failed: {e:#}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(OAuthError {
+                    error: "server_error",
+                    error_description: "failed to revoke token".into(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// End the sessions of whoever `token` (a refresh token or an access JWT)
+/// belongs to. A token that is neither is ignored.
+async fn revoke_owner_sessions(state: &OAuthState, token: &str) -> anyhow::Result<()> {
+    let refresh_tokens = state.org_storage.refresh_token_store();
+    let owner = match refresh_tokens.get_token(token).await? {
+        Some(stored) => UserId::from(stored.user_id),
+        None => match state.jwt_manager.validate(token) {
+            Ok(claims) => UserId::from(claims.sub),
+            Err(_) => return Ok(()),
+        },
+    };
+    revoke_sessions(&state.org_storage.user_store(), &refresh_tokens, &owner).await
 }
 
 /// RFC 8414 authorization server metadata.

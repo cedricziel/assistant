@@ -10,7 +10,7 @@ use anyhow::Result;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-use assistant_core::auth::AuthContext;
+use assistant_core::auth::{AuthContext, RefreshTokenStore};
 use assistant_core::identity::{Action, ResourceKind, SpaceId};
 use assistant_core::store::{MembershipStore, UserStore};
 
@@ -34,6 +34,8 @@ pub struct AuthState {
     pub users: Arc<dyn UserStore>,
     /// Membership store: the live space roles that replace a token's claims.
     pub memberships: Arc<dyn MembershipStore>,
+    /// Refresh token store, revoked together with the access tokens on logout.
+    pub refresh_tokens: Arc<dyn RefreshTokenStore>,
     /// Optional legacy token for backward compatibility.
     /// When set, requests with this token get a default org-admin context.
     pub legacy_token: Option<String>,
@@ -183,6 +185,7 @@ mod tests {
 
     use crate::api_keys::InMemoryApiKeyStore;
     use crate::jwt::JwtKeyPair;
+    use crate::oauth2::server::InMemoryRefreshTokenStore;
 
     use super::*;
 
@@ -222,6 +225,7 @@ mod tests {
             api_key_store: Arc::new(InMemoryApiKeyStore::new()),
             users,
             memberships: memberships.clone(),
+            refresh_tokens: Arc::new(InMemoryRefreshTokenStore::default()),
             legacy_token: None,
             legacy_context: None,
         };
