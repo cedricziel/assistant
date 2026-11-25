@@ -146,6 +146,39 @@ impl SpaceResolver {
     }
 }
 
+impl SpaceResolver {
+    /// Storage for a space named by slugs, for callers that carry no
+    /// [`AuthContext`] (the public workflow webhook ingress). The space must
+    /// exist in `org.db`, so a request cannot make the server create a
+    /// database for an arbitrary slug pair.
+    pub async fn storage_for_slugs(
+        &self,
+        org_slug: &str,
+        space_slug: &str,
+    ) -> Result<Arc<StorageLayer>, SpaceError> {
+        let org = self
+            .org_storage
+            .org_store()
+            .get_org_by_slug(org_slug)
+            .await
+            .map_err(internal)?
+            .ok_or(SpaceError::AccessDenied)?;
+        let space = self
+            .org_storage
+            .space_store()
+            .list_spaces(&org.id)
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .find(|s| s.slug == space_slug)
+            .ok_or(SpaceError::AccessDenied)?;
+        self.pools
+            .space_storage(&org.slug, &space.slug)
+            .await
+            .map_err(internal)
+    }
+}
+
 fn single_space(auth: &AuthContext) -> Result<SpaceId, SpaceError> {
     let mut spaces = auth.space_roles.keys();
     match (spaces.next(), spaces.next()) {
@@ -297,6 +330,29 @@ mod tests {
             ("acme", "eng")
         );
         assert_eq!(ctx.role, Role::Member);
+    }
+
+    #[tokio::test]
+    async fn slugs_resolve_only_spaces_that_exist_in_the_org() {
+        let (resolver, dir) = resolver().await;
+
+        assert!(resolver.storage_for_slugs("acme", "eng").await.is_ok());
+        for (org, space) in [
+            ("acme", "missing"),
+            ("missing", "eng"),
+            ("globex", "ops"),
+            ("..", "eng"),
+        ] {
+            assert_eq!(
+                resolver.storage_for_slugs(org, space).await.err(),
+                Some(SpaceError::AccessDenied),
+                "{org}/{space}"
+            );
+        }
+        assert!(
+            !dir.path().join("orgs/acme/spaces/missing").exists(),
+            "an unknown slug must not create a database directory"
+        );
     }
 
     #[tokio::test]
