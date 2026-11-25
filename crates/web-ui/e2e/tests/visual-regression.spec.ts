@@ -1,5 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 
+import { mockEverything } from "./support/integration-mocks";
+
 /**
  * Visual regression tests for the assistant web UI.
  *
@@ -134,6 +136,7 @@ const CATALOG_FIXTURE = [
     categories: ["project-management", "dev"],
     connect_url: "https://mcp.linear.app/mcp",
     auth: { kind: "oauth" },
+    installable_layers: ["org", "space", "user"],
   },
   {
     id: "curated/github-mcp",
@@ -418,6 +421,8 @@ test.describe("Authenticated pages", () => {
   });
 
   test("integrations catalog entry detail", async ({ page }) => {
+    // An org admin may install Linear, so the Install button is enabled.
+    await mockEverything(page, { role: "org_admin" });
     await mockCatalog(page, CATALOG_FIXTURE);
     await navigateAndSettle(page, "/integrations");
     // Flutter builds its semantics tree only after the (off-screen)
