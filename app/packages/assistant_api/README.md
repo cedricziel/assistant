@@ -134,13 +134,14 @@ Class | Method | HTTP request | Description
 [*MembersApi*](doc/MembersApi.md) | [**updateMember**](doc/MembersApi.md#updatemember) | **PATCH** /api/orgs/{org_id}/spaces/{space_id}/members/{user_id} | &#x60;PATCH /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}&#x60; — change role.
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessage**](doc/MessagesApi.md#a2asendmessage) | **POST** /message/send | &#x60;POST /message/send&#x60; -- Sends a message to the agent (unary).
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessageStreaming**](doc/MessagesApi.md#a2asendmessagestreaming) | **POST** /message/stream | &#x60;POST /message/stream&#x60; -- Sends a message with streaming response (SSE).
-[*OauthApi*](doc/OauthApi.md) | [**authorizeGet**](doc/OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render login form.
-[*OauthApi*](doc/OauthApi.md) | [**authorizePost**](doc/OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate credentials, generate auth code, redirect.
+[*OauthApi*](doc/OauthApi.md) | [**authorizeGet**](doc/OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render the email step, the password form, or redirect to the org&#39;s IdP.
+[*OauthApi*](doc/OauthApi.md) | [**authorizePost**](doc/OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate one org&#39;s password credentials, generate an auth code, redirect.
 [*OauthApi*](doc/OauthApi.md) | [**callback**](doc/OauthApi.md#callback) | **GET** /oauth/callback | GET /oauth/callback — handle the IdP redirect.
 [*OauthApi*](doc/OauthApi.md) | [**complete**](doc/OauthApi.md#complete) | **GET** /oauth/complete | GET /oauth/complete — return the authorization code as JSON.
 [*OauthApi*](doc/OauthApi.md) | [**deviceInitiate**](doc/OauthApi.md#deviceinitiate) | **POST** /oauth/device | POST /oauth/device — initiate the device authorization flow.
 [*OauthApi*](doc/OauthApi.md) | [**deviceVerifyPage**](doc/OauthApi.md#deviceverifypage) | **GET** /oauth/device/verify | GET /oauth/device/verify — render page where user enters the code.
 [*OauthApi*](doc/OauthApi.md) | [**deviceVerifySubmit**](doc/OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
+[*OauthApi*](doc/OauthApi.md) | [**identifyPost**](doc/OauthApi.md#identifypost) | **POST** /oauth/authorize/identify | POST /oauth/authorize/identify — find the org an email signs in to.
 [*OauthApi*](doc/OauthApi.md) | [**metadata**](doc/OauthApi.md#metadata) | **GET** /.well-known/oauth-authorization-server | GET /.well-known/oauth-authorization-server
 [*OauthApi*](doc/OauthApi.md) | [**register**](doc/OauthApi.md#register) | **POST** /oauth/register | POST /oauth/register — register a new OAuth2 client.
 [*OauthApi*](doc/OauthApi.md) | [**revoke**](doc/OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh or access token.

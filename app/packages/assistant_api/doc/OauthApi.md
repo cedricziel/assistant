@@ -9,13 +9,14 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**authorizeGet**](OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render login form.
-[**authorizePost**](OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate credentials, generate auth code, redirect.
+[**authorizeGet**](OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render the email step, the password form, or redirect to the org&#39;s IdP.
+[**authorizePost**](OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate one org&#39;s password credentials, generate an auth code, redirect.
 [**callback**](OauthApi.md#callback) | **GET** /oauth/callback | GET /oauth/callback — handle the IdP redirect.
 [**complete**](OauthApi.md#complete) | **GET** /oauth/complete | GET /oauth/complete — return the authorization code as JSON.
 [**deviceInitiate**](OauthApi.md#deviceinitiate) | **POST** /oauth/device | POST /oauth/device — initiate the device authorization flow.
 [**deviceVerifyPage**](OauthApi.md#deviceverifypage) | **GET** /oauth/device/verify | GET /oauth/device/verify — render page where user enters the code.
 [**deviceVerifySubmit**](OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
+[**identifyPost**](OauthApi.md#identifypost) | **POST** /oauth/authorize/identify | POST /oauth/authorize/identify — find the org an email signs in to.
 [**metadata**](OauthApi.md#metadata) | **GET** /.well-known/oauth-authorization-server | GET /.well-known/oauth-authorization-server
 [**register**](OauthApi.md#register) | **POST** /oauth/register | POST /oauth/register — register a new OAuth2 client.
 [**revoke**](OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh or access token.
@@ -23,9 +24,9 @@ Method | HTTP request | Description
 
 
 # **authorizeGet**
-> authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, org)
+> authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, org, loginHint)
 
-GET /oauth/authorize — render login form.
+GET /oauth/authorize — render the email step, the password form, or redirect to the org's IdP.
 
 ### Example
 ```dart
@@ -39,10 +40,11 @@ final String state = state_example; // String |
 final String codeChallenge = codeChallenge_example; // String | 
 final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected.
 final String scope = scope_example; // String | 
-final String org = org_example; // String | Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; without this parameter the password form is shown.
+final String org = org_example; // String | Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; a password org shows the password form. Without this parameter the page asks for the user's email to find the org.
+final String loginHint = loginHint_example; // String | Email the user already entered. Prefills the password form and is passed on to the org's identity provider as `login_hint`.
 
 try {
-    api.authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, org);
+    api.authorizeGet(responseType, clientId, redirectUri, state, codeChallenge, codeChallengeMethod, scope, org, loginHint);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->authorizeGet: $e\n');
 }
@@ -59,7 +61,8 @@ Name | Type | Description  | Notes
  **codeChallenge** | **String**|  | [optional] 
  **codeChallengeMethod** | **String**| Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected. | [optional] 
  **scope** | **String**|  | [optional] 
- **org** | **String**| Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; without this parameter the password form is shown. | [optional] 
+ **org** | **String**| Slug of the org to sign in to. An org in OIDC mode redirects to its own identity provider; a password org shows the password form. Without this parameter the page asks for the user's email to find the org. | [optional] 
+ **loginHint** | **String**| Email the user already entered. Prefills the password form and is passed on to the org's identity provider as `login_hint`. | [optional] 
 
 ### Return type
 
@@ -77,9 +80,9 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **authorizePost**
-> authorizePost(clientId, redirectUri, codeChallenge, codeChallengeMethod, email, password, scope, state)
+> authorizePost(clientId, org, redirectUri, codeChallenge, codeChallengeMethod, email, password, scope, state)
 
-POST /oauth/authorize — validate credentials, generate auth code, redirect.
+POST /oauth/authorize — validate one org's password credentials, generate an auth code, redirect.
 
 ### Example
 ```dart
@@ -87,6 +90,7 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getOauthApi();
 final String clientId = clientId_example; // String | 
+final String org = org_example; // String | Slug of the org the user signs in to. Emails are only unique per org.
 final String redirectUri = redirectUri_example; // String | 
 final String codeChallenge = codeChallenge_example; // String | 
 final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`.
@@ -96,7 +100,7 @@ final String scope = scope_example; // String |
 final String state = state_example; // String | 
 
 try {
-    api.authorizePost(clientId, redirectUri, codeChallenge, codeChallengeMethod, email, password, scope, state);
+    api.authorizePost(clientId, org, redirectUri, codeChallenge, codeChallengeMethod, email, password, scope, state);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->authorizePost: $e\n');
 }
@@ -107,6 +111,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **clientId** | **String**|  | 
+ **org** | **String**| Slug of the org the user signs in to. Emails are only unique per org. | 
  **redirectUri** | **String**|  | 
  **codeChallenge** | **String**|  | [optional] 
  **codeChallengeMethod** | **String**| Must be `S256`. | [optional] 
@@ -334,6 +339,60 @@ Name | Type | Description  | Notes
  **email** | **String**| Email for authentication. | 
  **password** | **String**| Password for authentication. | 
  **userCode** | **String**|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: application/x-www-form-urlencoded
+ - **Accept**: text/html
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **identifyPost**
+> identifyPost(clientId, email, redirectUri, codeChallenge, codeChallengeMethod, scope, state)
+
+POST /oauth/authorize/identify — find the org an email signs in to.
+
+A sole match continues in that org (IdP redirect or password form); no match or several get the same org-slug form so the response does not say which case applied.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getOauthApi();
+final String clientId = clientId_example; // String | 
+final String email = email_example; // String | Email used to find the org the user signs in to.
+final String redirectUri = redirectUri_example; // String | 
+final String codeChallenge = codeChallenge_example; // String | 
+final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`.
+final String scope = scope_example; // String | 
+final String state = state_example; // String | 
+
+try {
+    api.identifyPost(clientId, email, redirectUri, codeChallenge, codeChallengeMethod, scope, state);
+} on DioException catch (e) {
+    print('Exception when calling OauthApi->identifyPost: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **clientId** | **String**|  | 
+ **email** | **String**| Email used to find the org the user signs in to. | 
+ **redirectUri** | **String**|  | 
+ **codeChallenge** | **String**|  | [optional] 
+ **codeChallengeMethod** | **String**| Must be `S256`. | [optional] 
+ **scope** | **String**|  | [optional] 
+ **state** | **String**|  | [optional] 
 
 ### Return type
 
