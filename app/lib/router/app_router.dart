@@ -12,6 +12,8 @@ import '../features/connection/connection_screen.dart';
 import '../features/contexts/models/context_model.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/contexts/screens/context_switcher_screen.dart';
+import '../features/auth/browser_sign_in.dart';
+import '../features/login/login_callback_screen.dart';
 import '../features/login/login_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/spaces/space_selector_screen.dart';
@@ -40,6 +42,7 @@ import '../shared/nav_shell.dart';
 class AppRoutes {
   static const loading = '/loading';
   static const login = '/login';
+  static const loginCallback = browserSignInCallbackPath;
   static const setup = '/setup';
   static const contexts = '/contexts';
   static const chat = '/chat';
@@ -104,9 +107,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Exception: /setup must NOT be redirected away — ConnectionScreen reads
       // the `_token` query parameter in initState() for auto-connect, and
       // redirecting to /loading would prevent it from ever running.
+      //
+      // /login/callback must not either: its query carries the one-time
+      // authorization code from the server's sign-in page.
+      final onLoginCallback = matchedPath == AppRoutes.loginCallback;
       if (activeContextAsync.isLoading) {
         final onSetupEarly = matchedPath == AppRoutes.setup;
-        if (onLoading || onSetupEarly) return null;
+        if (onLoading || onSetupEarly || onLoginCallback) return null;
         // Preserve the intended destination so we can restore it later.
         if (requestedUri != AppRoutes.loading) {
           pendingRedirect = requestedUri;
@@ -140,7 +147,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       // No usable context AND not already on an auth screen → /login.
       // For corrupted contexts, append `?reason=session-ended` so the
       // login screen can surface an explanatory banner.
-      if (!hasUsableContext && !onLogin && !onContextSwitcher && !onSetup) {
+      if (!hasUsableContext &&
+          !onLogin &&
+          !onLoginCallback &&
+          !onContextSwitcher &&
+          !onSetup) {
         if (hasContext && activeContext.credentialsCorrupted) {
           return '${AppRoutes.login}?reason=session-ended';
         }
@@ -165,6 +176,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.login,
         builder: (context, state) => const LoginScreen(),
+      ),
+
+      // -- Return from the server's sign-in page (web) -----------------------
+      GoRoute(
+        path: AppRoutes.loginCallback,
+        builder: (context, state) =>
+            LoginCallbackScreen(query: state.uri.queryParameters),
       ),
 
       // -- Space selector: org + space picker after OAuth2 login -------------
