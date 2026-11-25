@@ -14,4 +14,4 @@ pub use memory::{
     InMemoryIntegrationCredentialStore, InMemoryIntegrationHealthStore, InMemoryIntegrationStore,
 };
 pub use model::*;
-pub use secret::{Sealed, SecretBox, SecretBoxError, credential_aad};
+pub use secret::{Sealed, SecretBox, SecretBoxError, credential_aad, oidc_client_secret_aad};

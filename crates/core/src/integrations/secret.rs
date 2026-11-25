@@ -10,6 +10,7 @@ use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
+use crate::identity::OrgId;
 use crate::secret::Secret;
 
 const KEY_LEN: usize = 32;
@@ -158,6 +159,14 @@ pub fn credential_aad(integration_id: &str, subject: Option<&str>, kind: &str) -
         "v1|{}:{integration_id}|{subject}|{kind}",
         integration_id.len()
     )
+}
+
+/// The AAD that binds an org's OIDC client secret to that org.
+///
+/// `v1|oidc-client-secret|<len>:<org>`. The second field is not numeric, so it
+/// cannot collide with a [`credential_aad`] value.
+pub fn oidc_client_secret_aad(org_id: &OrgId) -> String {
+    format!("v1|oidc-client-secret|{}:{org_id}", org_id.0.len())
 }
 
 fn decode_key(raw: &str) -> Result<[u8; KEY_LEN]> {
@@ -326,6 +335,29 @@ mod tests {
         ];
         let unique: std::collections::HashSet<_> = cases.iter().collect();
         assert_eq!(unique.len(), cases.len(), "AAD collision among {cases:?}");
+    }
+
+    #[test]
+    fn oidc_client_secret_aad_binds_the_org_and_never_collides_with_a_credential() {
+        let org = OrgId::from("org_1");
+        assert_eq!(
+            oidc_client_secret_aad(&org),
+            "v1|oidc-client-secret|5:org_1"
+        );
+        assert_ne!(
+            oidc_client_secret_aad(&OrgId::from("org_2")),
+            oidc_client_secret_aad(&org),
+            "another org must not share an AAD"
+        );
+        let sb = SecretBox::from_key(key(1));
+        let sealed = sb
+            .seal(&Secret::new("v"), oidc_client_secret_aad(&org).as_bytes())
+            .unwrap();
+        let as_credential = credential_aad("org_1", None, "header");
+        assert!(
+            sb.open(&sealed, as_credential.as_bytes()).is_err(),
+            "an OIDC secret must not open as an integration credential"
+        );
     }
 
     #[test]

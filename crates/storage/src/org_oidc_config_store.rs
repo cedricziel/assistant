@@ -1,10 +1,11 @@
 //! SQLite-backed [`OrgOidcConfigStore`] implementation.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use sqlx::{Row, SqlitePool};
 
 use assistant_core::identity::OrgId;
+use assistant_core::integrations::Sealed;
 use assistant_core::store::{OrgOidcConfig, OrgOidcConfigStore};
 
 /// SQLite-backed per-org OIDC config store.
@@ -18,13 +19,28 @@ impl SqliteOrgOidcConfigStore {
     }
 }
 
-fn row_to_config(row: sqlx::sqlite::SqliteRow) -> Result<OrgOidcConfig> {
+fn sealed_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Option<Sealed>> {
+    let ciphertext: Option<Vec<u8>> = row.get("client_secret_ciphertext");
+    let nonce: Option<Vec<u8>> = row.get("client_secret_nonce");
+    let key_id: Option<String> = row.get("client_secret_key_id");
+    match (ciphertext, nonce, key_id) {
+        (None, None, None) => Ok(None),
+        (Some(ciphertext), Some(nonce), Some(key_id)) => Ok(Some(Sealed {
+            ciphertext,
+            nonce,
+            key_id,
+        })),
+        _ => bail!("stored OIDC client secret is only partly present"),
+    }
+}
+
+fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> Result<OrgOidcConfig> {
     let domains: String = row.get("allowed_email_domains");
     Ok(OrgOidcConfig {
         org_id: OrgId(row.get("org_id")),
         issuer_url: row.get("issuer_url"),
         client_id: row.get("client_id"),
-        client_secret: row.get("client_secret"),
+        client_secret: sealed_from_row(row)?,
         auto_provision: row.get("auto_provision"),
         allowed_email_domains: serde_json::from_str(&domains)
             .context("parsing allowed_email_domains")?,
@@ -37,27 +53,32 @@ fn row_to_config(row: sqlx::sqlite::SqliteRow) -> Result<OrgOidcConfig> {
 impl OrgOidcConfigStore for SqliteOrgOidcConfigStore {
     async fn get_oidc_config(&self, org_id: &OrgId) -> Result<Option<OrgOidcConfig>> {
         let row = sqlx::query(
-            "SELECT org_id, issuer_url, client_id, client_secret, auto_provision,
+            "SELECT org_id, issuer_url, client_id, client_secret_ciphertext,
+                    client_secret_nonce, client_secret_key_id, auto_provision,
                     allowed_email_domains, created_at, updated_at
              FROM org_oidc_configs WHERE org_id = ?",
         )
         .bind(&org_id.0)
         .fetch_optional(&self.pool)
         .await?;
-        row.map(row_to_config).transpose()
+        row.as_ref().map(row_to_config).transpose()
     }
 
     async fn upsert_oidc_config(&self, config: &OrgOidcConfig) -> Result<()> {
         let domains = serde_json::to_string(&config.allowed_email_domains)?;
+        let sealed = config.client_secret.as_ref();
         sqlx::query(
             "INSERT INTO org_oidc_configs
-                (org_id, issuer_url, client_id, client_secret, auto_provision,
+                (org_id, issuer_url, client_id, client_secret_ciphertext,
+                 client_secret_nonce, client_secret_key_id, auto_provision,
                  allowed_email_domains, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(org_id) DO UPDATE SET
                 issuer_url = excluded.issuer_url,
                 client_id = excluded.client_id,
-                client_secret = excluded.client_secret,
+                client_secret_ciphertext = excluded.client_secret_ciphertext,
+                client_secret_nonce = excluded.client_secret_nonce,
+                client_secret_key_id = excluded.client_secret_key_id,
                 auto_provision = excluded.auto_provision,
                 allowed_email_domains = excluded.allowed_email_domains,
                 updated_at = excluded.updated_at",
@@ -65,7 +86,9 @@ impl OrgOidcConfigStore for SqliteOrgOidcConfigStore {
         .bind(&config.org_id.0)
         .bind(&config.issuer_url)
         .bind(&config.client_id)
-        .bind(&config.client_secret)
+        .bind(sealed.map(|s| &s.ciphertext))
+        .bind(sealed.map(|s| &s.nonce))
+        .bind(sealed.map(|s| &s.key_id))
         .bind(config.auto_provision)
         .bind(domains)
         .bind(config.created_at)
@@ -90,6 +113,7 @@ mod tests {
     use chrono::Utc;
 
     use assistant_core::identity::OrgId;
+    use assistant_core::integrations::Sealed;
     use assistant_core::store::{OrgOidcConfig, OrgOidcConfigStore, OrgStore, Organization};
 
     use crate::org_storage::OrgStorageLayer;
@@ -112,13 +136,21 @@ mod tests {
         layer
     }
 
+    fn sealed_secret() -> Sealed {
+        Sealed {
+            ciphertext: vec![0, 1, 2, 255],
+            nonce: vec![9; 12],
+            key_id: "key_1".into(),
+        }
+    }
+
     fn make_config(org_id: &str, issuer: &str) -> OrgOidcConfig {
         let now = Utc::now();
         OrgOidcConfig {
             org_id: OrgId::from(org_id),
             issuer_url: issuer.into(),
             client_id: "assistant".into(),
-            client_secret: Some("s3cret".into()),
+            client_secret: Some(sealed_secret()),
             auto_provision: false,
             allowed_email_domains: vec!["acme.com".into(), "acme.org".into()],
             created_at: now,
@@ -155,7 +187,11 @@ mod tests {
             .unwrap();
         assert_eq!(found.issuer_url, "https://idp.acme.com");
         assert_eq!(found.client_id, "assistant");
-        assert_eq!(found.client_secret.as_deref(), Some("s3cret"));
+        assert_eq!(
+            found.client_secret,
+            Some(sealed_secret()),
+            "the sealed secret should round-trip byte for byte"
+        );
         assert!(!found.auto_provision, "auto_provision should round-trip");
         assert_eq!(
             found.allowed_email_domains,

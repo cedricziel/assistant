@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::CatalogResourceType;
 use crate::identity::{OrgId, Role, SpaceId, UserId};
+use crate::integrations::Sealed;
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -117,7 +118,10 @@ pub struct PersonaBinding {
 
 /// Per-org OpenID Connect settings. An org with `auth_mode = "oidc"` signs
 /// its users in through this identity provider.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// The client secret is stored sealed; callers seal and open it with
+/// [`oidc_client_secret_aad`](crate::integrations::oidc_client_secret_aad).
+#[derive(Clone, Debug)]
 pub struct OrgOidcConfig {
     pub org_id: OrgId,
     /// Issuer URL; discovery reads `{issuer_url}/.well-known/openid-configuration`.
@@ -125,7 +129,7 @@ pub struct OrgOidcConfig {
     /// Our client_id registered with the IdP.
     pub client_id: String,
     /// `None` for public clients using PKCE.
-    pub client_secret: Option<String>,
+    pub client_secret: Option<Sealed>,
     /// Create a user on first login instead of rejecting unknown identities.
     pub auto_provision: bool,
     /// Email domains allowed to sign in; empty allows any domain.
@@ -1530,7 +1534,11 @@ mod tests {
             org_id: OrgId::from(org_id),
             issuer_url: issuer.into(),
             client_id: "assistant".into(),
-            client_secret: Some("s3cret".into()),
+            client_secret: Some(Sealed {
+                ciphertext: vec![1, 2, 3],
+                nonce: vec![4; 12],
+                key_id: "key_1".into(),
+            }),
             auto_provision: true,
             allowed_email_domains: vec!["acme.com".into()],
             created_at: now(),
@@ -1560,6 +1568,11 @@ mod tests {
             .unwrap();
         assert_eq!(found.issuer_url, "https://idp.acme.com");
         assert_eq!(found.allowed_email_domains, vec!["acme.com".to_string()]);
+        assert_eq!(
+            found.client_secret,
+            make_oidc_config("org_1", "x").client_secret,
+            "the sealed secret should round-trip"
+        );
     }
 
     #[tokio::test]
