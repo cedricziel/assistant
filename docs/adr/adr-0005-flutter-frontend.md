@@ -28,13 +28,13 @@ both web and macOS, embedded in the Rust binary at compile time.
 
 ### Build integration
 
-`crates/web-ui/build.rs` runs `flutter build web --release` from `app/`
-during `cargo build`. The output (`app/build/web/`) is baked into the
-binary via `rust-embed`. All unmatched HTTP routes fall through to the
-Flutter SPA handler so `go_router` can manage client-side navigation.
-
-If the Flutter SDK is not installed the build falls back to a placeholder
-`index.html` so the crate always compiles.
+Cargo never runs Flutter. `make build-web` (`flutter build web --release`
+in `app/`) is an explicit step that writes `app/build/web/`;
+`crates/web-ui/build.rs` embeds that directory via `rust-embed`, or a
+placeholder `index.html` when it does not exist, so the crate always
+compiles. Release and Docker workflows run the web build before cargo.
+All unmatched HTTP routes fall through to the Flutter SPA handler so
+`go_router` can manage client-side navigation.
 
 ### API layer
 
@@ -71,11 +71,10 @@ and workflow graphs are retained as-is. They serve a different audience
 
 **Neutral:**
 
-- Rust build requires Flutter SDK on `PATH`; CI runners need
-  `subosito/flutter-action` added (done in `release-please.yml`).
-- Cold `cargo build` is slower when Flutter SDK is present (adds ~60 s for
-  `flutter build web`). Subsequent builds are cached by Cargo's
-  `rerun-if-changed` directives.
+- A binary built with plain `cargo build` embeds a placeholder page; shipping
+  the real UI needs `make build-web` first. CI runners that build release
+  artifacts install Flutter with `subosito/flutter-action`.
+- Rust-only builds and tests no longer pay for `flutter build web`.
 
 **Bad / trade-offs:**
 

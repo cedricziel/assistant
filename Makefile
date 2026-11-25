@@ -1,11 +1,16 @@
-.PHONY: all build test lint lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-macos-binary build-macos-bundle test-flutter precommit icons coverage
+.PHONY: all build build-web build-release test lint lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-macos-binary build-macos-bundle test-flutter precommit icons coverage
 
 all: build
 
-build:
+# Build the Flutter web app that `assistant-web-ui` embeds. Cargo never runs
+# Flutter itself; without this step the binary embeds a placeholder page.
+build-web:
+	cd app && flutter pub get && flutter build web --release
+
+build: build-web
 	cargo build --workspace
 
-build-release:
+build-release: build-web
 	cargo build --workspace --release
 
 test:
@@ -106,7 +111,7 @@ run-worker:
 
 # Compile the assistant binary for Apple Silicon and copy it into the Flutter
 # app's macOS bundle resources directory.
-build-macos-binary:
+build-macos-binary: build-web
 	rustup target add aarch64-apple-darwin 2>/dev/null || true
 	cargo build --release -p assistant-cli --target aarch64-apple-darwin
 	mkdir -p app/macos/Runner/Resources

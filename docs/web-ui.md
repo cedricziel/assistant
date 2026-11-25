@@ -259,12 +259,13 @@ compile time via `rust-embed`. All unmatched routes fall through to the
 Flutter SPA so client-side routing (`go_router`) works correctly.
 
 The Flutter app lives in `app/` and is built automatically by
-`crates/web-ui/build.rs` when Cargo compiles the crate (requires the
-Flutter SDK on `PATH`; falls back to a placeholder if unavailable).
+`crates/web-ui/build.rs` when Cargo compiles the crate (it never
+runs Flutter; `make build-web` produces `app/build/web/`, and a placeholder
+page is embedded if that directory is missing).
 
 ```
 assistant webui serve
-├── build.rs            # Runs `flutter build web` before compilation
+├── build.rs            # Embeds app/build/web/ (or a placeholder page) at compile time
 ├── src/
 │   ├── flutter_assets.rs   # rust-embed of app/build/web/ → SPA fallback handler
 │   ├── auth.rs             # Auth middleware: JWT, API keys, legacy tokens, session cookies
