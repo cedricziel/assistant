@@ -35,6 +35,75 @@ pub struct SqliteIntegrationStore {
 }
 
 impl SqliteIntegrationStore {
+    /// `expected_updated_at`, when set, must equal the stored one.
+    async fn update_checked(
+        &self,
+        i: &Integration,
+        expected_updated_at: Option<DateTime<Utc>>,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let current = sqlx::query(
+            "SELECT catalog_entry_id, connect_url, updated_at FROM integrations WHERE id = ?",
+        )
+        .bind(&i.id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("loading integration {}", i.id))?;
+        let Some(current) = current else {
+            return Ok(false);
+        };
+        if let Some(expected) = expected_updated_at
+            && current.try_get::<DateTime<Utc>, _>("updated_at")? != expected
+        {
+            return Err(IntegrationStoreError::Stale { id: i.id.clone() }.into());
+        }
+        let from_catalog = current
+            .try_get::<Option<String>, _>("catalog_entry_id")?
+            .is_some();
+        let url_changed = current.try_get::<String, _>("connect_url")? != i.connect_url;
+        if from_catalog && url_changed {
+            return Err(IntegrationStoreError::ConnectUrlImmutable { id: i.id.clone() }.into());
+        }
+
+        sqlx::query(
+            "UPDATE integrations SET slug = ?, name = ?, connect_url = ?, auth_kind = ?,
+                    header_name = ?, header_value_prefix = ?, credential_mode = ?, trust = ?,
+                    enabled = ?, oauth_client_id_override = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(&i.slug)
+        .bind(&i.name)
+        .bind(&i.connect_url)
+        .bind(i.auth_kind.as_str())
+        .bind(&i.header_name)
+        .bind(&i.header_value_prefix)
+        .bind(i.credential_mode.as_str())
+        .bind(i.trust.as_str())
+        .bind(i.enabled)
+        .bind(&i.oauth_client_id_override)
+        .bind(i.updated_at)
+        .bind(&i.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_write_error(e, &i.slug, &format!("updating integration {}", i.id)))?;
+
+        if url_changed {
+            // Credentials were issued for the old host; never send them to the new one.
+            sqlx::query("DELETE FROM integration_credentials WHERE integration_id = ?")
+                .bind(&i.id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("dropping credentials of integration {}", i.id))?;
+            sqlx::query("DELETE FROM integration_oauth_states WHERE integration_id = ?")
+                .bind(&i.id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("dropping OAuth state of integration {}", i.id))?;
+        }
+        tx.commit().await?;
+        Ok(true)
+    }
+
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
@@ -164,61 +233,15 @@ impl IntegrationStore for SqliteIntegrationStore {
     }
 
     async fn update(&self, i: &Integration) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
-        let current =
-            sqlx::query("SELECT catalog_entry_id, connect_url FROM integrations WHERE id = ?")
-                .bind(&i.id)
-                .fetch_optional(&mut *tx)
-                .await
-                .with_context(|| format!("loading integration {}", i.id))?;
-        let Some(current) = current else {
-            return Ok(false);
-        };
-        let from_catalog = current
-            .try_get::<Option<String>, _>("catalog_entry_id")?
-            .is_some();
-        let url_changed = current.try_get::<String, _>("connect_url")? != i.connect_url;
-        if from_catalog && url_changed {
-            return Err(IntegrationStoreError::ConnectUrlImmutable { id: i.id.clone() }.into());
-        }
+        self.update_checked(i, None).await
+    }
 
-        sqlx::query(
-            "UPDATE integrations SET slug = ?, name = ?, connect_url = ?, auth_kind = ?,
-                    header_name = ?, header_value_prefix = ?, credential_mode = ?, trust = ?,
-                    enabled = ?, oauth_client_id_override = ?, updated_at = ?
-             WHERE id = ?",
-        )
-        .bind(&i.slug)
-        .bind(&i.name)
-        .bind(&i.connect_url)
-        .bind(i.auth_kind.as_str())
-        .bind(&i.header_name)
-        .bind(&i.header_value_prefix)
-        .bind(i.credential_mode.as_str())
-        .bind(i.trust.as_str())
-        .bind(i.enabled)
-        .bind(&i.oauth_client_id_override)
-        .bind(i.updated_at)
-        .bind(&i.id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| map_write_error(e, &i.slug, &format!("updating integration {}", i.id)))?;
-
-        if url_changed {
-            // Credentials were issued for the old host; never send them to the new one.
-            sqlx::query("DELETE FROM integration_credentials WHERE integration_id = ?")
-                .bind(&i.id)
-                .execute(&mut *tx)
-                .await
-                .with_context(|| format!("dropping credentials of integration {}", i.id))?;
-            sqlx::query("DELETE FROM integration_oauth_states WHERE integration_id = ?")
-                .bind(&i.id)
-                .execute(&mut *tx)
-                .await
-                .with_context(|| format!("dropping OAuth state of integration {}", i.id))?;
-        }
-        tx.commit().await?;
-        Ok(true)
+    async fn update_if_unchanged(
+        &self,
+        i: &Integration,
+        expected_updated_at: DateTime<Utc>,
+    ) -> Result<bool> {
+        self.update_checked(i, Some(expected_updated_at)).await
     }
 
     async fn delete(&self, id: &str) -> Result<bool> {

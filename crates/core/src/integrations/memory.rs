@@ -40,6 +40,59 @@ pub struct InMemoryIntegrationStore {
 }
 
 impl InMemoryIntegrationStore {
+    /// `expected_updated_at`, when set, must equal the stored one.
+    fn update_checked(
+        &self,
+        integration: &Integration,
+        expected_updated_at: Option<DateTime<Utc>>,
+    ) -> Result<bool> {
+        let mut state = lock(&self.state);
+        let Some(pos) = state
+            .integrations
+            .iter()
+            .position(|i| i.id == integration.id)
+        else {
+            return Ok(false);
+        };
+        let current = &state.integrations[pos];
+        if expected_updated_at.is_some_and(|expected| expected != current.updated_at) {
+            return Err(IntegrationStoreError::Stale {
+                id: integration.id.clone(),
+            }
+            .into());
+        }
+        let url_changed = current.connect_url != integration.connect_url;
+        if url_changed && current.catalog_entry_id.is_some() {
+            return Err(IntegrationStoreError::ConnectUrlImmutable {
+                id: integration.id.clone(),
+            }
+            .into());
+        }
+        let taken = state
+            .integrations
+            .iter()
+            .any(|i| i.id != current.id && same_scope(i, current) && i.slug == integration.slug);
+        if taken {
+            return Err(duplicate_slug(&integration.slug));
+        }
+        // Keep the immutable fields of the stored row.
+        let mut next = integration.clone();
+        next.org_id = current.org_id.clone();
+        next.layer = current.layer;
+        next.space_id = current.space_id.clone();
+        next.owner_user_id = current.owner_user_id.clone();
+        next.catalog_entry_id = current.catalog_entry_id.clone();
+        next.created_at = current.created_at;
+        check_invariants(&next)?;
+        state.integrations[pos] = next;
+        if url_changed {
+            state
+                .credentials
+                .retain(|c| c.integration_id != integration.id);
+        }
+        Ok(true)
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -142,45 +195,15 @@ impl IntegrationStore for InMemoryIntegrationStore {
     }
 
     async fn update(&self, integration: &Integration) -> Result<bool> {
-        let mut state = lock(&self.state);
-        let Some(pos) = state
-            .integrations
-            .iter()
-            .position(|i| i.id == integration.id)
-        else {
-            return Ok(false);
-        };
-        let current = &state.integrations[pos];
-        let url_changed = current.connect_url != integration.connect_url;
-        if url_changed && current.catalog_entry_id.is_some() {
-            return Err(IntegrationStoreError::ConnectUrlImmutable {
-                id: integration.id.clone(),
-            }
-            .into());
-        }
-        let taken = state
-            .integrations
-            .iter()
-            .any(|i| i.id != current.id && same_scope(i, current) && i.slug == integration.slug);
-        if taken {
-            return Err(duplicate_slug(&integration.slug));
-        }
-        // Keep the immutable fields of the stored row.
-        let mut next = integration.clone();
-        next.org_id = current.org_id.clone();
-        next.layer = current.layer;
-        next.space_id = current.space_id.clone();
-        next.owner_user_id = current.owner_user_id.clone();
-        next.catalog_entry_id = current.catalog_entry_id.clone();
-        next.created_at = current.created_at;
-        check_invariants(&next)?;
-        state.integrations[pos] = next;
-        if url_changed {
-            state
-                .credentials
-                .retain(|c| c.integration_id != integration.id);
-        }
-        Ok(true)
+        self.update_checked(integration, None)
+    }
+
+    async fn update_if_unchanged(
+        &self,
+        integration: &Integration,
+        expected_updated_at: DateTime<Utc>,
+    ) -> Result<bool> {
+        self.update_checked(integration, Some(expected_updated_at))
     }
 
     async fn delete(&self, id: &str) -> Result<bool> {

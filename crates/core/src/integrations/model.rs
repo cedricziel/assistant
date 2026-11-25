@@ -224,6 +224,8 @@ pub enum IntegrationStoreError {
     /// A catalog install's `connect_url` cannot change: it would re-point the
     /// stored credentials at a different host.
     ConnectUrlImmutable { id: String },
+    /// The integration changed since the caller read it.
+    Stale { id: String },
 }
 
 impl fmt::Display for IntegrationStoreError {
@@ -236,6 +238,12 @@ impl fmt::Display for IntegrationStoreError {
                 f,
                 "integration {id} comes from the catalog; its connect_url cannot change"
             ),
+            Self::Stale { id } => {
+                write!(
+                    f,
+                    "integration {id} changed since it was read; reload and retry"
+                )
+            }
         }
     }
 }
@@ -257,6 +265,15 @@ pub trait IntegrationStore: Send + Sync {
     /// [`IntegrationStoreError::ConnectUrlImmutable`]). Changing it on a custom
     /// URL integration deletes all of its credentials in the same transaction.
     async fn update(&self, integration: &Integration) -> Result<bool>;
+    /// [`IntegrationStore::update`], but only if the stored `updated_at` still
+    /// equals `expected_updated_at`; otherwise fails with
+    /// [`IntegrationStoreError::Stale`] and changes nothing. Use it for
+    /// read-modify-write cycles, so a concurrent writer's change is not lost.
+    async fn update_if_unchanged(
+        &self,
+        integration: &Integration,
+        expected_updated_at: DateTime<Utc>,
+    ) -> Result<bool>;
     /// Deletes the integration with its credentials, space access and OAuth
     /// state. `false` if `id` is unknown.
     async fn delete(&self, id: &str) -> Result<bool>;
