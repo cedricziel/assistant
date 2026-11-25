@@ -17,7 +17,7 @@ use assistant_core::clock::FakeClock;
 use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 use assistant_core::integrations::{
     CredentialKind, CredentialMode, CredentialStatus, Integration, IntegrationAuthKind,
-    IntegrationLayer, IntegrationPolicy, IntegrationTrust, StoredCredential,
+    IntegrationLayer, IntegrationPolicy, IntegrationTrust, SecretBox, StoredCredential,
 };
 use assistant_core::types::features::CatalogConfig;
 use assistant_storage::OrgStorageLayer;
@@ -30,9 +30,6 @@ use assistant_core::integrations::{
 };
 
 const FIXTURE: &str = include_str!("../../../../core/tests/fixtures/integrations-catalog.json");
-
-/// The key id the harness treats as the server's.
-pub const KEY_ID: &str = "k";
 
 /// The callers the tests act as. `Admin` is an org admin; `EngAdmin` and
 /// `SalesAdmin` administer one space; `Member` and `Viewer` belong to `sp_eng`;
@@ -122,9 +119,12 @@ impl Harness {
         let dir = tempfile::tempdir().unwrap();
         let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
         seed_org(&org_storage).await;
-        let state =
-            IntegrationsApiState::new(catalog_with_fixture(dir.path()).await, &org_storage, KEY_ID)
-                .with_clock(Arc::new(FakeClock::new(now())));
+        let state = IntegrationsApiState::new(
+            catalog_with_fixture(dir.path()).await,
+            &org_storage,
+            Arc::new(SecretBox::from_key([7; 32])),
+        )
+        .with_clock(Arc::new(FakeClock::new(now())));
         Self {
             state,
             org_storage,
@@ -234,7 +234,8 @@ impl Harness {
 
     /// Store a credential row (ciphertext is a stand-in).
     pub async fn seed_credential(&self, id: &str, subject: Option<Who>, status: CredentialStatus) {
-        self.seed_credential_with_key(id, subject, status, KEY_ID)
+        let key_id = self.state.secrets.key_id().to_owned();
+        self.seed_credential_with_key(id, subject, status, &key_id)
             .await;
     }
 
@@ -345,7 +346,7 @@ impl Harness {
         self.state.effective = Arc::new(EffectiveIntegrations::new(
             self.state.store.clone(),
             credentials.clone(),
-            KEY_ID,
+            self.state.secrets.key_id(),
         ));
         self.state.credentials = credentials;
     }

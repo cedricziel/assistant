@@ -37,6 +37,7 @@ use assistant_core::integrations::catalog::{
 };
 use assistant_core::integrations::{
     EffectiveIntegrations, IntegrationCredentialStore, IntegrationLayer, IntegrationStore,
+    SecretBox,
 };
 use assistant_storage::OrgStorageLayer;
 
@@ -68,13 +69,20 @@ pub struct IntegrationsApiState {
     credentials: Arc<dyn IntegrationCredentialStore>,
     spaces: Arc<dyn SpaceStore>,
     effective: Arc<EffectiveIntegrations>,
+    /// Seals credentials as they are written. The web process never reads
+    /// them back: connections are opened where turns run.
+    secrets: Arc<SecretBox>,
     clock: Arc<dyn Clock>,
 }
 
 impl IntegrationsApiState {
-    /// `key_id` identifies the server's secrets key; a credential sealed under
-    /// another key reports `auth_expired`.
-    pub fn new(catalog: Arc<CatalogSync>, org_storage: &OrgStorageLayer, key_id: &str) -> Self {
+    /// A credential sealed under a key other than `secrets`' reports
+    /// `auth_expired`.
+    pub fn new(
+        catalog: Arc<CatalogSync>,
+        org_storage: &OrgStorageLayer,
+        secrets: Arc<SecretBox>,
+    ) -> Self {
         let store: Arc<dyn IntegrationStore> = Arc::new(org_storage.integration_store());
         let credentials: Arc<dyn IntegrationCredentialStore> =
             Arc::new(org_storage.integration_credential_store());
@@ -83,11 +91,12 @@ impl IntegrationsApiState {
             effective: Arc::new(EffectiveIntegrations::new(
                 store.clone(),
                 credentials.clone(),
-                key_id,
+                secrets.key_id(),
             )),
             store,
             credentials,
             spaces: Arc::new(org_storage.space_store()),
+            secrets,
             clock: Arc::new(SystemClock),
         }
     }
@@ -375,7 +384,7 @@ mod tests {
                 integrations_api_router().with_state(IntegrationsApiState::new(
                     catalog,
                     &org_storage,
-                    "k",
+                    Arc::new(SecretBox::from_key([7; 32])),
                 )),
             )
             .route_layer(axum::middleware::from_fn_with_state(auth, require_auth))
