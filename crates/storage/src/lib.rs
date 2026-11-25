@@ -49,6 +49,7 @@ pub mod push_subscriptions;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
+pub mod scoped_bus;
 pub mod skill_executions;
 pub mod skill_stats;
 pub mod slack_threads;
@@ -104,6 +105,7 @@ pub use registry::{InMemorySkillCatalog, SkillCatalog, SkillRegistry};
 pub use scheduled_tasks::{
     InMemoryScheduledTaskStore, ScheduledTask, ScheduledTaskStore, SqliteScheduledTaskStore,
 };
+pub use scoped_bus::ScopedMessageBus;
 pub use skill_executions::{
     InMemorySkillExecutionStore, SkillExecution, SkillExecutionStore, SkillOutcome,
     SqliteSkillExecutionStore,
