@@ -2123,6 +2123,16 @@
               }
             }
           },
+          "409": {
+            "description": "The integration changed while the credential was saved; the credential was not kept",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The integration takes no header credential, or the value or header name is invalid",
             "content": {
@@ -2475,6 +2485,16 @@
           },
           "404": {
             "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The integration changed while the test ran; test again",
             "content": {
               "application/json": {
                 "schema": {
