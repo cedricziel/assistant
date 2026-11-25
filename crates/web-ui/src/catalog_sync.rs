@@ -16,6 +16,7 @@ use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use reqwest::header::{ETAG, HeaderName, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
@@ -48,6 +49,14 @@ struct CacheMeta {
     etag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_modified: Option<String>,
+    /// Source the validators came from; an `ETag` means nothing to another URL.
+    #[serde(default)]
+    source_url: String,
+    /// SHA-256 (hex) of the cached body the validators describe. The body and
+    /// meta files are renamed one after the other, so a crash between the two
+    /// can leave them out of step; the hash exposes that on load.
+    #[serde(default)]
+    body_sha256: String,
     /// When the cached body was last replaced.
     fetched_at: DateTime<Utc>,
     /// When the source was last asked, whether or not the body changed.
@@ -60,6 +69,7 @@ pub struct CatalogSync {
     cache_dir: PathBuf,
     clock: Arc<dyn Clock>,
     refresh_interval: Duration,
+    max_body_bytes: usize,
     index: RwLock<Arc<CatalogIndex>>,
     /// Meta of the copy behind `index`; held across a refresh so two
     /// refreshes never interleave.
@@ -79,6 +89,7 @@ impl CatalogSync {
             cache_dir: base_dir.join("cache").join("integrations"),
             clock: Arc::new(SystemClock),
             refresh_interval: REFRESH_INTERVAL,
+            max_body_bytes: MAX_BODY_BYTES,
             index: RwLock::new(Arc::new(CatalogIndex::empty())),
             meta: Mutex::new(None),
         })
@@ -94,6 +105,11 @@ impl CatalogSync {
         self
     }
 
+    pub fn with_max_body_bytes(mut self, limit: usize) -> Self {
+        self.max_body_bytes = limit;
+        self
+    }
+
     /// The current catalog. Cheap: clones an `Arc`.
     pub async fn index(&self) -> Arc<CatalogIndex> {
         self.index.read().await.clone()
@@ -106,6 +122,9 @@ impl CatalogSync {
         if !self.config.enabled {
             return;
         }
+        // Held until the index is published so a refresh cannot slip a newer
+        // body in between the read and the meta update.
+        let mut cached_meta = self.meta.lock().await;
         let bytes = match tokio::fs::read(self.cache_dir.join(CATALOG_FILE)).await {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
@@ -126,7 +145,21 @@ impl CatalogSync {
             "loaded the cached integrations catalog"
         );
         *self.index.write().await = Arc::new(index);
-        *self.meta.lock().await = self.read_meta().await;
+        *cached_meta = self
+            .read_meta()
+            .await
+            .filter(|meta| self.describes(meta, &bytes));
+    }
+
+    /// Whether `meta` holds validators for `body` as fetched from the
+    /// configured source.
+    fn describes(&self, meta: &CacheMeta, body: &[u8]) -> bool {
+        let matches =
+            meta.source_url == self.config.source_url && meta.body_sha256 == body_digest(body);
+        if !matches {
+            info!("cached integrations catalog validators do not match; fetching unconditionally");
+        }
+        matches
     }
 
     /// Fetch the source once, conditionally when a cached copy exists.
@@ -169,28 +202,26 @@ impl CatalogSync {
 
         let etag = header_value(&response, ETAG);
         let last_modified = header_value(&response, LAST_MODIFIED);
-        let bytes = response
-            .bytes()
-            .await
-            .context("cannot read the integrations catalog body")?;
-        if bytes.len() > MAX_BODY_BYTES {
-            bail!(
-                "catalog body is {} bytes, over the {MAX_BODY_BYTES} limit",
-                bytes.len()
-            );
-        }
+        let bytes = read_limited(response, self.max_body_bytes).await?;
         let index = parse_catalog(&bytes)?;
         let entries = index.len();
 
         let now = self.clock.now();
-        let meta = CacheMeta {
+        let mut meta = CacheMeta {
             etag,
             last_modified,
+            source_url: self.config.source_url.clone(),
+            body_sha256: body_digest(&bytes),
             fetched_at: now,
             checked_at: now,
         };
         if let Err(e) = self.persist(&bytes, &meta).await {
             warn!("cannot persist the integrations catalog: {e:#}");
+            // The disk still holds an older body. Withhold the validators so
+            // the next refresh fetches in full and saves body and meta together,
+            // instead of a 304 persisting validators for a body that is not there.
+            meta.etag = None;
+            meta.last_modified = None;
         }
         *self.index.write().await = Arc::new(index);
         *cached_meta = Some(meta);
@@ -255,6 +286,32 @@ fn parse_catalog(bytes: &[u8]) -> Result<CatalogIndex> {
         serde_json::from_slice(bytes).context("catalog body is not JSON")?;
     CatalogIndex::from_document(&document)
         .ok_or_else(|| anyhow::anyhow!("catalog body has no `data` array"))
+}
+
+fn body_digest(body: &[u8]) -> String {
+    hex::encode(Sha256::digest(body))
+}
+
+/// Read a response body, giving up as soon as it passes `limit` bytes.
+async fn read_limited(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
+    if response
+        .content_length()
+        .is_some_and(|len| len > limit as u64)
+    {
+        bail!("catalog body is over the {limit} byte limit");
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .context("cannot read the integrations catalog body")?
+    {
+        if body.len() + chunk.len() > limit {
+            bail!("catalog body is over the {limit} byte limit");
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 fn header_value(response: &reqwest::Response, name: HeaderName) -> Option<String> {
@@ -685,6 +742,153 @@ mod tests {
                 .collect();
         names.sort();
         assert_eq!(names, [CATALOG_FILE, META_FILE]);
+    }
+
+    // -- Review follow-ups ---------------------------------------------------
+
+    fn unconditional(request: &wiremock::Request) -> bool {
+        request.headers.get("if-none-match").is_none()
+            && request.headers.get("if-modified-since").is_none()
+    }
+
+    #[tokio::test]
+    async fn load_cached_holds_the_meta_lock_until_it_has_published_the_index() {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let sync = Arc::new(sync_in(dir.path(), config_for(&server)));
+        seed_cache(dir.path(), &sync_in(dir.path(), config_for(&server))).await;
+        let guard = sync.meta.lock().await;
+
+        let loader = {
+            let sync = sync.clone();
+            tokio::spawn(async move { sync.load_cached().await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let loaded_while_locked = !sync.index().await.is_empty();
+        drop(guard);
+        loader.await.unwrap();
+
+        assert!(
+            !loaded_while_locked,
+            "load_cached must wait for the meta lock"
+        );
+        assert_eq!(sync.index().await.len(), FIXTURE_ENTRIES);
+    }
+
+    #[tokio::test]
+    async fn validators_cached_for_another_source_are_not_replayed() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/a.json"))
+            .respond_with(catalog_response("\"v1\""))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/b.json"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("etag", "\"v1\"")
+                    .set_body_raw(catalog_of(3), "application/json"),
+            )
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let from_a = CatalogConfig {
+            enabled: true,
+            source_url: format!("{}/a.json", server.uri()),
+        };
+        let from_b = CatalogConfig {
+            enabled: true,
+            source_url: format!("{}/b.json", server.uri()),
+        };
+        sync_in(dir.path(), from_a).refresh().await.unwrap();
+        let mirror = sync_in(dir.path(), from_b);
+        mirror.load_cached().await;
+
+        let outcome = mirror.refresh().await.unwrap();
+
+        assert_eq!(outcome, RefreshOutcome::Updated { entries: 3 });
+        let requests = server.received_requests().await.unwrap();
+        assert!(
+            unconditional(&requests[1]),
+            "mirror request: {:?}",
+            requests[1].headers
+        );
+    }
+
+    #[tokio::test]
+    async fn validators_are_withheld_while_the_body_is_not_on_disk() {
+        let server = MockServer::start().await;
+        mount_catalog(&server, "\"v1\"").await;
+        let dir = tempfile::tempdir().unwrap();
+        // A file where the cache directory should be makes every write fail.
+        std::fs::create_dir_all(dir.path().join("cache")).unwrap();
+        std::fs::write(dir.path().join("cache").join("integrations"), "in the way").unwrap();
+        let sync = sync_in(dir.path(), config_for(&server));
+
+        sync.refresh().await.unwrap();
+        assert_eq!(
+            sync.index().await.len(),
+            FIXTURE_ENTRIES,
+            "still served from memory"
+        );
+        sync.refresh().await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert!(
+            unconditional(&requests[1]),
+            "second request: {:?}",
+            requests[1].headers
+        );
+    }
+
+    #[tokio::test]
+    async fn validators_that_do_not_describe_the_cached_body_are_dropped_on_load() {
+        let server = MockServer::start().await;
+        mount_catalog(&server, "\"v2\"").await;
+        let dir = tempfile::tempdir().unwrap();
+        let cache = cache_file(dir.path(), CATALOG_FILE);
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        // Body B on disk, validators of body A: a crash between the two writes.
+        std::fs::write(&cache, catalog_of(3)).unwrap();
+        std::fs::write(
+            cache_file(dir.path(), META_FILE),
+            serde_json::json!({
+                "etag": "\"v1\"",
+                "source_url": config_for(&server).source_url,
+                "body_sha256": "0000",
+                "fetched_at": "2026-11-25T00:00:00Z",
+                "checked_at": "2026-11-25T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let sync = sync_in(dir.path(), config_for(&server));
+
+        sync.load_cached().await;
+        assert_eq!(sync.index().await.len(), 3, "the body is still served");
+        sync.refresh().await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert!(
+            unconditional(&requests[0]),
+            "request: {:?}",
+            requests[0].headers
+        );
+    }
+
+    #[tokio::test]
+    async fn a_body_over_the_size_limit_is_rejected_and_the_cache_kept() {
+        let server = MockServer::start().await;
+        mount_catalog(&server, "\"v1\"").await;
+        let dir = tempfile::tempdir().unwrap();
+        let sync = sync_in(dir.path(), config_for(&server)).with_max_body_bytes(1024);
+
+        let result = sync.refresh().await;
+
+        assert!(result.is_err());
+        assert!(sync.index().await.is_empty());
+        assert!(!cache_file(dir.path(), CATALOG_FILE).exists());
     }
 
     /// Put a good copy in `sync`'s memory and on disk, as an earlier run would.
