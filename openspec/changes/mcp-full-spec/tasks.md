@@ -37,10 +37,10 @@ Each numbered group is one PR in the stack, in order.
 
 ## 6. Streamable HTTP `/mcp` endpoint (PR 6)
 
-- [ ] 6.1 Add failing web-ui integration tests: 401 with `resource_metadata` challenge without a token; 403 `insufficient_scope` for a token without `mcp:execute`; 401 for an API-audience JWT; 200 tool list for an MCP-audience token and for an API key with `mcp:execute`; 403 for a foreign `Origin`; confirm red
-- [ ] 6.2 Add `/.well-known/oauth-protected-resource/mcp` with a failing test first, then implement it with OpenAPI docs
-- [ ] 6.3 Mount rmcp `StreamableHttpService` at `/mcp` behind an MCP auth middleware that inserts `AuthContext`, enable `server-side-http`, and verify 6.1 passes
-- [ ] 6.4 Add a test that a space-restricted user cannot reach another space's data through `/mcp`; make it pass
+- [x] 6.1 Add failing web-ui integration tests: 401 with `resource_metadata` challenge without a token; 403 `insufficient_scope` for a token without `mcp:execute`; 401 for an API-audience JWT; 200 tool list for an MCP-audience token and for an API key with `mcp:execute`; 403 for a foreign `Origin`; confirm red
+- [x] 6.2 Add `/.well-known/oauth-protected-resource/mcp` with a failing test first, then implement it with OpenAPI docs
+- [x] 6.3 Mount rmcp `StreamableHttpService` at `/mcp` behind an MCP auth middleware that inserts `AuthContext`, enable `server-side-http`, and verify 6.1 passes
+- [x] 6.4 Add a test that a space-restricted user cannot reach another space's data through `/mcp`; make it pass
 - [ ] 6.5 Run `make dump-openapi` and `make generate-flutter-client`; verify the generated client builds with `make lint-flutter`
 
 ## 7. Server Tasks (PR 7)
