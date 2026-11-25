@@ -1,7 +1,7 @@
 //! MCP server request dispatcher.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use assistant_core::permission::{PermissionPolicy, PermissionRequest};
@@ -306,7 +306,7 @@ pub async fn handle_request(
                         match registry.get(skill_name).await {
                             Some(skill) => {
                                 let file_path = skill.dir.join(category).join(filename);
-                                match std::fs::read_to_string(&file_path) {
+                                match read_file_within(&skill.dir, &file_path) {
                                     Ok(text) => {
                                         let content = vec![ContentItem::text(text)];
                                         JsonRpcResponse::ok(req.id, json!({ "contents": content }))
@@ -347,4 +347,13 @@ pub async fn handle_request(
     }
 }
 
-// ── skill_to_mcp_tool is no longer needed (using ToolExecutor specs directly) ──
+/// Reads `path` only when it resolves inside `root`, so `..` segments and
+/// symlinks in a resource URI cannot reach files outside the skill directory.
+fn read_file_within(root: &Path, path: &Path) -> std::io::Result<String> {
+    let root = root.canonicalize()?;
+    let resolved = path.canonicalize()?;
+    if !resolved.starts_with(&root) {
+        return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+    }
+    std::fs::read_to_string(resolved)
+}
