@@ -213,7 +213,6 @@ platform :mac do
     # Notarize via ASC API key (already configured in before_all).
     notarize(
       package: app,
-      bundle_id: "com.cedricziel.assistant.macos",
       print_log: true
     )
   end
