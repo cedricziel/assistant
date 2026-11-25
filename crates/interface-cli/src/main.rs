@@ -620,7 +620,7 @@ async fn main() -> Result<()> {
                 }
             }
 
-            Ok(Signal::CtrlC) => {
+            Ok(Signal::CtrlC(..)) => {
                 println!("(Ctrl-C — type /exit to quit)");
             }
 
