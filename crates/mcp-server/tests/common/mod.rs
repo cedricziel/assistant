@@ -5,10 +5,11 @@
 
 use std::sync::Arc;
 
+use assistant_core::auth::AuthContext;
 use assistant_core::permission::PermissionPolicy;
 use assistant_core::tool::ToolDispatcher;
 use assistant_core::types::permissions::PermissionsConfig;
-use assistant_mcp_server::{AssistantMcpServer, serve_transport};
+use assistant_mcp_server::{AssistantMcpServer, serve_transport, with_identity};
 use assistant_runtime::{OrchestrationEngine, StubOrchestrationEngine, TurnResult};
 use assistant_skills::{SkillDef, SkillSource};
 use assistant_storage::{InMemorySkillCatalog, SkillCatalog, SkillRegistry, StorageLayer};
@@ -112,18 +113,44 @@ pub async fn install_registry() -> Arc<SkillRegistry> {
     Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap())
 }
 
-/// Serves `server` on one end of a duplex pipe and returns the other end.
-pub fn spawn_server(server: AssistantMcpServer) -> DuplexStream {
+/// Serves `server` on one end of a duplex pipe, with requests carrying no
+/// caller identity, and returns the other end.
+pub fn spawn_anonymous_server(server: AssistantMcpServer) -> DuplexStream {
     let (server_io, client_io) = tokio::io::duplex(64 * 1024);
     tokio::spawn(serve_transport(server, server_io));
     client_io
 }
 
-/// An rmcp client connected to `server`.
+/// Serves `server` on one end of a duplex pipe, with every request carrying
+/// `auth`, and returns the other end.
+pub fn spawn_server_as(server: AssistantMcpServer, auth: AuthContext) -> DuplexStream {
+    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    tokio::spawn(serve_transport(server, with_identity(server_io, auth)));
+    client_io
+}
+
+/// Serves `server` as the local system identity, like stdio does.
+pub fn spawn_server(server: AssistantMcpServer) -> DuplexStream {
+    spawn_server_as(server, AuthContext::system())
+}
+
+/// An rmcp client connected to `server` as the local system identity.
 pub async fn connect(server: AssistantMcpServer) -> Client {
-    ().serve(spawn_server(server))
-        .await
-        .expect("client handshake")
+    connect_to(spawn_server(server)).await
+}
+
+/// An rmcp client connected to `server` as `auth`.
+pub async fn connect_as(server: AssistantMcpServer, auth: AuthContext) -> Client {
+    connect_to(spawn_server_as(server, auth)).await
+}
+
+/// An rmcp client connected to `server` whose requests carry no identity.
+pub async fn connect_anonymous(server: AssistantMcpServer) -> Client {
+    connect_to(spawn_anonymous_server(server)).await
+}
+
+async fn connect_to(io: DuplexStream) -> Client {
+    ().serve(io).await.expect("client handshake")
 }
 
 pub fn args(value: Value) -> serde_json::Map<String, Value> {

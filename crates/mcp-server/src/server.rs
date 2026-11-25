@@ -24,6 +24,7 @@ use assistant_runtime::OrchestrationEngine;
 use assistant_storage::{SkillCatalog, SkillRegistry};
 use assistant_tool_executor::install_skill_from_source;
 
+use crate::identity::{Caller, resolve_caller};
 use crate::resources;
 
 const RUN_PROMPT: &str = "run-prompt";
@@ -114,17 +115,15 @@ impl AssistantMcpServer {
                 .any(|spec| spec.name == tool_name && spec.requires_confirmation)
     }
 
-    async fn run_prompt(&self, input: &Value) -> Result<CallToolResult, ErrorData> {
+    async fn run_prompt(
+        &self,
+        caller: &Caller,
+        input: &Value,
+    ) -> Result<CallToolResult, ErrorData> {
         let prompt = required_str(input, "prompt")?;
         let turn = self
             .orchestrator
-            .submit_turn(
-                &assistant_core::auth::AuthContext::system(),
-                prompt,
-                Uuid::new_v4(),
-                Interface::Mcp,
-                None,
-            )
+            .submit_turn(&caller.auth, prompt, Uuid::new_v4(), Interface::Mcp, None)
             .await
             .map_err(|e| {
                 warn!(error = %e, "run_prompt failed");
@@ -202,16 +201,22 @@ impl ServerHandler for AssistantMcpServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        let caller = resolve_caller(&context.extensions)?;
         let tool_name = request.name.as_ref();
+        if !caller.may_run_tools() {
+            let refusal = format!("the {:?} role cannot run tools", caller.role);
+            warn!(tool = %tool_name, %refusal, "MCP tool call refused");
+            return Ok(CallToolResult::error(vec![ContentBlock::text(refusal)]).into());
+        }
         let arguments = request.arguments.unwrap_or_default();
         let input = Value::Object(arguments.clone());
 
         // `run-prompt` is exempt from the policy: its tool calls pass the
         // orchestrator's own gate.
         if tool_name == RUN_PROMPT {
-            return self.run_prompt(&input).await.map(Into::into);
+            return self.run_prompt(&caller, &input).await.map(Into::into);
         }
 
         // MCP callers cannot be prompted, so the policy decides alone.
@@ -225,8 +230,9 @@ impl ServerHandler for AssistantMcpServer {
             depth: 0,
             user_id: None,
             org_id: None,
-            space_id: None,
-        };
+            space_id: Some(caller.space_id.clone()),
+        }
+        .with_auth(&caller.auth);
         let requires_confirmation = self.requires_confirmation(tool_name);
         let resolution = self
             .policy

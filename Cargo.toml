@@ -122,6 +122,7 @@ dirs = "7"
 toml = "1.1"
 # HTTP server
 axum = { version = "0.8", features = ["macros", "multipart"] }
+http = "1"
 # Async streams
 futures = "0.3"
 # Terminal line editor
