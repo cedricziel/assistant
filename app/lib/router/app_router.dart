@@ -68,6 +68,10 @@ class AppRoutes {
   static const admin = '/admin';
   static const adminIntegrations = '/admin/integrations';
   static const adminSpaceIntegrations = '/admin/spaces/:spaceId/integrations';
+
+  /// The integrations page of one space.
+  static String adminSpaceIntegrationsFor(String spaceId) =>
+      '/admin/spaces/$spaceId/integrations';
   static const apiKeys = '/api-keys';
   static const spaceSelector = '/spaces';
   static const onboarding = '/onboarding';

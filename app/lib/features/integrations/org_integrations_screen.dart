@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/platform/widgets.dart';
-import '../../shared/theme/assistant_spacing.dart';
 import 'browse_catalog_button.dart';
 import 'caller_roles.dart';
 import 'integration_list_view.dart';
@@ -18,37 +17,29 @@ class OrgIntegrationsScreen extends ConsumerWidget {
     final roles = ref.watch(callerRolesProvider);
     final colors = Theme.of(context).colorScheme;
 
-    return roles.when(
-      loading: () => Scaffold(
-        appBar: AppBar(title: const Text('Integrations')),
-        body: const Center(child: CircularProgressIndicator.adaptive()),
-      ),
-      error: (_, _) => Scaffold(
-        appBar: AppBar(title: const Text('Integrations')),
-        body: Center(
-          child: IntegrationStatusView(
-            icon: Icons.error_outline,
-            iconColor: colors.error,
+    final admin = roles.value?.isOrgAdmin ?? false;
+    if (admin) return const _AdminView();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Integrations')),
+      body: roles.when(
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
+        error: (_, _) => Center(
+          child: IntegrationStatusView.error(
+            context: context,
             message: 'Could not check your role. Try again.',
-            action: AdaptiveButton.filled(
-              onPressed: () => ref.invalidate(callerRolesProvider),
-              child: const Text('Retry'),
-            ),
+            onRetry: () => ref.invalidate(callerRolesProvider),
+          ),
+        ),
+        data: (_) => Center(
+          child: IntegrationStatusView(
+            icon: Icons.lock_outline,
+            iconColor: colors.onSurfaceVariant,
+            message: 'Only organization admins can manage organization integrations.',
           ),
         ),
       ),
-      data: (roles) => roles.isOrgAdmin
-          ? const _AdminView()
-          : Scaffold(
-              appBar: AppBar(title: const Text('Integrations')),
-              body: Center(
-                child: IntegrationStatusView(
-                  icon: Icons.lock_outline,
-                  iconColor: colors.onSurfaceVariant,
-                  message: 'Only organization admins can manage organization integrations.',
-                ),
-              ),
-            ),
     );
   }
 }
@@ -74,17 +65,8 @@ class _AdminView extends StatelessWidget {
           children: [
             Column(
               children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    AssistantSpacing.lg,
-                    AssistantSpacing.sm,
-                    AssistantSpacing.lg,
-                    0,
-                  ),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: BrowseCatalogButton(label: 'Add integration'),
-                  ),
+                const CatalogActionBar(
+                  child: BrowseCatalogButton(label: 'Add integration'),
                 ),
                 Expanded(
                   child: IntegrationListView(

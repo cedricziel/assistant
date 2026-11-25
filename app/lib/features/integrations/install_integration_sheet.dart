@@ -68,7 +68,7 @@ class _InstallIntegrationSheetState
     final form = ref.watch(provider);
     final vm = ref.read(provider.notifier);
     ref.listen(provider.select((s) => s.created), (_, created) {
-      if (created != null) ref.invalidate(integrationListViewModelProvider);
+      if (created != null) _refreshList(ref, created);
     });
 
     final created = form.created;
@@ -312,3 +312,13 @@ String _authLabel(IntegrationAuthKind kind) => switch (kind) {
   IntegrationAuthKind.header => 'API key',
   _ => 'OAuth',
 };
+
+/// Reloads the list the new integration appears in.
+void _refreshList(WidgetRef ref, IntegrationDetail created) {
+  final scope = switch (created.layer) {
+    IntegrationLayer.org => const IntegrationListScope.org(),
+    IntegrationLayer.space => IntegrationListScope.space(created.spaceId!),
+    _ => const IntegrationListScope.connections(),
+  };
+  ref.invalidate(integrationListViewModelProvider(scope));
+}

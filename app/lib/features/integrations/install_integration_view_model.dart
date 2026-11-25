@@ -1,5 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:built_collection/built_collection.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../connection/connection_provider.dart';
@@ -10,7 +10,7 @@ const _maxSlugLength = 32;
 const _maxNameLength = 100;
 
 /// What one install sheet may offer; build it with [installArgsForEntry] or
-/// [installArgsForCustom] and keep one instance for the sheet's lifetime.
+/// [installArgsForCustom].
 class InstallArgs {
   const InstallArgs({
     required this.entry,
@@ -26,6 +26,17 @@ class InstallArgs {
 
   /// Spaces the caller administers, for the space layer.
   final List<SpaceSummary> spaces;
+
+  @override
+  bool operator ==(Object other) =>
+      other is InstallArgs &&
+      other.entry == entry &&
+      listEquals(other.layers, layers) &&
+      listEquals(other.spaces, spaces);
+
+  @override
+  int get hashCode =>
+      Object.hash(entry, Object.hashAll(layers), Object.hashAll(spaces));
 }
 
 /// The install options for [entry], or null when it can be installed nowhere.
@@ -58,28 +69,22 @@ InstallArgs? installArgsForCustom(
   return InstallArgs(entry: null, layers: layers, spaces: spaces);
 }
 
+final _nonSlugChars = RegExp(r'[^a-z0-9]+');
+final _edgeHyphens = RegExp(r'^-+|-+$');
+
 /// `curated/linear-app-mcp` becomes `linear-app-mcp`: lower-case, single
 /// hyphens, shortened to fit. Mirrors the server's default.
 String slugFromCatalogId(String id) {
-  final tail = id.split('/').last.toLowerCase();
-  final slug = StringBuffer();
-  var lastWasHyphen = true;
-  for (final unit in tail.runes) {
-    final char = String.fromCharCode(unit);
-    final keep = RegExp(r'[a-z0-9]').hasMatch(char);
-    if (keep) {
-      slug.write(char);
-      lastWasHyphen = false;
-    } else if (!lastWasHyphen) {
-      slug.write('-');
-      lastWasHyphen = true;
-    }
-  }
-  final text = slug.toString();
-  final cut = text.length > _maxSlugLength
-      ? text.substring(0, _maxSlugLength)
-      : text;
-  return cut.replaceFirst(RegExp(r'-+$'), '');
+  final slug = id
+      .split('/')
+      .last
+      .toLowerCase()
+      .replaceAll(_nonSlugChars, '-')
+      .replaceAll(_edgeHyphens, '');
+  final cut = slug.length > _maxSlugLength
+      ? slug.substring(0, _maxSlugLength)
+      : slug;
+  return cut.replaceAll(_edgeHyphens, '');
 }
 
 final _kebab = RegExp(r'^[a-z0-9]+(-[a-z0-9]+)*$');
@@ -127,27 +132,21 @@ class InstallState {
 
   bool get isCustom => args.entry == null;
 
+  /// The auth kind the catalog entry states, or null when it does not say.
+  IntegrationAuthKind? get _catalogAuthKind => switch (args.entry?.auth.kind) {
+    CatalogAuthKindResponse.none => IntegrationAuthKind.none,
+    CatalogAuthKindResponse.header => IntegrationAuthKind.header,
+    CatalogAuthKindResponse.oauth => IntegrationAuthKind.oauth,
+    CatalogAuthKindResponse.mixed => IntegrationAuthKind.mixed,
+    _ => null,
+  };
+
   /// The user must pick none, header or OAuth: the entry does not say, or the
   /// URL is custom.
-  bool get needsAuthChoice =>
-      isCustom ||
-      switch (args.entry!.auth.kind) {
-        CatalogAuthKindResponse.none ||
-        CatalogAuthKindResponse.header ||
-        CatalogAuthKindResponse.oauth ||
-        CatalogAuthKindResponse.mixed => false,
-        _ => true,
-      };
+  bool get needsAuthChoice => _catalogAuthKind == null;
 
-  IntegrationAuthKind? get effectiveAuthKind {
-    if (needsAuthChoice) return authKind;
-    return switch (args.entry!.auth.kind) {
-      CatalogAuthKindResponse.none => IntegrationAuthKind.none,
-      CatalogAuthKindResponse.header => IntegrationAuthKind.header,
-      CatalogAuthKindResponse.oauth => IntegrationAuthKind.oauth,
-      _ => IntegrationAuthKind.mixed,
-    };
-  }
+  IntegrationAuthKind? get effectiveAuthKind =>
+      needsAuthChoice ? authKind : _catalogAuthKind;
 
   /// Header auth whose header the catalog does not name.
   bool get needsHeaderName =>

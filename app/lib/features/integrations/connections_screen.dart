@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/platform/widgets.dart';
 import 'browse_catalog_button.dart';
-import 'caller_roles.dart';
+import '../account/account_provider.dart';
 import 'integration_list_view.dart';
 import 'integration_list_view_model.dart';
 

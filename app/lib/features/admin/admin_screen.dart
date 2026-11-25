@@ -311,12 +311,8 @@ class _SpaceTile extends ConsumerWidget {
             IconButton(
               icon: const Icon(Icons.hub_outlined),
               tooltip: '${space.name} integrations',
-              onPressed: () => context.push(
-                AppRoutes.adminSpaceIntegrations.replaceFirst(
-                  ':spaceId',
-                  space.id,
-                ),
-              ),
+              onPressed: () =>
+                  context.push(AppRoutes.adminSpaceIntegrationsFor(space.id)),
             ),
             IconButton(
               icon: Icon(Icons.delete_outline, color: colorScheme.error),

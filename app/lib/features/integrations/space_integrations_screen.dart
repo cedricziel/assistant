@@ -2,7 +2,6 @@ import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/platform/widgets.dart';
-import '../../shared/theme/assistant_spacing.dart';
 import '../spaces/space_provider.dart';
 import 'browse_catalog_button.dart';
 import 'caller_roles.dart';
@@ -32,22 +31,13 @@ class SpaceIntegrationsScreen extends ConsumerWidget {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AssistantSpacing.lg,
-              AssistantSpacing.sm,
-              AssistantSpacing.lg,
-              0,
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: canManage
-                  ? const BrowseCatalogButton(label: 'Add integration')
-                  : Text(
-                      'Only space admins can change these integrations.',
-                      style: muted,
-                    ),
-            ),
+          CatalogActionBar(
+            child: canManage
+                ? const BrowseCatalogButton(label: 'Add integration')
+                : Text(
+                    'Only space admins can change these integrations.',
+                    style: muted,
+                  ),
           ),
           Expanded(
             child: IntegrationListView(

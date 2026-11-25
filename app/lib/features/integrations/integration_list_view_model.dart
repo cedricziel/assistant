@@ -2,7 +2,7 @@ import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../connection/connection_provider.dart';
-import 'caller_roles.dart';
+import '../account/account_provider.dart';
 import 'integration_failure.dart';
 import 'integration_summary_of.dart';
 
@@ -93,12 +93,6 @@ class IntegrationListViewModel extends AsyncNotifier<IntegrationListState> {
     final api = ref.watch(apiClientProvider);
     if (api == null) return const IntegrationListState();
     return IntegrationListState(rows: await _fetch());
-  }
-
-  /// Reloads the list.
-  Future<void> refresh() async {
-    final current = state.value ?? const IntegrationListState();
-    state = AsyncData(current.copyWith(rows: await _fetch()));
   }
 
   /// Enables or disables [id].
@@ -226,8 +220,10 @@ class IntegrationListViewModel extends AsyncNotifier<IntegrationListState> {
         final org = await _list(integrations, layer: IntegrationLayer.org);
         return [for (final item in org) IntegrationRow(item)];
       case IntegrationScopeKind.connections:
-        final userId = await ref.read(currentUserIdProvider.future);
-        final all = await _list(integrations);
+        final (userId, all) = await (
+          ref.read(currentUserIdProvider.future),
+          _list(integrations),
+        ).wait;
         return [
           for (final item in all)
             if (_isConnectionOf(item, userId)) IntegrationRow(item),

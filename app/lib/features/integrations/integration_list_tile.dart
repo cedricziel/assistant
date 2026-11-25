@@ -2,6 +2,7 @@ import 'package:assistant_api/assistant_api.dart';
 
 import '../../shared/platform/widgets.dart';
 import '../../shared/theme/assistant_spacing.dart';
+import 'auth_kind_badge.dart';
 import 'catalog_entry_tile.dart';
 
 /// Shown on the disabled Connect action until credential setup ships.
@@ -204,24 +205,6 @@ class IntegrationStatusChip extends StatelessWidget {
       _ => ('Unknown', colors.onSurfaceVariant, colors.surfaceContainerHighest),
     };
 
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AssistantSpacing.sm,
-        vertical: 3,
-      ),
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(AssistantRadius.md),
-        border: Border.all(color: text.withValues(alpha: 0.4)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: text,
-        ),
-      ),
-    );
+    return StatusPill(label: label, textColor: text, fillColor: fill);
   }
 }

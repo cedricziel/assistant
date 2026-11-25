@@ -13,6 +13,20 @@ class IntegrationStatusView extends StatelessWidget {
     this.action,
   });
 
+  /// A failed load, with a retry action.
+  IntegrationStatusView.error({
+    super.key,
+    required BuildContext context,
+    required this.message,
+    required VoidCallback onRetry,
+  }) : icon = Icons.error_outline,
+       iconColor = Theme.of(context).colorScheme.error,
+       title = null,
+       action = AdaptiveButton.filled(
+         onPressed: onRetry,
+         child: const Text('Retry'),
+       );
+
   final IconData icon;
   final Color iconColor;
   final String? title;

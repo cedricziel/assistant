@@ -5,12 +5,6 @@ import '../account/account_provider.dart';
 import '../connection/connection_provider.dart';
 import '../spaces/space_provider.dart';
 
-/// Id of the signed-in user.
-final currentUserIdProvider = FutureProvider.autoDispose<String>((ref) async {
-  final account = await ref.watch(accountProvider.future);
-  return account.user.id;
-});
-
 /// What the signed-in user may manage, derived from their space memberships.
 ///
 /// The API does not report the caller's role directly, so it is read from the
@@ -38,8 +32,10 @@ final callerRolesProvider = FutureProvider.autoDispose<CallerRoles>((
 ) async {
   final api = ref.watch(apiClientProvider);
   final orgId = ref.watch(spaceSelectionProvider).orgId;
-  final spaces = await ref.watch(spacesProvider.future);
-  final userId = await ref.watch(currentUserIdProvider.future);
+  final (spaces, userId) = await (
+    ref.watch(spacesProvider.future),
+    ref.watch(currentUserIdProvider.future),
+  ).wait;
   if (api == null || orgId == null) {
     return CallerRoles(spaces: spaces, roles: const {});
   }

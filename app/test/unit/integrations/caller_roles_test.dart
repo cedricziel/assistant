@@ -1,4 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
+import 'package:assistant_app/features/account/account_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/integrations/caller_roles.dart';
 import 'package:assistant_app/features/spaces/space_provider.dart';

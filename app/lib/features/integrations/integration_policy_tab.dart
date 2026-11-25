@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/platform/widgets.dart';
 import '../../shared/theme/assistant_spacing.dart';
 import 'allowlist_picker_sheet.dart';
+import 'content_width.dart';
 import 'integration_policy_view_model.dart';
 import 'integration_status_view.dart';
 
@@ -46,20 +47,14 @@ class _IntegrationPolicyTabState extends ConsumerState<IntegrationPolicyTab> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(integrationPolicyViewModelProvider);
-    final colors = Theme.of(context).colorScheme;
-
     return state.when(
       loading: () => const Center(child: CircularProgressIndicator.adaptive()),
       error: (_, _) => Center(
-        child: IntegrationStatusView(
-          icon: Icons.error_outline,
-          iconColor: colors.error,
+        child: IntegrationStatusView.error(
+          context: context,
           message:
               'Failed to load the policy. Check your connection and try again.',
-          action: AdaptiveButton.filled(
-            onPressed: () => ref.invalidate(integrationPolicyViewModelProvider),
-            child: const Text('Retry'),
-          ),
+          onRetry: () => ref.invalidate(integrationPolicyViewModelProvider),
         ),
       ),
       data: (data) => _form(context, data),
@@ -74,10 +69,7 @@ class _IntegrationPolicyTabState extends ConsumerState<IntegrationPolicyTab> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final side = ((constraints.maxWidth - _maxContentWidth) / 2).clamp(
-          AssistantSpacing.lg,
-          double.infinity,
-        );
+        final side = contentSideMargin(constraints.maxWidth, _maxContentWidth);
         return ListView(
           padding: EdgeInsets.symmetric(
             horizontal: side,

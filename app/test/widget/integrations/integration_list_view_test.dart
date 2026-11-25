@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:assistant_api/assistant_api.dart';
+import 'package:assistant_app/features/account/account_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
-import 'package:assistant_app/features/integrations/caller_roles.dart';
 import 'package:assistant_app/features/integrations/integration_list_tile.dart';
 import 'package:assistant_app/features/integrations/integration_list_view.dart';
 import 'package:assistant_app/features/integrations/integration_list_view_model.dart';

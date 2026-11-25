@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/platform/widgets.dart';
 import '../../shared/theme/assistant_spacing.dart';
+import 'content_width.dart';
 import 'integration_list_tile.dart';
 import 'integration_list_view_model.dart';
 import 'integration_status_view.dart';
@@ -71,14 +72,10 @@ class IntegrationListView extends ConsumerWidget {
     return state.when(
       loading: () => const Center(child: CircularProgressIndicator.adaptive()),
       error: (error, _) => Center(
-        child: IntegrationStatusView(
-          icon: Icons.error_outline,
-          iconColor: colors.error,
+        child: IntegrationStatusView.error(
+          context: context,
           message: 'Failed to load integrations. Check your connection and try again.',
-          action: AdaptiveButton.filled(
-            onPressed: () => ref.invalidate(provider),
-            child: const Text('Retry'),
-          ),
+          onRetry: () => ref.invalidate(provider),
         ),
       ),
       data: (data) {
@@ -95,9 +92,9 @@ class IntegrationListView extends ConsumerWidget {
         }
         return LayoutBuilder(
           builder: (context, constraints) {
-            final side = ((constraints.maxWidth - _maxContentWidth) / 2).clamp(
-              AssistantSpacing.lg,
-              double.infinity,
+            final side = contentSideMargin(
+              constraints.maxWidth,
+              _maxContentWidth,
             );
             return ListView.separated(
               padding: EdgeInsets.symmetric(
