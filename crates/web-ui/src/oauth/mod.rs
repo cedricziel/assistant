@@ -717,7 +717,7 @@ mod tests {
         // Step 2: POST /oauth/authorize with credentials + PKCE challenge.
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}"
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
         );
         let resp = app
             .oneshot(
@@ -821,7 +821,7 @@ mod tests {
         // Authorize (get auth code with PKCE challenge).
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}"
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
         );
         let resp = app
             .oneshot(
@@ -923,7 +923,7 @@ mod tests {
 
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}"
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
         );
         let resp = app
             .oneshot(
@@ -1036,7 +1036,7 @@ mod tests {
         // Authorize.
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}"
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}&code_challenge_method=S256"
         );
         let resp = app
             .oneshot(
@@ -1236,6 +1236,135 @@ mod tests {
         assert!(
             unknown * 2 > known,
             "unknown-user path ({unknown:?}) must run a password hash like the known-user path ({known:?})"
+        );
+    }
+
+    async fn register_test_client(state: &OAuthState) -> String {
+        let reg_body = serde_json::json!({
+            "client_name": "S256 Test",
+            "redirect_uris": ["http://localhost/cb"],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"]
+        });
+        let resp = build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        client["client_id"].as_str().unwrap().to_string()
+    }
+
+    async fn authorize_get_status(state: &OAuthState, method_param: &str) -> StatusCode {
+        let client_id = register_test_client(state).await;
+        let (_verifier, challenge) = test_pkce();
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&code_challenge={challenge}{method_param}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    async fn authorize_post_status(state: &OAuthState, method_param: &str) -> StatusCode {
+        let client_id = register_test_client(state).await;
+        let (_verifier, challenge) = test_pkce();
+        let form = format!(
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}{method_param}"
+        );
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn authorize_get_accepts_s256() {
+        let state = test_state().await;
+        assert_eq!(
+            authorize_get_status(&state, "&code_challenge_method=S256").await,
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn authorize_get_rejects_plain_and_missing_method() {
+        let state = test_state().await;
+        for param in [
+            "&code_challenge_method=plain",
+            "&code_challenge_method=s256",
+            "",
+        ] {
+            assert_eq!(
+                authorize_get_status(&state, param).await,
+                StatusCode::BAD_REQUEST,
+                "GET with {param:?} must be rejected"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn authorize_post_accepts_s256() {
+        let state = test_state().await;
+        assert_eq!(
+            authorize_post_status(&state, "&code_challenge_method=S256").await,
+            StatusCode::SEE_OTHER
+        );
+    }
+
+    #[tokio::test]
+    async fn authorize_post_rejects_plain_and_missing_method() {
+        let state = test_state().await;
+        for param in ["&code_challenge_method=plain", ""] {
+            assert_eq!(
+                authorize_post_status(&state, param).await,
+                StatusCode::BAD_REQUEST,
+                "POST with {param:?} must be rejected"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn authorize_form_carries_the_challenge_method() {
+        let state = test_state().await;
+        let client_id = register_test_client(&state).await;
+        let (_verifier, challenge) = test_pkce();
+        let resp = build_app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&code_challenge={challenge}&code_challenge_method=S256"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&body).contains(r#"name="code_challenge_method" value="S256""#),
+            "form must round-trip the challenge method"
         );
     }
 }

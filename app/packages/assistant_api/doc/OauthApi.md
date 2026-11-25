@@ -37,7 +37,7 @@ final String clientId = clientId_example; // String |
 final String redirectUri = redirectUri_example; // String | 
 final String state = state_example; // String | 
 final String codeChallenge = codeChallenge_example; // String | 
-final String codeChallengeMethod = codeChallengeMethod_example; // String | Accepted per RFC 7636 §4.3 for forward-compatibility. We only support `S256` and assume it implicitly; the value is not yet validated.
+final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected.
 final String scope = scope_example; // String | 
 
 try {
@@ -56,7 +56,7 @@ Name | Type | Description  | Notes
  **redirectUri** | **String**|  | [optional] 
  **state** | **String**|  | [optional] 
  **codeChallenge** | **String**|  | [optional] 
- **codeChallengeMethod** | **String**| Accepted per RFC 7636 §4.3 for forward-compatibility. We only support `S256` and assume it implicitly; the value is not yet validated. | [optional] 
+ **codeChallengeMethod** | **String**| Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected. | [optional] 
  **scope** | **String**|  | [optional] 
 
 ### Return type
@@ -75,7 +75,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **authorizePost**
-> authorizePost(clientId, redirectUri, codeChallenge, email, password, scope, state)
+> authorizePost(clientId, redirectUri, codeChallenge, codeChallengeMethod, email, password, scope, state)
 
 POST /oauth/authorize — validate credentials, generate auth code, redirect.
 
@@ -87,13 +87,14 @@ final api = AssistantApi().getOauthApi();
 final String clientId = clientId_example; // String | 
 final String redirectUri = redirectUri_example; // String | 
 final String codeChallenge = codeChallenge_example; // String | 
+final String codeChallengeMethod = codeChallengeMethod_example; // String | Must be `S256`.
 final String email = email_example; // String | 
 final String password = password_example; // String | 
 final String scope = scope_example; // String | 
 final String state = state_example; // String | 
 
 try {
-    api.authorizePost(clientId, redirectUri, codeChallenge, email, password, scope, state);
+    api.authorizePost(clientId, redirectUri, codeChallenge, codeChallengeMethod, email, password, scope, state);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->authorizePost: $e\n');
 }
@@ -106,6 +107,7 @@ Name | Type | Description  | Notes
  **clientId** | **String**|  | 
  **redirectUri** | **String**|  | 
  **codeChallenge** | **String**|  | [optional] 
+ **codeChallengeMethod** | **String**| Must be `S256`. | [optional] 
  **email** | **String**|  | [optional] 
  **password** | **String**|  | [optional] 
  **scope** | **String**|  | [optional] 

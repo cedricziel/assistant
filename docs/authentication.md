@@ -304,7 +304,10 @@ assistant_session=<JWT>; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600
 ```
 
 - `HttpOnly` prevents JavaScript access.
-- `SameSite=Lax` prevents CSRF via cross-origin POST.
+- `SameSite=Lax` prevents CSRF via cross-origin POST. As a second layer,
+  state-changing requests (including `POST /login` and `POST /logout`)
+  must carry an `Origin` or `Referer` that matches `Host`. Only requests
+  authenticated by a validated `Authorization: Bearer` token skip this check.
 - `Secure` is added when binding to a non-loopback address (override
   with `--no-secure-cookie` for plain HTTP behind a VPN).
 
@@ -315,7 +318,9 @@ assistant_session=<JWT>; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600
   across restarts.
 - API key plaintext is shown once at creation — store it securely.
 - Password hashing uses Argon2id.
-- Token comparison uses constant-time equality.
+- Token comparison uses constant-time equality (legacy token, PKCE verifier).
+- PKCE is mandatory and `S256`-only: `/oauth/authorize` rejects `plain` and
+  a missing `code_challenge_method`.
 - The device code flow uses short-lived codes (15 min) with
   rate-limited polling (5s interval).
 

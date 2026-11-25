@@ -21,9 +21,8 @@ pub struct AuthorizeQuery {
     pub redirect_uri: Option<String>,
     pub state: Option<String>,
     pub code_challenge: Option<String>,
-    /// Accepted per RFC 7636 §4.3 for forward-compatibility. We only support
-    /// `S256` and assume it implicitly; the value is not yet validated.
-    #[allow(dead_code)]
+    /// Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3
+    /// defaults to `plain`) are rejected.
     pub code_challenge_method: Option<String>,
     pub scope: Option<String>,
 }
@@ -37,6 +36,8 @@ pub struct AuthorizeForm {
     pub redirect_uri: String,
     pub state: Option<String>,
     pub code_challenge: Option<String>,
+    /// Must be `S256`.
+    pub code_challenge_method: Option<String>,
     pub scope: Option<String>,
 }
 
@@ -82,6 +83,10 @@ pub async fn authorize_get(
             Html("error: code_challenge is required (PKCE)".to_string()),
         )
             .into_response();
+    }
+
+    if let Some(resp) = reject_non_s256(params.code_challenge_method.as_deref()) {
+        return resp;
     }
 
     // -- OIDC mode: redirect to external IdP instead of rendering login form --
@@ -133,6 +138,7 @@ pub async fn authorize_get(
   <input type="hidden" name="redirect_uri" value="{redirect_uri}">
   <input type="hidden" name="state" value="{state_param}">
   <input type="hidden" name="code_challenge" value="{code_challenge}">
+  <input type="hidden" name="code_challenge_method" value="S256">
   <input type="hidden" name="scope" value="{scope}">
   <button type="submit">Sign In</button>
 </form>
@@ -164,6 +170,19 @@ pub async fn authorize_post(
 ) -> impl IntoResponse {
     // Validate client_id and redirect_uri against registered clients.
     if let Err(resp) = validate_client(&state, &form.client_id, &form.redirect_uri).await {
+        return resp;
+    }
+
+    // PKCE is mandatory per OAuth 2.1 §4.1.1 — reject requests without a
+    // code_challenge to prevent authorization code interception attacks.
+    if form.code_challenge.as_deref().unwrap_or("").is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Html("error: code_challenge is required (PKCE)".to_string()),
+        )
+            .into_response();
+    }
+    if let Some(resp) = reject_non_s256(form.code_challenge_method.as_deref()) {
         return resp;
     }
 
@@ -228,16 +247,6 @@ pub async fn authorize_post(
         _ => return invalid_credentials(),
     }
 
-    // PKCE is mandatory per OAuth 2.1 §4.1.1 — reject requests without a
-    // code_challenge to prevent authorization code interception attacks.
-    if form.code_challenge.as_deref().unwrap_or("").is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Html("error: code_challenge is required (PKCE)".to_string()),
-        )
-            .into_response();
-    }
-
     // Generate authorization code.
     let scopes: Vec<String> = form
         .scope
@@ -277,6 +286,17 @@ pub async fn authorize_post(
     }
 
     Redirect::to(&redirect).into_response()
+}
+
+/// PKCE is S256-only (OAuth 2.1 §4.1.1): reject `plain` and an omitted method.
+fn reject_non_s256(method: Option<&str>) -> Option<axum::response::Response> {
+    (method != Some("S256")).then(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Html("error: code_challenge_method must be S256".to_string()),
+        )
+            .into_response()
+    })
 }
 
 /// Validate that `client_id` is a registered client and `redirect_uri` is
