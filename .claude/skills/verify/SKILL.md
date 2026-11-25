@@ -56,9 +56,12 @@ Close the preview tab with `t3_preview_close`.
 
 ## Covered flows
 
-| Flow                       | Steps                                                                          | Expect                                                                                                                  |
-| -------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| Web sign-in (password org) | `URL/` → **Sign in** → email `admin@localhost` → Continue → password → Sign In | `/oauth/register` 201, server email page, 303 to `/login/callback?code=…&state=…`, `/oauth/token` 200, lands on `/chat` |
+| Flow                          | Steps                                                                                                                                                                            | Expect                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Web sign-in (password org)    | `URL/` → **Sign in** → email `admin@localhost` → Continue → password → Sign In                                                                                                   | `/oauth/register` 201, server email page, 303 to `/login/callback?code=…&state=…`, `/oauth/token` 200, lands on `/chat` |
+| Native redirect (server side) | `POST /oauth/register` with redirect `com.cedricziel.assistant:/oauth/callback`, then `POST /oauth/authorize` (`org`, `email`, `password`, PKCE `S256`, `Origin: URL`) with curl | `303` with `location: com.cedricziel.assistant:/oauth/callback?code=…&state=…`                                          |
 
-Not covered yet: OIDC orgs (needs a local identity provider), native apps,
-`assistant login` device approval. Add a row when you verify a new flow.
+Not covered yet: OIDC orgs (needs a local identity provider), the native
+sign-in sheet itself (needs simulator access: Settings → Integrations →
+Devices), `assistant login` device approval. Add a row when you verify a new
+flow.
