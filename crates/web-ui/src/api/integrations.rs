@@ -16,6 +16,8 @@
 //! | DELETE | `/api/integrations/{id}`            | Remove an integration             |
 //! | GET    | `/api/integrations/policy`          | Get the org policy                |
 //! | PUT    | `/api/integrations/policy`          | Replace the org policy (admin)    |
+//! | PUT    | `/api/integrations/{id}/credential` | Set the header credential        |
+//! | DELETE | `/api/integrations/{id}/credential` | Clear the header credential      |
 //! | PUT    | `/api/integrations/{id}/spaces/{space_id}` | Allow or opt out a space   |
 //! | DELETE | `/api/integrations/{id}/spaces/{space_id}` | Remove that row            |
 
@@ -46,6 +48,7 @@ use crate::openapi::ErrorBody;
 use error::{ApiError, ApiResult};
 
 mod authz;
+pub mod credentials;
 mod error;
 pub mod manage;
 pub mod policy;
@@ -54,6 +57,7 @@ pub mod spaces;
 mod testing;
 pub mod types;
 
+use credentials::{clear_credential, set_credential};
 use manage::{
     create_integration, delete_integration, get_integration, list_integrations, update_integration,
 };
@@ -238,6 +242,10 @@ pub fn integrations_api_router() -> Router<IntegrationsApiState> {
             get(get_integration)
                 .patch(update_integration)
                 .delete(delete_integration),
+        )
+        .route(
+            "/integrations/{id}/credential",
+            put(set_credential).delete(clear_credential),
         )
         .route(
             "/integrations/{id}/spaces/{space_id}",

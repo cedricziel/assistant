@@ -568,7 +568,7 @@ fn header_template(
     Ok((Some(name), request.header_value_prefix.clone()))
 }
 
-fn validate_header(name: &str, prefix: Option<&str>) -> ApiResult<()> {
+pub(super) fn validate_header(name: &str, prefix: Option<&str>) -> ApiResult<()> {
     if HeaderName::from_bytes(name.as_bytes()).is_err() {
         return Err(ApiError::unprocessable(
             "header_name is not a valid HTTP header name",

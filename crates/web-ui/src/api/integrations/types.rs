@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use assistant_core::integrations as domain;
 use assistant_core::integrations::Availability;
+use assistant_core::secret::Secret;
 
 /// Declares an API enum with the same variants as a domain enum, plus both
 /// `From` conversions. Wire names are the snake_case variant names.
@@ -291,6 +292,32 @@ pub struct UpdateIntegrationPolicyRequest {
     pub allowed_catalog_ids: Vec<String>,
     pub allow_custom_urls: bool,
     pub allow_user_integrations: bool,
+}
+
+// -- Credentials -------------------------------------------------------------
+
+/// Body of `PUT /api/integrations/{id}/credential`.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct SetCredentialRequest {
+    /// The secret that fills the header template, e.g. the token after
+    /// `Bearer `. Surrounding whitespace is dropped. It is stored encrypted
+    /// and never returned.
+    #[schema(value_type = String, format = Password)]
+    pub value: Secret,
+    /// The header that carries the value. Only accepted when the integration
+    /// has no header name yet, and then only from someone who manages its layer.
+    #[serde(default)]
+    pub header_name: Option<String>,
+}
+
+/// Whether a credential is stored for the caller's subject. The value itself is
+/// never returned.
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CredentialResponse {
+    pub has_credential: bool,
+    /// When the credential was last set; absent when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 // -- Space availability ------------------------------------------------------
