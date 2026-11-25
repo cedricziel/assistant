@@ -160,6 +160,7 @@ pub enum ResourceKind {
     Org,
     ApiKeys,
     Spaces,
+    Mcp,
 }
 
 impl std::str::FromStr for ResourceKind {
@@ -177,6 +178,7 @@ impl std::str::FromStr for ResourceKind {
             "org" => Ok(Self::Org),
             "api_keys" => Ok(Self::ApiKeys),
             "spaces" => Ok(Self::Spaces),
+            "mcp" => Ok(Self::Mcp),
             _ => Err(format!("unknown resource kind: {s}")),
         }
     }
@@ -195,6 +197,7 @@ impl fmt::Display for ResourceKind {
             Self::Org => "org",
             Self::ApiKeys => "api_keys",
             Self::Spaces => "spaces",
+            Self::Mcp => "mcp",
         };
         f.write_str(s)
     }
@@ -358,6 +361,13 @@ mod tests {
     fn scope_display() {
         let scope = Scope::new(ResourceKind::Messages, Action::Execute);
         assert_eq!(scope.to_string(), "messages:execute");
+    }
+
+    #[test]
+    fn mcp_resource_kind_roundtrips_through_its_name() {
+        assert_eq!("mcp".parse::<ResourceKind>(), Ok(ResourceKind::Mcp));
+        let scope = Scope::new(ResourceKind::Mcp, Action::Execute);
+        assert_eq!(scope.to_string(), "mcp:execute");
     }
 
     #[test]
