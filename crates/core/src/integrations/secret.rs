@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::secret::Secret;
 
@@ -145,9 +145,19 @@ impl SecretBox {
 
 /// The AAD that binds a ciphertext to its integration, subject and kind.
 ///
-/// `subject` is the user id, or `None` for the shared credential.
+/// `v1|<len>:<integration>|s|<kind>` for the shared credential and
+/// `v1|<len>:<integration>|u<len>:<user>|<kind>` for a user's. The subject type
+/// tag and the length prefixes make distinct inputs map to distinct AADs, so a
+/// user named `shared`, or ids containing `|`, cannot collide.
 pub fn credential_aad(integration_id: &str, subject: Option<&str>, kind: &str) -> String {
-    format!("{integration_id}|{}|{kind}", subject.unwrap_or("shared"))
+    let subject = match subject {
+        None => "s".to_owned(),
+        Some(user) => format!("u{}:{user}", user.len()),
+    };
+    format!(
+        "v1|{}:{integration_id}|{subject}|{kind}",
+        integration_id.len()
+    )
 }
 
 fn decode_key(raw: &str) -> Result<[u8; KEY_LEN]> {
@@ -160,25 +170,68 @@ fn decode_key(raw: &str) -> Result<[u8; KEY_LEN]> {
 }
 
 fn read_key_file(path: &Path) -> Result<Option<[u8; KEY_LEN]>> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => decode_key(&text)
-            .map(Some)
-            .with_context(|| format!("reading secrets key from {}", path.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("reading secrets key from {}", path.display())),
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(e).with_context(|| format!("reading secrets key from {}", path.display()));
+        }
+    };
+    let what = if text.trim().is_empty() {
+        "empty"
+    } else {
+        "not a valid base64 32-byte key"
+    };
+    // Never regenerate: a new key would make every stored credential unreadable.
+    decode_key(&text).map(Some).map_err(|_| {
+        anyhow!(
+            "secrets key file {} is {what}. Restore it from a backup; if no credentials have \
+             been stored yet, delete the file to generate a new key",
+            path.display()
+        )
+    })
+}
+
+/// Create the key file with all-or-nothing visibility: write and fsync a
+/// private temp file in the same directory, then hard-link it into place. A
+/// reader never sees a partial key, and a crash leaves at most a stray temp
+/// file. If another process linked first, use its key.
+fn create_key_file(path: &Path) -> Result<[u8; KEY_LEN]> {
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("creating directory for {}", dir.display()))?;
+    let mut key = [0u8; KEY_LEN];
+    getrandom::fill(&mut key).map_err(|e| anyhow!("generating secrets key: {e}"))?;
+    let mut suffix = [0u8; 8];
+    getrandom::fill(&mut suffix).map_err(|e| anyhow!("generating temp name: {e}"))?;
+    let tmp = dir.join(format!(".{KEY_FILE_NAME}.{}.tmp", hex::encode(suffix)));
+
+    let written = write_private_file(&tmp, format!("{}\n", STANDARD.encode(key)).as_bytes())
+        .with_context(|| format!("writing secrets key to {}", tmp.display()));
+    let linked = written.and_then(|()| match std::fs::hard_link(&tmp, path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e).with_context(|| format!("creating secrets key {}", path.display())),
+    });
+    if let Err(e) = std::fs::remove_file(&tmp) {
+        warn!(path = %tmp.display(), error = %e, "could not remove temp secrets key file");
+    }
+
+    if linked? {
+        sync_dir(dir);
+        info!(path = %path.display(), "generated integration secrets key");
+        Ok(key)
+    } else {
+        read_key_file(path)?
+            .ok_or_else(|| anyhow!("secrets key {} vanished during creation", path.display()))
     }
 }
 
-/// Create the key file atomically (`0600` on Unix). If another process won the
-/// race, use its key.
-fn create_key_file(path: &Path) -> Result<[u8; KEY_LEN]> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating directory for {}", parent.display()))?;
-    }
-    let mut key = [0u8; KEY_LEN];
-    getrandom::fill(&mut key).map_err(|e| anyhow!("generating secrets key: {e}"))?;
-
+/// Create `path` exclusively with mode `0600` (Unix), write `bytes` and fsync.
+fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -186,17 +239,19 @@ fn create_key_file(path: &Path) -> Result<[u8; KEY_LEN]> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    match options.open(path) {
-        Ok(mut file) => {
-            writeln!(file, "{}", STANDARD.encode(key))
-                .with_context(|| format!("writing secrets key to {}", path.display()))?;
-            info!(path = %path.display(), "generated integration secrets key");
-            Ok(key)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => read_key_file(path)?
-            .ok_or_else(|| anyhow!("secrets key {} vanished during creation", path.display())),
-        Err(e) => Err(e).with_context(|| format!("creating secrets key {}", path.display())),
+    let mut file = options.open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// Best-effort fsync of a directory so the new entry survives a crash.
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Err(e) = std::fs::File::open(dir).and_then(|d| d.sync_all()) {
+        warn!(path = %dir.display(), error = %e, "could not fsync secrets key directory");
     }
+    #[cfg(not(unix))]
+    let _ = dir;
 }
 
 #[cfg(test)]
@@ -245,15 +300,45 @@ mod tests {
     }
 
     #[test]
-    fn credential_aad_distinguishes_subject_and_kind() {
+    fn credential_aad_has_a_versioned_length_prefixed_format() {
         assert_eq!(
             credential_aad("int_1", None, "header"),
-            "int_1|shared|header"
+            "v1|5:int_1|s|header"
         );
         assert_eq!(
             credential_aad("int_1", Some("usr_1"), "oauth"),
-            "int_1|usr_1|oauth"
+            "v1|5:int_1|u5:usr_1|oauth"
         );
+    }
+
+    #[test]
+    fn credential_aad_is_unambiguous() {
+        let cases = [
+            credential_aad("int_1", None, "header"),
+            credential_aad("int_1", Some("shared"), "header"),
+            credential_aad("int_1", Some("usr_1"), "header"),
+            credential_aad("int_1", Some("usr_1"), "oauth"),
+            credential_aad("int_1|usr_1", None, "header"),
+            credential_aad("int_1", Some("usr_1|header"), "oauth"),
+            credential_aad("int_1|u5:usr_1", None, "header"),
+            credential_aad("", Some("int_1"), "header"),
+            credential_aad("int_1", Some(""), "header"),
+        ];
+        let unique: std::collections::HashSet<_> = cases.iter().collect();
+        assert_eq!(unique.len(), cases.len(), "AAD collision among {cases:?}");
+    }
+
+    #[test]
+    fn a_ciphertext_for_the_shared_subject_does_not_open_for_a_user_named_shared() {
+        let sb = SecretBox::from_key(key(1));
+        let sealed = sb
+            .seal(
+                &Secret::new("v"),
+                credential_aad("int_1", None, "header").as_bytes(),
+            )
+            .unwrap();
+        let as_user = credential_aad("int_1", Some("shared"), "header");
+        assert!(sb.open(&sealed, as_user.as_bytes()).is_err());
     }
 
     #[test]
@@ -362,5 +447,74 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(KEY_FILE_NAME), "garbage").unwrap();
         assert!(SecretBox::load(dir.path(), None).is_err());
+    }
+
+    #[test]
+    fn empty_key_file_is_a_clear_error_and_is_never_regenerated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(KEY_FILE_NAME);
+        std::fs::write(&path, "").unwrap();
+        let err = format!("{:#}", SecretBox::load(dir.path(), None).unwrap_err());
+        assert!(err.contains("empty"), "should say the file is empty: {err}");
+        assert!(
+            err.contains(&path.display().to_string()),
+            "should name the file: {err}"
+        );
+        assert!(
+            err.contains("backup") || err.contains("delete"),
+            "should say what to do: {err}"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"",
+            "file must stay untouched"
+        );
+    }
+
+    #[test]
+    fn truncated_key_file_is_a_clear_error_and_is_never_regenerated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(KEY_FILE_NAME);
+        let full = STANDARD.encode(key(5));
+        std::fs::write(&path, &full[..20]).unwrap();
+        let err = format!("{:#}", SecretBox::load(dir.path(), None).unwrap_err());
+        assert!(err.contains(&path.display().to_string()), "{err}");
+        assert!(err.contains("backup") || err.contains("delete"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), &full[..20]);
+    }
+
+    #[test]
+    fn key_creation_leaves_no_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        SecretBox::load(dir.path(), None).unwrap();
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, [KEY_FILE_NAME]);
+    }
+
+    #[test]
+    fn concurrent_first_use_agrees_on_one_key() {
+        for _ in 0..30 {
+            let dir = tempfile::tempdir().unwrap();
+            let base = dir.path().to_path_buf();
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let base = base.clone();
+                    std::thread::spawn(move || {
+                        SecretBox::load(&base, None).map(|sb| sb.key_id().to_owned())
+                    })
+                })
+                .collect();
+            let ids: Vec<String> = handles
+                .into_iter()
+                .map(|h| h.join().unwrap().unwrap())
+                .collect();
+            assert!(
+                ids.windows(2).all(|w| w[0] == w[1]),
+                "key ids differ: {ids:?}"
+            );
+        }
     }
 }
