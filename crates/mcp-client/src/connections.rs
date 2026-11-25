@@ -72,6 +72,15 @@ pub enum ConnectError {
     Internal(String),
 }
 
+impl ConnectError {
+    /// The reason alone, without the kind prefix [`Display`](fmt::Display) adds.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Credential(m) | Self::Unreachable(m) | Self::Internal(m) => m,
+        }
+    }
+}
+
 impl fmt::Display for ConnectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -417,10 +426,7 @@ impl IntegrationConnections {
 /// The error as stored and shown: bounded, and free of anything but what the
 /// transport reported.
 fn error_text(error: &ConnectError) -> String {
-    let text = match error {
-        ConnectError::Credential(m) | ConnectError::Unreachable(m) | ConnectError::Internal(m) => m,
-    };
-    text.chars().take(MAX_ERROR_LEN).collect()
+    error.message().chars().take(MAX_ERROR_LEN).collect()
 }
 
 fn header_for(

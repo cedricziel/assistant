@@ -16,6 +16,7 @@
 //! | DELETE | `/api/integrations/{id}`            | Remove an integration             |
 //! | GET    | `/api/integrations/policy`          | Get the org policy                |
 //! | PUT    | `/api/integrations/policy`          | Replace the org policy (admin)    |
+//! | POST   | `/api/integrations/{id}/test`       | Connect and list the tools       |
 //! | PUT    | `/api/integrations/{id}/credential` | Set the header credential        |
 //! | DELETE | `/api/integrations/{id}/credential` | Clear the header credential      |
 //! | PUT    | `/api/integrations/{id}/spaces/{space_id}` | Allow or opt out a space   |
@@ -27,7 +28,7 @@ use axum::{
     Extension, Json, Router,
     extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
-    routing::{get, put},
+    routing::{get, post, put},
 };
 use serde::{Deserialize, Serialize};
 
@@ -38,9 +39,10 @@ use assistant_core::integrations::catalog::{
     CatalogAuth, CatalogAuthKind, CatalogEntry, CatalogQuery,
 };
 use assistant_core::integrations::{
-    EffectiveIntegrations, IntegrationCredentialStore, IntegrationLayer, IntegrationStore,
-    SecretBox,
+    EffectiveIntegrations, IntegrationCredentialStore, IntegrationHealthStore, IntegrationLayer,
+    IntegrationStore, SecretBox,
 };
+use assistant_mcp_client::IntegrationConnections;
 use assistant_storage::OrgStorageLayer;
 
 use crate::catalog_sync::CatalogSync;
@@ -48,6 +50,7 @@ use crate::openapi::ErrorBody;
 use error::{ApiError, ApiResult};
 
 mod authz;
+pub mod connection;
 pub mod credentials;
 mod error;
 pub mod manage;
@@ -57,6 +60,7 @@ pub mod spaces;
 mod testing;
 pub mod types;
 
+use connection::test_integration;
 use credentials::{clear_credential, set_credential};
 use manage::{
     create_integration, delete_integration, get_integration, list_integrations, update_integration,
@@ -73,10 +77,13 @@ pub struct IntegrationsApiState {
     credentials: Arc<dyn IntegrationCredentialStore>,
     spaces: Arc<dyn SpaceStore>,
     effective: Arc<EffectiveIntegrations>,
-    /// Seals credentials as they are written. The web process never reads
-    /// them back: connections are opened where turns run.
+    /// Seals credentials as they are written. Only the `test` endpoint opens
+    /// them again; turns connect in the orchestrator service.
     secrets: Arc<SecretBox>,
     clock: Arc<dyn Clock>,
+    health: Arc<dyn IntegrationHealthStore>,
+    /// Used only to probe: the `test` endpoint connects once and keeps nothing.
+    connections: Arc<IntegrationConnections>,
 }
 
 impl IntegrationsApiState {
@@ -90,6 +97,9 @@ impl IntegrationsApiState {
         let store: Arc<dyn IntegrationStore> = Arc::new(org_storage.integration_store());
         let credentials: Arc<dyn IntegrationCredentialStore> =
             Arc::new(org_storage.integration_credential_store());
+        let health: Arc<dyn IntegrationHealthStore> =
+            Arc::new(org_storage.integration_health_store());
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         Self {
             catalog,
             effective: Arc::new(EffectiveIntegrations::new(
@@ -98,10 +108,17 @@ impl IntegrationsApiState {
                 secrets.key_id(),
             )),
             store,
-            credentials,
             spaces: Arc::new(org_storage.space_store()),
+            connections: Arc::new(IntegrationConnections::new(
+                credentials.clone(),
+                health.clone(),
+                secrets.clone(),
+                clock.clone(),
+            )),
             secrets,
-            clock: Arc::new(SystemClock),
+            clock,
+            health,
+            credentials,
         }
     }
 
@@ -243,6 +260,7 @@ pub fn integrations_api_router() -> Router<IntegrationsApiState> {
                 .patch(update_integration)
                 .delete(delete_integration),
         )
+        .route("/integrations/{id}/test", post(test_integration))
         .route(
             "/integrations/{id}/credential",
             put(set_credential).delete(clear_credential),

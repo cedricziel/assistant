@@ -79,8 +79,7 @@ pub enum IntegrationStatus {
     NeedsConnection,
     /// The caller's credential is unusable and must be set again.
     AuthExpired,
-    /// The MCP server could not be reached. Reported once connections are
-    /// tested; never returned by the management routes alone.
+    /// The latest connection attempt to the MCP server failed.
     Unreachable,
     /// The org policy no longer permits this integration.
     BlockedByPolicy,
@@ -131,6 +130,12 @@ pub struct IntegrationSummary {
     /// credential, or the caller's own for a per-user integration. The value
     /// itself is never returned.
     pub has_credential: bool,
+    /// The last time a connection for the caller's subject succeeded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_connected_at: Option<DateTime<Utc>>,
+    /// The number of tools that connection found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_count: Option<u32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -169,6 +174,10 @@ pub struct IntegrationDetail {
     pub enabled: bool,
     pub status: IntegrationStatus,
     pub has_credential: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_connected_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_count: Option<u32>,
     /// Space rows of an org-layer integration, limited to the spaces the
     /// caller belongs to unless the caller is an org admin.
     pub space_access: Vec<SpaceAccessEntry>,
@@ -292,6 +301,26 @@ pub struct UpdateIntegrationPolicyRequest {
     pub allowed_catalog_ids: Vec<String>,
     pub allow_custom_urls: bool,
     pub allow_user_integrations: bool,
+}
+
+// -- Connection test ---------------------------------------------------------
+
+/// The outcome of `POST /api/integrations/{id}/test`.
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct TestIntegrationResponse {
+    /// Whether a connection was made and its tools listed.
+    pub ok: bool,
+    /// The tools the server offers, sorted. Empty when the test failed.
+    pub tool_names: Vec<String>,
+    /// Why the connection failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The caller's status after this test.
+    pub status: IntegrationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_connected_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_count: Option<u32>,
 }
 
 // -- Credentials -------------------------------------------------------------

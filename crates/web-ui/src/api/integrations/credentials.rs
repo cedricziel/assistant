@@ -76,9 +76,16 @@ pub async fn set_credential(
             ));
         }
         validate_header(&name, integration.header_value_prefix.as_deref())?;
+        let read_at = integration.updated_at;
         integration.header_name = Some(name);
         integration.updated_at = now;
-        state.store.update(&integration).await?;
+        if !state
+            .store
+            .update_if_unchanged(&integration, read_at)
+            .await?
+        {
+            return Err(ApiError::not_found("integration not found"));
+        }
     } else if integration.header_name.is_none() {
         return Err(ApiError::unprocessable(
             "this integration has no header name yet: send header_name with the value",
