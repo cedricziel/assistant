@@ -376,6 +376,22 @@ fn check_mcp_servers(config: &ServerConfig) -> CheckResult {
         return CheckResult::skipped("MCP Servers", "none configured");
     }
 
+    let reserved: Vec<String> = servers
+        .iter()
+        .filter_map(|s| {
+            let prefix = s.reserved_prefix()?;
+            Some(format!(
+                "{}: the prefix '{prefix}' is reserved for integration tools; rename it",
+                s.name
+            ))
+        })
+        .collect();
+    if !reserved.is_empty() {
+        let mut result = CheckResult::error("MCP Servers", "server names use reserved prefixes");
+        result.details = reserved;
+        return result;
+    }
+
     let enabled: Vec<_> = servers.iter().filter(|s| s.enabled).collect();
     let disabled_count = servers.len() - enabled.len();
 
@@ -766,6 +782,23 @@ mod tests {
     fn check_mcp_skipped_when_none_configured() {
         let r = check_mcp_servers(&ServerConfig::default());
         assert_eq!(r.status, CheckStatus::Skipped);
+    }
+
+    #[test]
+    fn check_mcp_reports_names_reserved_for_integration_tools() {
+        let mut config = ServerConfig::default();
+        config.mcp.servers = serde_json::from_value(serde_json::json!([
+            {"name": "user_notes", "command": ["x"]},
+            {"name": "github", "command": ["y"]},
+        ]))
+        .unwrap();
+        let r = check_mcp_servers(&config);
+        assert_eq!(r.status, CheckStatus::Error);
+        assert!(
+            r.details
+                .iter()
+                .any(|d| d.contains("user_notes") && d.contains("reserved"))
+        );
     }
 
     #[test]

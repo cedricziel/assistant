@@ -339,8 +339,8 @@ impl Orchestrator {
     }
 
     /// Give every turn the tools `source` returns for `(org_slug, space_slug)`
-    /// and the turn's user. They exist for that turn only, are checked before
-    /// the executor's registry, and go through the same permission gate.
+    /// and the turn's user. They exist for that turn only, never shadow a
+    /// registered tool, and go through the same permission gate.
     pub fn with_turn_tool_source(
         mut self,
         source: Arc<dyn TurnToolSource>,

@@ -424,10 +424,9 @@ impl Orchestrator {
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
     ) -> DispatchOutcome {
-        let requires_confirm = overlay
-            .get(name)
-            .cloned()
-            .or_else(|| self.executor.handler(name))
+        let requires_confirm = self
+            .executor
+            .resolve(overlay, name)
             .is_some_and(|h| h.requires_confirmation());
 
         let authorization = self

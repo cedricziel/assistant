@@ -40,8 +40,17 @@ pub fn org_config_path(base_dir: &Path, org_slug: &str) -> Result<PathBuf> {
 }
 
 /// Load `server.toml` from the install root `base_dir`.
+///
+/// Fails when an MCP server is named with a prefix reserved for integration
+/// tools (see [`RESERVED_MCP_SERVER_PREFIXES`](crate::types::skills_mcp::RESERVED_MCP_SERVER_PREFIXES)).
 pub fn load_server_config(base_dir: &Path) -> Result<ServerConfig> {
-    load_toml(&server_config_path(base_dir))
+    let path = server_config_path(base_dir);
+    let config: ServerConfig = load_toml(&path)?;
+    config
+        .mcp
+        .check_names()
+        .with_context(|| format!("Invalid [[mcp.servers]] in {}", path.display()))?;
+    Ok(config)
 }
 
 /// Load `orgs/{org_slug}/org.toml` from the install root `base_dir`.
@@ -134,6 +143,31 @@ vapid_public_key = "pub"
             server.notifications.vapid_public_key.as_deref(),
             Some("pub")
         );
+    }
+
+    #[test]
+    fn mcp_server_names_that_integration_tools_use_are_rejected_with_a_clear_error() {
+        for name in ["org_linear", "space_sentry", "user_github"] {
+            let dir = tempfile::tempdir().unwrap();
+            write(
+                &server_config_path(dir.path()),
+                &format!("[[mcp.servers]]\nname = \"{name}\"\ncommand = [\"x\"]\n"),
+            );
+            let err = format!("{:#}", load_server_config(dir.path()).unwrap_err());
+            assert!(err.contains(name), "names the server: {err}");
+            assert!(err.contains("reserved"), "says why: {err}");
+            assert!(err.contains("server.toml"), "names the file: {err}");
+        }
+    }
+
+    #[test]
+    fn ordinary_mcp_server_names_still_load() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &server_config_path(dir.path()),
+            "[[mcp.servers]]\nname = \"user-notes\"\ncommand = [\"x\"]\n",
+        );
+        assert_eq!(load_server_config(dir.path()).unwrap().mcp.servers.len(), 1);
     }
 
     #[test]

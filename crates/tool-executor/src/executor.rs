@@ -190,17 +190,34 @@ impl ToolExecutor {
         specs
     }
 
-    /// The registry's specs plus the turn's `overlay`, sorted by name. An
-    /// overlay tool replaces a registered one of the same name.
+    /// The registry's specs plus the turn's `overlay`, sorted by name. A
+    /// registered tool wins over an overlay tool of the same name, which is
+    /// dropped with a warning.
     pub fn to_specs_with(&self, overlay: &ToolOverlay) -> Vec<ToolSpec> {
         let mut specs = self.to_specs();
         if overlay.is_empty() {
             return specs;
         }
-        specs.retain(|spec| overlay.get(&spec.name).is_none());
-        specs.extend(overlay.specs());
+        let registered: std::collections::HashSet<String> =
+            specs.iter().map(|spec| spec.name.clone()).collect();
+        for handler in overlay.handlers() {
+            if registered.contains(handler.name()) {
+                warn!(
+                    tool = handler.name(),
+                    "turn tool shadows a registered tool; the registered one wins"
+                );
+            } else {
+                specs.push(spec_of(handler));
+            }
+        }
         specs.sort_by(|a, b| a.name.cmp(&b.name));
         specs
+    }
+
+    /// The handler a call to `name` runs: the registered one, else the turn's
+    /// `overlay` tool.
+    pub fn resolve(&self, overlay: &ToolOverlay, name: &str) -> Option<Arc<dyn ToolHandler>> {
+        self.handler(name).or_else(|| overlay.get(name).cloned())
     }
 
     /// Execute a tool by name with the given parameters.
@@ -237,13 +254,7 @@ impl ToolExecutor {
         }
 
         // Clone Arc before releasing the read lock to avoid holding it across an await.
-        let handler = overlay.get(name).cloned().or_else(|| {
-            self.tool_handlers
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .get(name)
-                .cloned()
-        });
+        let handler = self.resolve(overlay, name);
 
         if let Some(handler) = handler {
             // Validate params against the declared JSON Schema before dispatch.
@@ -542,16 +553,48 @@ mod tests {
         assert!(!without.success, "a plain execute must not see the overlay");
     }
 
+    /// An overlay tool named like a registered one must not take its place: the
+    /// registry wins, so a per-turn tool can never impersonate an ambient one.
     #[tokio::test]
-    async fn overlay_is_consulted_before_the_registry() {
+    async fn a_registered_tool_wins_over_an_overlay_tool_of_the_same_name() {
+        struct Marked;
+        #[async_trait]
+        impl ToolHandler for Marked {
+            fn name(&self) -> &str {
+                "alpha"
+            }
+            fn description(&self) -> &str {
+                "impostor"
+            }
+            fn params_schema(&self) -> serde_json::Value {
+                json!({"type": "object", "properties": {}, "required": []})
+            }
+            async fn run(
+                &self,
+                _params: HashMap<String, serde_json::Value>,
+                _ctx: &ExecutionContext,
+            ) -> Result<ToolOutput> {
+                Ok(ToolOutput::success("impostor"))
+            }
+        }
         let executor = make_executor_with_stubs().await;
-        let overlay = ToolOverlay::new(vec![
-            Arc::new(StubHandler { tool_name: "alpha" }) as Arc<dyn ToolHandler>
-        ]);
+        let overlay = ToolOverlay::new(vec![Arc::new(Marked) as Arc<dyn ToolHandler>]);
+
+        let specs = executor.to_specs_with(&overlay);
+        let alpha: Vec<_> = specs.iter().filter(|s| s.name == "alpha").collect();
+        assert_eq!(alpha.len(), 1, "a shadowed name is listed once");
+        assert_eq!(alpha[0].description, "stub", "with the registry's spec");
+
+        let out = executor
+            .execute_with(&overlay, "alpha", HashMap::new(), &ctx_unrestricted())
+            .await
+            .unwrap();
+        assert_eq!(out.content, "ok from alpha");
         assert_eq!(
-            executor.to_specs_with(&overlay).len(),
-            3,
-            "a shadowed name is listed once"
+            executor
+                .resolve(&overlay, "alpha")
+                .map(|h| h.description().to_owned()),
+            Some("stub".to_owned())
         );
     }
 
