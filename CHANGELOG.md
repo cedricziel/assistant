@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.3.0](https://github.com/cedricziel/assistant/compare/v0.2.0...v0.3.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **web-ui:** scope device-flow password checks to an org
+* **web-ui:** ask for the email before choosing a sign-in method
+* **web-ui:** the --oidc-issuer-url, --oidc-client-id and --oidc-client-secret flags (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET) are removed. Configure OIDC per org through PUT /api/orgs/{id}/oidc.
+
+### Features
+
+* **app:** install integrations and manage them per layer ([5a07a77](https://github.com/cedricziel/assistant/commit/5a07a77310047790966c068c24c79226a7583460))
+* **auth:** create the initial admin on first start and add admin reset-password ([f66f3cc](https://github.com/cedricziel/assistant/commit/f66f3cc419757bd15e8e2571ad625082ea5148b6))
+* **runtime:** give turns their scoped integration tools ([d757748](https://github.com/cedricziel/assistant/commit/d75774892a605b8fab0b3ed4089341ec29a85d78))
+* **storage:** add per-org OIDC config store ([88dd390](https://github.com/cedricziel/assistant/commit/88dd390f5ad382bce7b46b81db9cc45efb98e2de))
+* **storage:** list users by email across orgs ([d2840eb](https://github.com/cedricziel/assistant/commit/d2840ebac10cefa1a282f749fb9e0c8ef9044a2b))
+* **web-ui:** add per-org OIDC settings API ([400ed27](https://github.com/cedricziel/assistant/commit/400ed27540c57f3c377591c42384276bb256b56d))
+* **web-ui:** ask for the email before choosing a sign-in method ([33bd30a](https://github.com/cedricziel/assistant/commit/33bd30a085015d0a6e668010f85e07ddc4819129))
+* **web-ui:** select the OIDC provider per org ([a552c3c](https://github.com/cedricziel/assistant/commit/a552c3ce966f5385e65a50a60d28a6a501956ce2))
+
+
+### Bug Fixes
+
+* **auth:** scope OIDC user lookups to the signing-in org ([52d36d4](https://github.com/cedricziel/assistant/commit/52d36d4ab5c3604c2a8d4135cb9ef209fc333e18))
+* **backup:** back up the multi-org install tree ([502d8a5](https://github.com/cedricziel/assistant/commit/502d8a55aa5ac8f12f36ecf9d0f41bb4b3cb013b))
+* **backup:** back up the multi-org install tree ([0b6cae6](https://github.com/cedricziel/assistant/commit/0b6cae6949ba61f83fb5b7e25b99c8017c014092))
+* **backup:** harden restore writes and back up credential files ([a8c6f07](https://github.com/cedricziel/assistant/commit/a8c6f07430a3f01e10c66d96535b19ddd0609a26))
+* **backup:** make restore writes crash-safe and keep modes ([cdccfed](https://github.com/cedricziel/assistant/commit/cdccfede70eec3cc181b8f431fe51c5f9632ee33))
+* **core:** keep created_at when replacing an OIDC config ([7bf9977](https://github.com/cedricziel/assistant/commit/7bf9977e73761d0b006dd6f06312e2539f0fe3ea))
+* **mcp-server:** keep skill resource reads inside the skill directory ([a583f06](https://github.com/cedricziel/assistant/commit/a583f065a81f54ed7959d1af90d62002a4daf1ec))
+* **mcp-server:** keep skill resource reads inside the skill directory ([2cbbb2c](https://github.com/cedricziel/assistant/commit/2cbbb2c84ad3318384d269167baeaf037b7e1841))
+* **runtime:** stop the title generator stealing submit_turn replies ([5c100d8](https://github.com/cedricziel/assistant/commit/5c100d8d3545d6b3bfd60beff0eaa469f97e6167))
+* **runtime:** stop the title generator stealing submit_turn replies ([667ed19](https://github.com/cedricziel/assistant/commit/667ed198c4ccef26ea2af9627222e6a1e5732b03))
+* **storage:** seal the OIDC client secret ([b6b18bc](https://github.com/cedricziel/assistant/commit/b6b18bc2edb551b613a270550c3d5fcd90fb7dcd))
+* **web-ui:** keep OIDC issuer URL verbatim ([323c6c3](https://github.com/cedricziel/assistant/commit/323c6c31b2ab0f6c3604668c6ec19aac86c156fb))
+* **web-ui:** open the sealed OIDC client secret at discovery ([a1b9d8d](https://github.com/cedricziel/assistant/commit/a1b9d8d73144f7ff695f3de3cd85ad2a65c5866d))
+* **web-ui:** scope device-flow password checks to an org ([6ee5cde](https://github.com/cedricziel/assistant/commit/6ee5cde4806856a5050aaf38f357d62c6e393b26))
+* **web-ui:** seal the OIDC client secret on save ([83598a6](https://github.com/cedricziel/assistant/commit/83598a6cbbfcfdca4f128899d8a62e6bf2dd6c96))
+
 ## [0.2.0](https://github.com/cedricziel/assistant/compare/v0.1.165...v0.2.0) (2026-11-25)
 
 
