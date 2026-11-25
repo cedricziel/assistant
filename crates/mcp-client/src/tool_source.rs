@@ -63,11 +63,12 @@ impl IntegrationToolSource {
         clock: Arc<dyn Clock>,
     ) -> Self {
         let effective = Arc::new(EffectiveIntegrations::new(
-            stores.integrations,
+            stores.integrations.clone(),
             stores.credentials.clone(),
             secrets.key_id(),
         ));
         let connections = Arc::new(IntegrationConnections::new(
+            stores.integrations,
             stores.credentials,
             stores.health,
             secrets,

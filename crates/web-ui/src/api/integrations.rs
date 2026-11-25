@@ -108,14 +108,15 @@ impl IntegrationsApiState {
                 credentials.clone(),
                 secrets.key_id(),
             )),
-            store,
             spaces: Arc::new(org_storage.space_store()),
             connections: Arc::new(IntegrationConnections::new(
+                store.clone(),
                 credentials.clone(),
                 health.clone(),
                 secrets.clone(),
                 clock.clone(),
             )),
+            store,
             connections_config: ConnectionsConfig::default(),
             secrets,
             clock,
@@ -143,6 +144,7 @@ impl IntegrationsApiState {
     fn rebuild_connections(&mut self) {
         self.connections = Arc::new(
             IntegrationConnections::new(
+                self.store.clone(),
                 self.credentials.clone(),
                 self.health.clone(),
                 self.secrets.clone(),

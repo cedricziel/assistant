@@ -25,8 +25,8 @@ use assistant_core::clock::Clock;
 use assistant_core::identity::UserId;
 use assistant_core::integrations::{
     CredentialKind, CredentialStatus, EffectiveIntegration, Integration, IntegrationAuthKind,
-    IntegrationCredentialStore, IntegrationHealthStore, Sealed, SecretBox, StoredCredential,
-    credential_aad,
+    IntegrationCredentialStore, IntegrationHealthStore, IntegrationStore, Sealed, SecretBox,
+    StoredCredential, credential_aad,
 };
 use assistant_core::secret::Secret;
 
@@ -167,6 +167,7 @@ impl Drop for Sweeper {
 }
 
 pub struct IntegrationConnections {
+    integrations: Arc<dyn IntegrationStore>,
     credentials: Arc<dyn IntegrationCredentialStore>,
     health: Arc<dyn IntegrationHealthStore>,
     secrets: Arc<SecretBox>,
@@ -176,12 +177,14 @@ pub struct IntegrationConnections {
 
 impl IntegrationConnections {
     pub fn new(
+        integrations: Arc<dyn IntegrationStore>,
         credentials: Arc<dyn IntegrationCredentialStore>,
         health: Arc<dyn IntegrationHealthStore>,
         secrets: Arc<SecretBox>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self::assemble(
+            integrations,
             credentials,
             health,
             secrets,
@@ -192,6 +195,7 @@ impl IntegrationConnections {
 
     pub fn with_config(self, config: ConnectionsConfig) -> Self {
         Self::assemble(
+            self.integrations.clone(),
             self.credentials.clone(),
             self.health.clone(),
             self.secrets.clone(),
@@ -203,6 +207,7 @@ impl IntegrationConnections {
     /// Builds the pool and, when a Tokio runtime is running, starts the sweep
     /// that drops idle connections. The sweep ends with the pool.
     fn assemble(
+        integrations: Arc<dyn IntegrationStore>,
         credentials: Arc<dyn IntegrationCredentialStore>,
         health: Arc<dyn IntegrationHealthStore>,
         secrets: Arc<SecretBox>,
@@ -220,6 +225,7 @@ impl IntegrationConnections {
             Sweeper(runtime.spawn(sweep_periodically(Arc::downgrade(&shared), interval)))
         });
         Self {
+            integrations,
             credentials,
             health,
             secrets,

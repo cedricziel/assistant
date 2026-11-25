@@ -156,6 +156,7 @@ impl World {
         let secrets = Arc::new(SecretBox::from_key([9; 32]));
         let clock = FakeClock::new(at(0));
         let pool = IntegrationConnections::new(
+            store.clone(),
             credentials.clone(),
             health.clone(),
             secrets.clone(),
@@ -793,6 +794,7 @@ async fn a_credential_replaced_during_a_slow_read_ends_up_as_the_connection_in_u
     let release = Arc::new(tokio::sync::Notify::new());
     let pool = Arc::new(
         IntegrationConnections::new(
+            world.store.clone(),
             Arc::new(StaleFirstRead {
                 inner: world.credentials.clone(),
                 first: Default::default(),

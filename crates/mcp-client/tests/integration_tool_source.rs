@@ -119,6 +119,7 @@ impl World {
         let clock = FakeClock::new(at(0));
         let connections = Arc::new(
             IntegrationConnections::new(
+                store.clone(),
                 credentials.clone(),
                 store.health_store(),
                 secrets.clone(),
