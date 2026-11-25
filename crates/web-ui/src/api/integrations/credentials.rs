@@ -555,6 +555,38 @@ mod tests {
         );
     }
 
+    /// The header-name write is a read-modify-write: a concurrent change to the
+    /// integration must surface as a conflict, not be overwritten or reported as
+    /// "not found".
+    #[tokio::test]
+    async fn a_header_name_write_that_loses_a_race_is_409_and_stores_nothing() {
+        let mut h = Harness::new().await;
+        h.seed("int_space", IntegrationLayer::Space, None, |i| {
+            i.catalog_entry_id = None;
+            i.header_name = None;
+            i.header_value_prefix = None;
+        })
+        .await;
+        let mut rival = h.state.store.get("int_space").await.unwrap().unwrap();
+        rival.enabled = false;
+        rival.updated_at = super::super::testing::at(500);
+        h.lose_the_next_update_to(rival);
+
+        let (status, body) = h
+            .put(
+                Who::EngAdmin,
+                &uri("int_space"),
+                json!({"value": "t", "header_name": "X-Api-Key"}),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        let stored = h.state.store.get("int_space").await.unwrap().unwrap();
+        assert!(!stored.enabled, "the rival's change survives");
+        assert_eq!(stored.header_name, None, "and the stale write did not land");
+        assert!(!h.has_credential("int_space", None).await);
+    }
+
     #[tokio::test]
     async fn a_missing_header_name_is_asked_for() {
         let h = Harness::new().await;
