@@ -502,6 +502,20 @@ async fn an_unknown_org_or_space_yields_no_tools() {
     assert!(world.tools(Some(&user), "acme", "nope").await.is_empty());
 }
 
+/// How many `initialize` requests the server has seen.
+async fn handshakes(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|r| {
+            serde_json::from_slice::<Value>(&r.body)
+                .is_ok_and(|b| b["method"].as_str() == Some("initialize"))
+        })
+        .count()
+}
+
 #[tokio::test]
 async fn an_integration_that_stops_answering_costs_the_turn_one_timeout_and_nothing_more() {
     let healthy = serve(None, true).await;
@@ -542,10 +556,18 @@ async fn an_integration_that_stops_answering_costs_the_turn_one_timeout_and_noth
         "both load while healthy"
     );
 
+    let before = handshakes(&hanging).await;
+
     *list_delay.lock().unwrap() = Some(Duration::from_secs(30));
     world.clock.advance(Duration::from_secs(6 * 60));
     let started = Instant::now();
     let names = world.names(Some(U), "eng").await;
+
+    assert_eq!(
+        handshakes(&hanging).await,
+        before,
+        "the turn must skip the hung integration, not reconnect to it"
+    );
 
     assert_eq!(names, vec!["mcp__org_linear__ping"]);
     assert!(

@@ -247,7 +247,6 @@ impl IntegrationConnections {
         &self,
         effective: &EffectiveIntegration,
     ) -> Result<Connected, ConnectError> {
-        self.evict_idle().await;
         let integration = &effective.integration;
         let subject = effective.credential_subject.as_ref();
 
@@ -297,7 +296,7 @@ impl IntegrationConnections {
                         slot.live = None;
                         let error = ConnectError::Unreachable(TIMEOUT.into());
                         return Err(self
-                            .remember_failure(&mut slot, integration, subject, versions, now, error)
+                            .remember_failure(&mut slot, integration, subject, versions, error)
                             .await);
                     }
                 }
@@ -343,26 +342,26 @@ impl IntegrationConnections {
                 Ok(connected)
             }
             Err(error) => Err(self
-                .remember_failure(&mut slot, integration, subject, versions, now, error)
+                .remember_failure(&mut slot, integration, subject, versions, error)
                 .await),
         }
     }
 
     /// Record `error` as the integration's health and remember it, so the next
-    /// turns are answered from it for a while.
+    /// turns are answered from it for a while. The pause counts from now, not
+    /// from when the failed attempt began.
     async fn remember_failure(
         &self,
         slot: &mut Slot,
         integration: &Integration,
         subject: Option<&UserId>,
         versions: Versions,
-        now: Instant,
         error: ConnectError,
     ) -> ConnectError {
         self.record_failed(integration, subject, &error).await;
         slot.failure = Some(Failure {
             versions,
-            at: now,
+            at: self.shared.clock.now_instant(),
             error: error_text(&error),
         });
         error
@@ -379,9 +378,22 @@ impl IntegrationConnections {
         let integration = &effective.integration;
         let subject = effective.credential_subject.as_ref();
         self.shared.reserve_probe(integration, subject)?;
-        let stored = self.stored_credential(integration, subject).await?;
-        self.ensure_unchanged(integration, stored.as_ref()).await?;
-        let header = self.auth_header(integration, subject, stored.as_ref())?;
+        let prepared = async {
+            let stored = self.stored_credential(integration, subject).await?;
+            self.ensure_unchanged(integration, stored.as_ref()).await?;
+            self.auth_header(integration, subject, stored.as_ref())
+        }
+        .await;
+        let header = match prepared {
+            Ok(header) => header,
+            Err(error) => {
+                // A credential that cannot be used replaces any healthy record.
+                if matches!(error, ConnectError::Credential(_)) {
+                    self.record_failed(integration, subject, &error).await;
+                }
+                return Err(error);
+            }
+        };
         match open(
             &integration.slug,
             &integration.connect_url,

@@ -34,6 +34,8 @@ struct Script {
     tools: Arc<std::sync::Mutex<Vec<&'static str>>>,
     /// How long `tools/list` takes to answer; changeable mid-test.
     list_delay: Arc<std::sync::Mutex<Option<Duration>>>,
+    /// Runs on every request, before it is answered.
+    on_request: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl Script {
@@ -43,6 +45,7 @@ impl Script {
             healthy: Arc::new(AtomicBool::new(true)),
             tools: Arc::new(std::sync::Mutex::new(tools.to_vec())),
             list_delay: Arc::default(),
+            on_request: None,
         }
     }
 }
@@ -55,6 +58,9 @@ fn rpc_result(id: &Value, result: Value) -> ResponseTemplate {
 
 impl Respond for Script {
     fn respond(&self, request: &Request) -> ResponseTemplate {
+        if let Some(hook) = &self.on_request {
+            hook();
+        }
         if !self.healthy.load(Ordering::SeqCst) {
             return ResponseTemplate::new(500);
         }
@@ -129,6 +135,27 @@ async fn count(server: &MockServer, rpc: &str) -> usize {
                 .is_ok_and(|b| b["method"].as_str() == Some(rpc))
         })
         .count()
+}
+
+/// The `Authorization` of each `initialize` request, in order. Unlike "the
+/// last request", this is not disturbed by a closing session's `DELETE`.
+async fn handshake_auth(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|r| {
+            serde_json::from_slice::<Value>(&r.body)
+                .is_ok_and(|b| b["method"].as_str() == Some("initialize"))
+        })
+        .filter_map(|r| {
+            r.headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 struct World {
@@ -464,13 +491,11 @@ async fn a_replaced_credential_reconnects_with_the_new_value() {
     world.credential(&integration, None, "new", 60).await;
     world.pool.connect(&eff).await.unwrap();
 
-    assert_eq!(count(&server, "initialize").await, 2);
-    let requests = server.received_requests().await.unwrap();
-    let last_auth = requests
-        .iter()
-        .rev()
-        .find_map(|r| r.headers.get("authorization").and_then(|v| v.to_str().ok()));
-    assert_eq!(last_auth, Some("Bearer new"));
+    assert_eq!(
+        handshake_auth(&server).await,
+        vec!["Bearer old", "Bearer new"],
+        "the replacement handshake carries the new credential"
+    );
 }
 
 #[tokio::test]
@@ -832,13 +857,8 @@ async fn a_credential_replaced_during_a_slow_read_ends_up_as_the_connection_in_u
     b.await.unwrap().unwrap();
     pool.connect(&eff).await.unwrap();
 
-    let requests = server.received_requests().await.unwrap();
-    let last_auth = requests
-        .iter()
-        .rev()
-        .find_map(|r| r.headers.get("authorization").and_then(|v| v.to_str().ok()));
     assert_eq!(
-        last_auth,
+        handshake_auth(&server).await.last().map(String::as_str),
         Some("Bearer new"),
         "the live connection must carry the newest credential"
     );
@@ -1173,4 +1193,128 @@ async fn an_integration_removed_after_the_read_is_not_connected() {
 
     assert!(result.is_err());
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+// -- cooldown, sweeping and probe health ----------------------------------------------
+
+#[tokio::test]
+async fn the_failure_pause_starts_when_the_failure_is_recorded() {
+    // The attempt itself takes 4 s (the server advances the clock while it
+    // fails), longer than the 3 s pause: the pause must still hold afterwards.
+    let clock_slot: Arc<std::sync::Mutex<Option<FakeClock>>> = Arc::default();
+    let mut script = Script::new(&["t"]);
+    script.healthy.store(false, Ordering::SeqCst);
+    let hook_clock = clock_slot.clone();
+    script.on_request = Some(Arc::new(move || {
+        if let Some(clock) = hook_clock.lock().unwrap().as_ref() {
+            clock.advance(Duration::from_secs(4));
+        }
+    }));
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig {
+        retry_after: Duration::from_secs(3),
+        ..ConnectionsConfig::default()
+    });
+    *clock_slot.lock().unwrap() = Some(world.clock.clone());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+
+    assert!(world.pool.connect(&eff).await.is_err());
+    let after_first = server.received_requests().await.unwrap().len();
+    assert!(world.pool.connect(&eff).await.is_err());
+
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        after_first,
+        "the pause counts from the failure, not from when the attempt began"
+    );
+}
+
+#[tokio::test]
+async fn looking_up_one_integration_does_not_sweep_the_others() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world
+        .integration(&server.uri(), |i| {
+            i.credential_mode = CredentialMode::PerUser
+        })
+        .await;
+    let (u1, u2) = (UserId::from("usr_1"), UserId::from("usr_2"));
+    world.credential(&integration, Some(&u1), "a", 0).await;
+    world.credential(&integration, Some(&u2), "b", 0).await;
+    world
+        .pool
+        .connect(&effective(&integration, Some(&u1)))
+        .await
+        .unwrap();
+    world
+        .pool
+        .connect(&effective(&integration, Some(&u2)))
+        .await
+        .unwrap();
+
+    world.clock.advance(Duration::from_secs(11 * 60));
+    world
+        .pool
+        .connect(&effective(&integration, Some(&u1)))
+        .await
+        .unwrap();
+
+    // u1 was found idle and reopened; u2 is left to the background sweep.
+    assert_eq!(world.pool.connection_count().await, 2);
+}
+
+#[tokio::test]
+async fn a_probe_that_fails_on_its_credential_replaces_the_healthy_record() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+    world.pool.probe(&eff).await.unwrap();
+    assert!(
+        world
+            .health
+            .get("int_1", None)
+            .await
+            .unwrap()
+            .unwrap()
+            .reachable
+    );
+
+    // The credential can no longer be opened (sealed under another key).
+    let foreign = SecretBox::from_key([1; 32]);
+    let aad = credential_aad("int_1", None, "header");
+    let sealed = foreign.seal(&Secret::new("x"), aad.as_bytes()).unwrap();
+    world
+        .credentials
+        .put(&StoredCredential {
+            integration_id: "int_1".into(),
+            subject_user_id: None,
+            kind: CredentialKind::Header,
+            ciphertext: sealed.ciphertext,
+            nonce: sealed.nonce,
+            key_id: sealed.key_id,
+            expires_at: None,
+            status: CredentialStatus::Ready,
+            updated_at: at(30),
+        })
+        .await
+        .unwrap();
+    world.clock.advance(Duration::from_secs(10));
+
+    assert!(matches!(
+        world.pool.probe(&eff).await,
+        Err(ConnectError::Credential(_))
+    ));
+
+    let health = world.health.get("int_1", None).await.unwrap().unwrap();
+    assert!(!health.reachable, "the old healthy record must not stand");
+    assert!(health.last_error.is_some());
+    assert_eq!(
+        health.tool_count,
+        Some(1),
+        "the last good connection is kept"
+    );
 }
