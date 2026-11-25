@@ -88,6 +88,7 @@ final apiClientProvider = Provider<ApiClient?>((ref) {
         }
       },
       onAuthExpired: () => _handleAuthExpired(ref),
+      spaceId: () => ref.read(spaceSelectionProvider).spaceId,
     );
     ref.onDispose(client.close);
     return client;
@@ -99,6 +100,7 @@ final apiClientProvider = Provider<ApiClient?>((ref) {
     token: ctx.effectiveToken ?? '',
     refreshTokens: () => _refreshAccessToken(ref),
     onAuthExpired: () => _handleAuthExpired(ref),
+    spaceId: () => ref.read(spaceSelectionProvider).spaceId,
   );
 });
 

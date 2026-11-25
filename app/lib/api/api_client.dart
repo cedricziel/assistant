@@ -22,6 +22,7 @@ import 'models/stream_event.dart';
 import 'native_http_adapter_stub.dart'
     if (dart.library.io) 'native_http_adapter_io.dart'
     as native_http_adapter;
+import 'space_header_interceptor.dart';
 
 /// Thrown when the server rejects an API request with HTTP 401.
 ///
@@ -49,6 +50,7 @@ class ApiClient {
     required String token,
     RefreshTokensCallback? refreshTokens,
     OnAuthExpiredCallback? onAuthExpired,
+    this.spaceId,
   }) : _staticToken = token,
        _tokenStorage = null {
     _setupDio(baseUrl: baseUrl);
@@ -80,6 +82,7 @@ class ApiClient {
     )
     refreshToken,
     required OnAuthExpiredCallback onAuthExpired,
+    this.spaceId,
   }) : _staticToken = null,
        _tokenStorage = tokenStorage {
     _setupDio(baseUrl: baseUrl);
@@ -133,11 +136,21 @@ class ApiClient {
     // dart:io is available.
     native_http_adapter.installNativeHttpAdapter(_dio);
 
+    final selectedSpace = spaceId;
+    if (selectedSpace != null) {
+      _dio.interceptors.add(SpaceHeaderInterceptor(spaceId: selectedSpace));
+    }
+
     _generatedApi = AssistantApi(dio: _dio, basePathOverride: baseUrl);
   }
 
   /// Static bearer for legacy/API-key contexts; `null` on the OAuth path.
   final String? _staticToken;
+
+  /// Id of the space data-plane calls act in, read on every request; `null`
+  /// sends no space selector, which the server accepts only for callers with
+  /// a single space.
+  final String? Function()? spaceId;
 
   /// Token storage for the OAuth path; `null` on the legacy path. Used by SSE
   /// methods to read the current bearer (so they pick up refreshed tokens
@@ -453,6 +466,8 @@ class ApiClient {
     final bearer = await _currentBearer();
     final qp = <String, String>{
       'access_token': bearer,
+      // The browser EventSource cannot set X-Space-Id.
+      spaceIdQueryParam: ?spaceId?.call(),
       // ignore: use_null_aware_elements — value is nullable, key is not.
       if (agentId != null) 'agent_id': agentId,
     };
