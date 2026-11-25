@@ -545,7 +545,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let persona_api_state = api::personas::PersonaApiState {
-        pool: storage.pool.clone(),
+        spaces: space_resolver.clone(),
         agent_id: state.agent_id.clone(),
     };
 

@@ -44,11 +44,12 @@ use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 use assistant_core::types::conversation::Message;
 use assistant_storage::{
     AttachmentStore as _, CommandEventStore as _, ConversationEventStore as _, ConversationStore,
-    PushSubscriptionStore, SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
-    WebhookStore,
+    PersonaStore as _, PushSubscriptionStore, SqliteCommandEventStore, SqliteConversationStore,
+    StorageLayer, WebhookStore,
 };
 use assistant_transcription::{TtsProvider, TtsRequest, TtsResult};
 
+use super::personas::{PersonaApiState, personas_router};
 use super::push::{PushApiState, push_api_router};
 use super::test_helpers::{TestSpace, body_bytes, multipart_body, state_over, tiny_png};
 use super::webhooks::{WebhooksApiState, webhooks_api_router};
@@ -62,6 +63,7 @@ const A2: &str = "spc_a2";
 const B1: &str = "spc_b1";
 
 const WEBHOOK_SECRET: &str = "whsec_fixture";
+const PERSONA_ID: &str = "alice-bot";
 
 // -- Principals ----------------------------------------------------------------
 
@@ -235,6 +237,10 @@ impl Tenancy {
             }))
             .merge(workflows_api_router().with_state(WorkflowsApiState {
                 spaces: api_state.spaces.clone(),
+                agent_id: agent_id.clone(),
+            }))
+            .merge(personas_router().with_state(PersonaApiState {
+                spaces: api_state.spaces.clone(),
                 agent_id,
             }))
             .merge(push_api_router().with_state(PushApiState {
@@ -319,6 +325,12 @@ impl Tenancy {
             .audio_store
             .insert(b"audio".to_vec(), "audio/mpeg".into())
             .await;
+
+        self.a1
+            .persona_store()
+            .create_owned(PERSONA_ID, "Alice's bot", "alice")
+            .await
+            .unwrap();
 
         self.a1
             .webhook_store_for_agent("default")
@@ -973,6 +985,138 @@ async fn webhooks_secret_is_visible_only_to_space_admins() {
     }
     let admin = t.get(Who::Adam, &hook, None).await;
     assert_eq!(admin.json()["secret"], WEBHOOK_SECRET);
+}
+
+// -- Personas ------------------------------------------------------------------
+
+#[tokio::test]
+async fn personas_foreign_org_selecting_a1_is_forbidden() {
+    let t = Tenancy::build().await;
+    let persona = format!("/personas/{PERSONA_ID}");
+
+    for (who, what) in [(Who::Bob, "foreign org"), (Who::Carol, "sibling space")] {
+        assert_forbidden(&t.get(who, "/personas", Some(A1)).await, what);
+        assert_forbidden(&t.get(who, &persona, Some(A1)).await, what);
+        assert_forbidden(
+            &t.get(who, &format!("{persona}/files/SOUL.md"), Some(A1))
+                .await,
+            what,
+        );
+        assert_forbidden(
+            &t.get(who, &format!("{persona}/skill-access"), Some(A1))
+                .await,
+            what,
+        );
+        assert_forbidden(
+            &t.send(
+                who,
+                Method::POST,
+                "/personas",
+                Some(A1),
+                Some(json!({"id": "planted", "name": "Planted"})),
+            )
+            .await,
+            what,
+        );
+        assert_forbidden(
+            &t.send(
+                who,
+                Method::POST,
+                "/personas/active",
+                Some(A1),
+                Some(json!({"id": PERSONA_ID})),
+            )
+            .await,
+            what,
+        );
+        assert_forbidden(
+            &t.send(
+                who,
+                Method::DELETE,
+                &format!("{persona}/skill-access/skills/x"),
+                Some(A1),
+                None,
+            )
+            .await,
+            what,
+        );
+    }
+}
+
+#[tokio::test]
+async fn personas_without_selector_stay_in_the_callers_own_space() {
+    let t = Tenancy::build().await;
+
+    let list = t.get(Who::Bob, "/personas", None).await;
+    assert_eq!(list.status, StatusCode::OK);
+    assert!(
+        !ids_in(&list.json()).contains(&PERSONA_ID.to_string()),
+        "bob's list must not contain A1 personas"
+    );
+    assert_not_found(
+        &t.get(Who::Bob, &format!("/personas/{PERSONA_ID}"), None)
+            .await,
+        "get A1 persona",
+    );
+}
+
+#[tokio::test]
+async fn personas_follow_the_role_matrix() {
+    let t = Tenancy::build().await;
+    let create = |id: &str| json!({"id": id, "name": id});
+
+    assert_eq!(
+        t.get(Who::Vera, "/personas", None).await.status,
+        StatusCode::OK
+    );
+    assert_forbidden(
+        &t.send(
+            Who::Vera,
+            Method::POST,
+            "/personas",
+            None,
+            Some(create("v")),
+        )
+        .await,
+        "viewer creates persona",
+    );
+    let created = t
+        .send(
+            Who::Amy,
+            Method::POST,
+            "/personas",
+            None,
+            Some(create("amy-bot")),
+        )
+        .await;
+    assert_eq!(
+        created.status,
+        StatusCode::CREATED,
+        "member creates persona"
+    );
+
+    for who in [Who::Alice, Who::Adam] {
+        let own = format!("{}-scratch", who.name());
+        let created = t
+            .send(who, Method::POST, "/personas", None, Some(create(&own)))
+            .await;
+        assert_eq!(
+            created.status,
+            StatusCode::CREATED,
+            "{who:?} creates persona"
+        );
+        let revoke = format!("/personas/{own}/skill-access/skills/x");
+        let revoked = t.send(who, Method::DELETE, &revoke, None, None).await;
+        if who == Who::Adam {
+            assert_eq!(
+                revoked.status,
+                StatusCode::NO_CONTENT,
+                "space admin revokes"
+            );
+        } else {
+            assert_forbidden(&revoked, "member revokes skill access");
+        }
+    }
 }
 
 // -- Workflows -----------------------------------------------------------------
