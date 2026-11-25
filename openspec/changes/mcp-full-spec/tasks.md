@@ -62,9 +62,9 @@ Each numbered group is one PR in the stack, in order.
 
 ## 10. Client Skills extension (PR 10)
 
-- [ ] 10.1 Add failing tests: skills from a Skills-enabled server appear as `{server}__{skill}`; a server without the extension gets no `skills/list`; a digest or size mismatch rejects the skill with a warning; a changed manifest forces re-verification; confirm red
-- [ ] 10.2 Add `SkillSource::Mcp { server }` and `McpSkillSource` with the verified cache under `~/.assistant/cache/mcp-skills/`, and verify the tests pass
-- [ ] 10.3 Add a failing test that script tools from a remote skill require confirmation under the permission policy; implement and verify it passes
+- [x] 10.1 Add failing tests: skills from a Skills-enabled server appear as `{server}__{skill}`; a server without the extension gets no `skills/list`; a digest or size mismatch rejects the skill with a warning; a changed manifest forces re-verification; confirm red
+- [x] 10.2 Add `SkillSource::Mcp { server }` and `McpSkillSource` with the verified cache under `~/.assistant/cache/mcp-skills/`, and verify the tests pass
+- [x] 10.3 Add a failing test that script tools from a remote skill require confirmation under the permission policy; implement and verify it passes
 
 ## 11. MCP Apps resolution and API (PR 11)
 
