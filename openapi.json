@@ -4718,6 +4718,9 @@
           "403": {
             "description": "Missing conversations:write scope"
           },
+          "422": {
+            "description": "persona_id names a persona this instance does not serve"
+          },
           "500": {
             "description": "Internal server error"
           }
@@ -9905,7 +9908,7 @@
               "string",
               "null"
             ],
-            "description": "Optional persona ID to route the message to a specific persona.\nWhen absent, the server's active persona is used."
+            "description": "Optional persona ID to run the message as. Must name the persona this\ninstance serves; any other existing persona is rejected with 422.\nUnknown IDs and an absent value fall back to the server's active persona."
           }
         }
       },
