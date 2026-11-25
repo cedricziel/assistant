@@ -3,8 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/platform/widgets.dart';
 import '../../shared/theme/assistant_spacing.dart';
 import 'catalog_entry_detail_sheet.dart';
+import 'caller_roles.dart';
 import 'catalog_entry_tile.dart';
 import 'catalog_view_model.dart';
+import 'install_integration_sheet.dart';
+import 'install_integration_view_model.dart';
+import 'integration_policy_view_model.dart';
 
 /// Widest the browser grows; wider windows get side margins.
 const _maxContentWidth = 840.0;
@@ -63,6 +67,7 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
                   ),
                 ),
               ),
+              const SliverToBoxAdapter(child: _CustomIntegrationAction()),
               ...switch (state.value) {
                 null => [_centered(const CircularProgressIndicator.adaptive())],
                 final catalog => _dataSlivers(catalog, sidePadding, notifier),
@@ -302,6 +307,31 @@ class _StatusView extends StatelessWidget {
             action!,
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// "Add custom integration", shown only when the caller may add one.
+class _CustomIntegrationAction extends ConsumerWidget {
+  const _CustomIntegrationAction();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final policy = ref.watch(integrationPolicyViewModelProvider).value?.policy;
+    final roles = ref.watch(callerRolesProvider).value;
+    final args = policy == null || roles == null
+        ? null
+        : installArgsForCustom(policy, roles);
+    if (args == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AssistantSpacing.lg),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: AdaptiveButton.plain(
+          onPressed: () => showInstallIntegrationSheet(context, args),
+          child: const Text('Add custom integration'),
+        ),
       ),
     );
   }
