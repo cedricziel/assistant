@@ -366,6 +366,10 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
             secure_cookie: false,
             oidc_provider: Some(Arc::new(provider)),
             oidc_sessions: Some(sessions.clone()),
+            rate_limits: Arc::new(crate::rate_limit::RateLimits::new(
+                Arc::new(assistant_core::clock::SystemClock),
+                &crate::rate_limit::RateLimitArgs::default(),
+            )),
         };
 
         (state, sessions)

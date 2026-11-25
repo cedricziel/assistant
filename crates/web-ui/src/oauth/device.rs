@@ -34,6 +34,7 @@ pub struct DeviceInitiateRequest {
     responses(
         (status = 200, description = "Device code issued", body = DeviceCodeResponseSchema),
         (status = 400, description = "Invalid request"),
+        (status = 429, description = "Rate limit exceeded; see the Retry-After header"),
         (status = 500, description = "Server error", body = OAuthErrorResponse),
     )
 )]
@@ -134,6 +135,7 @@ pub struct DeviceVerifyForm {
     responses(
         (status = 200, description = "Device authorized", content_type = "text/html"),
         (status = 400, description = "Invalid or expired code", content_type = "text/html"),
+        (status = 429, description = "Rate limit exceeded; see the Retry-After header"),
         (status = 401, description = "Invalid credentials", content_type = "text/html"),
     )
 )]

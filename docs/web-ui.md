@@ -108,6 +108,28 @@ foreground / background pairs meet WCAG AA on both light and dark themes
 | `--db-path`          |                             | `~/.assistant/assistant.db` | Path to the SQLite database                               |
 | `--cors-origin`      | `ASSISTANT_WEB_CORS_ORIGIN` | _(wildcard)_                | Restrict CORS to a specific origin (e.g. macOS app URL)   |
 | `--no-secure-cookie` |                             | `false`                     | Disable `Secure` attribute on session cookies (see below) |
+| `--auth-rate-limit-per-minute` | `ASSISTANT_WEB_AUTH_RATE_LIMIT` | `30` | Credential-endpoint requests per client IP per minute (see below) |
+| `--register-rate-limit-per-hour` | `ASSISTANT_WEB_REGISTER_RATE_LIMIT` | `10` | Dynamic client registrations per client IP per hour |
+| `--login-max-failures` | `ASSISTANT_WEB_LOGIN_MAX_FAILURES` | `10` | Failed password attempts per account before lockout; one attempt is restored per minute |
+| `--trust-forwarded-for` | `ASSISTANT_WEB_TRUST_FORWARDED_FOR` | `false` | Take the client IP from the rightmost `X-Forwarded-For` entry (reverse proxy only) |
+
+### Rate limiting
+
+`POST /login`, `/oauth/authorize`, `/oauth/token`, `/oauth/device`,
+`/oauth/device/verify` and `/oauth/revoke` share one token bucket per client
+IP. `POST /oauth/register` has its own, stricter bucket. IPv6 clients are
+bucketed by /64 prefix. A rejected request gets `429 Too Many Requests` with a
+`Retry-After` header.
+
+`POST /oauth/authorize` also locks an account after `--login-max-failures`
+failed attempts, whichever IP they come from. Unknown emails count the same
+way, so the lockout does not reveal which accounts exist.
+
+Behind a reverse proxy every request arrives from the proxy's address, so all
+clients would share one bucket. Set `--trust-forwarded-for` only when the proxy
+appends the real peer address to `X-Forwarded-For`; the server then uses the
+rightmost entry. Without the flag the header is ignored, so a direct client
+cannot choose its own bucket.
 
 ### Plain HTTP on non-loopback addresses
 

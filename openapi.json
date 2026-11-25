@@ -6101,6 +6101,9 @@
           "401": {
             "description": "Invalid credentials"
           },
+          "429": {
+            "description": "Too many failed attempts; see Retry-After"
+          },
           "500": {
             "description": "Internal server error"
           }
@@ -6291,6 +6294,9 @@
           "400": {
             "description": "Invalid request"
           },
+          "429": {
+            "description": "Rate limit exceeded; see the Retry-After header"
+          },
           "500": {
             "description": "Server error",
             "content": {
@@ -6373,6 +6379,9 @@
             "content": {
               "text/html": {}
             }
+          },
+          "429": {
+            "description": "Rate limit exceeded; see the Retry-After header"
           }
         },
         "security": [
@@ -6417,6 +6426,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Rate limit exceeded; see the Retry-After header"
           }
         },
         "security": [
@@ -6454,6 +6466,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Rate limit exceeded; see the Retry-After header"
           }
         },
         "security": [
@@ -6498,6 +6513,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Rate limit exceeded; see the Retry-After header"
           },
           "500": {
             "description": "Server error",
