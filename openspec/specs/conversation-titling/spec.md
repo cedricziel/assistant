@@ -40,13 +40,13 @@ The system SHALL store a `title_locked` boolean on every conversation row. The f
 - **THEN** every existing row with `title IS NOT NULL` has `title_locked = 1`
 - **AND** every existing row with `title IS NULL` has `title_locked = 0`
 
-### Requirement: A background worker consumes `turn.result` and produces titles
+### Requirement: A background worker consumes `turn.completed` and produces titles
 
-The system SHALL run a background worker that claims messages from the `turn.result` topic on the `MessageBus` and, for eligible conversations, calls an LLM to produce a short title (≤ 60 characters) and writes it via `ConversationStore::update_title`.
+The system SHALL run a background worker that claims messages from the `turn.completed` topic on the `MessageBus` and, for eligible conversations, calls an LLM to produce a short title (≤ 60 characters) and writes it via `ConversationStore::update_title`.
 
 #### Scenario: Worker titles an unlocked conversation that meets the turn threshold
 
-- **WHEN** a `turn.result` envelope is published with `turn >= min_turns` (default `2`)
+- **WHEN** a `turn.completed` envelope is published with `turn >= min_turns` (default `2`)
 - **AND** the conversation referenced by `conversation_id` has `title_locked = 0`
 - **THEN** the worker calls the LLM with a summarisation prompt
 - **AND** writes the LLM output via `update_title`
@@ -55,34 +55,34 @@ The system SHALL run a background worker that claims messages from the `turn.res
 
 #### Scenario: Worker titles after the first turn when the user message is long
 
-- **WHEN** a `turn.result` envelope is published with `turn == 1`
+- **WHEN** a `turn.completed` envelope is published with `turn == 1`
 - **AND** the first user message length exceeds `long_first_message_chars` (default `200`)
 - **AND** the conversation has `title_locked = 0`
 - **THEN** the worker generates and persists a title for that conversation
 
 #### Scenario: Worker skips locked conversations
 
-- **WHEN** a `turn.result` envelope is published for a conversation with `title_locked = 1`
+- **WHEN** a `turn.completed` envelope is published for a conversation with `title_locked = 1`
 - **THEN** the worker MUST NOT call the LLM
 - **AND** MUST NOT overwrite the existing title
 - **AND** acks the bus message
 
 #### Scenario: Worker skips conversations below threshold
 
-- **WHEN** a `turn.result` envelope is published with `turn < min_turns`
+- **WHEN** a `turn.completed` envelope is published with `turn < min_turns`
 - **AND** the first user message length is `<= long_first_message_chars`
 - **THEN** the worker MUST NOT call the LLM
 - **AND** acks the bus message
 
 #### Scenario: Worker is idempotent under bus redelivery
 
-- **WHEN** a `turn.result` envelope is redelivered after the worker already titled the conversation
+- **WHEN** a `turn.completed` envelope is redelivered after the worker already titled the conversation
 - **THEN** on second delivery the worker observes `title_locked = 1` and exits without an LLM call
 - **AND** acks the redelivered message
 
 ### Requirement: Worker failures must not block other consumers
 
-The system SHALL retry transient LLM failures using the bus's bounded redelivery mechanism. On permanent failure (exceeding `MAX_TURN_REDELIVERIES`), the worker SHALL leave the conversation untitled. Other `turn.result` consumers (webhooks, workflows) MUST NOT be affected by titling failures.
+The system SHALL retry transient LLM failures using the bus's bounded redelivery mechanism. On permanent failure (exceeding `MAX_TURN_REDELIVERIES`), the worker SHALL leave the conversation untitled. Consumers of `turn.result` (webhooks, workflows) MUST NOT be affected by titling failures.
 
 #### Scenario: Transient LLM error triggers redelivery with backoff
 
@@ -92,15 +92,15 @@ The system SHALL retry transient LLM failures using the bus's bounded redelivery
 
 #### Scenario: Permanent failure leaves conversation untitled
 
-- **WHEN** the LLM provider has returned errors exceeding `MAX_TURN_REDELIVERIES` for the same `turn.result` message
+- **WHEN** the LLM provider has returned errors exceeding `MAX_TURN_REDELIVERIES` for the same `turn.completed` message
 - **THEN** the bus marks the message permanently `Failed`
 - **AND** the conversation's `title_locked` remains `0`
 - **AND** the conversation remains displayable as `"Untitled"`
 
 #### Scenario: Webhook dispatch is unaffected by title-worker failure
 
-- **WHEN** the title-generator worker fails to process a `turn.result`
-- **THEN** the separate webhook-dispatch consumer of `turn.result` still receives and processes the same envelope independently
+- **WHEN** the title-generator worker fails to process a `turn.completed`
+- **THEN** the separate webhook-dispatch consumer of `turn.result` still receives and processes that turn's `turn.result` envelope independently
 
 ### Requirement: Titles are never retroactively changed
 
@@ -109,14 +109,14 @@ The system SHALL NOT overwrite a title once `title_locked = 1`, regardless of ho
 #### Scenario: Worker does not retitle after manual rename
 
 - **WHEN** a user renames a conversation via `PATCH` (setting `title_locked = 1`)
-- **AND** a subsequent `turn.result` is published for that conversation
+- **AND** a subsequent `turn.completed` is published for that conversation
 - **THEN** the worker observes `title_locked = 1` and does not call the LLM
 - **AND** the user's chosen title persists
 
 #### Scenario: Worker does not retitle a previously auto-titled conversation
 
 - **WHEN** the worker has already auto-titled a conversation in an earlier turn
-- **AND** a later `turn.result` arrives for the same conversation
+- **AND** a later `turn.completed` arrives for the same conversation
 - **THEN** the worker observes `title_locked = 1` and exits without an LLM call
 
 ### Requirement: Titling is configurable per-org
@@ -127,7 +127,7 @@ The system SHALL accept a `[titling]` block in `orgs/{slug}/org.toml` with the k
 
 - **WHEN** `[titling].enabled = false` in an org's `org.toml`
 - **THEN** the worker MUST NOT call the LLM for any conversation belonging to that org
-- **AND** still acks `turn.result` envelopes for that org
+- **AND** still acks `turn.completed` envelopes for that org
 
 #### Scenario: Missing `[titling]` block applies defaults
 

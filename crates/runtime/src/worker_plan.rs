@@ -8,7 +8,7 @@
 //! - `main-worker` — unfiltered turn consumer (REPL / orchestrator-unfiltered).
 //! - `scheduler-worker` — claims `Scheduler`-interface turns.
 //! - `web-worker` — claims `Web`-interface turns.
-//! - `TitleGeneratorWorker` — consumes `turn.result` and auto-titles
+//! - `TitleGeneratorWorker` — consumes `turn.completed` and auto-titles
 //!   conversations.
 //! - `memory_indexer` — periodic memory embedding pipeline.
 //!

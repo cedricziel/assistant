@@ -217,6 +217,31 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
 
 // ── Worker integration tests ────────────────────────────────────────────────
 
+#[tokio::test]
+async fn a_completed_turn_is_announced_on_turn_completed() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "done").await;
+    let (orch, _) = build(&server.uri()).await;
+    let worker_orch = orch.clone();
+    let _worker = tokio::spawn(async move { worker_orch.run_worker("test-worker").await });
+    let conv_id = Uuid::new_v4();
+
+    orch.submit_turn(&AuthContext::system(), "hi", conv_id, Interface::Web, None)
+        .await
+        .unwrap();
+
+    let announced = orch
+        .bus()
+        .list(topic::TURN_COMPLETED, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(announced.len(), 1, "one turn.completed per successful turn");
+    assert_eq!(announced[0].agent_id.as_deref(), Some("default"));
+    let event: bus_messages::TurnResult =
+        serde_json::from_value(announced[0].payload.clone()).unwrap();
+    assert_eq!(event.conversation_id, conv_id);
+}
+
 /// Test that submit_turn works correctly when the worker is running.
 /// This reproduces the bug where Slack/Mattermost-only modes didn't spawn
 /// the worker, causing submit_turn to timeout waiting for a result.

@@ -1,6 +1,6 @@
 //! Background worker that auto-generates conversation titles.
 //!
-//! Consumes `turn.result` envelopes from the message bus.  For each
+//! Consumes `turn.completed` envelopes from the message bus.  For each
 //! eligible conversation (unlocked, threshold met, titling enabled) it
 //! asks the LLM to produce a short title and persists it via
 //! `ConversationStore::update_title`, which transitively broadcasts the
@@ -210,7 +210,7 @@ const RETRY_BACKOFF: &[Duration] = &[
 /// Bus-consumer worker that auto-titles conversations.
 ///
 /// One worker is scoped to a single `agent_id` so the claim filter keeps
-/// messengers' personas from stealing each other's `turn.result` events.
+/// messengers' personas from stealing each other's `turn.completed` events.
 pub struct TitleGeneratorWorker {
     bus: Arc<dyn MessageBus>,
     storage: Arc<StorageLayer>,
@@ -258,7 +258,11 @@ impl TitleGeneratorWorker {
         let filter = ClaimFilter::new().with_agent_id(self.agent_id.clone());
         let claimed = self
             .bus
-            .claim_filtered(bus_messages::topic::TURN_RESULT, &self.worker_id(), &filter)
+            .claim_filtered(
+                bus_messages::topic::TURN_COMPLETED,
+                &self.worker_id(),
+                &filter,
+            )
             .await
             .context("title-generator: claim failed")?;
 
@@ -405,7 +409,7 @@ fn message_to_chat_history(m: &assistant_core::types::conversation::Message) -> 
 /// before any LLM round-trip.
 ///
 /// # Parameters
-/// - `turn` — the turn number from the just-completed `turn.result`.
+/// - `turn` — the turn number from the `turn.completed` envelope.
 /// - `first_message_len` — character count of the first user message in
 ///   the conversation.  Used by the long-first-message escape hatch.
 /// - `cfg` — the per-org titling configuration.
@@ -505,7 +509,7 @@ mod tests {
 
             // Whole id, plus the joined `<id>-<topic>` consumer name, must
             // match `[A-Za-z0-9_-]+`.
-            let joined = format!("{id}-turn-result");
+            let joined = format!("{id}-turn-completed");
             assert!(
                 joined
                     .chars()
@@ -657,16 +661,16 @@ mod tests {
         conv.id
     }
 
-    async fn publish_turn_result(
+    async fn publish_turn_completed(
         bus: &dyn MessageBus,
         conv_id: uuid::Uuid,
         agent_id: &str,
         turn: i64,
     ) {
-        publish_turn_result_with_interface(bus, conv_id, agent_id, turn, None).await
+        publish_turn_completed_with_interface(bus, conv_id, agent_id, turn, None).await
     }
 
-    async fn publish_turn_result_with_interface(
+    async fn publish_turn_completed_with_interface(
         bus: &dyn MessageBus,
         conv_id: uuid::Uuid,
         agent_id: &str,
@@ -682,7 +686,7 @@ mod tests {
             had_errors: false,
         })
         .unwrap();
-        let mut req = PublishRequest::new(bus_messages::topic::TURN_RESULT, payload)
+        let mut req = PublishRequest::new(bus_messages::topic::TURN_COMPLETED, payload)
             .with_agent_id(agent_id)
             .with_conversation_id(conv_id);
         if let Some(iface) = interface {
@@ -706,7 +710,7 @@ mod tests {
         .await;
         let turn = 2;
 
-        publish_turn_result(bus.as_ref(), conv_id, agent_id, turn).await;
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, turn).await;
 
         let worker = TitleGeneratorWorker::new(
             bus.clone(),
@@ -721,6 +725,55 @@ mod tests {
         let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
         assert_eq!(conv.title.as_deref(), Some("Dinner Brainstorm"));
         assert!(conv.title_locked, "worker must lock the title");
+    }
+
+    /// On the SQLite bus a claim is exclusive, so a worker claiming
+    /// `turn.result` takes the reply `submit_turn` is waiting for.
+    #[tokio::test]
+    async fn test_worker_leaves_the_submit_turn_reply_alone() {
+        let (bus, storage) = make_bus_and_storage().await;
+        let agent_id = "default";
+        let conv_id =
+            seed_conversation_with_messages(&storage, agent_id, &["x", "y"], &["a", "b"]).await;
+        let request_id = uuid::Uuid::new_v4();
+        let reply = serde_json::to_value(&bus_messages::TurnResult {
+            conversation_id: conv_id,
+            content: "assistant reply".into(),
+            turn: 2,
+            attachment_ids: vec![],
+            message_id: None,
+            had_errors: false,
+        })
+        .unwrap();
+        bus.publish(
+            PublishRequest::new(bus_messages::topic::TURN_RESULT, reply)
+                .with_agent_id(agent_id)
+                .with_conversation_id(conv_id)
+                .with_batch_id(request_id),
+        )
+        .await
+        .unwrap();
+
+        let worker = TitleGeneratorWorker::new(
+            bus.clone(),
+            storage.clone(),
+            Arc::new(MockLlm::new_ok("Title")),
+            TitlingConfig::default(),
+            agent_id.to_string(),
+        );
+        worker.run_one().await.unwrap();
+
+        let waiter = ClaimFilter::new()
+            .with_agent_id(agent_id)
+            .with_conversation_id(conv_id)
+            .with_batch_id(request_id);
+        assert!(
+            bus.claim_filtered(bus_messages::topic::TURN_RESULT, "submit_turn", &waiter)
+                .await
+                .unwrap()
+                .is_some(),
+            "the reply must still be claimable by submit_turn"
+        );
     }
 
     #[tokio::test]
@@ -744,7 +797,7 @@ mod tests {
         m2.turn = 2;
         store.save_message(&m2).await.unwrap();
 
-        publish_turn_result(bus.as_ref(), conv.id, agent_id, 2).await;
+        publish_turn_completed(bus.as_ref(), conv.id, agent_id, 2).await;
 
         let worker = TitleGeneratorWorker::new(
             bus.clone(),
@@ -770,7 +823,7 @@ mod tests {
         // First-turn, short first message → ineligible under defaults.
         let conv_id =
             seed_conversation_with_messages(&storage, agent_id, &["hi"], &["hello"]).await;
-        publish_turn_result(bus.as_ref(), conv_id, agent_id, 1).await;
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, 1).await;
 
         let worker = TitleGeneratorWorker::new(
             bus.clone(),
@@ -807,7 +860,7 @@ mod tests {
         )
         .await;
 
-        publish_turn_result(bus.as_ref(), conv_id, agent_id, 2).await;
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, 2).await;
         let worker = TitleGeneratorWorker::new(
             bus.clone(),
             storage.clone(),
@@ -819,7 +872,7 @@ mod tests {
         assert_eq!(llm.chat_calls(), 1, "first delivery titles");
 
         // Simulate redelivery: publish the same payload again.
-        publish_turn_result(bus.as_ref(), conv_id, agent_id, 2).await;
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, 2).await;
         worker.run_one().await.unwrap();
         assert_eq!(
             llm.chat_calls(),
@@ -842,7 +895,7 @@ mod tests {
         let conv_id =
             seed_conversation_with_messages(&storage, agent_id, &["help", "more"], &["yes", "ok"])
                 .await;
-        publish_turn_result(bus.as_ref(), conv_id, agent_id, 2).await;
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, 2).await;
 
         let cfg = TitlingConfig {
             enabled: false,
@@ -867,7 +920,7 @@ mod tests {
     async fn test_worker_titles_across_every_interface() {
         // Property: the title-generator must title conversations from CLI,
         // Web, Slack, Matrix, MCP, Scheduler, etc. — anything that publishes
-        // `turn.result` for the configured agent.  We exercise each interface
+        // `turn.completed` for the configured agent.  We exercise each interface
         // label and assert the worker doesn't filter any of them out.
         let (bus, storage) = make_bus_and_storage().await;
         let agent_id = "default";
@@ -891,7 +944,7 @@ mod tests {
                 &["ok", "ok"],
             )
             .await;
-            publish_turn_result_with_interface(bus.as_ref(), conv_id, agent_id, 2, Some(iface))
+            publish_turn_completed_with_interface(bus.as_ref(), conv_id, agent_id, 2, Some(iface))
                 .await;
             conv_ids.push((conv_id, *iface));
         }
@@ -942,7 +995,7 @@ mod tests {
         );
 
         // Publish AFTER spawn to exercise the live claim loop.
-        publish_turn_result(bus.as_ref(), conv_id, agent_id, 2).await;
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, 2).await;
 
         // The worker polls every 500ms; give it a generous window.
         let store = storage.conversation_store_for_agent(agent_id);
@@ -980,7 +1033,7 @@ mod tests {
         };
         let handle = spawn_title_generator_worker(bus.clone(), storage.clone(), llm, cfg, agent_id);
 
-        publish_turn_result(bus.as_ref(), conv_id, agent_id, 2).await;
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, 2).await;
         sleep(Duration::from_millis(1200)).await;
 
         assert_eq!(
@@ -1002,7 +1055,7 @@ mod tests {
 
         let conv_id =
             seed_conversation_with_messages(&storage, agent_id, &["a", "b"], &["c", "d"]).await;
-        publish_turn_result(bus.as_ref(), conv_id, agent_id, 2).await;
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, 2).await;
 
         let worker = TitleGeneratorWorker::new(
             bus.clone(),
