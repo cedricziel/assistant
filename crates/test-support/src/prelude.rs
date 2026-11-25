@@ -18,6 +18,10 @@
 //!   `InMemorySkillCatalog`.
 
 pub use assistant_core::clock::{Clock, FakeClock, SystemClock};
+pub use assistant_core::integrations::{
+    InMemoryIntegrationCredentialStore, InMemoryIntegrationStore, IntegrationCredentialStore,
+    IntegrationStore,
+};
 pub use assistant_core::tool::ToolDispatcher;
 pub use assistant_llm_provider::{RecordedCall, ScriptedLlmProvider};
 pub use assistant_storage::{

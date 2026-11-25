@@ -2,5 +2,14 @@
 //! domain model and its stores.
 
 pub mod catalog;
+pub mod effective;
 pub mod memory;
 pub mod model;
+pub mod secret;
+
+pub use effective::{
+    Availability, EffectiveIntegration, EffectiveIntegrations, EvaluatedIntegration,
+};
+pub use memory::{InMemoryIntegrationCredentialStore, InMemoryIntegrationStore};
+pub use model::*;
+pub use secret::{Sealed, SecretBox, SecretBoxError, credential_aad};
