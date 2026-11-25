@@ -287,7 +287,8 @@ impl SpaceRuntimes {
     async fn load_registry(&self, storage: &StorageLayer) -> Result<SkillRegistry> {
         let registry = SkillRegistry::new(storage.pool.clone())
             .await
-            .context("Failed to create skill registry")?;
+            .context("Failed to create skill registry")?
+            .with_user_skills_dir(self.pools.base_dir().join("skills"));
         registry
             .load_embedded()
             .await
@@ -295,7 +296,11 @@ impl SpaceRuntimes {
         self.sync_builtins_once(&registry);
 
         let project_root = std::env::current_dir().ok();
-        let dirs = crate::bootstrap::skill_dirs(&self.config, project_root.as_deref());
+        let dirs = crate::bootstrap::skill_dirs_in(
+            Some(self.pools.base_dir()),
+            &self.config,
+            project_root.as_deref(),
+        );
         let dirs: Vec<(&Path, SkillSource)> =
             dirs.iter().map(|(p, s)| (p.as_path(), s.clone())).collect();
         registry
