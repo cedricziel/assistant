@@ -26,6 +26,7 @@ use assistant_auth::jwt::{JwtKeyPair, JwtManager};
 use assistant_auth::middleware::AuthState;
 use assistant_auth::oauth2::server::InMemoryRefreshTokenStore;
 use assistant_core::auth::{ApiKeyRecord, ApiKeyStore as _, AuthContext};
+use assistant_core::clock::{Clock as _, SystemClock};
 use assistant_core::identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
 use assistant_core::store::{
     InMemoryMembershipStore, InMemoryUserStore, MembershipStore as _, SpaceMembership, User,
@@ -72,7 +73,7 @@ impl Fixture {
 
         let users = Arc::new(InMemoryUserStore::default());
         let memberships = Arc::new(InMemoryMembershipStore::default());
-        let now = chrono::Utc::now();
+        let now = SystemClock.now();
         for (user, space, role) in [
             ("alice", A1, Role::Member),
             ("adam", A1, Role::OrgAdmin),
@@ -170,7 +171,7 @@ impl Fixture {
                 space_roles: HashMap::from([(SpaceId::from(space), Role::Member)]),
                 scopes,
                 expires_at: None,
-                created_at: chrono::Utc::now(),
+                created_at: SystemClock.now(),
             })
             .await
             .unwrap();
