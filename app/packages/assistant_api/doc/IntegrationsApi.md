@@ -368,7 +368,7 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getIntegrationsApi();
 final IntegrationLayer layer = ; // IntegrationLayer | Only integrations of this layer.
-final String spaceId = spaceId_example; // String | Only space-layer integrations of this space.
+final String spaceId = spaceId_example; // String | Only integrations in use in this space: its own space-layer ones, plus the org-layer ones offered to it that it has not opted out of. User-layer integrations belong to no space and are never returned. Without this filter, opted-out org integrations are listed too, so a space can opt back in.
 
 try {
     final response = api.listIntegrations(layer, spaceId);
@@ -383,7 +383,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **layer** | [**IntegrationLayer**](.md)| Only integrations of this layer. | [optional] 
- **spaceId** | **String**| Only space-layer integrations of this space. | [optional] 
+ **spaceId** | **String**| Only integrations in use in this space: its own space-layer ones, plus the org-layer ones offered to it that it has not opted out of. User-layer integrations belong to no space and are never returned. Without this filter, opted-out org integrations are listed too, so a space can opt back in. | [optional] 
 
 ### Return type
 

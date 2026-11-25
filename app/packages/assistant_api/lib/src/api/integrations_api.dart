@@ -673,7 +673,7 @@ class IntegrationsApi {
   ///
   /// Parameters:
   /// * [layer] - Only integrations of this layer.
-  /// * [spaceId] - Only space-layer integrations of this space.
+  /// * [spaceId] - Only integrations in use in this space: its own space-layer ones, plus the org-layer ones offered to it that it has not opted out of. User-layer integrations belong to no space and are never returned. Without this filter, opted-out org integrations are listed too, so a space can opt back in.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
