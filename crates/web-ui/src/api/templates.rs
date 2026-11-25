@@ -28,14 +28,15 @@ use assistant_storage::OrgStorageLayer;
 
 use crate::errors::json_error;
 use crate::openapi::ErrorBody;
+use crate::space::{Access, SpaceResolver};
 
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct TemplatesApiState {
     pub org_storage: Arc<OrgStorageLayer>,
-    /// Main assistant.db pool for persona operations.
-    pub pool: sqlx::SqlitePool,
+    /// Resolves the space a persona is created in to its database.
+    pub spaces: SpaceResolver,
 }
 
 // -- Request/response types --------------------------------------------------
@@ -151,12 +152,19 @@ pub async fn list_templates(
 pub async fn create_from_template(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<TemplatesApiState>,
-    Path((org_id, _space_id)): Path<(String, String)>,
+    Path((org_id, space_id)): Path<(String, String)>,
     Json(body): Json<CreateFromTemplateRequest>,
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
         return json_error(StatusCode::FORBIDDEN, "access denied");
+    }
+    let space = match state.spaces.resolve(&ctx, Some(&space_id)).await {
+        Ok(space) => space,
+        Err(denied) => return denied.into_response(),
+    };
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
     }
 
     // Resolve the template from the catalog.
@@ -185,7 +193,7 @@ pub async fn create_from_template(
     let persona_id = format!("persona_{}", uuid::Uuid::new_v4());
     let now = SystemClock.now();
 
-    // Insert into the personas table in the main assistant.db.
+    // Insert into the personas table of the space's database.
     let result = sqlx::query(
         "INSERT INTO personas (id, name, is_default, owner_user_id, created_at, updated_at)
          VALUES (?, ?, 0, ?, ?, ?)",
@@ -195,7 +203,7 @@ pub async fn create_from_template(
     .bind(&ctx.user_id.0)
     .bind(now)
     .bind(now)
-    .execute(&state.pool)
+    .execute(&space.storage.pool)
     .await;
 
     if let Err(e) = result {
@@ -228,20 +236,30 @@ pub async fn onboarding_status(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<TemplatesApiState>,
 ) -> Response {
-    let has_persona: bool =
-        match sqlx::query_scalar("SELECT COUNT(*) > 0 FROM personas WHERE owner_user_id = ?")
-            .bind(&ctx.user_id.0)
-            .fetch_one(&state.pool)
-            .await
+    // A persona in any space the caller can reach counts.
+    for space_id in ctx.space_roles.keys() {
+        let Ok(space) = state.spaces.resolve(&ctx, Some(space_id.as_ref())).await else {
+            continue;
+        };
+        match sqlx::query_scalar::<_, bool>(
+            "SELECT COUNT(*) > 0 FROM personas WHERE owner_user_id = ?",
+        )
+        .bind(&ctx.user_id.0)
+        .fetch_one(&space.storage.pool)
+        .await
         {
-            Ok(v) => v,
+            Ok(true) => {
+                return Json(OnboardingStatusResponse { has_persona: true }).into_response();
+            }
+            Ok(false) => {}
             Err(e) => {
                 tracing::error!("failed to query onboarding status: {e}");
                 return json_error(StatusCode::INTERNAL_SERVER_ERROR, "database error");
             }
-        };
+        }
+    }
 
-    Json(OnboardingStatusResponse { has_persona }).into_response()
+    Json(OnboardingStatusResponse { has_persona: false }).into_response()
 }
 
 #[cfg(test)]
@@ -287,11 +305,18 @@ mod tests {
         .await
         .unwrap();
 
-        // Create an in-memory assistant.db for persona operations.
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let pool = storage.pool.clone();
+        // Serve space `sp_eng` from an in-memory database.
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let pools = Arc::new(assistant_storage::OrgPoolFactory::new(
+            "/nonexistent/assistant-test-root",
+        ));
+        pools.insert_space_storage("acme", "eng", storage).unwrap();
+        let spaces = SpaceResolver::new(org_storage.clone(), pools);
 
-        TemplatesApiState { org_storage, pool }
+        TemplatesApiState {
+            org_storage,
+            spaces,
+        }
     }
 
     #[tokio::test]
@@ -362,6 +387,88 @@ mod tests {
         let persona: PersonaFromTemplateResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(persona.name, "My Chatbot");
         assert!(persona.persona_id.starts_with("persona_"));
+    }
+
+    fn ctx_with_role(role: Role, space: &str) -> AuthContext {
+        let mut ctx = make_admin_ctx();
+        ctx.space_roles = HashMap::from([(SpaceId::from(space), role)]);
+        ctx
+    }
+
+    async fn post_from_template(state: TemplatesApiState, ctx: AuthContext) -> StatusCode {
+        let catalog = state.org_storage.catalog_item_store();
+        catalog
+            .create_item(&assistant_core::store::CatalogItem {
+                id: "tpl_1".into(),
+                org_id: OrgId::from("org_1"),
+                resource_type: CatalogResourceType::Template,
+                name: "chatbot".into(),
+                description: String::new(),
+                created_at: chrono::Utc::now(),
+            })
+            .await
+            .unwrap();
+        test_app(state, ctx)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/orgs/org_1/spaces/sp_eng/personas/from-template")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"template_id":"tpl_1"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn create_persona_from_template_needs_a_member_role_in_the_space() {
+        assert_eq!(
+            post_from_template(setup_state().await, ctx_with_role(Role::Viewer, "sp_eng")).await,
+            StatusCode::FORBIDDEN,
+            "a viewer cannot create personas"
+        );
+        assert_eq!(
+            post_from_template(setup_state().await, ctx_with_role(Role::Member, "sp_eng")).await,
+            StatusCode::CREATED
+        );
+    }
+
+    #[tokio::test]
+    async fn create_persona_from_template_denies_a_space_the_caller_has_no_role_in() {
+        assert_eq!(
+            post_from_template(setup_state().await, ctx_with_role(Role::Member, "sp_other")).await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[tokio::test]
+    async fn onboarding_status_counts_personas_in_any_reachable_space() {
+        let state = setup_state().await;
+        let status = |state: TemplatesApiState| async move {
+            let resp = test_app(state, ctx_with_role(Role::Member, "sp_eng"))
+                .oneshot(
+                    Request::builder()
+                        .uri("/users/me/onboarding-status")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice::<OnboardingStatusResponse>(&body)
+                .unwrap()
+                .has_persona
+        };
+        assert!(!status(state.clone()).await);
+
+        let created =
+            post_from_template(state.clone(), ctx_with_role(Role::Member, "sp_eng")).await;
+        assert_eq!(created, StatusCode::CREATED);
+        assert!(status(state).await, "the persona lives in sp_eng");
     }
 
     #[tokio::test]

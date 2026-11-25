@@ -690,7 +690,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
     let templates_api_state = api::templates::TemplatesApiState {
         org_storage: org_storage.clone(),
-        pool: storage.pool.clone(),
+        spaces: space_resolver.clone(),
     };
 
     // -- Router: public routes (no auth required) --------------------------
