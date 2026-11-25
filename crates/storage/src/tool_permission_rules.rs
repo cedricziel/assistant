@@ -13,6 +13,8 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
+use assistant_core::clock::{Clock, SystemClock};
+
 /// Whether a saved rule permits or forbids the tool calls it matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleEffect {
@@ -81,11 +83,21 @@ pub trait ToolPermissionRuleStore: Send + Sync {
 /// SQLite-backed [`ToolPermissionRuleStore`].
 pub struct SqliteToolPermissionRuleStore {
     pool: SqlitePool,
+    /// Clock for `created_at`. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl SqliteToolPermissionRuleStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -136,7 +148,11 @@ impl ToolPermissionRuleStore for SqliteToolPermissionRuleStore {
         .bind(user_id)
         .bind(effect.as_str())
         .bind(rule)
-        .bind(Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true))
+        .bind(
+            self.clock
+                .now()
+                .to_rfc3339_opts(SecondsFormat::Millis, true),
+        )
         .bind(source_interaction_id)
         .execute(&self.pool)
         .await?;
@@ -191,14 +207,28 @@ impl ToolPermissionRuleStore for SqliteToolPermissionRuleStore {
 }
 
 /// In-memory [`ToolPermissionRuleStore`] for tests.
-#[derive(Default)]
 pub struct InMemoryToolPermissionRuleStore {
     rows: Arc<Mutex<Vec<ToolPermissionRule>>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl Default for InMemoryToolPermissionRuleStore {
+    fn default() -> Self {
+        Self {
+            rows: Arc::default(),
+            clock: Arc::new(SystemClock),
+        }
+    }
 }
 
 impl InMemoryToolPermissionRuleStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<ToolPermissionRule>> {
@@ -230,7 +260,7 @@ impl ToolPermissionRuleStore for InMemoryToolPermissionRuleStore {
             user_id: user_id.to_string(),
             effect,
             rule: rule.to_string(),
-            created_at: Utc::now(),
+            created_at: self.clock.now(),
             source_interaction_id: source_interaction_id.map(str::to_string),
         };
         rows.push(saved.clone());
@@ -264,6 +294,10 @@ impl ToolPermissionRuleStore for InMemoryToolPermissionRuleStore {
 
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone;
+
+    use assistant_core::clock::FakeClock;
+
     use super::*;
     use crate::StorageLayer;
 
@@ -354,6 +388,27 @@ mod tests {
     #[tokio::test]
     async fn in_memory_store_satisfies_the_contract() {
         assert_store_contract(&InMemoryToolPermissionRuleStore::new()).await;
+    }
+
+    #[tokio::test]
+    async fn stores_stamp_created_at_from_the_injected_clock() {
+        let seed = Utc.with_ymd_and_hms(2026, 11, 25, 12, 0, 0).unwrap();
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let sqlite = SqliteToolPermissionRuleStore::new(storage.pool.clone())
+            .with_clock(Arc::new(FakeClock::new(seed)));
+        let memory =
+            InMemoryToolPermissionRuleStore::new().with_clock(Arc::new(FakeClock::new(seed)));
+
+        let from_sqlite = sqlite
+            .upsert("alice", RuleEffect::Allow, "bash(ls*)", None)
+            .await
+            .unwrap();
+        let from_memory = memory
+            .upsert("alice", RuleEffect::Allow, "bash(ls*)", None)
+            .await
+            .unwrap();
+        assert_eq!(from_sqlite.created_at, seed);
+        assert_eq!(from_memory.created_at, seed);
     }
 
     #[tokio::test]
