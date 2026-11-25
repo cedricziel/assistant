@@ -25,6 +25,7 @@ pub mod command_events;
 pub mod conversation_broadcaster;
 pub mod conversation_events;
 pub mod conversations;
+pub mod integration_store;
 pub mod interface_instance_store;
 pub mod memory_chunks;
 pub mod message_bus;
@@ -67,6 +68,7 @@ pub use conversation_events::{
 pub use conversations::{
     ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
 };
+pub use integration_store::{SqliteIntegrationCredentialStore, SqliteIntegrationStore};
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use memory_chunks::{
     FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,
