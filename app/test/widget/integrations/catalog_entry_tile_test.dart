@@ -2,7 +2,6 @@ import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/features/integrations/auth_kind_badge.dart';
 import 'package:assistant_app/features/integrations/catalog_entry_tile.dart';
 import 'package:built_collection/built_collection.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
