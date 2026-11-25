@@ -552,7 +552,7 @@ async fn a_slow_server_times_out_and_is_marked_unreachable() {
     assert!(started.elapsed() < Duration::from_secs(5));
     let health = world.health.get("int_1", None).await.unwrap().unwrap();
     assert!(!health.reachable);
-    assert!(health.last_error.as_deref().unwrap().contains("timed out"));
+    assert_eq!(health.last_error.as_deref(), Some("timeout"));
     assert_eq!(world.pool.connection_count().await, 0);
 }
 
@@ -904,5 +904,140 @@ async fn the_pool_sweeps_itself_without_being_asked() {
         world.pool.tracked(),
         0,
         "an idle connection is dropped by the background sweep"
+    );
+}
+
+// -- probing ------------------------------------------------------------------
+
+#[tokio::test]
+async fn probing_the_same_integration_again_too_soon_is_throttled() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig {
+        probe_interval: Duration::from_secs(5),
+        ..ConnectionsConfig::default()
+    });
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+
+    world.pool.probe(&eff).await.unwrap();
+    let requests = server.received_requests().await.unwrap().len();
+    world.clock.advance(Duration::from_secs(2));
+    let again = world.pool.probe(&eff).await;
+
+    assert_eq!(
+        again.err(),
+        Some(ConnectError::Throttled {
+            retry_after: Duration::from_secs(3)
+        })
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), requests);
+
+    world.clock.advance(Duration::from_secs(3));
+    world.pool.probe(&eff).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_failed_probe_is_throttled_too() {
+    let script = Script::new(&["t"]);
+    script.healthy.store(false, Ordering::SeqCst);
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+
+    assert!(matches!(
+        world.pool.probe(&eff).await,
+        Err(ConnectError::Unreachable(_))
+    ));
+    assert!(matches!(
+        world.pool.probe(&eff).await,
+        Err(ConnectError::Throttled { .. })
+    ));
+}
+
+#[tokio::test]
+async fn the_throttle_is_per_integration_and_subject() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world
+        .integration(&server.uri(), |i| {
+            i.credential_mode = CredentialMode::PerUser
+        })
+        .await;
+    let (u1, u2) = (UserId::from("usr_1"), UserId::from("usr_2"));
+    world.credential(&integration, Some(&u1), "a", 0).await;
+    world.credential(&integration, Some(&u2), "b", 0).await;
+
+    world
+        .pool
+        .probe(&effective(&integration, Some(&u1)))
+        .await
+        .unwrap();
+    world
+        .pool
+        .probe(&effective(&integration, Some(&u2)))
+        .await
+        .unwrap();
+}
+
+// -- what a failure says --------------------------------------------------------
+
+async fn unreachable_message(world: &World, integration: &Integration) -> String {
+    let error = world
+        .pool
+        .connect(&effective(integration, None))
+        .await
+        .err()
+        .expect("the connection must fail");
+    let health = world.health.get("int_1", None).await.unwrap().unwrap();
+    assert_eq!(health.last_error, Some(error.message()));
+    error.message()
+}
+
+#[tokio::test]
+async fn failures_are_reported_by_kind_and_never_with_the_raw_transport_error() {
+    // HTTP status.
+    let script = Script::new(&["t"]);
+    script.healthy.store(false, Ordering::SeqCst);
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    assert_eq!(unreachable_message(&world, &integration).await, "HTTP 500");
+
+    // Nothing listening.
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration("http://127.0.0.1:9/mcp", |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    assert_eq!(
+        unreachable_message(&world, &integration).await,
+        "connection failed"
+    );
+
+    // Not an MCP server: a 200 that is not JSON-RPC.
+    let garbage = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html>hello</html>"))
+        .mount(&garbage)
+        .await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&garbage.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    assert_eq!(
+        unreachable_message(&world, &integration).await,
+        "protocol error"
+    );
+
+    // TLS spoken to a plain-HTTP server: rmcp does not say why the request failed.
+    let plain = serve(&Script::new(&["t"])).await;
+    let https_url = plain.uri().replacen("http://", "https://", 1);
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&https_url, |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    assert_eq!(
+        unreachable_message(&world, &integration).await,
+        "connection failed"
     );
 }

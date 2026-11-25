@@ -12,7 +12,6 @@ use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use http::{HeaderName, HeaderValue};
 use rmcp::ServiceExt;
@@ -50,6 +49,9 @@ pub struct ConnectionsConfig {
     pub tools_ttl: Duration,
     /// How often the pool drops idle connections on its own.
     pub sweep_interval: Duration,
+    /// The shortest time between two [`probe`](IntegrationConnections::probe)s
+    /// of the same integration and subject.
+    pub probe_interval: Duration,
 }
 
 impl Default for ConnectionsConfig {
@@ -60,6 +62,7 @@ impl Default for ConnectionsConfig {
             retry_after: Duration::from_secs(30),
             tools_ttl: Duration::from_secs(5 * 60),
             sweep_interval: Duration::from_secs(60),
+            probe_interval: Duration::from_secs(5),
         }
     }
 }
@@ -73,13 +76,22 @@ pub enum ConnectError {
     Unreachable(String),
     /// Reading the stores failed.
     Internal(String),
+    /// A probe came too soon after the last one for the same integration and
+    /// subject.
+    Throttled { retry_after: Duration },
 }
 
 impl ConnectError {
     /// The reason alone, without the kind prefix [`Display`](fmt::Display) adds.
-    pub fn message(&self) -> &str {
+    pub fn message(&self) -> String {
         match self {
-            Self::Credential(m) | Self::Unreachable(m) | Self::Internal(m) => m,
+            Self::Credential(m) | Self::Unreachable(m) | Self::Internal(m) => m.clone(),
+            Self::Throttled { retry_after } => {
+                format!(
+                    "tested too recently; retry in {}s",
+                    retry_after.as_secs().max(1)
+                )
+            }
         }
     }
 }
@@ -90,6 +102,7 @@ impl fmt::Display for ConnectError {
             Self::Credential(m) => write!(f, "credential unusable: {m}"),
             Self::Unreachable(m) => write!(f, "unreachable: {m}"),
             Self::Internal(m) => write!(f, "internal error: {m}"),
+            Self::Throttled { .. } => f.write_str(&self.message()),
         }
     }
 }
@@ -136,6 +149,8 @@ struct Shared {
     clock: Arc<dyn Clock>,
     config: ConnectionsConfig,
     slots: Mutex<HashMap<Key, Arc<AsyncMutex<Slot>>>>,
+    /// When each integration and subject was last probed.
+    probes: Mutex<HashMap<Key, Instant>>,
 }
 
 /// Stops the sweep when the pool is dropped.
@@ -195,6 +210,7 @@ impl IntegrationConnections {
             clock,
             config,
             slots: Mutex::new(HashMap::new()),
+            probes: Mutex::new(HashMap::new()),
         });
         let sweeper = tokio::runtime::Handle::try_current().ok().map(|runtime| {
             Sweeper(runtime.spawn(sweep_periodically(Arc::downgrade(&shared), interval)))
@@ -263,10 +279,7 @@ impl IntegrationConnections {
                     Err(_) => {
                         // A session that stops answering is skipped, not waited on again.
                         slot.live = None;
-                        let error = ConnectError::Unreachable(format!(
-                            "tool list refresh timed out after {:?}",
-                            config.connect_timeout
-                        ));
+                        let error = ConnectError::Unreachable(TIMEOUT.into());
                         return Err(self
                             .remember_failure(&mut slot, integration, subject, versions, now, error)
                             .await);
@@ -342,9 +355,14 @@ impl IntegrationConnections {
     /// Connect once without keeping anything, and record the outcome as the
     /// integration's health. For checks that must not leave a session open,
     /// like the `test` endpoint.
+    ///
+    /// A probe skips the failure pause, so each integration and subject may be
+    /// probed only once per [`ConnectionsConfig::probe_interval`]; sooner, it
+    /// fails with [`ConnectError::Throttled`] without contacting the server.
     pub async fn probe(&self, effective: &EffectiveIntegration) -> Result<Vec<Tool>, ConnectError> {
         let integration = &effective.integration;
         let subject = effective.credential_subject.as_ref();
+        self.shared.reserve_probe(integration, subject)?;
         let stored = self.stored_credential(integration, subject).await?;
         let header = self.auth_header(integration, subject, stored.as_ref())?;
         match open(
@@ -511,6 +529,27 @@ impl Shared {
         now.saturating_duration_since(live.last_used) > self.config.idle_timeout
     }
 
+    /// Claim the right to probe, or say how long until it is allowed.
+    fn reserve_probe(
+        &self,
+        integration: &Integration,
+        subject: Option<&UserId>,
+    ) -> Result<(), ConnectError> {
+        let now = self.clock.now_instant();
+        let mut probes = self.probes.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = (integration.id.clone(), subject.cloned());
+        if let Some(last) = probes.get(&key) {
+            let since = now.saturating_duration_since(*last);
+            if since < self.config.probe_interval {
+                return Err(ConnectError::Throttled {
+                    retry_after: self.config.probe_interval - since,
+                });
+            }
+        }
+        probes.insert(key, now);
+        Ok(())
+    }
+
     async fn sweep(&self) {
         let now = self.clock.now_instant();
         for slot in self.all_slots() {
@@ -528,6 +567,10 @@ impl Shared {
                 slot.failure = None;
             }
         }
+        self.probes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|_, last| now.saturating_duration_since(*last) < self.config.probe_interval);
         // Nobody else holds an entry the map alone references, and entries are
         // only handed out under this lock, so an empty one can go.
         self.slots
@@ -582,6 +625,9 @@ fn header_for(
 }
 
 /// Open a Streamable HTTP session and list its tools within `timeout`.
+///
+/// Failures are reported by kind (see [`classify`]); the raw transport error
+/// goes to the debug log only, so it never reaches an API response.
 async fn open(
     name: &str,
     url: &str,
@@ -594,19 +640,48 @@ async fn open(
             config = config.custom_headers(HashMap::from([(header_name, value)]));
         }
         let transport = StreamableHttpClientTransport::<reqwest::Client>::from_config(config);
-        let service = ()
-            .serve(transport)
-            .await
-            .map_err(|e| anyhow!("initialize handshake failed: {e}"))?;
+        let service = ().serve(transport).await.map_err(anyhow::Error::new)?;
         let client = McpClient::new(name, service);
         let tools = client.list_tools().await?;
         anyhow::Ok((client, tools))
     };
     match tokio::time::timeout(timeout, attempt).await {
         Ok(Ok(opened)) => Ok(opened),
-        Ok(Err(e)) => Err(ConnectError::Unreachable(format!("{e:#}"))),
-        Err(_) => Err(ConnectError::Unreachable(format!(
-            "connection timed out after {timeout:?}"
-        ))),
+        Ok(Err(e)) => {
+            let raw = format!("{e:#}");
+            debug!(integration = name, error = %raw, "integration connection failed");
+            Err(ConnectError::Unreachable(classify(&raw)))
+        }
+        Err(_) => Err(ConnectError::Unreachable(TIMEOUT.into())),
     }
+}
+
+const TIMEOUT: &str = "timeout";
+
+/// Reduce a transport error to a kind safe to show: `HTTP <status>`,
+/// `timeout`, `connection failed` or `protocol error`.
+///
+/// rmcp flattens a failed request to "error sending request", which hides
+/// whether the cause was a refused connection, DNS or TLS, so those share
+/// `connection failed`.
+fn classify(raw: &str) -> String {
+    let lower = raw.to_ascii_lowercase();
+    if let Some(status) = http_status(&lower) {
+        return format!("HTTP {status}");
+    }
+    let kind = if lower.contains("timed out") || lower.contains("timeout") {
+        TIMEOUT
+    } else if lower.contains("error sending request") {
+        "connection failed"
+    } else {
+        "protocol error"
+    };
+    kind.into()
+}
+
+/// The status in `... http 500 ...` (lowercased input), if any.
+fn http_status(lower: &str) -> Option<&str> {
+    let after = lower.split("http ").nth(1)?;
+    let digits = after.get(..3)?;
+    digits.bytes().all(|b| b.is_ascii_digit()).then_some(digits)
 }

@@ -80,7 +80,7 @@ pub async fn test_integration(
         Err(ConnectError::Internal(message)) => {
             return Err(anyhow::anyhow!(message).into());
         }
-        Err(error) => (false, Vec::new(), Some(error.message().to_owned())),
+        Err(error) => (false, Vec::new(), Some(error.message())),
     };
 
     let view = caller_view(&state, &ctx, &policy, &integration).await?;
