@@ -207,6 +207,7 @@ class ApiClient {
   AccountApi get account => _generatedApi.getAccountApi();
   ApiKeysApi get apiKeys => _generatedApi.getApiKeysApi();
   CatalogApi get catalog => _generatedApi.getCatalogApi();
+  IntegrationsApi get integrations => _generatedApi.getIntegrationsApi();
   TemplatesApi get templates => _generatedApi.getTemplatesApi();
 
   /// Request that the server cancel an in-flight turn.
