@@ -52,16 +52,20 @@ impl EffectiveIntegration {
 pub struct EffectiveIntegrations {
     integrations: Arc<dyn IntegrationStore>,
     credentials: Arc<dyn IntegrationCredentialStore>,
+    /// `key_id` of the server key; credentials sealed under another key are unusable.
+    key_id: String,
 }
 
 impl EffectiveIntegrations {
     pub fn new(
         integrations: Arc<dyn IntegrationStore>,
         credentials: Arc<dyn IntegrationCredentialStore>,
+        key_id: impl Into<String>,
     ) -> Self {
         Self {
             integrations,
             credentials,
+            key_id: key_id.into(),
         }
     }
 
@@ -187,7 +191,9 @@ impl EffectiveIntegrations {
             .await?
         {
             None => Availability::NeedsConnection,
-            Some(c) if c.status == CredentialStatus::Ready => Availability::Available,
+            Some(c) if c.key_id == self.key_id && c.status == CredentialStatus::Ready => {
+                Availability::Available
+            }
             Some(_) => Availability::AuthExpired,
         };
         Ok((availability, subject))
@@ -200,6 +206,8 @@ mod tests {
 
     use super::*;
     use crate::integrations::memory::InMemoryIntegrationStore;
+
+    const KEY_ID: &str = "k";
 
     fn at(secs: i64) -> DateTime<Utc> {
         Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
@@ -230,7 +238,7 @@ mod tests {
     impl World {
         fn new() -> Self {
             let store = Arc::new(InMemoryIntegrationStore::new());
-            let sut = EffectiveIntegrations::new(store.clone(), store.credential_store());
+            let sut = EffectiveIntegrations::new(store.clone(), store.credential_store(), KEY_ID);
             Self {
                 store,
                 sut,
@@ -728,6 +736,39 @@ mod tests {
                 "{name}: resolve must omit blocked integrations"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn credentials_sealed_under_another_key_are_auth_expired() {
+        let mut w = World::new();
+        w.space_int("shared", &eng(), |_| {}).await;
+        w.org_int("per_user", |i| i.credential_mode = CredentialMode::PerUser)
+            .await;
+        w.ready("shared", None).await;
+        w.ready("per_user", Some(&u1())).await;
+        assert_eq!(
+            w.resolved(&eng(), Some(&u1())).await.len(),
+            2,
+            "same key: usable"
+        );
+
+        // The server restarts with a different key.
+        let rekeyed =
+            EffectiveIntegrations::new(w.store.clone(), w.store.credential_store(), "other-key");
+        let got = rekeyed.evaluate(&org(), &eng(), Some(&u1())).await.unwrap();
+        assert_eq!(got.len(), 2);
+        assert!(
+            got.iter()
+                .all(|e| e.availability == Availability::AuthExpired),
+            "key mismatch must report auth_expired: {got:?}"
+        );
+        assert!(
+            rekeyed
+                .resolve(&org(), &eng(), Some(&u1()))
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
