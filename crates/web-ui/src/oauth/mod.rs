@@ -328,6 +328,7 @@ mod tests {
             secure_cookie: false,
             oidc: Arc::new(oidc_registry::OidcProviderRegistry::new(
                 org_storage.clone(),
+                test_support::test_secrets(),
             )),
             oidc_sessions: Arc::new(PendingOidcSessionStore::new(
                 std::time::Duration::from_secs(300),

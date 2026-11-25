@@ -1,5 +1,7 @@
 //! Shared fixtures for OIDC tests: a mock IdP, a signing key, and org seeding.
 
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -7,6 +9,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use assistant_auth::oidc::{IdTokenClaims, Jwk, JwksResponse, OidcDiscovery};
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::OrgId;
+use assistant_core::integrations::{Sealed, SecretBox, oidc_client_secret_aad};
+use assistant_core::secret::Secret;
 use assistant_core::store::{OrgOidcConfig, OrgOidcConfigStore, OrgStore, Organization};
 use assistant_storage::OrgStorageLayer;
 
@@ -121,6 +125,21 @@ pub(crate) async fn seed_org(storage: &OrgStorageLayer, id: &str, slug: &str, au
         })
         .await
         .unwrap();
+}
+
+/// The server key used by OIDC tests.
+pub(crate) fn test_secrets() -> Arc<SecretBox> {
+    Arc::new(SecretBox::from_key([7; 32]))
+}
+
+/// `plaintext` sealed under `secrets` the way the settings API stores it.
+pub(crate) fn sealed_client_secret(secrets: &SecretBox, org_id: &str, plaintext: &str) -> Sealed {
+    secrets
+        .seal(
+            &Secret::new(plaintext),
+            oidc_client_secret_aad(&OrgId::from(org_id)).as_bytes(),
+        )
+        .unwrap()
 }
 
 /// An OIDC config for `org_id` pointing at `issuer`.

@@ -578,6 +578,7 @@ async fn run_with_args(args: Args) -> Result<()> {
             secure_cookie,
             oidc: Arc::new(oauth::oidc_registry::OidcProviderRegistry::new(
                 org_storage.clone(),
+                secrets.clone(),
             )),
             oidc_sessions: Arc::new(oauth::oidc_sessions::PendingOidcSessionStore::new(
                 Duration::from_secs(300),

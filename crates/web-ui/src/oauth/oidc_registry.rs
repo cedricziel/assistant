@@ -11,10 +11,11 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{error, info};
 
 use assistant_auth::oidc::{OidcConfig, OidcProvider};
 use assistant_core::identity::OrgId;
+use assistant_core::integrations::{SecretBox, oidc_client_secret_aad};
 use assistant_core::store::{OrgOidcConfig, OrgOidcConfigStore};
 use assistant_storage::OrgStorageLayer;
 
@@ -24,19 +25,25 @@ type CachedProvider = (DateTime<Utc>, Arc<OidcProvider>);
 /// Resolves the [`OidcProvider`] for an org from its stored config.
 pub struct OidcProviderRegistry {
     storage: Arc<OrgStorageLayer>,
+    secrets: Arc<SecretBox>,
     http_client: reqwest::Client,
     cache: RwLock<HashMap<OrgId, CachedProvider>>,
 }
 
 impl OidcProviderRegistry {
-    pub fn new(storage: Arc<OrgStorageLayer>) -> Self {
-        Self::with_client(storage, reqwest::Client::new())
+    pub fn new(storage: Arc<OrgStorageLayer>, secrets: Arc<SecretBox>) -> Self {
+        Self::with_client(storage, secrets, reqwest::Client::new())
     }
 
     /// Use a custom HTTP client for discovery (for testing).
-    pub fn with_client(storage: Arc<OrgStorageLayer>, http_client: reqwest::Client) -> Self {
+    pub fn with_client(
+        storage: Arc<OrgStorageLayer>,
+        secrets: Arc<SecretBox>,
+        http_client: reqwest::Client,
+    ) -> Self {
         Self {
             storage,
+            secrets,
             http_client,
             cache: RwLock::new(HashMap::new()),
         }
@@ -44,8 +51,8 @@ impl OidcProviderRegistry {
 
     /// The provider for `org_id`, or `None` when the org has no OIDC config.
     ///
-    /// A failed discovery is returned as an error and not cached, so the
-    /// next call retries.
+    /// A failed discovery, or a client secret the server key cannot open, is
+    /// returned as an error and not cached, so the next call retries.
     pub async fn provider_for(&self, org_id: &OrgId) -> Result<Option<Arc<OidcProvider>>> {
         let Some(config) = self
             .storage
@@ -66,8 +73,11 @@ impl OidcProviderRegistry {
 
         let updated_at = config.updated_at;
         let issuer = config.issuer_url.clone();
+        let oidc_config = to_oidc_config(config, &self.secrets).inspect_err(|e| {
+            error!(org_id = %org_id, "cannot open the OIDC client secret: {e:#}");
+        })?;
         let provider = Arc::new(
-            OidcProvider::discover_with_client(to_oidc_config(config), self.http_client.clone())
+            OidcProvider::discover_with_client(oidc_config, self.http_client.clone())
                 .await
                 .with_context(|| format!("OIDC discovery failed for {issuer}"))?,
         );
@@ -80,15 +90,25 @@ impl OidcProviderRegistry {
     }
 }
 
-fn to_oidc_config(config: OrgOidcConfig) -> OidcConfig {
-    OidcConfig {
+fn to_oidc_config(config: OrgOidcConfig, secrets: &SecretBox) -> Result<OidcConfig> {
+    let aad = oidc_client_secret_aad(&config.org_id);
+    let client_secret = config
+        .client_secret
+        .map(|sealed| {
+            secrets
+                .open(&sealed, aad.as_bytes())
+                .map(|secret| secret.expose().to_owned())
+        })
+        .transpose()
+        .context("failed to open the OIDC client secret")?;
+    Ok(OidcConfig {
         issuer_url: config.issuer_url,
         client_id: config.client_id,
-        client_secret: config.client_secret,
+        client_secret,
         auto_provision: config.auto_provision,
         allowed_email_domains: (!config.allowed_email_domains.is_empty())
             .then_some(config.allowed_email_domains),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -96,14 +116,20 @@ mod tests {
     use chrono::Duration;
     use wiremock::MockServer;
 
+    use assistant_core::integrations::SecretBox;
+
     use super::super::test_support::{
-        discovery_hits, mount_idp, oidc_config, seed_oidc_org, seed_org,
+        discovery_hits, mount_idp, oidc_config, sealed_client_secret, seed_oidc_org, seed_org,
+        test_secrets,
     };
     use super::*;
 
     async fn registry() -> (OidcProviderRegistry, Arc<OrgStorageLayer>) {
         let storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
-        (OidcProviderRegistry::new(storage.clone()), storage)
+        (
+            OidcProviderRegistry::new(storage.clone(), test_secrets()),
+            storage,
+        )
     }
 
     #[tokio::test]
@@ -166,7 +192,7 @@ mod tests {
             "client-a2",
             Utc::now() + Duration::seconds(5),
         );
-        updated.client_secret = Some("s3cret".into());
+        updated.client_secret = Some(sealed_client_secret(&test_secrets(), "org_a", "s3cret"));
         storage
             .oidc_config_store()
             .upsert_oidc_config(&updated)
@@ -197,6 +223,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn secret_sealed_under_another_key_is_an_error_and_not_cached() {
+        let (registry, storage) = registry().await;
+        let idp = MockServer::start().await;
+        mount_idp(&idp).await;
+        seed_oidc_org(&storage, "org_a", "a", &idp.uri(), "client-a").await;
+        let other_key = SecretBox::from_key([9; 32]);
+        let mut config = oidc_config("org_a", &idp.uri(), "client-a", Utc::now());
+        config.client_secret = Some(sealed_client_secret(&other_key, "org_a", "s3cret"));
+        storage
+            .oidc_config_store()
+            .upsert_oidc_config(&config)
+            .await
+            .unwrap();
+        let org = OrgId::from("org_a");
+
+        assert!(
+            registry.provider_for(&org).await.is_err(),
+            "a secret the server key cannot open must fail the lookup"
+        );
+        assert_eq!(
+            discovery_hits(&idp).await,
+            0,
+            "no discovery runs without a usable secret"
+        );
+
+        config.client_secret = Some(sealed_client_secret(&test_secrets(), "org_a", "s3cret"));
+        storage
+            .oidc_config_store()
+            .upsert_oidc_config(&config)
+            .await
+            .unwrap();
+        assert!(
+            registry.provider_for(&org).await.unwrap().is_some(),
+            "the failure was not cached"
+        );
+    }
+
+    #[test]
+    fn opens_the_sealed_secret_for_the_provider_config() {
+        let secrets = test_secrets();
+        let mut config = oidc_config("org_a", "https://idp.example", "c", Utc::now());
+        config.client_secret = Some(sealed_client_secret(&secrets, "org_a", "s3cret"));
+
+        let mapped = to_oidc_config(config.clone(), &secrets).unwrap();
+        assert_eq!(mapped.client_secret.as_deref(), Some("s3cret"));
+
+        config.org_id = OrgId::from("org_b");
+        assert!(
+            to_oidc_config(config, &secrets).is_err(),
+            "a secret sealed for another org must not open"
+        );
+    }
+
+    #[tokio::test]
     async fn deleting_config_drops_cached_provider() {
         let (registry, storage) = registry().await;
         let idp = MockServer::start().await;
@@ -217,15 +297,17 @@ mod tests {
     #[test]
     fn empty_domain_list_means_any_domain() {
         let mut config = oidc_config("org_a", "https://idp.example", "c", Utc::now());
+        let secrets = test_secrets();
         assert!(
-            to_oidc_config(config.clone())
+            to_oidc_config(config.clone(), &secrets)
+                .unwrap()
                 .allowed_email_domains
                 .is_none()
         );
 
         config.allowed_email_domains = vec!["example.com".into()];
         config.auto_provision = false;
-        let mapped = to_oidc_config(config);
+        let mapped = to_oidc_config(config, &secrets).unwrap();
         assert_eq!(
             mapped.allowed_email_domains,
             Some(vec!["example.com".to_string()])

@@ -197,7 +197,9 @@ mod tests {
 
     use super::super::oidc_registry::OidcProviderRegistry;
     use super::super::oidc_sessions::{PendingOidcSession, PendingOidcSessionStore};
-    use super::super::test_support::{mount_idp, seed_oidc_org, seed_org, sign_test_id_token};
+    use super::super::test_support::{
+        mount_idp, seed_oidc_org, seed_org, sign_test_id_token, test_secrets,
+    };
     use super::*;
 
     /// Build an `OAuthState` with no orgs; tests seed the orgs they need.
@@ -239,7 +241,7 @@ mod tests {
             org_storage: org_storage.clone(),
             issuer: "http://localhost".into(),
             secure_cookie: false,
-            oidc: Arc::new(OidcProviderRegistry::new(org_storage)),
+            oidc: Arc::new(OidcProviderRegistry::new(org_storage, test_secrets())),
             oidc_sessions: sessions.clone(),
             rate_limits: Arc::new(crate::rate_limit::RateLimits::new(
                 Arc::new(assistant_core::clock::SystemClock),
