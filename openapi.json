@@ -8421,7 +8421,7 @@
             }
           },
           "400": {
-            "description": "Invalid or expired code",
+            "description": "Invalid or expired code, unknown org, or the org uses single sign-on",
             "content": {
               "text/html": {}
             }
@@ -11013,6 +11013,7 @@
         "description": "Form fields for POST /oauth/device/verify.",
         "required": [
           "user_code",
+          "org",
           "email",
           "password"
         ],
@@ -11020,6 +11021,10 @@
           "email": {
             "type": "string",
             "description": "Email for authentication."
+          },
+          "org": {
+            "type": "string",
+            "description": "Slug of the org the user signs in to. Emails are only unique per org."
           },
           "password": {
             "type": "string",

@@ -10,11 +10,10 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Json};
 use serde::Deserialize;
 
+use super::authorize::authenticate_password;
 use super::{
     DeviceCodeResponseSchema, OAuthError, OAuthErrorResponse, OAuthState, escape_html_attr,
 };
-
-use assistant_auth::password::verify_password;
 
 /// POST /oauth/device request body.
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -102,6 +101,8 @@ pub async fn device_verify_page(Query(params): Query<VerifyQuery>) -> impl IntoR
          pattern="[A-Za-z]{{4}}-[A-Za-z]{{4}}" maxlength="9" autocomplete="off"
          style="text-transform: uppercase; font-size: 1.5em; text-align: center; letter-spacing: 0.2em;">
   <p style="margin-top: 16px;">Sign in to authorize:</p>
+  <input type="text" name="org" placeholder="Organization" required
+         style="text-transform: none; font-size: 1em; text-align: left; letter-spacing: normal;">
   <input type="email" name="email" placeholder="Email" required
          style="text-transform: none; font-size: 1em; text-align: left; letter-spacing: normal;">
   <input type="password" name="password" placeholder="Password" required
@@ -119,6 +120,8 @@ pub async fn device_verify_page(Query(params): Query<VerifyQuery>) -> impl IntoR
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct DeviceVerifyForm {
     pub user_code: String,
+    /// Slug of the org the user signs in to. Emails are only unique per org.
+    pub org: String,
     /// Email for authentication.
     pub email: String,
     /// Password for authentication.
@@ -134,7 +137,7 @@ pub struct DeviceVerifyForm {
     request_body(content = DeviceVerifyForm, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "Device authorized", content_type = "text/html"),
-        (status = 400, description = "Invalid or expired code", content_type = "text/html"),
+        (status = 400, description = "Invalid or expired code, unknown org, or the org uses single sign-on", content_type = "text/html"),
         (status = 429, description = "Rate limit exceeded; see the Retry-After header"),
         (status = 401, description = "Invalid credentials", content_type = "text/html"),
     )
@@ -144,40 +147,10 @@ pub async fn device_verify_submit(
     Form(form): Form<DeviceVerifyForm>,
 ) -> impl IntoResponse {
     // Authenticate the user before approving the device code.
-    let user = match state
-        .org_storage
-        .user_store()
-        .get_user_by_email_any(&form.email)
-        .await
-    {
-        Ok(Some(u)) => u,
-        _ => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Html("error: invalid email or password".to_string()),
-            )
-                .into_response();
-        }
+    let user = match authenticate_password(&state, &form.org, &form.email, &form.password).await {
+        Ok(user) => user,
+        Err(resp) => return *resp,
     };
-
-    if user.password_hash.is_empty() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Html("error: invalid email or password".to_string()),
-        )
-            .into_response();
-    }
-
-    match verify_password(&form.password, &user.password_hash) {
-        Ok(true) => {}
-        _ => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Html("error: invalid email or password".to_string()),
-            )
-                .into_response();
-        }
-    }
 
     let user_code = form.user_code.trim().to_uppercase();
 

@@ -2071,4 +2071,192 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     }
+
+    // -- Device flow: the password check is scoped to one org --
+
+    /// Start a device flow and return its `(device_code, user_code)`.
+    async fn start_device_flow(state: &OAuthState) -> (String, String) {
+        let resp = state
+            .device_manager
+            .initiate("device-client", vec![])
+            .await
+            .unwrap();
+        (resp.device_code, resp.user_code)
+    }
+
+    /// POST `/oauth/device/verify`; `org: None` leaves the field out.
+    async fn verify_device(
+        state: &OAuthState,
+        user_code: &str,
+        org: Option<&str>,
+        email: &str,
+        password: &str,
+    ) -> axum::response::Response {
+        let org_field = org.map(|o| format!("&org={o}")).unwrap_or_default();
+        let form = format!(
+            "user_code={user_code}&email={}&password={password}{org_field}",
+            urlencoding::encode(email)
+        );
+        build_app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/device/verify")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Who approved the device flow, if anyone.
+    async fn device_approver(state: &OAuthState, device_code: &str) -> Option<String> {
+        match state.device_manager.poll(device_code).await.unwrap() {
+            assistant_auth::oauth2::device::PollResult::Authorized { user_id, .. } => Some(user_id),
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn device_verify_page_asks_for_the_org() {
+        let state = test_state().await;
+
+        let resp = build_app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/device/verify")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let html = body_text(resp).await;
+        assert!(
+            html.contains(r#"name="org""#),
+            "the form needs an organization field: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn device_verify_authenticates_against_the_selected_org_only() {
+        let state = test_state().await;
+        seed_namesake_org(&state).await;
+
+        for (org, password, expected, approver) in [
+            ("test", "secret123", StatusCode::OK, Some("usr_alice")),
+            ("other", "other-pass", StatusCode::OK, Some("usr_alice2")),
+            ("test", "other-pass", StatusCode::UNAUTHORIZED, None),
+            ("other", "secret123", StatusCode::UNAUTHORIZED, None),
+        ] {
+            let (device_code, user_code) = start_device_flow(&state).await;
+            let resp =
+                verify_device(&state, &user_code, Some(org), "alice@example.com", password).await;
+            assert_eq!(resp.status(), expected, "org={org} password={password}");
+            assert_eq!(
+                device_approver(&state, &device_code).await.as_deref(),
+                approver,
+                "org={org} password={password}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn device_verify_is_refused_for_an_oidc_org() {
+        let state = test_state().await;
+        let idp = wiremock::MockServer::start().await;
+        test_support::mount_idp(&idp).await;
+        test_support::seed_oidc_org(
+            &state.org_storage,
+            "org_acme",
+            "acme",
+            &idp.uri(),
+            "oidc-client",
+        )
+        .await;
+        seed_user(&state, "usr_carol", "org_acme", "carol@example.com", "pw").await;
+        let (device_code, user_code) = start_device_flow(&state).await;
+
+        let resp = verify_device(&state, &user_code, Some("acme"), "carol@example.com", "pw").await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(device_approver(&state, &device_code).await, None);
+    }
+
+    #[tokio::test]
+    async fn device_verify_is_refused_for_an_unknown_org() {
+        let state = test_state().await;
+        let (device_code, user_code) = start_device_flow(&state).await;
+
+        let resp = verify_device(
+            &state,
+            &user_code,
+            Some("no-such-org"),
+            "alice@example.com",
+            "secret123",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(device_approver(&state, &device_code).await, None);
+    }
+
+    #[tokio::test]
+    async fn device_verify_requires_an_org() {
+        let state = test_state().await;
+        let (device_code, user_code) = start_device_flow(&state).await;
+
+        let resp = verify_device(&state, &user_code, None, "alice@example.com", "secret123").await;
+
+        assert!(
+            resp.status().is_client_error(),
+            "a submission without an org must be rejected, got {}",
+            resp.status()
+        );
+        assert_eq!(device_approver(&state, &device_code).await, None);
+    }
+
+    #[tokio::test]
+    async fn device_verify_locks_out_one_orgs_account_only() {
+        let (state, _clock) = test_state_with_clock().await;
+        seed_namesake_org(&state).await;
+        let (_, user_code) = start_device_flow(&state).await;
+        for _ in 0..3 {
+            let resp = verify_device(
+                &state,
+                &user_code,
+                Some("test"),
+                "alice@example.com",
+                "wrong",
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        }
+
+        let locked = verify_device(
+            &state,
+            &user_code,
+            Some("test"),
+            "alice@example.com",
+            "secret123",
+        )
+        .await;
+        assert_eq!(locked.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        let (device_code, user_code) = start_device_flow(&state).await;
+        let other = verify_device(
+            &state,
+            &user_code,
+            Some("other"),
+            "alice@example.com",
+            "other-pass",
+        )
+        .await;
+        assert_eq!(other.status(), StatusCode::OK);
+        assert_eq!(
+            device_approver(&state, &device_code).await.as_deref(),
+            Some("usr_alice2")
+        );
+    }
 }

@@ -523,6 +523,7 @@ class OauthApi {
   ///
   /// Parameters:
   /// * [email] - Email for authentication.
+  /// * [org] - Slug of the org the user signs in to. Emails are only unique per org.
   /// * [password] - Password for authentication.
   /// * [userCode]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -536,6 +537,7 @@ class OauthApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> deviceVerifySubmit({
     required String email,
+    required String org,
     required String password,
     required String userCode,
     CancelToken? cancelToken,
@@ -565,6 +567,7 @@ class OauthApi {
       _bodyData = <String, dynamic>{
         r'email':
             encodeQueryParameter(_serializers, email, const FullType(String)),
+        r'org': encodeQueryParameter(_serializers, org, const FullType(String)),
         r'password': encodeQueryParameter(
             _serializers, password, const FullType(String)),
         r'user_code': encodeQueryParameter(

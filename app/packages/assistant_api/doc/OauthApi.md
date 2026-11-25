@@ -312,7 +312,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deviceVerifySubmit**
-> deviceVerifySubmit(email, password, userCode)
+> deviceVerifySubmit(email, org, password, userCode)
 
 POST /oauth/device/verify — user approves the device code.
 
@@ -322,11 +322,12 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getOauthApi();
 final String email = email_example; // String | Email for authentication.
+final String org = org_example; // String | Slug of the org the user signs in to. Emails are only unique per org.
 final String password = password_example; // String | Password for authentication.
 final String userCode = userCode_example; // String | 
 
 try {
-    api.deviceVerifySubmit(email, password, userCode);
+    api.deviceVerifySubmit(email, org, password, userCode);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->deviceVerifySubmit: $e\n');
 }
@@ -337,6 +338,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **email** | **String**| Email for authentication. | 
+ **org** | **String**| Slug of the org the user signs in to. Emails are only unique per org. | 
  **password** | **String**| Password for authentication. | 
  **userCode** | **String**|  | 
 

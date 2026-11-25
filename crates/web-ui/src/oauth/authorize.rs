@@ -13,7 +13,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use assistant_core::identity::OrgId;
-use assistant_core::store::{OrgStore, UserStore};
+use assistant_core::store::{OrgStore, User, UserStore};
 
 use super::oidc_sessions::PendingOidcSession;
 use super::{OAuthState, escape_html_attr};
@@ -325,11 +325,11 @@ fn password_form(params: &OAuthParams, org_slug: &str, email: &str) -> Response 
     ))
 }
 
-fn html_error(status: StatusCode, message: &str) -> Response {
+pub(super) fn html_error(status: StatusCode, message: &str) -> Response {
     (status, Html(format!("error: {message}"))).into_response()
 }
 
-fn internal_error() -> Response {
+pub(super) fn internal_error() -> Response {
     html_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
 }
 
@@ -408,75 +408,17 @@ pub async fn authorize_post(
         return resp;
     }
 
-    let org = match state
-        .org_storage
-        .org_store()
-        .get_org_by_slug(&form.org)
-        .await
+    let user = match authenticate_password(
+        &state,
+        &form.org,
+        form.email.as_deref().unwrap_or_default(),
+        form.password.as_deref().unwrap_or_default(),
+    )
+    .await
     {
-        Ok(Some(org)) => org,
-        Ok(None) => return html_error(StatusCode::BAD_REQUEST, "unknown organization"),
-        Err(e) => {
-            tracing::error!("org lookup failed: {e:#}");
-            return internal_error();
-        }
+        Ok(user) => user,
+        Err(resp) => return *resp,
     };
-    if org.auth_mode == "oidc" {
-        return html_error(
-            StatusCode::BAD_REQUEST,
-            "password sign-in is not available for this organization",
-        );
-    }
-
-    let email = form.email.unwrap_or_default();
-    let password = form.password.unwrap_or_default();
-
-    if email.is_empty() || password.is_empty() {
-        return html_error(StatusCode::BAD_REQUEST, "email and password are required");
-    }
-
-    // Lock out an account after repeated failures. Unknown emails are counted
-    // too, so the lockout does not reveal which accounts exist. The key is
-    // per org because the same email can belong to users in several orgs.
-    let account_key = format!("{}:{}", org.id, email.trim().to_lowercase());
-    let failures = &state.rate_limits.login_failures;
-    if let Err(retry_after) = failures.check(&account_key) {
-        return too_many_requests(retry_after);
-    }
-    let invalid_credentials = || {
-        let _ = failures.try_acquire(&account_key);
-        html_error(StatusCode::UNAUTHORIZED, "invalid email or password")
-    };
-
-    // Look up the user in this org and verify the password.
-    let user = match state
-        .org_storage
-        .user_store()
-        .get_user_by_email(&org.id, &email)
-        .await
-    {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            // Burn the same argon2 time as a real check so response timing
-            // does not reveal whether the email is registered.
-            assistant_auth::password::verify_dummy(&password);
-            return invalid_credentials();
-        }
-        Err(e) => {
-            tracing::error!("user lookup failed: {e}");
-            return internal_error();
-        }
-    };
-
-    // Verify password hash.
-    if user.password_hash.is_empty() {
-        assistant_auth::password::verify_dummy(&password);
-        return invalid_credentials();
-    }
-    match assistant_auth::password::verify_password(&password, &user.password_hash) {
-        Ok(true) => failures.reset(&account_key),
-        _ => return invalid_credentials(),
-    }
 
     // Generate authorization code.
     let scopes: Vec<String> = form
@@ -516,6 +458,88 @@ pub async fn authorize_post(
     }
 
     Redirect::to(&redirect).into_response()
+}
+
+/// Check `email` and `password` against the password-mode org `org_slug`.
+///
+/// Shared by every password sign-in step. Emails are only unique per org, so
+/// the org decides which user is checked. `Err` is the response to return.
+pub(super) async fn authenticate_password(
+    state: &OAuthState,
+    org_slug: &str,
+    email: &str,
+    password: &str,
+) -> Result<User, Box<Response>> {
+    let org = match state
+        .org_storage
+        .org_store()
+        .get_org_by_slug(org_slug)
+        .await
+    {
+        Ok(Some(org)) => org,
+        Ok(None) => return Err(html_error(StatusCode::BAD_REQUEST, "unknown organization").into()),
+        Err(e) => {
+            tracing::error!("org lookup failed: {e:#}");
+            return Err(internal_error().into());
+        }
+    };
+    if org.auth_mode == "oidc" {
+        return Err(html_error(
+            StatusCode::BAD_REQUEST,
+            "password sign-in is not available for this organization",
+        )
+        .into());
+    }
+
+    if email.is_empty() || password.is_empty() {
+        return Err(html_error(StatusCode::BAD_REQUEST, "email and password are required").into());
+    }
+
+    // Lock out an account after repeated failures. Unknown emails are counted
+    // too, so the lockout does not reveal which accounts exist. The key is
+    // per org because the same email can belong to users in several orgs.
+    let account_key = format!("{}:{}", org.id, email.trim().to_lowercase());
+    let failures = &state.rate_limits.login_failures;
+    if let Err(retry_after) = failures.check(&account_key) {
+        return Err(too_many_requests(retry_after).into());
+    }
+    let invalid_credentials = || {
+        let _ = failures.try_acquire(&account_key);
+        Box::new(html_error(
+            StatusCode::UNAUTHORIZED,
+            "invalid email or password",
+        ))
+    };
+
+    // Look up the user in this org and verify the password.
+    let user = match state
+        .org_storage
+        .user_store()
+        .get_user_by_email(&org.id, email)
+        .await
+    {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            // Burn the same argon2 time as a real check so response timing
+            // does not reveal whether the email is registered.
+            assistant_auth::password::verify_dummy(password);
+            return Err(invalid_credentials());
+        }
+        Err(e) => {
+            tracing::error!("user lookup failed: {e}");
+            return Err(internal_error().into());
+        }
+    };
+
+    if user.password_hash.is_empty() {
+        assistant_auth::password::verify_dummy(password);
+        return Err(invalid_credentials());
+    }
+    match assistant_auth::password::verify_password(password, &user.password_hash) {
+        Ok(true) => failures.reset(&account_key),
+        _ => return Err(invalid_credentials()),
+    }
+    Ok(user)
 }
 
 /// The checks every sign-in step applies to the authorization request: a
