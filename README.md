@@ -170,7 +170,7 @@ Or via the MCP `install_skill` tool when connecting from Claude Code.
 
 > **Currently inactive.** Skill execution statistics used to be read from the
 > local trace store, which was removed when telemetry became OTLP-only
-> ([ADR-0011](docs/adr/adr-0011-otlp-only-telemetry.md)). `self-analyze`
+> ([ADR-0012](docs/adr/adr-0012-otlp-only-telemetry.md)). `self-analyze`
 > reports that no statistics are available and the improvement task is not
 > scheduled until a replacement lands.
 
@@ -356,7 +356,7 @@ The `opentelemetry-otlp` crate reads the standard `OTEL_EXPORTER_OTLP_*` env
 vars (endpoint, protocol, headers, timeout, compression) with per-signal
 overrides — see [docs/opentelemetry.md](docs/opentelemetry.md) for the full
 reference of emitted spans, metrics, and supported environment variables, and
-[ADR-0011](docs/adr/adr-0011-otlp-only-telemetry.md) for why the built-in
+[ADR-0012](docs/adr/adr-0012-otlp-only-telemetry.md) for why the built-in
 viewers and local store were removed.
 
 ### Pre-commit hooks

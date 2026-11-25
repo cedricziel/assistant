@@ -1,4 +1,4 @@
-# ADR 0011: Telemetry Is Emitted Over OTLP Only
+# ADR 0012: Telemetry Is Emitted Over OTLP Only
 
 **Status**: Accepted
 **Date**: 2026-11-25

@@ -77,7 +77,7 @@ All library crates MUST use `tracing` macros (`debug!`, `info!`, `warn!`, `error
 `println!` is NEVER permitted in library crates.
 The ReAct orchestration loop MUST emit OpenTelemetry spans for each turn.
 Telemetry MUST leave the process over OTLP only; the assistant MUST NOT keep a local telemetry
-store (see ADR-0011).
+store (see ADR-0012).
 
 **Rationale**: Emitting standard OpenTelemetry makes runtime behavior inspectable in any
 observability backend without modifying code, and keeps storage, retention and querying out of

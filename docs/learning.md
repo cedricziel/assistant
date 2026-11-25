@@ -101,12 +101,12 @@ Tool spans carry an `active_skill` attribute when a skill is loaded and are
 exported over OTLP like all telemetry. The improvement analysis does not read
 them: it asks a `SkillStatsProvider` for per-skill execution stats, and the
 local trace store that used to provide them was removed
-([ADR-0011](adr/adr-0011-otlp-only-telemetry.md)).
+([ADR-0012](adr/adr-0012-otlp-only-telemetry.md)).
 
 **Skill self-improvement is therefore inactive.** The `self-analyze` tool
 reports that no statistics are collected, the `skill-self-improve` task is not
 registered, and the CLI logs a warning at startup when `[learning] enabled`.
-Autonomous skill creation is unaffected. ADR-0011 proposes the replacement:
+Autonomous skill creation is unaffected. ADR-0012 proposes the replacement:
 a `skill_executions` table written by the orchestrator.
 
 ## Disabling

@@ -9,7 +9,7 @@ LogQL, PromQL, or whatever your backend speaks. See
 [ADR-0010](adr/adr-0010-external-observability.md).
 
 The assistant keeps no local telemetry store, API or viewer: OTLP is the only
-output ([ADR-0011](adr/adr-0011-otlp-only-telemetry.md)). With no OTLP
+output ([ADR-0012](adr/adr-0012-otlp-only-telemetry.md)). With no OTLP
 endpoint configured, telemetry is a no-op and only console logging runs.
 
 ## Quick start

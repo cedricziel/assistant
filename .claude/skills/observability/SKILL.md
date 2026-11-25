@@ -19,7 +19,7 @@ backend receives them (TraceQL, LogQL, PromQL, …). There are no
 `distributed_traces`, `logs`, or `metric_points` tables, no `/api/traces`,
 `/api/logs`, or `/api/analytics` endpoints, and no trace, log, or analytics
 screens in the app. See `docs/opentelemetry.md` and
-`docs/adr/adr-0011-otlp-only-telemetry.md`.
+`docs/adr/adr-0012-otlp-only-telemetry.md`.
 
 ## Turn export on
 

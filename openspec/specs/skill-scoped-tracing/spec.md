@@ -27,7 +27,7 @@ When the `load-skill` tool is invoked during a turn, the system SHALL record the
 
 ### Requirement: SkillStatsProvider trait abstracts the statistics source
 
-The system SHALL provide a `SkillStatsProvider` trait so the learning subsystem obtains per-skill execution statistics through an abstraction rather than a concrete store. Telemetry is exported over OTLP only and the assistant keeps no local trace store, so the statistics source is a product-owned one — see `docs/adr/adr-0011-otlp-only-telemetry.md`.
+The system SHALL provide a `SkillStatsProvider` trait so the learning subsystem obtains per-skill execution statistics through an abstraction rather than a concrete store. Telemetry is exported over OTLP only and the assistant keeps no local trace store, so the statistics source is a product-owned one — see `docs/adr/adr-0012-otlp-only-telemetry.md`.
 
 #### Scenario: No statistics source is configured
 
