@@ -1837,7 +1837,7 @@
           "integrations"
         ],
         "summary": "`GET /api/integrations/{id}` — get one integration.",
-        "description": "`404` when the caller may not see it, including another user's personal\nintegration.",
+        "description": "`404` when the caller may not see it, including another user's personal\nintegration. Org admins are the exception: they can read a personal\nintegration's metadata (never its credential) so they can remove it.",
         "operationId": "get_integration",
         "parameters": [
           {
@@ -1872,7 +1872,7 @@
             }
           },
           "404": {
-            "description": "No such integration, or the caller may not see it",
+            "description": "No such integration, or the caller may not see it (another user's personal integration, except to org admins)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1958,7 +1958,7 @@
           "integrations"
         ],
         "summary": "`PATCH /api/integrations/{id}` — update an integration.",
-        "description": "Layer, owner, catalog entry, auth kind and credential mode are fixed at\ninstall time. A catalog install cannot change its URL or header template;\nmoving a custom URL deletes its stored credentials.",
+        "description": "Layer, owner, catalog entry, auth kind and credential mode are fixed at\ninstall time. A catalog install cannot change its URL or header template;\nmoving a custom URL deletes its stored credentials. A change that races\nwith another one on the same integration fails with `409` instead of\noverwriting it.",
         "operationId": "update_integration",
         "parameters": [
           {
@@ -2023,7 +2023,7 @@
             }
           },
           "409": {
-            "description": "The slug is already taken",
+            "description": "The slug is already taken, or another request changed the integration since it was read (reload and retry)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2157,7 +2157,7 @@
           "integrations"
         ],
         "summary": "`DELETE /api/integrations/{id}/spaces/{space_id}?mode=` — remove a space row.",
-        "description": "The `mode` query parameter names the row (`allow` or `opt_out`) and has the\nsame permissions as `PUT`. Removing a row that does not exist succeeds.",
+        "description": "The `mode` query parameter names the row (`allow` or `opt_out`) and has the\nsame permissions as `PUT`. Removing a row that does not exist succeeds.\n\nRemoving the last `allow` row does not hide the integration everywhere: with\nno `allow` rows left it is offered to every space again, except those that\nopted out.",
         "operationId": "delete_space_access",
         "parameters": [
           {
@@ -10369,7 +10369,7 @@
       },
       "ErrorBody": {
         "type": "object",
-        "description": "Standard error envelope returned for every 4xx/5xx response from\n`/api/...` endpoints. Matches the project convention documented in\n`AGENTS.md`: `{\"error\": \"...message...\"}`.\n\nOAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`]\n(RFC 6749 §5.2) and are intentionally exempt.",
+        "description": "Standard error envelope returned for every 4xx/5xx response from\n`/api/...` endpoints. Matches the project convention documented in\n`AGENTS.md`: `{\"error\": \"...message...\"}`.\n\nOAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`]\n(RFC 6749 §5.2) and are intentionally exempt.\n\nOne more exception: a `401 Unauthorized` is sent by the auth middleware\nbefore any handler runs, as the plain text `Unauthorized`, not as JSON.",
         "required": [
           "error"
         ],
