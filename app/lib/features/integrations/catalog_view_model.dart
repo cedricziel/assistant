@@ -111,6 +111,12 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
     return _refetch(category: category == current ? null : category);
   }
 
+  /// Drops the search text and the category filter.
+  Future<void> clearFilters() {
+    _debounce?.cancel();
+    return _refetch(query: '', category: null);
+  }
+
   /// Fetches the next page and appends it.
   Future<void> loadMore() async {
     final current = state.value;

@@ -297,6 +297,22 @@ void main() {
       expect(state.items, hasLength(2));
     });
 
+    test('clearFilters drops both the query and the category', () async {
+      final t = _setup((_) async => _page([_entry('github')]));
+      addTearDown(t.container.dispose);
+      await t.container.read(catalogViewModelProvider.future);
+      final notifier = t.container.read(catalogViewModelProvider.notifier);
+      await notifier.selectCategory('dev');
+
+      await notifier.clearFilters();
+
+      final state = t.container.read(catalogViewModelProvider).requireValue;
+      expect(t.api.calls.last.q, isNull);
+      expect(t.api.calls.last.category, isNull);
+      expect(state.category, isNull);
+      expect(state.query, isEmpty);
+    });
+
     test('loadMore appends the next page using the cursor', () async {
       final t = _setup((call) async {
         if (call.cursor == 'c1') {
