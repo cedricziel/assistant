@@ -244,7 +244,7 @@ impl Default for TitlingConfig {
 /// Push notification / VAPID configuration (`[notifications]` section).
 ///
 /// VAPID keys are generated on first `assistant webui serve` startup and
-/// written back to `~/.assistant/config.toml`. Keeping them stable ensures
+/// written back to `~/.assistant/server.toml`. Keeping them stable ensures
 /// all existing browser push subscriptions remain valid.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NotificationsConfig {

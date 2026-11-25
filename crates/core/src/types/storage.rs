@@ -18,7 +18,7 @@ pub enum BusKind {
 /// Message bus configuration.
 ///
 /// Controls which bus backend is used. Add a `[bus]` section to
-/// `config.toml`:
+/// `~/.assistant/server.toml`:
 ///
 /// ```toml
 /// [bus]

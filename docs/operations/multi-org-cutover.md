@@ -30,7 +30,7 @@ Starting with this release:
    removes the `*-shm` / `*-wal` sidecars, so the two databases cannot
    diverge after a successful migration.
 3. **`config.storage.db_path` is removed.** The install root is always
-   `~/.assistant`; delete a leftover `[storage]` section from `config.toml`.
+   `~/.assistant`; delete a leftover `[storage]` section from `server.toml`.
 
 ## Verifying with `assistant doctor`
 

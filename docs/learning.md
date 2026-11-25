@@ -6,7 +6,7 @@ opt-in.
 
 ## Quick Start
 
-Add to `~/.assistant/config.toml`:
+Add to `~/.assistant/orgs/default/org.toml`:
 
 ```toml
 [learning]

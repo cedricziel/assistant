@@ -409,7 +409,7 @@ For hundreds+, enable the NATS backend via `[bus] kind = "nats"` (see below).
 
 The NATS backend is implemented in `assistant-bus-nats` and wired into the
 interface binaries. It is enabled by default in the primary binaries; set
-`[bus] kind = "nats"` to activate it at runtime:
+`[bus] kind = "nats"` in `~/.assistant/server.toml` to activate it at runtime:
 
 ```toml
 [bus]

@@ -11,11 +11,11 @@ pub use assistant_core::types::channels::MattermostConfig;
 /// Extension methods for [`MattermostConfig`] that require the `dirs` crate.
 pub trait MattermostConfigExt {
     /// Return the server URL, falling back to the `MATTERMOST_SERVER_URL`
-    /// environment variable if not configured in `config.toml`.
+    /// environment variable if not configured in `org.toml`.
     fn resolved_server_url(&self) -> Option<String>;
 
     /// Return the access token, falling back to the `MATTERMOST_TOKEN`
-    /// environment variable if not configured in `config.toml`.
+    /// environment variable if not configured in `org.toml`.
     fn resolved_token(&self) -> Option<Secret>;
 }
 

@@ -27,13 +27,15 @@ The Rust build embeds the Flutter web app via `rust-embed`, but cargo never runs
 
 All runtime data lives under `~/.assistant/`. The multi-org layout:
 
-- `server.toml` — global config: listen address, log level
-- `orgs/{slug}/org.toml` — per-org config: auth mode, LLM providers
+- `server.toml` — process-wide settings, loaded once at startup: message bus (`[bus]`), external MCP servers (`[mcp]`), Web Push keys (`[notifications]`)
+- `orgs/{slug}/org.toml` — per-org settings, loaded when the org's first space is used: LLM providers (`[llm]`), Persona, memory, skills, permissions, messenger and speech credentials. A space gets its LLM and settings from its own org.
 - `orgs/{slug}/org.db` — org-level database (users, spaces, memberships, API keys, OAuth clients)
 - `orgs/{slug}/spaces/{space}/space.db` — space-level database (conversations, messages, personas, scheduled tasks)
 - `orgs/{slug}/spaces/{space}/agents/{id}/` — per-persona agent workspace
 - `orgs/{slug}/spaces/{space}/skills/` — space-local skills
 - `orgs/{slug}/catalog/` — org-level shared skills, templates, interfaces
+
+The runtime does not read `config.toml`. See `docs/operations/configuration.md`.
 
 Legacy single-user installs are auto-migrated to `orgs/default/spaces/default/` on first startup. The migration renames the original `assistant.db` to `assistant.db.legacy` — a frozen snapshot retained for safety. Operators may delete it once `assistant doctor` reports no drift between the legacy and runtime databases. If a host was migrated by an old binary that kept writing to `assistant.db` afterwards, run `assistant migrate finalize` to cut over (see `docs/operations/multi-org-cutover.md`).
 

@@ -11,11 +11,11 @@ pub use assistant_core::types::channels::SlackConfig;
 /// Extension methods for [`SlackConfig`] that resolve tokens from the environment.
 pub trait SlackConfigExt {
     /// Return the bot token, falling back to the `SLACK_BOT_TOKEN` environment
-    /// variable if no token is configured in `config.toml`.
+    /// variable if no token is configured in `org.toml`.
     fn resolved_bot_token(&self) -> Option<Secret>;
 
     /// Return the app-level token, falling back to the `SLACK_APP_TOKEN`
-    /// environment variable if no token is configured in `config.toml`.
+    /// environment variable if no token is configured in `org.toml`.
     fn resolved_app_token(&self) -> Option<Secret>;
 }
 

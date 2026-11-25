@@ -10,11 +10,12 @@ ChatGPT subscription).
 ### API key mode
 
 ```sh
-# Set your API key (or put it in config.toml)
+# Set your API key (or put it in org.toml)
 export OPENAI_API_KEY=sk-...
 
-# Edit ~/.assistant/config.toml
-cat <<'EOF' >> ~/.assistant/config.toml
+# Edit ~/.assistant/orgs/default/org.toml
+mkdir -p ~/.assistant/orgs/default
+cat <<'EOF' >> ~/.assistant/orgs/default/org.toml
 [llm]
 provider = "openai"
 model    = "gpt-4o"
@@ -30,7 +31,8 @@ OAuth lets you authenticate with your ChatGPT account so usage is billed
 against your Codex plan quota instead of API credits.
 
 ```sh
-cat <<'EOF' >> ~/.assistant/config.toml
+mkdir -p ~/.assistant/orgs/default
+cat <<'EOF' >> ~/.assistant/orgs/default/org.toml
 [llm]
 provider = "openai"
 model    = "gpt-4o"
@@ -48,7 +50,7 @@ cargo run -p assistant-cli
 ## Configuration
 
 All OpenAI settings live under the `[llm]` and `[llm.openai]` sections
-in `~/.assistant/config.toml`.
+in `~/.assistant/orgs/default/org.toml`.
 
 ### `[llm]` section
 
@@ -82,7 +84,7 @@ and set it via environment variable or config file:
 # Environment variable (recommended — avoids secrets in config files)
 export OPENAI_API_KEY=sk-...
 
-# Or in config.toml
+# Or in org.toml
 [llm]
 provider = "openai"
 api_key  = "sk-..."
@@ -255,7 +257,7 @@ Set the key via environment variable or config file:
 export OPENAI_API_KEY=sk-...
 ```
 
-Or add `api_key = "sk-..."` to the `[llm]` section in config.toml.
+Or add `api_key = "sk-..."` to the `[llm]` section in org.toml.
 
 ### "OAuth mode requires openai.oauth_client_id in config"
 
@@ -283,7 +285,7 @@ rm ~/.assistant/openai-oauth.json
 
 ### Requests going to wrong endpoint
 
-Check that `base_url` in config.toml points to the correct API.  The
+Check that `base_url` in org.toml points to the correct API.  The
 provider auto-appends `/v1` if missing, which may conflict with
 endpoints that already include a version path.  Set the full URL
 explicitly:

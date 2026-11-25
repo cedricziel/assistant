@@ -11,7 +11,7 @@ use crate::secret::Secret;
 
 /// Which transcription backend to use.
 ///
-/// Set via `[transcription] provider = "whisper"` in `config.toml`.
+/// Set via `[transcription] provider = "whisper"` in `org.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TranscriptionProviderKind {

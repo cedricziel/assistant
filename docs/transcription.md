@@ -12,7 +12,7 @@ Automatically transcribes audio attachments (voice messages, voice notes) into t
 
 ## Configuration
 
-Add to `~/.assistant/config.toml`:
+Add to `~/.assistant/orgs/default/org.toml`:
 
 ```toml
 [transcription]

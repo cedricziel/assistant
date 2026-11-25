@@ -8,11 +8,12 @@ OpenAI Chat Completions wire format.
 ## Quick start
 
 ```sh
-# Set your API key (or put it in config.toml)
+# Set your API key (or put it in org.toml)
 export OPENROUTER_API_KEY=sk-or-...
 
-# Edit ~/.assistant/config.toml
-cat <<'EOF' >> ~/.assistant/config.toml
+# Edit ~/.assistant/orgs/default/org.toml
+mkdir -p ~/.assistant/orgs/default
+cat <<'EOF' >> ~/.assistant/orgs/default/org.toml
 [llm]
 provider = "openrouter"
 model    = "anthropic/claude-sonnet-4-20250514"
@@ -25,7 +26,7 @@ cargo run -p assistant-cli
 ## Configuration
 
 All OpenRouter settings live under the `[llm]` and `[llm.openrouter]`
-sections in `~/.assistant/config.toml`.
+sections in `~/.assistant/orgs/default/org.toml`.
 
 ### `[llm]` section
 
@@ -55,7 +56,7 @@ and set it via environment variable or config file:
 # Environment variable (recommended — avoids secrets in config files)
 export OPENROUTER_API_KEY=sk-or-...
 
-# Or in config.toml
+# Or in org.toml
 [llm]
 provider = "openrouter"
 api_key  = "sk-or-..."
@@ -180,7 +181,7 @@ Set the key via environment variable or config file:
 export OPENROUTER_API_KEY=sk-or-...
 ```
 
-Or add `api_key = "sk-or-..."` to the `[llm]` section in config.toml.
+Or add `api_key = "sk-or-..."` to the `[llm]` section in org.toml.
 
 ### Requests timing out
 

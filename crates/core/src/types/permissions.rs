@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::permission::Rule;
 
-/// Tool-permission configuration (`[permissions]` in `config.toml`).
+/// Tool-permission configuration (`[permissions]` in `org.toml`).
 ///
 /// Rules use the grammar `tool-name` or `tool-name(pattern)`; see
 /// [`crate::permission`]. Config rules are *added* to the built-in rules;
