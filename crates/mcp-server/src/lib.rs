@@ -1,34 +1,37 @@
-// MCP server library — consumed by the unified `assistant-cli` crate.
-pub mod protocol;
-pub mod server;
+//! MCP server library — consumed by the unified `assistant-cli` crate.
+//!
+//! The protocol itself (framing, lifecycle, version negotiation) comes from
+//! `rmcp`; this crate supplies the [`AssistantMcpServer`] handler.
+
+mod resources;
+mod server;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::permission::PermissionPolicy;
-use assistant_core::tool::ToolDispatcher;
-use assistant_runtime::{OrchestrationEngine, Orchestrator};
-use assistant_storage::{SkillCatalog, StorageLayer, registry::SkillRegistry};
+use assistant_runtime::Orchestrator;
+use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tracing::{info, warn};
+use rmcp::service::ServerInitializeError;
+use rmcp::transport::IntoTransport;
+use rmcp::{RoleServer, ServiceExt};
+use tracing::info;
 
-use crate::protocol::JsonRpcRequest;
+pub use server::AssistantMcpServer;
 
-/// Run the MCP stdio JSON-RPC server using the provided pre-built components.
+/// Serve MCP over the process's stdin and stdout until the client disconnects.
 ///
-/// This function takes over `stdin`/`stdout` and runs a line-oriented JSON-RPC
-/// loop until EOF.  All logging is expected to go to `stderr` (configure the
-/// tracing subscriber accordingly before calling this).
+/// stdout carries only protocol messages; configure the tracing subscriber to
+/// write to stderr before calling this.
 ///
 /// # Arguments
 ///
-/// * `orchestrator` — shared orchestrator for `run_prompt` / `invoke_skill`
+/// * `orchestrator` — shared orchestrator for the `run-prompt` tool
 /// * `executor` — shared tool executor for `tools/call`
-/// * `registry` — shared skill registry for `resources/list`
+/// * `registry` — shared skill registry for resources and `install-skill`
 /// * `_storage` — storage layer (reserved for future use)
-/// * `user_skills_dir` — directory where `install_skill` writes new skills
+/// * `user_skills_dir` — directory where `install-skill` writes new skills
 pub async fn run(
     orchestrator: Arc<Orchestrator>,
     executor: Arc<ToolExecutor>,
@@ -36,99 +39,41 @@ pub async fn run(
     _storage: Arc<StorageLayer>,
     user_skills_dir: PathBuf,
 ) -> Result<()> {
-    info!("MCP server ready — reading JSON-RPC from stdin");
-
     let policy = orchestrator.permission_policy().clone();
-
-    let reader = BufReader::new(tokio::io::stdin());
-    let writer = tokio::io::stdout();
-
-    run_io(
-        reader,
-        writer,
+    let server = AssistantMcpServer::new(
         orchestrator,
         executor,
-        policy,
         registry.clone(),
-        registry,
+        policy,
         user_skills_dir,
     )
-    .await
+    .with_install_registry(registry);
+
+    info!("MCP server ready — serving on stdio");
+    serve_stdio(server).await
 }
 
-/// Drives the JSON-RPC loop over arbitrary `AsyncBufRead` / `AsyncWrite`
-/// streams. Extracted from [`run`] so tests can pipe canned input through
-/// the dispatcher without monopolising stdin/stdout.
+/// Serve `server` over stdin and stdout until the client disconnects.
+pub async fn serve_stdio(server: AssistantMcpServer) -> Result<()> {
+    serve_transport(server, rmcp::transport::stdio()).await
+}
+
+/// Serve `server` over `transport` until the peer disconnects.
 ///
-/// Every `tools/call` is authorized by `policy`; MCP callers cannot be
-/// prompted, so calls the policy leaves undecided are refused.
-///
-/// The `catalog` parameter is the [`SkillCatalog`] used by `resources/list`
-/// and `resources/read`; `install_registry` is the optional concrete
-/// [`SkillRegistry`] used by the `install-skill` tool (None disables it).
-#[allow(clippy::too_many_arguments)]
-pub async fn run_io<R, W>(
-    mut reader: R,
-    mut writer: W,
-    orchestrator: Arc<dyn OrchestrationEngine>,
-    executor: Arc<dyn ToolDispatcher>,
-    policy: PermissionPolicy,
-    catalog: Arc<dyn SkillCatalog>,
-    install_registry: Arc<SkillRegistry>,
-    user_skills_dir: PathBuf,
-) -> Result<()>
+/// A peer that disconnects before it starts a session is a clean shutdown, not
+/// an error.
+pub async fn serve_transport<T, E, A>(server: AssistantMcpServer, transport: T) -> Result<()>
 where
-    R: AsyncBufRead + Unpin,
-    W: AsyncWrite + Unpin,
+    T: IntoTransport<RoleServer, E, A>,
+    E: std::error::Error + Send + Sync + 'static,
 {
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        match reader.read_line(&mut line).await {
-            Ok(0) => break, // EOF
-            Ok(_) => {}
-            Err(e) => {
-                warn!("stdin read error: {e}");
-                break;
-            }
+    match server.serve(transport).await {
+        Ok(running) => {
+            running.waiting().await?;
         }
-
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let request: JsonRpcRequest = match serde_json::from_str(trimmed) {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("Failed to parse JSON-RPC request: {e}");
-                let err = crate::protocol::JsonRpcResponse::err(None, -32700, "Parse error");
-                let mut json = serde_json::to_vec(&err).unwrap_or_default();
-                json.push(b'\n');
-                writer.write_all(&json).await.ok();
-                writer.flush().await.ok();
-                continue;
-            }
-        };
-
-        let response = server::handle_request(
-            request,
-            catalog.clone(),
-            executor.clone(),
-            orchestrator.clone(),
-            &policy,
-            user_skills_dir.clone(),
-            Some(install_registry.clone()),
-        )
-        .await;
-
-        let mut json = serde_json::to_vec(&response).unwrap_or_default();
-        json.push(b'\n');
-        writer.write_all(&json).await.ok();
-        writer.flush().await.ok();
+        Err(ServerInitializeError::ConnectionClosed(_)) => {}
+        Err(error) => return Err(error.into()),
     }
-
     info!("MCP server shutting down");
     Ok(())
 }

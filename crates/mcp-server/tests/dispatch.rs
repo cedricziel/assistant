@@ -1,474 +1,317 @@
-//! End-to-end dispatch tests for the MCP server's `handle_request`.
+//! End-to-end dispatch tests for [`AssistantMcpServer`], driven through an
+//! rmcp client over an in-memory pipe.
 //!
 //! Uses [`StubOrchestrationEngine`], [`StubToolDispatcher`], and
 //! [`InMemorySkillCatalog`] in place of the real Orchestrator /
-//! ToolExecutor / SkillRegistry so each JSON-RPC method can be
-//! exercised without booting SQLite or hitting an LLM backend.
+//! ToolExecutor / SkillRegistry so each MCP method can be exercised
+//! without booting SQLite or hitting an LLM backend.
 //!
 //! Phase 7.8 of `workspace-test-coverage-floor`.
+
+mod common;
 
 use std::sync::Arc;
 
 use assistant_core::ToolSpec;
 use assistant_core::permission::PermissionPolicy;
-use assistant_core::tool::{ToolDispatcher, ToolOutput};
-use assistant_core::types::permissions::PermissionsConfig;
-use assistant_mcp_server::protocol::{JsonRpcRequest, JsonRpcResponse};
-use assistant_mcp_server::server::handle_request;
-use assistant_runtime::{CancelOutcome, OrchestrationEngine, StubOrchestrationEngine, TurnResult};
-use assistant_skills::{SkillDef, SkillSource};
-use assistant_storage::{InMemorySkillCatalog, SkillCatalog};
+use assistant_core::tool::ToolOutput;
+use assistant_runtime::StubOrchestrationEngine;
 use assistant_tool_executor::StubToolDispatcher;
-use serde_json::{Value, json};
+use common::*;
+use rmcp::model::{ClientRequest, ErrorCode, ReadResourceRequestParams, ServerResult};
+use serde_json::json;
 
-fn make_skill(name: &str) -> SkillDef {
-    SkillDef {
-        name: name.to_string(),
-        description: format!("test skill {name}"),
-        license: None,
-        compatibility: None,
-        allowed_tools: Vec::new(),
-        metadata: std::collections::HashMap::new(),
-        body: format!("body of {name}"),
-        dir: std::path::PathBuf::from(format!("/tmp/{name}")),
-        source: SkillSource::Builtin,
-    }
+fn read(uri: &str) -> ReadResourceRequestParams {
+    ReadResourceRequestParams::new(uri)
 }
 
-fn make_request(id: i64, method: &str, params: Value) -> JsonRpcRequest {
-    JsonRpcRequest {
-        jsonrpc: "2.0".to_string(),
-        id: Some(json!(id)),
-        method: method.to_string(),
-        params,
-    }
-}
-
-fn workspace_skills_dir() -> std::path::PathBuf {
-    tempfile::tempdir().expect("tempdir").keep()
-}
-
-/// Policy for tests that exercise dispatch rather than permissions.
-fn allow_everything() -> PermissionPolicy {
-    policy(&["*"], &[])
-}
-
-fn policy(allow: &[&str], deny: &[&str]) -> PermissionPolicy {
-    let rules = |texts: &[&str]| {
-        texts
-            .iter()
-            .map(|t| t.parse().expect("valid rule"))
-            .collect()
-    };
-    PermissionPolicy::from_config(&PermissionsConfig {
-        allow: rules(allow),
-        deny: rules(deny),
-        ..PermissionsConfig::default()
-    })
-}
-
-async fn call(
-    req: JsonRpcRequest,
-    orchestrator: Arc<dyn OrchestrationEngine>,
-    executor: Arc<dyn ToolDispatcher>,
-    registry: Arc<dyn SkillCatalog>,
-) -> JsonRpcResponse {
-    call_with_policy(req, orchestrator, executor, registry, &allow_everything()).await
-}
-
-async fn call_with_policy(
-    req: JsonRpcRequest,
-    orchestrator: Arc<dyn OrchestrationEngine>,
-    executor: Arc<dyn ToolDispatcher>,
-    registry: Arc<dyn SkillCatalog>,
-    policy: &PermissionPolicy,
-) -> JsonRpcResponse {
-    handle_request(
-        req,
-        registry,
-        executor,
-        orchestrator,
-        policy,
-        workspace_skills_dir(),
-        None,
-    )
-    .await
-}
-
-fn default_stubs() -> (
-    Arc<dyn OrchestrationEngine>,
-    Arc<dyn ToolDispatcher>,
-    Arc<dyn SkillCatalog>,
-) {
-    let orch = Arc::new(StubOrchestrationEngine::new()) as Arc<dyn OrchestrationEngine>;
-    let exec = Arc::new(StubToolDispatcher::new()) as Arc<dyn ToolDispatcher>;
-    let reg = Arc::new(InMemorySkillCatalog::new()) as Arc<dyn SkillCatalog>;
-    (orch, exec, reg)
-}
-
-#[tokio::test]
-async fn initialize_returns_protocol_version_and_server_info() {
-    let (o, e, r) = default_stubs();
-    let resp = call(make_request(1, "initialize", json!({})), o, e, r).await;
-    assert!(
-        resp.error.is_none(),
-        "initialize should not error: {resp:?}"
-    );
-    let result = resp.result.expect("initialize must return a result");
-    assert_eq!(result["protocolVersion"], "2024-11-05");
-    assert_eq!(result["serverInfo"]["name"], "assistant-mcp-server");
-}
-
-#[tokio::test]
-async fn notifications_initialized_returns_empty_result() {
-    let (o, e, r) = default_stubs();
-    let resp = call(
-        make_request(2, "notifications/initialized", json!({})),
-        o,
-        e,
-        r,
-    )
-    .await;
-    assert!(resp.error.is_none());
-    assert_eq!(resp.result.unwrap(), json!({}));
-}
-
-#[tokio::test]
-async fn ping_returns_empty_result() {
-    let (o, e, r) = default_stubs();
-    let resp = call(make_request(3, "ping", json!({})), o, e, r).await;
-    assert!(resp.error.is_none());
-}
-
-#[tokio::test]
-async fn tools_list_returns_executor_specs_plus_management_tools() {
-    let (o, _, r) = default_stubs();
-    let exec = Arc::new(StubToolDispatcher::new().with_specs(vec![ToolSpec {
+fn echo_spec() -> ToolSpec {
+    ToolSpec {
         name: "echo".into(),
         description: "echo".into(),
         params_schema: json!({}),
         is_mutating: false,
         requires_confirmation: false,
-    }])) as Arc<dyn ToolDispatcher>;
-    let resp = call(make_request(4, "tools/list", json!({})), o, exec, r).await;
-    assert!(resp.error.is_none());
-    let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
-    let names: Vec<String> = tools
-        .iter()
-        .map(|t| t["name"].as_str().unwrap().to_string())
-        .collect();
-    assert!(names.contains(&"echo".to_string()));
-    assert!(names.contains(&"run-prompt".to_string()));
-    assert!(names.contains(&"install-skill".to_string()));
+    }
+}
+
+#[tokio::test]
+async fn initialize_returns_server_info_and_capabilities() {
+    let client = default_stubs().connect().await;
+    let info = client.peer_info().expect("peer info after handshake");
+    assert_eq!(
+        info.server_info.as_ref().map(|i| i.name.as_str()),
+        Some("assistant-mcp-server")
+    );
+    assert!(info.capabilities.tools.is_some());
+    assert!(info.capabilities.resources.is_some());
+}
+
+#[tokio::test]
+async fn ping_returns_empty_result() {
+    let client = default_stubs().connect().await;
+    let result = client
+        .send_request(ClientRequest::PingRequest(Default::default()))
+        .await
+        .unwrap();
+    assert!(matches!(result, ServerResult::EmptyResult(_)), "{result:?}");
+}
+
+#[tokio::test]
+async fn tools_list_is_stable_with_management_tools_last() {
+    let specs = ["zeta", "alpha"].map(|name| ToolSpec {
+        name: name.into(),
+        ..echo_spec()
+    });
+    let exec = Arc::new(StubToolDispatcher::new().with_specs(specs.to_vec()));
+    let client = default_stubs().executor(exec).connect().await;
+
+    let names = |tools: Vec<rmcp::model::Tool>| {
+        tools.iter().map(|t| t.name.to_string()).collect::<Vec<_>>()
+    };
+    let first = names(client.list_all_tools().await.unwrap());
+    let second = names(client.list_all_tools().await.unwrap());
+
+    assert_eq!(first, second, "listing twice must not reorder tools");
+    assert_eq!(first, ["zeta", "alpha", "run-prompt", "install-skill"]);
 }
 
 #[tokio::test]
 async fn tools_call_run_prompt_invokes_orchestrator() {
-    let orch = Arc::new(StubOrchestrationEngine::new().queue_turn(Ok(TurnResult {
-        answer: "hello from stub".to_string(),
-        attachments: Vec::new(),
-        attachment_ids: Vec::new(),
-        message_id: None,
-        had_errors: false,
-    })));
-    let orch_dyn: Arc<dyn OrchestrationEngine> = orch.clone();
-    let (_, e, r) = default_stubs();
-    let resp = call(
-        make_request(
-            5,
-            "tools/call",
-            json!({"name": "run-prompt", "arguments": {"prompt": "hi"}}),
-        ),
-        orch_dyn,
-        e,
-        r,
-    )
-    .await;
-    assert!(resp.error.is_none(), "{resp:?}");
-    let content = resp.result.unwrap()["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(content, "hello from stub");
+    let orch = Arc::new(StubOrchestrationEngine::new().queue_turn(Ok(turn("hello from stub"))));
+    let client = default_stubs().orchestrator(orch.clone()).connect().await;
+    let result = client
+        .call_tool(call_params("run-prompt", json!({"prompt": "hi"})))
+        .await
+        .unwrap();
+    assert_eq!(text_of(&result), "hello from stub");
     assert_eq!(orch.submit_calls().len(), 1);
 }
 
 #[tokio::test]
-async fn tools_call_run_prompt_missing_prompt_returns_error() {
-    let (o, e, r) = default_stubs();
-    let resp = call(
-        make_request(
-            6,
-            "tools/call",
-            json!({"name": "run-prompt", "arguments": {}}),
-        ),
-        o,
-        e,
-        r,
-    )
-    .await;
-    assert!(resp.error.is_some());
-    assert_eq!(resp.error.unwrap().code, -32602);
+async fn tools_call_run_prompt_missing_prompt_returns_invalid_params() {
+    let client = default_stubs().connect().await;
+    let err = client
+        .call_tool(call_params("run-prompt", json!({})))
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]
 async fn tools_call_install_skill_without_registry_returns_error() {
-    let (o, e, r) = default_stubs();
-    let resp = call(
-        make_request(
-            7,
-            "tools/call",
-            json!({"name": "install-skill", "arguments": {"source": "/tmp"}}),
-        ),
-        o,
-        e,
-        r,
+    let client = default_stubs().connect().await;
+    let err = client
+        .call_tool(call_params("install-skill", json!({"source": "/tmp"})))
+        .await
+        .unwrap_err();
+    let data = protocol_error(err);
+    assert_eq!(data.code, ErrorCode::INTERNAL_ERROR);
+    assert!(data.message.contains("SkillRegistry"), "{}", data.message);
+}
+
+#[tokio::test]
+async fn tools_call_install_skill_missing_source_returns_invalid_params() {
+    let client = default_stubs().connect().await;
+    let err = client
+        .call_tool(call_params("install-skill", json!({})))
+        .await
+        .unwrap_err();
+    let data = protocol_error(err);
+    assert_eq!(data.code, ErrorCode::INVALID_PARAMS);
+    assert!(data.message.contains("source"), "{}", data.message);
+}
+
+#[tokio::test]
+async fn tools_call_install_skill_installs_from_a_local_path() {
+    let source = tempfile::tempdir().unwrap();
+    let skill_dir = source.path().join("installed-skill");
+    std::fs::create_dir(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: installed-skill\ndescription: from a test\n---\nbody\n",
     )
-    .await;
-    assert!(resp.error.is_some());
-    let err = resp.error.unwrap();
-    assert_eq!(err.code, -32603);
-    assert!(err.message.contains("SkillRegistry"));
+    .unwrap();
+    let skills_dir = tempfile::tempdir().unwrap();
+    let stubs = default_stubs();
+    let server = assistant_mcp_server::AssistantMcpServer::new(
+        stubs.orchestrator,
+        stubs.executor,
+        stubs.catalog,
+        allow_everything(),
+        skills_dir.path().to_path_buf(),
+    )
+    .with_install_registry(install_registry().await);
+    let client = connect(server).await;
+
+    let result = client
+        .call_tool(call_params(
+            "install-skill",
+            json!({"source": skill_dir.to_str().unwrap()}),
+        ))
+        .await
+        .unwrap();
+
+    assert!(text_of(&result).contains("installed-skill"));
+    assert!(skills_dir.path().join("installed-skill").is_dir());
 }
 
 #[tokio::test]
 async fn tools_call_dispatches_to_executor() {
-    let (o, _, r) = default_stubs();
     let exec = StubToolDispatcher::new().queue_response("echo", ToolOutput::success("echoed: hi"));
-    let exec_dyn: Arc<dyn ToolDispatcher> = Arc::new(exec);
-    let resp = call(
-        make_request(
-            8,
-            "tools/call",
-            json!({"name": "echo", "arguments": {"text": "hi"}}),
-        ),
-        o,
-        exec_dyn,
-        r,
-    )
-    .await;
-    assert!(resp.error.is_none(), "{resp:?}");
-    let content = resp.result.unwrap()["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(content, "echoed: hi");
+    let client = default_stubs().executor(Arc::new(exec)).connect().await;
+    let result = client
+        .call_tool(call_params("echo", json!({"text": "hi"})))
+        .await
+        .unwrap();
+    assert_eq!(text_of(&result), "echoed: hi");
 }
 
 #[tokio::test]
-async fn tools_call_unknown_tool_returns_error_output() {
-    let (o, e, r) = default_stubs();
-    let resp = call(
-        make_request(9, "tools/call", json!({"name": "ghost", "arguments": {}})),
-        o,
-        e,
-        r,
-    )
-    .await;
-    // The dispatcher returned the benign success ("(stub: ghost)") since
-    // the stub doesn't track which tools are registered. Just assert no
-    // protocol-level error.
-    assert!(resp.error.is_none());
+async fn tools_call_unknown_tool_is_not_a_protocol_error() {
+    // The stub dispatcher answers with a benign success ("(stub: ghost)")
+    // since it doesn't track which tools are registered.
+    let client = default_stubs().connect().await;
+    client
+        .call_tool(call_params("ghost", json!({})))
+        .await
+        .expect("no protocol-level error");
 }
 
 #[tokio::test]
-async fn resources_list_returns_skills_from_catalog() {
-    let (o, e, _) = default_stubs();
-    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![
-        make_skill("alpha"),
-        make_skill("beta"),
-    ])) as Arc<dyn SkillCatalog>;
-    let resp = call(make_request(10, "resources/list", json!({})), o, e, reg).await;
-    assert!(resp.error.is_none(), "{resp:?}");
-    let resources = resp.result.unwrap()["resources"]
-        .as_array()
-        .unwrap()
-        .clone();
-    let names: Vec<String> = resources
-        .iter()
-        .map(|r| r["name"].as_str().unwrap().to_string())
-        .collect();
-    assert!(names.contains(&"alpha".to_string()));
-    assert!(names.contains(&"beta".to_string()));
-}
-
-#[tokio::test]
-async fn resources_read_returns_skill_body() {
-    let (o, e, _) = default_stubs();
-    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![make_skill("foo")]))
-        as Arc<dyn SkillCatalog>;
-    let resp = call(
-        make_request(11, "resources/read", json!({"uri": "skills://foo"})),
-        o,
-        e,
-        reg,
-    )
-    .await;
-    assert!(resp.error.is_none(), "{resp:?}");
-    let contents = resp.result.unwrap()["contents"][0]["text"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert!(contents.contains("body of foo"));
-}
-
-#[tokio::test]
-async fn resources_read_unknown_skill_returns_error() {
-    let (o, e, r) = default_stubs();
-    let resp = call(
-        make_request(12, "resources/read", json!({"uri": "skills://missing"})),
-        o,
-        e,
-        r,
-    )
-    .await;
-    assert!(resp.error.is_some());
-}
-
-#[tokio::test]
-async fn unknown_method_returns_method_not_found() {
-    let (o, e, r) = default_stubs();
-    let resp = call(make_request(13, "nonsense/method", json!({})), o, e, r).await;
-    assert!(resp.error.is_some());
-    let err = resp.error.unwrap();
-    assert_eq!(err.code, -32601);
-}
-
-#[tokio::test]
-async fn cancel_turn_via_orchestrator_engine_returns_outcome() {
-    let orch =
-        Arc::new(StubOrchestrationEngine::new().queue_cancel_outcome(CancelOutcome::Cancelled));
-    let req_id = uuid::Uuid::new_v4();
-    let outcome = orch.cancel_turn(req_id).await;
-    assert!(matches!(outcome, CancelOutcome::Cancelled));
+async fn unimplemented_method_returns_method_not_found() {
+    let client = default_stubs().connect().await;
+    let err = client.list_prompts(None).await.unwrap_err();
+    assert_eq!(code(err), ErrorCode::METHOD_NOT_FOUND);
 }
 
 #[tokio::test]
 async fn tools_call_run_prompt_orchestrator_error_returns_internal_error() {
     let orch = Arc::new(
         StubOrchestrationEngine::new().queue_turn(Err(anyhow::anyhow!("backend exploded"))),
-    ) as Arc<dyn OrchestrationEngine>;
-    let (_, e, r) = default_stubs();
-    let resp = call(
-        make_request(
-            14,
-            "tools/call",
-            json!({"name": "run-prompt", "arguments": {"prompt": "hi"}}),
-        ),
-        orch,
-        e,
-        r,
-    )
-    .await;
-    let err = resp.error.expect("orchestrator error must surface");
-    assert_eq!(err.code, -32603);
-    assert!(err.message.contains("backend exploded"));
+    );
+    let client = default_stubs().orchestrator(orch).connect().await;
+    let err = client
+        .call_tool(call_params("run-prompt", json!({"prompt": "hi"})))
+        .await
+        .unwrap_err();
+    let data = protocol_error(err);
+    assert_eq!(data.code, ErrorCode::INTERNAL_ERROR);
+    assert!(
+        data.message.contains("backend exploded"),
+        "{}",
+        data.message
+    );
 }
 
 #[tokio::test]
-async fn tools_call_install_skill_missing_source_returns_invalid_params() {
-    let (o, e, r) = default_stubs();
-    let resp = call(
-        make_request(
-            15,
-            "tools/call",
-            json!({"name": "install-skill", "arguments": {}}),
-        ),
-        o,
-        e,
-        r,
-    )
-    .await;
-    let err = resp.error.expect("missing source must error");
-    assert_eq!(err.code, -32602);
-    assert!(err.message.contains("source"));
+async fn tools_call_dispatcher_error_surfaces_internal_error() {
+    let exec =
+        StubToolDispatcher::new().queue_error("explode", anyhow::anyhow!("dispatcher failed"));
+    let client = default_stubs().executor(Arc::new(exec)).connect().await;
+    let err = client
+        .call_tool(call_params("explode", json!({})))
+        .await
+        .unwrap_err();
+    let data = protocol_error(err);
+    assert_eq!(data.code, ErrorCode::INTERNAL_ERROR);
+    assert!(
+        data.message.contains("dispatcher failed"),
+        "{}",
+        data.message
+    );
+}
+
+// ── Resources ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn resources_list_returns_skills_from_catalog() {
+    let client = default_stubs()
+        .skills(vec![make_skill("alpha"), make_skill("beta")])
+        .connect()
+        .await;
+    let resources = client.list_all_resources().await.unwrap();
+    let names: Vec<&str> = resources.iter().map(|r| r.name.as_str()).collect();
+    assert!(names.contains(&"alpha"));
+    assert!(names.contains(&"beta"));
 }
 
 #[tokio::test]
 async fn resources_list_includes_auxiliary_files_from_skill_dir() {
     use std::fs;
-    // Build a skill on disk with a scripts/ and references/ subdir, then
-    // load it through InMemorySkillCatalog so resources/list sees its
-    // auxiliary files.
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path().join("foo");
     fs::create_dir_all(dir.join("scripts")).unwrap();
     fs::create_dir_all(dir.join("references")).unwrap();
     fs::write(dir.join("scripts").join("run.sh"), "#!/bin/sh\n").unwrap();
     fs::write(dir.join("references").join("notes.md"), "notes").unwrap();
-
     let mut skill = make_skill("foo");
     skill.dir = dir;
 
-    let (o, e, _) = default_stubs();
-    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![skill])) as Arc<dyn SkillCatalog>;
-    let resp = call(make_request(16, "resources/list", json!({})), o, e, reg).await;
-    assert!(resp.error.is_none(), "{resp:?}");
-    let resources = resp.result.unwrap()["resources"]
-        .as_array()
-        .unwrap()
-        .clone();
-    let uris: Vec<String> = resources
-        .iter()
-        .map(|r| r["uri"].as_str().unwrap().to_string())
-        .collect();
-    assert!(uris.iter().any(|u| u.contains("scripts/run.sh")));
-    assert!(uris.iter().any(|u| u.contains("references/notes.md")));
+    let client = default_stubs().skills(vec![skill]).connect().await;
+    let resources = client.list_all_resources().await.unwrap();
+    let uris: Vec<&str> = resources.iter().map(|r| r.uri.as_str()).collect();
+    assert!(uris.contains(&"skills://foo/scripts/run.sh"), "{uris:?}");
+    assert!(
+        uris.contains(&"skills://foo/references/notes.md"),
+        "{uris:?}"
+    );
+}
+
+#[tokio::test]
+async fn resource_templates_describe_skill_files() {
+    let client = default_stubs().connect().await;
+    let templates = client.list_all_resource_templates().await.unwrap();
+    assert_eq!(templates.len(), 1, "{templates:?}");
+    assert_eq!(
+        templates[0].uri_template,
+        "skills://{name}/{category}/{+path}"
+    );
+}
+
+#[tokio::test]
+async fn resources_read_returns_skill_body() {
+    let client = default_stubs()
+        .skills(vec![make_skill("foo")])
+        .connect()
+        .await;
+    let result = client.read_resource(read("skills://foo")).await.unwrap();
+    assert!(resource_text(&result).contains("body of foo"));
 }
 
 #[tokio::test]
 async fn resources_read_skills_list_returns_index() {
-    let (o, e, _) = default_stubs();
-    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![
-        make_skill("alpha"),
-        make_skill("beta"),
-    ])) as Arc<dyn SkillCatalog>;
-    let resp = call(
-        make_request(17, "resources/read", json!({"uri": "skills://list"})),
-        o,
-        e,
-        reg,
-    )
-    .await;
-    assert!(resp.error.is_none(), "{resp:?}");
-    let text = resp.result.unwrap()["contents"][0]["text"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let client = default_stubs()
+        .skills(vec![make_skill("alpha"), make_skill("beta")])
+        .connect()
+        .await;
+    let result = client.read_resource(read("skills://list")).await.unwrap();
+    let text = resource_text(&result);
     assert!(text.contains("alpha"));
     assert!(text.contains("beta"));
 }
 
 #[tokio::test]
-async fn resources_read_auxiliary_file_returns_contents() {
+async fn resources_read_auxiliary_file_returns_contents_and_mime_type() {
     use std::fs;
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path().join("foo");
     fs::create_dir_all(dir.join("scripts")).unwrap();
     fs::write(dir.join("scripts").join("run.sh"), "echo hello").unwrap();
-
     let mut skill = make_skill("foo");
     skill.dir = dir;
 
-    let (o, e, _) = default_stubs();
-    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![skill])) as Arc<dyn SkillCatalog>;
-    let resp = call(
-        make_request(
-            18,
-            "resources/read",
-            json!({"uri": "skills://foo/scripts/run.sh"}),
-        ),
-        o,
-        e,
-        reg,
-    )
-    .await;
-    assert!(resp.error.is_none(), "{resp:?}");
-    let text = resp.result.unwrap()["contents"][0]["text"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(text, "echo hello");
+    let client = default_stubs().skills(vec![skill]).connect().await;
+    let result = client
+        .read_resource(read("skills://foo/scripts/run.sh"))
+        .await
+        .unwrap();
+    assert_eq!(resource_text(&result), "echo hello");
+    let rmcp::model::ResourceContents::TextResourceContents { mime_type, .. } = &result.contents[0]
+    else {
+        panic!("expected text contents");
+    };
+    assert_eq!(mime_type.as_deref(), Some("text/plain"));
 }
 
 #[tokio::test]
@@ -478,184 +321,118 @@ async fn resources_read_aux_file_outside_skill_dir_is_not_read() {
     let dir = tmp.path().join("foo");
     fs::create_dir_all(dir.join("scripts")).unwrap();
     fs::write(tmp.path().join("secret.txt"), "top secret").unwrap();
-
     let mut skill = make_skill("foo");
     skill.dir = dir;
 
-    let (o, e, _) = default_stubs();
-    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![skill])) as Arc<dyn SkillCatalog>;
-    let resp = call(
-        make_request(
-            30,
-            "resources/read",
-            json!({"uri": "skills://foo/scripts/../../secret.txt"}),
-        ),
-        o,
-        e,
-        reg,
-    )
-    .await;
-    assert!(
-        resp.result.is_none(),
-        "a path escaping the skill dir must not be served: {resp:?}"
-    );
-    assert_eq!(resp.error.map(|e| e.code), Some(-32602));
+    let client = default_stubs().skills(vec![skill]).connect().await;
+    let err = client
+        .read_resource(read("skills://foo/scripts/../../secret.txt"))
+        .await
+        .expect_err("a path escaping the skill dir must not be served");
+    assert_eq!(code(err), ErrorCode::RESOURCE_NOT_FOUND);
 }
 
 #[tokio::test]
-async fn resources_read_aux_file_missing_returns_error() {
-    use std::fs;
+async fn resources_read_unknown_skill_returns_not_found() {
+    let client = default_stubs().connect().await;
+    let err = client
+        .read_resource(read("skills://missing"))
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), ErrorCode::RESOURCE_NOT_FOUND);
+}
+
+#[tokio::test]
+async fn resources_read_aux_file_missing_returns_not_found() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path().join("foo");
-    fs::create_dir_all(&dir).unwrap();
-
+    std::fs::create_dir_all(&dir).unwrap();
     let mut skill = make_skill("foo");
     skill.dir = dir;
 
-    let (o, e, _) = default_stubs();
-    let reg = Arc::new(InMemorySkillCatalog::with_skills(vec![skill])) as Arc<dyn SkillCatalog>;
-    let resp = call(
-        make_request(
-            19,
-            "resources/read",
-            json!({"uri": "skills://foo/scripts/missing.sh"}),
-        ),
-        o,
-        e,
-        reg,
-    )
-    .await;
-    let err = resp.error.expect("missing aux file must error");
-    assert_eq!(err.code, -32602);
+    let client = default_stubs().skills(vec![skill]).connect().await;
+    let err = client
+        .read_resource(read("skills://foo/scripts/missing.sh"))
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), ErrorCode::RESOURCE_NOT_FOUND);
 }
 
 #[tokio::test]
-async fn resources_read_aux_file_for_unknown_skill_returns_error() {
-    let (o, e, r) = default_stubs();
-    let resp = call(
-        make_request(
-            20,
-            "resources/read",
-            json!({"uri": "skills://ghost/scripts/run.sh"}),
-        ),
-        o,
-        e,
-        r,
-    )
-    .await;
-    let err = resp.error.expect("unknown skill must error");
-    assert_eq!(err.code, -32602);
+async fn resources_read_aux_file_for_unknown_skill_returns_not_found() {
+    let client = default_stubs().connect().await;
+    let err = client
+        .read_resource(read("skills://ghost/scripts/run.sh"))
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), ErrorCode::RESOURCE_NOT_FOUND);
 }
 
 #[tokio::test]
-async fn resources_read_invalid_segments_returns_error() {
-    let (o, e, r) = default_stubs();
-    // 2-segment URI is neither `skills://list`, nor `skills://<name>`,
-    // nor a 3-segment auxiliary path — falls into the catch-all branch.
-    let resp = call(
-        make_request(21, "resources/read", json!({"uri": "skills://foo/bar"})),
-        o,
-        e,
-        r,
-    )
-    .await;
-    let err = resp.error.expect("invalid resource URI must error");
-    assert_eq!(err.code, -32602);
+async fn resources_read_invalid_segments_returns_invalid_params() {
+    let client = default_stubs().connect().await;
+    // Two segments are neither `skills://list`, `skills://<name>`, nor a
+    // `<name>/<category>/<file>` path.
+    let err = client
+        .read_resource(read("skills://foo/bar"))
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]
-async fn resources_read_non_skills_uri_returns_error() {
-    let (o, e, r) = default_stubs();
-    let resp = call(
-        make_request(22, "resources/read", json!({"uri": "https://example.com"})),
-        o,
-        e,
-        r,
-    )
-    .await;
-    let err = resp.error.expect("non-skills URI must error");
-    assert_eq!(err.code, -32602);
-    assert!(err.message.contains("Unknown resource URI"));
-}
-
-#[tokio::test]
-async fn unknown_notification_returns_empty_ok() {
-    let (o, e, r) = default_stubs();
-    // Notifications have no id; per JSON-RPC, the server should return
-    // a benign empty result rather than `-32601`.
-    let req = JsonRpcRequest {
-        jsonrpc: "2.0".to_string(),
-        id: None,
-        method: "ghost/notify".to_string(),
-        params: json!({}),
-    };
-    let resp = call(req, o, e, r).await;
-    assert!(resp.error.is_none(), "{resp:?}");
-}
-
-#[tokio::test]
-async fn tools_call_dispatcher_error_surfaces_internal_error() {
-    let (o, _, r) = default_stubs();
-    let exec =
-        StubToolDispatcher::new().queue_error("explode", anyhow::anyhow!("dispatcher failed"));
-    let exec_dyn: Arc<dyn ToolDispatcher> = Arc::new(exec);
-    let resp = call(
-        make_request(
-            23,
-            "tools/call",
-            json!({"name": "explode", "arguments": {}}),
-        ),
-        o,
-        exec_dyn,
-        r,
-    )
-    .await;
-    let err = resp.error.expect("dispatcher Err must propagate");
-    assert_eq!(err.code, -32603);
-    assert!(err.message.contains("dispatcher failed"));
+async fn resources_read_non_skills_uri_returns_invalid_params() {
+    let client = default_stubs().connect().await;
+    let err = client
+        .read_resource(read("https://example.com"))
+        .await
+        .unwrap_err();
+    let data = protocol_error(err);
+    assert_eq!(data.code, ErrorCode::INVALID_PARAMS);
+    assert!(
+        data.message.contains("Unknown resource URI"),
+        "{}",
+        data.message
+    );
 }
 
 // ── Permission policy ─────────────────────────────────────────────────────
 
-/// Calls `echo` through `policy`; returns the response and the stub so the
+/// Calls `echo` through `policy`; returns the result and the stub so the
 /// test can see whether the tool ran.
-async fn call_echo(policy: &PermissionPolicy) -> (JsonRpcResponse, Arc<StubToolDispatcher>) {
-    let (o, _, r) = default_stubs();
+async fn call_echo(
+    policy: PermissionPolicy,
+) -> (rmcp::model::CallToolResult, Arc<StubToolDispatcher>) {
     let stub = Arc::new(
         StubToolDispatcher::new().queue_response("echo", ToolOutput::success("echoed: hi")),
     );
-    let resp = call_with_policy(
-        make_request(
-            30,
-            "tools/call",
-            json!({"name": "echo", "arguments": {"text": "hi"}}),
-        ),
-        o,
-        stub.clone(),
-        r,
-        policy,
-    )
-    .await;
-    (resp, stub)
+    let client = default_stubs()
+        .executor(stub.clone())
+        .connect_with_policy(policy)
+        .await;
+    let result = client
+        .call_tool(call_params("echo", json!({"text": "hi"})))
+        .await
+        .expect("a refusal is a tool result, not a protocol error");
+    (result, stub)
 }
 
-fn tool_error_text(resp: &JsonRpcResponse) -> String {
-    let result = resp.result.as_ref().expect("a refusal is a tool result");
-    assert_eq!(result["isError"], true, "{resp:?}");
-    result["content"][0]["text"].as_str().unwrap().to_string()
+fn assert_refused(result: &rmcp::model::CallToolResult) -> String {
+    assert_eq!(result.is_error, Some(true), "{result:?}");
+    text_of(result)
 }
 
 #[tokio::test]
 async fn tools_call_runs_tools_the_policy_allows() {
-    let (resp, stub) = call_echo(&policy(&["echo"], &[])).await;
-    assert!(resp.error.is_none(), "{resp:?}");
+    let (result, stub) = call_echo(policy(&["echo"], &[])).await;
+    assert_ne!(result.is_error, Some(true), "{result:?}");
     assert_eq!(stub.recorded_calls().len(), 1);
 }
 
 #[tokio::test]
 async fn tools_call_refuses_tools_the_policy_denies() {
-    let (resp, stub) = call_echo(&policy(&["*"], &["echo"])).await;
-    let text = tool_error_text(&resp);
+    let (result, stub) = call_echo(policy(&["*"], &["echo"])).await;
+    let text = assert_refused(&result);
     assert!(text.contains("Permission denied for 'echo'"), "{text}");
     assert!(
         stub.recorded_calls().is_empty(),
@@ -665,8 +442,8 @@ async fn tools_call_refuses_tools_the_policy_denies() {
 
 #[tokio::test]
 async fn tools_call_refuses_undecided_tools_because_nobody_can_be_asked() {
-    let (resp, stub) = call_echo(&policy(&[], &[])).await;
-    let text = tool_error_text(&resp);
+    let (result, stub) = call_echo(policy(&[], &[])).await;
+    let text = assert_refused(&result);
     assert!(text.contains("cannot prompt a user"), "{text}");
     assert!(
         stub.recorded_calls().is_empty(),
@@ -676,7 +453,6 @@ async fn tools_call_refuses_undecided_tools_because_nobody_can_be_asked() {
 
 #[tokio::test]
 async fn tools_call_refuses_tools_that_require_confirmation_without_an_allow_rule() {
-    let (o, _, r) = default_stubs();
     let spec = ToolSpec {
         name: "risky".to_string(),
         description: "needs a human".to_string(),
@@ -685,35 +461,30 @@ async fn tools_call_refuses_tools_that_require_confirmation_without_an_allow_rul
         requires_confirmation: true,
     };
     let stub = Arc::new(StubToolDispatcher::new().with_specs(vec![spec]));
-    let resp = call_with_policy(
-        make_request(31, "tools/call", json!({"name": "risky", "arguments": {}})),
-        o,
-        stub.clone(),
-        r,
-        &policy(&[], &[]),
-    )
-    .await;
-    let text = tool_error_text(&resp);
+    let client = default_stubs()
+        .executor(stub.clone())
+        .connect_with_policy(policy(&[], &[]))
+        .await;
+    let result = client
+        .call_tool(call_params("risky", json!({})))
+        .await
+        .unwrap();
+    let text = assert_refused(&result);
     assert!(text.contains("requires confirmation"), "{text}");
     assert!(stub.recorded_calls().is_empty());
 }
 
 #[tokio::test]
 async fn tools_call_install_skill_is_subject_to_the_policy() {
-    let (o, e, r) = default_stubs();
-    let resp = call_with_policy(
-        make_request(
-            32,
-            "tools/call",
-            json!({"name": "install-skill", "arguments": {"source": "owner/repo"}}),
-        ),
-        o,
-        e,
-        r,
-        &policy(&[], &[]),
-    )
-    .await;
-    let text = tool_error_text(&resp);
+    let client = default_stubs().connect_with_policy(policy(&[], &[])).await;
+    let result = client
+        .call_tool(call_params(
+            "install-skill",
+            json!({"source": "owner/repo"}),
+        ))
+        .await
+        .unwrap();
+    let text = assert_refused(&result);
     assert!(
         text.contains("Permission denied for 'install-skill'"),
         "{text}"

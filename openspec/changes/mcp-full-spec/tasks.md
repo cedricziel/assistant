@@ -9,12 +9,12 @@ Each numbered group is one PR in the stack, in order.
 
 ## 2. Workspace rmcp and server handler on stdio (PR 2)
 
-- [ ] 2.1 Declare `rmcp = "3.11"` in `[workspace.dependencies]`, point `mcp-client` and `mcp-server` at it (server: `server`, `macros`, `transport-io`), and verify `cargo check -p assistant-mcp-server -p assistant-mcp-client` passes
-- [ ] 2.2 Port `tests/dispatch.rs` and `tests/io_loop.rs` to drive the server through an rmcp client over an in-process duplex transport; confirm red against a stub `AssistantMcpServer`
-- [ ] 2.3 Implement `AssistantMcpServer: ServerHandler` with `get_info`, `list_tools` (deterministic order), `call_tool`, `list_resources`, `list_resource_templates`, `read_resource`, carrying over permission evaluation and the traversal guard; verify the ported tests pass
-- [ ] 2.4 Add tests that `server/discover` reports `2026-07-28` and `2025-11-25`, that `initialize` at `2025-11-25` succeeds and that `2024-11-05` is rejected; make them pass
-- [ ] 2.5 Delete `protocol.rs`, `run_io` and the line loop; serve stdio via rmcp in `run`; verify with `cargo test -p assistant-mcp-server` and a `cargo machete --with-metadata` run
-- [ ] 2.6 Add a test that stdout carries only protocol frames while the handler logs, and make it pass
+- [x] 2.1 Declare `rmcp = "3.11"` in `[workspace.dependencies]`, point `mcp-client` and `mcp-server` at it (server: `server`, `transport-io`; `macros` is not needed because the handler implements `list_tools`/`call_tool` directly), and verify `cargo check -p assistant-mcp-server -p assistant-mcp-client` passes
+- [x] 2.2 Port `tests/dispatch.rs` and `tests/io_loop.rs` to drive the server through an rmcp client over an in-process duplex transport; confirm red against a stub `AssistantMcpServer`
+- [x] 2.3 Implement `AssistantMcpServer: ServerHandler` with `get_info`, `list_tools` (deterministic order), `call_tool`, `list_resources`, `list_resource_templates`, `read_resource`, carrying over permission evaluation and the traversal guard; verify the ported tests pass
+- [x] 2.4 Add tests that `server/discover` reports `2026-07-28` and `2025-11-25`, that `initialize` at `2025-11-25` succeeds and that `2024-11-05` is rejected; make them pass
+- [x] 2.5 Delete `protocol.rs`, `run_io` and the line loop; serve stdio via rmcp in `run`; verify with `cargo test -p assistant-mcp-server` and a `cargo machete --with-metadata` run
+- [x] 2.6 Add a test that stdout carries only protocol frames while the handler logs, and make it pass
 
 ## 3. Caller identity in the server (PR 3)
 
