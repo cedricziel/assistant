@@ -430,11 +430,12 @@ dependencies = [
  "assistant-skills",
  "assistant-storage",
  "assistant-tool-executor",
- "serde",
+ "rmcp",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

@@ -1,359 +1,287 @@
-//! MCP server request dispatcher.
+//! MCP server handler backed by the assistant's tool, skill and orchestration facades.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
+
+use rmcp::model::{
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
+    ServerConfig, Tool,
+};
+use rmcp::service::RequestContext;
+use rmcp::{ErrorData, RoleServer, ServerHandler};
+use serde_json::{Value, json};
+use tracing::warn;
+use uuid::Uuid;
 
 use assistant_core::permission::{PermissionPolicy, PermissionRequest};
 use assistant_core::tool::ToolDispatcher;
-use assistant_core::{types::conversation::ExecutionContext, types::conversation::Interface};
+use assistant_core::types::conversation::{ExecutionContext, Interface};
 use assistant_runtime::OrchestrationEngine;
-use assistant_storage::SkillCatalog;
+use assistant_storage::{SkillCatalog, SkillRegistry};
 use assistant_tool_executor::install_skill_from_source;
-use serde_json::{Value, json};
-use tracing::{debug, warn};
-use uuid::Uuid;
 
-use crate::protocol::*;
+use crate::resources;
 
-/// Handles a single MCP JSON-RPC request and returns a response.
-pub async fn handle_request(
-    req: JsonRpcRequest,
-    registry: Arc<dyn SkillCatalog>,
+const RUN_PROMPT: &str = "run-prompt";
+const INSTALL_SKILL: &str = "install-skill";
+
+/// Revisions this server implements, oldest first. Pinned rather than taken from
+/// rmcp's known set so a rmcp upgrade cannot silently advertise older revisions.
+const SUPPORTED_VERSIONS: &[ProtocolVersion] =
+    &[ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28];
+
+/// Serves the assistant's tools and skills to MCP clients.
+///
+/// Every `tools/call` is authorized by the permission policy; MCP callers
+/// cannot be prompted, so calls the policy leaves undecided are refused.
+#[derive(Clone)]
+pub struct AssistantMcpServer {
+    catalog: Arc<dyn SkillCatalog>,
     executor: Arc<dyn ToolDispatcher>,
     orchestrator: Arc<dyn OrchestrationEngine>,
-    policy: &PermissionPolicy,
+    policy: PermissionPolicy,
     user_skills_dir: PathBuf,
-    install_registry: Option<Arc<assistant_storage::SkillRegistry>>,
-) -> JsonRpcResponse {
-    debug!(method = %req.method, "MCP request");
+    install_registry: Option<Arc<SkillRegistry>>,
+}
 
-    match req.method.as_str() {
-        // ── Lifecycle ─────────────────────────────────────────────────────────
-        "initialize" => {
-            let result = InitializeResult {
-                protocol_version: "2024-11-05",
-                capabilities: ServerCapabilities {
-                    tools: ToolsCapability {
-                        list_changed: false,
-                    },
-                    resources: ResourcesCapability {
-                        subscribe: false,
-                        list_changed: false,
-                    },
-                },
-                server_info: ServerInfo {
-                    name: "assistant-mcp-server",
-                    version: env!("CARGO_PKG_VERSION"),
-                },
-            };
-            JsonRpcResponse::ok(
-                req.id,
-                serde_json::to_value(result).unwrap_or(serde_json::json!({})),
-            )
+impl AssistantMcpServer {
+    pub fn new(
+        orchestrator: Arc<dyn OrchestrationEngine>,
+        executor: Arc<dyn ToolDispatcher>,
+        catalog: Arc<dyn SkillCatalog>,
+        policy: PermissionPolicy,
+        user_skills_dir: PathBuf,
+    ) -> Self {
+        Self {
+            catalog,
+            executor,
+            orchestrator,
+            policy,
+            user_skills_dir,
+            install_registry: None,
         }
+    }
 
-        "notifications/initialized" | "ping" => JsonRpcResponse::ok(req.id, json!({})),
+    /// Enables the `install-skill` tool, which writes into `user_skills_dir` and
+    /// registers the result in `registry`.
+    pub fn with_install_registry(mut self, registry: Arc<SkillRegistry>) -> Self {
+        self.install_registry = Some(registry);
+        self
+    }
 
-        // ── Tools ─────────────────────────────────────────────────────────────
-        "tools/list" => {
-            // Use ToolExecutor specs for the tools list.
-            let tool_specs = executor.to_specs();
-            let mut tools: Vec<McpTool> = tool_specs
+    fn tool_list(&self) -> Vec<Tool> {
+        let mut tools: Vec<Tool> = self
+            .executor
+            .to_specs()
+            .into_iter()
+            .map(|spec| tool(spec.name, spec.description, spec.params_schema))
+            .collect();
+        tools.push(tool(
+            RUN_PROMPT,
+            "Send a prompt through the orchestrator loop (may invoke multiple tools).",
+            json!({
+                "type": "object",
+                "required": ["prompt"],
+                "properties": {
+                    "prompt": { "type": "string", "description": "The user message to process" }
+                }
+            }),
+        ));
+        tools.push(tool(
+            INSTALL_SKILL,
+            "Install a skill from a local path or GitHub (owner/repo[/path]).",
+            json!({
+                "type": "object",
+                "required": ["source"],
+                "properties": {
+                    "source": { "type": "string", "description": "Local path or owner/repo[/sub/path]" }
+                }
+            }),
+        ));
+        tools
+    }
+
+    fn requires_confirmation(&self, tool_name: &str) -> bool {
+        tool_name == INSTALL_SKILL
+            || self
+                .executor
+                .to_specs()
                 .iter()
-                .map(|spec| McpTool {
-                    name: spec.name.clone(),
-                    description: spec.description.clone(),
-                    input_schema: spec.params_schema.clone(),
-                })
-                .collect();
+                .any(|spec| spec.name == tool_name && spec.requires_confirmation)
+    }
 
-            // Management tools appended after the per-tool entries.
-            tools.push(McpTool {
-                name: "run-prompt".to_string(),
-                description:
-                    "Send a prompt through the orchestrator loop (may invoke multiple tools)."
-                        .to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "required": ["prompt"],
-                    "properties": {
-                        "prompt": { "type": "string", "description": "The user message to process" }
-                    }
-                }),
-            });
-            tools.push(McpTool {
-                name: "install-skill".to_string(),
-                description: "Install a skill from a local path or GitHub (owner/repo[/path]).".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "required": ["source"],
-                    "properties": {
-                        "source": { "type": "string", "description": "Local path or owner/repo[/sub/path]" }
-                    }
-                }),
-            });
+    async fn run_prompt(&self, input: &Value) -> Result<CallToolResult, ErrorData> {
+        let prompt = required_str(input, "prompt")?;
+        let turn = self
+            .orchestrator
+            .submit_turn(
+                &assistant_core::auth::AuthContext::system(),
+                prompt,
+                Uuid::new_v4(),
+                Interface::Mcp,
+                None,
+            )
+            .await
+            .map_err(|e| {
+                warn!(error = %e, "run_prompt failed");
+                ErrorData::internal_error(e.to_string(), None)
+            })?;
+        Ok(text_result(turn.answer))
+    }
 
-            JsonRpcResponse::ok(req.id, json!({ "tools": tools }))
-        }
-
-        "tools/call" => {
-            let tool_name = req.params["name"].as_str().unwrap_or("").to_string();
-            let tool_input = req.params["arguments"].clone();
-
-            // ── Management tools ──────────────────────────────────────────────
-            if tool_name == "run-prompt" {
-                let Some(prompt) = tool_input["prompt"].as_str() else {
-                    return JsonRpcResponse::err(
-                        req.id,
-                        -32602,
-                        "Missing required parameter 'prompt'",
-                    );
-                };
-                return match orchestrator
-                    .submit_turn(
-                        &assistant_core::auth::AuthContext::system(),
-                        prompt,
-                        Uuid::new_v4(),
-                        Interface::Mcp,
-                        None,
-                    )
-                    .await
-                {
-                    Ok(turn) => {
-                        let content = vec![ContentItem::text(turn.answer)];
-                        JsonRpcResponse::ok(req.id, json!({ "content": content }))
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "run_prompt failed");
-                        JsonRpcResponse::err(req.id, -32603, e.to_string())
-                    }
-                };
-            }
-
-            // MCP callers cannot be prompted, so the policy decides alone.
-            // `run-prompt` is exempt: its tool calls pass the orchestrator's
-            // own gate.
-            let ctx = ExecutionContext {
-                conversation_id: Uuid::new_v4(),
-                agent_id: "default".to_string(),
-                turn: 0,
-                interface: Interface::Mcp,
-                interactive: false,
-                allowed_tools: None,
-                depth: 0,
-                user_id: None,
-                org_id: None,
-                space_id: None,
-            };
-            let requires_confirmation = tool_name == "install-skill"
-                || executor
-                    .to_specs()
-                    .iter()
-                    .any(|spec| spec.name == tool_name && spec.requires_confirmation);
-            let resolution = policy
-                .evaluate(&PermissionRequest {
-                    tool_name: &tool_name,
-                    params: &tool_input,
-                    ctx: &ctx,
-                    requires_confirmation,
-                    task_context: None,
-                })
-                .await;
-            if let Some(refusal) = resolution.refusal(&tool_name) {
-                warn!(tool = %tool_name, %refusal, "MCP tool call refused");
-                return JsonRpcResponse::ok(
-                    req.id,
-                    json!({ "content": [ContentItem::text(refusal)], "isError": true }),
-                );
-            }
-
-            if tool_name == "install-skill" {
-                let Some(source) = tool_input["source"].as_str() else {
-                    return JsonRpcResponse::err(
-                        req.id,
-                        -32602,
-                        "Missing required parameter 'source'",
-                    );
-                };
-                let Some(install_target) = install_registry.clone() else {
-                    return JsonRpcResponse::err(
-                        req.id,
-                        -32603,
-                        "Skill installation requires a SkillRegistry — none configured",
-                    );
-                };
-                return match install_skill_from_source(source, &user_skills_dir, install_target)
-                    .await
-                {
-                    Ok(name) => {
-                        let content = vec![ContentItem::text(format!("Skill '{name}' installed."))];
-                        JsonRpcResponse::ok(req.id, json!({ "content": content }))
-                    }
-                    Err(e) => {
-                        warn!(source, error = %e, "install_skill failed");
-                        JsonRpcResponse::err(req.id, -32603, e.to_string())
-                    }
-                };
-            }
-
-            // ── Per-tool dynamic dispatch via ToolExecutor ─────────────────────
-            let params: HashMap<String, Value> = if let Value::Object(map) = &tool_input {
-                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-            } else {
-                HashMap::new()
-            };
-
-            match executor.execute(&tool_name, params, &ctx).await {
-                Ok(output) => {
-                    let content = vec![ContentItem::text(output.content)];
-                    JsonRpcResponse::ok(req.id, json!({ "content": content }))
-                }
-                Err(e) => {
-                    warn!(tool = %tool_name, error = %e, "Tool execution failed");
-                    JsonRpcResponse::err(req.id, -32603, e.to_string())
-                }
-            }
-        }
-
-        // ── Resources ─────────────────────────────────────────────────────────
-        // Resources still use the SkillRegistry (SKILL.md knowledge packages).
-        "resources/list" => {
-            let skills = registry.list().await;
-            let mut resources = vec![McpResource {
-                uri: "skills://list".to_string(),
-                name: "All Skills".to_string(),
-                description: "List of all registered assistant skills".to_string(),
-                mime_type: "application/json".to_string(),
-            }];
-
-            for skill in &skills {
-                resources.push(McpResource {
-                    uri: format!("skills://{}", skill.name),
-                    name: skill.name.clone(),
-                    description: skill.description.clone(),
-                    mime_type: "text/markdown".to_string(),
-                });
-
-                // Auxiliary files (scripts/, references/, assets/)
-                for (category, rel_path) in skill.auxiliary_files() {
-                    let filename = rel_path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown");
-                    resources.push(McpResource {
-                        uri: format!("skills://{}/{}", skill.name, rel_path.display()),
-                        name: filename.to_string(),
-                        description: format!(
-                            "{} file for {} skill",
-                            category.dir_name(),
-                            skill.name
-                        ),
-                        mime_type: category.mime_type().to_string(),
-                    });
-                }
-            }
-
-            JsonRpcResponse::ok(req.id, json!({ "resources": resources }))
-        }
-
-        "resources/read" => {
-            let uri = req.params["uri"].as_str().unwrap_or("").to_string();
-
-            if uri == "skills://list" {
-                let skills = registry.list().await;
-                let items: Vec<_> = skills
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "name": s.name,
-                            "description": s.description,
-                            "source": s.source.to_string(),
-                        })
-                    })
-                    .collect();
-
-                let content = vec![ContentItem::text(
-                    serde_json::to_string_pretty(&json!({ "skills": items })).unwrap_or_default(),
-                )];
-                JsonRpcResponse::ok(req.id, json!({ "contents": content }))
-            } else if let Some(path) = uri.strip_prefix("skills://") {
-                let segments: Vec<&str> = path.splitn(3, '/').collect();
-                match segments.len() {
-                    // skills://<name> — return SKILL.md
-                    1 => {
-                        let skill_name = segments[0];
-                        match registry.get(skill_name).await {
-                            Some(skill) => {
-                                let skill_md_path = skill.dir.join("SKILL.md");
-                                let text = std::fs::read_to_string(&skill_md_path)
-                                    .unwrap_or_else(|_| skill.body.clone());
-                                let content = vec![ContentItem::text(text)];
-                                JsonRpcResponse::ok(req.id, json!({ "contents": content }))
-                            }
-                            None => JsonRpcResponse::err(
-                                req.id,
-                                -32602,
-                                format!("Skill '{skill_name}' not found"),
-                            ),
-                        }
-                    }
-                    // skills://<name>/<category>/<filename> — return auxiliary file
-                    3 if matches!(segments[1], "scripts" | "references" | "assets") => {
-                        let skill_name = segments[0];
-                        let category = segments[1];
-                        let filename = segments[2];
-                        match registry.get(skill_name).await {
-                            Some(skill) => {
-                                let file_path = skill.dir.join(category).join(filename);
-                                match read_file_within(&skill.dir, &file_path) {
-                                    Ok(text) => {
-                                        let content = vec![ContentItem::text(text)];
-                                        JsonRpcResponse::ok(req.id, json!({ "contents": content }))
-                                    }
-                                    Err(_) => JsonRpcResponse::err(
-                                        req.id,
-                                        -32602,
-                                        format!(
-                                            "File '{category}/{filename}' not found in skill '{skill_name}'"
-                                        ),
-                                    ),
-                                }
-                            }
-                            None => JsonRpcResponse::err(
-                                req.id,
-                                -32602,
-                                format!("Skill '{skill_name}' not found"),
-                            ),
-                        }
-                    }
-                    _ => {
-                        JsonRpcResponse::err(req.id, -32602, format!("Invalid resource URI: {uri}"))
-                    }
-                }
-            } else {
-                JsonRpcResponse::err(req.id, -32602, format!("Unknown resource URI: {uri}"))
-            }
-        }
-
-        other => {
-            debug!(method = %other, "Unhandled MCP method");
-            if req.id.is_some() {
-                JsonRpcResponse::err(req.id, -32601, format!("Method not found: {other}"))
-            } else {
-                JsonRpcResponse::ok(None, json!({}))
-            }
-        }
+    async fn install_skill(&self, input: &Value) -> Result<CallToolResult, ErrorData> {
+        let source = required_str(input, "source")?;
+        let Some(registry) = self.install_registry.clone() else {
+            return Err(ErrorData::internal_error(
+                "Skill installation requires a SkillRegistry — none configured",
+                None,
+            ));
+        };
+        let name = install_skill_from_source(source, &self.user_skills_dir, registry)
+            .await
+            .map_err(|e| {
+                warn!(source, error = %e, "install_skill failed");
+                ErrorData::internal_error(e.to_string(), None)
+            })?;
+        Ok(text_result(format!("Skill '{name}' installed.")))
     }
 }
 
-/// Reads `path` only when it resolves inside `root`, so `..` segments and
-/// symlinks in a resource URI cannot reach files outside the skill directory.
-fn read_file_within(root: &Path, path: &Path) -> std::io::Result<String> {
-    let root = root.canonicalize()?;
-    let resolved = path.canonicalize()?;
-    if !resolved.starts_with(&root) {
-        return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+fn tool(
+    name: impl Into<Cow<'static, str>>,
+    description: impl Into<Cow<'static, str>>,
+    schema: Value,
+) -> Tool {
+    let schema = match schema {
+        Value::Object(map) => map,
+        _ => serde_json::Map::from_iter([("type".to_owned(), json!("object"))]),
+    };
+    Tool::new(name, description, schema)
+}
+
+fn text_result(text: impl Into<String>) -> CallToolResult {
+    CallToolResult::success(vec![ContentBlock::text(text)])
+}
+
+fn required_str<'a>(input: &'a Value, name: &str) -> Result<&'a str, ErrorData> {
+    input[name].as_str().ok_or_else(|| {
+        ErrorData::invalid_params(format!("Missing required parameter '{name}'"), None)
+    })
+}
+
+impl ServerHandler for AssistantMcpServer {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
+        .with_server_info(Implementation::new(
+            "assistant-mcp-server",
+            env!("CARGO_PKG_VERSION"),
+        ))
     }
-    std::fs::read_to_string(resolved)
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(SUPPORTED_VERSIONS)
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(ListToolsResult::with_all_items(self.tool_list()))
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let tool_name = request.name.as_ref();
+        let arguments = request.arguments.unwrap_or_default();
+        let input = Value::Object(arguments.clone());
+
+        // `run-prompt` is exempt from the policy: its tool calls pass the
+        // orchestrator's own gate.
+        if tool_name == RUN_PROMPT {
+            return self.run_prompt(&input).await.map(Into::into);
+        }
+
+        // MCP callers cannot be prompted, so the policy decides alone.
+        let ctx = ExecutionContext {
+            conversation_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
+            turn: 0,
+            interface: Interface::Mcp,
+            interactive: false,
+            allowed_tools: None,
+            depth: 0,
+            user_id: None,
+            org_id: None,
+            space_id: None,
+        };
+        let requires_confirmation = self.requires_confirmation(tool_name);
+        let resolution = self
+            .policy
+            .evaluate(&PermissionRequest {
+                tool_name,
+                params: &input,
+                ctx: &ctx,
+                requires_confirmation,
+                task_context: None,
+            })
+            .await;
+        if let Some(refusal) = resolution.refusal(tool_name) {
+            warn!(tool = %tool_name, %refusal, "MCP tool call refused");
+            return Ok(CallToolResult::error(vec![ContentBlock::text(refusal)]).into());
+        }
+
+        if tool_name == INSTALL_SKILL {
+            return self.install_skill(&input).await.map(Into::into);
+        }
+
+        let params: HashMap<String, Value> = arguments.into_iter().collect();
+        let output = self
+            .executor
+            .execute(tool_name, params, &ctx)
+            .await
+            .map_err(|e| {
+                warn!(tool = %tool_name, error = %e, "Tool execution failed");
+                ErrorData::internal_error(e.to_string(), None)
+            })?;
+        Ok(text_result(output.content).into())
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        Ok(resources::list(self.catalog.as_ref()).await)
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        Ok(resources::templates())
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        resources::read(self.catalog.as_ref(), &request.uri)
+            .await
+            .map(Into::into)
+    }
 }

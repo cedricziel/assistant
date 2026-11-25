@@ -19,7 +19,7 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 base64 = { workspace = true }
-rmcp = { version = "3.1.4", default-features = false, features = [
+rmcp = { workspace = true, features = [
     "client",
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
@@ -32,7 +32,7 @@ reqwest = { workspace = true }
 # Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
 assistant-core = { path = "../core", features = ["test-tls"] }
 tokio = { workspace = true, features = ["test-util", "io-util", "macros"] }
-rmcp = { version = "3.1.4", default-features = false, features = [
+rmcp = { workspace = true, features = [
     "client",
     "server",
 ] }

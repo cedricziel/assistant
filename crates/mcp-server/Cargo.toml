@@ -3,27 +3,35 @@ name = "assistant-mcp-server"
 version = "0.3.0"
 license.workspace = true
 edition.workspace = true
-description = "stdio MCP server library exposing assistant skills via JSON-RPC 2.0"
+description = "MCP server library exposing assistant tools and skills through rmcp"
 
 [lib]
 name = "assistant_mcp_server"
 path = "src/lib.rs"
+
+# Spawns itself as a child process to inspect the real stdout and stderr.
+[[test]]
+name = "stdio"
+path = "tests/stdio.rs"
+harness = false
 
 [dependencies]
 assistant-core = { path = "../core" }
 assistant-storage = { path = "../storage" }
 assistant-tool-executor = { path = "../tool-executor" }
 assistant-runtime = { path = "../runtime" }
+assistant-skills = { path = "../skills" }
+rmcp = { workspace = true, features = ["server", "transport-io"] }
 tokio = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-assistant-skills = { path = "../skills" }
+rmcp = { workspace = true, features = ["client", "server"] }
 tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # Panic-free contract: production code propagates errors via `anyhow::Result`.
 # Tests are exempt because `make lint` (`cargo clippy --workspace`) does not
