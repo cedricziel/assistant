@@ -157,6 +157,143 @@ fn parse_header_template(template: &str) -> Option<HeaderTemplate> {
     })
 }
 
+// -- Index -------------------------------------------------------------------
+
+/// Page size when a query names none.
+pub const DEFAULT_PAGE_SIZE: usize = 50;
+/// Largest page a query may ask for.
+pub const MAX_PAGE_SIZE: usize = 200;
+
+/// Search parameters for [`CatalogIndex::search`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CatalogQuery<'a> {
+    /// Case-insensitive text matched against name, domain and description.
+    pub q: Option<&'a str>,
+    /// Case-insensitive exact category.
+    pub category: Option<&'a str>,
+    /// Page size; defaults to [`DEFAULT_PAGE_SIZE`], capped at [`MAX_PAGE_SIZE`].
+    pub limit: Option<usize>,
+    /// `next_cursor` of the previous page.
+    pub cursor: Option<&'a str>,
+}
+
+/// One page of search results.
+#[derive(Debug)]
+pub struct CatalogPage<'a> {
+    pub items: Vec<&'a CatalogEntry>,
+    /// Pass as `cursor` to get the next page; `None` on the last page.
+    pub next_cursor: Option<String>,
+}
+
+/// The cursor is not one this index handed out.
+#[derive(Debug, PartialEq, Eq)]
+pub struct InvalidCursor;
+
+impl std::fmt::Display for InvalidCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("invalid cursor")
+    }
+}
+
+impl std::error::Error for InvalidCursor {}
+
+/// Normalized catalog entries with a precomputed search string each.
+///
+/// The catalog holds about 1,350 entries, so search is a linear scan.
+#[derive(Debug, Default)]
+pub struct CatalogIndex {
+    entries: Vec<IndexedEntry>,
+}
+
+#[derive(Debug)]
+struct IndexedEntry {
+    entry: CatalogEntry,
+    /// Lowercased `name`, `domain` and `description`, newline-separated.
+    haystack: String,
+}
+
+impl IndexedEntry {
+    fn new(entry: CatalogEntry) -> Self {
+        let haystack =
+            format!("{}\n{}\n{}", entry.name, entry.domain, entry.description).to_lowercase();
+        Self { entry, haystack }
+    }
+
+    fn matches(&self, q: &str, category: Option<&str>) -> bool {
+        self.haystack.contains(q)
+            && category.is_none_or(|wanted| {
+                self.entry
+                    .categories
+                    .iter()
+                    .any(|c| c.eq_ignore_ascii_case(wanted))
+            })
+    }
+}
+
+impl CatalogIndex {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Build an index from an upstream document `{version, generatedAt, data[]}`.
+    ///
+    /// Returns `None` when `raw` is not a catalog (no `data` array). Entries
+    /// that do not normalize are skipped.
+    pub fn from_document(raw: &Value) -> Option<Self> {
+        let data = raw.get("data")?.as_array()?;
+        let entries = data
+            .iter()
+            .filter_map(normalize)
+            .map(IndexedEntry::new)
+            .collect();
+        Some(Self { entries })
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn get(&self, id: &str) -> Option<&CatalogEntry> {
+        self.entries
+            .iter()
+            .map(|indexed| &indexed.entry)
+            .find(|entry| entry.id == id)
+    }
+
+    /// Entries matching `query`, in upstream order, one page at a time.
+    ///
+    /// The cursor is the offset into the filtered list, so it stays stable
+    /// for as long as the index is not replaced.
+    pub fn search(&self, query: &CatalogQuery<'_>) -> Result<CatalogPage<'_>, InvalidCursor> {
+        let offset = match query.cursor {
+            Some(cursor) => cursor.parse::<usize>().map_err(|_| InvalidCursor)?,
+            None => 0,
+        };
+        let limit = query
+            .limit
+            .unwrap_or(DEFAULT_PAGE_SIZE)
+            .clamp(1, MAX_PAGE_SIZE);
+        let q = query.q.map(|q| q.trim().to_lowercase()).unwrap_or_default();
+
+        let mut matching = self
+            .entries
+            .iter()
+            .filter(|indexed| indexed.matches(&q, query.category))
+            .skip(offset);
+        let items: Vec<&CatalogEntry> = matching
+            .by_ref()
+            .take(limit)
+            .map(|indexed| &indexed.entry)
+            .collect();
+        let next_cursor = matching.next().map(|_| (offset + items.len()).to_string());
+        Ok(CatalogPage { items, next_cursor })
+    }
+}
+
 // -- Tests -------------------------------------------------------------------
 
 #[cfg(test)]
@@ -426,5 +563,270 @@ mod tests {
                 "value_prefix": ""
             })
         );
+    }
+
+    // -- CatalogIndex --------------------------------------------------------
+
+    fn fixture_index() -> CatalogIndex {
+        let doc: Value = serde_json::from_str(FIXTURE).unwrap();
+        CatalogIndex::from_document(&doc).unwrap()
+    }
+
+    fn ids<'a>(page: &CatalogPage<'a>) -> Vec<&'a str> {
+        page.items.iter().map(|e| e.id.as_str()).collect()
+    }
+
+    /// `n` installable entries named "Entry 0".."Entry n-1", all in category `c`.
+    fn index_of(n: usize) -> CatalogIndex {
+        let data: Vec<Value> = (0..n)
+            .map(|i| {
+                json!({
+                    "id": format!("e/{i}"), "kind": "mcp", "name": format!("Entry {i}"),
+                    "connectUrl": "https://e.example/mcp", "categories": ["c"]
+                })
+            })
+            .collect();
+        CatalogIndex::from_document(&json!({"version": 1, "data": data})).unwrap()
+    }
+
+    #[test]
+    fn from_document_indexes_only_normalizable_entries() {
+        assert_eq!(fixture_index().len(), 13);
+    }
+
+    #[test]
+    fn from_document_rejects_things_that_are_not_catalogs() {
+        for raw in [
+            json!({"version": 1}),
+            json!({"data": "nope"}),
+            json!([1, 2]),
+            Value::Null,
+        ] {
+            assert!(CatalogIndex::from_document(&raw).is_none(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn from_document_accepts_an_empty_catalog() {
+        let index = CatalogIndex::from_document(&json!({"data": []})).unwrap();
+
+        assert!(index.is_empty());
+    }
+
+    #[test]
+    fn empty_index_searches_to_an_empty_page() {
+        let index = CatalogIndex::empty();
+
+        let page = index.search(&CatalogQuery::default()).unwrap();
+
+        assert!(page.items.is_empty());
+        assert_eq!(page.next_cursor, None);
+    }
+
+    #[test]
+    fn get_finds_an_entry_by_id() {
+        let index = fixture_index();
+
+        assert_eq!(
+            index.get("curated/linear-app-mcp").map(|e| e.name.as_str()),
+            Some("Linear")
+        );
+        assert!(index.get("curated/github-com-cli").is_none());
+        assert!(index.get("nope").is_none());
+    }
+
+    #[test]
+    fn text_search_is_case_insensitive_over_name_domain_and_description() {
+        let index = fixture_index();
+
+        let by_name = index
+            .search(&CatalogQuery {
+                q: Some("LINEAR"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(ids(&by_name), ["curated/linear-app-mcp"]);
+
+        let by_domain = index
+            .search(&CatalogQuery {
+                q: Some("notion.com"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(ids(&by_domain), ["curated/notion-com-mcp"]);
+
+        let by_description = index
+            .search(&CatalogQuery {
+                q: Some("hosted mcp server exposes query, monitor"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(ids(&by_description), ["curated/axiom-co-mcp"]);
+    }
+
+    #[test]
+    fn blank_text_search_matches_everything() {
+        let index = fixture_index();
+
+        let page = index
+            .search(&CatalogQuery {
+                q: Some("   "),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(page.items.len(), 13);
+    }
+
+    #[test]
+    fn category_filter_is_case_insensitive_and_exact() {
+        let index = fixture_index();
+
+        let page = index
+            .search(&CatalogQuery {
+                category: Some("Observability"),
+                ..Default::default()
+            })
+            .unwrap();
+        let mut found = ids(&page);
+        found.sort();
+        assert_eq!(found, ["curated/axiom-co-mcp", "curated/sentry-io-mcp"]);
+
+        let partial = index
+            .search(&CatalogQuery {
+                category: Some("observ"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(partial.items.is_empty());
+    }
+
+    #[test]
+    fn text_and_category_filters_combine() {
+        let index = fixture_index();
+
+        let page = index
+            .search(&CatalogQuery {
+                q: Some("sentry"),
+                category: Some("observability"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(ids(&page), ["curated/sentry-io-mcp"]);
+
+        let none = index
+            .search(&CatalogQuery {
+                q: Some("linear"),
+                category: Some("observability"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(none.items.is_empty());
+    }
+
+    #[test]
+    fn default_page_size_is_fifty() {
+        let index = index_of(120);
+
+        let page = index.search(&CatalogQuery::default()).unwrap();
+
+        assert_eq!(page.items.len(), 50);
+        assert!(page.next_cursor.is_some());
+    }
+
+    #[test]
+    fn limit_is_capped_at_two_hundred_and_at_least_one() {
+        let index = index_of(250);
+
+        let big = index
+            .search(&CatalogQuery {
+                limit: Some(10_000),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(big.items.len(), 200);
+
+        let zero = index
+            .search(&CatalogQuery {
+                limit: Some(0),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(zero.items.len(), 1);
+    }
+
+    #[test]
+    fn cursor_pages_through_every_entry_once_in_order() {
+        let index = index_of(7);
+        let mut seen = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let page = index
+                .search(&CatalogQuery {
+                    limit: Some(3),
+                    cursor: cursor.as_deref(),
+                    ..Default::default()
+                })
+                .unwrap();
+            seen.extend(page.items.iter().map(|e| e.id.clone()));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+
+        let expected: Vec<String> = (0..7).map(|i| format!("e/{i}")).collect();
+        assert_eq!(seen, expected);
+    }
+
+    #[test]
+    fn exact_fit_last_page_has_no_next_cursor() {
+        let index = index_of(6);
+
+        let first = index
+            .search(&CatalogQuery {
+                limit: Some(3),
+                ..Default::default()
+            })
+            .unwrap();
+        let second = index
+            .search(&CatalogQuery {
+                limit: Some(3),
+                cursor: first.next_cursor.as_deref(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(second.items.len(), 3);
+        assert_eq!(second.next_cursor, None);
+    }
+
+    #[test]
+    fn invalid_cursor_is_rejected() {
+        let index = index_of(3);
+
+        for cursor in ["abc", "-1", "", "1.5"] {
+            let result = index.search(&CatalogQuery {
+                cursor: Some(cursor),
+                ..Default::default()
+            });
+            assert_eq!(result.err(), Some(InvalidCursor), "cursor {cursor:?}");
+        }
+    }
+
+    #[test]
+    fn cursor_past_the_end_yields_an_empty_last_page() {
+        let index = index_of(3);
+
+        let page = index
+            .search(&CatalogQuery {
+                cursor: Some("99"),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(page.items.is_empty());
+        assert_eq!(page.next_cursor, None);
     }
 }
