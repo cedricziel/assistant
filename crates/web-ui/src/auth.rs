@@ -17,12 +17,14 @@
 use std::sync::Arc;
 
 use axum::Form;
+use axum::Router;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::header::{COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::routing::{get, post};
 use serde::Deserialize;
 
 use assistant_auth::api_keys;
@@ -75,6 +77,14 @@ impl WebAuthConfig {
     }
 }
 
+/// Request extension set by [`require_auth`] when the request authenticated
+/// with a validated `Authorization: Bearer` token (as opposed to a cookie).
+///
+/// Bearer tokens are not ambient credentials, so only these requests are
+/// exempt from the same-origin check.
+#[derive(Clone, Copy)]
+struct BearerAuthenticated;
+
 // -- Token resolution -------------------------------------------------------
 
 /// Try to resolve an [`AuthContext`] from a bearer token string.
@@ -95,7 +105,7 @@ async fn resolve_bearer(auth: &AuthState, token: &str) -> Option<AuthContext> {
 
     // 3. Try legacy token.
     if let Some(ref legacy) = auth.legacy_token
-        && token == legacy
+        && assistant_auth::constant_time::eq(token, legacy)
         && let Some(ref ctx) = auth.legacy_context
     {
         return Some(ctx.clone());
@@ -141,6 +151,7 @@ pub async fn require_auth(
         && let Some(ctx) = resolve_bearer(&auth, token).await
     {
         request.extensions_mut().insert(ctx);
+        request.extensions_mut().insert(BearerAuthenticated);
         return next.run(request).await;
     }
 
@@ -176,20 +187,15 @@ pub async fn require_auth(
 ///
 /// Browser CSRF relies on ambient cookies on cross-site requests. For state-changing
 /// methods we reject requests whose `Origin`/`Referer` do not match `Host`.
-/// Bearer-authenticated API requests are exempt from this check.
+/// Requests that [`require_auth`] authenticated with a validated Bearer token
+/// are exempt; a bare `Authorization: Bearer` prefix is not enough.
 pub async fn require_same_origin_mutation(request: Request, next: Next) -> Response {
     match *request.method() {
         Method::GET | Method::HEAD | Method::OPTIONS => return next.run(request).await,
         _ => {}
     }
 
-    if request
-        .headers()
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.starts_with("Bearer "))
-        .unwrap_or(false)
-    {
+    if request.extensions().get::<BearerAuthenticated>().is_some() {
         return next.run(request).await;
     }
 
@@ -378,6 +384,17 @@ fn login_html(error: Option<&str>) -> Html<String> {
 </body>
 </html>"#
     ))
+}
+
+/// Browser session routes: the login form, token submission and logout.
+///
+/// Mutations are same-origin only: the login POST would otherwise allow
+/// login CSRF and logout would let any site end the session.
+pub fn session_router() -> Router<WebAuthConfig> {
+    Router::new()
+        .route("/login", get(login_page).post(login_submit))
+        .route("/logout", post(logout))
+        .route_layer(axum::middleware::from_fn(require_same_origin_mutation))
 }
 
 /// `GET /login` — render the login form.
@@ -1089,25 +1106,160 @@ mod tests {
         );
     }
 
+    /// CSRF middleware behind `require_auth`, as wired in `lib.rs`.
+    fn csrf_app_with_auth(config: WebAuthConfig) -> Router {
+        async fn ok() -> &'static str {
+            "ok"
+        }
+
+        Router::new()
+            .route("/action", post(ok))
+            .route_layer(axum::middleware::from_fn(require_same_origin_mutation))
+            .route_layer(axum::middleware::from_fn_with_state(config, require_auth))
+    }
+
+    fn post_action(headers: &[(&str, String)]) -> axum::http::Request<Body> {
+        let mut builder = axum::http::Request::builder()
+            .method("POST")
+            .uri("/action")
+            .header("host", "example.com");
+        for (name, value) in headers {
+            builder = builder.header(*name, value);
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
     #[tokio::test]
-    async fn csrf_allows_bearer_auth() {
-        let app = csrf_app();
-        let resp = app
-            .oneshot(
-                axum::http::Request::builder()
-                    .method("POST")
-                    .uri("/action")
-                    .header("authorization", "Bearer some-token")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+    async fn csrf_allows_validated_bearer_without_origin() {
+        let (config, jwt_sign) = test_config();
+        let token = jwt_sign
+            .sign(&make_user_context(), "acme", "Alice")
+            .unwrap();
+        let resp = csrf_app_with_auth(config)
+            .oneshot(post_action(&[("authorization", format!("Bearer {token}"))]))
             .await
             .unwrap();
         assert_eq!(
             resp.status(),
             StatusCode::OK,
-            "Bearer-authenticated POST should bypass CSRF check"
+            "validated Bearer POST should bypass the origin check"
         );
+    }
+
+    #[tokio::test]
+    async fn csrf_rejects_unvalidated_bearer_prefix() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(post_action(&[(
+                "authorization",
+                "Bearer some-token".into(),
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "a Bearer prefix alone must not bypass the origin check"
+        );
+    }
+
+    #[tokio::test]
+    async fn csrf_rejects_cookie_session_with_bogus_bearer_header() {
+        let (config, jwt_sign) = test_config();
+        let jwt = jwt_sign
+            .sign(&make_user_context(), "acme", "Alice")
+            .unwrap();
+        let resp = csrf_app_with_auth(config)
+            .oneshot(post_action(&[
+                ("authorization", "Bearer bogus".into()),
+                ("cookie", format!("{SESSION_COOKIE}={jwt}")),
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "cookie-authenticated POST with an invalid Bearer header must still be origin-checked"
+        );
+    }
+
+    // -- Tests: CSRF on /login and /logout -----------------------------------
+
+    fn session_app() -> Router {
+        let (config, _jwt_sign) = test_config();
+        session_router().with_state(config)
+    }
+
+    fn session_post(uri: &str, origin: Option<&str>) -> axum::http::Request<Body> {
+        let mut builder = axum::http::Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("host", "example.com")
+            .header("content-type", "application/x-www-form-urlencoded");
+        if let Some(origin) = origin {
+            builder = builder.header("origin", origin);
+        }
+        builder.body(Body::from("token=wrong")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn login_post_without_origin_is_forbidden() {
+        let resp = session_app()
+            .oneshot(session_post("/login", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn login_post_from_foreign_origin_is_forbidden() {
+        let resp = session_app()
+            .oneshot(session_post("/login", Some("https://evil.com")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn login_post_from_same_origin_is_processed() {
+        let resp = session_app()
+            .oneshot(session_post("/login", Some("https://example.com")))
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "same-origin login reaches the handler (wrong token re-renders the form)"
+        );
+    }
+
+    #[tokio::test]
+    async fn logout_requires_same_origin() {
+        let forbidden = session_app()
+            .oneshot(session_post("/logout", Some("https://evil.com")))
+            .await
+            .unwrap();
+        assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+        let ok = session_app()
+            .oneshot(session_post("/logout", Some("https://example.com")))
+            .await
+            .unwrap();
+        assert_eq!(ok.status(), StatusCode::SEE_OTHER);
+    }
+
+    #[tokio::test]
+    async fn login_page_get_needs_no_origin() {
+        let resp = session_app()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]

@@ -11,6 +11,7 @@
 
 pub mod api_keys;
 pub mod bootstrap;
+pub mod constant_time;
 pub mod jwt;
 pub mod middleware;
 pub mod oauth2;

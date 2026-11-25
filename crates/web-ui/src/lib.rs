@@ -41,11 +41,7 @@ use assistant_workflow::{
     spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
 };
 use assistant_workflow_http::HttpRequestActionExecutor;
-use axum::{
-    Extension, Router,
-    http::StatusCode,
-    routing::{get, post},
-};
+use axum::{Extension, Router, http::StatusCode, routing::get};
 use clap::Parser;
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -830,9 +826,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     let public_routes = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
-        .route("/login", get(auth::login_page).post(auth::login_submit))
-        .route("/logout", post(auth::logout))
-        .with_state(auth_config.clone())
+        .merge(auth::session_router().with_state(auth_config.clone()))
         // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
         .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))
         // Public workflow webhook trigger ingress.

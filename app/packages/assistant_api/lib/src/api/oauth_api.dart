@@ -33,7 +33,7 @@ class OauthApi {
   /// * [redirectUri]
   /// * [state]
   /// * [codeChallenge]
-  /// * [codeChallengeMethod] - Accepted per RFC 7636 §4.3 for forward-compatibility. We only support `S256` and assume it implicitly; the value is not yet validated.
+  /// * [codeChallengeMethod] - Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3 defaults to `plain`) are rejected.
   /// * [scope]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
@@ -108,6 +108,7 @@ class OauthApi {
   /// * [clientId]
   /// * [redirectUri]
   /// * [codeChallenge]
+  /// * [codeChallengeMethod] - Must be `S256`.
   /// * [email]
   /// * [password]
   /// * [scope]
@@ -125,6 +126,7 @@ class OauthApi {
     required String clientId,
     required String redirectUri,
     String? codeChallenge,
+    String? codeChallengeMethod,
     String? email,
     String? password,
     String? scope,
@@ -158,6 +160,8 @@ class OauthApi {
             _serializers, clientId, const FullType(String)),
         r'code_challenge': encodeQueryParameter(
             _serializers, codeChallenge, const FullType(String)),
+        r'code_challenge_method': encodeQueryParameter(
+            _serializers, codeChallengeMethod, const FullType(String)),
         r'email':
             encodeQueryParameter(_serializers, email, const FullType(String)),
         r'password': encodeQueryParameter(

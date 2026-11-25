@@ -6033,7 +6033,7 @@
           {
             "name": "code_challenge_method",
             "in": "query",
-            "description": "Accepted per RFC 7636 §4.3 for forward-compatibility. We only support\n`S256` and assume it implicitly; the value is not yet validated.",
+            "description": "Must be `S256`; `plain` and an omitted value (which RFC 7636 §4.3\ndefaults to `plain`) are rejected.",
             "required": false,
             "schema": {
               "type": [
@@ -7815,6 +7815,13 @@
               "string",
               "null"
             ]
+          },
+          "code_challenge_method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Must be `S256`."
           },
           "email": {
             "type": [

@@ -133,7 +133,7 @@ impl FromRequestParts<AuthState> for AuthExtractor {
 
             // 3. Try legacy token.
             if let Some(ref legacy) = state.legacy_token
-                && token == legacy
+                && crate::constant_time::eq(token, legacy)
                 && let Some(ref ctx) = state.legacy_context
             {
                 return Ok(AuthExtractor(ctx.clone()));
