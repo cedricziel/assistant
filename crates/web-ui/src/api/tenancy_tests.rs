@@ -51,7 +51,8 @@ use assistant_transcription::{TtsProvider, TtsRequest, TtsResult};
 
 use super::personas::{PersonaApiState, personas_router};
 use super::push::{PushApiState, push_api_router};
-use super::test_helpers::{TestSpace, body_bytes, multipart_body, state_over, tiny_png};
+use super::skills::{SkillsApiState, skills_router};
+use super::test_helpers::{TestSpace, body_bytes, multipart_body, state_over_in, tiny_png};
 use super::webhooks::{WebhooksApiState, webhooks_api_router};
 use super::workflows::{WorkflowsApiState, workflows_api_router};
 use super::{ApiState, api_router};
@@ -208,6 +209,8 @@ async fn topology(a1: &Arc<StorageLayer>) -> Vec<TestSpace> {
 
 /// The wired data-plane router plus ids of the rows seeded into space A1.
 struct Tenancy {
+    /// Install root of the runtimes; skills created in tests land here.
+    _root: tempfile::TempDir,
     router: Router,
     /// Space A1's storage, for seeding and for asserting nothing leaked in.
     a1: Arc<StorageLayer>,
@@ -224,8 +227,14 @@ struct Tenancy {
 impl Tenancy {
     async fn build() -> Self {
         let a1 = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-        let (mut api_state, _) =
-            state_over("http://127.0.0.1:1", &topology(&a1).await, false).await;
+        let root = tempfile::tempdir().unwrap();
+        let (mut api_state, _) = state_over_in(
+            root.path(),
+            "http://127.0.0.1:1",
+            &topology(&a1).await,
+            false,
+        )
+        .await;
         api_state.tts_provider = Some(Arc::new(StubTts));
         let agent_id = Arc::new(RwLock::new("default".to_string()));
 
@@ -238,6 +247,10 @@ impl Tenancy {
             .merge(workflows_api_router().with_state(WorkflowsApiState {
                 spaces: api_state.spaces.clone(),
                 agent_id: agent_id.clone(),
+            }))
+            .merge(skills_router().with_state(SkillsApiState {
+                spaces: api_state.spaces.clone(),
+                runtimes: api_state.runtimes.clone(),
             }))
             .merge(personas_router().with_state(PersonaApiState {
                 spaces: api_state.spaces.clone(),
@@ -255,6 +268,7 @@ impl Tenancy {
         ));
 
         let mut tenancy = Self {
+            _root: root,
             router,
             a1,
             audio_id: Uuid::nil(),
@@ -1117,6 +1131,86 @@ async fn personas_follow_the_role_matrix() {
             assert_forbidden(&revoked, "member revokes skill access");
         }
     }
+}
+
+// -- Skills --------------------------------------------------------------------
+
+#[tokio::test]
+async fn skills_foreign_org_selecting_a1_is_forbidden() {
+    let t = Tenancy::build().await;
+    let persona_skills = format!("/personas/{PERSONA_ID}/skills");
+
+    for (who, what) in [(Who::Bob, "foreign org"), (Who::Carol, "sibling space")] {
+        assert_forbidden(&t.get(who, "/skills", Some(A1)).await, what);
+        assert_forbidden(&t.get(who, "/skills/anything", Some(A1)).await, what);
+        assert_forbidden(&t.get(who, &persona_skills, Some(A1)).await, what);
+        assert_forbidden(
+            &t.send(
+                who,
+                Method::POST,
+                "/skills",
+                Some(A1),
+                Some(json!({"name": "planted", "description": "d", "body": "b"})),
+            )
+            .await,
+            what,
+        );
+        assert_forbidden(
+            &t.send(who, Method::DELETE, "/skills/anything", Some(A1), None)
+                .await,
+            what,
+        );
+    }
+}
+
+#[tokio::test]
+async fn skills_follow_the_role_matrix() {
+    let t = Tenancy::build().await;
+    let skill = |name: &str| json!({"name": name, "description": "d", "body": "b"});
+
+    assert_eq!(
+        t.get(Who::Vera, "/skills", None).await.status,
+        StatusCode::OK
+    );
+    assert_forbidden(
+        &t.send(Who::Vera, Method::POST, "/skills", None, Some(skill("v")))
+            .await,
+        "viewer creates skill",
+    );
+    let created = t
+        .send(
+            Who::Alice,
+            Method::POST,
+            "/skills",
+            None,
+            Some(skill("tenancy-skill")),
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED, "member creates skill");
+    assert_forbidden(
+        &t.send(
+            Who::Alice,
+            Method::DELETE,
+            "/skills/tenancy-skill",
+            None,
+            None,
+        )
+        .await,
+        "member deletes skill",
+    );
+    assert_eq!(
+        t.send(
+            Who::Adam,
+            Method::DELETE,
+            "/skills/tenancy-skill",
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT,
+        "space admin deletes skill"
+    );
 }
 
 // -- Workflows -----------------------------------------------------------------

@@ -6,6 +6,7 @@
 
 #![cfg(test)]
 
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -43,8 +44,14 @@ pub(crate) struct TestSpace {
 /// Build a [`SpaceResolver`] over an in-memory org database that holds
 /// `spaces`, each served from its preloaded storage (nothing touches disk).
 pub(crate) async fn resolver_for(spaces: &[TestSpace]) -> SpaceResolver {
+    resolver_in(Path::new("/nonexistent/assistant-test-root"), spaces).await
+}
+
+/// Like [`resolver_for`], with the install root at `root`: skills and other
+/// files that runtimes write land there.
+pub(crate) async fn resolver_in(root: &Path, spaces: &[TestSpace]) -> SpaceResolver {
     let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
-    let pools = Arc::new(OrgPoolFactory::new("/nonexistent/assistant-test-root"));
+    let pools = Arc::new(OrgPoolFactory::new(root));
     let now = chrono::DateTime::UNIX_EPOCH;
     let mut orgs_seen = std::collections::HashSet::new();
     for space in spaces {
@@ -154,6 +161,22 @@ pub(crate) async fn state_over(
     spaces: &[TestSpace],
     workers: bool,
 ) -> (ApiState, SpaceResolver) {
+    state_over_in(
+        Path::new("/nonexistent/assistant-test-root"),
+        llm_url,
+        spaces,
+        workers,
+    )
+    .await
+}
+
+/// [`state_over`] with the install root at `root`.
+pub(crate) async fn state_over_in(
+    root: &Path,
+    llm_url: &str,
+    spaces: &[TestSpace],
+    workers: bool,
+) -> (ApiState, SpaceResolver) {
     let mut config = AssistantConfig::default();
     config.memory.enabled = false;
     let llm = Arc::new(
@@ -165,7 +188,7 @@ pub(crate) async fn state_over(
         })
         .unwrap(),
     );
-    let resolver = resolver_for(spaces).await;
+    let resolver = resolver_in(root, spaces).await;
     // Cap the submit timeout: the production default is 3 hours, so a turn
     // that never gets picked up by the worker would keep a test — and the CI
     // job around it — blocked for that long instead of failing fast.
@@ -195,7 +218,7 @@ pub(crate) async fn state_over(
     (state, resolver)
 }
 
-fn default_space(storage: &Arc<StorageLayer>) -> TestSpace {
+pub(crate) fn default_space(storage: &Arc<StorageLayer>) -> TestSpace {
     TestSpace {
         id: "default",
         org_id: "default",

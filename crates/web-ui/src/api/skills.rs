@@ -23,18 +23,46 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use tracing::warn;
 
 use assistant_core::auth::AuthContext;
+use assistant_runtime::SpaceRuntimes;
 use assistant_storage::registry::SkillRegistry;
+
+use crate::errors::json_error;
+use crate::space::{Access, SpaceCtx, SpaceResolver};
 
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct SkillsApiState {
-    pub pool: SqlitePool,
-    pub registry: Arc<SkillRegistry>,
+    /// Resolves each request to the caller's space and its database.
+    pub spaces: SpaceResolver,
+    /// Per-space runtimes; each space has its own skill registry.
+    pub runtimes: Arc<SpaceRuntimes>,
+}
+
+impl SkillsApiState {
+    /// The skill registry of the space `space` is bound to.
+    async fn registry(&self, space: &SpaceCtx) -> Result<Arc<SkillRegistry>, Response> {
+        self.runtimes
+            .get(&space.org_slug, &space.space_slug)
+            .await
+            .map(|runtime| runtime.registry.clone())
+            .map_err(|e| {
+                warn!("space runtime unavailable: {e:#}");
+                json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "space runtime unavailable",
+                )
+            })
+    }
+}
+
+impl axum::extract::FromRef<SkillsApiState> for SpaceResolver {
+    fn from_ref(state: &SkillsApiState) -> Self {
+        state.spaces.clone()
+    }
 }
 
 // -- Response types ----------------------------------------------------------
@@ -102,11 +130,20 @@ pub fn skills_router() -> Router<SkillsApiState> {
     security(("bearer_token" = []))
 )]
 pub async fn list_persona_skills(
+    space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Path(persona_id): Path<String>,
 ) -> Response {
-    let persona_store = assistant_storage::personas::SqlitePersonaStore::new(state.pool.clone());
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let registry = match state.registry(&space).await {
+        Ok(registry) => registry,
+        Err(response) => return response,
+    };
+    let persona_store =
+        assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
 
     // Verify the persona exists and the caller owns it.
     match persona_store.get(&persona_id).await {
@@ -138,7 +175,7 @@ pub async fn list_persona_skills(
 
     let skill_access_store =
         assistant_storage::persona_skill_access::SqlitePersonaSkillAccessStore::new(
-            state.pool.clone(),
+            space.storage.pool.clone(),
         );
 
     // Determine which skills are enabled for this persona.
@@ -152,7 +189,7 @@ pub async fn list_persona_skills(
         .await
         .unwrap_or_default();
 
-    let all_skills = state.registry.list().await;
+    let all_skills = registry.list().await;
 
     let entries: Vec<SkillEntryResponse> = all_skills
         .into_iter()
@@ -185,10 +222,18 @@ pub async fn list_persona_skills(
     security(("bearer_token" = []))
 )]
 pub async fn list_skills(
+    space: SpaceCtx,
     Extension(_ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
 ) -> Response {
-    let skills = state.registry.list().await;
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let registry = match state.registry(&space).await {
+        Ok(registry) => registry,
+        Err(response) => return response,
+    };
+    let skills = registry.list().await;
     let details: Vec<SkillDetail> = skills
         .into_iter()
         .map(|s| {
@@ -219,12 +264,19 @@ pub async fn list_skills(
     security(("bearer_token" = []))
 )]
 pub async fn create_skill(
+    space: SpaceCtx,
     Extension(_ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Json(body): Json<CreateSkillRequest>,
 ) -> Response {
-    match state
-        .registry
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
+    let registry = match state.registry(&space).await {
+        Ok(registry) => registry,
+        Err(response) => return response,
+    };
+    match registry
         .create_user_skill(&body.name, &body.description, &body.body)
         .await
     {
@@ -268,11 +320,19 @@ pub async fn create_skill(
     security(("bearer_token" = []))
 )]
 pub async fn get_skill(
+    space: SpaceCtx,
     Extension(_ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Path(name): Path<String>,
 ) -> Response {
-    match state.registry.get(&name).await {
+    if let Err(denied) = space.require(Access::Read) {
+        return denied.into_response();
+    }
+    let registry = match state.registry(&space).await {
+        Ok(registry) => registry,
+        Err(response) => return response,
+    };
+    match registry.get(&name).await {
         Some(skill) => {
             let is_builtin = skill.is_builtin();
             let detail = SkillDetail {
@@ -308,17 +368,24 @@ pub async fn get_skill(
     security(("bearer_token" = []))
 )]
 pub async fn update_skill(
+    space: SpaceCtx,
     Extension(_ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Path(name): Path<String>,
     Json(body): Json<UpdateSkillRequest>,
 ) -> Response {
-    match state
-        .registry
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
+    let registry = match state.registry(&space).await {
+        Ok(registry) => registry,
+        Err(response) => return response,
+    };
+    match registry
         .update_user_skill(&name, &body.description, &body.body)
         .await
     {
-        Ok(()) => match state.registry.get(&name).await {
+        Ok(()) => match registry.get(&name).await {
             Some(skill) => {
                 let is_builtin = skill.is_builtin();
                 let detail = SkillDetail {
@@ -373,11 +440,19 @@ pub async fn update_skill(
     security(("bearer_token" = []))
 )]
 pub async fn delete_skill(
+    space: SpaceCtx,
     Extension(_ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Path(name): Path<String>,
 ) -> Response {
-    match state.registry.delete_user_skill(&name).await {
+    if let Err(denied) = space.require(Access::Admin) {
+        return denied.into_response();
+    }
+    let registry = match state.registry(&space).await {
+        Ok(registry) => registry,
+        Err(response) => return response,
+    };
+    match registry.delete_user_skill(&name).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             let msg = e.to_string();
@@ -409,17 +484,17 @@ mod tests {
     use tower::ServiceExt;
 
     use assistant_core::auth::AuthContext;
-    use assistant_core::identity::{OrgId, UserId};
-    use assistant_storage::{StorageLayer, registry::SkillRegistry};
+    use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
+    use assistant_storage::StorageLayer;
 
     use super::{SkillsApiState, skills_router};
 
     fn make_test_ctx() -> AuthContext {
         AuthContext {
             user_id: UserId::from("test-user"),
-            org_id: OrgId::from("org_1"),
+            org_id: OrgId::from("default"),
             email: "test@test.local".into(),
-            space_roles: HashMap::new(),
+            space_roles: HashMap::from([(SpaceId::from("default"), Role::SpaceAdmin)]),
             scopes: vec![],
             client_id: "test".into(),
         }
@@ -446,19 +521,20 @@ mod tests {
             .ensure_exists("default")
             .await
             .unwrap();
-        // Isolated skills dir: the default `~/.assistant/skills` is shared by
+        // Isolated install root: the default `~/.assistant/skills` is shared by
         // every test process on the machine, so concurrent runs raced on the
         // same SKILL.md files.
         let skills_dir = tempfile::tempdir().unwrap();
-        let registry = Arc::new(
-            SkillRegistry::new(storage.pool.clone())
-                .await
-                .unwrap()
-                .with_user_skills_dir(skills_dir.path().to_path_buf()),
-        );
+        let (api, resolver) = super::super::test_helpers::state_over_in(
+            skills_dir.path(),
+            "http://127.0.0.1:1",
+            &[super::super::test_helpers::default_space(&storage)],
+            false,
+        )
+        .await;
         let state = SkillsApiState {
-            pool: storage.pool.clone(),
-            registry,
+            spaces: resolver,
+            runtimes: api.runtimes.clone(),
         };
         (
             state,

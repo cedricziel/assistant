@@ -31,7 +31,6 @@ use assistant_core::{
 };
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
 use assistant_runtime::{SpaceRuntimes, SpaceSupervisor, init_tracing};
-use assistant_storage::registry::SkillRegistry;
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use axum::{Extension, Router, http::StatusCode, routing::get};
 use clap::Parser;
@@ -130,7 +129,6 @@ struct Args {
 pub(crate) struct AppState {
     pub(crate) pool: SqlitePool,
     pub(crate) agent_id: Arc<RwLock<String>>,
-    pub(crate) registry: Arc<SkillRegistry>,
     pub(crate) bus_kind: BusKind,
     pub(crate) nats_url: Option<String>,
     pub(crate) nats_token: Option<String>,
@@ -393,7 +391,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         .await
         .context("Failed to open the default space runtime")?;
     let storage = default_runtime.storage.clone();
-    let registry = default_runtime.registry.clone();
     let orchestrator = default_runtime.orchestrator.clone();
 
     // -- Push dispatcher (built here so AppState can hold a reference) -------
@@ -410,7 +407,6 @@ async fn run_with_args(args: Args) -> Result<()> {
     let state = AppState {
         pool: storage.pool.clone(),
         agent_id: Arc::new(RwLock::new(selected_agent.clone())),
-        registry: registry.clone(),
         bus_kind: config.bus.kind.clone(),
         nats_url: config
             .bus
@@ -550,8 +546,8 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let skills_api_state = api::skills::SkillsApiState {
-        pool: storage.pool.clone(),
-        registry: state.registry.clone(),
+        spaces: space_resolver.clone(),
+        runtimes: runtimes.clone(),
     };
 
     let webhooks_api_state = api::webhooks::WebhooksApiState {
