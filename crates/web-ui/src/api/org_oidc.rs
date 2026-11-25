@@ -92,8 +92,11 @@ impl From<OrgOidcConfig> for OrgOidcConfigResponse {
 
 // -- Validation --------------------------------------------------------------
 
+/// Validates the issuer URL and returns it trimmed but otherwise verbatim:
+/// discovery compares it byte-for-byte with the IdP's `issuer` claim.
 fn validate_issuer_url(raw: &str) -> Result<String, &'static str> {
-    let url = url::Url::parse(raw.trim()).map_err(|_| "issuer_url is not a valid URL")?;
+    let raw = raw.trim();
+    let url = url::Url::parse(raw).map_err(|_| "issuer_url is not a valid URL")?;
     let loopback = matches!(
         url.host(),
         Some(url::Host::Domain("localhost"))
@@ -105,7 +108,7 @@ fn validate_issuer_url(raw: &str) -> Result<String, &'static str> {
         "http" if loopback => {}
         _ => return Err("issuer_url must use https (http is allowed only for localhost)"),
     }
-    Ok(url.as_str().trim_end_matches('/').to_string())
+    Ok(raw.to_string())
 }
 
 fn normalize_domains(raw: Vec<String>) -> Result<Vec<String>, &'static str> {
@@ -482,6 +485,20 @@ mod tests {
                 StatusCode::BAD_REQUEST,
                 "{field} = {value} should be rejected"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn put_keeps_issuer_url_verbatim() {
+        // Discovery compares the IdP's `issuer` claim byte-for-byte, and some
+        // IdPs publish theirs with a trailing slash.
+        let app = app(setup().await, Role::OrgAdmin);
+        for issuer in ["https://tenant.auth0.com/", "https://idp.acme.com"] {
+            let mut body = valid_body();
+            body["issuer_url"] = json!(format!("  {issuer} "));
+            let (status, got) = send(&app, "PUT", "/orgs/org_1/oidc", Some(body)).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(got["issuer_url"], issuer, "only whitespace is trimmed");
         }
     }
 
