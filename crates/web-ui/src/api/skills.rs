@@ -425,19 +425,48 @@ mod tests {
         }
     }
 
-    async fn test_state() -> (SkillsApiState, Arc<StorageLayer>) {
+    /// Keeps the storage and the per-test skills directory alive. Binding it
+    /// to `_` would drop it (and delete the directory) immediately.
+    struct TestEnv {
+        storage: Arc<StorageLayer>,
+        _skills_dir: tempfile::TempDir,
+    }
+
+    impl std::ops::Deref for TestEnv {
+        type Target = StorageLayer;
+        fn deref(&self) -> &StorageLayer {
+            &self.storage
+        }
+    }
+
+    async fn test_state() -> (SkillsApiState, TestEnv) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         storage
             .persona_store()
             .ensure_exists("default")
             .await
             .unwrap();
-        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        // Isolated skills dir: the default `~/.assistant/skills` is shared by
+        // every test process on the machine, so concurrent runs raced on the
+        // same SKILL.md files.
+        let skills_dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(
+            SkillRegistry::new(storage.pool.clone())
+                .await
+                .unwrap()
+                .with_user_skills_dir(skills_dir.path().to_path_buf()),
+        );
         let state = SkillsApiState {
             pool: storage.pool.clone(),
             registry,
         };
-        (state, storage)
+        (
+            state,
+            TestEnv {
+                storage,
+                _skills_dir: skills_dir,
+            },
+        )
     }
 
     fn app(state: SkillsApiState) -> axum::Router {
@@ -455,7 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_persona_skills_for_default_returns_ok() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
         let resp = app(state)
             .oneshot(
                 Request::builder()
@@ -473,7 +502,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_persona_skills_unknown_persona_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
         let resp = app(state)
             .oneshot(
                 Request::builder()
@@ -491,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_skills_returns_array() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -510,7 +539,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_skill_returns_201() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
 
         let body =
             r#"{"name":"my-skill","description":"A test skill","body":"My Skill body content."}"#;
@@ -535,7 +564,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_skill_duplicate_returns_409() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
 
         let body = r#"{"name":"dup-skill","description":"Test","body":"body"}"#;
 
@@ -570,7 +599,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_skill_unknown_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -587,7 +616,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_skill_updates_description_and_body() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
 
         // Create the skill first.
         let create_body =
@@ -626,7 +655,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_skill_returns_204() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
 
         // Create first.
         let create_body = r#"{"name":"del-skill","description":"To delete","body":"body content"}"#;
@@ -659,7 +688,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_skill_unknown_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -706,7 +735,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_skill_returns_detail_for_existing_skill() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
         // Seed via POST /skills.
         let body = r#"{"name":"detail-skill","description":"D","body":"B"}"#;
         app(state.clone())
@@ -740,7 +769,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_skill_unknown_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
         let body = r#"{"description":"x","body":"y"}"#;
         let resp = app(state)
             .oneshot(
@@ -762,7 +791,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_unknown_skill_returns_404_or_403() {
-        let (state, _) = test_state().await;
+        let (state, _env) = test_state().await;
         let resp = app(state)
             .oneshot(
                 Request::builder()

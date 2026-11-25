@@ -6,7 +6,11 @@ use assistant_skills::{SkillDef, SkillSource, parse_skill_content};
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 use std::sync::Mutex as StdMutex;
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -68,6 +72,9 @@ pub struct SkillRegistry {
     skills: Arc<RwLock<HashMap<String, SkillDef>>>,
     /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
     clock: Arc<dyn Clock>,
+    /// Directory new user skills are created under. `None` means
+    /// `~/.assistant/skills`.
+    user_skills_dir: Option<PathBuf>,
 }
 
 impl SkillRegistry {
@@ -77,6 +84,7 @@ impl SkillRegistry {
             pool,
             skills: Arc::new(RwLock::new(HashMap::new())),
             clock: Arc::new(SystemClock),
+            user_skills_dir: None,
         };
         registry.load_from_db().await?;
         Ok(registry)
@@ -85,6 +93,12 @@ impl SkillRegistry {
     /// Inject a [`Clock`] implementation.
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Create new user skills under `dir` instead of `~/.assistant/skills`.
+    pub fn with_user_skills_dir(mut self, dir: PathBuf) -> Self {
+        self.user_skills_dir = Some(dir);
         self
     }
 
@@ -219,8 +233,14 @@ impl SkillRegistry {
             anyhow::bail!("Skill '{}' already exists", name);
         }
 
-        let home = dirs::home_dir().context("Cannot determine home directory")?;
-        let skill_dir = home.join(".assistant").join("skills").join(name);
+        let skills_root = match &self.user_skills_dir {
+            Some(dir) => dir.clone(),
+            None => dirs::home_dir()
+                .context("Cannot determine home directory")?
+                .join(".assistant")
+                .join("skills"),
+        };
+        let skill_dir = skills_root.join(name);
 
         tokio::fs::create_dir_all(&skill_dir)
             .await
@@ -808,6 +828,24 @@ mod tests {
             .await;
         assert!(result.is_err(), "duplicate skill name must be rejected");
         assert!(result.unwrap_err().to_string().contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn create_user_skill_writes_under_configured_dir() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let registry = SkillRegistry::new(storage.pool.clone())
+            .await
+            .unwrap()
+            .with_user_skills_dir(tmp.path().to_path_buf());
+
+        let def = registry
+            .create_user_skill("cfg-skill", "desc", "body")
+            .await
+            .unwrap();
+
+        assert_eq!(def.dir, tmp.path().join("cfg-skill"));
+        assert!(tmp.path().join("cfg-skill").join("SKILL.md").exists());
     }
 
     // -- update_user_skill / delete_user_skill tests --------------------------
