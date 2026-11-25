@@ -10,17 +10,6 @@
 //!   `AuthCodeStore`, `RefreshTokenStore`, `DeviceCodeStore`) live in
 //!   [`assistant_core::auth`]; the SQLite-backed implementations here
 //!   simply implement them.
-//! - The legacy → multi-org migration (see [`migration`]) is intentionally
-//!   schema-shaped: filesystem layout, SQLite copy, and seeding the
-//!   default org/space. Pre-migration backup creation lives in
-//!   `assistant-backup` (`backup_legacy_install`) and the initial admin
-//!   user is bootstrapped by `assistant-auth` (`bootstrap::create_admin_user`).
-//!   Production callers (e.g. `assistant-web-ui`) compose these four steps.
-//!
-//! `assistant-auth` and `assistant-backup` are present as `[dev-dependencies]`
-//! so the round-trip migration test in [`migration`] can exercise the same
-//! composition the production caller uses. The `dep_boundary` integration
-//! test enforces this boundary at compile time.
 //!
 //! The panic-free contract for non-test code is enforced via
 //! `[lints.clippy]` overrides in this crate's `Cargo.toml` (managed by the
@@ -39,7 +28,6 @@ pub mod conversations;
 pub mod interface_instance_store;
 pub mod memory_chunks;
 pub mod message_bus;
-pub mod migration;
 pub mod org_storage;
 pub mod org_store;
 pub mod persona_skill_access;
@@ -92,7 +80,7 @@ pub use persona_skill_access::{
 pub use personas::{
     HomeChannel, InMemoryPersonaStore, PersonaRecord, PersonaStore, SqlitePersonaStore,
 };
-pub use pool_factory::OrgPoolFactory;
+pub use pool_factory::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG, OrgPoolFactory};
 pub use push_subscriptions::{
     InMemoryPushSubscriptionStore, PushSubscription, PushSubscriptionStore,
     SqlitePushSubscriptionStore,

@@ -37,7 +37,7 @@ All runtime data lives under `~/.assistant/`. The multi-org layout:
 
 The runtime does not read `config.toml`. See `docs/operations/configuration.md`.
 
-Legacy single-user installs are auto-migrated to `orgs/default/spaces/default/` on first startup. The migration renames the original `assistant.db` to `assistant.db.legacy` — a frozen snapshot retained for safety. Operators may delete it once `assistant doctor` reports no drift between the legacy and runtime databases. If a host was migrated by an old binary that kept writing to `assistant.db` afterwards, run `assistant migrate finalize` to cut over (see `docs/operations/multi-org-cutover.md`).
+There is no migration from the old single-user layout (`~/.assistant/assistant.db`, `config.toml`); those installs start fresh.
 
 ## Authentication
 

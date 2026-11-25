@@ -159,9 +159,6 @@ fine-grained control for API keys without complicating the role model.
 
 ## Operations
 
-The migration from a legacy single-user install to the multi-org layout
-is automatic on first startup. Operational details — what changes on
-disk, how to verify with `assistant doctor`, when to run
-`assistant migrate finalize`, the meaning of `assistant.db.legacy`, and
-the rollback procedure — are documented in
-[`docs/operations/multi-org-cutover.md`](../operations/multi-org-cutover.md).
+The original design migrated legacy single-user installs to the multi-org
+layout automatically. That migration and its `assistant migrate finalize`
+recovery command were removed; old installs are not migrated and start fresh.

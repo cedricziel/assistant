@@ -1,9 +1,8 @@
 //! Database pool factory for org/space resolution.
 //!
 //! Resolves org and space slugs to their respective database paths under
-//! `~/.assistant/`. `org.db` lives at the install root (next to the
-//! post-cutover `assistant.db.legacy` snapshot) while space databases live
-//! under `orgs/{slug}/spaces/{space_slug}/space.db`.
+//! `~/.assistant/`. `org.db` lives at the install root while space
+//! databases live under `orgs/{slug}/spaces/{space_slug}/space.db`.
 //!
 //! ## Production callers
 //!
@@ -11,18 +10,11 @@
 //!
 //! - `crates/interface-cli/src/main.rs` — the `assistant` binary. Resolves the
 //!   default space's `space.db` for one-shot commands, builds per-space
-//!   runtimes through [`OrgPoolFactory::space_storage`], and calls
-//!   `assistant_web_ui::install::ensure_migrated` before opening any database.
-//! - `crates/interface-cli/src/cmd_migrate.rs` — `assistant migrate
-//!   finalize` resolves the same `space.db` path to overwrite it from a
-//!   live legacy database during recovery.
+//!   runtimes through [`OrgPoolFactory::space_storage`].
 //! - `crates/web-ui/src/lib.rs` — `assistant webui serve`. Opens `org.db`
 //!   through the factory and resolves every data-plane request, and every
 //!   per-space runtime, to a space database through
 //!   [`OrgPoolFactory::space_storage`].
-//! - `crates/storage/src/migration.rs` — the `migrate_database` step of
-//!   the legacy-to-multi-org migration writes the initial `space.db` at
-//!   the path resolved by these helpers.
 //!
 //! Tests outside the crate may also call `space_db_path` to seed fixtures
 //! against tempdirs; those are not part of the production runtime path.
@@ -36,6 +28,11 @@ use tokio::sync::OnceCell;
 
 use crate::StorageLayer;
 use crate::org_storage::OrgStorageLayer;
+
+/// Slug of the org every install starts with.
+pub const DEFAULT_ORG_SLUG: &str = "default";
+/// Slug of the space every install starts with.
+pub const DEFAULT_SPACE_SLUG: &str = "default";
 
 type SpaceKey = (String, String);
 type SpaceSlot = Arc<OnceCell<Arc<StorageLayer>>>;
@@ -72,7 +69,7 @@ impl OrgPoolFactory {
         Ok(Self::new(home.join(".assistant")))
     }
 
-    /// Return the org.db path (at the install root, next to `assistant.db`).
+    /// Return the org.db path (at the install root).
     pub fn org_db_path(&self) -> PathBuf {
         self.base_dir.join("org.db")
     }

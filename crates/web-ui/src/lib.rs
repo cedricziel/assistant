@@ -188,36 +188,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         .map(|h| h.join(".assistant"))
         .context("Cannot determine the home directory")?;
 
-    // Before opening databases, check for a legacy single-user layout and
-    // auto-migrate to the new org/space directory structure. The helper runs
-    // backup → filesystem migration → DB cutover → admin bootstrap as a single
-    // unit; it must complete before StorageLayer opens any database file.
-    if let Some(outcome) = install::ensure_migrated(&base_path).await? {
-        info!("created admin user: {}", outcome.admin.user_id);
-        match outcome.admin_credentials_file.as_ref() {
-            Some(creds_path) => {
-                info!("============================================================");
-                info!("  Migration complete - initial admin credentials written to:");
-                info!("    {}", creds_path.display());
-                info!("  (file permissions: 0600 — owner read/write only)");
-                info!("  Email: {}", outcome.admin.email);
-                info!("  Change this password after first login and delete the file.");
-                info!("============================================================");
-            }
-            None => {
-                info!("============================================================");
-                info!("  Migration complete - admin user created.");
-                info!("    Email:    {}", outcome.admin.email);
-                info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
-                info!("============================================================");
-            }
-        }
-        info!(
-            "migration complete — backup at {}",
-            outcome.backup_path.display()
-        );
-    }
-
     // -- Org-level storage (users, spaces, auth state) --------------------------
     let pool_factory = Arc::new(assistant_storage::OrgPoolFactory::new(base_path.clone()));
 
@@ -301,7 +271,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     // The default org's settings decide the persona of the process-wide A2A
     // agent card and the voice providers.
     let default_org = orgs
-        .get(assistant_storage::migration::DEFAULT_ORG_SLUG)
+        .get(assistant_storage::DEFAULT_ORG_SLUG)
         .context("Failed to load the default org's settings")?;
     let config = default_org.config.clone();
     let selected_agent = config.agent.id.clone();

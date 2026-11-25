@@ -221,12 +221,8 @@ export ASSISTANT_SERVER=http://your-server:8080
 
 ## Upgrading a single-database install
 
-The assistant does not keep compatibility with the old single-database
-layout. On first startup it migrates a legacy `assistant.db` into
-`orgs/default/spaces/default/` and renames the original to
-`assistant.db.legacy`. A host that kept writing to `assistant.db` after
-that migration needs `assistant migrate finalize`; see
-[multi-org-cutover.md](operations/multi-org-cutover.md).
+The assistant does not migrate the old single-database layout. A host with
+`~/.assistant/assistant.db` starts fresh in the multi-org layout.
 
 Workflow webhook URLs without the org and space slugs no longer work.
 Re-copy them from `GET /workflows/{id}/webhook-secrets`.

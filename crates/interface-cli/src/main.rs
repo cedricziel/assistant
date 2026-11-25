@@ -5,7 +5,6 @@ mod cmd_account;
 mod cmd_backup;
 mod cmd_doctor;
 mod cmd_login;
-mod cmd_migrate;
 mod cmd_persona;
 mod cmd_reset;
 mod cmd_review;
@@ -20,7 +19,7 @@ mod space_binding;
 mod space_tasks;
 mod wiring;
 
-use args::{Cli, Command, MigrateCommand, OrchestratorCommand, SkillCommand};
+use args::{Cli, Command, OrchestratorCommand, SkillCommand};
 use cli_helpers::{CliConfirmation, normalize_worker_interface, parse_interface_selection};
 
 use std::collections::{HashMap, HashSet};
@@ -47,7 +46,7 @@ use assistant_runtime::{
     orchestrator::ConfirmationCallback, start_conversation_context,
 };
 use assistant_storage::OrgPoolFactory;
-use assistant_storage::migration::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
+use assistant_storage::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
 use assistant_tool_executor::install_skill_from_source;
 
 /// How often the orchestrator service looks for spaces that were created or deleted.
@@ -107,47 +106,6 @@ async fn main() -> Result<()> {
     tokio::fs::create_dir_all(&workspace_dir)
         .await
         .with_context(|| format!("Failed to create workspace at {}", workspace_dir.display()))?;
-
-    // `assistant migrate finalize` is the recovery path for installs that
-    // were partially migrated to the multi-org layout but never cut over.
-    // It must run *before* `ensure_migrated`, which assumes the install is
-    // either fully legacy or fully migrated.
-    if let Some(Command::Migrate {
-        command: MigrateCommand::Finalize { force },
-    }) = &cli.command
-    {
-        return cmd_migrate::cmd_migrate_finalize(*force, &assistant_dir).await;
-    }
-
-    // Run the legacy-to-multi-org migration before opening any database. The
-    // helper short-circuits when the install is already migrated, so this is
-    // a cheap no-op on healthy hosts. Lives in `assistant-web-ui` because it
-    // composes auth, backup, and storage helpers.
-    if let Some(outcome) = assistant_web_ui::install::ensure_migrated(&assistant_dir).await? {
-        info!("created admin user: {}", outcome.admin.user_id);
-        match outcome.admin_credentials_file.as_ref() {
-            Some(creds_path) => {
-                info!("============================================================");
-                info!("  Migration complete - initial admin credentials written to:");
-                info!("    {}", creds_path.display());
-                info!("  (file permissions: 0600 — owner read/write only)");
-                info!("  Email: {}", outcome.admin.email);
-                info!("  Change this password after first login and delete the file.");
-                info!("============================================================");
-            }
-            None => {
-                info!("============================================================");
-                info!("  Migration complete - admin user created.");
-                info!("    Email:    {}", outcome.admin.email);
-                info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
-                info!("============================================================");
-            }
-        }
-        info!(
-            "migration complete — backup at {}",
-            outcome.backup_path.display()
-        );
-    }
 
     // Every space database lives under the install root; one-shot commands
     // work on the default space.

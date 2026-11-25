@@ -89,6 +89,5 @@ The `[self_improvement]` section is gone. It had no effect, so drop it.
 
 ## See also
 
-- `docs/operations/multi-org-cutover.md` for the database cutover.
 - `docs/backup.md` for `assistant backup` and `assistant restore`.
 - `docs/adr/adr-0007-multi-user-orgs.md` for the org and space model.
