@@ -1,4 +1,6 @@
-//! Integrations: the cached integrations.sh catalog, plus credential encryption.
+//! Integrations: the cached integrations.sh catalog, credential encryption, the
+//! domain model and its stores.
 
 pub mod catalog;
-pub mod secret;
+pub mod memory;
+pub mod model;
