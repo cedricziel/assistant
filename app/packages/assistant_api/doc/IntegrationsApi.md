@@ -602,7 +602,7 @@ Name | Type | Description  | Notes
 
 `POST /api/integrations/{id}/test` — connect and list the tools.
 
-Uses the credential the caller's turns would use: the shared one, or their own for a per-user integration. A personal integration can be tested only by its owner. A failed connection is still a `200` with `ok: false` and the error, and marks the integration `unreachable` until a connection works.
+Uses the credential the caller's turns would use: the shared one, or their own for a per-user integration. A personal integration can be tested only by its owner. A failed connection is still a `200` with `ok: false` and the error, and marks the integration `unreachable` until a connection works. The error names a kind (`HTTP <status>`, `timeout`, `connection failed`, `protocol error`), never the raw transport error. An integration can be tested once every few seconds per caller (`429` with `Retry-After`).
 
 ### Example
 ```dart

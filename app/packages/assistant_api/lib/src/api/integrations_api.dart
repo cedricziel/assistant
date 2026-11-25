@@ -1214,7 +1214,7 @@ class IntegrationsApi {
   }
 
   /// &#x60;POST /api/integrations/{id}/test&#x60; — connect and list the tools.
-  /// Uses the credential the caller&#39;s turns would use: the shared one, or their own for a per-user integration. A personal integration can be tested only by its owner. A failed connection is still a &#x60;200&#x60; with &#x60;ok: false&#x60; and the error, and marks the integration &#x60;unreachable&#x60; until a connection works.
+  /// Uses the credential the caller&#39;s turns would use: the shared one, or their own for a per-user integration. A personal integration can be tested only by its owner. A failed connection is still a &#x60;200&#x60; with &#x60;ok: false&#x60; and the error, and marks the integration &#x60;unreachable&#x60; until a connection works. The error names a kind (&#x60;HTTP &lt;status&gt;&#x60;, &#x60;timeout&#x60;, &#x60;connection failed&#x60;, &#x60;protocol error&#x60;), never the raw transport error. An integration can be tested once every few seconds per caller (&#x60;429&#x60; with &#x60;Retry-After&#x60;).
   ///
   /// Parameters:
   /// * [id] - Integration id, `int_<uuid>`
