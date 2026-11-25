@@ -462,6 +462,11 @@ impl Orchestrator {
         Ok(provider)
     }
 
+    /// The gate every tool call passes before it runs.
+    pub fn permission_policy(&self) -> &assistant_core::permission::PermissionPolicy {
+        &self.permission_policy
+    }
+
     /// Attach a confirmation callback (used by the CLI interface).
     pub fn with_confirmation_callback(mut self, cb: Arc<dyn ConfirmationCallback>) -> Self {
         self.confirmation_callback = Some(cb);
