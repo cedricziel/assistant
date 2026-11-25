@@ -21,7 +21,9 @@ use opentelemetry::{
 use opentelemetry_semantic_conventions::attribute::{
     GEN_AI_CONVERSATION_ID, GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL,
     GEN_AI_RESPONSE_FINISH_REASONS, GEN_AI_RESPONSE_ID, GEN_AI_RESPONSE_MODEL,
-    GEN_AI_USAGE_INPUT_TOKENS, GEN_AI_USAGE_OUTPUT_TOKENS, SERVER_ADDRESS,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+    GEN_AI_USAGE_INPUT_TOKENS, GEN_AI_USAGE_OUTPUT_TOKENS, GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
+    SERVER_ADDRESS,
 };
 use uuid::Uuid;
 
@@ -30,6 +32,8 @@ const GEN_AI_SYSTEM_INSTRUCTIONS: &str = "gen_ai.system_instructions";
 const GEN_AI_INPUT_MESSAGES: &str = "gen_ai.input.messages";
 const GEN_AI_TOOL_DEFINITIONS: &str = "gen_ai.tool.definitions";
 const GEN_AI_OUTPUT_MESSAGES: &str = "gen_ai.output.messages";
+/// No GenAI convention exists for cost yet.
+const ASSISTANT_LLM_COST_USD: &str = "assistant.llm.cost_usd";
 
 /// Create an OpenTelemetry context carrying a conversation-level root span.
 ///
@@ -302,6 +306,24 @@ pub(crate) fn finish_llm_span(
     if let Some(output) = meta.output_tokens {
         span.set_attribute(KeyValue::new(GEN_AI_USAGE_OUTPUT_TOKENS, output as i64));
     }
+    for (key, value) in [
+        (
+            GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+            meta.cached_input_tokens,
+        ),
+        (
+            GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+            meta.cache_write_input_tokens,
+        ),
+        (GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, meta.reasoning_tokens),
+    ] {
+        if let Some(tokens) = value {
+            span.set_attribute(KeyValue::new(key, tokens as i64));
+        }
+    }
+    if let Some(cost) = meta.cost_usd {
+        span.set_attribute(KeyValue::new(ASSISTANT_LLM_COST_USD, cost));
+    }
 
     if trace_content {
         let output_json = match response {
@@ -408,6 +430,10 @@ mod tests {
     use super::*;
     use opentelemetry_sdk::trace::{SdkTracerProvider, SpanExporter};
 
+    /// Serializes tests that install the global tracer provider, which
+    /// otherwise race and export each other's spans.
+    static GLOBAL_TRACER_PROVIDER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// A minimal in-memory exporter that collects exported spans.
     #[derive(Debug, Clone, Default)]
     struct CollectingExporter {
@@ -424,6 +450,78 @@ mod tests {
         }
     }
 
+    /// Finish an LLM span on a local provider and return its attributes.
+    fn finished_llm_span_attrs(meta: LlmResponseMeta) -> HashMap<String, opentelemetry::Value> {
+        use opentelemetry::trace::{Tracer, TracerProvider};
+
+        let exporter = CollectingExporter::default();
+        let spans = exporter.spans.clone();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter)
+            .build();
+        let tracer = opentelemetry::global::BoxedTracer::new(Box::new(provider.tracer("test")));
+        let mut span = tracer.start("chat");
+        let response = LlmResponse::FinalAnswer("hi".into(), meta.clone());
+        finish_llm_span(&mut span, &meta, &response, false, None);
+        let _ = provider.force_flush();
+
+        let collected = spans.lock().unwrap();
+        collected[0]
+            .attributes
+            .iter()
+            .map(|kv| (kv.key.as_str().to_string(), kv.value.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn llm_span_records_cache_reasoning_and_cost() {
+        let attrs = finished_llm_span_attrs(LlmResponseMeta {
+            input_tokens: Some(10_339),
+            output_tokens: Some(60),
+            cached_input_tokens: Some(10_318),
+            cache_write_input_tokens: Some(21),
+            reasoning_tokens: Some(40),
+            cost_usd: Some(0.0021),
+            ..Default::default()
+        });
+        assert_eq!(
+            attrs.get("gen_ai.usage.cache_read.input_tokens"),
+            Some(&Value::I64(10_318))
+        );
+        assert_eq!(
+            attrs.get("gen_ai.usage.cache_creation.input_tokens"),
+            Some(&Value::I64(21))
+        );
+        assert_eq!(
+            attrs.get("gen_ai.usage.reasoning.output_tokens"),
+            Some(&Value::I64(40))
+        );
+        assert_eq!(
+            attrs.get("assistant.llm.cost_usd"),
+            Some(&Value::F64(0.0021))
+        );
+    }
+
+    #[test]
+    fn llm_span_omits_unknown_usage_details() {
+        let attrs = finished_llm_span_attrs(LlmResponseMeta {
+            input_tokens: Some(5),
+            output_tokens: Some(1),
+            ..Default::default()
+        });
+        for key in [
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            "gen_ai.usage.reasoning.output_tokens",
+            "assistant.llm.cost_usd",
+        ] {
+            assert!(
+                !attrs.contains_key(key),
+                "{key} must be absent when unknown"
+            );
+        }
+    }
+
     /// Verify that `start_tool_span` sets the `active_skill` attribute when provided.
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_start_tool_span_sets_active_skill() {
@@ -433,6 +531,9 @@ mod tests {
             .with_simple_exporter(exporter)
             .build();
         // start_tool_span uses global::tracer(), so we must set the global provider.
+        let _global = GLOBAL_TRACER_PROVIDER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         opentelemetry::global::set_tracer_provider(provider.clone());
 
         let conversation_id = Uuid::new_v4();
@@ -487,6 +588,9 @@ mod tests {
         let provider = SdkTracerProvider::builder()
             .with_simple_exporter(exporter)
             .build();
+        let _global = GLOBAL_TRACER_PROVIDER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         opentelemetry::global::set_tracer_provider(provider.clone());
 
         let conversation_id = Uuid::new_v4();

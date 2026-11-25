@@ -185,6 +185,7 @@ impl MoonshotProvider {
                 finish_reason: Some(finish_reason.to_string()),
                 input_tokens: resp_body["usage"]["prompt_tokens"].as_u64(),
                 output_tokens: resp_body["usage"]["completion_tokens"].as_u64(),
+                ..Default::default()
             };
 
             // Check for tool calls.

@@ -481,6 +481,7 @@ fn extract_ollama_meta(json: &Value) -> LlmResponseMeta {
             .and_then(|v| v.as_str())
             .map(String::from),
         response_id: None, // Ollama does not emit a response ID.
+        ..Default::default()
     }
 }
 

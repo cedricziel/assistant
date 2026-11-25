@@ -358,13 +358,7 @@ mod tests {
             ) -> anyhow::Result<LlmResponse> {
                 Ok(LlmResponse::FinalAnswer(
                     "{\"create\": true, \"name\": \"codebase-search\", \"description\": \"Search and summarize codebase patterns\", \"body\": \"# Codebase Search\\n\\n1. Glob for files\\n2. Grep for patterns\\n3. Summarize\"}".to_string(),
-                    LlmResponseMeta {
-                        model: None,
-                        input_tokens: None,
-                        output_tokens: None,
-                        finish_reason: None,
-                        response_id: None,
-                    },
+                    LlmResponseMeta::default(),
                 ))
             }
             async fn chat_streaming(
