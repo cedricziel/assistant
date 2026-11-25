@@ -2,6 +2,7 @@ mod args;
 mod bootstrap;
 mod cli_helpers;
 mod cmd_account;
+mod cmd_admin;
 mod cmd_backup;
 mod cmd_doctor;
 mod cmd_login;

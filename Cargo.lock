@@ -252,6 +252,7 @@ name = "assistant-cli"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "assistant-auth",
  "assistant-backup",
  "assistant-bus-nats",
  "assistant-core",

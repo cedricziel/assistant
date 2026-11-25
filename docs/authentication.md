@@ -32,6 +32,34 @@ appropriate for single-user local development.
 curl -H "Authorization: Bearer my-secret-token" http://localhost:8080/api/personas
 ```
 
+## First start: the initial admin
+
+When the default organization uses password authentication and has no
+users, `assistant webui serve` creates one on startup:
+
+- Email: `admin@localhost`, with the `OrgAdmin` role in the default space.
+- Password: 24 random alphanumeric characters, written to
+  `~/.assistant/orgs/default/admin_credentials.txt` (mode `0600`).
+
+The server logs the path of that file, never the password. Sign in, change
+the password with `assistant account change-password`, then delete the file.
+Later starts find a user and do nothing. Organizations in OIDC mode get no
+initial admin; users are provisioned on first sign-in.
+
+### Reset a password locally
+
+If nobody can sign in, run this as the OS user that owns `~/.assistant`:
+
+```sh
+assistant admin reset-password admin@localhost
+# another organization:
+assistant admin reset-password someone@example.com --org acme
+```
+
+The command prompts for the new password twice, writes it to `org.db`
+directly, and signs the user out everywhere. It refuses users managed by an
+external identity provider.
+
 ## Multi-user mode (OAuth2 + API keys)
 
 When an `org.db` database exists and users are registered, the server

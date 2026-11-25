@@ -2,6 +2,21 @@
 
 TDD discipline: every implementation task is preceded by a failing test.
 
+### Server: first-run admin bootstrap (lands first, legacy token still works)
+
+- [x] Write failing test: first start creates exactly one admin, grants
+      `OrgAdmin`, and writes the credentials file; a second start does nothing.
+- [x] Write failing test: the credentials file is mode 0600, also when a
+      looser file is left over.
+- [x] Write failing test: a failed file write rolls the user back so the next
+      start retries.
+- [x] Write failing test: an OIDC org gets no admin.
+- [x] Drop the `ASSISTANT_WEB_TOKEN` seed branch from
+      `crates/auth/src/bootstrap.rs`; always generate the password.
+- [x] Add `bootstrap::ensure_admin_user` and `install::ensure_initial_admin`;
+      call it from `crates/web-ui/src/lib.rs` after `ensure_default_space`.
+      The file is `~/.assistant/orgs/{slug}/admin_credentials.txt`.
+
 ### Server: delete `/login` HTML page
 
 - [ ] Write failing test: request to `GET /login` returns the SPA
@@ -37,23 +52,23 @@ TDD discipline: every implementation task is preceded by a failing test.
 - [ ] Delete `--auth-token` / `ASSISTANT_WEB_TOKEN` arg from
       `crates/web-ui/src/lib.rs` (`Args`, `legacy_token` resolution, threading
       into `WebAuthConfig::new`).
-- [ ] Delete the `ASSISTANT_WEB_TOKEN` seed-password branch in
-      `crates/auth/src/bootstrap.rs:45`; always generate.
-- [ ] Delete the "Password: (your ASSISTANT_WEB_TOKEN value)" branch in
-      `crates/web-ui/src/lib.rs:241` and the matching line in
-      `crates/interface-cli/src/main.rs:1501`.
+- [x] Delete the `ASSISTANT_WEB_TOKEN` seed-password branch in
+      `crates/auth/src/bootstrap.rs`; always generate. (Done with the
+      bootstrap step above. The "Password: (your ASSISTANT_WEB_TOKEN value)"
+      lines this task named no longer exist.)
 
 ### Recovery CLI: `assistant admin reset-password`
 
-- [ ] Write failing test: integration test that runs the CLI against a temp
-      `org.db` with a seeded user, supplies a new password via stdin, then
-      verifies the new password against the updated hash and the old one
-      fails.
-- [ ] Implement subcommand in `crates/interface-cli/src/main.rs` under an
-      `admin` group: parses `<email>`, reads the password from TTY via
-      `rpassword`, opens `org.db` directly via `OrgPoolFactory`, calls
-      `password::hash_password`, updates the row.
-- [ ] Add `--org` flag (defaults to `default`); fail clearly if the user is
+- [x] Write failing tests against in-memory stores (`cmd_admin::reset_password`):
+      the new password verifies and the old one does not, sessions are
+      revoked, unknown user or org fails clearly, empty passwords and
+      IdP-managed users are rejected. The TTY prompt stays outside the tested
+      function, so no stdin-driven integration test is needed.
+- [x] Implement the `admin reset-password <email>` subcommand
+      (`crates/interface-cli/src/cmd_admin.rs`): reads the password via
+      `rpassword`, opens `org.db` through `OrgPoolFactory`, hashes it, updates
+      the row and revokes the user's sessions.
+- [x] Add `--org` flag (defaults to `default`); fail clearly if the user is
       not found.
 
 ### Flutter app: collapse `AssistantContext` credential model
