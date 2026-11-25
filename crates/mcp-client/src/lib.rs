@@ -17,8 +17,10 @@
 
 pub mod bridge;
 pub mod client;
+pub mod connections;
 pub mod manager;
 
 pub use bridge::McpToolHandler;
 pub use client::McpClient;
+pub use connections::{ConnectError, Connected, ConnectionsConfig, IntegrationConnections};
 pub use manager::McpClientManager;

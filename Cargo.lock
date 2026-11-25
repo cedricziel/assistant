@@ -406,6 +406,7 @@ dependencies = [
  "assistant-core",
  "async-trait",
  "base64 0.23.1",
+ "chrono",
  "futures",
  "http",
  "reqwest",

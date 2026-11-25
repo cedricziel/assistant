@@ -1,0 +1,681 @@
+//! `IntegrationConnections` against a scripted MCP server speaking Streamable
+//! HTTP: lazy connect, header injection from the integration's template, tool
+//! caching, idle eviction, invalidation and the connect timeout.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use chrono::{DateTime, TimeZone, Utc};
+use serde_json::{Value, json};
+use wiremock::matchers::method;
+use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+use assistant_core::clock::FakeClock;
+use assistant_core::identity::{OrgId, UserId};
+use assistant_core::integrations::{
+    CredentialKind, CredentialMode, CredentialStatus, EffectiveIntegration,
+    InMemoryIntegrationStore, Integration, IntegrationAuthKind, IntegrationCredentialStore,
+    IntegrationHealthStore, IntegrationLayer, IntegrationStore, IntegrationTrust, SecretBox,
+    StoredCredential, credential_aad,
+};
+use assistant_core::secret::Secret;
+use assistant_mcp_client::{ConnectError, ConnectionsConfig, IntegrationConnections};
+
+fn at(secs: i64) -> DateTime<Utc> {
+    Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
+}
+
+/// Answers the JSON-RPC methods of one MCP session.
+#[derive(Clone, Default)]
+struct Script {
+    initialize_delay: Option<Duration>,
+    healthy: Arc<AtomicBool>,
+    tools: Arc<std::sync::Mutex<Vec<&'static str>>>,
+}
+
+impl Script {
+    fn new(tools: &[&'static str]) -> Self {
+        Self {
+            initialize_delay: None,
+            healthy: Arc::new(AtomicBool::new(true)),
+            tools: Arc::new(std::sync::Mutex::new(tools.to_vec())),
+        }
+    }
+}
+
+fn rpc_result(id: &Value, result: Value) -> ResponseTemplate {
+    ResponseTemplate::new(200)
+        .insert_header("mcp-session-id", "session-1")
+        .set_body_json(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+}
+
+impl Respond for Script {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        if !self.healthy.load(Ordering::SeqCst) {
+            return ResponseTemplate::new(500);
+        }
+        let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
+        let id = body["id"].clone();
+        match body["method"].as_str().unwrap_or_default() {
+            "initialize" => {
+                let response = rpc_result(
+                    &id,
+                    json!({
+                        "protocolVersion": body["params"]["protocolVersion"],
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "scripted", "version": "1.0.0"},
+                    }),
+                );
+                match self.initialize_delay {
+                    Some(delay) => response.set_delay(delay),
+                    None => response,
+                }
+            }
+            "tools/list" => {
+                let tools: Vec<Value> = self
+                    .tools
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|name| {
+                        json!({
+                            "name": name,
+                            "description": format!("the {name} tool"),
+                            "inputSchema": {"type": "object"},
+                        })
+                    })
+                    .collect();
+                rpc_result(&id, json!({"tools": tools}))
+            }
+            _ => ResponseTemplate::new(202),
+        }
+    }
+}
+
+async fn serve(script: &Script) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(script.clone())
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(405))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// How many JSON-RPC requests of `rpc` the server has seen.
+async fn count(server: &MockServer, rpc: &str) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|r| {
+            serde_json::from_slice::<Value>(&r.body)
+                .is_ok_and(|b| b["method"].as_str() == Some(rpc))
+        })
+        .count()
+}
+
+struct World {
+    store: Arc<InMemoryIntegrationStore>,
+    credentials: Arc<dyn IntegrationCredentialStore>,
+    health: Arc<dyn IntegrationHealthStore>,
+    secrets: Arc<SecretBox>,
+    clock: FakeClock,
+    pool: IntegrationConnections,
+}
+
+impl World {
+    fn new(config: ConnectionsConfig) -> Self {
+        let store = Arc::new(InMemoryIntegrationStore::new());
+        let credentials: Arc<dyn IntegrationCredentialStore> = store.credential_store();
+        let health: Arc<dyn IntegrationHealthStore> = store.health_store();
+        let secrets = Arc::new(SecretBox::from_key([9; 32]));
+        let clock = FakeClock::new(at(0));
+        let pool = IntegrationConnections::new(
+            credentials.clone(),
+            health.clone(),
+            secrets.clone(),
+            Arc::new(clock.clone()),
+        )
+        .with_config(config);
+        Self {
+            store,
+            credentials,
+            health,
+            secrets,
+            clock,
+            pool,
+        }
+    }
+
+    async fn integration(&self, url: &str, mutate: impl FnOnce(&mut Integration)) -> Integration {
+        let mut integration = Integration {
+            id: "int_1".into(),
+            org_id: OrgId::from("org_1"),
+            layer: IntegrationLayer::Org,
+            space_id: None,
+            owner_user_id: None,
+            catalog_entry_id: None,
+            connect_url: url.into(),
+            slug: "linear".into(),
+            name: "Linear".into(),
+            auth_kind: IntegrationAuthKind::Header,
+            header_name: Some("Authorization".into()),
+            header_value_prefix: Some("Bearer ".into()),
+            credential_mode: CredentialMode::Shared,
+            trust: IntegrationTrust::Confirm,
+            enabled: true,
+            oauth_client_id_override: None,
+            created_at: at(0),
+            updated_at: at(0),
+        };
+        mutate(&mut integration);
+        self.store.create(&integration).await.unwrap();
+        integration
+    }
+
+    /// Store `value` as the credential of `(integration, subject)`.
+    async fn credential(
+        &self,
+        integration: &Integration,
+        subject: Option<&UserId>,
+        value: &str,
+        updated: i64,
+    ) {
+        let aad = credential_aad(
+            &integration.id,
+            subject.map(|u| u.0.as_str()),
+            CredentialKind::Header.as_str(),
+        );
+        let sealed = self
+            .secrets
+            .seal(&Secret::new(value), aad.as_bytes())
+            .unwrap();
+        self.credentials
+            .put(&StoredCredential {
+                integration_id: integration.id.clone(),
+                subject_user_id: subject.cloned(),
+                kind: CredentialKind::Header,
+                ciphertext: sealed.ciphertext,
+                nonce: sealed.nonce,
+                key_id: sealed.key_id,
+                expires_at: None,
+                status: CredentialStatus::Ready,
+                updated_at: at(updated),
+            })
+            .await
+            .unwrap();
+    }
+}
+
+fn effective(integration: &Integration, subject: Option<&UserId>) -> EffectiveIntegration {
+    EffectiveIntegration {
+        integration: integration.clone(),
+        credential_subject: subject.cloned(),
+    }
+}
+
+fn names(tools: &[rmcp::model::Tool]) -> Vec<String> {
+    tools.iter().map(|t| t.name.to_string()).collect()
+}
+
+const SIX_MINUTES: Duration = Duration::from_secs(6 * 60);
+
+#[tokio::test]
+async fn nothing_connects_until_a_turn_asks() {
+    let server = serve(&Script::new(&["create_issue"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    world.integration(&server.uri(), |_| {}).await;
+
+    assert_eq!(world.pool.connection_count().await, 0);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_first_connect_lists_the_servers_tools() {
+    let server = serve(&Script::new(&["create_issue", "list_issues"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+
+    let connected = world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .unwrap();
+
+    assert_eq!(names(&connected.tools), vec!["create_issue", "list_issues"]);
+    assert_eq!(world.pool.connection_count().await, 1);
+}
+
+#[tokio::test]
+async fn every_request_carries_the_header_the_template_forms() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+
+    world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let posts: Vec<_> = requests
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .collect();
+    assert!(posts.len() >= 2, "initialize and tools/list at least");
+    for request in posts {
+        assert_eq!(
+            request
+                .headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok()),
+            Some("Bearer ghp_abc")
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_custom_header_name_without_a_prefix_is_sent_as_is() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world
+        .integration(&server.uri(), |i| {
+            i.header_name = Some("x-api-key".into());
+            i.header_value_prefix = None;
+        })
+        .await;
+    world.credential(&integration, None, "key-1", 0).await;
+
+    world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    assert!(
+        requests
+            .iter()
+            .filter(|r| r.method.as_str() == "POST")
+            .all(|r| r.headers.get("x-api-key").and_then(|v| v.to_str().ok()) == Some("key-1"))
+    );
+}
+
+#[tokio::test]
+async fn an_integration_without_auth_connects_without_a_credential() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world
+        .integration(&server.uri(), |i| {
+            i.auth_kind = IntegrationAuthKind::None;
+            i.header_name = None;
+            i.header_value_prefix = None;
+        })
+        .await;
+
+    let connected = world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .unwrap();
+    assert_eq!(names(&connected.tools), vec!["t"]);
+}
+
+#[tokio::test]
+async fn tools_are_cached_across_turns() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+
+    for _ in 0..3 {
+        world.pool.connect(&eff).await.unwrap();
+    }
+
+    assert_eq!(count(&server, "initialize").await, 1);
+    assert_eq!(count(&server, "tools/list").await, 1);
+}
+
+#[tokio::test]
+async fn the_tool_list_is_refreshed_after_its_ttl_without_reconnecting() {
+    let script = Script::new(&["t"]);
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig {
+        tools_ttl: Duration::from_secs(5 * 60),
+        ..ConnectionsConfig::default()
+    });
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+    world.pool.connect(&eff).await.unwrap();
+
+    script.tools.lock().unwrap().push("added");
+    world.clock.advance(SIX_MINUTES);
+    let again = world.pool.connect(&eff).await.unwrap();
+
+    assert_eq!(names(&again.tools), vec!["t", "added"]);
+    assert_eq!(count(&server, "initialize").await, 1);
+}
+
+#[tokio::test]
+async fn a_connection_idle_for_ten_minutes_is_evicted() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+    world.pool.connect(&eff).await.unwrap();
+
+    world.clock.advance(Duration::from_secs(9 * 60));
+    world.pool.connect(&eff).await.unwrap();
+    assert_eq!(
+        count(&server, "initialize").await,
+        1,
+        "still warm after 9 min"
+    );
+
+    world.clock.advance(Duration::from_secs(10 * 60 + 1));
+    world.pool.evict_idle().await;
+    assert_eq!(world.pool.connection_count().await, 0);
+
+    world.pool.connect(&eff).await.unwrap();
+    assert_eq!(
+        count(&server, "initialize").await,
+        2,
+        "reconnects after eviction"
+    );
+}
+
+#[tokio::test]
+async fn using_a_connection_keeps_it_from_going_idle() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+
+    for _ in 0..4 {
+        world.pool.connect(&eff).await.unwrap();
+        world.clock.advance(Duration::from_secs(8 * 60));
+    }
+
+    assert_eq!(count(&server, "initialize").await, 1);
+}
+
+#[tokio::test]
+async fn a_changed_integration_reconnects() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .unwrap();
+
+    let mut edited = integration.clone();
+    edited.updated_at = at(60);
+    world.pool.connect(&effective(&edited, None)).await.unwrap();
+
+    assert_eq!(count(&server, "initialize").await, 2);
+}
+
+#[tokio::test]
+async fn a_replaced_credential_reconnects_with_the_new_value() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    let eff = effective(&integration, None);
+    world.credential(&integration, None, "old", 0).await;
+    world.pool.connect(&eff).await.unwrap();
+
+    world.credential(&integration, None, "new", 60).await;
+    world.pool.connect(&eff).await.unwrap();
+
+    assert_eq!(count(&server, "initialize").await, 2);
+    let requests = server.received_requests().await.unwrap();
+    let last_auth = requests
+        .iter()
+        .rev()
+        .find_map(|r| r.headers.get("authorization").and_then(|v| v.to_str().ok()));
+    assert_eq!(last_auth, Some("Bearer new"));
+}
+
+#[tokio::test]
+async fn each_subject_gets_its_own_connection_and_credential() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world
+        .integration(&server.uri(), |i| {
+            i.credential_mode = CredentialMode::PerUser
+        })
+        .await;
+    let (u1, u2) = (UserId::from("usr_1"), UserId::from("usr_2"));
+    world
+        .credential(&integration, Some(&u1), "token-1", 0)
+        .await;
+    world
+        .credential(&integration, Some(&u2), "token-2", 0)
+        .await;
+
+    world
+        .pool
+        .connect(&effective(&integration, Some(&u1)))
+        .await
+        .unwrap();
+    world
+        .pool
+        .connect(&effective(&integration, Some(&u2)))
+        .await
+        .unwrap();
+    world
+        .pool
+        .connect(&effective(&integration, Some(&u1)))
+        .await
+        .unwrap();
+
+    assert_eq!(world.pool.connection_count().await, 2);
+    assert_eq!(count(&server, "initialize").await, 2);
+    let requests = server.received_requests().await.unwrap();
+    for token in ["Bearer token-1", "Bearer token-2"] {
+        assert!(
+            requests.iter().any(
+                |r| r.headers.get("authorization").and_then(|v| v.to_str().ok()) == Some(token)
+            ),
+            "{token} was never sent"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_connection_is_recorded_as_healthy_with_its_tool_count() {
+    let server = serve(&Script::new(&["a", "b", "c"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    world.clock.advance(Duration::from_secs(42));
+
+    world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .unwrap();
+
+    let health = world.health.get("int_1", None).await.unwrap().unwrap();
+    assert!(health.reachable);
+    assert_eq!(health.tool_count, Some(3));
+    assert_eq!(health.last_connected_at, Some(at(42)));
+}
+
+#[tokio::test]
+async fn a_slow_server_times_out_and_is_marked_unreachable() {
+    let mut script = Script::new(&["t"]);
+    script.initialize_delay = Some(Duration::from_secs(30));
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig {
+        connect_timeout: Duration::from_millis(200),
+        ..ConnectionsConfig::default()
+    });
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+
+    let started = std::time::Instant::now();
+    let result = world.pool.connect(&effective(&integration, None)).await;
+
+    assert!(
+        matches!(result, Err(ConnectError::Unreachable(_))),
+        "got {:?}",
+        result.err()
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let health = world.health.get("int_1", None).await.unwrap().unwrap();
+    assert!(!health.reachable);
+    assert!(health.last_error.as_deref().unwrap().contains("timed out"));
+    assert_eq!(world.pool.connection_count().await, 0);
+}
+
+#[tokio::test]
+async fn an_unreachable_integration_is_not_retried_on_every_turn() {
+    let script = Script::new(&["t"]);
+    script.healthy.store(false, Ordering::SeqCst);
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig {
+        retry_after: Duration::from_secs(30),
+        ..ConnectionsConfig::default()
+    });
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+
+    assert!(world.pool.connect(&eff).await.is_err());
+    let after_first = server.received_requests().await.unwrap().len();
+    assert!(world.pool.connect(&eff).await.is_err());
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        after_first,
+        "a recent failure must be answered without another attempt"
+    );
+
+    script.healthy.store(true, Ordering::SeqCst);
+    world.clock.advance(Duration::from_secs(31));
+    assert!(
+        world.pool.connect(&eff).await.is_ok(),
+        "retries once the pause is over"
+    );
+    assert!(
+        world
+            .health
+            .get("int_1", None)
+            .await
+            .unwrap()
+            .unwrap()
+            .reachable
+    );
+}
+
+#[tokio::test]
+async fn editing_the_integration_ends_the_pause_after_a_failure() {
+    let script = Script::new(&["t"]);
+    script.healthy.store(false, Ordering::SeqCst);
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    assert!(
+        world
+            .pool
+            .connect(&effective(&integration, None))
+            .await
+            .is_err()
+    );
+
+    script.healthy.store(true, Ordering::SeqCst);
+    let mut fixed = integration.clone();
+    fixed.updated_at = at(5);
+    assert!(world.pool.connect(&effective(&fixed, None)).await.is_ok());
+}
+
+#[tokio::test]
+async fn a_missing_credential_fails_without_contacting_the_server() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+
+    let result = world.pool.connect(&effective(&integration, None)).await;
+
+    assert!(matches!(result, Err(ConnectError::Credential(_))));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_credential_sealed_under_another_key_fails_without_contacting_the_server() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    let foreign = SecretBox::from_key([1; 32]);
+    let aad = credential_aad("int_1", None, "header");
+    let sealed = foreign.seal(&Secret::new("x"), aad.as_bytes()).unwrap();
+    world
+        .credentials
+        .put(&StoredCredential {
+            integration_id: "int_1".into(),
+            subject_user_id: None,
+            kind: CredentialKind::Header,
+            ciphertext: sealed.ciphertext,
+            nonce: sealed.nonce,
+            key_id: sealed.key_id,
+            expires_at: None,
+            status: CredentialStatus::Ready,
+            updated_at: at(0),
+        })
+        .await
+        .unwrap();
+
+    let result = world.pool.connect(&effective(&integration, None)).await;
+
+    assert!(matches!(result, Err(ConnectError::Credential(_))));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_error_never_contains_the_credential() {
+    let script = Script::new(&["t"]);
+    script.healthy.store(false, Ordering::SeqCst);
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world
+        .credential(&integration, None, "ghp_supersecret", 0)
+        .await;
+
+    let error = world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .err()
+        .unwrap();
+    let health = world.health.get("int_1", None).await.unwrap().unwrap();
+
+    assert!(!error.to_string().contains("ghp_supersecret"));
+    assert!(
+        !health
+            .last_error
+            .unwrap_or_default()
+            .contains("ghp_supersecret")
+    );
+}

@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
+chrono = { workspace = true }
 base64 = { workspace = true }
 rmcp = { version = "3.1.4", default-features = false, features = [
     "client",
