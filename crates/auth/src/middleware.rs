@@ -1,27 +1,19 @@
-//! Axum auth middleware extractors.
+//! Shared authentication state and scope checks.
 //!
-//! Provides [`AuthExtractor`] which resolves an [`AuthContext`] from incoming
-//! requests by checking (in order):
-//!
-//! 1. `Authorization: Bearer <JWT>` header
-//! 2. Session cookie (encrypted reference to a refresh token)
-//! 3. API key (`ask_live_` prefix detection)
-//!
-//! Also provides [`RequireScope`] as a tower layer that checks permissions
-//! after extraction.
+//! [`AuthState`] holds everything the web layer needs to resolve tokens and
+//! keys into an [`AuthContext`]. [`RequireScope`] checks permissions on an
+//! already-resolved context.
 
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
-use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::{Action, ResourceKind, SpaceId};
 
-use crate::api_keys::{self, ApiKeyStore};
+use crate::api_keys::ApiKeyStore;
 use crate::jwt::JwtManager;
 
 // -- Auth state shared across handlers --
@@ -41,109 +33,6 @@ pub struct AuthState {
     pub legacy_token: Option<String>,
     /// Default AuthContext for legacy token authentication.
     pub legacy_context: Option<AuthContext>,
-}
-
-// -- AuthExtractor --
-
-/// Extracts an [`AuthContext`] from an incoming request.
-///
-/// Resolution order:
-/// 1. `Authorization: Bearer <token>` → try JWT, then API key
-/// 2. Legacy `ASSISTANT_WEB_TOKEN` match (backward compatibility)
-/// 3. Reject with 401
-#[derive(Debug)]
-pub struct AuthExtractor(pub AuthContext);
-
-/// Error type returned when authentication fails.
-#[derive(Debug)]
-pub enum AuthError {
-    /// No credentials provided.
-    MissingCredentials,
-    /// Credentials provided but invalid.
-    InvalidCredentials(String),
-}
-
-impl IntoResponse for AuthError {
-    fn into_response(self) -> Response {
-        match self {
-            Self::MissingCredentials => {
-                (StatusCode::UNAUTHORIZED, "authentication required").into_response()
-            }
-            Self::InvalidCredentials(msg) => (
-                StatusCode::UNAUTHORIZED,
-                format!("invalid credentials: {msg}"),
-            )
-                .into_response(),
-        }
-    }
-}
-
-impl FromRequestParts<AuthState> for AuthExtractor {
-    type Rejection = AuthError;
-
-    fn from_request_parts(
-        parts: &mut Parts,
-        state: &AuthState,
-    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
-        let auth_header = parts
-            .headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-
-        // Fallback: extract `?access_token=<jwt>` from the URL query string.
-        // SSE endpoints consumed by the browser's `EventSource` API cannot send
-        // custom request headers, so we accept the JWT in the query string for
-        // those callers. The header path always takes precedence when both are
-        // present.
-        let query_token = parts.uri.query().and_then(|q| {
-            url::form_urlencoded::parse(q.as_bytes())
-                .find(|(k, _)| k == "access_token")
-                .map(|(_, v)| v.into_owned())
-        });
-
-        let state = state.clone();
-
-        async move {
-            let header_token = match &auth_header {
-                Some(h) if h.starts_with("Bearer ") => Some(h[7..].to_string()),
-                _ => None,
-            };
-
-            let token = match header_token.or(query_token) {
-                Some(t) => t,
-                None => return Err(AuthError::MissingCredentials),
-            };
-            let token = token.as_str();
-
-            // 1. Try JWT validation.
-            if let Ok(ctx) = state.jwt_manager.validate_to_context(token) {
-                return Ok(AuthExtractor(ctx));
-            }
-
-            // 2. Try API key resolution.
-            if token.starts_with("ask_live_") {
-                match api_keys::resolve_key(token, state.api_key_store.as_ref()).await {
-                    Ok(ctx) => return Ok(AuthExtractor(ctx)),
-                    Err(e) => {
-                        return Err(AuthError::InvalidCredentials(format!("API key: {e}")));
-                    }
-                }
-            }
-
-            // 3. Try legacy token.
-            if let Some(ref legacy) = state.legacy_token
-                && crate::constant_time::eq(token, legacy)
-                && let Some(ref ctx) = state.legacy_context
-            {
-                return Ok(AuthExtractor(ctx.clone()));
-            }
-
-            Err(AuthError::InvalidCredentials(
-                "token is not a valid JWT or API key".into(),
-            ))
-        }
-    }
 }
 
 // -- RequireScope --
@@ -205,44 +94,9 @@ impl IntoResponse for ScopeError {
 mod tests {
     use std::collections::HashMap;
 
-    use axum::http::Request;
-
     use assistant_core::identity::{OrgId, Role, Scope, UserId};
 
-    use crate::api_keys::InMemoryApiKeyStore;
-    use crate::jwt::JwtKeyPair;
-
     use super::*;
-
-    fn test_auth_state() -> (AuthState, JwtManager) {
-        let kp = JwtKeyPair::generate().unwrap();
-        let jwt_mgr = JwtManager::new(kp, "https://test.local".into(), "https://test.local".into());
-        // We need another JwtManager for the state since JwtKeyPair isn't Clone.
-        // Generate a shared secret and build two managers from it.
-        let secret = b"test-secret-that-is-long-enough!!";
-        let kp_state = JwtKeyPair::from_secret(secret).unwrap();
-        let kp_sign = JwtKeyPair::from_secret(secret).unwrap();
-        let jwt_state = JwtManager::new(
-            kp_state,
-            "https://test.local".into(),
-            "https://test.local".into(),
-        );
-        let jwt_sign = JwtManager::new(
-            kp_sign,
-            "https://test.local".into(),
-            "https://test.local".into(),
-        );
-
-        let state = AuthState {
-            jwt_manager: Arc::new(jwt_state),
-            api_key_store: Arc::new(InMemoryApiKeyStore::new()),
-            legacy_token: Some("legacy-token-123".into()),
-            legacy_context: Some(make_admin_context()),
-        };
-
-        drop(jwt_mgr); // unused, we use the shared-secret pair instead
-        (state, jwt_sign)
-    }
 
     fn make_admin_context() -> AuthContext {
         let mut space_roles = HashMap::new();
@@ -272,177 +126,6 @@ mod tests {
             ],
             client_id: "webui".into(),
         }
-    }
-
-    async fn extract_from_header(
-        state: &AuthState,
-        auth_value: &str,
-    ) -> Result<AuthContext, AuthError> {
-        let req = Request::builder()
-            .header("authorization", auth_value)
-            .body(())
-            .unwrap();
-        let (mut parts, _body) = req.into_parts();
-
-        AuthExtractor::from_request_parts(&mut parts, state)
-            .await
-            .map(|e| e.0)
-    }
-
-    async fn extract_from_query(state: &AuthState, uri: &str) -> Result<AuthContext, AuthError> {
-        let req = Request::builder().uri(uri).body(()).unwrap();
-        let (mut parts, _body) = req.into_parts();
-
-        AuthExtractor::from_request_parts(&mut parts, state)
-            .await
-            .map(|e| e.0)
-    }
-
-    #[tokio::test]
-    async fn extract_jwt_from_query_param() {
-        let (state, jwt_sign) = test_auth_state();
-        let ctx = make_member_context();
-        let token = jwt_sign.sign(&ctx, "acme", "Bob").unwrap();
-
-        let result = extract_from_query(
-            &state,
-            &format!("/api/conversations/stream?access_token={token}"),
-        )
-        .await;
-        assert!(result.is_ok(), "expected ok, got {result:?}");
-        let extracted = result.unwrap();
-        assert_eq!(extracted.user_id, UserId::from("bob"));
-        assert_eq!(extracted.org_id, OrgId::from("acme"));
-    }
-
-    #[tokio::test]
-    async fn invalid_jwt_in_query_param_rejected() {
-        let (state, _jwt_sign) = test_auth_state();
-        let result = extract_from_query(
-            &state,
-            "/api/conversations/stream?access_token=not-a-real-jwt",
-        )
-        .await;
-        assert!(matches!(result, Err(AuthError::InvalidCredentials(_))));
-    }
-
-    #[tokio::test]
-    async fn header_takes_precedence_over_query_param() {
-        let (state, jwt_sign) = test_auth_state();
-
-        // Bob signs a token; build a request that passes Bob's token in the
-        // header but a garbage token in the query param. The header path
-        // must win — successful auth as Bob.
-        let bob_ctx = make_member_context();
-        let bob_token = jwt_sign.sign(&bob_ctx, "acme", "Bob").unwrap();
-
-        let req = Request::builder()
-            .uri("/api/conversations/stream?access_token=garbage")
-            .header("authorization", format!("Bearer {bob_token}"))
-            .body(())
-            .unwrap();
-        let (mut parts, _body) = req.into_parts();
-        let result = AuthExtractor::from_request_parts(&mut parts, &state).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().0.user_id, UserId::from("bob"));
-    }
-
-    #[tokio::test]
-    async fn extract_valid_jwt() {
-        let (state, jwt_sign) = test_auth_state();
-        let ctx = make_member_context();
-        let token = jwt_sign.sign(&ctx, "acme", "Bob").unwrap();
-
-        let result = extract_from_header(&state, &format!("Bearer {token}")).await;
-        assert!(result.is_ok());
-        let extracted = result.unwrap();
-        assert_eq!(extracted.user_id, UserId::from("bob"));
-        assert_eq!(extracted.org_id, OrgId::from("acme"));
-    }
-
-    #[tokio::test]
-    async fn extract_valid_api_key() {
-        let (state, _jwt_sign) = test_auth_state();
-
-        // Store an API key.
-        let key = crate::api_keys::generate_key();
-        let mut space_roles = HashMap::new();
-        space_roles.insert(SpaceId::from("eng"), Role::Member);
-        let record = crate::api_keys::ApiKeyRecord {
-            id: "key_test".into(),
-            user_id: UserId::from("alice"),
-            name: "Test".into(),
-            key_hash: key.key_hash.clone(),
-            key_prefix: key.key_prefix.clone(),
-            org_id: OrgId::from("acme"),
-            space_roles,
-            scopes: vec![Scope::new(ResourceKind::Personas, Action::Read)],
-            expires_at: None,
-            created_at: chrono::Utc::now(),
-        };
-        state.api_key_store.store_key(record).await.unwrap();
-
-        let result = extract_from_header(&state, &format!("Bearer {}", key.plaintext)).await;
-        assert!(result.is_ok());
-        let extracted = result.unwrap();
-        assert_eq!(extracted.user_id, UserId::from("alice"));
-        assert_eq!(extracted.client_id, "api_key");
-    }
-
-    #[tokio::test]
-    async fn extract_legacy_token() {
-        let (state, _jwt_sign) = test_auth_state();
-
-        let result = extract_from_header(&state, "Bearer legacy-token-123").await;
-        assert!(result.is_ok());
-        let extracted = result.unwrap();
-        assert_eq!(extracted.user_id, UserId::from("admin"));
-        assert!(extracted.is_org_admin());
-    }
-
-    #[tokio::test]
-    async fn extract_missing_header_returns_401() {
-        let (state, _jwt_sign) = test_auth_state();
-
-        let req = Request::builder().body(()).unwrap();
-        let (mut parts, _body) = req.into_parts();
-
-        let result = AuthExtractor::from_request_parts(&mut parts, &state).await;
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AuthError::MissingCredentials => {}
-            other => panic!("expected MissingCredentials, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn extract_invalid_token_returns_401() {
-        let (state, _jwt_sign) = test_auth_state();
-
-        let result = extract_from_header(&state, "Bearer invalid-garbage-token").await;
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AuthError::InvalidCredentials(_) => {}
-            other => panic!("expected InvalidCredentials, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn extract_expired_jwt_falls_through() {
-        let (state, _jwt_sign) = test_auth_state();
-
-        // Sign with a different secret so validation fails.
-        let other_kp = JwtKeyPair::from_secret(b"other-secret-that-is-long-enough").unwrap();
-        let other_mgr = JwtManager::new(
-            other_kp,
-            "https://test.local".into(),
-            "https://test.local".into(),
-        );
-        let ctx = make_member_context();
-        let bad_token = other_mgr.sign(&ctx, "acme", "Bob").unwrap();
-
-        let result = extract_from_header(&state, &format!("Bearer {bad_token}")).await;
-        assert!(result.is_err());
     }
 
     // -- RequireScope tests --
