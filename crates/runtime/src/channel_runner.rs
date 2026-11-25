@@ -74,6 +74,7 @@ impl ChannelRunner {
         let command_event_store: Arc<dyn CommandEventStore> = Arc::new(
             SqliteCommandEventStore::new(orchestrator.storage.pool.clone()),
         );
+        let conversation_configs = orchestrator.conversation_configs();
         Self {
             adapter,
             orchestrator,
@@ -81,7 +82,7 @@ impl ChannelRunner {
             conv_locks: Arc::new(Mutex::new(HashMap::new())),
             shutdown: None,
             command_registry: Arc::new(CommandRegistry::new()),
-            conversation_configs: Arc::new(RwLock::new(HashMap::new())),
+            conversation_configs,
             active_turns: Arc::new(RwLock::new(HashMap::new())),
             command_event_store,
             identity_resolver: None,

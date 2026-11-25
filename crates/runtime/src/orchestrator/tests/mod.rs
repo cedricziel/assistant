@@ -221,6 +221,7 @@ mod dispatch;
 mod end_turn;
 mod history;
 mod misc;
+mod model_override;
 mod multimodal;
 mod permission;
 mod sanitize;

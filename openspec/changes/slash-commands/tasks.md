@@ -29,7 +29,7 @@
 - [x] 4.3 For `/compact`, acquire the per-conversation lock before execution. For all other commands, execute without locking.
 - [x] 4.4 After command execution, persist a `command_events` record and send ack via `adapter.send()`.
 - [x] 4.5 Wire active_turns tracking: record request_id before dispatch, remove after dispatch completes.
-- [ ] 4.6 **DEFERRED**: Add orchestrator support for per-conversation model override. Requires LlmProvider model-switching or per-turn provider construction — separate change. `/model` stores the override; wiring is future work.
+- [x] 4.6 Orchestrator honours the per-conversation model override: each turn runs on a provider built for the `/model` name (same provider kind and endpoint as the configured default). The override map is owned by the orchestrator and shared with every interface's `CommandContext`.
 - [x] 4.7 Tests: parse/interception covered by CommandRegistry unit tests (parse_recognized, parse_unrecognized, passthrough).
 
 ## 5. Web UI API endpoints

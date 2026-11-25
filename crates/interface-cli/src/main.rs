@@ -39,8 +39,8 @@ use uuid::Uuid;
 
 use assistant_core::types::conversation::Interface;
 use assistant_core::{
-    ConversationConfig, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
-    set_runtime_workspace_dir, validate_agent_id,
+    apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
+    validate_agent_id,
 };
 use assistant_runtime::{
     CommandContext, CommandRegistry, init_tracing, orchestrator::ConfirmationCallback,
@@ -431,8 +431,7 @@ async fn main() -> Result<()> {
 
     // 13. Shared command registry and per-conversation state.
     let command_registry = CommandRegistry::new();
-    let conversation_configs: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationConfig>>> =
-        Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+    let conversation_configs = bs.orchestrator.conversation_configs();
     let active_turns: Arc<tokio::sync::RwLock<HashMap<Uuid, Uuid>>> =
         Arc::new(tokio::sync::RwLock::new(HashMap::new()));
     let default_model = bs.config.llm.model.clone();

@@ -189,7 +189,7 @@ impl ApiState {
             command_registry: Arc::new(CommandRegistry::new()),
             command_event_store,
             conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
-            conversation_configs: Arc::new(RwLock::new(HashMap::new())),
+            conversation_configs: orchestrator_ref.conversation_configs(),
             orchestrator_ref,
             active_turns: Arc::new(RwLock::new(HashMap::new())),
             default_model,
