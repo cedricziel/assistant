@@ -32,6 +32,8 @@ struct Script {
     initialize_delay: Option<Duration>,
     healthy: Arc<AtomicBool>,
     tools: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    /// How long `tools/list` takes to answer; changeable mid-test.
+    list_delay: Arc<std::sync::Mutex<Option<Duration>>>,
 }
 
 impl Script {
@@ -40,6 +42,7 @@ impl Script {
             initialize_delay: None,
             healthy: Arc::new(AtomicBool::new(true)),
             tools: Arc::new(std::sync::Mutex::new(tools.to_vec())),
+            list_delay: Arc::default(),
         }
     }
 }
@@ -86,7 +89,11 @@ impl Respond for Script {
                         })
                     })
                     .collect();
-                rpc_result(&id, json!({"tools": tools}))
+                let response = rpc_result(&id, json!({"tools": tools}));
+                match *self.list_delay.lock().unwrap() {
+                    Some(delay) => response.set_delay(delay),
+                    None => response,
+                }
             }
             _ => ResponseTemplate::new(202),
         }
@@ -677,5 +684,225 @@ async fn the_error_never_contains_the_credential() {
             .last_error
             .unwrap_or_default()
             .contains("ghp_supersecret")
+    );
+}
+
+// -- A server that stops answering ------------------------------------------
+
+#[tokio::test]
+async fn a_hung_tool_refresh_fails_within_the_timeout_and_drops_the_connection() {
+    let script = Script::new(&["t"]);
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig {
+        connect_timeout: Duration::from_millis(300),
+        tools_ttl: Duration::from_secs(5 * 60),
+        ..ConnectionsConfig::default()
+    });
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+    world.pool.connect(&eff).await.unwrap();
+
+    *script.list_delay.lock().unwrap() = Some(Duration::from_secs(30));
+    world.clock.advance(SIX_MINUTES);
+    let started = std::time::Instant::now();
+    let result = world.pool.connect(&eff).await;
+
+    assert!(
+        matches!(result, Err(ConnectError::Unreachable(_))),
+        "got {:?}",
+        result.err()
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "a hung refresh must not block the turn, took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(world.pool.connection_count().await, 0);
+    assert!(
+        !world
+            .health
+            .get("int_1", None)
+            .await
+            .unwrap()
+            .unwrap()
+            .reachable
+    );
+
+    let again = std::time::Instant::now();
+    assert!(world.pool.connect(&eff).await.is_err());
+    assert!(
+        again.elapsed() < Duration::from_millis(100),
+        "the next turn is answered from the failure, not another wait"
+    );
+}
+
+// -- A credential read before the lock goes stale ----------------------------
+
+/// Reads from the inner store, then holds the first `get` until released, so
+/// its answer is stale by the time the caller sees it.
+struct StaleFirstRead {
+    inner: Arc<dyn IntegrationCredentialStore>,
+    first: std::sync::atomic::AtomicBool,
+    paused: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl IntegrationCredentialStore for StaleFirstRead {
+    async fn put(&self, c: &StoredCredential) -> anyhow::Result<()> {
+        self.inner.put(c).await
+    }
+    async fn get(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+    ) -> anyhow::Result<Option<StoredCredential>> {
+        let read = self.inner.get(integration_id, subject).await?;
+        if !self.first.swap(true, Ordering::SeqCst) {
+            self.paused.notify_one();
+            self.release.notified().await;
+        }
+        Ok(read)
+    }
+    async fn delete(&self, integration_id: &str, subject: Option<&UserId>) -> anyhow::Result<bool> {
+        self.inner.delete(integration_id, subject).await
+    }
+    async fn compare_and_swap(
+        &self,
+        expected: DateTime<Utc>,
+        c: &StoredCredential,
+    ) -> anyhow::Result<bool> {
+        self.inner.compare_and_swap(expected, c).await
+    }
+}
+
+#[tokio::test]
+async fn a_credential_replaced_during_a_slow_read_ends_up_as_the_connection_in_use() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let paused = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let pool = Arc::new(IntegrationConnections::new(
+        Arc::new(StaleFirstRead {
+            inner: world.credentials.clone(),
+            first: Default::default(),
+            paused: paused.clone(),
+            release: release.clone(),
+        }),
+        world.health.clone(),
+        world.secrets.clone(),
+        Arc::new(world.clock.clone()),
+    ));
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "old", 0).await;
+    let eff = effective(&integration, None);
+
+    let a = tokio::spawn({
+        let (pool, eff) = (pool.clone(), eff.clone());
+        async move { pool.connect(&eff).await.map(|_| ()) }
+    });
+    paused.notified().await;
+    world.credential(&integration, None, "new", 60).await;
+    let b = tokio::spawn({
+        let (pool, eff) = (pool.clone(), eff.clone());
+        async move { pool.connect(&eff).await.map(|_| ()) }
+    });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    release.notify_one();
+    a.await.unwrap().unwrap();
+    b.await.unwrap().unwrap();
+    pool.connect(&eff).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let last_auth = requests
+        .iter()
+        .rev()
+        .find_map(|r| r.headers.get("authorization").and_then(|v| v.to_str().ok()));
+    assert_eq!(
+        last_auth,
+        Some("Bearer new"),
+        "the live connection must carry the newest credential"
+    );
+    assert_eq!(
+        count(&server, "initialize").await,
+        2,
+        "a stale read must not cost an extra reconnect"
+    );
+}
+
+// -- The pool does not grow without bound -----------------------------------
+
+#[tokio::test]
+async fn an_evicted_connection_leaves_no_entry_behind() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .unwrap();
+    assert_eq!(world.pool.tracked(), 1);
+
+    world.clock.advance(Duration::from_secs(10 * 60 + 1));
+    world.pool.evict_idle().await;
+
+    assert_eq!(world.pool.tracked(), 0);
+}
+
+#[tokio::test]
+async fn an_expired_failure_leaves_no_entry_behind() {
+    let script = Script::new(&["t"]);
+    script.healthy.store(false, Ordering::SeqCst);
+    let server = serve(&script).await;
+    let world = World::new(ConnectionsConfig {
+        retry_after: Duration::from_secs(30),
+        ..ConnectionsConfig::default()
+    });
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    assert!(
+        world
+            .pool
+            .connect(&effective(&integration, None))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        world.pool.tracked(),
+        1,
+        "the failure is remembered for a while"
+    );
+
+    world.clock.advance(Duration::from_secs(31));
+    world.pool.evict_idle().await;
+
+    assert_eq!(world.pool.tracked(), 0);
+}
+
+#[tokio::test]
+async fn the_pool_sweeps_itself_without_being_asked() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::new(ConnectionsConfig {
+        sweep_interval: Duration::from_millis(20),
+        ..ConnectionsConfig::default()
+    });
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    world
+        .pool
+        .connect(&effective(&integration, None))
+        .await
+        .unwrap();
+
+    world.clock.advance(Duration::from_secs(11 * 60));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    assert_eq!(
+        world.pool.tracked(),
+        0,
+        "an idle connection is dropped by the background sweep"
     );
 }

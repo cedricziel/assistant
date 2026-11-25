@@ -48,6 +48,8 @@ pub struct ConnectionsConfig {
     pub retry_after: Duration,
     /// How long a cached `tools/list` is trusted on a live connection.
     pub tools_ttl: Duration,
+    /// How often the pool drops idle connections on its own.
+    pub sweep_interval: Duration,
 }
 
 impl Default for ConnectionsConfig {
@@ -57,6 +59,7 @@ impl Default for ConnectionsConfig {
             connect_timeout: Duration::from_secs(5),
             retry_after: Duration::from_secs(30),
             tools_ttl: Duration::from_secs(5 * 60),
+            sweep_interval: Duration::from_secs(60),
         }
     }
 }
@@ -128,13 +131,28 @@ struct Slot {
 
 type Key = (String, Option<UserId>);
 
+/// What the background sweep needs: nothing that keeps the pool's stores alive.
+struct Shared {
+    clock: Arc<dyn Clock>,
+    config: ConnectionsConfig,
+    slots: Mutex<HashMap<Key, Arc<AsyncMutex<Slot>>>>,
+}
+
+/// Stops the sweep when the pool is dropped.
+struct Sweeper(tokio::task::JoinHandle<()>);
+
+impl Drop for Sweeper {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 pub struct IntegrationConnections {
     credentials: Arc<dyn IntegrationCredentialStore>,
     health: Arc<dyn IntegrationHealthStore>,
     secrets: Arc<SecretBox>,
-    clock: Arc<dyn Clock>,
-    config: ConnectionsConfig,
-    slots: Mutex<HashMap<Key, Arc<AsyncMutex<Slot>>>>,
+    shared: Arc<Shared>,
+    _sweeper: Option<Sweeper>,
 }
 
 impl IntegrationConnections {
@@ -144,19 +162,50 @@ impl IntegrationConnections {
         secrets: Arc<SecretBox>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self {
+        Self::assemble(
             credentials,
             health,
             secrets,
             clock,
-            config: ConnectionsConfig::default(),
-            slots: Mutex::new(HashMap::new()),
-        }
+            ConnectionsConfig::default(),
+        )
     }
 
-    pub fn with_config(mut self, config: ConnectionsConfig) -> Self {
-        self.config = config;
-        self
+    pub fn with_config(self, config: ConnectionsConfig) -> Self {
+        Self::assemble(
+            self.credentials.clone(),
+            self.health.clone(),
+            self.secrets.clone(),
+            self.shared.clock.clone(),
+            config,
+        )
+    }
+
+    /// Builds the pool and, when a Tokio runtime is running, starts the sweep
+    /// that drops idle connections. The sweep ends with the pool.
+    fn assemble(
+        credentials: Arc<dyn IntegrationCredentialStore>,
+        health: Arc<dyn IntegrationHealthStore>,
+        secrets: Arc<SecretBox>,
+        clock: Arc<dyn Clock>,
+        config: ConnectionsConfig,
+    ) -> Self {
+        let interval = config.sweep_interval;
+        let shared = Arc::new(Shared {
+            clock,
+            config,
+            slots: Mutex::new(HashMap::new()),
+        });
+        let sweeper = tokio::runtime::Handle::try_current().ok().map(|runtime| {
+            Sweeper(runtime.spawn(sweep_periodically(Arc::downgrade(&shared), interval)))
+        });
+        Self {
+            credentials,
+            health,
+            secrets,
+            shared,
+            _sweeper: sweeper,
+        }
     }
 
     /// The connection of `effective`, opened if needed.
@@ -171,29 +220,56 @@ impl IntegrationConnections {
         self.evict_idle().await;
         let integration = &effective.integration;
         let subject = effective.credential_subject.as_ref();
-        let stored = self.stored_credential(integration, subject).await?;
+
+        // The credential is read under the slot lock: a read taken before it
+        // could be replaced by the time the lock is won, and the stale value
+        // would then be cached.
+        let slot = self.slot(integration, subject);
+        let mut slot = slot.lock().await;
+        let stored = match self.stored_credential(integration, subject).await {
+            Ok(stored) => stored,
+            Err(error) => {
+                // A revoked or missing credential must not keep a session open.
+                slot.live = None;
+                return Err(error);
+            }
+        };
         let versions = Versions {
             integration: integration.updated_at,
             credential: stored.as_ref().map(|c| c.updated_at),
         };
-
-        let slot = self.slot(integration, subject);
-        let mut slot = slot.lock().await;
-        let now = self.clock.now_instant();
+        let now = self.shared.clock.now_instant();
+        let config = &self.shared.config;
 
         if let Some(live) = &mut slot.live {
             let fresh = live.versions == versions
                 && live.connected.client.is_connected()
-                && !self.idle(live, now);
-            if fresh && now.saturating_duration_since(live.listed_at) >= self.config.tools_ttl {
-                match live.connected.client.list_tools().await {
-                    Ok(tools) => {
+                && !self.shared.idle(live, now);
+            if fresh && now.saturating_duration_since(live.listed_at) >= config.tools_ttl {
+                match tokio::time::timeout(
+                    config.connect_timeout,
+                    live.connected.client.list_tools(),
+                )
+                .await
+                {
+                    Ok(Ok(tools)) => {
                         live.connected.tools = tools.into();
                         live.listed_at = now;
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         debug!(integration = %integration.id, error = %e, "tools refresh failed; reconnecting");
                         slot.live = None;
+                    }
+                    Err(_) => {
+                        // A session that stops answering is skipped, not waited on again.
+                        slot.live = None;
+                        let error = ConnectError::Unreachable(format!(
+                            "tool list refresh timed out after {:?}",
+                            config.connect_timeout
+                        ));
+                        return Err(self
+                            .remember_failure(&mut slot, integration, subject, versions, now, error)
+                            .await);
                     }
                 }
             } else if !fresh {
@@ -206,7 +282,7 @@ impl IntegrationConnections {
         }
 
         if let Some(failure) = &slot.failure {
-            let recent = now.saturating_duration_since(failure.at) < self.config.retry_after;
+            let recent = now.saturating_duration_since(failure.at) < config.retry_after;
             if failure.versions == versions && recent {
                 return Err(ConnectError::Unreachable(failure.error.clone()));
             }
@@ -217,7 +293,7 @@ impl IntegrationConnections {
             &integration.slug,
             &integration.connect_url,
             header,
-            self.config.connect_timeout,
+            config.connect_timeout,
         )
         .await
         {
@@ -237,16 +313,30 @@ impl IntegrationConnections {
                 });
                 Ok(connected)
             }
-            Err(error) => {
-                self.record_failed(integration, subject, &error).await;
-                slot.failure = Some(Failure {
-                    versions,
-                    at: now,
-                    error: error_text(&error),
-                });
-                Err(error)
-            }
+            Err(error) => Err(self
+                .remember_failure(&mut slot, integration, subject, versions, now, error)
+                .await),
         }
+    }
+
+    /// Record `error` as the integration's health and remember it, so the next
+    /// turns are answered from it for a while.
+    async fn remember_failure(
+        &self,
+        slot: &mut Slot,
+        integration: &Integration,
+        subject: Option<&UserId>,
+        versions: Versions,
+        now: Instant,
+        error: ConnectError,
+    ) -> ConnectError {
+        self.record_failed(integration, subject, &error).await;
+        slot.failure = Some(Failure {
+            versions,
+            at: now,
+            error: error_text(&error),
+        });
+        error
     }
 
     /// Connect once without keeping anything, and record the outcome as the
@@ -261,7 +351,7 @@ impl IntegrationConnections {
             &integration.slug,
             &integration.connect_url,
             header,
-            self.config.connect_timeout,
+            self.shared.config.connect_timeout,
         )
         .await
         {
@@ -277,24 +367,25 @@ impl IntegrationConnections {
         }
     }
 
-    /// Drop every connection that has been idle for the idle timeout.
+    /// Drop every connection that has been idle for the idle timeout, forget
+    /// failures that no longer matter, and remove the entries left empty.
     pub async fn evict_idle(&self) {
-        let now = self.clock.now_instant();
-        for slot in self.all_slots() {
-            // A slot in use is not idle.
-            let Ok(mut slot) = slot.try_lock() else {
-                continue;
-            };
-            if slot.live.as_ref().is_some_and(|live| self.idle(live, now)) {
-                slot.live = None;
-            }
-        }
+        self.shared.sweep().await;
+    }
+
+    /// Entries the pool keeps: open connections and remembered failures.
+    pub fn tracked(&self) -> usize {
+        self.shared
+            .slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 
     /// Connections currently open.
     pub async fn connection_count(&self) -> usize {
         let mut open = 0;
-        for slot in self.all_slots() {
+        for slot in self.shared.all_slots() {
             if slot.lock().await.live.is_some() {
                 open += 1;
             }
@@ -302,21 +393,9 @@ impl IntegrationConnections {
         open
     }
 
-    fn all_slots(&self) -> Vec<Arc<AsyncMutex<Slot>>> {
-        self.slots
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-            .cloned()
-            .collect()
-    }
-
-    fn idle(&self, live: &Live, now: Instant) -> bool {
-        now.saturating_duration_since(live.last_used) > self.config.idle_timeout
-    }
-
     fn slot(&self, integration: &Integration, subject: Option<&UserId>) -> Arc<AsyncMutex<Slot>> {
-        self.slots
+        self.shared
+            .slots
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .entry((integration.id.clone(), subject.cloned()))
@@ -389,7 +468,7 @@ impl IntegrationConnections {
         let tools = u32::try_from(tools).unwrap_or(u32::MAX);
         if let Err(e) = self
             .health
-            .record_connected(&integration.id, subject, tools, self.clock.now())
+            .record_connected(&integration.id, subject, tools, self.shared.clock.now())
             .await
         {
             warn!(integration = %integration.id, error = %e, "could not record integration health");
@@ -409,12 +488,68 @@ impl IntegrationConnections {
                 &integration.id,
                 subject,
                 &error_text(error),
-                self.clock.now(),
+                self.shared.clock.now(),
             )
             .await
         {
             warn!(integration = %integration.id, error = %e, "could not record integration health");
         }
+    }
+}
+
+impl Shared {
+    fn all_slots(&self) -> Vec<Arc<AsyncMutex<Slot>>> {
+        self.slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    fn idle(&self, live: &Live, now: Instant) -> bool {
+        now.saturating_duration_since(live.last_used) > self.config.idle_timeout
+    }
+
+    async fn sweep(&self) {
+        let now = self.clock.now_instant();
+        for slot in self.all_slots() {
+            // A slot in use is not idle.
+            let Ok(mut slot) = slot.try_lock() else {
+                continue;
+            };
+            if slot.live.as_ref().is_some_and(|live| self.idle(live, now)) {
+                slot.live = None;
+            }
+            let expired = |failure: &Failure| {
+                now.saturating_duration_since(failure.at) >= self.config.retry_after
+            };
+            if slot.failure.as_ref().is_some_and(expired) {
+                slot.failure = None;
+            }
+        }
+        // Nobody else holds an entry the map alone references, and entries are
+        // only handed out under this lock, so an empty one can go.
+        self.slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|_, slot| {
+                Arc::strong_count(slot) > 1
+                    || slot
+                        .try_lock()
+                        .map_or(true, |s| s.live.is_some() || s.failure.is_some())
+            });
+    }
+}
+
+/// The background sweep: ends when the pool, and so `shared`, is gone.
+async fn sweep_periodically(shared: std::sync::Weak<Shared>, interval: Duration) {
+    loop {
+        tokio::time::sleep(interval).await;
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        shared.sweep().await;
     }
 }
 

@@ -30,6 +30,8 @@ fn at(secs: i64) -> DateTime<Utc> {
 struct Server {
     delay: Option<Duration>,
     healthy: bool,
+    /// How long `tools/list` takes; changeable mid-test.
+    list_delay: Arc<std::sync::Mutex<Option<Duration>>>,
 }
 
 impl Respond for Server {
@@ -54,18 +56,33 @@ impl Respond for Server {
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "s", "version": "1"},
             })),
-            "tools/list" => reply(json!({"tools": [{
-                "name": "ping", "description": "ping", "inputSchema": {"type": "object"},
-            }]})),
+            "tools/list" => {
+                let response = reply(json!({"tools": [{
+                    "name": "ping", "description": "ping", "inputSchema": {"type": "object"},
+                }]}));
+                match *self.list_delay.lock().unwrap() {
+                    Some(delay) => response.set_delay(delay),
+                    None => response,
+                }
+            }
             _ => ResponseTemplate::new(202),
         }
     }
 }
 
 async fn serve(delay: Option<Duration>, healthy: bool) -> MockServer {
+    serve_with(Server {
+        delay,
+        healthy,
+        list_delay: Arc::default(),
+    })
+    .await
+}
+
+async fn serve_with(script: Server) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(Server { delay, healthy })
+        .respond_with(script)
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -82,6 +99,7 @@ async fn serve(delay: Option<Duration>, healthy: bool) -> MockServer {
 struct World {
     store: Arc<InMemoryIntegrationStore>,
     secrets: Arc<SecretBox>,
+    clock: FakeClock,
     source: IntegrationToolSource,
 }
 
@@ -93,12 +111,13 @@ impl World {
         let store = Arc::new(InMemoryIntegrationStore::new());
         let secrets = Arc::new(SecretBox::from_key([5; 32]));
         let credentials = store.credential_store();
+        let clock = FakeClock::new(at(0));
         let connections = Arc::new(
             IntegrationConnections::new(
                 credentials.clone(),
                 store.health_store(),
                 secrets.clone(),
-                Arc::new(FakeClock::new(at(0))),
+                Arc::new(clock.clone()),
             )
             .with_config(config),
         );
@@ -142,6 +161,7 @@ impl World {
         Self {
             store,
             secrets,
+            clock,
             source,
         }
     }
@@ -474,4 +494,57 @@ async fn an_unknown_org_or_space_yields_no_tools() {
 
     assert!(world.tools(Some(&user), "nope", "eng").await.is_empty());
     assert!(world.tools(Some(&user), "acme", "nope").await.is_empty());
+}
+
+#[tokio::test]
+async fn an_integration_that_stops_answering_costs_the_turn_one_timeout_and_nothing_more() {
+    let healthy = serve(None, true).await;
+    let list_delay = Arc::new(std::sync::Mutex::new(None));
+    let hanging = serve_with(Server {
+        delay: None,
+        healthy: true,
+        list_delay: list_delay.clone(),
+    })
+    .await;
+    let world = World::new(ConnectionsConfig {
+        connect_timeout: Duration::from_millis(300),
+        tools_ttl: Duration::from_secs(5 * 60),
+        ..ConnectionsConfig::default()
+    })
+    .await;
+    world
+        .open(
+            "int_o",
+            IntegrationLayer::Org,
+            &healthy.uri(),
+            IntegrationTrust::Trust,
+        )
+        .await;
+    world
+        .add(
+            "int_s",
+            IntegrationLayer::Space,
+            &hanging.uri(),
+            IntegrationTrust::Trust,
+            CredentialMode::Shared,
+            |i| i.slug = "sentry".into(),
+        )
+        .await;
+    assert_eq!(
+        world.names(Some(U), "eng").await.len(),
+        2,
+        "both load while healthy"
+    );
+
+    *list_delay.lock().unwrap() = Some(Duration::from_secs(30));
+    world.clock.advance(Duration::from_secs(6 * 60));
+    let started = Instant::now();
+    let names = world.names(Some(U), "eng").await;
+
+    assert_eq!(names, vec!["mcp__org_linear__ping"]);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the turn must proceed, took {:?}",
+        started.elapsed()
+    );
 }
