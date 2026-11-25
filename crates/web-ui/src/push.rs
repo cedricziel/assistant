@@ -113,32 +113,27 @@ async fn persist_vapid_keys(
 
 // -- PushDispatcher ----------------------------------------------------------
 
-/// Sends VAPID-signed Web Push notifications to all stored subscriptions.
+/// Sends VAPID-signed Web Push notifications to the subscriptions of one
+/// space, which the caller passes as the store to [`send_to_all`](Self::send_to_all).
 #[derive(Clone)]
 pub struct PushDispatcher {
     /// base64url-encoded PEM bytes of the P-256 ECDSA signing key.
     vapid_private_key_b64: Arc<String>,
-    store: Arc<dyn PushSubscriptionStore>,
     /// HTTP client used for outbound push delivery. Default `Client::new()`;
     /// tests inject a client built against a `wiremock::MockServer`.
     client: reqwest::Client,
 }
 
 impl PushDispatcher {
-    pub fn new(vapid_private_key_b64: String, store: Arc<dyn PushSubscriptionStore>) -> Self {
-        Self::with_client(vapid_private_key_b64, store, reqwest::Client::new())
+    pub fn new(vapid_private_key_b64: String) -> Self {
+        Self::with_client(vapid_private_key_b64, reqwest::Client::new())
     }
 
     /// Construct with an explicit `reqwest::Client`. Tests pass a client
     /// built against a `wiremock::MockServer`.
-    pub fn with_client(
-        vapid_private_key_b64: String,
-        store: Arc<dyn PushSubscriptionStore>,
-        client: reqwest::Client,
-    ) -> Self {
+    pub fn with_client(vapid_private_key_b64: String, client: reqwest::Client) -> Self {
         Self {
             vapid_private_key_b64: Arc::new(vapid_private_key_b64),
-            store,
             client,
         }
     }
@@ -153,16 +148,17 @@ impl PushDispatcher {
         SigningKey::from_pkcs8_pem(pem_str).context("Failed to parse VAPID PKCS#8 PEM")
     }
 
-    /// Send a push notification to every stored subscription.
+    /// Send a push notification to every subscription in `store`.
     ///
-    /// Subscriptions that respond with `410 Gone` are deleted automatically.
+    /// Subscriptions that respond with `410 Gone` are deleted from `store`.
     pub async fn send_to_all(
         &self,
+        store: &dyn PushSubscriptionStore,
         title: &str,
         body: &str,
         conversation_id: Option<&str>,
     ) -> Result<()> {
-        let subscriptions = self.store.list_all().await?;
+        let subscriptions = store.list_all().await?;
         if subscriptions.is_empty() {
             return Ok(());
         }
@@ -192,7 +188,7 @@ impl PushDispatcher {
                 }
                 Err(PushError::Gone) => {
                     warn!("Deleting stale push subscription: {}", sub.endpoint);
-                    if let Err(e) = self.store.delete(&sub.endpoint).await {
+                    if let Err(e) = store.delete(&sub.endpoint).await {
                         warn!("Failed to delete stale subscription: {e}");
                     }
                 }
@@ -429,16 +425,54 @@ mod tests {
         let storage = assistant_storage::StorageLayer::new_in_memory()
             .await
             .unwrap();
-        let store = Arc::new(SqlitePushSubscriptionStore::new(storage.pool.clone()));
+        let store = SqlitePushSubscriptionStore::new(storage.pool.clone());
         let dispatcher = PushDispatcher::with_client(
             "AA".repeat(40), // not a valid key, but not parsed in the empty path
-            store,
             reqwest::Client::new(),
         );
         dispatcher
-            .send_to_all("title", "body", None)
+            .send_to_all(&store, "title", "body", None)
             .await
             .expect("empty subscriptions should return Ok");
+    }
+
+    /// Counts how often the dispatcher reads a store's subscriptions.
+    #[derive(Default)]
+    struct CountingStore {
+        reads: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl PushSubscriptionStore for CountingStore {
+        async fn upsert(&self, _endpoint: &str, _p256dh: &str, _auth: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn delete(&self, _endpoint: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn list_all(&self) -> Result<Vec<assistant_storage::PushSubscription>> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatcher_reads_only_the_store_it_is_given() {
+        let (space_a, space_b) = (CountingStore::default(), CountingStore::default());
+        let dispatcher = PushDispatcher::new("AA".repeat(40));
+
+        dispatcher
+            .send_to_all(&space_a, "title", "body", None)
+            .await
+            .unwrap();
+
+        let reads = |s: &CountingStore| s.reads.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(reads(&space_a), 1);
+        assert_eq!(
+            reads(&space_b),
+            0,
+            "another space's subscriptions are never read"
+        );
     }
 
     #[tokio::test]
@@ -458,11 +492,14 @@ mod tests {
         let storage = assistant_storage::StorageLayer::new_in_memory()
             .await
             .unwrap();
-        let store = Arc::new(SqlitePushSubscriptionStore::new(storage.pool.clone()));
-        let dispatcher = PushDispatcher::with_client("fakekey".to_string(), store, custom_client);
+        let store = SqlitePushSubscriptionStore::new(storage.pool.clone());
+        let dispatcher = PushDispatcher::with_client("fakekey".to_string(), custom_client);
 
         // Construct OK + empty send_to_all returns Ok.
-        dispatcher.send_to_all("t", "b", None).await.unwrap();
+        dispatcher
+            .send_to_all(&store, "t", "b", None)
+            .await
+            .unwrap();
         // Reference the mock server so the compiler doesn't elide it.
         let _ = server.uri();
     }
@@ -567,9 +604,9 @@ mod tests {
         let storage = assistant_storage::StorageLayer::new_in_memory()
             .await
             .unwrap();
-        let store = Arc::new(SqlitePushSubscriptionStore::new(storage.pool.clone()));
+        let _ = storage;
         let (priv_b64, _) = generate_vapid_keypair().unwrap();
-        let dispatcher = PushDispatcher::new(priv_b64, store);
+        let dispatcher = PushDispatcher::new(priv_b64);
         assert!(
             dispatcher.signing_key().is_ok(),
             "valid PEM must decode back to a signing key"
@@ -581,8 +618,8 @@ mod tests {
         let storage = assistant_storage::StorageLayer::new_in_memory()
             .await
             .unwrap();
-        let store = Arc::new(SqlitePushSubscriptionStore::new(storage.pool.clone()));
-        let dispatcher = PushDispatcher::new("not-base64!@#$".to_string(), store);
+        let _ = storage;
+        let dispatcher = PushDispatcher::new("not-base64!@#$".to_string());
         assert!(dispatcher.signing_key().is_err());
     }
 }

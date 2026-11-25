@@ -27,7 +27,9 @@ use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::types::conversation::Interface;
 use assistant_runtime::OrchestratorEvent;
 use assistant_runtime::projection::{SseProjector, StreamProjector};
-use assistant_storage::{ConversationEventStore as _, ConversationStore, SqliteConversationStore};
+use assistant_storage::{
+    ConversationEventStore as _, ConversationStore, PushSubscriptionStore, SqliteConversationStore,
+};
 use assistant_transcription::TranscriptionRequest;
 
 use crate::space::{Access, SpaceCtx};
@@ -174,6 +176,8 @@ pub async fn send_message(
     };
 
     let push_dispatcher_for_sse = state.push_dispatcher.clone();
+    let push_store: std::sync::Arc<dyn PushSubscriptionStore> =
+        std::sync::Arc::new(ctx.storage.push_subscription_store());
     let conv_id_for_push = conv_id;
     let event_store = ctx.storage.conversation_event_store();
     let run_broadcaster = state.run_broadcaster.clone();
@@ -269,8 +273,9 @@ pub async fn send_message(
                 let body = format!("{skill_name}: {summary}");
                 let cid = conv_id_str.clone();
                 let d = dispatcher.clone();
+                let store = push_store.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = d.send_to_all(title, &body, Some(&cid)).await {
+                    if let Err(e) = d.send_to_all(&*store, title, &body, Some(&cid)).await {
                         warn!("Push (skill) failed: {e}");
                     }
                 });
@@ -281,8 +286,12 @@ pub async fn send_message(
                 let body = frame.sse_data.chars().take(80).collect::<String>();
                 let cid = conv_id_str.clone();
                 let d = dispatcher.clone();
+                let store = push_store.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = d.send_to_all("Assistant error", &body, Some(&cid)).await {
+                    if let Err(e) = d
+                        .send_to_all(&*store, "Assistant error", &body, Some(&cid))
+                        .await
+                    {
                         warn!("Push (agent error) failed: {e}");
                     }
                 });
@@ -468,7 +477,7 @@ pub async fn send_message(
         if let Some(dispatcher) = push_dispatcher_for_sse {
             let body = reply_text.chars().take(80).collect::<String>();
             if let Err(e) = dispatcher
-                .send_to_all("New message", &body, Some(&conv_id_str))
+                .send_to_all(&*push_store, "New message", &body, Some(&conv_id_str))
                 .await
             {
                 warn!("Push dispatch failed: {e}");
@@ -1045,6 +1054,8 @@ pub async fn send_voice_message(
         .await;
 
     let push_dispatcher_for_sse = state.push_dispatcher.clone();
+    let push_store: std::sync::Arc<dyn PushSubscriptionStore> =
+        std::sync::Arc::new(ctx.storage.push_subscription_store());
     let conv_id_for_push = conv_id;
     tokio::spawn(async move {
         let mut full_text = String::new();
@@ -1092,7 +1103,7 @@ pub async fn send_voice_message(
             let body = reply_text.chars().take(80).collect::<String>();
             let conv_id_str = conv_id_for_push.to_string();
             if let Err(e) = dispatcher
-                .send_to_all("New message", &body, Some(&conv_id_str))
+                .send_to_all(&*push_store, "New message", &body, Some(&conv_id_str))
                 .await
             {
                 warn!("Push dispatch failed: {e}");

@@ -380,30 +380,15 @@ async fn run_with_args(args: Args) -> Result<()> {
         );
     }
 
-    // The A2A routes, workflow runner and persona/skills/template routes are
-    // not space-aware yet and keep working against the default space.
-    let default_runtime = runtimes
-        .get(
-            assistant_storage::migration::DEFAULT_ORG_SLUG,
-            assistant_storage::migration::DEFAULT_SPACE_SLUG,
-        )
-        .await
-        .context("Failed to open the default space runtime")?;
-    let storage = default_runtime.storage.clone();
-
     // -- Push dispatcher (built here so AppState can hold a reference) -------
-    let push_store_for_state = Arc::new(storage.push_subscription_store());
     let push_dispatcher_for_state = if !vapid_private_key.is_empty() {
-        Some(Arc::new(PushDispatcher::new(
-            vapid_private_key.clone(),
-            push_store_for_state.clone(),
-        )))
+        Some(Arc::new(PushDispatcher::new(vapid_private_key.clone())))
     } else {
         None
     };
 
     let state = AppState {
-        pool: storage.pool.clone(),
+        pool: org_storage.pool().clone(),
         agent_id: Arc::new(RwLock::new(selected_agent.clone())),
         bus_kind: config.bus.kind.clone(),
         nats_url: config
