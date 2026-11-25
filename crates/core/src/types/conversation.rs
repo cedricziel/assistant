@@ -46,6 +46,14 @@ pub struct Message {
     /// The user who sent this message (multi-user scoping).
     /// `None` for assistant/system/tool messages and legacy data.
     pub sender_user_id: Option<String>,
+    /// The message this one answers (its predecessor on the conversation
+    /// tree). `None` marks a root. Set by the store when the message is saved.
+    #[serde(default)]
+    pub parent_id: Option<Uuid>,
+    /// The turn run that wrote this row: the request id when present,
+    /// otherwise the bus message id. `None` for legacy rows.
+    #[serde(default)]
+    pub run_id: Option<Uuid>,
 }
 
 impl Message {
@@ -60,6 +68,8 @@ impl Message {
             turn: 0,
             created_at: SystemClock.now(),
             sender_user_id: None,
+            parent_id: None,
+            run_id: None,
         }
     }
 

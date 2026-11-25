@@ -242,6 +242,8 @@ mod tests {
             turn: 0,
             created_at: chrono::Utc::now(),
             sender_user_id: None,
+            parent_id: None,
+            run_id: None,
         }
     }
 
@@ -256,6 +258,8 @@ mod tests {
             turn: 1,
             created_at: chrono::Utc::now(),
             sender_user_id: None,
+            parent_id: None,
+            run_id: None,
         }
     }
 

@@ -168,6 +168,104 @@ async fn replace_history_overwrites(store: Box<dyn ConversationStore>) {
     assert_eq!(loaded[1].content, "new2");
 }
 
+async fn sequential_saves_form_a_chain_ending_at_the_leaf(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Chain")).await.unwrap();
+    let a = user_msg(conv.id, "a", 0);
+    let b = assistant_msg(conv.id, "b", 1);
+    let c = user_msg(conv.id, "c", 2);
+    for m in [&a, &b, &c] {
+        store.save_message(m).await.unwrap();
+    }
+
+    let history = store.load_history(conv.id).await.unwrap();
+    let ids: Vec<Uuid> = history.iter().map(|m| m.id).collect();
+    assert_eq!(ids, vec![a.id, b.id, c.id], "history follows the chain");
+    assert_eq!(history[0].parent_id, None, "first message is a root");
+    assert_eq!(history[1].parent_id, Some(a.id), "b hangs under a");
+    assert_eq!(history[2].parent_id, Some(b.id), "c hangs under b");
+
+    let last = store.last_messages(conv.id, 2).await.unwrap();
+    let last_ids: Vec<Uuid> = last.iter().map(|m| m.id).collect();
+    assert_eq!(last_ids, vec![b.id, c.id], "last_messages is the path tail");
+}
+
+async fn empty_conversation_loads_no_history(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Empty")).await.unwrap();
+    assert!(store.load_history(conv.id).await.unwrap().is_empty());
+    assert!(store.last_messages(conv.id, 5).await.unwrap().is_empty());
+}
+
+async fn long_chain_loads_in_order(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Long")).await.unwrap();
+    let mut ids = Vec::new();
+    for i in 0..1000 {
+        let m = user_msg(conv.id, &format!("m{i}"), 0);
+        ids.push(m.id);
+        store.save_message(&m).await.unwrap();
+    }
+    let history = store.load_history(conv.id).await.unwrap();
+    let loaded: Vec<Uuid> = history.iter().map(|m| m.id).collect();
+    assert_eq!(loaded, ids, "1,000-row chain loads in save order");
+}
+
+async fn resaving_an_existing_id_keeps_the_leaf(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Idempotent")).await.unwrap();
+    let a = user_msg(conv.id, "a", 0);
+    let b = assistant_msg(conv.id, "b", 1);
+    store.save_message(&a).await.unwrap();
+    store.save_message(&b).await.unwrap();
+    store.save_message(&a).await.unwrap();
+
+    let c = user_msg(conv.id, "c", 2);
+    store.save_message(&c).await.unwrap();
+
+    let history = store.load_history(conv.id).await.unwrap();
+    let ids: Vec<Uuid> = history.iter().map(|m| m.id).collect();
+    assert_eq!(
+        ids,
+        vec![a.id, b.id, c.id],
+        "a re-save inserts nothing and does not move the leaf"
+    );
+    assert_eq!(history[2].parent_id, Some(b.id));
+}
+
+async fn deleting_a_long_chain_succeeds(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Big")).await.unwrap();
+    for i in 0..1500 {
+        store
+            .save_message(&user_msg(conv.id, &format!("m{i}"), 0))
+            .await
+            .unwrap();
+    }
+    store.delete_conversation(conv.id).await.unwrap();
+    assert!(store.get_conversation(conv.id).await.unwrap().is_none());
+    assert!(store.load_history(conv.id).await.unwrap().is_empty());
+}
+
+async fn replace_history_rechains_the_new_rows(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Rechain")).await.unwrap();
+    for i in 0..3 {
+        store
+            .save_message(&user_msg(conv.id, &format!("old{i}"), i))
+            .await
+            .unwrap();
+    }
+    let replacement = vec![
+        user_msg(conv.id, "new1", 0),
+        assistant_msg(conv.id, "new2", 0),
+        user_msg(conv.id, "new3", 0),
+    ];
+    store.replace_history(conv.id, &replacement).await.unwrap();
+
+    let loaded = store.load_history(conv.id).await.unwrap();
+    let ids: Vec<Uuid> = loaded.iter().map(|m| m.id).collect();
+    let expected: Vec<Uuid> = replacement.iter().map(|m| m.id).collect();
+    assert_eq!(ids, expected, "history equals the re-inserted rows");
+    assert_eq!(loaded[0].parent_id, None, "the first kept row is a root");
+    assert_eq!(loaded[1].parent_id, Some(replacement[0].id));
+    assert_eq!(loaded[2].parent_id, Some(replacement[1].id));
+}
+
 macro_rules! contract_tests {
     ($store_name:ident, $constructor:expr) => {
         mod $store_name {
@@ -221,6 +319,36 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_replace_history_overwrites() {
                 replace_history_overwrites($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_sequential_saves_form_a_chain_ending_at_the_leaf() {
+                sequential_saves_form_a_chain_ending_at_the_leaf($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_empty_conversation_loads_no_history() {
+                empty_conversation_loads_no_history($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_long_chain_loads_in_order() {
+                long_chain_loads_in_order($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_resaving_an_existing_id_keeps_the_leaf() {
+                resaving_an_existing_id_keeps_the_leaf($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_deleting_a_long_chain_succeeds() {
+                deleting_a_long_chain_succeeds($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_replace_history_rechains_the_new_rows() {
+                replace_history_rechains_the_new_rows($constructor).await;
             }
         }
     };

@@ -372,11 +372,19 @@ impl ConversationStore for SqliteConversationStore {
         // Verify the conversation belongs to this agent before mutating.
         self.ensure_conversation_agent(conversation_id).await?;
 
+        // Delete the rows and clear the leaf together, so the first re-insert
+        // cannot take a deleted row as its parent.
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query("DELETE FROM messages WHERE conversation_id = ?1")
             .bind(&conv_id_str)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .with_context(|| format!("deleting messages for conversation {conversation_id}"))?;
+        sqlx::query("UPDATE conversations SET active_leaf_id = NULL WHERE id = ?1")
+            .bind(&conv_id_str)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
 
         for msg in messages {
             self.save_message(msg).await?;
@@ -409,7 +417,12 @@ impl ConversationStore for SqliteConversationStore {
     // Messages
     // -----------------------------------------------------------------------
 
-    /// Persist a message to the database.
+    /// Persist a message, appending it at the conversation's active leaf.
+    ///
+    /// The leaf is read, the row inserted under it and the leaf moved in one
+    /// `BEGIN IMMEDIATE` transaction, so concurrent writers cannot fork the
+    /// chain. Re-saving an existing id inserts nothing and leaves the leaf
+    /// where it is.
     async fn save_message(&self, msg: &Message) -> Result<()> {
         let id = msg.id.to_string();
         let conversation_id = msg.conversation_id.to_string();
@@ -417,10 +430,20 @@ impl ConversationStore for SqliteConversationStore {
 
         self.ensure_conversation_agent(msg.conversation_id).await?;
 
-        sqlx::query(
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        let leaf: Option<String> = sqlx::query_scalar(
+            "SELECT active_leaf_id FROM conversations WHERE id = ?1 AND agent_id = ?2",
+        )
+        .bind(&conversation_id)
+        .bind(&self.agent_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let insert = sqlx::query(
             "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -432,19 +455,29 @@ impl ConversationStore for SqliteConversationStore {
         .bind(msg.turn)
         .bind(msg.created_at)
         .bind(&msg.sender_user_id)
-        .execute(&self.pool)
+        .bind(&leaf)
+        .bind(msg.run_id.map(|r| r.to_string()))
+        .execute(&mut *tx)
         .await?;
+        let inserted = insert.rows_affected() > 0;
 
-        // Update the conversation's updated_at timestamp
-        let now = self.clock.now();
-        sqlx::query("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND agent_id = ?3")
-            .bind(now)
+        if inserted {
+            sqlx::query(
+                "UPDATE conversations SET active_leaf_id = ?1, updated_at = ?2 \
+                 WHERE id = ?3 AND agent_id = ?4",
+            )
+            .bind(&id)
+            .bind(self.clock.now())
             .bind(&conversation_id)
             .bind(&self.agent_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+        }
 
-        if let Some(b) = &self.broadcaster
+        tx.commit().await?;
+
+        if inserted
+            && let Some(b) = &self.broadcaster
             && let Ok(Some(conv)) = self.get_conversation(msg.conversation_id).await
         {
             b.emit(ConversationEvent::Upserted(conv));
@@ -453,115 +486,53 @@ impl ConversationStore for SqliteConversationStore {
         Ok(())
     }
 
-    /// Load all messages for a conversation, ordered by turn then created_at.
+    /// Load the active path of a conversation, root first.
     async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>> {
-        let conv_id_str = conversation_id.to_string();
+        let rows = sqlx::query(ACTIVE_PATH_SQL)
+            .bind(conversation_id.to_string())
+            .bind(&self.agent_id)
+            .bind(-1_i64)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
-             FROM messages m \
-             INNER JOIN conversations c ON c.id = m.conversation_id \
-             WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
-             ORDER BY m.turn ASC, m.created_at ASC",
-        )
-        .bind(&conv_id_str)
-        .bind(&self.agent_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        rows.into_iter()
-            .map(|r| {
-                let id_str: String = r.get("id");
-                let conv_str: String = r.get("conversation_id");
-                let role_str: String = r.get("role");
-                Ok(Message {
-                    id: Uuid::parse_str(&id_str)?,
-                    conversation_id: Uuid::parse_str(&conv_str)?,
-                    role: parse_role(&role_str)?,
-                    content: r.get("content"),
-                    skill_name: r.get("skill_name"),
-                    tool_calls_json: r.get("tool_calls_json"),
-                    turn: r.get("turn"),
-                    created_at: r.get("created_at"),
-                    sender_user_id: r.get("sender_user_id"),
-                })
-            })
-            .collect()
+        let mut messages = rows
+            .iter()
+            .map(message_from_row)
+            .collect::<Result<Vec<_>>>()?;
+        messages.reverse();
+        Ok(messages)
     }
 
     /// Fetch a single message by its ID (agent-scoped via the conversation join).
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
-        let id_str = message_id.to_string();
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
         )
-        .bind(&id_str)
+        .bind(message_id.to_string())
         .bind(&self.agent_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(|r| {
-            let id_s: String = r.get("id");
-            let conv_s: String = r.get("conversation_id");
-            let role_s: String = r.get("role");
-            Ok(Message {
-                id: Uuid::parse_str(&id_s)?,
-                conversation_id: Uuid::parse_str(&conv_s)?,
-                role: parse_role(&role_s)?,
-                content: r.get("content"),
-                skill_name: r.get("skill_name"),
-                tool_calls_json: r.get("tool_calls_json"),
-                turn: r.get("turn"),
-                created_at: r.get("created_at"),
-                sender_user_id: r.get("sender_user_id"),
-            })
-        })
-        .transpose()
+        row.as_ref().map(message_from_row).transpose()
     }
 
-    /// Return the last `limit` messages for a conversation, in chronological order.
+    /// Return the last `limit` messages of the active path, in chronological order.
     async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
-        let conv_id_str = conversation_id.to_string();
+        // The query walks leaf-first, so `LIMIT` keeps the tail of the path.
+        let rows = sqlx::query(ACTIVE_PATH_SQL)
+            .bind(conversation_id.to_string())
+            .bind(&self.agent_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        // Fetch the newest rows first, then reverse to restore chronological order.
-        let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
-             FROM messages m \
-             INNER JOIN conversations c ON c.id = m.conversation_id \
-             WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
-             ORDER BY m.turn DESC, m.created_at DESC \
-             LIMIT ?3",
-        )
-        .bind(&conv_id_str)
-        .bind(&self.agent_id)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut messages: Vec<Message> = rows
-            .into_iter()
-            .map(|r| {
-                let id_str: String = r.get("id");
-                let conv_str: String = r.get("conversation_id");
-                let role_str: String = r.get("role");
-                Ok(Message {
-                    id: Uuid::parse_str(&id_str)?,
-                    conversation_id: Uuid::parse_str(&conv_str)?,
-                    role: parse_role(&role_str)?,
-                    content: r.get("content"),
-                    skill_name: r.get("skill_name"),
-                    tool_calls_json: r.get("tool_calls_json"),
-                    turn: r.get("turn"),
-                    created_at: r.get("created_at"),
-                    sender_user_id: r.get("sender_user_id"),
-                })
-            })
+        let mut messages = rows
+            .iter()
+            .map(message_from_row)
             .collect::<Result<Vec<_>>>()?;
-
-        // Restore chronological order
         messages.reverse();
         Ok(messages)
     }
@@ -595,6 +566,8 @@ pub struct InMemoryConversationStore {
 struct MemoryState {
     conversations: HashMap<Uuid, ConversationRecord>,
     messages: HashMap<Uuid, Vec<Message>>,
+    /// Active leaf per conversation (the tip of the active path).
+    leaves: HashMap<Uuid, Uuid>,
 }
 
 impl InMemoryConversationStore {
@@ -751,8 +724,14 @@ impl ConversationStore for InMemoryConversationStore {
     }
 
     async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
-        let mut state = self.lock_state();
-        state.messages.insert(conversation_id, messages.to_vec());
+        {
+            let mut state = self.lock_state();
+            state.messages.remove(&conversation_id);
+            state.leaves.remove(&conversation_id);
+        }
+        for msg in messages {
+            self.save_message(msg).await?;
+        }
         Ok(())
     }
 
@@ -760,6 +739,7 @@ impl ConversationStore for InMemoryConversationStore {
         let mut state = self.lock_state();
         state.conversations.remove(&id);
         state.messages.remove(&id);
+        state.leaves.remove(&id);
         if let Some(b) = &self.broadcaster {
             b.emit(ConversationEvent::Deleted {
                 conversation_id: id,
@@ -771,11 +751,21 @@ impl ConversationStore for InMemoryConversationStore {
 
     async fn save_message(&self, msg: &Message) -> Result<()> {
         let mut state = self.lock_state();
+        if state
+            .messages
+            .get(&msg.conversation_id)
+            .is_some_and(|rows| rows.iter().any(|m| m.id == msg.id))
+        {
+            return Ok(());
+        }
+        let mut stored = msg.clone();
+        stored.parent_id = state.leaves.get(&msg.conversation_id).copied();
         state
             .messages
             .entry(msg.conversation_id)
             .or_default()
-            .push(msg.clone());
+            .push(stored);
+        state.leaves.insert(msg.conversation_id, msg.id);
         if let Some(conv) = state.conversations.get_mut(&msg.conversation_id) {
             conv.updated_at = self.clock.now();
         }
@@ -784,11 +774,7 @@ impl ConversationStore for InMemoryConversationStore {
 
     async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>> {
         let state = self.lock_state();
-        Ok(state
-            .messages
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_default())
+        Ok(active_path(&state, conversation_id))
     }
 
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
@@ -803,11 +789,7 @@ impl ConversationStore for InMemoryConversationStore {
 
     async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
         let state = self.lock_state();
-        let mut out = state
-            .messages
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_default();
+        let mut out = active_path(&state, conversation_id);
         if limit > 0 {
             let limit = limit as usize;
             if out.len() > limit {
@@ -819,9 +801,67 @@ impl ConversationStore for InMemoryConversationStore {
     }
 }
 
+/// Walk from the conversation's active leaf up the parent chain, root first.
+fn active_path(state: &MemoryState, conversation_id: Uuid) -> Vec<Message> {
+    let Some(rows) = state.messages.get(&conversation_id) else {
+        return Vec::new();
+    };
+    let by_id: HashMap<Uuid, &Message> = rows.iter().map(|m| (m.id, m)).collect();
+    let mut path = Vec::new();
+    let mut cursor = state.leaves.get(&conversation_id).copied();
+    while let Some(id) = cursor {
+        let Some(msg) = by_id.get(&id) else { break };
+        path.push((*msg).clone());
+        cursor = msg.parent_id;
+    }
+    path.reverse();
+    path
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// The active path of a conversation, newest message first: a recursive walk
+/// from `conversations.active_leaf_id` up the `parent_id` chain.
+/// Binds: `?1` conversation id, `?2` agent id, `?3` row limit (`-1` for all).
+const ACTIVE_PATH_SQL: &str = "\
+    WITH RECURSIVE path(id, parent_id, depth) AS ( \
+        SELECT m.id, m.parent_id, 0 \
+        FROM conversations c \
+        INNER JOIN messages m ON m.id = c.active_leaf_id \
+        WHERE c.id = ?1 AND c.agent_id = ?2 \
+        UNION ALL \
+        SELECT m.id, m.parent_id, p.depth + 1 \
+        FROM path p \
+        INNER JOIN messages m ON m.id = p.parent_id \
+    ) \
+    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id \
+    FROM path \
+    INNER JOIN messages m ON m.id = path.id \
+    ORDER BY path.depth ASC \
+    LIMIT ?3";
+
+fn message_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Message> {
+    let id_str: String = r.get("id");
+    let conv_str: String = r.get("conversation_id");
+    let role_str: String = r.get("role");
+    let parent_str: Option<String> = r.get("parent_id");
+    let run_str: Option<String> = r.get("run_id");
+    Ok(Message {
+        id: Uuid::parse_str(&id_str)?,
+        conversation_id: Uuid::parse_str(&conv_str)?,
+        role: parse_role(&role_str)?,
+        content: r.get("content"),
+        skill_name: r.get("skill_name"),
+        tool_calls_json: r.get("tool_calls_json"),
+        turn: r.get("turn"),
+        created_at: r.get("created_at"),
+        sender_user_id: r.get("sender_user_id"),
+        parent_id: parent_str.as_deref().map(Uuid::parse_str).transpose()?,
+        run_id: run_str.as_deref().map(Uuid::parse_str).transpose()?,
+    })
+}
 
 fn parse_role(s: &str) -> Result<MessageRole> {
     match s {
