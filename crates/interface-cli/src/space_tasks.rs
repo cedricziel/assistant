@@ -79,6 +79,11 @@ mod tests {
 
     use super::*;
 
+    /// Upper bound only: the turn normally completes in well under a second,
+    /// but instrumented builds under parallel load can be orders of magnitude
+    /// slower. The test waits on the turn result, never on this deadline.
+    const TURN_DEADLINE: Duration = Duration::from_secs(120);
+
     #[tokio::test]
     async fn the_orchestrator_service_works_every_spaces_turn_queue() {
         let tmp = tempfile::tempdir().unwrap();
@@ -124,7 +129,7 @@ mod tests {
                     interface_name: "test",
                 }),
             )
-            .with_submit_timeout(20),
+            .with_submit_timeout(TURN_DEADLINE.as_secs()),
         );
         let supervisor = SpaceSupervisor::new(
             org_storage,
@@ -137,7 +142,7 @@ mod tests {
         let beta = runtimes.get("acme", "beta").await.unwrap();
         let conversation = Uuid::new_v4();
         tokio::time::timeout(
-            Duration::from_secs(15),
+            TURN_DEADLINE,
             beta.orchestrator.submit_turn(
                 &AuthContext::system(),
                 "hello",

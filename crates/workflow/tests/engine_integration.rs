@@ -133,7 +133,24 @@ async fn schedule_adapter_creates_schedule_run() {
         .expect("create workflow");
 
     let handle = spawn_schedule_trigger_adapter(storage.clone(), Duration::from_millis(20));
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    // Wait for the first run rather than sleeping a fixed time: under load
+    // the adapter's first tick can arrive arbitrarily late.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while store
+        .list_runs(workflow_id, 10)
+        .await
+        .expect("list runs while waiting for schedule adapter")
+        .is_empty()
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "schedule adapter never created a run"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // Let a few more ticks pass to prove the adapter does not fire twice for
+    // the same cron slot.
+    tokio::time::sleep(Duration::from_millis(100)).await;
     handle.abort();
     let _ = handle.await; // ensure the task's DB connection is returned to the pool
 
