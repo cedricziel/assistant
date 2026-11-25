@@ -90,7 +90,9 @@ async fn collect_image_attachments(text: &str, roots: &WorkspaceRoots) -> Vec<At
         if !token.starts_with('/') {
             continue;
         }
-        let resolved = resolve_real_path(token, None);
+        let Ok(resolved) = resolve_real_path(token, None) else {
+            continue;
+        };
         if !roots.contains(&resolved) {
             continue;
         }
