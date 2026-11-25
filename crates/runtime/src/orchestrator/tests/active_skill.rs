@@ -11,7 +11,7 @@ use assistant_core::tool::{ToolHandler, ToolOutput};
 use assistant_core::types::conversation::{ExecutionContext, Interface, TurnIdentity};
 use assistant_core::{
     ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, LlmResponseMeta, MessageBus,
-    StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, types::agent::AssistantConfig,
+    StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, types::agent::OrgConfig,
 };
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
@@ -186,7 +186,7 @@ async fn harness(scripts: HashMap<&'static str, Vec<&'static str>>) -> Harness {
         judged: judged.clone(),
     });
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     config.permissions.allow = vec!["*".parse().expect("valid rule")];
     config.learning.enabled = true;

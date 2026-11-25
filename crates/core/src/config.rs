@@ -14,9 +14,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use tracing::{info, warn};
+use tracing::info;
 
-use crate::types::agent::{AssistantConfig, OrgConfig, ServerConfig};
+use crate::types::agent::{OrgConfig, ServerConfig};
 
 /// Path of `server.toml` under the install root `base_dir`.
 pub fn server_config_path(base_dir: &Path) -> PathBuf {
@@ -64,56 +64,6 @@ fn load_toml<T: Default + serde::de::DeserializeOwned>(path: &Path) -> Result<T>
         toml::from_str(&raw).with_context(|| format!("Failed to parse {}", path.display()))?;
     info!("Loaded config from {}", path.display());
     Ok(parsed)
-}
-
-// -- Single-file loader (replaced by the server/org loaders above) --------------
-
-/// Return the default path to the assistant config file
-/// (`~/.assistant/config.toml`).
-///
-/// Returns `None` if the home directory cannot be determined.
-pub fn default_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".assistant").join("config.toml"))
-}
-
-/// Load [`AssistantConfig`] from a TOML file at `path`.
-///
-/// * If the file does not exist, returns [`AssistantConfig::default()`].
-/// * If the file cannot be read or parsed, logs a warning and returns
-///   the default.
-///
-/// This is intentionally synchronous — config loading happens once at
-/// startup and the file is tiny, so blocking I/O is acceptable and avoids
-/// requiring a tokio runtime.
-pub fn load_config(path: &Path) -> AssistantConfig {
-    if !path.exists() {
-        info!("No config file at {}; using defaults", path.display());
-        return AssistantConfig::default();
-    }
-
-    let raw = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            warn!("Failed to read {}: {}", path.display(), e);
-            return AssistantConfig::default();
-        }
-    };
-
-    match toml::from_str::<AssistantConfig>(&raw) {
-        Ok(cfg) => {
-            info!(
-                "Loaded config from {} (provider={:?}, model={})",
-                path.display(),
-                cfg.llm.provider,
-                cfg.llm.model,
-            );
-            cfg
-        }
-        Err(e) => {
-            warn!("Failed to parse {}: {}; using defaults", path.display(), e);
-            AssistantConfig::default()
-        }
-    }
 }
 
 // -- Tests -------------------------------------------------------------------

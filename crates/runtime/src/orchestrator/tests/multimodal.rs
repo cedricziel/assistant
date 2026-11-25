@@ -11,7 +11,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use assistant_core::tool::{ToolHandler, ToolOutput};
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{ExecutionContext, Interface, TurnIdentity};
 use assistant_core::{ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, MessageBus};
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
@@ -445,7 +445,7 @@ fn max_image_bytes_default_is_conservative() {
 #[tokio::test]
 async fn with_audio_store_makes_store_available() {
     let store = Arc::new(assistant_transcription::AudioStore::new());
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
 
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());

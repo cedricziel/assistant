@@ -10,17 +10,17 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path, types::agent::AssistantConfig,
+    ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path, types::agent::OrgConfig,
     types::conversation::ExecutionContext,
 };
 use async_trait::async_trait;
 
 pub struct MemoryGetHandler {
-    config: Arc<AssistantConfig>,
+    config: Arc<OrgConfig>,
 }
 
 impl MemoryGetHandler {
-    pub fn new(config: Arc<AssistantConfig>) -> Self {
+    pub fn new(config: Arc<OrgConfig>) -> Self {
         Self { config }
     }
 

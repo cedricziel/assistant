@@ -24,7 +24,7 @@ use crate::wiring::{Messenger, RunMode};
 
 /// Shared inputs every messenger is built from.
 pub struct MessengerDeps<'a> {
-    pub config: &'a assistant_core::types::agent::AssistantConfig,
+    pub config: &'a assistant_core::types::agent::OrgConfig,
     pub runtimes: Arc<SpaceRuntimes>,
     pub org_storage: Arc<OrgStorageLayer>,
     pub default_space: DefaultSpace,
@@ -72,7 +72,7 @@ impl Messenger {
 
 fn not_configured(messenger: Messenger) -> String {
     format!(
-        "{} is not configured. Add a [{}] section to ~/.assistant/config.toml",
+        "{} is not configured. Add a [{}] section to ~/.assistant/orgs/default/org.toml",
         messenger.interface_name(),
         messenger.key()
     )

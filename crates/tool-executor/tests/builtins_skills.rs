@@ -87,10 +87,10 @@ async fn list_skills_empty_registry_returns_friendly_message() {
 
 #[tokio::test]
 async fn memory_get_missing_target_returns_error() {
-    use assistant_core::types::agent::AssistantConfig;
+    use assistant_core::types::agent::OrgConfig;
     use assistant_tool_executor::builtins::memory_get::MemoryGetHandler;
 
-    let config = Arc::new(AssistantConfig::default());
+    let config = Arc::new(OrgConfig::default());
     let handler = MemoryGetHandler::new(config);
     let out = handler.run(params(&[]), &ctx()).await.unwrap();
     assert!(!out.success);
@@ -99,10 +99,10 @@ async fn memory_get_missing_target_returns_error() {
 
 #[tokio::test]
 async fn memory_get_unknown_target_returns_error() {
-    use assistant_core::types::agent::AssistantConfig;
+    use assistant_core::types::agent::OrgConfig;
     use assistant_tool_executor::builtins::memory_get::MemoryGetHandler;
 
-    let config = Arc::new(AssistantConfig::default());
+    let config = Arc::new(OrgConfig::default());
     let handler = MemoryGetHandler::new(config);
     let out = handler
         .run(params(&[("target", json!("not-a-target"))]), &ctx())
@@ -114,10 +114,10 @@ async fn memory_get_unknown_target_returns_error() {
 
 #[tokio::test]
 async fn memory_get_invalid_notes_date_format_returns_error() {
-    use assistant_core::types::agent::AssistantConfig;
+    use assistant_core::types::agent::OrgConfig;
     use assistant_tool_executor::builtins::memory_get::MemoryGetHandler;
 
-    let config = Arc::new(AssistantConfig::default());
+    let config = Arc::new(OrgConfig::default());
     let handler = MemoryGetHandler::new(config);
     let out = handler
         .run(params(&[("target", json!("notes/not-a-date"))]), &ctx())

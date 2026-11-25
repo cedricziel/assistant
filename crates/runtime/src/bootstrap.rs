@@ -1,19 +1,17 @@
 //! Shared bootstrap helpers for interface binaries.
 //!
 //! These utilities are used by the Slack and Mattermost interface binaries to
-//! reduce code duplication for common startup tasks: loading config, finding
-//! skill directories, and providing an auto-deny confirmation callback.
+//! reduce code duplication for common startup tasks: finding skill
+//! directories and providing an auto-deny confirmation callback.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use assistant_core::types::features::MemoryConfig;
-use assistant_core::{LlmProvider, expand_tilde, types::agent::AssistantConfig};
+use assistant_core::{LlmProvider, expand_tilde, types::agent::OrgConfig};
 use assistant_skills::SkillSource;
 use assistant_storage::StorageLayer;
-use tracing::info;
 
 use crate::orchestrator::ConfirmationCallback;
 
@@ -40,27 +38,6 @@ impl ConfirmationCallback for AutoDenyConfirmation {
     }
 }
 
-// ── Config loading ─────────────────────────────────────────────────────────────
-
-/// Load [`AssistantConfig`] from a TOML file.
-///
-/// Returns [`AssistantConfig::default()`] if the file does not exist.
-pub async fn load_config(config_path: &Path) -> Result<AssistantConfig> {
-    if !config_path.exists() {
-        return Ok(AssistantConfig::default());
-    }
-
-    let raw = tokio::fs::read_to_string(config_path)
-        .await
-        .with_context(|| format!("Failed to read config at {}", config_path.display()))?;
-
-    let cfg = toml::from_str::<AssistantConfig>(&raw)
-        .with_context(|| format!("Failed to parse config at {}", config_path.display()))?;
-
-    info!("Loaded config from {}", config_path.display());
-    Ok(cfg)
-}
-
 // ── Skill directories ──────────────────────────────────────────────────────────
 
 /// Return the runtime skill search directories.
@@ -73,10 +50,7 @@ pub async fn load_config(config_path: &Path) -> Result<AssistantConfig> {
 /// * `~/.assistant/skills/` — user-installed skills
 /// * `<project>/.assistant/skills/` — project-scoped skills (if available)
 /// * `<exe_dir>/skills/` — optional sidecar skills shipped alongside the binary
-pub fn skill_dirs(
-    config: &AssistantConfig,
-    project_root: Option<&Path>,
-) -> Vec<(PathBuf, SkillSource)> {
+pub fn skill_dirs(config: &OrgConfig, project_root: Option<&Path>) -> Vec<(PathBuf, SkillSource)> {
     skill_dirs_in(
         dirs::home_dir().map(|h| h.join(".assistant")).as_deref(),
         config,
@@ -88,7 +62,7 @@ pub fn skill_dirs(
 /// directory is the user skill directory.
 pub fn skill_dirs_in(
     install_root: Option<&Path>,
-    config: &AssistantConfig,
+    config: &OrgConfig,
     project_root: Option<&Path>,
 ) -> Vec<(PathBuf, SkillSource)> {
     let mut dirs: Vec<(PathBuf, SkillSource)> = Vec::new();
@@ -171,37 +145,6 @@ mod tests {
         assert!(!cb.confirm("dangerous", &serde_json::json!({"foo": 1})));
     }
 
-    // ── load_config ───────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn load_config_returns_default_when_file_missing() {
-        let tmp = TempDir::new().unwrap();
-        let missing = tmp.path().join("does-not-exist.toml");
-        let cfg = load_config(&missing).await.unwrap();
-        // Default config should round-trip back; we just check it loads.
-        let _ = cfg;
-    }
-
-    #[tokio::test]
-    async fn load_config_parses_valid_toml() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("config.toml");
-        tokio::fs::write(&path, "# empty config\n").await.unwrap();
-        let cfg = load_config(&path).await.unwrap();
-        let _ = cfg;
-    }
-
-    #[tokio::test]
-    async fn load_config_errors_on_invalid_toml() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("config.toml");
-        tokio::fs::write(&path, "this is = not valid [[[ toml")
-            .await
-            .unwrap();
-        let err = load_config(&path).await.unwrap_err();
-        assert!(err.to_string().contains("parse config"));
-    }
-
     // ── resolve_extra_dir ─────────────────────────────────────────────────
 
     #[test]
@@ -238,7 +181,7 @@ mod tests {
         // No extra dirs configured, no ~/.assistant/skills present, and a
         // non-existent project root → no dirs should be returned (existence
         // check filters them out).
-        let mut cfg = AssistantConfig::default();
+        let mut cfg = OrgConfig::default();
         cfg.skills.extra_dirs.clear();
 
         let project_root = std::path::Path::new("/definitely/does/not/exist");
@@ -256,7 +199,7 @@ mod tests {
         let project_skills = tmp.path().join(".assistant").join("skills");
         std::fs::create_dir_all(&project_skills).unwrap();
 
-        let cfg = AssistantConfig::default();
+        let cfg = OrgConfig::default();
         let dirs = skill_dirs(&cfg, Some(tmp.path()));
         let project = dirs.iter().find(|(p, _)| p == &project_skills);
         assert!(
@@ -272,7 +215,7 @@ mod tests {
         let extra = tmp.path().join("extra-skills");
         std::fs::create_dir_all(&extra).unwrap();
 
-        let mut cfg = AssistantConfig::default();
+        let mut cfg = OrgConfig::default();
         cfg.skills.extra_dirs = vec!["./extra-skills".to_string()];
 
         let dirs = skill_dirs(&cfg, Some(tmp.path()));
@@ -289,7 +232,7 @@ mod tests {
         let extra = tmp.path().join("dup");
         std::fs::create_dir_all(&extra).unwrap();
 
-        let mut cfg = AssistantConfig::default();
+        let mut cfg = OrgConfig::default();
         cfg.skills.extra_dirs = vec![
             extra.to_string_lossy().to_string(),
             extra.to_string_lossy().to_string(),
@@ -303,7 +246,7 @@ mod tests {
     #[test]
     fn skill_dirs_skips_empty_extra_dir_entries() {
         let tmp = TempDir::new().unwrap();
-        let mut cfg = AssistantConfig::default();
+        let mut cfg = OrgConfig::default();
         cfg.skills.extra_dirs = vec!["".to_string(), "   ".to_string()];
 
         let dirs = skill_dirs(&cfg, Some(tmp.path()));
@@ -316,7 +259,7 @@ mod tests {
     #[test]
     fn skill_dirs_skips_non_existent_extra_dir() {
         let tmp = TempDir::new().unwrap();
-        let mut cfg = AssistantConfig::default();
+        let mut cfg = OrgConfig::default();
         // Point at a directory that does NOT exist.
         cfg.skills.extra_dirs = vec![tmp.path().join("not-here").to_string_lossy().to_string()];
 

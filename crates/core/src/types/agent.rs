@@ -1,5 +1,5 @@
-//! Top-level assistant configuration (`AssistantConfig`) and the active
-//! agent context (`AgentConfig`).
+//! Process-wide ([`ServerConfig`]) and per-organization ([`OrgConfig`])
+//! configuration, and the active agent context (`AgentConfig`).
 
 use serde::{Deserialize, Serialize};
 
@@ -10,69 +10,9 @@ use super::features::{
 use super::llm::LlmConfig;
 use super::observability::ObservabilityConfig;
 use super::permissions::PermissionsConfig;
-use super::skills_mcp::{McpConfig, MirrorConfig, SkillsConfig};
+use super::skills_mcp::{McpConfig, SkillsConfig};
 use super::storage::BusConfig;
 use super::transcription::{TranscriptionConfig, TtsConfig};
-
-/// Top-level assistant configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AssistantConfig {
-    #[serde(default)]
-    pub llm: LlmConfig,
-    #[serde(default)]
-    pub bus: BusConfig,
-    #[serde(default)]
-    pub skills: SkillsConfig,
-    #[serde(default)]
-    pub mcp: McpConfig,
-    /// Deprecated — use `[observability]` instead. Kept for backwards compatibility.
-    #[serde(default, alias = "self_improvement", skip_serializing)]
-    pub mirror: MirrorConfig,
-    /// Observability / telemetry configuration (`[observability]` section).
-    #[serde(default)]
-    pub observability: ObservabilityConfig,
-    #[serde(default)]
-    pub memory: MemoryConfig,
-    #[serde(default)]
-    pub compaction: CompactionConfig,
-    /// Autonomous learning configuration (`[learning]` section).
-    #[serde(default)]
-    pub learning: LearningConfig,
-    /// Conversation title-generator configuration (`[titling]` section).
-    #[serde(default)]
-    pub titling: TitlingConfig,
-    #[serde(default)]
-    pub agent: AgentConfig,
-    /// Signal messenger interface configuration (optional).
-    /// Populated from the `[signal]` section of `config.toml`.
-    pub signal: Option<SignalConfig>,
-    /// Slack interface configuration (optional).
-    /// Populated from the `[slack]` section of `config.toml`.
-    pub slack: Option<SlackConfig>,
-    /// Mattermost interface configuration (optional).
-    /// Populated from the `[mattermost]` section of `config.toml`.
-    pub mattermost: Option<MattermostConfig>,
-    /// Nextcloud Talk interface configuration (optional).
-    /// Populated from the `[nextcloud]` section of `config.toml`.
-    pub nextcloud: Option<NextcloudConfig>,
-    /// Matrix interface configuration (optional).
-    /// Populated from the `[matrix]` section of `config.toml`.
-    pub matrix: Option<MatrixConfig>,
-    /// Audio transcription configuration (optional).
-    /// Populated from the `[transcription]` section of `config.toml`.
-    #[serde(default)]
-    pub transcription: Option<TranscriptionConfig>,
-    /// Text-to-speech configuration (optional).
-    /// Populated from the `[tts]` section of `config.toml`.
-    #[serde(default)]
-    pub tts: Option<TtsConfig>,
-    /// Push notification / VAPID configuration (`[notifications]` section).
-    #[serde(default)]
-    pub notifications: NotificationsConfig,
-    /// Tool-permission rules and decision model (`[permissions]` section).
-    #[serde(default)]
-    pub permissions: PermissionsConfig,
-}
 
 /// Process-wide settings, read once at startup from `~/.assistant/server.toml`.
 ///
@@ -160,7 +100,7 @@ fn default_agent_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::AssistantConfig;
+    use super::OrgConfig;
     use crate::types::llm::{EmbeddingProviderKind, LlmProviderKind};
 
     // -- TitlingConfig defaults / overrides ----------------------------------
@@ -170,7 +110,7 @@ mod tests {
         // An OrgConfig with no [titling] section must deserialize cleanly and
         // the worker should pick up the default values.
         let toml_str = "llm_provider = \"ollama\"";
-        let cfg: AssistantConfig = toml::from_str(toml_str).unwrap();
+        let cfg: OrgConfig = toml::from_str(toml_str).unwrap();
         let titling = cfg.titling;
         assert!(titling.enabled, "default: enabled = true");
         assert_eq!(titling.min_turns, 2);
@@ -187,14 +127,14 @@ mod tests {
             min_turns = 4
             long_first_message_chars = 500
         "#;
-        let cfg: AssistantConfig = toml::from_str(toml_str).unwrap();
+        let cfg: OrgConfig = toml::from_str(toml_str).unwrap();
         let titling = cfg.titling;
         assert!(!titling.enabled);
         assert_eq!(titling.min_turns, 4);
         assert_eq!(titling.long_first_message_chars, 500);
     }
 
-    // -- AssistantConfig with embeddings section -----------------------------
+    // -- OrgConfig with embeddings section -----------------------------
 
     #[test]
     fn full_assistant_config_with_embeddings() {
@@ -209,7 +149,7 @@ mod tests {
             model = "text-embedding-3-small"
             api_key = "sk-openai-test"
         "#;
-        let cfg: AssistantConfig = toml::from_str(toml_str).unwrap();
+        let cfg: OrgConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.llm.provider, LlmProviderKind::Anthropic);
         let emb = cfg.llm.embeddings.expect("embeddings should be Some");
         assert_eq!(emb.provider, EmbeddingProviderKind::OpenAI);
@@ -227,7 +167,7 @@ mod tests {
             provider = "ollama"
             model = "qwen2.5:7b"
         "#;
-        let cfg: AssistantConfig = toml::from_str(toml_str).unwrap();
+        let cfg: OrgConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.llm.provider, LlmProviderKind::Ollama);
         assert!(cfg.llm.embeddings.is_none());
     }

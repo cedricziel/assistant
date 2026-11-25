@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_runtime::BinaryRole;
 
 use crate::args::Command;
@@ -89,7 +89,7 @@ impl Messenger {
         }
     }
 
-    pub fn is_configured(self, config: &AssistantConfig) -> bool {
+    pub fn is_configured(self, config: &OrgConfig) -> bool {
         match self {
             Self::Slack => config.slack.is_some(),
             Self::Mattermost => config.mattermost.is_some(),
@@ -150,10 +150,7 @@ pub fn uses_auto_deny_confirmation(command: Option<&Command>, no_repl: bool) -> 
 }
 
 /// Messengers to start in background mode, in start order.
-pub fn background_messengers(
-    config: &AssistantConfig,
-    selection: &HashSet<String>,
-) -> Vec<Messenger> {
+pub fn background_messengers(config: &OrgConfig, selection: &HashSet<String>) -> Vec<Messenger> {
     Messenger::ALL
         .into_iter()
         .filter(|m| m.is_configured(config) && interface_selected(selection, m.key()))
@@ -321,8 +318,8 @@ mod tests {
         }
     }
 
-    fn config_with(messengers: &[Messenger]) -> AssistantConfig {
-        let mut c = AssistantConfig::default();
+    fn config_with(messengers: &[Messenger]) -> OrgConfig {
+        let mut c = OrgConfig::default();
         for m in messengers {
             match m {
                 Messenger::Slack => c.slack = Some(Default::default()),
@@ -363,6 +360,6 @@ mod tests {
 
     #[test]
     fn nothing_configured_selects_nothing() {
-        assert!(background_messengers(&AssistantConfig::default(), &HashSet::new()).is_empty());
+        assert!(background_messengers(&OrgConfig::default(), &HashSet::new()).is_empty());
     }
 }

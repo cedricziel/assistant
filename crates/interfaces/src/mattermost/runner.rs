@@ -122,13 +122,13 @@ mod tests {
     use assistant_storage::StorageLayer;
 
     async fn make_orchestrator() -> Arc<Orchestrator> {
-        use assistant_core::types::agent::AssistantConfig;
+        use assistant_core::types::agent::OrgConfig;
         use assistant_core::{LlmProvider, MessageBus};
         use assistant_llm_provider::scripted::ScriptedLlmProvider;
         use assistant_storage::registry::SkillRegistry;
         use assistant_tool_executor::ToolExecutor;
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-        let cfg = AssistantConfig::default();
+        let cfg = OrgConfig::default();
         let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
         let llm: Arc<dyn LlmProvider> = Arc::new(ScriptedLlmProvider::new());
         let exec = Arc::new(ToolExecutor::new(

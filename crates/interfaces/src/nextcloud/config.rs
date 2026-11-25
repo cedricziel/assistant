@@ -1,7 +1,7 @@
 //! Configuration helpers for the Nextcloud Talk interface.
 //!
 //! The config struct itself (`NextcloudConfig`) lives in `assistant-core` so
-//! it can be embedded in `AssistantConfig`.  This module adds an extension
+//! it can be embedded in `OrgConfig`.  This module adds an extension
 //! trait with runtime helpers (env-var fallbacks).
 
 pub use assistant_core::Secret;

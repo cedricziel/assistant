@@ -8,10 +8,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::{OrgConfig, ServerConfig};
 use assistant_core::types::llm::LlmProviderKind;
 use assistant_core::types::skills_mcp::McpTransportConfig;
 use assistant_core::types::storage::BusKind;
+use assistant_core::{load_org_config, load_server_config, org_config_path, server_config_path};
+use assistant_storage::migration::DEFAULT_ORG_SLUG;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -182,21 +184,77 @@ impl DoctorReport {
 
 // ── Individual checks ────────────────────────────────────────────────────────
 
-fn check_config(config_path: &Path) -> CheckResult {
-    if !config_path.exists() {
-        return CheckResult::warning("Configuration", "config.toml not found (using defaults)")
-            .with_detail(format!("Expected at: {}", config_path.display()));
+/// Every config file under `base_dir`: `server.toml` and each org's `org.toml`
+/// that exists, in a stable order.
+fn config_files(base_dir: &Path) -> Vec<PathBuf> {
+    let mut orgs: Vec<String> = std::fs::read_dir(base_dir.join("orgs"))
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    orgs.sort();
+
+    std::iter::once(server_config_path(base_dir))
+        .chain(
+            orgs.iter()
+                .filter_map(|slug| org_config_path(base_dir, slug).ok()),
+        )
+        .filter(|p| p.exists())
+        .collect()
+}
+
+fn check_config(base_dir: &Path) -> CheckResult {
+    let files = config_files(base_dir);
+    if files.is_empty() {
+        return CheckResult::warning(
+            "Configuration",
+            "no server.toml or org.toml found (using defaults)",
+        )
+        .with_detail(format!(
+            "Expected {} and {}",
+            server_config_path(base_dir).display(),
+            base_dir.join("orgs/<org>/org.toml").display()
+        ));
     }
 
-    match std::fs::read_to_string(config_path) {
-        Ok(raw) => match toml::from_str::<AssistantConfig>(&raw) {
-            Ok(_) => CheckResult::ok("Configuration", "config.toml is valid"),
-            Err(e) => CheckResult::error("Configuration", "config.toml has parse errors")
-                .with_detail(format!("{e}")),
-        },
-        Err(e) => CheckResult::error("Configuration", "cannot read config.toml")
-            .with_detail(format!("{e}")),
+    let server_path = server_config_path(base_dir);
+    let problems: Vec<String> = files
+        .iter()
+        .filter_map(|path| {
+            let relative = path.strip_prefix(base_dir).unwrap_or(path).display();
+            let raw = match std::fs::read_to_string(path) {
+                Ok(raw) => raw,
+                Err(e) => return Some(format!("{relative}: cannot read: {e}")),
+            };
+            let parsed = if *path == server_path {
+                toml::from_str::<ServerConfig>(&raw).map(drop)
+            } else {
+                toml::from_str::<OrgConfig>(&raw).map(drop)
+            };
+            parsed.err().map(|e| format!("{relative}: {e}"))
+        })
+        .collect();
+
+    if problems.is_empty() {
+        let org_files = files.iter().filter(|p| **p != server_path).count();
+        let server = if server_path.exists() {
+            "server.toml and "
+        } else {
+            ""
+        };
+        return CheckResult::ok(
+            "Configuration",
+            format!("{server}{org_files} org.toml file(s) are valid"),
+        );
     }
+    let mut result = CheckResult::error("Configuration", "config files have errors");
+    for problem in problems {
+        result = result.with_detail(problem);
+    }
+    result
 }
 
 fn check_database(db_path: &Path) -> CheckResult {
@@ -221,7 +279,7 @@ fn check_database(db_path: &Path) -> CheckResult {
         .with_detail(format!("Path: {}", db_path.display()))
 }
 
-fn check_llm_provider(config: &AssistantConfig) -> CheckResult {
+fn check_llm_provider(config: &OrgConfig) -> CheckResult {
     let provider = &config.llm.provider;
     let model = &config.llm.model;
 
@@ -283,7 +341,7 @@ fn check_llm_provider(config: &AssistantConfig) -> CheckResult {
     }
 }
 
-fn check_embeddings(config: &AssistantConfig) -> CheckResult {
+fn check_embeddings(config: &OrgConfig) -> CheckResult {
     match &config.llm.embeddings {
         Some(emb) => {
             let provider = &emb.provider;
@@ -312,7 +370,7 @@ fn check_embeddings(config: &AssistantConfig) -> CheckResult {
     }
 }
 
-fn check_mcp_servers(config: &AssistantConfig) -> CheckResult {
+fn check_mcp_servers(config: &ServerConfig) -> CheckResult {
     let servers = &config.mcp.servers;
     if servers.is_empty() {
         return CheckResult::skipped("MCP Servers", "none configured");
@@ -358,7 +416,7 @@ fn check_mcp_servers(config: &AssistantConfig) -> CheckResult {
     result
 }
 
-fn check_skill_directories(config: &AssistantConfig, assistant_dir: &Path) -> CheckResult {
+fn check_skill_directories(config: &OrgConfig, assistant_dir: &Path) -> CheckResult {
     let mut dirs_checked = Vec::new();
     let mut ok_dirs = 0usize;
     let mut missing_dirs = 0usize;
@@ -407,7 +465,7 @@ fn check_skill_directories(config: &AssistantConfig, assistant_dir: &Path) -> Ch
     result
 }
 
-fn check_message_bus(config: &AssistantConfig) -> CheckResult {
+fn check_message_bus(config: &ServerConfig) -> CheckResult {
     match &config.bus.kind {
         BusKind::Sqlite => CheckResult::ok("Message Bus", "SQLite (default)"),
         BusKind::Nats => {
@@ -423,7 +481,7 @@ fn check_message_bus(config: &AssistantConfig) -> CheckResult {
     }
 }
 
-fn check_interfaces(config: &AssistantConfig) -> CheckResult {
+fn check_interfaces(config: &OrgConfig) -> CheckResult {
     let mut configured = Vec::new();
 
     if config.slack.is_some() {
@@ -464,7 +522,7 @@ fn check_observability() -> CheckResult {
     }
 }
 
-fn check_learning(config: &AssistantConfig) -> CheckResult {
+fn check_learning(config: &OrgConfig) -> CheckResult {
     if config.learning.enabled {
         CheckResult::ok("Learning", "enabled")
     } else {
@@ -556,27 +614,26 @@ async fn count_messages_readonly(path: &Path) -> Result<i64> {
 // ── Public entry point ───────────────────────────────────────────────────────
 
 /// Run all diagnostic checks and print the report.
-pub async fn cmd_doctor(
-    config_path: &Path,
-    db_path: &Path,
-    config: &AssistantConfig,
-) -> Result<()> {
-    let assistant_dir = config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("~/.assistant"));
+///
+/// `assistant_dir` is the install root holding `server.toml` and `orgs/`.
+/// Config files that fail to load are reported by the configuration check and
+/// the checks that depend on them run against the defaults.
+pub async fn cmd_doctor(assistant_dir: &Path, db_path: &Path) -> Result<()> {
+    let server = load_server_config(assistant_dir).unwrap_or_default();
+    let config = load_org_config(assistant_dir, DEFAULT_ORG_SLUG).unwrap_or_default();
 
     let checks = vec![
-        check_config(config_path),
+        check_config(assistant_dir),
         check_database(db_path),
         check_drift(assistant_dir, db_path).await,
-        check_llm_provider(config),
-        check_embeddings(config),
-        check_mcp_servers(config),
-        check_skill_directories(config, assistant_dir),
-        check_message_bus(config),
-        check_interfaces(config),
+        check_llm_provider(&config),
+        check_embeddings(&config),
+        check_mcp_servers(&server),
+        check_skill_directories(&config, assistant_dir),
+        check_message_bus(&server),
+        check_interfaces(&config),
         check_observability(),
-        check_learning(config),
+        check_learning(&config),
     ];
 
     let report = DoctorReport { checks };
@@ -597,8 +654,8 @@ pub async fn cmd_doctor(
 mod tests {
     use super::*;
 
-    fn default_config() -> AssistantConfig {
-        AssistantConfig::default()
+    fn default_config() -> OrgConfig {
+        OrgConfig::default()
     }
 
     // -- CheckResult constructors --
@@ -694,10 +751,53 @@ mod tests {
 
     // -- Individual check logic --
 
+    fn write_config(base: &Path, rel: &str, content: &str) {
+        let path = base.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
     #[test]
-    fn check_config_warns_on_missing_file() {
-        let r = check_config(Path::new("/nonexistent/path/config.toml"));
+    fn check_config_warns_when_no_config_files_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = check_config(dir.path());
         assert_eq!(r.status, CheckStatus::Warning);
+        assert!(r.message.contains("server.toml"), "got: {}", r.message);
+    }
+
+    #[test]
+    fn check_config_ok_for_valid_server_and_org_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(dir.path(), "server.toml", "[bus]\nkind = \"sqlite\"\n");
+        write_config(
+            dir.path(),
+            "orgs/acme/org.toml",
+            "[llm]\nprovider = \"ollama\"\n",
+        );
+        let r = check_config(dir.path());
+        assert_eq!(r.status, CheckStatus::Ok, "got: {}", r.message);
+        assert!(r.message.contains("1 org.toml"), "got: {}", r.message);
+    }
+
+    #[test]
+    fn check_config_names_the_file_that_fails_to_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(dir.path(), "server.toml", "[bus]\nkind = \"sqlite\"\n");
+        write_config(dir.path(), "orgs/acme/org.toml", "{{{{");
+        let r = check_config(dir.path());
+        assert_eq!(r.status, CheckStatus::Error);
+        assert!(
+            r.details.iter().any(|d| d.contains("orgs/acme/org.toml")),
+            "details should name the file: {:?}",
+            r.details
+        );
+    }
+
+    #[test]
+    fn check_config_ignores_a_leftover_config_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(dir.path(), "config.toml", "{{{{");
+        assert_eq!(check_config(dir.path()).status, CheckStatus::Warning);
     }
 
     #[test]
@@ -746,8 +846,7 @@ mod tests {
 
     #[test]
     fn check_mcp_skipped_when_none_configured() {
-        let config = default_config();
-        let r = check_mcp_servers(&config);
+        let r = check_mcp_servers(&ServerConfig::default());
         assert_eq!(r.status, CheckStatus::Skipped);
     }
 
@@ -761,8 +860,7 @@ mod tests {
 
     #[test]
     fn check_message_bus_sqlite_default() {
-        let config = default_config();
-        let r = check_message_bus(&config);
+        let r = check_message_bus(&ServerConfig::default());
         assert_eq!(r.status, CheckStatus::Ok);
         assert!(r.message.contains("SQLite"));
     }

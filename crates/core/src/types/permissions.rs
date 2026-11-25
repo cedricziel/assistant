@@ -211,7 +211,7 @@ workspace_roots = ["~/scratch"]
 
     #[test]
     fn assistant_config_defaults_to_empty_permissions() {
-        let cfg: crate::types::agent::AssistantConfig = toml::from_str("").unwrap();
+        let cfg: crate::types::agent::OrgConfig = toml::from_str("").unwrap();
         assert_eq!(cfg.permissions, PermissionsConfig::default());
     }
 }

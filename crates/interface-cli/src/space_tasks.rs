@@ -8,7 +8,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use assistant_core::types::agent::AssistantConfig;
 use assistant_runtime::{
     CoreWorkerPlan, SpaceRef, SpaceTaskSpawner, spawn_memory_indexer, spawn_scheduler,
     spawn_title_generator_worker,
@@ -18,11 +17,11 @@ use assistant_runtime::{
 /// scheduler when `scheduler_poll` is set.
 pub fn space_task_spawner(
     plan: CoreWorkerPlan,
-    config: Arc<AssistantConfig>,
     scheduler_poll: Option<Duration>,
 ) -> SpaceTaskSpawner {
     Arc::new(move |space: SpaceRef| {
         let runtime = space.runtime;
+        let config = runtime.config.clone();
         let mut tasks = Vec::new();
 
         for spec in &plan.workers {
@@ -69,11 +68,13 @@ mod tests {
     use assistant_core::auth::AuthContext;
     use assistant_core::identity::{OrgId, SpaceId};
     use assistant_core::store::{OrgStore as _, Organization, Space, SpaceStore as _};
-    use assistant_core::types::agent::AssistantConfig;
+    use assistant_core::types::agent::OrgConfig;
     use assistant_core::types::conversation::Interface;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
     use assistant_runtime::bootstrap::AutoDenyConfirmation;
-    use assistant_runtime::{BinaryRole, SpaceRuntimes, SpaceSupervisor, core_worker_plan};
+    use assistant_runtime::{
+        BinaryRole, OrgContexts, SpaceRuntimes, SpaceSupervisor, core_worker_plan,
+    };
     use assistant_storage::{ConversationStore as _, OrgPoolFactory, SqliteConversationStore};
 
     use super::*;
@@ -110,14 +111,15 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let mut config = AssistantConfig::default();
+        let mut config = OrgConfig::default();
         config.memory.enabled = false;
-        let config = Arc::new(config);
         let runtimes = Arc::new(
             SpaceRuntimes::new(
                 pools,
-                config.clone(),
-                Arc::new(ScriptedLlmProvider::new()),
+                Arc::new(OrgContexts::fixed(
+                    config,
+                    Arc::new(ScriptedLlmProvider::new()),
+                )),
                 Arc::new(AutoDenyConfirmation {
                     interface_name: "test",
                 }),
@@ -127,11 +129,7 @@ mod tests {
         let supervisor = SpaceSupervisor::new(
             org_storage,
             runtimes.clone(),
-            space_task_spawner(
-                core_worker_plan(BinaryRole::OrchestratorUnfiltered),
-                config,
-                None,
-            ),
+            space_task_spawner(core_worker_plan(BinaryRole::OrchestratorUnfiltered), None),
         );
         supervisor.reconcile().await.unwrap();
 

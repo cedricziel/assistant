@@ -1,7 +1,7 @@
 //! Slack interface configuration.
 //!
 //! [`SlackConfig`] is defined in `assistant-core` so it can be embedded in
-//! [`AssistantConfig`][assistant_core::types::agent::AssistantConfig].  This module
+//! [`OrgConfig`][assistant_core::types::agent::OrgConfig].  This module
 //! re-exports it and adds runtime helpers that resolve tokens from
 //! environment variables when not explicitly configured.
 
@@ -88,8 +88,7 @@ mod tests {
             bot_token = "xoxb-abc"
             allowed_channels = ["CGENERAL"]
         "#;
-        let cfg: assistant_core::types::agent::AssistantConfig =
-            toml::from_str(toml_str).expect("parse");
+        let cfg: assistant_core::types::agent::OrgConfig = toml::from_str(toml_str).expect("parse");
         let slack = cfg.slack.expect("slack section present");
         assert_eq!(
             slack.bot_token.as_ref().map(Secret::expose),
@@ -100,7 +99,7 @@ mod tests {
 
     #[test]
     fn assistant_config_without_slack_section_is_none() {
-        let cfg: assistant_core::types::agent::AssistantConfig = toml::from_str("").expect("parse");
+        let cfg: assistant_core::types::agent::OrgConfig = toml::from_str("").expect("parse");
         assert!(cfg.slack.is_none());
     }
 }

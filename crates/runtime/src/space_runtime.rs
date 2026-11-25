@@ -6,8 +6,9 @@
 //! a turn submitted for space B reads and writes B's `space.db` and never
 //! touches another space.
 //!
-//! The LLM provider, config, confirmation callback and MCP tools are shared by
-//! every space; only the storage-bound pieces are per space.
+//! A space gets its LLM provider and settings from the org it belongs to
+//! ([`OrgContexts`]); the confirmation callback and MCP tools are shared by
+//! every space. Only the storage-bound pieces are per space.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -19,7 +20,7 @@ use tokio::sync::OnceCell;
 use tracing::{info, warn};
 
 use assistant_core::tool::ToolHandler;
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_core::{LlmProvider, MessageBus};
 use assistant_skills::SkillSource;
 use assistant_storage::{
@@ -29,6 +30,7 @@ use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{AudioStore, TtsProvider};
 
 use crate::orchestrator::{ConfirmationCallback, Orchestrator};
+use crate::org_context::{OrgContext, OrgContexts};
 
 type SpaceKey = (String, String);
 type Slot = Arc<OnceCell<Arc<SpaceRuntime>>>;
@@ -37,6 +39,10 @@ type Slot = Arc<OnceCell<Arc<SpaceRuntime>>>;
 pub struct SpaceRuntime {
     pub org_slug: String,
     pub space_slug: String,
+    /// The settings of the org this space belongs to.
+    pub config: Arc<OrgConfig>,
+    /// The LLM client of the org this space belongs to.
+    pub llm: Arc<dyn LlmProvider>,
     pub storage: Arc<StorageLayer>,
     pub registry: Arc<SkillRegistry>,
     pub executor: Arc<ToolExecutor>,
@@ -49,6 +55,7 @@ impl SpaceRuntime {
     pub fn from_parts(
         org_slug: impl Into<String>,
         space_slug: impl Into<String>,
+        org: OrgContext,
         storage: Arc<StorageLayer>,
         registry: Arc<SkillRegistry>,
         executor: Arc<ToolExecutor>,
@@ -58,6 +65,8 @@ impl SpaceRuntime {
         Self {
             org_slug: org_slug.into(),
             space_slug: space_slug.into(),
+            config: org.config,
+            llm: org.llm,
             storage,
             registry,
             executor,
@@ -70,8 +79,7 @@ impl SpaceRuntime {
 /// Builds and caches one [`SpaceRuntime`] per `(org, space)`.
 pub struct SpaceRuntimes {
     pools: Arc<OrgPoolFactory>,
-    config: Arc<AssistantConfig>,
-    llm: Arc<dyn LlmProvider>,
+    orgs: Arc<OrgContexts>,
     confirmation: Arc<dyn ConfirmationCallback>,
     audio_store: Option<Arc<AudioStore>>,
     voice: Option<Arc<dyn TtsProvider>>,
@@ -85,14 +93,12 @@ pub struct SpaceRuntimes {
 impl SpaceRuntimes {
     pub fn new(
         pools: Arc<OrgPoolFactory>,
-        config: Arc<AssistantConfig>,
-        llm: Arc<dyn LlmProvider>,
+        orgs: Arc<OrgContexts>,
         confirmation: Arc<dyn ConfirmationCallback>,
     ) -> Self {
         Self {
             pools,
-            config,
-            llm,
+            orgs,
             confirmation,
             audio_store: None,
             voice: None,
@@ -134,12 +140,9 @@ impl SpaceRuntimes {
         &self.pools
     }
 
-    pub fn config(&self) -> &Arc<AssistantConfig> {
-        &self.config
-    }
-
-    pub fn llm(&self) -> &Arc<dyn LlmProvider> {
-        &self.llm
+    /// The per-org settings and LLM clients the spaces are built from.
+    pub fn orgs(&self) -> &Arc<OrgContexts> {
+        &self.orgs
     }
 
     /// The runtime of `(org_slug, space_slug)`, built on first use.
@@ -216,16 +219,17 @@ impl SpaceRuntimes {
     }
 
     async fn build(&self, org_slug: &str, space_slug: &str) -> Result<Arc<SpaceRuntime>> {
+        let OrgContext { config, llm } = self.orgs.get(org_slug)?;
         let storage = self.pools.space_storage(org_slug, space_slug).await?;
-        let agent_id = self.config.agent.id.clone();
+        let agent_id = config.agent.id.clone();
         storage.persona_store().ensure_exists(&agent_id).await?;
 
-        let registry = Arc::new(self.load_registry(&storage).await?);
+        let registry = Arc::new(self.load_registry(&storage, &config).await?);
         let executor = Arc::new(ToolExecutor::new(
             storage.clone(),
-            self.llm.clone(),
+            llm.clone(),
             registry.clone(),
-            self.config.clone(),
+            config.clone(),
         ));
         let bus: Arc<dyn MessageBus> = match &self.shared_bus {
             Some(shared) => Arc::new(ScopedMessageBus::new(
@@ -243,12 +247,12 @@ impl SpaceRuntimes {
             .flatten()
             .and_then(|p| p.turn_timeout_secs);
         let mut orchestrator = Orchestrator::new(
-            self.llm.clone(),
+            llm.clone(),
             storage.clone(),
             executor.clone(),
             registry.clone(),
             bus.clone(),
-            &self.config,
+            &config,
         )
         .with_confirmation_callback(self.confirmation.clone());
         if let Some(store) = &self.audio_store {
@@ -276,6 +280,8 @@ impl SpaceRuntimes {
         Ok(Arc::new(SpaceRuntime {
             org_slug: org_slug.to_owned(),
             space_slug: space_slug.to_owned(),
+            config,
+            llm,
             storage,
             registry,
             executor,
@@ -284,7 +290,11 @@ impl SpaceRuntimes {
         }))
     }
 
-    async fn load_registry(&self, storage: &StorageLayer) -> Result<SkillRegistry> {
+    async fn load_registry(
+        &self,
+        storage: &StorageLayer,
+        config: &OrgConfig,
+    ) -> Result<SkillRegistry> {
         let registry = SkillRegistry::new(storage.pool.clone())
             .await
             .context("Failed to create skill registry")?
@@ -298,7 +308,7 @@ impl SpaceRuntimes {
         let project_root = std::env::current_dir().ok();
         let dirs = crate::bootstrap::skill_dirs_in(
             Some(self.pools.base_dir()),
-            &self.config,
+            config,
             project_root.as_deref(),
         );
         let dirs: Vec<(&Path, SkillSource)> =
@@ -339,7 +349,7 @@ mod tests {
     use uuid::Uuid;
 
     use assistant_core::auth::AuthContext;
-    use assistant_core::types::agent::AssistantConfig;
+    use assistant_core::types::agent::OrgConfig;
     use assistant_core::types::conversation::Interface;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
     use assistant_storage::{ConversationStore as _, OrgPoolFactory, SqliteConversationStore};
@@ -349,13 +359,15 @@ mod tests {
     use super::*;
 
     fn runtimes(base: &std::path::Path) -> Arc<SpaceRuntimes> {
-        let mut config = AssistantConfig::default();
+        let mut config = OrgConfig::default();
         config.memory.enabled = false;
         Arc::new(
             SpaceRuntimes::new(
                 Arc::new(OrgPoolFactory::new(base)),
-                Arc::new(config),
-                Arc::new(ScriptedLlmProvider::new()),
+                Arc::new(OrgContexts::fixed(
+                    config,
+                    Arc::new(ScriptedLlmProvider::new()),
+                )),
                 Arc::new(AutoDenyConfirmation {
                     interface_name: "test",
                 }),
@@ -376,6 +388,40 @@ mod tests {
         let beta = runtimes.get("acme", "beta").await.unwrap();
         assert!(!Arc::ptr_eq(&a1, &beta));
         assert!(!Arc::ptr_eq(&a1.storage, &beta.storage));
+    }
+
+    #[tokio::test]
+    async fn a_space_runs_with_the_llm_and_config_of_its_org() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (org, model, agent) in [
+            ("acme", "acme-model", "ops"),
+            ("globex", "globex-model", "dev"),
+        ] {
+            let path = assistant_core::org_config_path(tmp.path(), org).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                path,
+                format!(
+                    "[llm]\nprovider = \"ollama\"\nmodel = \"{model}\"\n\n[agent]\nid = \"{agent}\"\n\n[memory]\nenabled = false\n"
+                ),
+            )
+            .unwrap();
+        }
+        let runtimes = SpaceRuntimes::new(
+            Arc::new(OrgPoolFactory::new(tmp.path())),
+            Arc::new(OrgContexts::from_files(tmp.path())),
+            Arc::new(AutoDenyConfirmation {
+                interface_name: "test",
+            }),
+        );
+
+        let acme = runtimes.get("acme", "main").await.unwrap();
+        let globex = runtimes.get("globex", "main").await.unwrap();
+
+        assert_eq!(acme.llm.model_name(), "acme-model");
+        assert_eq!(acme.config.agent.id, "ops");
+        assert_eq!(globex.llm.model_name(), "globex-model");
+        assert_eq!(globex.config.agent.id, "dev");
     }
 
     #[tokio::test]
@@ -471,12 +517,14 @@ mod tests {
         use assistant_core::topic;
         let tmp = tempfile::tempdir().unwrap();
         let shared: Arc<dyn MessageBus> = Arc::new(assistant_storage::InMemoryMessageBus::new());
-        let mut config = AssistantConfig::default();
+        let mut config = OrgConfig::default();
         config.memory.enabled = false;
         let runtimes = SpaceRuntimes::new(
             Arc::new(OrgPoolFactory::new(tmp.path())),
-            Arc::new(config),
-            Arc::new(ScriptedLlmProvider::new()),
+            Arc::new(OrgContexts::fixed(
+                config,
+                Arc::new(ScriptedLlmProvider::new()),
+            )),
             Arc::new(AutoDenyConfirmation {
                 interface_name: "test",
             }),

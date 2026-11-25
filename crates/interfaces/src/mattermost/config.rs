@@ -1,7 +1,7 @@
 //! Mattermost interface configuration.
 //!
 //! [`MattermostConfig`] is defined in `assistant-core` so it can be embedded
-//! in [`AssistantConfig`][assistant_core::types::agent::AssistantConfig].  This module
+//! in [`OrgConfig`][assistant_core::types::agent::OrgConfig].  This module
 //! re-exports it and adds runtime helpers that depend on the `dirs` crate,
 //! which is not a dependency of `assistant-core`.
 
@@ -88,8 +88,7 @@ mod tests {
             server_url = "https://mm.example.com"
             token = "tok-abc"
         "#;
-        let cfg: assistant_core::types::agent::AssistantConfig =
-            toml::from_str(toml_str).expect("parse");
+        let cfg: assistant_core::types::agent::OrgConfig = toml::from_str(toml_str).expect("parse");
         let mm = cfg.mattermost.expect("mattermost section present");
         assert_eq!(mm.server_url.as_deref(), Some("https://mm.example.com"));
         assert_eq!(mm.token.as_ref().map(Secret::expose), Some("tok-abc"));
@@ -97,7 +96,7 @@ mod tests {
 
     #[test]
     fn assistant_config_without_mattermost_section_is_none() {
-        let cfg: assistant_core::types::agent::AssistantConfig = toml::from_str("").expect("parse");
+        let cfg: assistant_core::types::agent::OrgConfig = toml::from_str("").expect("parse");
         assert!(cfg.mattermost.is_none());
     }
 }

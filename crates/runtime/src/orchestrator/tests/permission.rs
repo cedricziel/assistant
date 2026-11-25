@@ -6,7 +6,7 @@ use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{ExecutionContext, Interface, TurnIdentity};
 
 use crate::orchestrator::ConfirmationCallback;
@@ -34,15 +34,15 @@ async fn mount_bash_call(server: &MockServer, command: &str) {
         .await;
 }
 
-fn config(allow: &[&str]) -> AssistantConfig {
-    let mut config = AssistantConfig::default();
+fn config(allow: &[&str]) -> OrgConfig {
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     config.permissions.allow = allow.iter().map(|r| r.parse().unwrap()).collect();
     config
 }
 
 /// Run one non-interactive (Slack) turn and return the `ToolResult` events.
-async fn run_turn(config: AssistantConfig, command: &str) -> Vec<(String, String)> {
+async fn run_turn(config: OrgConfig, command: &str) -> Vec<(String, String)> {
     let server = MockServer::start().await;
     mount_bash_call(&server, command).await;
     let (orch, _) = build_with_config(&server.uri(), config).await;

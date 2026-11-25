@@ -6,9 +6,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use assistant_core::MemoryLoader;
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 
-pub fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Result<()> {
+pub fn cmd_reset(db_path: &Path, config: &OrgConfig, skip_confirm: bool) -> Result<()> {
     let loader = MemoryLoader::new(config);
 
     // Collect everything that will be removed so we can show the user upfront.
@@ -73,8 +73,8 @@ pub fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -
 mod tests {
     use super::*;
 
-    fn agent_config_under(root: &Path) -> AssistantConfig {
-        let mut cfg = AssistantConfig::default();
+    fn agent_config_under(root: &Path) -> OrgConfig {
+        let mut cfg = OrgConfig::default();
         cfg.agent.id = "default".to_string();
         // Reroute every memory-file path to absolute paths under the tempdir
         // so the test never touches ~/.assistant.

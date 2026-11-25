@@ -21,10 +21,7 @@ mod space_tasks;
 mod wiring;
 
 use args::{Cli, Command, MigrateCommand, OrchestratorCommand, SkillCommand};
-use cli_helpers::{
-    CliConfirmation, ConfigLoadMessage, load_config_messages, normalize_worker_interface,
-    parse_interface_selection,
-};
+use cli_helpers::{CliConfirmation, normalize_worker_interface, parse_interface_selection};
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -39,13 +36,14 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use assistant_core::types::agent::{OrgConfig, ServerConfig};
 use assistant_core::types::conversation::Interface;
 use assistant_core::{
-    apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
-    validate_agent_id,
+    apply_agent_context, default_workspace_dir, load_org_config, load_server_config,
+    set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_runtime::{
-    BinaryRole, CommandContext, CommandRegistry, SpaceSupervisor, init_tracing,
+    BinaryRole, CommandContext, CommandRegistry, OrgContexts, SpaceSupervisor, init_tracing,
     orchestrator::ConfirmationCallback, start_conversation_context,
 };
 use assistant_storage::OrgPoolFactory;
@@ -60,7 +58,16 @@ pub fn home_agent_root(agent_id: &str) -> Result<PathBuf> {
     Ok(home.join(".assistant").join("agents").join(agent_id))
 }
 
-// ── Embedding provider factory ────────────────────────────────────────────────
+/// The persona to run as: the `--persona` override, else the org's own. Fails
+/// on an invalid id, and points `config`'s memory paths at the persona.
+fn select_persona(cli_override: Option<&str>, config: &mut OrgConfig) -> Result<String> {
+    let persona = cli_override.map_or_else(|| config.agent.id.clone(), str::to_owned);
+    if !validate_agent_id(&persona) {
+        anyhow::bail!("Invalid Persona ID '{persona}'. Use only letters, numbers, '-' and '_'.");
+    }
+    apply_agent_context(config, &persona);
+    Ok(persona)
+}
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -78,20 +85,21 @@ async fn main() -> Result<()> {
     // 2. Resolve home directory and eagerly load config before tracing init.
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
-    let config_path = assistant_dir.join("config.toml");
-    let (mut config, config_logs) = load_config_messages(&config_path);
+    // `assistant doctor` reports unreadable config files itself, so it still
+    // runs when they do not load.
+    let (server, mut config) = match (
+        load_server_config(&assistant_dir),
+        load_org_config(&assistant_dir, DEFAULT_ORG_SLUG),
+    ) {
+        (Ok(server), Ok(config)) => (server, config),
+        _ if matches!(cli.command, Some(Command::Doctor)) => {
+            (ServerConfig::default(), OrgConfig::default())
+        }
+        (Err(e), _) | (_, Err(e)) => return Err(e),
+    };
 
     let cli_persona_override = cli.persona.clone();
-    let selected_persona = cli_persona_override
-        .clone()
-        .unwrap_or_else(|| config.agent.id.clone());
-    if !validate_agent_id(&selected_persona) {
-        anyhow::bail!(
-            "Invalid Persona ID '{}'. Use only letters, numbers, '-' and '_'.",
-            selected_persona
-        );
-    }
-    apply_agent_context(&mut config, &selected_persona);
+    let selected_persona = select_persona(cli_persona_override.as_deref(), &mut config)?;
     let agent_root = assistant_dir.join("agents").join(&selected_persona);
     let workspace_dir = default_workspace_dir(&selected_persona);
     set_runtime_agent_root(agent_root);
@@ -147,7 +155,7 @@ async fn main() -> Result<()> {
     let db_path: PathBuf = pools.space_db_path(DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG);
 
     // 3. One-shot subcommands do not need the heavy runtime.
-    if let Some(result) = dispatch::run_one_shot(&cli, &config_path, &db_path, &config).await {
+    if let Some(result) = dispatch::run_one_shot(&cli, &assistant_dir, &db_path, &config).await {
         return result;
     }
 
@@ -188,14 +196,15 @@ async fn main() -> Result<()> {
         };
 
     let _otel_guard = init_tracing()?;
-    for msg in config_logs {
-        match msg {
-            ConfigLoadMessage::Info(text) => info!("{text}"),
-            ConfigLoadMessage::Warn(text) => warn!("{text}"),
-        }
-    }
 
-    let bs = bootstrap::bootstrap(&home, confirmation_cb, pools.clone(), config).await?;
+    // Every org's `org.toml` is loaded on first use; the persona chosen on the
+    // command line applies to all of them.
+    let orgs = Arc::new(
+        OrgContexts::from_files(&assistant_dir).with_adjust(Arc::new(move |org_config| {
+            select_persona(cli_persona_override.as_deref(), org_config).map(drop)
+        })),
+    );
+    let bs = bootstrap::bootstrap(&home, confirmation_cb, pools.clone(), server, orgs).await?;
 
     // 5a. Skill generate — one-shot turn, print result, exit.
     if let Some(Command::Skill {
@@ -283,11 +292,8 @@ async fn main() -> Result<()> {
         transcription: None,
         transcription_language: None,
     };
-    let spawn_space_tasks = space_tasks::space_task_spawner(
-        worker_plan,
-        Arc::new(bs.config.clone()),
-        Some(Duration::from_secs(60)),
-    );
+    let spawn_space_tasks =
+        space_tasks::space_task_spawner(worker_plan, Some(Duration::from_secs(60)));
     if matches!(
         binary_role,
         BinaryRole::OrchestratorFiltered | BinaryRole::OrchestratorUnfiltered
@@ -597,4 +603,33 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_persona_prefers_the_command_line_override() {
+        let mut config = OrgConfig::default();
+        config.agent.id = "ops".to_string();
+
+        assert_eq!(select_persona(Some("dev"), &mut config).unwrap(), "dev");
+        assert_eq!(config.agent.id, "dev");
+    }
+
+    #[test]
+    fn select_persona_falls_back_to_the_orgs_own_persona() {
+        let mut config = OrgConfig::default();
+        config.agent.id = "ops".to_string();
+
+        assert_eq!(select_persona(None, &mut config).unwrap(), "ops");
+    }
+
+    #[test]
+    fn select_persona_rejects_an_invalid_id() {
+        let mut config = OrgConfig::default();
+
+        assert!(select_persona(Some("../etc"), &mut config).is_err());
+    }
 }

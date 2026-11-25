@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use anyhow::Result;
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{
-    LlmProvider, SubagentRunner, ToolHandler, ToolOutput, ToolSpec, types::agent::AssistantConfig,
+    LlmProvider, SubagentRunner, ToolHandler, ToolOutput, ToolSpec, types::agent::OrgConfig,
 };
 use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use tracing::warn;
@@ -21,7 +21,7 @@ impl ToolExecutor {
         storage: Arc<StorageLayer>,
         llm: Arc<dyn LlmProvider>,
         registry: Arc<SkillRegistry>,
-        config: Arc<AssistantConfig>,
+        config: Arc<OrgConfig>,
     ) -> Self {
         let stats_provider: Arc<dyn SkillStatsProvider> = Arc::new(storage.skill_execution_store());
         let executor = Self {
@@ -36,7 +36,7 @@ impl ToolExecutor {
         &self,
         llm: Arc<dyn LlmProvider>,
         registry: Arc<SkillRegistry>,
-        config: Arc<AssistantConfig>,
+        config: Arc<OrgConfig>,
         stats_provider: Arc<dyn SkillStatsProvider>,
     ) {
         use crate::builtins::*;

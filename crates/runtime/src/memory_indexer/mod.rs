@@ -10,9 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{
-    LlmProvider, base_dir, resolve_dir, resolve_path, types::agent::AssistantConfig,
-};
+use assistant_core::{LlmProvider, base_dir, resolve_dir, resolve_path, types::agent::OrgConfig};
 use assistant_storage::{MemoryChunkStore, StorageLayer};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
@@ -24,14 +22,14 @@ const EMBED_BATCH_SIZE: i64 = 100;
 
 /// Indexes memory files into SQLite for full-text and vector search.
 pub struct MemoryIndexer {
-    config: Arc<AssistantConfig>,
+    config: Arc<OrgConfig>,
     storage: Arc<StorageLayer>,
     llm: Arc<dyn LlmProvider>,
 }
 
 impl MemoryIndexer {
     pub fn new(
-        config: Arc<AssistantConfig>,
+        config: Arc<OrgConfig>,
         storage: Arc<StorageLayer>,
         llm: Arc<dyn LlmProvider>,
     ) -> Self {
@@ -177,11 +175,11 @@ pub fn spawn_memory_indexer(
     let interval = std::time::Duration::from_secs(secs);
     let enabled = config.enabled;
 
-    // Create a minimal AssistantConfig with just the memory section
+    // Create a minimal OrgConfig with just the memory section
     // for the MemoryIndexer
-    let assistant_config = Arc::new(AssistantConfig {
+    let assistant_config = Arc::new(OrgConfig {
         memory: config.clone(),
-        ..AssistantConfig::default()
+        ..OrgConfig::default()
     });
 
     let indexer = Arc::new(MemoryIndexer::new(assistant_config, storage, llm));
@@ -397,7 +395,7 @@ mod tests {
         mem.user_path = Some("/non/existent/user.md".to_string());
         mem.notes_dir = Some("/non/existent/notes".to_string());
 
-        let mut cfg = AssistantConfig::default();
+        let mut cfg = OrgConfig::default();
         cfg.memory = mem;
 
         let llm: Arc<dyn LlmProvider> = if embed_responses.is_empty() {

@@ -143,11 +143,12 @@ mod tests {
 
     use assistant_core::identity::{OrgId, SpaceId};
     use assistant_core::store::{OrgStore as _, Organization, Space, SpaceStore as _};
-    use assistant_core::types::agent::AssistantConfig;
+    use assistant_core::types::agent::OrgConfig;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
     use assistant_storage::{OrgPoolFactory, OrgStorageLayer};
 
     use crate::bootstrap::AutoDenyConfirmation;
+    use crate::org_context::OrgContexts;
     use crate::space_runtime::SpaceRuntimes;
 
     use super::*;
@@ -163,12 +164,14 @@ mod tests {
             let tmp = tempfile::tempdir().unwrap();
             let pools = Arc::new(OrgPoolFactory::new(tmp.path()));
             let org_storage = Arc::new(pools.org_storage().await.unwrap());
-            let mut config = AssistantConfig::default();
+            let mut config = OrgConfig::default();
             config.memory.enabled = false;
             let runtimes = Arc::new(SpaceRuntimes::new(
                 pools,
-                Arc::new(config),
-                Arc::new(ScriptedLlmProvider::new()),
+                Arc::new(OrgContexts::fixed(
+                    config,
+                    Arc::new(ScriptedLlmProvider::new()),
+                )),
                 Arc::new(AutoDenyConfirmation {
                     interface_name: "test",
                 }),

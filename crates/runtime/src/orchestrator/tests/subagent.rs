@@ -10,7 +10,7 @@ use uuid::Uuid;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use assistant_core::types::agent::AssistantConfig;
+use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{DEFAULT_MAX_AGENT_DEPTH, Interface, TurnIdentity};
 use assistant_core::{AgentReportStatus, AgentSpawn, SubagentRunner};
 
@@ -518,7 +518,7 @@ async fn subagent_max_iterations_returns_failed_status() {
         .mount(&server)
         .await;
 
-    let mut config = AssistantConfig::default();
+    let mut config = OrgConfig::default();
     config.memory.enabled = false;
     config.llm.max_iterations = 2;
     let (orch, _) = build_with_config(&server.uri(), config).await;
