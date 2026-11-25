@@ -12,7 +12,8 @@
 //!   4. PATCH /api/users/me — change name
 //!   5. POST /api/users/me/password — change password
 //!   6. assert old refresh tokens have been revoked
-//!   7. assert the calling JWT continues to work (still 200)
+//!   7. assert the calling JWT is rejected (the password change ended every
+//!      session), while a JWT signed afterwards works
 //!   8. assert the API key continues to work (still 200)
 
 use std::collections::HashMap;
@@ -29,6 +30,7 @@ use tower::ServiceExt;
 
 use assistant_auth::api_keys::{ApiKeyRecord, ApiKeyStore, InMemoryApiKeyStore, generate_key};
 use assistant_auth::jwt::{JwtKeyPair, JwtManager};
+use assistant_auth::middleware::AuthState;
 use assistant_auth::oauth2::server::{
     InMemoryRefreshTokenStore, RefreshTokenStore, StoredRefreshToken,
 };
@@ -57,6 +59,7 @@ const JWT_SECRET: &[u8] = b"integration-account-test-secret-32!!";
 struct TestEnv {
     app: Router,
     alice_jwt: String,
+    jwt_sign: JwtManager,
     alice_api_key_plaintext: String,
     layer: Arc<OrgStorageLayer>,
     refresh_store: Arc<InMemoryRefreshTokenStore>,
@@ -134,7 +137,18 @@ async fn setup() -> TestEnv {
         "https://test.local".into(),
     );
 
-    let auth_config = WebAuthConfig::new(jwt_validate, api_key_store, None, None, false);
+    let auth_config = WebAuthConfig {
+        auth_state: AuthState {
+            jwt_manager: jwt_validate,
+            api_key_store,
+            users: Arc::new(layer.user_store()),
+            memberships: Arc::new(layer.membership_store()),
+            refresh_tokens: refresh_store.clone(),
+            legacy_token: None,
+            legacy_context: None,
+        },
+        secure_cookie: false,
+    };
 
     let account_state = AccountApiState {
         org_storage: layer.clone(),
@@ -146,11 +160,12 @@ async fn setup() -> TestEnv {
         .route_layer(from_fn_with_state(auth_config, require_auth));
 
     // Sign alice's JWT — this is what the "logged-in client" carries.
-    let alice_jwt = jwt_sign.sign(&alice_ctx(), ORG_SLUG, "Alice").unwrap();
+    let alice_jwt = jwt_sign.sign(&alice_ctx(), ORG_SLUG, "Alice", 0).unwrap();
 
     TestEnv {
         app,
         alice_jwt,
+        jwt_sign,
         alice_api_key_plaintext,
         layer,
         refresh_store,
@@ -344,7 +359,7 @@ async fn full_self_service_account_flow() {
         "bob's refresh token must NOT be touched by alice's password change"
     );
 
-    // -- 6. Calling JWT continues to work (until natural expiry) ------------
+    // -- 6. The calling JWT is revoked; a fresh one works -------------------
     let resp = env
         .app
         .clone()
@@ -353,8 +368,18 @@ async fn full_self_service_account_flow() {
         .unwrap();
     assert_eq!(
         resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "the JWT signed before the password change must stop working"
+    );
+    let fresh_jwt = env
+        .jwt_sign
+        .sign(&alice_ctx(), ORG_SLUG, "Alice", 1)
+        .unwrap();
+    let resp = env.app.clone().oneshot(get_me(&fresh_jwt)).await.unwrap();
+    assert_eq!(
+        resp.status(),
         StatusCode::OK,
-        "the JWT used to call change-password must keep working"
+        "a JWT signed under the new token version must work"
     );
     let detail: serde_json::Value = body_json(resp).await;
     assert_eq!(

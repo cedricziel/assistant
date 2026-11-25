@@ -50,7 +50,6 @@ reqwest = { workspace = true }
 tracing = { workspace = true }
 
 # URL percent-encoding (OIDC authorize URL)
-urlencoding = { workspace = true }
 
 # HTTP server (middleware extractors)
 axum = { workspace = true }

@@ -67,7 +67,7 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
-[*AccountApi*](doc/AccountApi.md) | [**changePassword**](doc/AccountApi.md#changepassword) | **POST** /api/users/me/password | &#x60;POST /api/users/me/password&#x60; — change the caller&#39;s password and revoke all their refresh tokens. The current access JWT keeps working until it naturally expires; API keys are untouched.
+[*AccountApi*](doc/AccountApi.md) | [**changePassword**](doc/AccountApi.md#changepassword) | **POST** /api/users/me/password | &#x60;POST /api/users/me/password&#x60; — change the caller&#39;s password and end all their sessions: every access JWT, including the one used for this call, and every refresh token is revoked. API keys are untouched.
 [*AccountApi*](doc/AccountApi.md) | [**getCurrentUser**](doc/AccountApi.md#getcurrentuser) | **GET** /api/users/me | &#x60;GET /api/users/me&#x60; — return the caller&#39;s &#x60;UserDetail&#x60;. Works in any &#x60;auth_mode&#x60;.
 [*AccountApi*](doc/AccountApi.md) | [**updateCurrentUser**](doc/AccountApi.md#updatecurrentuser) | **PATCH** /api/users/me | &#x60;PATCH /api/users/me&#x60; — update the caller&#39;s name and/or email.
 [*AgentCardApi*](doc/AgentCardApi.md) | [**getAgentCardWellKnown**](doc/AgentCardApi.md#getagentcardwellknown) | **GET** /.well-known/agent.json | &#x60;GET /.well-known/agent.json&#x60; -- Returns the public agent card.
@@ -131,7 +131,7 @@ Class | Method | HTTP request | Description
 [*OauthApi*](doc/OauthApi.md) | [**deviceVerifySubmit**](doc/OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
 [*OauthApi*](doc/OauthApi.md) | [**metadata**](doc/OauthApi.md#metadata) | **GET** /.well-known/oauth-authorization-server | GET /.well-known/oauth-authorization-server
 [*OauthApi*](doc/OauthApi.md) | [**register**](doc/OauthApi.md#register) | **POST** /oauth/register | POST /oauth/register — register a new OAuth2 client.
-[*OauthApi*](doc/OauthApi.md) | [**revoke**](doc/OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh token.
+[*OauthApi*](doc/OauthApi.md) | [**revoke**](doc/OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh or access token.
 [*OauthApi*](doc/OauthApi.md) | [**token**](doc/OauthApi.md#token) | **POST** /oauth/token | POST /oauth/token
 [*OrgsApi*](doc/OrgsApi.md) | [**createOrg**](doc/OrgsApi.md#createorg) | **POST** /api/orgs | &#x60;POST /api/orgs&#x60; — create a new organization.
 [*OrgsApi*](doc/OrgsApi.md) | [**getOrg**](doc/OrgsApi.md#getorg) | **GET** /api/orgs/{id} | &#x60;GET /api/orgs/{id}&#x60; — get organization detail.

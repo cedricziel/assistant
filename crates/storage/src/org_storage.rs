@@ -172,6 +172,10 @@ async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
             "006_integrations",
             include_str!("../../../migrations/org/006_integrations.sql"),
         ),
+        (
+            "007_user_token_version",
+            include_str!("../../../migrations/org/007_user_token_version.sql"),
+        ),
     ];
 
     for &(name, sql) in migrations {

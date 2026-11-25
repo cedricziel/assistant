@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use sqlx::{Row, SqlitePool};
 
 use assistant_core::identity::{OrgId, UserId};
-use assistant_core::store::{User, UserStore};
+use assistant_core::store::{SessionState, User, UserStore};
 
 /// SQLite-backed user store.
 pub struct SqliteUserStore {
@@ -137,6 +137,25 @@ impl UserStore for SqliteUserStore {
 
     async fn delete_user(&self, id: &UserId) -> Result<bool> {
         let result = sqlx::query("DELETE FROM users WHERE id = ?")
+            .bind(&id.0)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn session_state(&self, id: &UserId) -> Result<Option<SessionState>> {
+        let row = sqlx::query("SELECT org_id, token_version FROM users WHERE id = ?")
+            .bind(&id.0)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| SessionState {
+            org_id: OrgId(row.get("org_id")),
+            token_version: row.get::<i64, _>("token_version").max(0) as u64,
+        }))
+    }
+
+    async fn bump_token_version(&self, id: &UserId) -> Result<bool> {
+        let result = sqlx::query("UPDATE users SET token_version = token_version + 1 WHERE id = ?")
             .bind(&id.0)
             .execute(&self.pool)
             .await?;
@@ -310,5 +329,89 @@ mod tests {
         let (_layer, store) = setup().await;
         let found = store.get_user(&UserId::from("no_such")).await.unwrap();
         assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn session_state_starts_at_version_zero() {
+        let (_layer, store) = setup().await;
+        store
+            .create_user(&make_user("usr_1", "org_1", "alice@acme.com"))
+            .await
+            .unwrap();
+
+        let state = store
+            .session_state(&UserId::from("usr_1"))
+            .await
+            .unwrap()
+            .expect("user exists");
+        assert_eq!(state.org_id, OrgId::from("org_1"));
+        assert_eq!(state.token_version, 0);
+    }
+
+    #[tokio::test]
+    async fn session_state_is_none_for_deleted_user() {
+        let (_layer, store) = setup().await;
+        store
+            .create_user(&make_user("usr_1", "org_1", "alice@acme.com"))
+            .await
+            .unwrap();
+        store.delete_user(&UserId::from("usr_1")).await.unwrap();
+
+        let state = store.session_state(&UserId::from("usr_1")).await.unwrap();
+        assert_eq!(state, None);
+    }
+
+    #[tokio::test]
+    async fn bump_token_version_persists_and_is_per_user() {
+        let (_layer, store) = setup().await;
+        for (id, email) in [("usr_1", "alice@acme.com"), ("usr_2", "bob@acme.com")] {
+            store
+                .create_user(&make_user(id, "org_1", email))
+                .await
+                .unwrap();
+        }
+
+        assert!(
+            store
+                .bump_token_version(&UserId::from("usr_1"))
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .bump_token_version(&UserId::from("usr_1"))
+                .await
+                .unwrap()
+        );
+
+        let one = store.session_state(&UserId::from("usr_1")).await.unwrap();
+        let two = store.session_state(&UserId::from("usr_2")).await.unwrap();
+        assert_eq!(one.unwrap().token_version, 2);
+        assert_eq!(two.unwrap().token_version, 0);
+    }
+
+    #[tokio::test]
+    async fn update_user_keeps_token_version() {
+        let (_layer, store) = setup().await;
+        let mut user = make_user("usr_1", "org_1", "alice@acme.com");
+        store.create_user(&user).await.unwrap();
+        store.bump_token_version(&user.id).await.unwrap();
+
+        user.name = "Alice".into();
+        store.update_user(&user).await.unwrap();
+
+        let state = store.session_state(&user.id).await.unwrap();
+        assert_eq!(state.unwrap().token_version, 1);
+    }
+
+    #[tokio::test]
+    async fn bump_token_version_of_unknown_user_returns_false() {
+        let (_layer, store) = setup().await;
+        assert!(
+            !store
+                .bump_token_version(&UserId::from("ghost"))
+                .await
+                .unwrap()
+        );
     }
 }

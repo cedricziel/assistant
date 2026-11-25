@@ -23,7 +23,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use assistant_core::UserStore;
-use assistant_core::auth::AuthContext;
+use assistant_core::auth::{AuthContext, RefreshTokenStore as _};
 use assistant_core::identity::{OrgId, UserId};
 use assistant_core::store::User;
 use assistant_storage::OrgStorageLayer;
@@ -380,7 +380,23 @@ pub async fn delete_user(
     let store = state.org_storage.user_store();
 
     match store.delete_user(&user_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            // The user row is gone, which already voids their access tokens
+            // and API keys; drop the refresh tokens too.
+            if let Err(e) = state
+                .org_storage
+                .refresh_token_store()
+                .revoke_for_user_except(&user_id.0, "")
+                .await
+            {
+                tracing::error!(
+                    user_id = %user_id.0,
+                    error = %e,
+                    "user deleted but failed to revoke their refresh tokens"
+                );
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => json_error(StatusCode::NOT_FOUND, "user not found"),
         Err(e) => {
             tracing::error!("failed to delete user: {e}");
@@ -757,6 +773,64 @@ mod tests {
         assert!(
             status == 400 || status == 422,
             "expected 4xx for empty email; got {status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_user_revokes_their_refresh_tokens() {
+        use assistant_core::auth::StoredRefreshToken;
+
+        let state = setup_state().await;
+        let now = chrono::Utc::now();
+        state
+            .org_storage
+            .user_store()
+            .create_user(&User {
+                id: UserId::from("usr_del"),
+                org_id: OrgId::from("org_1"),
+                email: "del@acme.com".into(),
+                name: "Del".into(),
+                password_hash: String::new(),
+                idp_issuer: None,
+                idp_subject: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+        let refresh_tokens = state.org_storage.refresh_token_store();
+        refresh_tokens
+            .store_token(StoredRefreshToken {
+                token: "del-refresh".into(),
+                user_id: "usr_del".into(),
+                client_id: "webui".into(),
+                scopes: vec![],
+                expires_at: now + chrono::Duration::days(1),
+                consumed: false,
+            })
+            .await
+            .unwrap();
+
+        let app = test_app(state, make_admin_ctx());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/orgs/org_1/users/usr_del")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(
+            refresh_tokens
+                .get_token("del-refresh")
+                .await
+                .unwrap()
+                .is_none(),
+            "a deleted user must not keep a refresh token"
         );
     }
 

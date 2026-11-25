@@ -6,8 +6,8 @@
 //! - OAuth2 server logic ([`oauth2`])
 //! - OIDC federation ([`oidc`])
 //! - Scoped API key management ([`api_keys`])
-//! - Axum middleware extractors ([`middleware`])
-//! - [`AuthProvider`](assistant_core::auth::AuthProvider) implementations ([`providers`])
+//! - Shared auth state and scope checks ([`middleware`])
+//! - Ending a user's sessions ([`session`])
 
 pub mod api_keys;
 pub mod bootstrap;
@@ -17,4 +17,4 @@ pub mod middleware;
 pub mod oauth2;
 pub mod oidc;
 pub mod password;
-pub mod providers;
+pub mod session;

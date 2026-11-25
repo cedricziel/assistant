@@ -129,24 +129,10 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
     {
         Ok(pair) => {
             // Sign a JWT access token for the user.
-            let ctx =
-                build_auth_context_for_user(&state.org_storage, &pair.user_id, &client_id).await;
             let ttl = state.jwt_manager.access_ttl_secs();
-            let jwt = match state
-                .jwt_manager
-                .sign(&ctx, ctx.org_id.as_ref(), &pair.user_id)
-            {
+            let jwt = match issue_access_jwt(&state, &pair.user_id, &client_id).await {
                 Ok(t) => t,
-                Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(OAuthError {
-                            error: "server_error",
-                            error_description: e.to_string(),
-                        }),
-                    )
-                        .into_response();
-                }
+                Err(resp) => return resp,
             };
 
             let cookie = session_cookie(&jwt, state.secure_cookie, ttl);
@@ -200,24 +186,10 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
         .await
     {
         Ok(pair) => {
-            let ctx =
-                build_auth_context_for_user(&state.org_storage, &pair.user_id, &client_id).await;
             let ttl = state.jwt_manager.access_ttl_secs();
-            let jwt = match state
-                .jwt_manager
-                .sign(&ctx, ctx.org_id.as_ref(), &pair.user_id)
-            {
+            let jwt = match issue_access_jwt(&state, &pair.user_id, &client_id).await {
                 Ok(t) => t,
-                Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(OAuthError {
-                            error: "server_error",
-                            error_description: e.to_string(),
-                        }),
-                    )
-                        .into_response();
-                }
+                Err(resp) => return resp,
             };
 
             let cookie = session_cookie(&jwt, state.secure_cookie, ttl);
@@ -247,6 +219,56 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
         )
             .into_response(),
     }
+}
+
+/// Sign the access JWT for `user_id`, bound to the user's current session
+/// generation.
+///
+/// Answers `invalid_grant` when the user no longer exists, so a refresh token
+/// outliving its user cannot mint new access tokens.
+async fn issue_access_jwt(
+    state: &OAuthState,
+    user_id: &str,
+    client_id: &str,
+) -> Result<String, axum::response::Response> {
+    let server_error = |description: String| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(OAuthError {
+                error: "server_error",
+                error_description: description,
+            }),
+        )
+            .into_response()
+    };
+
+    let identity = match build_auth_context_for_user(&state.org_storage, user_id, client_id).await {
+        Ok(Some(identity)) => identity,
+        Ok(None) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(OAuthError {
+                    error: "invalid_grant",
+                    error_description: "user no longer exists".into(),
+                }),
+            )
+                .into_response());
+        }
+        Err(e) => {
+            tracing::error!(user_id = %user_id, error = %e, "loading user for token issuance failed");
+            return Err(server_error("failed to load user".into()));
+        }
+    };
+
+    state
+        .jwt_manager
+        .sign(
+            &identity.ctx,
+            identity.ctx.org_id.as_ref(),
+            user_id,
+            identity.token_version,
+        )
+        .map_err(|e| server_error(e.to_string()))
 }
 
 /// Build the `Set-Cookie` header value for the `assistant_session` JWT cookie.
@@ -338,20 +360,10 @@ async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::respo
                 }
             };
 
-            let ctx = build_auth_context_for_user(&state.org_storage, &user_id, &client_id).await;
             let ttl = state.jwt_manager.access_ttl_secs();
-            let jwt = match state.jwt_manager.sign(&ctx, ctx.org_id.as_ref(), &user_id) {
+            let jwt = match issue_access_jwt(&state, &user_id, &client_id).await {
                 Ok(t) => t,
-                Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(OAuthError {
-                            error: "server_error",
-                            error_description: e.to_string(),
-                        }),
-                    )
-                        .into_response();
-                }
+                Err(resp) => return resp,
             };
 
             Json(TokenResponse {

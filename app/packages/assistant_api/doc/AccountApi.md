@@ -9,7 +9,7 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**changePassword**](AccountApi.md#changepassword) | **POST** /api/users/me/password | &#x60;POST /api/users/me/password&#x60; — change the caller&#39;s password and revoke all their refresh tokens. The current access JWT keeps working until it naturally expires; API keys are untouched.
+[**changePassword**](AccountApi.md#changepassword) | **POST** /api/users/me/password | &#x60;POST /api/users/me/password&#x60; — change the caller&#39;s password and end all their sessions: every access JWT, including the one used for this call, and every refresh token is revoked. API keys are untouched.
 [**getCurrentUser**](AccountApi.md#getcurrentuser) | **GET** /api/users/me | &#x60;GET /api/users/me&#x60; — return the caller&#39;s &#x60;UserDetail&#x60;. Works in any &#x60;auth_mode&#x60;.
 [**updateCurrentUser**](AccountApi.md#updatecurrentuser) | **PATCH** /api/users/me | &#x60;PATCH /api/users/me&#x60; — update the caller&#39;s name and/or email.
 
@@ -17,7 +17,7 @@ Method | HTTP request | Description
 # **changePassword**
 > changePassword(changePasswordRequest)
 
-`POST /api/users/me/password` — change the caller's password and revoke all their refresh tokens. The current access JWT keeps working until it naturally expires; API keys are untouched.
+`POST /api/users/me/password` — change the caller's password and end all their sessions: every access JWT, including the one used for this call, and every refresh token is revoked. API keys are untouched.
 
 ### Example
 ```dart

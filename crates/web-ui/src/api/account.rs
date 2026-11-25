@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use assistant_auth::oauth2::server::RefreshTokenStore;
 use assistant_auth::password;
+use assistant_auth::session::revoke_sessions;
 use assistant_core::auth::AuthContext;
 use assistant_core::store::Organization;
 use assistant_core::{OrgStore, UserStore};
@@ -269,9 +270,9 @@ pub async fn update_current_user(
     Json(resp).into_response()
 }
 
-/// `POST /api/users/me/password` — change the caller's password and revoke
-/// all their refresh tokens. The current access JWT keeps working until it
-/// naturally expires; API keys are untouched.
+/// `POST /api/users/me/password` — change the caller's password and end all
+/// their sessions: every access JWT, including the one used for this call,
+/// and every refresh token is revoked. API keys are untouched.
 #[utoipa::path(
     post,
     path = "/api/users/me/password",
@@ -336,9 +337,8 @@ pub async fn change_password(
         );
     }
 
-    // Revoke every refresh token for this user. The empty-string sentinel
-    // ensures no real token is excepted (no token's value is the empty
-    // string), so all sessions get logged out on next refresh.
+    // End every session: the caller's own access JWT stops working too, so
+    // the client signs in again with the new password.
     //
     // The password commit above has already succeeded. If revocation now
     // fails (e.g. transient SQLite error), surfacing a 500 to the client
@@ -346,18 +346,19 @@ pub async fn change_password(
     // they'd be told the operation failed and might try the old password.
     // Instead, we log loudly so operators can investigate, and return the
     // same 204 the client would have seen on full success. Worst case the
-    // siblings outlive the password change until their natural 30-day
-    // refresh-token TTL.
-    if let Err(e) = state
-        .refresh_token_store
-        .revoke_for_user_except(&ctx.user_id.0, "")
-        .await
+    // old sessions outlive the password change until their natural expiry.
+    if let Err(e) = revoke_sessions(
+        &user_store,
+        state.refresh_token_store.as_ref(),
+        &ctx.user_id,
+    )
+    .await
     {
         tracing::error!(
             user_id = %ctx.user_id.0,
             error = %e,
-            "password changed but failed to revoke sibling refresh tokens — \
-             stale sessions may persist until natural TTL"
+            "password changed but failed to revoke sessions — \
+             stale sessions may persist until natural expiry"
         );
     }
 

@@ -18,7 +18,7 @@ Method | HTTP request | Description
 [**deviceVerifySubmit**](OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
 [**metadata**](OauthApi.md#metadata) | **GET** /.well-known/oauth-authorization-server | GET /.well-known/oauth-authorization-server
 [**register**](OauthApi.md#register) | **POST** /oauth/register | POST /oauth/register — register a new OAuth2 client.
-[**revoke**](OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh token.
+[**revoke**](OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh or access token.
 [**token**](OauthApi.md#token) | **POST** /oauth/token | POST /oauth/token
 
 
@@ -429,7 +429,9 @@ No authorization required
 # **revoke**
 > revoke(token, clientId, tokenTypeHint)
 
-POST /oauth/revoke — revoke a refresh token.
+POST /oauth/revoke — revoke a refresh or access token.
+
+Presenting either token proves possession, so no client authentication is needed. Revocation ends all of the token owner's sessions (every access token and refresh token), not just the one presented; this is the logout call.
 
 ### Example
 ```dart

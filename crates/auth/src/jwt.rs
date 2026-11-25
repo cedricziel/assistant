@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use assistant_core::auth::AuthContext;
 use assistant_core::clock::{Clock, SystemClock};
-use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
+use assistant_core::identity::{OrgId, UserId};
 
 // -- Claims --
 
@@ -35,6 +35,9 @@ pub struct Claims {
     pub iat: i64,
     /// Unique token ID.
     pub jti: String,
+    /// The user's session generation when the token was signed. A token is
+    /// only honoured while it equals the user's current `token_version`.
+    pub tv: u64,
 
     /// Organization ID.
     pub org_id: String,
@@ -44,8 +47,6 @@ pub struct Claims {
     pub email: String,
     /// User display name.
     pub name: String,
-    /// Space → role mapping.
-    pub spaces: HashMap<String, String>,
     /// OAuth2 client ID that requested this token.
     pub client_id: String,
     /// Space-separated scope string (standard OAuth2 format).
@@ -175,16 +176,17 @@ impl JwtManager {
         self.access_ttl.num_seconds().max(0) as u64
     }
 
-    /// Sign a JWT for the given auth context.
-    pub fn sign(&self, ctx: &AuthContext, org_slug: &str, name: &str) -> Result<String> {
+    /// Sign a JWT for the given auth context, bound to the user's current
+    /// `token_version`.
+    pub fn sign(
+        &self,
+        ctx: &AuthContext,
+        org_slug: &str,
+        name: &str,
+        token_version: u64,
+    ) -> Result<String> {
         let now = self.clock.now();
         let exp = now + self.access_ttl;
-
-        let spaces: HashMap<String, String> = ctx
-            .space_roles
-            .iter()
-            .map(|(s, r)| (s.0.clone(), r.to_string()))
-            .collect();
 
         let scope_str = ctx
             .scopes
@@ -208,11 +210,11 @@ impl JwtManager {
             exp: exp.timestamp(),
             iat: now.timestamp(),
             jti: uuid::Uuid::new_v4().to_string(),
+            tv: token_version,
             org_id: ctx.org_id.0.clone(),
             org_slug: org_slug.to_owned(),
             email: ctx.email.clone(),
             name: name.to_owned(),
-            spaces,
             client_id: ctx.client_id.clone(),
             scope: scope_str,
             scope_restrictions,
@@ -233,31 +235,14 @@ impl JwtManager {
 
         Ok(token_data.claims)
     }
-
-    /// Validate a JWT and reconstruct an [`AuthContext`] from the claims.
-    pub fn validate_to_context(&self, token: &str) -> Result<AuthContext> {
-        let claims = self.validate(token)?;
-        claims_to_context(&claims)
-    }
 }
 
 /// Convert decoded JWT claims into an [`AuthContext`].
+///
+/// The context has no space roles: the token does not carry them, so a
+/// demoted or removed member cannot keep access through an old token. Callers
+/// load the live roles from `org.db`.
 pub fn claims_to_context(claims: &Claims) -> Result<AuthContext> {
-    let space_roles: HashMap<SpaceId, Role> = claims
-        .spaces
-        .iter()
-        .map(|(space_id, role_str)| {
-            let role = match role_str.as_str() {
-                "org_admin" => Role::OrgAdmin,
-                "space_admin" => Role::SpaceAdmin,
-                "member" => Role::Member,
-                "viewer" => Role::Viewer,
-                other => bail!("unknown role in JWT: {other}"),
-            };
-            Ok((SpaceId(space_id.clone()), role))
-        })
-        .collect::<Result<_>>()?;
-
     let scopes = if claims.scope.is_empty() {
         vec![]
     } else {
@@ -279,7 +264,7 @@ pub fn claims_to_context(claims: &Claims) -> Result<AuthContext> {
         user_id: UserId(claims.sub.clone()),
         org_id: OrgId(claims.org_id.clone()),
         email: claims.email.clone(),
-        space_roles,
+        space_roles: HashMap::new(),
         scopes,
         client_id: claims.client_id.clone(),
     })
@@ -321,7 +306,7 @@ fn parse_scope(s: &str) -> Result<assistant_core::identity::Scope> {
 
 #[cfg(test)]
 mod tests {
-    use assistant_core::identity::{Action, ResourceKind, Scope};
+    use assistant_core::identity::{Action, ResourceKind, Role, Scope, SpaceId};
 
     use super::*;
 
@@ -344,41 +329,49 @@ mod tests {
     }
 
     #[test]
+    fn sign_embeds_token_version() {
+        let kp = JwtKeyPair::generate().unwrap();
+        let mgr = JwtManager::new(kp, "https://test.local".into(), "https://test.local".into());
+
+        let token = mgr.sign(&make_test_context(), "acme", "Alice", 7).unwrap();
+
+        assert_eq!(mgr.validate(&token).unwrap().tv, 7);
+    }
+
+    #[test]
     fn sign_and_validate_roundtrip() {
         let kp = JwtKeyPair::generate().unwrap();
         let mgr = JwtManager::new(kp, "https://test.local".into(), "https://test.local".into());
 
         let ctx = make_test_context();
-        let token = mgr.sign(&ctx, "acme", "Alice").unwrap();
+        let token = mgr.sign(&ctx, "acme", "Alice", 0).unwrap();
 
         let claims = mgr.validate(&token).unwrap();
         assert_eq!(claims.sub, "usr_alice");
         assert_eq!(claims.org_id, "org_acme");
         assert_eq!(claims.email, "alice@acme.com");
         assert_eq!(claims.client_id, "webui");
-        assert_eq!(claims.spaces.get("eng"), Some(&"member".to_string()));
-        assert_eq!(claims.spaces.get("mktg"), Some(&"viewer".to_string()));
         assert!(claims.scope.contains("personas:read"));
         assert!(claims.scope.contains("conversations:write"));
     }
 
     #[test]
-    fn validate_to_context_roundtrip() {
+    fn claims_to_context_restores_identity_but_not_roles() {
         let kp = JwtKeyPair::generate().unwrap();
         let mgr = JwtManager::new(kp, "https://test.local".into(), "https://test.local".into());
 
         let ctx = make_test_context();
-        let token = mgr.sign(&ctx, "acme", "Alice").unwrap();
+        let token = mgr.sign(&ctx, "acme", "Alice", 0).unwrap();
 
-        let restored = mgr.validate_to_context(&token).unwrap();
+        let restored = claims_to_context(&mgr.validate(&token).unwrap()).unwrap();
         assert_eq!(restored.user_id, ctx.user_id);
         assert_eq!(restored.org_id, ctx.org_id);
         assert_eq!(restored.email, ctx.email);
         assert_eq!(restored.client_id, ctx.client_id);
-        assert_eq!(restored.role_in(&SpaceId::from("eng")), Some(&Role::Member));
-        assert_eq!(
-            restored.role_in(&SpaceId::from("mktg")),
-            Some(&Role::Viewer)
+        assert_eq!(restored.scopes, ctx.scopes);
+        assert!(
+            restored.space_roles.is_empty(),
+            "roles must come from org.db, not the token"
         );
     }
 
@@ -389,7 +382,7 @@ mod tests {
             .with_access_ttl(Duration::seconds(-120)); // Well past the 60s default leeway.
 
         let ctx = make_test_context();
-        let token = mgr.sign(&ctx, "acme", "Alice").unwrap();
+        let token = mgr.sign(&ctx, "acme", "Alice", 0).unwrap();
 
         let err = mgr.validate(&token);
         assert!(
@@ -421,7 +414,7 @@ mod tests {
         );
 
         let ctx = make_test_context();
-        let token = mgr1.sign(&ctx, "acme", "Alice").unwrap();
+        let token = mgr1.sign(&ctx, "acme", "Alice", 0).unwrap();
 
         let err = mgr2.validate(&token);
         assert!(err.is_err());
@@ -443,7 +436,7 @@ mod tests {
         );
 
         let ctx = make_test_context();
-        let token = mgr_sign.sign(&ctx, "acme", "Alice").unwrap();
+        let token = mgr_sign.sign(&ctx, "acme", "Alice", 0).unwrap();
 
         let err = mgr_verify.validate(&token);
         assert!(err.is_err());
@@ -501,7 +494,7 @@ mod tests {
         );
 
         let ctx = make_test_context();
-        let token = mgr1.sign(&ctx, "acme", "Alice").unwrap();
+        let token = mgr1.sign(&ctx, "acme", "Alice", 0).unwrap();
         let claims = mgr2.validate(&token).unwrap();
         assert_eq!(claims.sub, "usr_alice");
     }
@@ -525,7 +518,7 @@ mod tests {
             .with_clock(fake.clone() as Arc<dyn Clock>);
 
         let ctx = make_test_context();
-        let token = mgr.sign(&ctx, "acme", "Alice").unwrap();
+        let token = mgr.sign(&ctx, "acme", "Alice", 0).unwrap();
         let claims = mgr.validate(&token).unwrap();
 
         assert_eq!(
@@ -541,7 +534,7 @@ mod tests {
 
         // Advance the fake clock; subsequent signs reflect the new now.
         fake.advance(std::time::Duration::from_secs(300));
-        let token2 = mgr.sign(&ctx, "acme", "Alice").unwrap();
+        let token2 = mgr.sign(&ctx, "acme", "Alice", 0).unwrap();
         let claims2 = mgr.validate(&token2).unwrap();
         assert_eq!(
             claims2.iat,
@@ -569,7 +562,7 @@ mod tests {
             "https://test.local".into(),
             "https://test.local".into(),
         );
-        let token = mgr.sign(&make_test_context(), "acme", "Alice").unwrap();
+        let token = mgr.sign(&make_test_context(), "acme", "Alice", 0).unwrap();
         let claims = mgr.validate(&token).unwrap();
 
         let hs384 = encode(
@@ -595,7 +588,7 @@ mod tests {
             "https://test.local".into(),
             "https://test.local".into(),
         );
-        let token = mgr.sign(&make_test_context(), "acme", "Alice").unwrap();
+        let token = mgr.sign(&make_test_context(), "acme", "Alice", 0).unwrap();
         let payload = token.split('.').nth(1).unwrap();
         let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
 
