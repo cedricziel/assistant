@@ -41,6 +41,9 @@ lib/features/traces/traces_screen.dart
 lib/features/webhooks/webhook_detail_screen.dart
 lib/features/webhooks/webhooks_screen.dart
 lib/features/workflows/workflow_detail_screen.dart
-lib/features/workflows/workflow_editor_screen.dart
+lib/features/workflows/workflow_canvas_painters.dart
+lib/features/workflows/workflow_editor_model.dart
+lib/features/workflows/workflow_mobile_editor.dart
+lib/features/workflows/workflow_node_palette.dart
 lib/features/workflows/workflow_run_detail_screen.dart
 lib/features/workflows/workflows_screen.dart

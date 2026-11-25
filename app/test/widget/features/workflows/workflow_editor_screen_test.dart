@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:assistant_app/features/workflows/workflow_editor_model.dart';
 import 'package:assistant_app/features/workflows/workflow_editor_screen.dart';
 import 'package:assistant_app/features/workflows/workflows_provider.dart';
 
