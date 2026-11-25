@@ -10,8 +10,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use assistant_core::Secret;
-use assistant_core::types::llm::LlmConfig;
+use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::{
     Capabilities, ChatHistoryMessage, LlmProvider, LlmResponse, StreamChunk, ToolSpec, ToolSupport,
 };
@@ -41,16 +40,15 @@ impl OpenRouterProvider {
     /// var.  Falls back to `DEFAULT_BASE_URL` when the base URL is the Ollama
     /// default (i.e. not explicitly configured).
     pub fn from_llm_config(cfg: &LlmConfig) -> anyhow::Result<Self> {
-        let api_key = cfg
-            .api_key
-            .clone()
-            .or_else(|| std::env::var("OPENROUTER_API_KEY").ok().map(Secret::from))
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "OpenRouter API key not found. Set api_key in [llm] config \
+        let api_key = resolve_openrouter_key(None, cfg, OPENROUTER_API_KEY_ENV, |name| {
+            std::env::var(name).ok()
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "OpenRouter API key not found. Set api_key in [llm] config \
                      or OPENROUTER_API_KEY environment variable."
-                )
-            })?;
+            )
+        })?;
 
         // If the base URL is the Ollama default, the user hasn't explicitly set
         // it, so use the OpenRouter endpoint instead.
@@ -151,6 +149,7 @@ impl LlmProvider for OpenRouterProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assistant_core::Secret;
     use assistant_core::types::llm::LlmProviderKind;
     use assistant_core::types::llm::OpenRouterOptions;
     use serde_json::{Value, json};

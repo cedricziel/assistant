@@ -154,6 +154,38 @@ impl Default for LlmConfig {
     }
 }
 
+// ── OpenRouter key resolution ─────────────────────────────────────────────────
+
+/// Environment variable checked last for an OpenRouter API key.
+pub const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
+
+impl LlmConfig {
+    /// The `[llm]` API key, but only when `[llm]` itself is OpenRouter, so a key
+    /// meant for another provider is never sent to OpenRouter.
+    pub fn openrouter_api_key(&self) -> Option<&Secret> {
+        match self.provider {
+            LlmProviderKind::OpenRouter => self.api_key.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+/// Resolve the key for an OpenRouter-backed feature: the feature's own
+/// `section` key, then the `[llm]` OpenRouter key, then `env_var` read through
+/// `env`. Blank values count as unset.
+pub fn resolve_openrouter_key(
+    section: Option<&Secret>,
+    llm: &LlmConfig,
+    env_var: &str,
+    env: impl Fn(&str) -> Option<String>,
+) -> Option<Secret> {
+    section
+        .filter(|s| !s.is_blank())
+        .or_else(|| llm.openrouter_api_key().filter(|s| !s.is_blank()))
+        .cloned()
+        .or_else(|| env(env_var).map(Secret::from).filter(|s| !s.is_blank()))
+}
+
 // ── Anthropic-specific options ────────────────────────────────────────────────
 
 /// Additional configuration for Anthropic-specific features.
@@ -353,8 +385,118 @@ pub struct OpenRouterOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::{EmbeddingConfig, EmbeddingProviderKind, LlmConfig, LlmProviderKind};
+    use super::{
+        EmbeddingConfig, EmbeddingProviderKind, LlmConfig, LlmProviderKind, OPENROUTER_API_KEY_ENV,
+        resolve_openrouter_key,
+    };
     use crate::secret::Secret;
+
+    // -- OpenRouter key resolution --------------------------------------------
+
+    fn llm(provider: LlmProviderKind, key: Option<&str>) -> LlmConfig {
+        LlmConfig {
+            provider,
+            api_key: key.map(Secret::new),
+            ..LlmConfig::default()
+        }
+    }
+
+    fn env_with(value: Option<&'static str>) -> impl Fn(&str) -> Option<String> {
+        move |name| {
+            assert_eq!(name, OPENROUTER_API_KEY_ENV, "unexpected env var lookup");
+            value.map(str::to_string)
+        }
+    }
+
+    fn resolved(
+        section: Option<&str>,
+        llm: &LlmConfig,
+        env: impl Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        let section = section.map(Secret::new);
+        resolve_openrouter_key(section.as_ref(), llm, OPENROUTER_API_KEY_ENV, env)
+            .map(|s| s.expose().to_string())
+    }
+
+    #[test]
+    fn openrouter_api_key_only_for_openrouter_provider() {
+        assert_eq!(
+            llm(LlmProviderKind::OpenRouter, Some("k2"))
+                .openrouter_api_key()
+                .map(Secret::expose),
+            Some("k2"),
+            "an OpenRouter [llm] key is reusable"
+        );
+        assert!(
+            llm(LlmProviderKind::Anthropic, Some("sk-ant"))
+                .openrouter_api_key()
+                .is_none(),
+            "a non-OpenRouter [llm] key must never be offered to OpenRouter"
+        );
+    }
+
+    #[test]
+    fn section_key_wins_over_llm_and_env() {
+        let llm = llm(LlmProviderKind::OpenRouter, Some("k2"));
+        assert_eq!(
+            resolved(Some("k1"), &llm, env_with(Some("k3"))).as_deref(),
+            Some("k1"),
+            "the section's own api_key comes first"
+        );
+    }
+
+    #[test]
+    fn openrouter_llm_key_is_reused_before_env() {
+        let llm = llm(LlmProviderKind::OpenRouter, Some("k2"));
+        assert_eq!(
+            resolved(None, &llm, env_with(Some("k3"))).as_deref(),
+            Some("k2"),
+            "[llm] key is reused when [llm] is OpenRouter"
+        );
+    }
+
+    #[test]
+    fn non_openrouter_llm_key_is_never_reused() {
+        let llm = llm(LlmProviderKind::Anthropic, Some("sk-ant"));
+        assert_eq!(
+            resolved(None, &llm, env_with(None)),
+            None,
+            "an Anthropic key must not resolve as an OpenRouter key"
+        );
+        assert_eq!(
+            resolved(None, &llm, env_with(Some("k3"))).as_deref(),
+            Some("k3"),
+            "env is the fallback when [llm] is not OpenRouter"
+        );
+    }
+
+    #[test]
+    fn blank_keys_count_as_unset() {
+        let llm = llm(LlmProviderKind::OpenRouter, Some("  "));
+        assert_eq!(
+            resolved(Some(""), &llm, env_with(Some("k3"))).as_deref(),
+            Some("k3"),
+            "blank section and [llm] keys fall through to env"
+        );
+        assert_eq!(
+            resolved(None, &llm, env_with(Some(" "))),
+            None,
+            "a blank env value is not a key"
+        );
+    }
+
+    #[test]
+    fn env_var_name_is_caller_supplied() {
+        let llm = llm(LlmProviderKind::Ollama, None);
+        let key = resolve_openrouter_key(None, &llm, "CUSTOM_KEY", |name| {
+            (name == "CUSTOM_KEY").then(|| "k4".to_string())
+        });
+        assert_eq!(
+            key.as_ref().map(Secret::expose),
+            Some("k4"),
+            "the decision model passes its own api_key_env"
+        );
+    }
 
     // -- EmbeddingConfig deserialization --------------------------------------
 
