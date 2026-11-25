@@ -13,7 +13,7 @@ make dump-openapi           # re-export openapi.json from the running server
 make generate-flutter-client # regenerate Dart/dio client from openapi.json
 ```
 
-Requires `openapi-generator` (`brew install openapi-generator`).
+Requires Docker: the generator runs from the pinned `openapitools/openapi-generator-cli` image (see `OPENAPI_GENERATOR_VERSION` in the Makefile).
 
 ## Build Integration
 

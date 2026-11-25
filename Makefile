@@ -135,15 +135,22 @@ validate-openapi: openapi.json
 	npx --yes @redocly/cli lint openapi.json
 
 # Generate the Dart/Flutter API client from openapi.json.
-# Requires: openapi-generator (brew install openapi-generator)
+# The generator runs from a pinned docker image so every machine and CI produce
+# byte-identical output; a different version reformats hundreds of files.
+# `dart format` is pinned to the package's SDK floor so the style does not
+# depend on whether a package_config.json exists yet.
+# Requires: docker
+OPENAPI_GENERATOR_VERSION := 7.22.0
+
 generate-flutter-client: openapi.json
-	openapi-generator generate \
-	  -i openapi.json \
+	docker run --rm --user "$$(id -u):$$(id -g)" -v "$(CURDIR):/local" \
+	  openapitools/openapi-generator-cli:v$(OPENAPI_GENERATOR_VERSION) generate \
+	  -i /local/openapi.json \
 	  -g dart-dio \
-	  -o app/packages/assistant_api \
-	  -c app/openapi-generator.yaml \
+	  -o /local/app/packages/assistant_api \
+	  -c /local/app/openapi-generator.yaml \
 	  --skip-validate-spec
-	cd app && dart format packages/assistant_api/lib packages/assistant_api/test
+	cd app && dart format --language-version=2.18 packages/assistant_api/lib packages/assistant_api/test
 	cd app/packages/assistant_api && dart run build_runner build
 
 # Lint the OpenAPI spec with Spectral. Enforces rules in openapi-spectral.yaml,

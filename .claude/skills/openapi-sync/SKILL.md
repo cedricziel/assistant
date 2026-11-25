@@ -25,7 +25,7 @@ Any change to the REST API **must** keep `openapi.json` and the generated Flutte
    make generate-flutter-client
    ```
 
-   Requires `openapi-generator` (`brew install openapi-generator`).
+   Requires Docker: the generator runs from the pinned `openapitools/openapi-generator-cli` image (see `OPENAPI_GENERATOR_VERSION` in the Makefile).
 
 4. **Commit both** `openapi.json` and the regenerated files in `app/packages/assistant_api/` together with the API change in the same commit (or a follow-up commit in the same PR).
 
