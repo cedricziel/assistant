@@ -1,12 +1,30 @@
 //! Shared helpers used across multiple interface adapters.
 
-use assistant_core::clock::{Clock, SystemClock};
+use std::num::NonZeroUsize;
 use std::time::Duration;
+
+use assistant_core::clock::{Clock, SystemClock};
+use lru::LruCache;
 
 /// Minimum reconnect delay.
 pub const BACKOFF_MIN: Duration = Duration::from_secs(1);
 /// Maximum reconnect delay.
 pub const BACKOFF_MAX: Duration = Duration::from_secs(60);
+
+/// Maximum entries in the per-adapter maps that track in-flight state
+/// (pending reactions, seeded threads). Entries that never see their matching
+/// `on_turn_start` are evicted least-recently-used first.
+pub const PENDING_CAPACITY: usize = 1024;
+
+const PENDING_CAPACITY_NZ: NonZeroUsize = match NonZeroUsize::new(PENDING_CAPACITY) {
+    Some(n) => n,
+    None => unreachable!(),
+};
+
+/// A string-keyed LRU cache sized to [`PENDING_CAPACITY`].
+pub fn pending_cache<V>() -> LruCache<String, V> {
+    LruCache::new(PENDING_CAPACITY_NZ)
+}
 
 /// Sleep for the current backoff duration (with ±10 % jitter), then double it.
 ///
@@ -32,6 +50,20 @@ pub async fn sleep_backoff(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_cache_evicts_least_recently_used_beyond_capacity() {
+        let mut cache = pending_cache::<usize>();
+        for i in 0..PENDING_CAPACITY + 5 {
+            cache.put(format!("k{i}"), i);
+        }
+        assert_eq!(cache.len(), PENDING_CAPACITY, "never exceeds capacity");
+        assert!(cache.peek("k0").is_none(), "oldest entry evicted");
+        assert!(
+            cache.peek(&format!("k{}", PENDING_CAPACITY + 4)).is_some(),
+            "newest entry kept"
+        );
+    }
 
     #[test]
     fn rand_jitter_in_unit_interval() {

@@ -6,7 +6,6 @@
 //! `futures::Stream`.
 
 use assistant_core::clock::{Clock, SystemClock};
-use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -33,7 +32,7 @@ use uuid::Uuid;
 use super::client::SlackApiClient;
 use super::config::SlackConfigExt;
 
-use crate::common::{BACKOFF_MIN, sleep_backoff};
+use crate::common::{BACKOFF_MIN, pending_cache, sleep_backoff};
 
 /// Maximum audio file size downloaded for transcription (25 MB — Whisper API limit).
 /// LRU capacity for the in-process cache of Slack thread roots that the bot
@@ -58,7 +57,7 @@ pub struct SlackAdapter {
     /// Optional storage layer for seeding thread history on first turn.
     storage: Option<Arc<StorageLayer>>,
     /// Set of `platform_id`s for which history has already been seeded.
-    seeded_keys: Arc<Mutex<HashSet<String>>>,
+    seeded_keys: Arc<Mutex<LruCache<String, ()>>>,
     /// Optional audio transcription provider for voice messages.
     transcription: Option<Arc<dyn TranscriptionProvider>>,
     /// BCP-47 language hint passed to the transcription provider.
@@ -82,10 +81,20 @@ impl SlackAdapter {
             stop_tx,
             stop_rx,
             storage: None,
-            seeded_keys: Arc::new(Mutex::new(HashSet::new())),
+            seeded_keys: Arc::new(Mutex::new(pending_cache())),
             transcription: None,
             transcription_language: None,
         })
+    }
+
+    /// Record that `key` has been seen; `true` when this is the first time
+    /// (or the entry was evicted), meaning history should be seeded.
+    async fn mark_seeded(&self, key: &str) -> bool {
+        self.seeded_keys
+            .lock()
+            .await
+            .put(key.to_string(), ())
+            .is_none()
     }
 
     /// Attach a storage layer to enable thread-history seeding on first turn.
@@ -559,11 +568,7 @@ impl ChannelAdapter for SlackAdapter {
         // Seed thread history into the conversation store on first touch.
         if let Some(storage) = &self.storage {
             let platform_id = user.platform_id.clone();
-            let already_seeded = {
-                let mut seeded = self.seeded_keys.lock().await;
-                !seeded.insert(platform_id.clone())
-            };
-            if !already_seeded {
+            if self.mark_seeded(&platform_id).await {
                 let thread_key = thread_ts.as_deref().unwrap_or("").to_string();
                 if !channel.is_empty() && !thread_key.is_empty() {
                     match self
@@ -966,10 +971,27 @@ mod tests {
             stop_tx,
             stop_rx,
             storage: None,
-            seeded_keys: Arc::new(Mutex::new(Default::default())),
+            seeded_keys: Arc::new(Mutex::new(pending_cache())),
             transcription: None,
             transcription_language: None,
         }
+    }
+
+    #[tokio::test]
+    async fn seeded_keys_stay_bounded() {
+        use crate::common::PENDING_CAPACITY;
+
+        let server = MockServer::start().await;
+        let adapter = make_adapter(&server);
+        assert!(adapter.mark_seeded("C1/1.0").await, "first sighting seeds");
+        assert!(
+            !adapter.mark_seeded("C1/1.0").await,
+            "second sighting skips"
+        );
+        for i in 0..PENDING_CAPACITY + 5 {
+            adapter.mark_seeded(&format!("C/{i}")).await;
+        }
+        assert_eq!(adapter.seeded_keys.lock().await.len(), PENDING_CAPACITY);
     }
 
     fn make_msg(channel: &str, ts: &str) -> ChannelMessage {

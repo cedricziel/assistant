@@ -7,7 +7,6 @@
 //! HMAC-SHA256 signing logic is unchanged — it lives in `signing.rs`.
 
 use assistant_core::clock::{Clock, SystemClock};
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,9 +25,12 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use futures::stream::Stream;
+use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+use crate::common::pending_cache;
 
 use super::config::NextcloudConfigExt;
 use super::replay::{REPLAY_CAPACITY, REPLAY_WINDOW, ReplayGuard};
@@ -50,7 +52,7 @@ pub struct NextcloudAdapter {
     stop_rx: tokio::sync::watch::Receiver<bool>,
     /// Stores pending ⏳ message IDs keyed by conversation_token.
     /// Used to remove the hourglass reaction in on_turn_start.
-    pending_message_ids: Arc<Mutex<HashMap<String, String>>>,
+    pending_message_ids: Arc<Mutex<LruCache<String, String>>>,
     /// Optional audio transcription provider for voice messages.
     transcription: Option<Arc<dyn TranscriptionProvider>>,
     /// BCP-47 language hint passed to the transcription provider.
@@ -74,7 +76,7 @@ impl NextcloudAdapter {
             secret,
             stop_tx,
             stop_rx,
-            pending_message_ids: Arc::new(Mutex::new(HashMap::new())),
+            pending_message_ids: Arc::new(Mutex::new(pending_cache())),
             transcription: None,
             transcription_language: None,
             serve_failure: ServeFailure::default(),
@@ -286,7 +288,7 @@ impl ChannelAdapter for NextcloudAdapter {
         self.pending_message_ids
             .lock()
             .await
-            .insert(conversation_token.clone(), message_id.clone());
+            .put(conversation_token.clone(), message_id.clone());
         // Add ⏳ reaction (best-effort; Talk < 17 returns 404, which we ignore).
         if let Err(e) = http_add_reaction(
             &self.server_url,
@@ -311,7 +313,7 @@ impl ChannelAdapter for NextcloudAdapter {
             .pending_message_ids
             .lock()
             .await
-            .remove(conversation_token);
+            .pop(conversation_token);
         if let Some(mid) = message_id {
             let _ = http_remove_reaction(
                 &self.server_url,
@@ -969,6 +971,41 @@ mod tests {
         let headers = sign_headers(SECRET, body_str);
         let status = webhook_handler(State(state), headers, Bytes::from(body_str)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn pending_message_ids_stay_bounded_when_turns_never_start() {
+        use crate::common::PENDING_CAPACITY;
+
+        let adapter = NextcloudAdapter::new(NextcloudConfig {
+            server_url: Some("http://127.0.0.1:1".to_string()),
+            secret: Some(SECRET.into()),
+            ..Default::default()
+        })
+        .unwrap();
+        for i in 0..PENDING_CAPACITY + 5 {
+            let msg = ChannelMessage {
+                channel_type: ChannelType::Nextcloud,
+                platform_message_id: Some(i.to_string()),
+                sender: ChannelUser {
+                    platform_id: format!("room-{i}"),
+                    display_name: None,
+                },
+                content: ChannelContent::Text("hi".into()),
+                thread_id: None,
+                timestamp: SystemClock.now(),
+                metadata: Default::default(),
+            };
+            adapter.on_message_received(&msg).await.unwrap();
+        }
+        let pending = adapter.pending_message_ids.lock().await;
+        assert_eq!(pending.len(), PENDING_CAPACITY);
+        assert!(pending.peek("room-0").is_none(), "oldest entry evicted");
+        assert!(
+            pending
+                .peek(&format!("room-{}", PENDING_CAPACITY + 4))
+                .is_some()
+        );
     }
 
     #[tokio::test]

@@ -7,7 +7,7 @@
 //! Auto-accepts room invitations via `POST /join/<room_id>`.
 
 use assistant_core::clock::{Clock, SystemClock};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -21,9 +21,12 @@ use assistant_core::{
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest};
 use async_trait::async_trait;
 use futures::stream::Stream;
+use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+use crate::common::pending_cache;
 
 use super::client::MatrixClient;
 
@@ -49,7 +52,47 @@ pub struct MatrixAdapter {
     /// Stores the reaction event IDs for pending ⏳ hourglass reactions,
     /// keyed by room_id.  A VecDeque is used so that multiple queued messages
     /// in the same room are redacted in FIFO order without losing track.
-    pending_reactions: Arc<Mutex<HashMap<String, VecDeque<String>>>>,
+    pending_reactions: Arc<Mutex<PendingReactions>>,
+}
+
+/// Most ⏳ reactions remembered per room before the oldest is dropped.
+const MAX_PENDING_PER_ROOM: usize = 64;
+
+/// Reaction event IDs awaiting redaction, per room, oldest first.
+///
+/// Bounded in both dimensions: rooms are LRU-evicted and each room's queue
+/// drops its oldest entry once full, so turns that never reach
+/// `on_turn_start` cannot grow it without limit.
+struct PendingReactions {
+    rooms: LruCache<String, VecDeque<String>>,
+}
+
+impl PendingReactions {
+    fn new() -> Self {
+        Self {
+            rooms: pending_cache(),
+        }
+    }
+
+    fn push(&mut self, room_id: String, reaction_id: String) {
+        if let Some(queue) = self.rooms.get_mut(&room_id) {
+            if queue.len() >= MAX_PENDING_PER_ROOM {
+                queue.pop_front();
+            }
+            queue.push_back(reaction_id);
+        } else {
+            self.rooms.put(room_id, VecDeque::from([reaction_id]));
+        }
+    }
+
+    fn pop(&mut self, room_id: &str) -> Option<String> {
+        self.rooms.get_mut(room_id).and_then(|q| q.pop_front())
+    }
+
+    #[cfg(test)]
+    fn rooms(&self) -> usize {
+        self.rooms.len()
+    }
 }
 
 impl MatrixAdapter {
@@ -73,7 +116,7 @@ impl MatrixAdapter {
             stop_rx,
             transcription: None,
             transcription_language: None,
-            pending_reactions: Arc::new(Mutex::new(HashMap::new())),
+            pending_reactions: Arc::new(Mutex::new(PendingReactions::new())),
         }
     }
 
@@ -467,12 +510,7 @@ impl ChannelAdapter for MatrixAdapter {
         tokio::spawn(async move {
             match client.add_reaction(&room_id, &event_id, "⏳").await {
                 Ok(reaction_id) => {
-                    pending
-                        .lock()
-                        .await
-                        .entry(room_id)
-                        .or_default()
-                        .push_back(reaction_id);
+                    pending.lock().await.push(room_id, reaction_id);
                 }
                 Err(e) => {
                     debug!(error = %e, "matrix: failed to add hourglass reaction (best-effort)");
@@ -485,12 +523,7 @@ impl ChannelAdapter for MatrixAdapter {
     /// Redact ⏳ (FIFO) and send typing indicator when a turn starts.
     async fn on_turn_start(&self, user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
         let room_id = &user.platform_id;
-        let reaction_id = self
-            .pending_reactions
-            .lock()
-            .await
-            .get_mut(room_id)
-            .and_then(|q| q.pop_front());
+        let reaction_id = self.pending_reactions.lock().await.pop(room_id);
         if let Some(rid) = reaction_id
             && let Err(e) = self.client.redact_event(room_id, &rid).await
         {
@@ -589,6 +622,27 @@ mod tests {
 
     use super::*;
     use crate::matrix::client::MatrixClient;
+
+    #[test]
+    fn pending_reactions_bound_rooms_and_queue_depth() {
+        use crate::common::PENDING_CAPACITY;
+
+        let mut pending = PendingReactions::new();
+        for i in 0..PENDING_CAPACITY + 5 {
+            pending.push(format!("!room{i}"), format!("r{i}"));
+        }
+        assert_eq!(pending.rooms(), PENDING_CAPACITY, "rooms are LRU-bounded");
+        assert_eq!(pending.pop("!room0"), None, "oldest room evicted");
+
+        for i in 0..MAX_PENDING_PER_ROOM + 3 {
+            pending.push("!busy".to_string(), format!("b{i}"));
+        }
+        assert_eq!(
+            pending.pop("!busy").as_deref(),
+            Some("b3"),
+            "oldest dropped"
+        );
+    }
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
