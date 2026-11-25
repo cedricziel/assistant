@@ -23,10 +23,43 @@ use tracing::warn;
 use uuid::Uuid;
 
 use assistant_core::types::conversation::MessageRole;
-use assistant_storage::{ConversationEvent, ConversationStore, SqliteConversationStore};
+use assistant_storage::{
+    AttachmentStore as _, ConversationEvent, ConversationRecord, ConversationStore,
+    SqliteConversationStore,
+};
+
+use crate::space::{Access, SpaceCtx};
 
 use super::attachments::AttachmentMetaResponse;
 use super::{ApiState, sse_response};
+
+// -- Caller scoping ----------------------------------------------------------
+
+/// The conversation store for the calling user in the caller's space: every
+/// read through it sees only conversations that user owns.
+pub(crate) async fn caller_store(ctx: &SpaceCtx, state: &ApiState) -> SqliteConversationStore {
+    let agent_id = state.agent_id.read().await.clone();
+    SqliteConversationStore::for_agent(ctx.storage.pool.clone(), agent_id)
+        .with_user_id(ctx.auth.user_id.0.clone())
+}
+
+/// Load a conversation the caller owns, or the `404` response to return.
+///
+/// A conversation owned by someone else is reported as missing, so the
+/// response does not confirm that the id exists.
+pub(crate) async fn owned_conversation(
+    store: &SqliteConversationStore,
+    id: Uuid,
+) -> Result<ConversationRecord, Response> {
+    match store.get_conversation(id).await {
+        Ok(Some(conv)) => Ok(conv),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "Conversation not found").into_response()),
+        Err(e) => {
+            warn!("Failed to load conversation {id}: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
+        }
+    }
+}
 
 // -- Response types ----------------------------------------------------------
 
@@ -121,9 +154,11 @@ pub struct UpdateConversationRequest {
     ),
     security(("bearer_token" = []))
 )]
-pub async fn list_conversations(State(state): State<ApiState>) -> Response {
-    let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteConversationStore::for_agent(state.pool, &agent_id);
+pub async fn list_conversations(ctx: SpaceCtx, State(state): State<ApiState>) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
+    let store = caller_store(&ctx, &state).await;
     match store.list_conversations().await {
         Ok(convs) => {
             let summaries: Vec<ConversationSummary> = convs
@@ -174,11 +209,18 @@ pub struct StreamConversationsQuery {
 /// Sends an initial `snapshot` event with the full conversation list, then
 /// pushes `upserted` and `deleted` delta events as conversations change.
 pub async fn stream_conversations(
+    ctx: SpaceCtx,
     State(state): State<ApiState>,
     axum::extract::Query(query): axum::extract::Query<StreamConversationsQuery>,
 ) -> Response {
-    let broadcaster = state.conversation_broadcaster.clone();
-    let pool = state.pool.clone();
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
+    let broadcaster = state
+        .conversation_broadcasters
+        .for_space(&ctx.org_slug, &ctx.space_slug);
+    let pool = ctx.storage.pool.clone();
+    let caller = ctx.auth.user_id.0.clone();
 
     // D4: subscribe *before* snapshot to avoid race window.
     let mut rx = broadcaster.subscribe();
@@ -192,17 +234,10 @@ pub async fn stream_conversations(
         .to_string();
 
     // Fetch snapshot from DB.
-    let store = SqliteConversationStore::for_agent(pool.clone(), &snapshot_agent_id);
+    let store = SqliteConversationStore::for_agent(pool.clone(), &snapshot_agent_id)
+        .with_user_id(caller.clone());
     let snapshot = match store.list_conversations().await {
-        Ok(convs) => convs
-            .into_iter()
-            .map(|c| ConversationSummary {
-                id: c.id,
-                title: c.title.unwrap_or_else(|| "Untitled".into()),
-                created_at: c.created_at,
-                updated_at: c.updated_at,
-            })
-            .collect::<Vec<_>>(),
+        Ok(convs) => convs,
         Err(e) => {
             warn!("Failed to list conversations for stream snapshot: {e}");
             return (
@@ -216,6 +251,19 @@ pub async fn stream_conversations(
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
     tokio::spawn(async move {
+        // Deleted events carry no owner, so remember which ids belong to the
+        // caller and forward only those.
+        let mut owned: std::collections::HashSet<Uuid> = snapshot.iter().map(|c| c.id).collect();
+        let snapshot: Vec<ConversationSummary> = snapshot
+            .into_iter()
+            .map(|c| ConversationSummary {
+                id: c.id,
+                title: c.title.unwrap_or_else(|| "Untitled".into()),
+                created_at: c.created_at,
+                updated_at: c.updated_at,
+            })
+            .collect();
+
         // Send snapshot.
         let snapshot_json = serde_json::to_string(&snapshot).unwrap_or_default();
         let event = Event::default().event("snapshot").data(snapshot_json);
@@ -229,6 +277,10 @@ pub async fn stream_conversations(
                 Ok(conv_event) => {
                     let sse_event = match &conv_event {
                         ConversationEvent::Upserted(record) => {
+                            if record.user_id.as_deref() != Some(caller.as_str()) {
+                                continue;
+                            }
+                            owned.insert(record.id);
                             // Apply agent filter.
                             if let Some(ref filter) = filter_agent_id
                                 && record.agent_id != *filter
@@ -248,6 +300,9 @@ pub async fn stream_conversations(
                             conversation_id,
                             agent_id,
                         } => {
+                            if !owned.remove(conversation_id) {
+                                continue;
+                            }
                             if let Some(ref filter) = filter_agent_id
                                 && agent_id != filter
                             {
@@ -292,12 +347,18 @@ pub async fn stream_conversations(
     security(("bearer_token" = []))
 )]
 pub async fn create_conversation(
+    ctx: SpaceCtx,
     State(state): State<ApiState>,
     Json(body): Json<CreateConversationRequest>,
 ) -> Response {
-    let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteConversationStore::for_agent(state.pool, &agent_id)
-        .with_broadcaster(state.conversation_broadcaster.clone());
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
+    let store = caller_store(&ctx, &state).await.with_broadcaster(
+        state
+            .conversation_broadcasters
+            .for_space(&ctx.org_slug, &ctx.space_slug),
+    );
     // Pass the title through as-is. Without an explicit title, the row stays
     // NULL-titled and the title-generator worker will fill it in once the
     // conversation has enough material. Display layers coerce NULL → "Untitled".
@@ -337,22 +398,23 @@ pub async fn create_conversation(
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<String>) -> Response {
+pub async fn get_conversation(
+    ctx: SpaceCtx,
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteConversationStore::for_agent(state.pool, &agent_id);
-
-    let conv = match store.get_conversation(conv_id).await {
-        Ok(Some(c)) => c,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
-        Err(e) => {
-            warn!("Failed to get conversation: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-        }
+    let store = caller_store(&ctx, &state).await;
+    let conv = match owned_conversation(&store, conv_id).await {
+        Ok(c) => c,
+        Err(response) => return response,
     };
 
     let history = store.load_history(conv_id).await.unwrap_or_default();
@@ -360,7 +422,12 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
 
     // Pre-load all attachments for this conversation, grouped by message ID.
     let mut attachments_by_msg: HashMap<Uuid, Vec<AttachmentMetaResponse>> = HashMap::new();
-    if let Ok(all_atts) = state.attachment_store.list_for_conversation(conv_id).await {
+    if let Ok(all_atts) = ctx
+        .storage
+        .attachment_store()
+        .list_for_conversation(conv_id)
+        .await
+    {
         for att in all_atts {
             if let Some(msg_id) = att.message_id {
                 attachments_by_msg
@@ -472,17 +539,26 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
     security(("bearer_token" = []))
 )]
 pub async fn delete_conversation(
+    ctx: SpaceCtx,
     State(state): State<ApiState>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteConversationStore::for_agent(state.pool, &agent_id)
-        .with_broadcaster(state.conversation_broadcaster.clone());
+    let store = caller_store(&ctx, &state).await.with_broadcaster(
+        state
+            .conversation_broadcasters
+            .for_space(&ctx.org_slug, &ctx.space_slug),
+    );
+    if let Err(response) = owned_conversation(&store, conv_id).await {
+        return response;
+    }
     match store.delete_conversation(conv_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
@@ -513,18 +589,27 @@ pub async fn delete_conversation(
     security(("bearer_token" = []))
 )]
 pub async fn update_conversation(
+    ctx: SpaceCtx,
     State(state): State<ApiState>,
     Path(id): Path<String>,
     Json(body): Json<UpdateConversationRequest>,
 ) -> Response {
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    let agent_id = state.agent_id.read().await.clone();
-    let store = SqliteConversationStore::for_agent(state.pool, &agent_id)
-        .with_broadcaster(state.conversation_broadcaster.clone());
+    let store = caller_store(&ctx, &state).await.with_broadcaster(
+        state
+            .conversation_broadcasters
+            .for_space(&ctx.org_slug, &ctx.space_slug),
+    );
+    if let Err(response) = owned_conversation(&store, conv_id).await {
+        return response;
+    }
     match store.update_title(conv_id, &body.title).await {
         Ok(()) => {}
         Err(e) if e.to_string().contains("not found") => {
@@ -568,7 +653,6 @@ mod tests {
 
     use assistant_storage::{ConversationStore, SqliteConversationStore};
 
-    use super::super::api_router;
     use super::super::test_helpers::*;
 
     // -- GET /conversations ----------------------------------------------------
@@ -598,7 +682,8 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         store.create_conversation(Some("Alpha")).await.unwrap();
         store.create_conversation(Some("Beta")).await.unwrap();
 
@@ -670,7 +755,8 @@ mod tests {
 
         // DB row holds NULL with the lock cleared so the worker can title later.
         let conv_id: Uuid = json["id"].as_str().unwrap().parse().unwrap();
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
         assert!(conv.title.is_none(), "DB title must be NULL");
         assert!(!conv.title_locked, "title_locked must be false");
@@ -698,7 +784,8 @@ mod tests {
         assert_eq!(json["title"], "Pinned Thread");
 
         let conv_id: Uuid = json["id"].as_str().unwrap().parse().unwrap();
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
         assert_eq!(conv.title.as_deref(), Some("Pinned Thread"));
         assert!(
@@ -714,7 +801,8 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         let conv = store.create_conversation(Some("Test")).await.unwrap();
         let id = conv.id;
 
@@ -779,7 +867,8 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         let conv = store.create_conversation(Some("Bye")).await.unwrap();
         let id = conv.id;
 
@@ -807,7 +896,8 @@ mod tests {
         let server = MockServer::start().await;
         let (state, storage) = test_state(&server.uri()).await;
 
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         let conv = store.create_conversation(Some("Old Name")).await.unwrap();
         let id = conv.id;
 
@@ -936,7 +1026,8 @@ mod tests {
         let (state, storage) = test_state(&server.uri()).await;
 
         // Seed a conversation for "alice".
-        let store_alice = SqliteConversationStore::for_agent(storage.pool.clone(), "alice");
+        let store_alice = SqliteConversationStore::for_agent(storage.pool.clone(), "alice")
+            .with_user_id("system");
         store_alice
             .create_conversation(Some("Alice conv"))
             .await
@@ -945,8 +1036,7 @@ mod tests {
         // Switch the shared agent ID to "alice" at runtime.
         *state.agent_id.write().await = "alice".to_string();
 
-        let resp = api_router()
-            .with_state(state)
+        let resp = app(state)
             .oneshot(
                 Request::builder()
                     .uri("/conversations")
@@ -969,7 +1059,8 @@ mod tests {
         let (state, storage) = event_log_state().await;
 
         // Create a conversation so the snapshot is non-empty.
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
         store.create_conversation(Some("Hello")).await.unwrap();
 
         let resp = app(state)
@@ -1000,9 +1091,11 @@ mod tests {
 
     #[tokio::test]
     async fn stream_conversations_forwards_upserted_delta() {
-        let (state, _storage) = event_log_state().await;
-        let broadcaster = state.conversation_broadcaster.clone();
-        let pool = state.pool.clone();
+        let (state, storage) = event_log_state().await;
+        let broadcaster = state
+            .conversation_broadcasters
+            .for_space("default", "default");
+        let pool = storage.pool.clone();
 
         // Spawn the SSE stream reader in a task.
         let app = app(state);
@@ -1024,8 +1117,9 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Create a conversation through a broadcaster-wired store.
-        let store =
-            SqliteConversationStore::for_agent(pool, "default").with_broadcaster(broadcaster);
+        let store = SqliteConversationStore::for_agent(pool, "default")
+            .with_user_id("system")
+            .with_broadcaster(broadcaster);
         store.create_conversation(Some("Delta Test")).await.unwrap();
 
         // Give the stream a moment to forward the event, then drop broadcaster
@@ -1056,11 +1150,14 @@ mod tests {
         // event MUST be broadcast carrying the new title so any subscribed
         // UI re-renders without a refresh.  The wire-level forward to SSE
         // is covered by `stream_conversations_forwards_upserted_delta`.
-        let (state, _storage) = event_log_state().await;
-        let broadcaster = state.conversation_broadcaster.clone();
-        let pool = state.pool.clone();
+        let (state, storage) = event_log_state().await;
+        let broadcaster = state
+            .conversation_broadcasters
+            .for_space("default", "default");
+        let pool = storage.pool.clone();
 
         let store = SqliteConversationStore::for_agent(pool, "default")
+            .with_user_id("system")
             .with_broadcaster(broadcaster.clone());
         let conv = store.create_conversation(None).await.unwrap();
         let conv_id = conv.id;
@@ -1095,7 +1192,9 @@ mod tests {
         use assistant_storage::ConversationEvent;
 
         let (state, _storage) = event_log_state().await;
-        let broadcaster = state.conversation_broadcaster.clone();
+        let broadcaster = state
+            .conversation_broadcasters
+            .for_space("default", "default");
 
         // Stream filtered to agent "work".
         let app = app(state);
@@ -1121,7 +1220,7 @@ mod tests {
                 agent_id: "default".to_string(),
                 title: Some("DefaultConv".to_string()),
                 title_locked: true,
-                user_id: None,
+                user_id: Some("system".to_string()),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             },
@@ -1134,7 +1233,7 @@ mod tests {
                 agent_id: "work".to_string(),
                 title: Some("WorkConv".to_string()),
                 title_locked: true,
-                user_id: None,
+                user_id: Some("system".to_string()),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             },

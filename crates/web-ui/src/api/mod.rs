@@ -122,12 +122,16 @@ use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
+use crate::space::SpaceResolver;
+
 // -- State -------------------------------------------------------------------
 
 /// Shared state for the conversation API handlers.
 #[derive(Clone)]
 pub struct ApiState {
     pub pool: SqlitePool,
+    /// Resolves each request to the caller's space and its storage.
+    pub spaces: SpaceResolver,
     /// Shared live agent ID — updated when the user switches personas at runtime.
     pub agent_id: Arc<RwLock<String>>,
     pub orchestrator: Arc<dyn AssistantInterface>,
@@ -149,8 +153,8 @@ pub struct ApiState {
     pub command_registry: Arc<CommandRegistry>,
     /// Durable store for slash-command events.
     pub command_event_store: Arc<dyn CommandEventStore>,
-    /// Conversation-list broadcaster for reactive SSE streaming.
-    pub conversation_broadcaster: Arc<dyn ConversationBroadcast>,
+    /// Per-space conversation-list broadcasters for reactive SSE streaming.
+    pub conversation_broadcasters: ConversationBroadcasters,
     /// Per-conversation config overrides (model selection, etc.).
     pub conversation_configs: Arc<RwLock<HashMap<Uuid, ConversationConfig>>>,
     /// Concrete orchestrator reference for command execution.
@@ -164,6 +168,7 @@ pub struct ApiState {
 impl ApiState {
     pub fn new(
         pool: SqlitePool,
+        spaces: SpaceResolver,
         orchestrator: Arc<dyn AssistantInterface>,
         agent_id: Arc<RwLock<String>>,
         orchestrator_ref: Arc<Orchestrator>,
@@ -177,6 +182,7 @@ impl ApiState {
         let default_model = orchestrator_ref.llm.model_name().to_string();
         Self {
             pool,
+            spaces,
             agent_id,
             orchestrator,
             push_dispatcher: None,
@@ -188,7 +194,7 @@ impl ApiState {
             attachment_store,
             command_registry: Arc::new(CommandRegistry::new()),
             command_event_store,
-            conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
+            conversation_broadcasters: ConversationBroadcasters::default(),
             conversation_configs: orchestrator_ref.conversation_configs(),
             orchestrator_ref,
             active_turns: Arc::new(RwLock::new(HashMap::new())),
@@ -209,6 +215,36 @@ impl ApiState {
     pub fn with_tts_provider(mut self, provider: Arc<dyn TtsProvider>) -> Self {
         self.tts_provider = Some(provider);
         self
+    }
+}
+
+/// Conversation-list broadcasters, one per `(org, space)`, so a list stream
+/// only ever sees events from the space it was opened in.
+#[derive(Clone, Default)]
+pub struct ConversationBroadcasters {
+    by_space: Arc<std::sync::Mutex<HashMap<SpaceKey, Arc<dyn ConversationBroadcast>>>>,
+}
+
+/// `(org slug, space slug)`.
+type SpaceKey = (String, String);
+
+impl ConversationBroadcasters {
+    /// The broadcaster for one space, created on first use.
+    pub fn for_space(&self, org_slug: &str, space_slug: &str) -> Arc<dyn ConversationBroadcast> {
+        let mut by_space = self
+            .by_space
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        by_space
+            .entry((org_slug.to_owned(), space_slug.to_owned()))
+            .or_insert_with(|| Arc::new(InMemoryConversationBroadcaster::new()))
+            .clone()
+    }
+}
+
+impl axum::extract::FromRef<ApiState> for SpaceResolver {
+    fn from_ref(state: &ApiState) -> Self {
+        state.spaces.clone()
     }
 }
 

@@ -237,7 +237,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     }
 
     // -- Org-level storage (users, spaces, auth state) --------------------------
-    let pool_factory = assistant_storage::OrgPoolFactory::new(base_path.clone());
+    let pool_factory = Arc::new(assistant_storage::OrgPoolFactory::new(base_path.clone()));
 
     // Resolve the runtime database path. Production hosts use the per-space
     // path under `orgs/default/spaces/default/space.db`; explicit `--db-path`
@@ -261,6 +261,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     }
 
     let storage = Arc::new(StorageLayer::new(&db_path).await?);
+    pool_factory.insert_space_storage("default", "default", storage.clone())?;
 
     let org_storage = Arc::new(
         pool_factory
@@ -268,6 +269,7 @@ async fn run_with_args(args: Args) -> Result<()> {
             .await
             .context("Failed to open org.db")?,
     );
+    let space_resolver = space::SpaceResolver::new(org_storage.clone(), pool_factory.clone());
 
     // -- Load assistant config from ~/.assistant/config.toml --------------------
     let mut config = match assistant_core::default_config_path() {
@@ -652,6 +654,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         let orchestrator_ref = orchestrator.clone();
         let mut s = api::ApiState::new(
             storage.pool.clone(),
+            space_resolver.clone(),
             orchestrator,
             state.agent_id.clone(),
             orchestrator_ref,

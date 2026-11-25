@@ -47,15 +47,20 @@ use assistant_core::auth::AuthContext;
 use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 use assistant_core::types::conversation::Message;
 use assistant_storage::{
-    ConversationStore, PushSubscriptionStore, SqliteConversationStore, StorageLayer, WebhookStore,
+    AttachmentStore as _, CommandEventStore as _, ConversationEventStore as _, ConversationStore,
+    PushSubscriptionStore, SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
+    WebhookStore,
 };
 use assistant_transcription::{TtsProvider, TtsRequest, TtsResult};
 
 use super::push::{PushApiState, push_api_router};
-use super::test_helpers::{body_bytes, event_log_state, multipart_body, tiny_png};
+use super::test_helpers::{
+    TestSpace, body_bytes, event_log_state, multipart_body, resolver_for, tiny_png,
+};
 use super::webhooks::{WebhooksApiState, webhooks_api_router};
 use super::workflows::{WorkflowsApiState, workflows_api_router};
 use super::{ApiState, api_router};
+use crate::space::SpaceResolver;
 
 const ORG_A: &str = "org_a";
 const ORG_B: &str = "org_b";
@@ -177,6 +182,36 @@ impl Resp {
     }
 }
 
+/// Resolver for the topology above. A1 is served from `a1`; the other spaces
+/// get empty storage of their own.
+async fn topology_resolver(a1: &Arc<StorageLayer>) -> SpaceResolver {
+    let empty = || async { Arc::new(StorageLayer::new_in_memory().await.unwrap()) };
+    resolver_for(&[
+        TestSpace {
+            id: A1,
+            org_id: ORG_A,
+            org_slug: "acme",
+            slug: "eng",
+            storage: a1.clone(),
+        },
+        TestSpace {
+            id: A2,
+            org_id: ORG_A,
+            org_slug: "acme",
+            slug: "ops",
+            storage: empty().await,
+        },
+        TestSpace {
+            id: B1,
+            org_id: ORG_B,
+            org_slug: "globex",
+            slug: "eng",
+            storage: empty().await,
+        },
+    ])
+    .await
+}
+
 /// The wired data-plane router plus ids of the rows seeded into space A1.
 struct Tenancy {
     router: Router,
@@ -196,6 +231,7 @@ impl Tenancy {
     async fn build() -> Self {
         let (mut api_state, a1) = event_log_state().await;
         api_state.tts_provider = Some(Arc::new(StubTts));
+        api_state.spaces = topology_resolver(&a1).await;
         let agent_id = Arc::new(RwLock::new("default".to_string()));
 
         let router = api_router()
@@ -254,8 +290,8 @@ impl Tenancy {
         self.alice_message = reply.id;
         owned_by("alice").save_message(&reply).await.unwrap();
 
-        state
-            .event_store
+        self.a1
+            .conversation_event_store()
             .append_event(
                 &self.turn_id.to_string(),
                 &self.alice_conv.to_string(),
@@ -265,13 +301,12 @@ impl Tenancy {
             )
             .await
             .unwrap();
-        state
-            .command_event_store
+        SqliteCommandEventStore::new(self.a1.pool.clone())
             .save_event(self.alice_conv, "model", None, "alice-only ack")
             .await
             .unwrap();
-        state
-            .attachment_store
+        self.a1
+            .attachment_store()
             .store(
                 &AttachmentMeta {
                     id: self.attachment_id,
@@ -426,7 +461,6 @@ fn ids_in(list: &Value) -> Vec<String> {
 // -- Conversations -------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_foreign_org_selecting_a1_is_forbidden() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -474,7 +508,6 @@ async fn conversations_foreign_org_selecting_a1_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_sibling_space_member_selecting_a1_is_forbidden() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -499,7 +532,6 @@ async fn conversations_sibling_space_member_selecting_a1_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_unknown_space_selector_is_forbidden() {
     let t = Tenancy::build().await;
     assert_forbidden(
@@ -510,7 +542,6 @@ async fn conversations_unknown_space_selector_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_without_selector_stay_in_the_callers_own_space() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -533,7 +564,6 @@ async fn conversations_without_selector_stay_in_the_callers_own_space() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_are_private_to_their_owner() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -572,7 +602,6 @@ async fn conversations_are_private_to_their_owner() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_viewer_cannot_write() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
