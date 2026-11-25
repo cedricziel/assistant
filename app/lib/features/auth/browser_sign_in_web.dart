@@ -10,10 +10,11 @@ class _WebBrowserSignIn implements BrowserSignInPlatform {
   static const _key = 'assistant.pendingSignIn';
 
   @override
-  bool get isSupported => true;
+  String? get hostedServerUrl => web.window.location.origin;
 
   @override
-  String get appOrigin => web.window.location.origin;
+  String get redirectUri =>
+      '${web.window.location.origin}$browserSignInCallbackPath';
 
   @override
   void savePending(PendingBrowserSignIn value) {
@@ -32,5 +33,8 @@ class _WebBrowserSignIn implements BrowserSignInPlatform {
   }
 
   @override
-  void navigateTo(Uri url) => web.window.location.assign(url.toString());
+  Future<Uri?> open(Uri url) async {
+    web.window.location.assign(url.toString());
+    return null;
+  }
 }

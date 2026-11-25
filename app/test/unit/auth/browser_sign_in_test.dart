@@ -23,14 +23,23 @@ class _FakeSecureStorage implements SecureKeyValueStorage {
 }
 
 class _FakeBrowser implements BrowserSignInPlatform {
+  _FakeBrowser({
+    this.redirectUri = 'https://assistant.example.com/login/callback',
+    this.respond,
+  });
+
   PendingBrowserSignIn? pending;
   Uri? navigatedTo;
 
-  @override
-  bool get isSupported => true;
+  /// Builds the callback a native sign-in sheet returns; null models the web,
+  /// where the page leaves and nothing comes back.
+  final Uri? Function(Uri authorizeUrl)? respond;
 
   @override
-  String get appOrigin => 'https://assistant.example.com';
+  final String redirectUri;
+
+  @override
+  String? get hostedServerUrl => null;
 
   @override
   void savePending(PendingBrowserSignIn value) => pending = value;
@@ -43,7 +52,10 @@ class _FakeBrowser implements BrowserSignInPlatform {
   }
 
   @override
-  void navigateTo(Uri url) => navigatedTo = url;
+  Future<Uri?> open(Uri url) async {
+    navigatedTo = url;
+    return respond?.call(url);
+  }
 }
 
 class _FakeOAuthService extends OAuthService {
@@ -86,14 +98,14 @@ class _FakeOAuthService extends OAuthService {
 const _server = 'https://assistant.example.com';
 
 Future<(ProviderContainer, _FakeBrowser, _FakeOAuthService, ContextRepository)>
-_setUp() async {
+_setUp({_FakeBrowser? browser}) async {
   SharedPreferences.setMockInitialValues({});
   final prefs = await SharedPreferences.getInstance();
   final repo = ContextRepository(
     prefs: prefs,
     secureStorage: _FakeSecureStorage(),
   );
-  final browser = _FakeBrowser();
+  browser ??= _FakeBrowser();
   final service = _FakeOAuthService(_server);
   final container = ProviderContainer(
     overrides: [
@@ -131,6 +143,53 @@ void main() {
         reason: 'the stored verifier must match the challenge sent',
       );
       expect(pending.state, isNotEmpty);
+    });
+    test('completes in place when the platform returns the callback '
+        '(native sign-in sheet)', () async {
+      const redirect = 'com.cedricziel.assistant:/oauth/callback';
+      final (container, _, service, repo) = await _setUp(
+        browser: _FakeBrowser(
+          redirectUri: redirect,
+          respond: (url) => Uri.parse(redirect).replace(
+            queryParameters: {
+              'code': 'native_code',
+              'state': url.queryParameters['state'],
+            },
+          ),
+        ),
+      );
+
+      await container
+          .read(oauthLoginProvider.notifier)
+          .startBrowserSignIn(serverUrl: _server);
+
+      final state = container.read(oauthLoginProvider);
+      expect(state, isA<OAuthLoginSuccess>());
+      expect(service.registeredRedirectUris, [redirect]);
+      expect(service.exchanged?['code'], 'native_code');
+      expect(service.exchanged?['redirectUri'], redirect);
+      expect(
+        repo.getActiveContextId(),
+        (state as OAuthLoginSuccess).context.id,
+      );
+    });
+
+    test('reports a cancelled native sign-in as an error', () async {
+      final (container, _, service, _) = await _setUp(
+        browser: _FakeBrowser(
+          redirectUri: 'com.cedricziel.assistant:/oauth/callback',
+          respond: (_) => throw const BrowserSignInCancelled(),
+        ),
+      );
+
+      await container
+          .read(oauthLoginProvider.notifier)
+          .startBrowserSignIn(serverUrl: _server);
+
+      final state = container.read(oauthLoginProvider);
+      expect(state, isA<OAuthLoginError>());
+      expect((state as OAuthLoginError).message, contains('cancelled'));
+      expect(service.exchanged, isNull);
     });
   });
 

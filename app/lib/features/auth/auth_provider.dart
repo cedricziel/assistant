@@ -46,67 +46,19 @@ class OAuthLoginNotifier extends Notifier<OAuthLoginState> {
   @override
   OAuthLoginState build() => const OAuthLoginIdle();
 
-  /// Performs a full OAuth2 login:
-  /// 1. Check server supports OAuth2
-  /// 2. Register a dynamic client
-  /// 3. Post credentials (email + password) to get an auth code
-  /// 4. Exchange code for tokens
-  /// 5. Save credentials and activate context
-  Future<void> login({
-    required String serverUrl,
-    required String email,
-    required String password,
-  }) async {
-    state = const OAuthLoginLoading(message: 'Registering client...');
-
-    try {
-      final service = ref.read(oauthServiceFactoryProvider)(serverUrl);
-
-      // We don't pre-check the well-known metadata endpoint: in deployments
-      // behind a reverse-proxy auth layer (e.g. Pangolin), unauthenticated
-      // GETs to `/.well-known/oauth-authorization-server` may be redirected
-      // to the proxy's login page, making the metadata probe a false-negative.
-      // Instead we attempt registration → if the server doesn't support
-      // OAuth2, registration fails with a server error and we surface that.
-
-      // Register a dynamic client.
-      final redirectUri = _redirectUri(serverUrl);
-      final clientId = await service.registerClient(
-        clientName: 'Assistant Flutter App',
-        redirectUris: [redirectUri],
-      );
-
-      // 3. Generate PKCE and login.
-      state = const OAuthLoginLoading(message: 'Authenticating...');
-      final pkce = PkceChallenge.generate();
-      final creds = await service.login(
-        email: email,
-        password: password,
-        clientId: clientId,
-        redirectUri: redirectUri,
-        pkce: pkce,
-      );
-
-      await _activateOAuthContext(serverUrl, creds);
-    } on OAuthException catch (e) {
-      state = OAuthLoginError(e.message);
-    } catch (e) {
-      state = OAuthLoginError('Login failed: $e');
-    }
-  }
-
-  /// Starts a sign-in on the server's own sign-in page (web only).
+  /// Signs in on the server's own sign-in page.
   ///
   /// The server asks for the email, finds the org and shows its password
-  /// form or redirects to the org's identity provider (OIDC). It then sends
-  /// the browser back to [browserSignInCallbackPath], where
-  /// [completeBrowserSignIn] picks up.
+  /// form or redirects to the org's identity provider (OIDC), then redirects
+  /// to the app with an authorization code. On native platforms that
+  /// redirect comes straight back here; on web it lands on
+  /// [browserSignInCallbackPath], where [completeBrowserSignIn] picks up.
   Future<void> startBrowserSignIn({required String serverUrl}) async {
     state = const OAuthLoginLoading(message: 'Registering client...');
     try {
       final browser = ref.read(browserSignInPlatformProvider);
       final service = ref.read(oauthServiceFactoryProvider)(serverUrl);
-      final redirectUri = '${browser.appOrigin}$browserSignInCallbackPath';
+      final redirectUri = browser.redirectUri;
       final clientId = await service.registerClient(
         clientName: 'Assistant Flutter App',
         redirectUris: [redirectUri],
@@ -122,8 +74,8 @@ class OAuthLoginNotifier extends Notifier<OAuthLoginState> {
       );
       browser.savePending(pending);
 
-      state = const OAuthLoginLoading(message: 'Redirecting...');
-      browser.navigateTo(
+      state = const OAuthLoginLoading(message: 'Waiting for sign-in...');
+      final callback = await browser.open(
         service.buildAuthorizationUrl(
           clientId: clientId,
           redirectUri: redirectUri,
@@ -131,6 +83,12 @@ class OAuthLoginNotifier extends Notifier<OAuthLoginState> {
           state: pending.state,
         ),
       );
+      if (callback != null) {
+        await completeBrowserSignIn(callback.queryParameters);
+      }
+    } on BrowserSignInCancelled {
+      ref.read(browserSignInPlatformProvider).takePending();
+      state = const OAuthLoginError('Sign-in was cancelled.');
     } on OAuthException catch (e) {
       state = OAuthLoginError(e.message);
     } catch (e) {
@@ -226,16 +184,6 @@ class OAuthLoginNotifier extends Notifier<OAuthLoginState> {
     } catch (e) {
       state = OAuthLoginError('Connection failed: $e');
     }
-  }
-
-  /// The redirect URI for OAuth2 flows.
-  ///
-  /// Uses `/oauth/complete` — a dedicated endpoint that returns the auth
-  /// code as JSON.  This avoids colliding with `/oauth/callback` which is
-  /// reserved for OIDC IdP callbacks (and expects a `state` parameter).
-  String _redirectUri(String serverUrl) {
-    final uri = Uri.parse(serverUrl);
-    return uri.replace(path: '/oauth/complete').toString();
   }
 }
 

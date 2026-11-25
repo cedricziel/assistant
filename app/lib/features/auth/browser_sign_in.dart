@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 
 import 'browser_sign_in_stub.dart'
     if (dart.library.js_interop) 'browser_sign_in_web.dart'
@@ -55,38 +57,74 @@ class PendingBrowserSignIn {
   }
 }
 
-/// Browser side of the redirect sign-in: where the app runs, how it leaves
-/// for the server's sign-in page, and where the pending sign-in survives
-/// the round trip.
-abstract class BrowserSignInPlatform {
-  /// Whether the app can sign in by redirecting this window (web only).
-  bool get isSupported;
+/// Thrown by [BrowserSignInPlatform.open] when the user closes the sign-in
+/// sheet without finishing.
+class BrowserSignInCancelled implements Exception {
+  const BrowserSignInCancelled();
+}
 
-  /// Origin the app is served from, e.g. `https://assistant.example.com`.
-  String get appOrigin;
+/// Where the server's sign-in page opens and how its redirect comes back.
+///
+/// Web: the app's own window leaves for the server and returns to
+/// [browserSignInCallbackPath], so the pending sign-in waits in storage.
+/// Native: the system sign-in sheet (`ASWebAuthenticationSession`) opens and
+/// hands the redirect back to [open] directly.
+abstract class BrowserSignInPlatform {
+  /// Server the app is served from (web), or null when the user enters one.
+  String? get hostedServerUrl;
+
+  /// Redirect URI registered for this app.
+  String get redirectUri;
 
   void savePending(PendingBrowserSignIn value);
 
   /// Returns the pending sign-in and forgets it, so a code is used once.
   PendingBrowserSignIn? takePending();
 
-  void navigateTo(Uri url);
+  /// Opens the sign-in page at [url]. Returns the redirect the server sent
+  /// back, or null when the page left the app and the redirect arrives at
+  /// [browserSignInCallbackPath] instead. Throws [BrowserSignInCancelled].
+  Future<Uri?> open(Uri url);
 }
 
 final browserSignInPlatformProvider = Provider<BrowserSignInPlatform>((ref) {
   if (kIsWeb) return platform.makeBrowserSignInPlatform();
-  return _UnsupportedBrowserSignIn();
+  return NativeBrowserSignIn();
 });
 
-class _UnsupportedBrowserSignIn implements BrowserSignInPlatform {
+/// Private-use URI scheme for the native redirect (RFC 8252 §7.1).
+const nativeSignInScheme = 'com.cedricziel.assistant';
+
+class NativeBrowserSignIn implements BrowserSignInPlatform {
+  PendingBrowserSignIn? _pending;
+
   @override
-  bool get isSupported => false;
+  String? get hostedServerUrl => null;
+
   @override
-  String get appOrigin => '';
+  String get redirectUri => '$nativeSignInScheme:/oauth/callback';
+
   @override
-  void savePending(PendingBrowserSignIn value) {}
+  void savePending(PendingBrowserSignIn value) => _pending = value;
+
   @override
-  PendingBrowserSignIn? takePending() => null;
+  PendingBrowserSignIn? takePending() {
+    final value = _pending;
+    _pending = null;
+    return value;
+  }
+
   @override
-  void navigateTo(Uri url) {}
+  Future<Uri?> open(Uri url) async {
+    try {
+      final result = await FlutterWebAuth2.authenticate(
+        url: url.toString(),
+        callbackUrlScheme: nativeSignInScheme,
+      );
+      return Uri.parse(result);
+    } on PlatformException catch (e) {
+      if (e.code == 'CANCELED') throw const BrowserSignInCancelled();
+      rethrow;
+    }
+  }
 }
