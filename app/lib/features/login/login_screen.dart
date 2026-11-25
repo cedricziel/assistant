@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../router/app_router.dart';
 import '../../shared/platform/platform.dart';
 import '../auth/auth_provider.dart';
+import '../auth/browser_sign_in.dart';
 
 /// Login mode shown in the UI.
 enum _LoginMode { oauth2, legacyToken }
@@ -39,7 +40,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   _LoginMode _mode = _LoginMode.oauth2;
   bool _bannerDismissed = false;
 
+  BrowserSignInPlatform get _browser => ref.read(browserSignInPlatformProvider);
+
+  /// On web, "Sign in" hands off to the server's sign-in page, which picks
+  /// the org and shows its password form or identity provider (OIDC).
+  bool get _usesBrowserSignIn =>
+      _mode == _LoginMode.oauth2 && _browser.isSupported;
+
   String get _serverUrl {
+    if (_browser.isSupported) return _browser.appOrigin;
     if (isMaterial && _isWebContext) {
       // On web, derive from page origin.
       final base = Uri.base;
@@ -50,6 +59,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   bool get _isWebContext {
+    if (_browser.isSupported) return true;
     try {
       // Uri.base.host is empty in test environments.
       return Uri.base.host.isNotEmpty;
@@ -76,7 +86,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     final loginNotifier = ref.read(oauthLoginProvider.notifier);
 
-    if (_mode == _LoginMode.oauth2) {
+    if (_usesBrowserSignIn) {
+      await loginNotifier.startBrowserSignIn(serverUrl: _serverUrl);
+    } else if (_mode == _LoginMode.oauth2) {
       await loginNotifier.login(
         serverUrl: _serverUrl,
         email: _emailCtrl.text.trim(),
@@ -143,7 +155,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      _mode == _LoginMode.oauth2
+                      _usesBrowserSignIn
+                          ? "You'll continue on your server's sign-in page."
+                          : _mode == _LoginMode.oauth2
                           ? 'Sign in with your email and password.'
                           : 'Enter an API token to connect.',
                       style: Theme.of(context).textTheme.bodyMedium,
@@ -191,7 +205,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const SizedBox(height: 16),
 
                     // Auth mode fields.
-                    if (_mode == _LoginMode.oauth2) ...[
+                    if (_usesBrowserSignIn)
+                      const SizedBox.shrink()
+                    else if (_mode == _LoginMode.oauth2) ...[
                       TextFormField(
                         controller: _emailCtrl,
                         focusNode: _emailFocus,
