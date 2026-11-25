@@ -15,8 +15,10 @@
 //! served from the cache.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use futures::future::BoxFuture;
 use tracing::{debug, warn};
 
 use assistant_skills::{SkillDef, SkillSource, parse_skill_content};
@@ -29,6 +31,10 @@ struct Entry<'a> {
     relative: PathBuf,
     uri: &'a str,
 }
+
+/// Receives the skills a server offers, replacing what it offered before.
+pub type SkillPublisher =
+    Arc<dyn Fn(String, Vec<SkillDef>) -> BoxFuture<'static, ()> + Send + Sync>;
 
 /// Lists, verifies and caches the skills of MCP servers.
 pub struct McpSkillSource {
@@ -74,6 +80,22 @@ impl McpSkillSource {
             }
         }
         offered
+    }
+
+    /// Publish what each server offers: its verified skills, or none when it
+    /// is not connected, so a server that went away takes its skills along.
+    pub async fn sync(
+        &self,
+        servers: &[(String, Option<Arc<McpClient>>)],
+        publish: &SkillPublisher,
+    ) {
+        for (server, client) in servers {
+            let skills = match client {
+                Some(client) => self.skills(client).await,
+                None => Vec::new(),
+            };
+            publish(server.clone(), skills).await;
+        }
     }
 
     async fn verified(&self, client: &McpClient, skill: &Skill) -> Result<SkillDef> {

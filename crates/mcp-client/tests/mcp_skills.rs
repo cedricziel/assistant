@@ -218,3 +218,39 @@ async fn a_cached_file_that_was_altered_on_disk_is_fetched_again() {
         "the file is restored from the server"
     );
 }
+
+#[tokio::test]
+async fn sync_publishes_each_servers_skills_and_empties_a_disconnected_one() {
+    use std::sync::{Arc, Mutex};
+
+    use assistant_mcp_client::skills::SkillPublisher;
+
+    let server = SkillServer::new();
+    server.publish("deploy", "Ship it", "Run it.", &[]);
+    let client = Arc::new(server.connect("acme").await);
+    let base = tempfile::tempdir().unwrap();
+    let published: Arc<Mutex<Vec<(String, Vec<String>)>>> = Arc::default();
+    let sink = published.clone();
+    let publish: SkillPublisher = Arc::new(move |server, skills| {
+        let sink = sink.clone();
+        Box::pin(async move {
+            let names = skills.into_iter().map(|s| s.name).collect();
+            sink.lock().unwrap().push((server, names));
+        })
+    });
+
+    McpSkillSource::new(base.path())
+        .sync(
+            &[("acme".into(), Some(client)), ("gone".into(), None)],
+            &publish,
+        )
+        .await;
+
+    assert_eq!(
+        *published.lock().unwrap(),
+        vec![
+            ("acme".to_string(), vec!["acme__deploy".to_string()]),
+            ("gone".to_string(), Vec::new()),
+        ]
+    );
+}

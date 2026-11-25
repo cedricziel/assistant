@@ -117,6 +117,16 @@ pub async fn bootstrap(
             Arc::new(move |h| register.register_ambient_tool(h)),
             Arc::new(move |prefix| unregister.unregister_tools_by_prefix(prefix)),
         );
+
+        // Offer the skills servers publish, in every space.
+        let skills = runtimes.clone();
+        mcp_manager.spawn_skill_sync(
+            assistant_mcp_client::McpSkillSource::new(pools.base_dir()),
+            Arc::new(move |server, published| {
+                let skills = skills.clone();
+                Box::pin(async move { skills.set_ambient_skills(&server, published).await })
+            }),
+        );
     }
 
     let default_space = runtimes
