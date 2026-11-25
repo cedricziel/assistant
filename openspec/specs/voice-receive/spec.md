@@ -1,4 +1,10 @@
-## ADDED Requirements
+# voice-receive
+
+## Purpose
+
+Lets users hear assistant replies as speech: on-demand synthesis of assistant messages, tool-synthesized audio, and the server advertising which voice features are available.
+
+## Requirements
 
 ### Requirement: Assistant messages have a play button for on-demand TTS
 
