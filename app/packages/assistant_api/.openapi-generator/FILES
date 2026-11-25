@@ -30,6 +30,10 @@ doc/BindingsApi.md
 doc/CancelTaskRequest.md
 doc/CapabilitiesApi.md
 doc/CatalogApi.md
+doc/CatalogAuthKindResponse.md
+doc/CatalogAuthResponse.md
+doc/CatalogEntryListResponse.md
+doc/CatalogEntrySummary.md
 doc/CatalogItemResponse.md
 doc/ChangePasswordRequest.md
 doc/ClientCredentialsOAuthFlow.md
@@ -63,6 +67,7 @@ doc/ErrorBody.md
 doc/ExecuteCommandRequest.md
 doc/HttpAuthSecurityScheme.md
 doc/ImplicitOAuthFlow.md
+doc/IntegrationsApi.md
 doc/InterfaceInstanceResponse.md
 doc/InterfacesApi.md
 doc/ListTaskPushNotificationConfigsResponse.md
@@ -184,6 +189,7 @@ lib/src/api/capabilities_api.dart
 lib/src/api/catalog_api.dart
 lib/src/api/commands_api.dart
 lib/src/api/conversations_api.dart
+lib/src/api/integrations_api.dart
 lib/src/api/interfaces_api.dart
 lib/src/api/members_api.dart
 lib/src/api/messages_api.dart
@@ -227,6 +233,10 @@ lib/src/model/authentication_info.dart
 lib/src/model/authorization_code_o_auth_flow.dart
 lib/src/model/binding_response.dart
 lib/src/model/cancel_task_request.dart
+lib/src/model/catalog_auth_kind_response.dart
+lib/src/model/catalog_auth_response.dart
+lib/src/model/catalog_entry_list_response.dart
+lib/src/model/catalog_entry_summary.dart
 lib/src/model/catalog_item_response.dart
 lib/src/model/change_password_request.dart
 lib/src/model/client_credentials_o_auth_flow.dart

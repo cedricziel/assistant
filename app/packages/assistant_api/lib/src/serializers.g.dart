@@ -28,6 +28,10 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(AuthorizationCodeOAuthFlow.serializer)
       ..add(BindingResponse.serializer)
       ..add(CancelTaskRequest.serializer)
+      ..add(CatalogAuthKindResponse.serializer)
+      ..add(CatalogAuthResponse.serializer)
+      ..add(CatalogEntryListResponse.serializer)
+      ..add(CatalogEntrySummary.serializer)
       ..add(CatalogItemResponse.serializer)
       ..add(ChangePasswordRequest.serializer)
       ..add(ClientCredentialsOAuthFlow.serializer)
@@ -176,6 +180,10 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(ToolCallSummary)]),
           () => ListBuilder<ToolCallSummary>())
       ..addBuilderFactory(
+          const FullType(
+              BuiltList, const [const FullType(CatalogEntrySummary)]),
+          () => ListBuilder<CatalogEntrySummary>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(CommandArgResponse)]),
           () => ListBuilder<CommandArgResponse>())
       ..addBuilderFactory(
@@ -184,6 +192,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
           () => ListBuilder<PersonaFileSlot>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

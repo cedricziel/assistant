@@ -111,6 +111,8 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**getCatalogEntry**](doc/IntegrationsApi.md#getcatalogentry) | **GET** /api/integrations/catalog/{id} | &#x60;GET /api/integrations/catalog/{id}&#x60; — get one catalog entry.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**listCatalogEntries**](doc/IntegrationsApi.md#listcatalogentries) | **GET** /api/integrations/catalog | &#x60;GET /api/integrations/catalog&#x60; — search the integrations catalog.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**createInterface**](doc/InterfacesApi.md#createinterface) | **POST** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — create an interface instance.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**deleteInterface**](doc/InterfacesApi.md#deleteinterface) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}&#x60; — delete an interface instance.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**listInterfaces**](doc/InterfacesApi.md#listinterfaces) | **GET** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — list interface instances.
@@ -220,6 +222,10 @@ Class | Method | HTTP request | Description
  - [AuthorizationCodeOAuthFlow](doc/AuthorizationCodeOAuthFlow.md)
  - [BindingResponse](doc/BindingResponse.md)
  - [CancelTaskRequest](doc/CancelTaskRequest.md)
+ - [CatalogAuthKindResponse](doc/CatalogAuthKindResponse.md)
+ - [CatalogAuthResponse](doc/CatalogAuthResponse.md)
+ - [CatalogEntryListResponse](doc/CatalogEntryListResponse.md)
+ - [CatalogEntrySummary](doc/CatalogEntrySummary.md)
  - [CatalogItemResponse](doc/CatalogItemResponse.md)
  - [ChangePasswordRequest](doc/ChangePasswordRequest.md)
  - [ClientCredentialsOAuthFlow](doc/ClientCredentialsOAuthFlow.md)
