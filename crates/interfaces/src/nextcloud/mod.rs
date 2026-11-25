@@ -4,6 +4,7 @@
 
 mod adapter;
 pub(crate) mod config;
+mod replay;
 pub mod runner;
 mod signing;
 mod tools;
