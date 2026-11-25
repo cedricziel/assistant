@@ -18,10 +18,12 @@
 //! - `crates/interface-cli/src/cmd_migrate.rs` — `assistant migrate
 //!   finalize` resolves the same `space.db` path to overwrite it from a
 //!   live legacy database during recovery.
-//! - `crates/web-ui/src/main.rs` — `assistant webui serve`. Uses the
-//!   factory for both `org_db_path` (`OrgStorageLayer::new`) and
-//!   `space_db_path("default", "default")` for `StorageLayer::new`.
-//!   Like the CLI it honors `--db-path` only as a deprecated dev override.
+//! - `crates/web-ui/src/lib.rs` — `assistant webui serve`. Opens `org.db`
+//!   through the factory and resolves every data-plane request to a space
+//!   database through [`OrgPoolFactory::space_storage`]. Until the runtime is
+//!   space-aware it also opens the default space's pool for the orchestrator
+//!   and workflow runner. The install root is always `~/.assistant`; there is
+//!   no path override.
 //! - `crates/storage/src/migration.rs` — the `migrate_database` step of
 //!   the legacy-to-multi-org migration writes the initial `space.db` at
 //!   the path resolved by these helpers.
