@@ -76,31 +76,27 @@ class CatalogEntryTile extends StatelessWidget {
   }
 }
 
+const _iconSize = 40.0;
+
 /// Entry icon loaded from `icon_url`, falling back to the name's initial.
 class CatalogEntryIcon extends StatelessWidget {
-  const CatalogEntryIcon({
-    super.key,
-    required this.name,
-    this.iconUrl,
-    this.size = 40,
-  });
+  const CatalogEntryIcon({super.key, required this.name, this.iconUrl});
 
   final String name;
   final String? iconUrl;
-  final double size;
 
   @override
   Widget build(BuildContext context) {
     final url = iconUrl;
-    final fallback = _InitialAvatar(name: name, size: size);
+    final fallback = _InitialAvatar(name: name);
     if (url == null || url.isEmpty) return fallback;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(AssistantRadius.sm),
       child: Image.network(
         url,
-        width: size,
-        height: size,
+        width: _iconSize,
+        height: _iconSize,
         fit: BoxFit.contain,
         errorBuilder: (_, _, _) => fallback,
       ),
@@ -109,10 +105,9 @@ class CatalogEntryIcon extends StatelessWidget {
 }
 
 class _InitialAvatar extends StatelessWidget {
-  const _InitialAvatar({required this.name, required this.size});
+  const _InitialAvatar({required this.name});
 
   final String name;
-  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -120,7 +115,7 @@ class _InitialAvatar extends StatelessWidget {
     final initial = name.isEmpty ? '?' : name.substring(0, 1).toUpperCase();
 
     return SizedBox.square(
-      dimension: size,
+      dimension: _iconSize,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: colors.primaryContainer,

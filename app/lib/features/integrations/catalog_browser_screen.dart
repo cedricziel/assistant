@@ -59,13 +59,10 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
                   ),
                 ),
               ),
-              ...state.when(
-                loading: () => [_centered(const _Loading())],
-                error: (err, _) => [
-                  _centered(_ErrorView(error: '$err', onRetry: notifier.retry)),
-                ],
-                data: (catalog) => _dataSlivers(catalog, gutter, notifier),
-              ),
+              ...switch (state.value) {
+                null => [_centered(const CircularProgressIndicator.adaptive())],
+                final catalog => _dataSlivers(catalog, gutter, notifier),
+              },
             ],
           );
         },
@@ -101,7 +98,7 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
         chips,
         _centered(
           catalog.isLoading
-              ? const _Loading()
+              ? const CircularProgressIndicator.adaptive()
               : _EmptyView(
                   filtered:
                       catalog.query.isNotEmpty || catalog.category != null,
@@ -111,7 +108,6 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
       ];
     }
 
-    final items = catalog.items;
     return [
       chips,
       SliverPadding(
@@ -119,11 +115,11 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
         sliver: SliverOpacity(
           opacity: catalog.isLoading ? 0.5 : 1,
           sliver: SliverList.separated(
-            itemCount: items.length,
+            itemCount: catalog.items.length,
             separatorBuilder: (_, _) =>
                 const SizedBox(height: AssistantSpacing.sm),
             itemBuilder: (context, index) {
-              final entry = items[index];
+              final entry = catalog.items[index];
               return CatalogEntryTile(
                 key: ValueKey(entry.id),
                 entry: entry,
@@ -154,14 +150,6 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
 
   Widget _centered(Widget child) =>
       SliverFillRemaining(hasScrollBody: false, child: Center(child: child));
-}
-
-class _Loading extends StatelessWidget {
-  const _Loading();
-
-  @override
-  Widget build(BuildContext context) =>
-      const CircularProgressIndicator.adaptive();
 }
 
 class _CategoryChips extends StatelessWidget {
@@ -226,38 +214,23 @@ class _EmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Padding(
-      padding: const EdgeInsets.all(AssistantSpacing.xxl),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.hub_outlined, size: 48, color: muted),
-          const SizedBox(height: AssistantSpacing.lg),
-          Text(
-            filtered
-                ? 'No integrations match your search'
-                : 'No integrations available',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: AssistantSpacing.sm),
-          Text(
-            filtered
-                ? 'Try a different search term or category.'
-                : 'The catalog is empty or has not been synced yet. '
-                      'Ask an administrator to check the catalog source.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: muted),
-          ),
-          if (filtered) ...[
-            const SizedBox(height: AssistantSpacing.lg),
-            AdaptiveButton.plain(
+    final colors = Theme.of(context).colorScheme;
+    return _StatusView(
+      icon: Icons.hub_outlined,
+      iconColor: colors.onSurfaceVariant,
+      title: filtered
+          ? 'No integrations match your search'
+          : 'No integrations available',
+      message: filtered
+          ? 'Try a different search term or category.'
+          : 'The catalog is empty or has not been synced yet. '
+                'Ask an administrator to check the catalog source.',
+      action: filtered
+          ? AdaptiveButton.plain(
               onPressed: onClearFilters,
               child: const Text('Clear filters'),
-            ),
-          ],
-        ],
-      ),
+            )
+          : null,
     );
   }
 }
@@ -270,20 +243,61 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    return _StatusView(
+      icon: Icons.error_outline,
+      iconColor: Theme.of(context).colorScheme.error,
+      message: 'Failed to load the catalog: $error',
+      action: AdaptiveButton.filled(
+        onPressed: onRetry,
+        child: const Text('Retry'),
+      ),
+    );
+  }
+}
+
+/// Centered icon, optional title, message and action for empty and error
+/// states.
+class _StatusView extends StatelessWidget {
+  const _StatusView({
+    required this.icon,
+    required this.iconColor,
+    required this.message,
+    this.title,
+    this.action,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String? title;
+  final String message;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return Padding(
       padding: const EdgeInsets.all(AssistantSpacing.xxl),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, size: 48, color: colors.error),
+          Icon(icon, size: 48, color: iconColor),
           const SizedBox(height: AssistantSpacing.lg),
+          if (title != null) ...[
+            Text(
+              title!,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: AssistantSpacing.sm),
+          ],
           Text(
-            'Failed to load the catalog: $error',
+            message,
             textAlign: TextAlign.center,
+            style: title == null ? null : TextStyle(color: muted),
           ),
-          const SizedBox(height: AssistantSpacing.lg),
-          AdaptiveButton.filled(onPressed: onRetry, child: const Text('Retry')),
+          if (action != null) ...[
+            const SizedBox(height: AssistantSpacing.lg),
+            action!,
+          ],
         ],
       ),
     );

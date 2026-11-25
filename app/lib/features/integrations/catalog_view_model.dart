@@ -174,7 +174,6 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
         nextCursor: page.nextCursor,
         categories: _mergeCategories(request.categories, page.items),
         isLoading: false,
-        error: null,
       );
     } catch (e) {
       if (generation != _generation) return state.value ?? request;
@@ -193,7 +192,7 @@ class CatalogViewModel extends AsyncNotifier<CatalogState> {
   }) async {
     final api = ref.read(apiClientProvider);
     if (api == null) throw StateError('Not connected');
-    final query = request.query.trim();
+    final query = request.query;
     final response = await api.integrations.listCatalogEntries(
       q: query.isEmpty ? null : query,
       category: request.category,
