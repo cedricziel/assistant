@@ -12,7 +12,7 @@ use assistant_core::types::agent::{OrgConfig, ServerConfig};
 use assistant_core::types::storage::BusKind;
 use assistant_runtime::Orchestrator;
 use assistant_runtime::{OrgContexts, SpaceRuntimes, orchestrator::ConfirmationCallback};
-use assistant_storage::migration::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
+use assistant_storage::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
 use assistant_storage::{OrgPoolFactory, StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 

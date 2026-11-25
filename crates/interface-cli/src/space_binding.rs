@@ -13,7 +13,7 @@ use assistant_core::identity::{OrgId, SpaceId};
 use assistant_core::store::{InterfaceInstanceStore as _, OrgStore as _, SpaceStore as _};
 use assistant_runtime::{SpaceRef, SpaceRuntimes};
 use assistant_storage::OrgStorageLayer;
-use assistant_storage::migration::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
+use assistant_storage::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
 use assistant_web_ui::install::DefaultSpace;
 
 /// A space named by both its ids and its slugs.

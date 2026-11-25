@@ -122,24 +122,6 @@ pub enum Command {
         #[command(subcommand)]
         command: AccountCommand,
     },
-    /// Manage migrations between assistant data layouts.
-    Migrate {
-        #[command(subcommand)]
-        command: MigrateCommand,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum MigrateCommand {
-    /// Finalize a partially-migrated install: copy live `assistant.db` into
-    /// `space.db`, rename the legacy file to `assistant.db.legacy`, and remove
-    /// `*-shm`/`*-wal` sidecars. Refuses to run when an `assistant`
-    /// orchestrator or webui process is detected unless `--force` is passed.
-    Finalize {
-        /// Skip the running-process check.
-        #[arg(long)]
-        force: bool,
-    },
 }
 
 #[derive(Subcommand)]

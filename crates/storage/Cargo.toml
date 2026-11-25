@@ -21,11 +21,6 @@ serde = { workspace = true }
 cron = { workspace = true }
 
 [dev-dependencies]
-# Auth and backup are dev-only — the migration round-trip test composes the
-# external bootstrap and backup helpers to mirror the production caller.
-# Production code in this crate must NOT depend on either.
-assistant-auth = { path = "../auth" }
-assistant-backup = { path = "../backup" }
 tokio = { workspace = true }
 tempfile = { workspace = true }
 toml = { workspace = true }
