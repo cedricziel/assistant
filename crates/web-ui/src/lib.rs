@@ -2,6 +2,7 @@ mod a2a;
 pub mod api;
 pub(crate) mod audio_store;
 pub mod auth;
+mod cors;
 pub(crate) mod errors;
 mod flutter_assets;
 pub mod install;
@@ -50,7 +51,6 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
-use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use utoipa::OpenApi as _;
@@ -113,11 +113,12 @@ struct Args {
     #[arg(long, env = "ASSISTANT_AGENT")]
     agent: Option<String>,
 
-    /// Allowed CORS origin for API routes (e.g. "http://localhost:3000").
-    /// Defaults to wildcard (`*`) when not set.
-    /// Use `ASSISTANT_WEB_CORS_ORIGIN` env var as an alternative.
-    #[arg(long, env = "ASSISTANT_WEB_CORS_ORIGIN")]
-    cors_origin: Option<String>,
+    /// Allowed CORS origins (e.g. "http://localhost:3000"); repeat the flag or
+    /// comma-separate `ASSISTANT_WEB_CORS_ORIGIN`. When unset, no CORS headers
+    /// are sent and browsers only reach the API same-origin. An invalid origin
+    /// aborts startup.
+    #[arg(long, env = "ASSISTANT_WEB_CORS_ORIGIN", value_delimiter = ',')]
+    cors_origin: Vec<String>,
 
     /// Print the OpenAPI specification as JSON to stdout and exit.
     /// Use this to regenerate the committed `openapi.json` file:
@@ -880,44 +881,15 @@ async fn run_with_args(args: Args) -> Result<()> {
             auth::require_auth,
         ));
 
-    // -- CORS layer for /api/* routes ----------------------------------------
-    //
-    // The Flutter web build runs at the same origin as the server (embedded),
-    // but the macOS desktop app and external clients make cross-origin requests.
-    // We emit permissive CORS headers on all /api/* routes.
-    let cors = if let Some(ref origin) = args.cors_origin {
-        let origin_val = match origin.parse::<axum::http::HeaderValue>() {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("Invalid --cors-origin value {origin:?}: {e}; falling back to wildcard");
-                axum::http::HeaderValue::from_static("*")
-            }
-        };
-        CorsLayer::new()
-            .allow_origin(origin_val)
-            .allow_headers([
-                axum::http::header::AUTHORIZATION,
-                axum::http::header::CONTENT_TYPE,
-                axum::http::header::ACCEPT,
-            ])
-            .allow_methods(Any)
-    } else {
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_headers([
-                axum::http::header::AUTHORIZATION,
-                axum::http::header::CONTENT_TYPE,
-                axum::http::header::ACCEPT,
-            ])
-            .allow_methods(Any)
-    };
+    // -- CORS: same-origin unless origins are configured explicitly ----------
+    let cors = cors::build_layer(&args.cors_origin)?;
 
     let router = public_routes
         .merge(protected_routes)
         // Flutter SPA fallback: serves embedded web assets for all unmatched
         // paths (no auth required — FR-013).
         .fallback(flutter_assets::flutter_handler)
-        .layer(cors)
+        .layer(tower::util::option_layer(cors))
         .layer(axum::middleware::from_fn_with_state(
             rate_limits,
             rate_limit::enforce_ip_limits,
