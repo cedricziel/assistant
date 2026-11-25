@@ -18,12 +18,8 @@
 //!
 //! Every fixture row lives in A1.
 //!
-//! The isolation tests are `#[ignore]`d so the stack stays mergeable: they fail
-//! today, because the routers share one pool and never read `AuthContext`.
-//! Reproduce the red state with
-//! `cargo test -p assistant-web-ui --lib tenancy_tests -- --ignored`. The PRs
-//! that implement resolution and authorization remove the attribute as each
-//! module goes green.
+//! The public workflow webhook ingress has no caller to authenticate; its
+//! space-slug routing is tested next to the handler in `workflows.rs`.
 
 #![cfg(test)]
 
@@ -47,15 +43,20 @@ use assistant_core::auth::AuthContext;
 use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 use assistant_core::types::conversation::Message;
 use assistant_storage::{
-    ConversationStore, PushSubscriptionStore, SqliteConversationStore, StorageLayer, WebhookStore,
+    AttachmentStore as _, CommandEventStore as _, ConversationEventStore as _, ConversationStore,
+    PushSubscriptionStore, SqliteCommandEventStore, SqliteConversationStore, StorageLayer,
+    WebhookStore,
 };
 use assistant_transcription::{TtsProvider, TtsRequest, TtsResult};
 
 use super::push::{PushApiState, push_api_router};
-use super::test_helpers::{body_bytes, event_log_state, multipart_body, tiny_png};
+use super::test_helpers::{
+    TestSpace, body_bytes, event_log_state, multipart_body, resolver_for, tiny_png,
+};
 use super::webhooks::{WebhooksApiState, webhooks_api_router};
 use super::workflows::{WorkflowsApiState, workflows_api_router};
 use super::{ApiState, api_router};
+use crate::space::SpaceResolver;
 
 const ORG_A: &str = "org_a";
 const ORG_B: &str = "org_b";
@@ -177,6 +178,36 @@ impl Resp {
     }
 }
 
+/// Resolver for the topology above. A1 is served from `a1`; the other spaces
+/// get empty storage of their own.
+async fn topology_resolver(a1: &Arc<StorageLayer>) -> SpaceResolver {
+    let empty = || async { Arc::new(StorageLayer::new_in_memory().await.unwrap()) };
+    resolver_for(&[
+        TestSpace {
+            id: A1,
+            org_id: ORG_A,
+            org_slug: "acme",
+            slug: "eng",
+            storage: a1.clone(),
+        },
+        TestSpace {
+            id: A2,
+            org_id: ORG_A,
+            org_slug: "acme",
+            slug: "ops",
+            storage: empty().await,
+        },
+        TestSpace {
+            id: B1,
+            org_id: ORG_B,
+            org_slug: "globex",
+            slug: "eng",
+            storage: empty().await,
+        },
+    ])
+    .await
+}
+
 /// The wired data-plane router plus ids of the rows seeded into space A1.
 struct Tenancy {
     router: Router,
@@ -196,20 +227,21 @@ impl Tenancy {
     async fn build() -> Self {
         let (mut api_state, a1) = event_log_state().await;
         api_state.tts_provider = Some(Arc::new(StubTts));
+        api_state.spaces = topology_resolver(&a1).await;
         let agent_id = Arc::new(RwLock::new("default".to_string()));
 
         let router = api_router()
             .with_state(api_state.clone())
             .merge(webhooks_api_router().with_state(WebhooksApiState {
-                pool: a1.pool.clone(),
+                spaces: api_state.spaces.clone(),
                 agent_id: agent_id.clone(),
             }))
             .merge(workflows_api_router().with_state(WorkflowsApiState {
-                pool: a1.pool.clone(),
+                spaces: api_state.spaces.clone(),
                 agent_id,
             }))
             .merge(push_api_router().with_state(PushApiState {
-                store: Arc::new(a1.push_subscription_store()),
+                spaces: api_state.spaces.clone(),
                 vapid_public_key: Arc::new("vapid-key".to_string()),
             }));
         let principals: HashMap<&'static str, AuthContext> =
@@ -254,8 +286,8 @@ impl Tenancy {
         self.alice_message = reply.id;
         owned_by("alice").save_message(&reply).await.unwrap();
 
-        state
-            .event_store
+        self.a1
+            .conversation_event_store()
             .append_event(
                 &self.turn_id.to_string(),
                 &self.alice_conv.to_string(),
@@ -265,13 +297,12 @@ impl Tenancy {
             )
             .await
             .unwrap();
-        state
-            .command_event_store
+        SqliteCommandEventStore::new(self.a1.pool.clone())
             .save_event(self.alice_conv, "model", None, "alice-only ack")
             .await
             .unwrap();
-        state
-            .attachment_store
+        self.a1
+            .attachment_store()
             .store(
                 &AttachmentMeta {
                     id: self.attachment_id,
@@ -426,7 +457,6 @@ fn ids_in(list: &Value) -> Vec<String> {
 // -- Conversations -------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_foreign_org_selecting_a1_is_forbidden() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -474,7 +504,6 @@ async fn conversations_foreign_org_selecting_a1_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_sibling_space_member_selecting_a1_is_forbidden() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -499,7 +528,6 @@ async fn conversations_sibling_space_member_selecting_a1_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_unknown_space_selector_is_forbidden() {
     let t = Tenancy::build().await;
     assert_forbidden(
@@ -510,7 +538,6 @@ async fn conversations_unknown_space_selector_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_without_selector_stay_in_the_callers_own_space() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -533,7 +560,6 @@ async fn conversations_without_selector_stay_in_the_callers_own_space() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_are_private_to_their_owner() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -572,7 +598,6 @@ async fn conversations_are_private_to_their_owner() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn conversations_viewer_cannot_write() {
     let t = Tenancy::build().await;
     let conv = format!("/conversations/{}", t.alice_conv);
@@ -610,7 +635,6 @@ async fn conversations_viewer_can_read_their_own() {
 // -- Turns ---------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn turns_are_isolated_across_tenants_and_owners() {
     let t = Tenancy::build().await;
     let status = format!("/conversations/{}/turns/{}/status", t.alice_conv, t.turn_id);
@@ -641,7 +665,6 @@ async fn turns_are_isolated_across_tenants_and_owners() {
 // -- Attachments ---------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn attachments_are_isolated_across_tenants_and_owners() {
     let t = Tenancy::build().await;
     let serve = format!("/attachments/{}", t.attachment_id);
@@ -656,7 +679,6 @@ async fn attachments_are_isolated_across_tenants_and_owners() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn attachments_upload_requires_write_in_the_callers_space() {
     let t = Tenancy::build().await;
     let uri = format!("/conversations/{}/attachments", t.alice_conv);
@@ -685,7 +707,6 @@ async fn attachments_upload_requires_write_in_the_callers_space() {
 // -- Audio ---------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn audio_is_isolated_across_tenants_and_owners() {
     let t = Tenancy::build().await;
     let message_audio = format!("/messages/{}/audio", t.alice_message);
@@ -713,7 +734,6 @@ async fn audio_is_isolated_across_tenants_and_owners() {
 // -- Commands ------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn commands_are_isolated_across_tenants_and_owners() {
     let t = Tenancy::build().await;
     let events = format!("/conversations/{}/events", t.alice_conv);
@@ -754,7 +774,6 @@ async fn commands_are_isolated_across_tenants_and_owners() {
 // -- Capabilities --------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn capabilities_require_a_role_in_the_selected_space() {
     let t = Tenancy::build().await;
 
@@ -781,7 +800,6 @@ async fn capabilities_require_a_role_in_the_selected_space() {
 // -- Push ----------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn push_subscriptions_never_cross_spaces() {
     let t = Tenancy::build().await;
     let subscribe = json!({"endpoint": "https://push.test/bob", "p256dh": "k", "auth": "a"});
@@ -824,7 +842,6 @@ async fn push_subscriptions_never_cross_spaces() {
 // -- Webhooks ------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn webhooks_foreign_org_selecting_a1_is_forbidden() {
     let t = Tenancy::build().await;
     let hook = format!("/webhooks/{}", t.webhook_id);
@@ -874,7 +891,6 @@ async fn webhooks_foreign_org_selecting_a1_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn webhooks_without_selector_stay_in_the_callers_own_space() {
     let t = Tenancy::build().await;
     let hook = format!("/webhooks/{}", t.webhook_id);
@@ -905,7 +921,6 @@ async fn webhooks_without_selector_stay_in_the_callers_own_space() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn webhooks_secret_operations_require_space_admin() {
     let t = Tenancy::build().await;
     let hook = format!("/webhooks/{}", t.webhook_id);
@@ -940,7 +955,6 @@ async fn webhooks_secret_operations_require_space_admin() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn webhooks_secret_is_visible_only_to_space_admins() {
     let t = Tenancy::build().await;
     let hook = format!("/webhooks/{}", t.webhook_id);
@@ -967,7 +981,6 @@ async fn webhooks_secret_is_visible_only_to_space_admins() {
 // -- Workflows -----------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn workflows_foreign_org_selecting_a1_is_forbidden() {
     let t = Tenancy::build().await;
     let flow = format!("/workflows/{}", t.workflow_id);
@@ -1004,7 +1017,6 @@ async fn workflows_foreign_org_selecting_a1_is_forbidden() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn workflows_without_selector_stay_in_the_callers_own_space() {
     let t = Tenancy::build().await;
     let flow = format!("/workflows/{}", t.workflow_id);
@@ -1023,7 +1035,6 @@ async fn workflows_without_selector_stay_in_the_callers_own_space() {
 }
 
 #[tokio::test]
-#[ignore = "red until per-request space resolution lands (multi-tenant-data-plane PR 2/3)"]
 async fn workflows_destructive_and_secret_operations_require_space_admin() {
     let t = Tenancy::build().await;
     let flow = format!("/workflows/{}", t.workflow_id);

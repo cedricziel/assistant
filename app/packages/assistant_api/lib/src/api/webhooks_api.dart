@@ -28,6 +28,7 @@ class WebhooksApi {
   ///
   /// Parameters:
   /// * [createWebhookRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -39,6 +40,7 @@ class WebhooksApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WebhookResponse>> createWebhook({
     required CreateWebhookRequest createWebhookRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -50,6 +52,7 @@ class WebhooksApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -130,6 +133,7 @@ class WebhooksApi {
   ///
   /// Parameters:
   /// * [id] - Webhook ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -141,6 +145,7 @@ class WebhooksApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> deleteWebhook({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -155,6 +160,7 @@ class WebhooksApi {
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -186,6 +192,7 @@ class WebhooksApi {
   ///
   /// Parameters:
   /// * [id] - Webhook ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -197,6 +204,7 @@ class WebhooksApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WebhookResponse>> getWebhook({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -211,6 +219,7 @@ class WebhooksApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -270,6 +279,7 @@ class WebhooksApi {
   ///
   ///
   /// Parameters:
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -280,6 +290,7 @@ class WebhooksApi {
   /// Returns a [Future] containing a [Response] with a [BuiltList<WebhookResponse>] as data
   /// Throws [DioException] if API call or serialization fails
   Future<Response<BuiltList<WebhookResponse>>> listWebhooks({
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -291,6 +302,7 @@ class WebhooksApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -352,6 +364,7 @@ class WebhooksApi {
   ///
   /// Parameters:
   /// * [id] - Webhook ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -363,6 +376,7 @@ class WebhooksApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<RotateSecretResponse>> rotateSecret({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -377,6 +391,7 @@ class WebhooksApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -437,6 +452,7 @@ class WebhooksApi {
   ///
   /// Parameters:
   /// * [id] - Webhook ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -448,6 +464,7 @@ class WebhooksApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WebhookResponse>> toggleWebhook({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -462,6 +479,7 @@ class WebhooksApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -523,6 +541,7 @@ class WebhooksApi {
   /// Parameters:
   /// * [id] - Webhook ID
   /// * [updateWebhookRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -535,6 +554,7 @@ class WebhooksApi {
   Future<Response<WebhookResponse>> updateWebhook({
     required String id,
     required UpdateWebhookRequest updateWebhookRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -549,6 +569,7 @@ class WebhooksApi {
     final _options = Options(
       method: r'PATCH',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -629,6 +650,7 @@ class WebhooksApi {
   ///
   /// Parameters:
   /// * [id] - Webhook ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -640,6 +662,7 @@ class WebhooksApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<VerifyWebhookResponse>> verifyWebhook({
     required String id,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -654,6 +677,7 @@ class WebhooksApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{

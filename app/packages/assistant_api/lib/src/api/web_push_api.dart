@@ -24,6 +24,7 @@ class WebPushApi {
   ///
   /// Parameters:
   /// * [subscribeRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -35,6 +36,7 @@ class WebPushApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> subscribe({
     required SubscribeRequest subscribeRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -46,6 +48,7 @@ class WebPushApi {
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -97,6 +100,7 @@ class WebPushApi {
   ///
   /// Parameters:
   /// * [unsubscribeRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -108,6 +112,7 @@ class WebPushApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> unsubscribe({
     required UnsubscribeRequest unsubscribeRequest,
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -119,6 +124,7 @@ class WebPushApi {
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{
@@ -169,6 +175,7 @@ class WebPushApi {
   /// Returns the server&#39;s VAPID public key as a base64url-encoded string. The Flutter PWA uses this as the &#x60;applicationServerKey&#x60; argument to &#x60;PushManager.subscribe()&#x60;.
   ///
   /// Parameters:
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -179,6 +186,7 @@ class WebPushApi {
   /// Returns a [Future] containing a [Response] with a [VapidKeyResponse] as data
   /// Throws [DioException] if API call or serialization fails
   Future<Response<VapidKeyResponse>> vapidPublicKey({
+    String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -190,6 +198,7 @@ class WebPushApi {
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
         ...?headers,
       },
       extra: <String, dynamic>{

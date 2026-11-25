@@ -9,23 +9,33 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{FromRef, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
 
-use assistant_storage::PushSubscriptionStore;
+use assistant_storage::PushSubscriptionStore as _;
 
 use crate::api::internal_error;
+use crate::space::{Access, SpaceCtx, SpaceError, SpaceResolver};
 
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct PushApiState {
-    pub store: Arc<dyn PushSubscriptionStore>,
+    /// Resolves each request to the caller's space, whose database holds
+    /// that space's subscriptions.
+    pub spaces: SpaceResolver,
     /// Base64url-encoded VAPID public key (uncompressed P-256 point).
     pub vapid_public_key: Arc<String>,
+}
+
+impl FromRef<PushApiState> for SpaceResolver {
+    fn from_ref(state: &PushApiState) -> Self {
+        state.spaces.clone()
+    }
 }
 
 // -- Router ------------------------------------------------------------------
@@ -82,10 +92,14 @@ pub struct VapidKeyResponse {
     ),
     security(("bearer_token" = [])),
 )]
-pub async fn vapid_public_key(State(state): State<PushApiState>) -> Json<VapidKeyResponse> {
-    Json(VapidKeyResponse {
+pub async fn vapid_public_key(
+    ctx: SpaceCtx,
+    State(state): State<PushApiState>,
+) -> Result<Json<VapidKeyResponse>, SpaceError> {
+    ctx.require(Access::Read)?;
+    Ok(Json(VapidKeyResponse {
         public_key: (*state.vapid_public_key).clone(),
-    })
+    }))
 }
 
 /// `POST /api/push/subscribe`
@@ -105,14 +119,16 @@ pub async fn vapid_public_key(State(state): State<PushApiState>) -> Json<VapidKe
     security(("bearer_token" = [])),
 )]
 pub async fn subscribe(
-    State(state): State<PushApiState>,
+    ctx: SpaceCtx,
     Json(body): Json<SubscribeRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    state
-        .store
+) -> Result<StatusCode, Response> {
+    ctx.require(Access::Read)
+        .map_err(IntoResponse::into_response)?;
+    ctx.storage
+        .push_subscription_store()
         .upsert(&body.endpoint, &body.p256dh, &body.auth)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e).into_response())?;
 
     Ok(StatusCode::CREATED)
 }
@@ -134,14 +150,16 @@ pub async fn subscribe(
     security(("bearer_token" = [])),
 )]
 pub async fn unsubscribe(
-    State(state): State<PushApiState>,
+    ctx: SpaceCtx,
     Json(body): Json<UnsubscribeRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    state
-        .store
+) -> Result<StatusCode, Response> {
+    ctx.require(Access::Read)
+        .map_err(IntoResponse::into_response)?;
+    ctx.storage
+        .push_subscription_store()
         .delete(&body.endpoint)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e).into_response())?;
 
     Ok(StatusCode::NO_CONTENT)
 }

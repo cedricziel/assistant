@@ -17,7 +17,7 @@ part 'webhook_response.g.dart';
 /// * [eventTypes]
 /// * [id]
 /// * [name]
-/// * [secret]
+/// * [secret] - Signing secret; present only for space admins.
 /// * [updatedAt]
 /// * [url]
 /// * [verifiedAt]
@@ -39,8 +39,9 @@ abstract class WebhookResponse
   @BuiltValueField(wireName: r'name')
   String get name;
 
+  /// Signing secret; present only for space admins.
   @BuiltValueField(wireName: r'secret')
-  String get secret;
+  String? get secret;
 
   @BuiltValueField(wireName: r'updated_at')
   DateTime get updatedAt;
@@ -102,11 +103,13 @@ class _$WebhookResponseSerializer
       object.name,
       specifiedType: const FullType(String),
     );
-    yield r'secret';
-    yield serializers.serialize(
-      object.secret,
-      specifiedType: const FullType(String),
-    );
+    if (object.secret != null) {
+      yield r'secret';
+      yield serializers.serialize(
+        object.secret,
+        specifiedType: const FullType.nullable(String),
+      );
+    }
     yield r'updated_at';
     yield serializers.serialize(
       object.updatedAt,
@@ -187,8 +190,9 @@ class _$WebhookResponseSerializer
         case r'secret':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(String),
-          ) as String;
+            specifiedType: const FullType.nullable(String),
+          ) as String?;
+          if (valueDes == null) continue;
           result.secret = valueDes;
           break;
         case r'updated_at':

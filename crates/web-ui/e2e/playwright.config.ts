@@ -3,7 +3,9 @@ import * as os from "os";
 import * as path from "path";
 
 const runTag = process.env.GITHUB_RUN_ID || `${process.pid}`;
-const dbPath = path.join(os.tmpdir(), `assistant-e2e-test-${runTag}.db`);
+// The server keeps all state under $HOME/.assistant, so a throwaway HOME
+// isolates each run.
+const homeDir = path.join(os.tmpdir(), `assistant-e2e-home-${runTag}`);
 
 /**
  * Playwright configuration for visual regression tests.
@@ -79,8 +81,8 @@ export default defineConfig({
   /* Auto-start the server if not already running */
   webServer: {
     command: process.env.ASSISTANT_BIN
-      ? `rm -f ${dbPath} && ${process.env.ASSISTANT_BIN} webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`
-      : `rm -f ${dbPath} && cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
+      ? `rm -rf ${homeDir} && mkdir -p ${homeDir} && HOME=${homeDir} ${process.env.ASSISTANT_BIN} webui serve --auth-token test-token --listen 127.0.0.1:8787`
+      : `rm -rf ${homeDir} && mkdir -p ${homeDir} && HOME=${homeDir} cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787`,
     url: "http://127.0.0.1:8787/login",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

@@ -19,7 +19,11 @@ use anyhow::{Context, Result};
 use tracing::info;
 
 use assistant_auth::bootstrap::{AdminCredentials, create_admin_user};
-use assistant_storage::migration;
+use assistant_core::clock::{Clock, SystemClock};
+use assistant_core::identity::{OrgId, SpaceId};
+use assistant_core::store::{OrgStore as _, Organization, Space, SpaceStore as _};
+use assistant_storage::{OrgStorageLayer, migration};
+use uuid::Uuid;
 
 /// Outcome of a successful legacy-to-multi-org migration. `None` is returned by
 /// [`ensure_migrated`] when there is nothing to do.
@@ -89,6 +93,73 @@ pub async fn ensure_migrated(base_path: &Path) -> Result<Option<MigrationOutcome
     }))
 }
 
+/// The org and space that a fresh or migrated install starts with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DefaultSpace {
+    pub org_id: OrgId,
+    pub space_id: SpaceId,
+}
+
+/// Return the `default` org and its `default` space, creating whichever is
+/// missing. Migrated installs already have both, so their ids are reused;
+/// fresh installs get new `org_<uuid>` / `spc_<uuid>` rows.
+pub async fn ensure_default_space(org_storage: &OrgStorageLayer) -> Result<DefaultSpace> {
+    let now = SystemClock.now();
+    let org_store = org_storage.org_store();
+    let space_store = org_storage.space_store();
+
+    let org = match org_store
+        .get_org_by_slug(migration::DEFAULT_ORG_SLUG)
+        .await?
+    {
+        Some(org) => org,
+        None => {
+            let org = Organization {
+                id: OrgId::from(format!("org_{}", Uuid::new_v4())),
+                name: "Default Organization".into(),
+                slug: migration::DEFAULT_ORG_SLUG.into(),
+                auth_mode: "password".into(),
+                created_at: now,
+                updated_at: now,
+            };
+            org_store
+                .create_org(&org)
+                .await
+                .context("creating default organization")?;
+            org
+        }
+    };
+
+    let existing = space_store
+        .list_spaces(&org.id)
+        .await?
+        .into_iter()
+        .find(|s| s.slug == migration::DEFAULT_SPACE_SLUG);
+    let space = match existing {
+        Some(space) => space,
+        None => {
+            let space = Space {
+                id: SpaceId::from(format!("spc_{}", Uuid::new_v4())),
+                org_id: org.id.clone(),
+                name: "Default Space".into(),
+                slug: migration::DEFAULT_SPACE_SLUG.into(),
+                created_at: now,
+                updated_at: now,
+            };
+            space_store
+                .create_space(&space)
+                .await
+                .context("creating default space")?;
+            space
+        }
+    };
+
+    Ok(DefaultSpace {
+        org_id: org.id,
+        space_id: space.id,
+    })
+}
+
 /// Write initial admin credentials to a 0600 file. Refuses to overwrite an
 /// existing file or follow symlinks (uses `create_new`).
 pub(crate) fn write_admin_credentials_file(path: &Path, email: &str, password: &str) -> Result<()> {
@@ -127,6 +198,63 @@ pub(crate) fn write_admin_credentials_file(path: &Path, email: &str, password: &
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn ensure_default_space_seeds_an_empty_org_db_once() {
+        let org_storage = assistant_storage::OrgStorageLayer::new_in_memory()
+            .await
+            .unwrap();
+
+        let first = ensure_default_space(&org_storage).await.unwrap();
+        let again = ensure_default_space(&org_storage).await.unwrap();
+
+        assert_eq!(first, again, "a second call must reuse the seeded rows");
+        assert!(first.org_id.0.starts_with("org_"), "{:?}", first.org_id);
+        assert!(first.space_id.0.starts_with("spc_"), "{:?}", first.space_id);
+        let org = org_storage
+            .org_store()
+            .get_org_by_slug("default")
+            .await
+            .unwrap()
+            .expect("default org");
+        assert_eq!(org.id, first.org_id);
+        let spaces = org_storage
+            .space_store()
+            .list_spaces(&org.id)
+            .await
+            .unwrap();
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(
+            (spaces[0].slug.as_str(), &spaces[0].id),
+            ("default", &first.space_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_default_space_reuses_the_migrated_rows() {
+        let dir = TempDir::new().unwrap();
+        let legacy_db = dir.path().join("assistant.db");
+        drop(
+            assistant_storage::StorageLayer::new(&legacy_db)
+                .await
+                .unwrap(),
+        );
+        ensure_migrated(dir.path()).await.unwrap().unwrap();
+        let org_storage = assistant_storage::OrgPoolFactory::new(dir.path())
+            .org_storage()
+            .await
+            .unwrap();
+        let migrated_org = org_storage
+            .org_store()
+            .get_org_by_slug("default")
+            .await
+            .unwrap()
+            .unwrap();
+
+        let seeded = ensure_default_space(&org_storage).await.unwrap();
+
+        assert_eq!(seeded.org_id, migrated_org.id);
+    }
 
     #[tokio::test]
     async fn ensure_migrated_runs_full_pipeline_on_legacy_layout() {

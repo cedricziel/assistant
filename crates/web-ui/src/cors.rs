@@ -4,7 +4,7 @@
 //! the operator lists the allowed origins explicitly.
 
 use anyhow::{Result, bail};
-use axum::http::{HeaderValue, Method, Uri, header};
+use axum::http::{HeaderName, HeaderValue, Method, Uri, header};
 use tower_http::cors::CorsLayer;
 
 /// Build the CORS layer for the configured origins.
@@ -30,7 +30,12 @@ pub(crate) fn build_layer(origins: &[String]) -> Result<Option<CorsLayer>> {
                 Method::DELETE,
                 Method::OPTIONS,
             ])
-            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT]),
+            .allow_headers([
+                header::AUTHORIZATION,
+                header::CONTENT_TYPE,
+                header::ACCEPT,
+                HeaderName::from_static(crate::space::SPACE_HEADER),
+            ]),
     ))
 }
 
@@ -170,5 +175,29 @@ mod tests {
             .unwrap();
         assert_ne!(methods, "*");
         assert!(methods.contains("POST"));
+    }
+
+    #[tokio::test]
+    async fn space_selector_header_is_allowed() {
+        let layer = build_layer(&origins(&["http://localhost:3000"]))
+            .unwrap()
+            .unwrap();
+        let app = Router::new()
+            .route("/api/ping", get(|| async { "ok" }))
+            .layer(layer);
+        let mut request = preflight("http://localhost:3000");
+        request.headers_mut().insert(
+            header::ACCESS_CONTROL_REQUEST_HEADERS,
+            HeaderValue::from_static("x-space-id"),
+        );
+        let resp = app.oneshot(request).await.unwrap();
+        let allowed = resp
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+            .expect("allow-headers")
+            .to_str()
+            .unwrap()
+            .to_ascii_lowercase();
+        assert!(allowed.contains("x-space-id"), "{allowed}");
     }
 }

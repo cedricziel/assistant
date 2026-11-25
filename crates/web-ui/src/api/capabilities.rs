@@ -5,6 +5,8 @@ use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
+use crate::space::{Access, SpaceCtx};
+
 use super::ApiState;
 
 /// Server capability flags.
@@ -27,7 +29,10 @@ pub struct ServerCapabilities {
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_capabilities(State(state): State<ApiState>) -> Response {
+pub async fn get_capabilities(ctx: SpaceCtx, State(state): State<ApiState>) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
     Json(ServerCapabilities {
         voice_send: state.transcription_provider.is_some(),
         voice_receive: state.tts_provider.is_some(),

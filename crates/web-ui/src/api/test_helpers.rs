@@ -20,14 +20,81 @@ use assistant_core::types::agent::AssistantConfig;
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_llm_provider::retry::RetryConfig;
 use assistant_runtime::{CommandRegistry, Orchestrator};
-use assistant_storage::{
-    InMemoryConversationBroadcaster, RunBroadcaster, SkillRegistry, SqliteAttachmentStore,
-    SqliteCommandEventStore, SqliteConversationEventStore, StorageLayer,
-};
+use assistant_storage::{RunBroadcaster, SkillRegistry, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
 
+use assistant_core::identity::{OrgId, SpaceId};
+use assistant_core::store::{OrgStore as _, Organization, Space, SpaceStore as _};
+use assistant_storage::{OrgPoolFactory, OrgStorageLayer};
+
+use crate::space::SpaceResolver;
+
 use super::{ApiState, api_router};
+
+/// One seeded space for [`resolver_for`].
+pub(crate) struct TestSpace {
+    pub id: &'static str,
+    pub org_id: &'static str,
+    pub org_slug: &'static str,
+    pub slug: &'static str,
+    pub storage: Arc<StorageLayer>,
+}
+
+/// Build a [`SpaceResolver`] over an in-memory org database that holds
+/// `spaces`, each served from its preloaded storage (nothing touches disk).
+pub(crate) async fn resolver_for(spaces: &[TestSpace]) -> SpaceResolver {
+    let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
+    let pools = Arc::new(OrgPoolFactory::new("/nonexistent/assistant-test-root"));
+    let now = chrono::DateTime::UNIX_EPOCH;
+    let mut orgs_seen = std::collections::HashSet::new();
+    for space in spaces {
+        if orgs_seen.insert(space.org_id) {
+            org_storage
+                .org_store()
+                .create_org(&Organization {
+                    id: OrgId::from(space.org_id),
+                    name: space.org_slug.into(),
+                    slug: space.org_slug.into(),
+                    auth_mode: "password".into(),
+                    created_at: now,
+                    updated_at: now,
+                })
+                .await
+                .unwrap();
+        }
+        org_storage
+            .space_store()
+            .create_space(&Space {
+                id: SpaceId::from(space.id),
+                org_id: OrgId::from(space.org_id),
+                name: space.slug.into(),
+                slug: space.slug.into(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+        pools
+            .insert_space_storage(space.org_slug, space.slug, space.storage.clone())
+            .unwrap();
+    }
+    SpaceResolver::new(org_storage, pools)
+}
+
+/// Resolver with the single `default`/`default` space that
+/// [`AuthContext::system`](assistant_core::auth::AuthContext::system) holds a
+/// role in, served from `storage`.
+pub(crate) async fn default_resolver(storage: &Arc<StorageLayer>) -> SpaceResolver {
+    resolver_for(&[TestSpace {
+        id: "default",
+        org_id: "default",
+        org_slug: "default",
+        slug: "default",
+        storage: storage.clone(),
+    }])
+    .await
+}
 
 /// Upper bound for `submit_turn` in tests.
 ///
@@ -120,19 +187,16 @@ pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
     let orchestrator_ref = orchestrator.clone();
     let default_model = orchestrator_ref.llm.model_name().to_string();
     let state = ApiState {
-        pool: storage.pool.clone(),
+        spaces: default_resolver(&storage).await,
         agent_id: Arc::new(RwLock::new("default".to_string())),
         orchestrator,
         push_dispatcher: None,
         transcription_provider: None,
         tts_provider: None,
         audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-        event_store: Arc::new(SqliteConversationEventStore::new(storage.pool.clone())),
         run_broadcaster: RunBroadcaster::new(),
-        attachment_store: Arc::new(SqliteAttachmentStore::new(storage.pool.clone())),
         command_registry: Arc::new(CommandRegistry::new()),
-        command_event_store: Arc::new(SqliteCommandEventStore::new(storage.pool.clone())),
-        conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
+        conversation_broadcasters: super::ConversationBroadcasters::default(),
         conversation_configs: Arc::new(RwLock::new(HashMap::new())),
         orchestrator_ref,
         active_turns: Arc::new(RwLock::new(HashMap::new())),
@@ -177,25 +241,34 @@ pub(crate) async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
     let orchestrator_ref = orchestrator.clone();
     let default_model = orchestrator_ref.llm.model_name().to_string();
     let state = ApiState {
-        pool: storage.pool.clone(),
+        spaces: default_resolver(&storage).await,
         agent_id: Arc::new(RwLock::new("default".to_string())),
         orchestrator,
         push_dispatcher: None,
         transcription_provider: None,
         tts_provider: None,
         audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-        event_store: Arc::new(SqliteConversationEventStore::new(storage.pool.clone())),
         run_broadcaster: RunBroadcaster::new(),
-        attachment_store: Arc::new(SqliteAttachmentStore::new(storage.pool.clone())),
         command_registry: Arc::new(CommandRegistry::new()),
-        command_event_store: Arc::new(SqliteCommandEventStore::new(storage.pool.clone())),
-        conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
+        conversation_broadcasters: super::ConversationBroadcasters::default(),
         conversation_configs: Arc::new(RwLock::new(HashMap::new())),
         orchestrator_ref,
         active_turns: Arc::new(RwLock::new(HashMap::new())),
         default_model,
     };
     (state, storage)
+}
+
+/// Create a conversation owned by [`AuthContext::system`](assistant_core::auth::AuthContext::system),
+/// the caller that [`app`] injects, and return its id.
+pub(crate) async fn seed_conversation(storage: &StorageLayer) -> uuid::Uuid {
+    use assistant_storage::ConversationStore as _;
+    assistant_storage::SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+        .with_user_id("system")
+        .create_conversation(None)
+        .await
+        .unwrap()
+        .id
 }
 
 pub(crate) fn app(state: ApiState) -> axum::Router {

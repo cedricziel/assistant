@@ -13,7 +13,7 @@ Method | HTTP request | Description
 
 
 # **getCapabilities**
-> ServerCapabilities getCapabilities()
+> ServerCapabilities getCapabilities(xSpaceId)
 
 `GET /api/capabilities` — return server capability flags.
 
@@ -22,9 +22,10 @@ Method | HTTP request | Description
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getCapabilitiesApi();
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.getCapabilities();
+    final response = api.getCapabilities(xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling CapabilitiesApi->getCapabilities: $e\n');
@@ -32,7 +33,10 @@ try {
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
 

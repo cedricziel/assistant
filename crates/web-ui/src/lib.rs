@@ -17,7 +17,7 @@ use assistant_storage::PersonaStore as _;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,7 +32,6 @@ use assistant_core::{
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
 use assistant_runtime::{Orchestrator, init_tracing};
 use assistant_skills::SkillSource;
-use assistant_storage::StorageLayer;
 use assistant_storage::registry::SkillRegistry;
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
@@ -74,10 +73,6 @@ struct Args {
     /// reachable endpoints. Falls back to `http://{listen}` when unset.
     #[arg(long, env = "ASSISTANT_PUBLIC_URL")]
     public_url: Option<String>,
-
-    /// Path to the SQLite database (defaults to ~/.assistant/assistant.db)
-    #[arg(long)]
-    db_path: Option<PathBuf>,
 
     /// Optional legacy authentication token.  Falls back to ASSISTANT_WEB_TOKEN env var.
     /// When empty or absent the server starts without legacy-token auth.
@@ -193,18 +188,11 @@ async fn run_with_args(args: Args) -> Result<()> {
         &args.rate_limit,
     ));
 
-    // Resolve the install root (default: ~/.assistant). Migration and the
-    // multi-org factory both work against this path; the runtime db_path is
-    // derived from it below.
-    let base_path: PathBuf = match args.db_path.as_ref() {
-        Some(p) => p
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| Path::new(".").to_path_buf()),
-        None => dirs::home_dir()
-            .map(|h| h.join(".assistant"))
-            .context("Cannot determine default base path. Specify --db-path.")?,
-    };
+    // The install root is always ~/.assistant; org.db lives there and every
+    // space database under orgs/{org}/spaces/{space}/.
+    let base_path: PathBuf = dirs::home_dir()
+        .map(|h| h.join(".assistant"))
+        .context("Cannot determine the home directory")?;
 
     // Before opening databases, check for a legacy single-user layout and
     // auto-migrate to the new org/space directory structure. The helper runs
@@ -237,30 +225,18 @@ async fn run_with_args(args: Args) -> Result<()> {
     }
 
     // -- Org-level storage (users, spaces, auth state) --------------------------
-    let pool_factory = assistant_storage::OrgPoolFactory::new(base_path.clone());
+    let pool_factory = Arc::new(assistant_storage::OrgPoolFactory::new(base_path.clone()));
 
-    // Resolve the runtime database path. Production hosts use the per-space
-    // path under `orgs/default/spaces/default/space.db`; explicit `--db-path`
-    // (or `ASSISTANT_DB_PATH`) is preserved as a deprecated dev/test override.
-    let db_path: PathBuf = match args.db_path.as_ref() {
-        Some(p) => {
-            warn!(
-                path = %p.display(),
-                "explicit --db-path bypasses the multi-org per-space layout — \
-                 keep for tests/dev only; production should use the factory-resolved \
-                 space.db at orgs/default/spaces/default/space.db"
-            );
-            p.clone()
-        }
-        None => pool_factory.space_db_path("default", "default"),
-    };
-    if let Some(parent) = db_path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_context(|| format!("creating db parent directory {}", parent.display()))?;
-    }
-
-    let storage = Arc::new(StorageLayer::new(&db_path).await?);
+    // The runtime (orchestrator, tool executor, workflow runner) is not yet
+    // space-aware, so it works against the default space's database. The data
+    // plane reaches that same pool through the factory's per-space cache.
+    let storage = pool_factory
+        .space_storage(
+            assistant_storage::migration::DEFAULT_ORG_SLUG,
+            assistant_storage::migration::DEFAULT_SPACE_SLUG,
+        )
+        .await
+        .context("Failed to open the default space database")?;
 
     let org_storage = Arc::new(
         pool_factory
@@ -268,6 +244,10 @@ async fn run_with_args(args: Args) -> Result<()> {
             .await
             .context("Failed to open org.db")?,
     );
+    let default_space = install::ensure_default_space(&org_storage)
+        .await
+        .context("Failed to seed the default org and space")?;
+    let space_resolver = space::SpaceResolver::new(org_storage.clone(), pool_factory.clone());
 
     // -- Load assistant config from ~/.assistant/config.toml --------------------
     let mut config = match assistant_core::default_config_path() {
@@ -601,7 +581,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let workflows_api_state = api::workflows::WorkflowsApiState {
-        pool: storage.pool.clone(),
+        spaces: space_resolver.clone(),
         agent_id: state.agent_id.clone(),
     };
 
@@ -651,7 +631,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     let api_state = {
         let orchestrator_ref = orchestrator.clone();
         let mut s = api::ApiState::new(
-            storage.pool.clone(),
+            space_resolver.clone(),
             orchestrator,
             state.agent_id.clone(),
             orchestrator_ref,
@@ -680,7 +660,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let webhooks_api_state = api::webhooks::WebhooksApiState {
-        pool: storage.pool.clone(),
+        spaces: space_resolver.clone(),
         agent_id: state.agent_id.clone(),
     };
 
@@ -692,14 +672,14 @@ async fn run_with_args(args: Args) -> Result<()> {
     // An empty key means key generation failed; exposing the endpoints in that
     // state would let clients subscribe but never receive any delivery.
     let push_api_state = (!vapid_public_key.is_empty()).then(|| PushApiState {
-        store: push_store_for_state,
+        spaces: space_resolver.clone(),
         vapid_public_key: Arc::new(vapid_public_key),
     });
 
     // -- JWT + OAuth2 state ---------------------------------------------------
     let jwt_manager = {
         use assistant_auth::jwt::{JwtKeyPair, JwtManager};
-        let jwt_secret_path = db_path.with_file_name("jwt_secret");
+        let jwt_secret_path = base_path.join("jwt_secret");
         let jwt_key_pair = JwtKeyPair::load_or_generate(&jwt_secret_path)
             .context("Failed to load or generate JWT signing key")?;
         Arc::new(JwtManager::new(
@@ -768,12 +748,12 @@ async fn run_with_args(args: Args) -> Result<()> {
     // -- Auth config (JWT + API key + legacy token) --------------------------
     let legacy_context = legacy_token.as_ref().map(|_| {
         use assistant_core::auth::AuthContext;
-        use assistant_core::identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
+        use assistant_core::identity::{Action, ResourceKind, Role, Scope, UserId};
         let mut space_roles = std::collections::HashMap::new();
-        space_roles.insert(SpaceId::from("default"), Role::OrgAdmin);
+        space_roles.insert(default_space.space_id.clone(), Role::OrgAdmin);
         AuthContext {
             user_id: UserId::from("admin"),
-            org_id: OrgId::from("default"),
+            org_id: default_space.org_id.clone(),
             email: String::new(),
             space_roles,
             scopes: vec![Scope::new(ResourceKind::Org, Action::Manage)],
@@ -1244,5 +1224,19 @@ mod nats_reachable_tests {
     async fn handles_url_with_token_only_auth() {
         let result = nats_reachable("nats://token@127.0.0.1:1", None).await;
         assert!(!result);
+    }
+}
+
+#[cfg(test)]
+mod args_tests {
+    use clap::Parser as _;
+
+    use super::Args;
+
+    #[test]
+    fn db_path_flag_is_rejected() {
+        let err = Args::try_parse_from(["webui", "--db-path", "/tmp/x.db"])
+            .expect_err("--db-path was removed");
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 }

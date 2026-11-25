@@ -19,14 +19,18 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::Json,
+    response::{IntoResponse, Json, Response},
 };
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use assistant_storage::ConversationEventStore as _;
+
 use super::ApiState;
+use super::conversations::{caller_store, owned_conversation};
 use crate::openapi::ErrorBody;
+use crate::space::{Access, SpaceCtx};
 
 /// Closed enum of turn states surfaced by the status endpoint.
 ///
@@ -87,9 +91,29 @@ pub struct TurnStatusResponse {
     security(("bearer_token" = [])),
 )]
 pub async fn get_turn_status(
+    ctx: SpaceCtx,
     State(state): State<ApiState>,
     Path((conversation_id, turn_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<TurnStatusResponse>, (StatusCode, Json<ErrorBody>)> {
+) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
+    if let Err(response) =
+        owned_conversation(&caller_store(&ctx, &state).await, conversation_id).await
+    {
+        return response;
+    }
+    match turn_status(&ctx, conversation_id, turn_id).await {
+        Ok(status) => Json(status).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn turn_status(
+    ctx: &SpaceCtx,
+    conversation_id: Uuid,
+    turn_id: Uuid,
+) -> Result<TurnStatusResponse, (StatusCode, Json<ErrorBody>)> {
     let turn_id_str = turn_id.to_string();
     let conv_id_str = conversation_id.to_string();
 
@@ -97,8 +121,9 @@ pub async fn get_turn_status(
     // take the last event so we get both the recency timestamp and the
     // kind in one query. For typical turns this is O(events_per_turn);
     // for very long-running turns we could add a "tail" query later.
-    let events = state
-        .event_store
+    let events = ctx
+        .storage
+        .conversation_event_store()
         .list_events_since(&turn_id_str, 0)
         .await
         .map_err(|e| {
@@ -114,37 +139,37 @@ pub async fn get_turn_status(
     // `unknown`. We additionally guard against turn-id reuse across
     // conversations by checking conversation_id on the first row.
     if events.is_empty() {
-        return Ok(Json(TurnStatusResponse {
+        return Ok(TurnStatusResponse {
             turn_id: turn_id_str,
             conversation_id: conv_id_str,
             state: TurnState::Unknown,
             last_event_at: None,
             last_event_kind: None,
-        }));
+        });
     }
     if events
         .first()
         .map(|e| e.conversation_id != conv_id_str)
         .unwrap_or(false)
     {
-        return Ok(Json(TurnStatusResponse {
+        return Ok(TurnStatusResponse {
             turn_id: turn_id_str,
             conversation_id: conv_id_str,
             state: TurnState::Unknown,
             last_event_at: None,
             last_event_kind: None,
-        }));
+        });
     }
 
     // The empty-events branch returned above, so `last` is always Some.
     let Some(last) = events.last() else {
-        return Ok(Json(TurnStatusResponse {
+        return Ok(TurnStatusResponse {
             turn_id: turn_id_str,
             conversation_id: conv_id_str,
             state: TurnState::Unknown,
             last_event_at: None,
             last_event_kind: None,
-        }));
+        });
     };
     let last_kind = last.event_type.clone();
     let last_at = last.created_at.to_rfc3339();
@@ -155,13 +180,13 @@ pub async fn get_turn_status(
         _ => TurnState::Running,
     };
 
-    Ok(Json(TurnStatusResponse {
+    Ok(TurnStatusResponse {
         turn_id: turn_id_str,
         conversation_id: conv_id_str,
         state: derived_state,
         last_event_at: Some(last_at),
         last_event_kind: Some(last_kind),
-    }))
+    })
 }
 
 /// `POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`
@@ -188,9 +213,19 @@ pub async fn get_turn_status(
     security(("bearer_token" = [])),
 )]
 pub async fn cancel_turn(
+    ctx: SpaceCtx,
     State(state): State<ApiState>,
     Path((conversation_id, turn_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<TurnStatusResponse>, (StatusCode, Json<ErrorBody>)> {
+) -> Response {
+    if let Err(denied) = ctx.require(Access::Write) {
+        return denied.into_response();
+    }
+    if let Err(response) =
+        owned_conversation(&caller_store(&ctx, &state).await, conversation_id).await
+    {
+        return response;
+    }
+
     // Fire the cancellation signal. Outcome is intentionally not surfaced —
     // the endpoint is idempotent and the authoritative reply is whatever
     // the event store shows after the worker reacts.
@@ -199,7 +234,10 @@ pub async fn cancel_turn(
     // Return the current status. The transition from `running` →
     // `errored` (via the synthetic `agent_error` event from the SSE
     // handler) may not be visible yet — that's fine. The client polls.
-    get_turn_status(State(state), Path((conversation_id, turn_id))).await
+    match turn_status(&ctx, conversation_id, turn_id).await {
+        Ok(status) => Json(status).into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -209,7 +247,9 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use super::super::test_helpers::{app, body_json, event_log_state};
+    use assistant_storage::ConversationEventStore as _;
+
+    use super::super::test_helpers::{app, body_json, event_log_state, seed_conversation};
 
     /// Helper: build the status URL.
     fn url(conv: &Uuid, turn: &Uuid) -> String {
@@ -219,12 +259,12 @@ mod tests {
     /// A run with only intermediate events (run_started + a token) → `running`.
     #[tokio::test]
     async fn returns_running_for_in_flight_turn() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
         let turn_id = Uuid::new_v4();
 
-        state
-            .event_store
+        storage
+            .conversation_event_store()
             .append_event(
                 &turn_id.to_string(),
                 &conv_id.to_string(),
@@ -234,8 +274,8 @@ mod tests {
             )
             .await
             .unwrap();
-        state
-            .event_store
+        storage
+            .conversation_event_store()
             .append_event(
                 &turn_id.to_string(),
                 &conv_id.to_string(),
@@ -268,13 +308,13 @@ mod tests {
     /// A run terminated by `done` → `completed`.
     #[tokio::test]
     async fn returns_completed_when_done_event_present() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
         let turn_id = Uuid::new_v4();
 
         for (seq, kind) in [(0, "run_started"), (1, "token"), (2, "done")] {
-            state
-                .event_store
+            storage
+                .conversation_event_store()
                 .append_event(
                     &turn_id.to_string(),
                     &conv_id.to_string(),
@@ -304,13 +344,13 @@ mod tests {
     /// A run terminated by `agent_error` → `errored`.
     #[tokio::test]
     async fn returns_errored_when_agent_error_event_present() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
         let turn_id = Uuid::new_v4();
 
         for (seq, kind) in [(0, "run_started"), (1, "agent_error")] {
-            state
-                .event_store
+            storage
+                .conversation_event_store()
                 .append_event(
                     &turn_id.to_string(),
                     &conv_id.to_string(),
@@ -342,8 +382,8 @@ mod tests {
     /// have been replaced or GC'd) without parsing error bodies.
     #[tokio::test]
     async fn returns_unknown_for_missing_turn() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
         let turn_id = Uuid::new_v4(); // never seeded
 
         let resp = app(state)
@@ -369,8 +409,8 @@ mod tests {
     /// is idempotent.
     #[tokio::test]
     async fn cancel_unknown_turn_returns_unknown() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
         let turn_id = Uuid::new_v4(); // never seeded, no registered token
 
         let resp = app(state)
@@ -394,13 +434,13 @@ mod tests {
     /// what the event store has.
     #[tokio::test]
     async fn cancel_completed_turn_returns_completed() {
-        let (state, _storage) = event_log_state().await;
-        let conv_id = Uuid::new_v4();
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
         let turn_id = Uuid::new_v4();
 
         for (seq, kind) in [(0, "run_started"), (1, "done")] {
-            state
-                .event_store
+            storage
+                .conversation_event_store()
                 .append_event(
                     &turn_id.to_string(),
                     &conv_id.to_string(),
@@ -431,13 +471,13 @@ mod tests {
     /// match returns `unknown` (same guard as the status endpoint).
     #[tokio::test]
     async fn cancel_mismatched_conversation_returns_unknown() {
-        let (state, _storage) = event_log_state().await;
+        let (state, storage) = event_log_state().await;
         let real_conv = Uuid::new_v4();
-        let other_conv = Uuid::new_v4();
+        let other_conv = seed_conversation(&storage).await;
         let turn_id = Uuid::new_v4();
 
-        state
-            .event_store
+        storage
+            .conversation_event_store()
             .append_event(
                 &turn_id.to_string(),
                 &real_conv.to_string(),
@@ -472,13 +512,13 @@ mod tests {
     /// the response is `unknown` (the client should refetch the conversation).
     #[tokio::test]
     async fn returns_unknown_when_conversation_id_mismatches() {
-        let (state, _storage) = event_log_state().await;
+        let (state, storage) = event_log_state().await;
         let real_conv = Uuid::new_v4();
-        let other_conv = Uuid::new_v4();
+        let other_conv = seed_conversation(&storage).await;
         let turn_id = Uuid::new_v4();
 
-        state
-            .event_store
+        storage
+            .conversation_event_store()
             .append_event(
                 &turn_id.to_string(),
                 &real_conv.to_string(),
