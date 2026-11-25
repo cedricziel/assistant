@@ -41,7 +41,7 @@ Each numbered group is one PR in the stack, in order.
 - [x] 6.2 Add `/.well-known/oauth-protected-resource/mcp` with a failing test first, then implement it with OpenAPI docs
 - [x] 6.3 Mount rmcp `StreamableHttpService` at `/mcp` behind an MCP auth middleware that inserts `AuthContext`, enable `server-side-http`, and verify 6.1 passes
 - [x] 6.4 Add a test that a space-restricted user cannot reach another space's data through `/mcp`; make it pass
-- [ ] 6.5 Run `make dump-openapi` and `make generate-flutter-client`; verify the generated client builds with `make lint-flutter`
+- [x] 6.5 Run `make dump-openapi` and `make generate-flutter-client`; verify the generated client builds with `make lint-flutter`
 
 ## 7. Server Tasks (PR 7)
 

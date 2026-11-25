@@ -98,6 +98,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(PersonaFromTemplateResponse.serializer)
       ..add(PersonaSkillAccess.serializer)
       ..add(PersonaSummary.serializer)
+      ..add(ProtectedResourceMetadata.serializer)
       ..add(PublishCatalogItemRequest.serializer)
       ..add(PushNotificationConfig.serializer)
       ..add(PutOrgOidcConfigRequest.serializer)
@@ -302,6 +303,15 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(AgentInterface)]),
           () => ListBuilder<AgentInterface>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
