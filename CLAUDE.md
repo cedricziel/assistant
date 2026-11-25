@@ -17,10 +17,11 @@ Requires `openapi-generator` (`brew install openapi-generator`).
 
 ## Build Integration
 
-The Rust build embeds the Flutter web app via `rust-embed`. `cargo build -p assistant-cli` (or `make build`) triggers `build.rs`, which runs `flutter build web --release` in `app/`. This means:
+The Rust build embeds the Flutter web app via `rust-embed`, but cargo never runs Flutter. Building the web app is an explicit step:
 
-- A Flutter SDK must be on `PATH` for a full Rust build.
-- Use `make check` (`cargo check`) to skip Flutter and validate Rust only.
+- `make build-web` runs `flutter build web --release` in `app/`, producing `app/build/web/`. `make build`, `make build-release` and `make build-macos-binary` run it first.
+- `crates/web-ui/build.rs` embeds `app/build/web/` if it exists, otherwise a placeholder page. A bare `cargo build -p assistant-cli` therefore never needs Flutter, but its UI is a placeholder until `make build-web` has run.
+- Release and Docker workflows build the web app first (`flutter build web` job or `make build-web`) so shipped binaries embed the real UI.
 
 ## Runtime Data
 

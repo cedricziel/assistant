@@ -15,7 +15,7 @@ Playwright captures screenshots of the compiled Flutter SPA at three viewport
 sizes (desktop, tablet, mobile) and compares them against committed baselines.
 
 The binary serves the Flutter web build at `/`. The `webServer` config in
-`playwright.config.ts` builds the binary (which embeds `flutter build web`)
+`playwright.config.ts` builds the binary (which embeds `app/build/web`, produced by `make build-web`)
 and starts it with `--auth-token test-token --listen 127.0.0.1:8787`.
 
 ## Directory Layout
@@ -152,8 +152,8 @@ Three projects in `playwright.config.ts` match the app's responsive breakpoints:
 
 The `visual-regression` job in `.github/workflows/ci.yml`:
 
-1. Installs Flutter SDK (`subosito/flutter-action@v2`, flutter 3.x stable) and runs `flutter pub get` in `app/`
-2. Builds the unified assistant binary (`cargo build -p assistant-cli`), which embeds the Flutter web app via `build.rs`
+1. Downloads the `flutter-web-build` artifact from the `build-flutter-web` job into `app/build/web/`
+2. Builds the unified assistant binary (`cargo build -p assistant-cli`), which embeds `app/build/web/` via `build.rs`
 3. Installs Playwright + Chromium
 4. Runs `npx playwright test`
 5. Uploads the HTML report as an artifact (always)
@@ -199,10 +199,10 @@ Font rendering differences. The 3% tolerance should absorb this. If not:
 ### Server doesn't start in time
 
 The `webServer.timeout` is 120 seconds. The first build is slow because
-`cargo build` triggers `flutter build web --release` (via `build.rs`).
-If it still times out:
+the binary is compiled from scratch. `cargo build` does not run Flutter, so
+build the web app first (`make build-web`). If it still times out:
 
-1. Pre-build manually: `cargo build -p assistant-cli` from the repo root
+1. Pre-build manually: `make build-web && cargo build -p assistant-cli` from the repo root
 2. Ensure Flutter SDK is on `$PATH` (run `flutter doctor`)
 3. Check if port 8787 is already in use
 4. Set `E2E_BASE_URL` to point to a manually started server
