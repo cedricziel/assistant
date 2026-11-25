@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::permission::Rule;
+use crate::secret::Secret;
 
 /// Tool-permission configuration (`[permissions]` in `org.toml`).
 ///
@@ -52,6 +53,10 @@ pub struct DecisionModelConfig {
     pub timeout_secs: u64,
     /// Decisions endpoint.
     pub base_url: String,
+    /// API key. When unset, the `[llm]` key is reused if `[llm]` is
+    /// OpenRouter, and `api_key_env` is read last.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<Secret>,
     /// Environment variable holding the API key.
     pub api_key_env: String,
 }
@@ -64,6 +69,7 @@ impl Default for DecisionModelConfig {
             threshold: 0.9,
             timeout_secs: 8,
             base_url: "https://openrouter.ai/api/alpha/decisions".to_string(),
+            api_key: None,
             api_key_env: "OPENROUTER_API_KEY".to_string(),
         }
     }
@@ -178,6 +184,28 @@ workspace_roots = ["~/scratch"]
         assert!(cfg.decision_model.enabled);
         assert_eq!(cfg.decision_model.model, "typesafe/jev-2.0");
         assert_eq!(cfg.decision_model.timeout_secs, 3);
+    }
+
+    #[test]
+    fn decision_model_api_key_is_optional_and_parsed() {
+        assert!(
+            PermissionsConfig::default()
+                .decision_model
+                .api_key
+                .is_none(),
+            "no key by default; it is resolved at build time"
+        );
+        let cfg: PermissionsConfig =
+            toml::from_str("[decision_model]\napi_key = \"sk-or-x\"").unwrap();
+        assert_eq!(
+            cfg.decision_model.api_key.as_ref().map(Secret::expose),
+            Some("sk-or-x"),
+            "api_key is read from [permissions.decision_model]"
+        );
+        assert!(
+            !format!("{:?}", cfg.decision_model).contains("sk-or-x"),
+            "the key must not leak through Debug"
+        );
     }
 
     #[test]

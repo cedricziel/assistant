@@ -53,11 +53,18 @@ api_key_env = "OPENROUTER_API_KEY"
 | `threshold`    | `0.9`                                       | Score every asked question must reach. Must be above 0 and at most 1. |
 | `timeout_secs` | `8`                                         | Request timeout. A timeout means "not approved".                      |
 | `base_url`     | `https://openrouter.ai/api/alpha/decisions` | Decisions endpoint.                                                   |
+| `api_key`      | _(none)_                                    | API key. See the lookup order below.                                  |
 | `api_key_env`  | `OPENROUTER_API_KEY`                        | Name of the environment variable that holds the API key.              |
 
 `model` must be pinned to a version. `latest` aliases and ids without a version make the config fail to load, so approval behavior never changes without a config change.
 
-If `enabled` is true and the key variable is not set, the model is left out and an error is logged. Undecided calls then go to a human, or are denied on turns that cannot prompt.
+The API key is looked up in this order:
+
+1. `api_key` in `[permissions.decision_model]`.
+2. `api_key` in `[llm]`, but only when `[llm] provider = "openrouter"`. A key for another provider is never sent to OpenRouter.
+3. The environment variable named by `api_key_env`.
+
+If `enabled` is true and none of these gives a key, the model is left out and an error is logged. Undecided calls then go to a human, or are denied on turns that cannot prompt.
 
 ### What the model is sent
 

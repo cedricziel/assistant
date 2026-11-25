@@ -10,6 +10,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use assistant_core::permission::{Decision, PermissionRequest, ToolDecider, Verdict};
+use assistant_core::types::llm::{LlmConfig, resolve_openrouter_key};
 use assistant_core::types::permissions::DecisionModelConfig;
 use assistant_core::{default_workspace_dir, runtime_workspace_dir};
 use async_trait::async_trait;
@@ -49,15 +50,27 @@ impl JevDecider {
         }
     }
 
-    /// Build from config, reading the API key from `cfg.api_key_env`.
-    pub fn from_config(cfg: &DecisionModelConfig) -> anyhow::Result<Self> {
-        let key = std::env::var(&cfg.api_key_env).map_err(|_| {
-            anyhow::anyhow!(
-                "decision model is enabled but {} is not set",
-                cfg.api_key_env
-            )
-        })?;
-        Ok(Self::new(cfg.clone(), key))
+    /// Build from config. The key is `cfg.api_key`, then the `[llm]` key when
+    /// `[llm]` is OpenRouter, then the variable named by `cfg.api_key_env`.
+    pub fn from_config(cfg: &DecisionModelConfig, llm: &LlmConfig) -> anyhow::Result<Self> {
+        Self::from_config_with_env(cfg, llm, |name| std::env::var(name).ok())
+    }
+
+    fn from_config_with_env(
+        cfg: &DecisionModelConfig,
+        llm: &LlmConfig,
+        env: impl Fn(&str) -> Option<String>,
+    ) -> anyhow::Result<Self> {
+        let key = resolve_openrouter_key(cfg.api_key.as_ref(), llm, &cfg.api_key_env, env)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "decision model is enabled but has no API key: set \
+                     [permissions.decision_model] api_key, an OpenRouter [llm] api_key, \
+                     or {}",
+                    cfg.api_key_env
+                )
+            })?;
+        Ok(Self::new(cfg.clone(), key.expose().to_owned()))
     }
 
     async fn score(&self, req: &PermissionRequest<'_>) -> Result<Vec<(&'static str, f64)>, String> {
@@ -243,7 +256,9 @@ mod tests {
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    use assistant_core::Secret;
     use assistant_core::types::conversation::{ExecutionContext, Interface};
+    use assistant_core::types::llm::LlmProviderKind;
 
     use super::*;
 
@@ -272,6 +287,73 @@ mod tests {
             },
             "test-key".into(),
         )
+    }
+
+    // -- key resolution --
+
+    fn openrouter_llm(key: Option<&str>) -> LlmConfig {
+        LlmConfig {
+            provider: LlmProviderKind::OpenRouter,
+            api_key: key.map(Secret::new),
+            ..LlmConfig::default()
+        }
+    }
+
+    fn key_of(
+        cfg: DecisionModelConfig,
+        llm: &LlmConfig,
+        env: impl Fn(&str) -> Option<String>,
+    ) -> anyhow::Result<String> {
+        JevDecider::from_config_with_env(&cfg, llm, env).map(|d| d.api_key)
+    }
+
+    #[test]
+    fn config_api_key_wins() {
+        let cfg = DecisionModelConfig {
+            api_key: Some(Secret::new("k1")),
+            ..Default::default()
+        };
+        let key = key_of(cfg, &openrouter_llm(Some("k2")), |_| Some("k3".into())).unwrap();
+        assert_eq!(key, "k1", "decision_model.api_key comes first");
+    }
+
+    #[test]
+    fn openrouter_chat_key_is_reused() {
+        let key = key_of(
+            DecisionModelConfig::default(),
+            &openrouter_llm(Some("k2")),
+            |_| None,
+        )
+        .unwrap();
+        assert_eq!(key, "k2", "an OpenRouter [llm] key is reused");
+    }
+
+    #[test]
+    fn api_key_env_is_the_last_resort() {
+        let cfg = DecisionModelConfig {
+            api_key_env: "JEV_KEY".into(),
+            ..Default::default()
+        };
+        let llm = LlmConfig {
+            provider: LlmProviderKind::Anthropic,
+            api_key: Some(Secret::new("sk-ant")),
+            ..LlmConfig::default()
+        };
+        let key = key_of(cfg.clone(), &llm, |name| {
+            (name == "JEV_KEY").then(|| "k3".to_string())
+        })
+        .unwrap();
+        assert_eq!(key, "k3", "the env var named by api_key_env is read last");
+
+        let err = key_of(cfg, &llm, |_| None).unwrap_err().to_string();
+        assert!(
+            !err.contains("sk-ant"),
+            "a non-OpenRouter key is never used or echoed: {err}"
+        );
+        assert!(
+            err.contains("JEV_KEY") && err.contains("[llm]"),
+            "the error names every source: {err}"
+        );
     }
 
     fn answers(reversible: f64, serves_task: Option<f64>) -> Value {
