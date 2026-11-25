@@ -12,15 +12,16 @@ mod cmd_review;
 mod cmd_skill;
 mod cmd_webui;
 mod credentials;
+mod dispatch;
+mod messengers;
 mod repl_helpers;
 mod skill_diff;
+mod wiring;
 
-use args::{
-    AccountCommand, ApiKeysCommand, Cli, Command, MigrateCommand, OrchestratorCommand, SkillCommand,
-};
+use args::{Cli, Command, MigrateCommand, OrchestratorCommand, SkillCommand};
 use cli_helpers::{
-    CliConfirmation, ConfigLoadMessage, interface_selected, load_config_messages,
-    normalize_worker_interface, parse_interface_selection,
+    CliConfirmation, ConfigLoadMessage, load_config_messages, normalize_worker_interface,
+    parse_interface_selection,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -150,73 +151,9 @@ async fn main() -> Result<()> {
         None => OrgPoolFactory::new(assistant_dir.clone()).space_db_path("default", "default"),
     };
 
-    // 3. Handle Reset early — does not need heavy resources.
-    if let Some(Command::Reset { yes }) = &cli.command {
-        return cmd_reset::cmd_reset(&db_path, &config, *yes);
-    }
-
-    if let Some(Command::Persona { command }) = &cli.command {
-        return cmd_persona::cmd_persona(&db_path, command).await;
-    }
-
-    if let Some(Command::Skill { command }) = &cli.command {
-        // Generate needs the full Orchestrator — handled after bootstrap.
-        if !matches!(command, SkillCommand::Generate { .. }) {
-            return cmd_skill::cmd_skill(&db_path, &config, command).await;
-        }
-    }
-
-    if let Some(Command::Backup(args)) = &cli.command {
-        return cmd_backup::cmd_backup(args).await;
-    }
-
-    if let Some(Command::Restore(args)) = &cli.command {
-        return cmd_backup::cmd_restore(args).await;
-    }
-
-    if let Some(Command::Webui { command }) = &cli.command {
-        return cmd_webui::cmd_webui(command).await;
-    }
-
-    if matches!(cli.command, Some(Command::Doctor)) {
-        return cmd_doctor::cmd_doctor(&config_path, &db_path, &config).await;
-    }
-
-    if let Some(Command::Login { server }) = &cli.command {
-        return cmd_login::cmd_login(server).await;
-    }
-    if matches!(cli.command, Some(Command::Logout)) {
-        return cmd_login::cmd_logout().await;
-    }
-    if matches!(cli.command, Some(Command::Status)) {
-        return cmd_login::cmd_status();
-    }
-    if let Some(Command::ApiKeys { command }) = &cli.command {
-        return match command {
-            ApiKeysCommand::Create { name, scopes } => {
-                cmd_login::cmd_api_keys_create(name, scopes, &cli.api_key, &cli.server).await
-            }
-            ApiKeysCommand::List => cmd_login::cmd_api_keys_list(&cli.api_key, &cli.server).await,
-            ApiKeysCommand::Revoke { id } => {
-                cmd_login::cmd_api_keys_revoke(id, &cli.api_key, &cli.server).await
-            }
-        };
-    }
-    if let Some(Command::Account { command }) = &cli.command {
-        return match command {
-            AccountCommand::Show { json } => {
-                cmd_account::cmd_account_show(*json, &cli.api_key, &cli.server).await
-            }
-            AccountCommand::SetEmail { email } => {
-                cmd_account::cmd_account_set_email(email, &cli.api_key, &cli.server).await
-            }
-            AccountCommand::SetName { name } => {
-                cmd_account::cmd_account_set_name(name, &cli.api_key, &cli.server).await
-            }
-            AccountCommand::ChangePassword => {
-                cmd_account::cmd_account_change_password(&cli.api_key, &cli.server).await
-            }
-        };
+    // 3. One-shot subcommands do not need the heavy runtime.
+    if let Some(result) = dispatch::run_one_shot(&cli, &config_path, &db_path, &config).await {
+        return result;
     }
 
     let (orchestrator_interfaces, orchestrator_no_repl) =
@@ -235,62 +172,25 @@ async fn main() -> Result<()> {
 
     // 4. Prepare confirmation behavior before bootstrapping the stack.
     //
-    //    MCP and Slack/Mattermost modes use auto-deny confirmation (no terminal
+    //    Background modes use auto-deny confirmation (no terminal
     //    interaction). REPL mode uses the interactive CLI confirmation.
-    #[cfg(feature = "mcp")]
-    let is_mcp = matches!(cli.command, Some(Command::Mcp));
-    #[cfg(not(feature = "mcp"))]
-    let is_mcp = false;
+    //
+    //    The binary role drives the infrastructure-worker plan, the single
+    //    source of truth for which `main-worker` / `scheduler-worker` /
+    //    `web-worker` / `TitleGeneratorWorker` / `memory_indexer` to spawn.
+    //    See `assistant_runtime::worker_plan` for the rules and their unit tests.
+    let binary_role =
+        wiring::select_binary_role(cli.command.as_ref(), orchestrator_interface_filtered);
+    let worker_plan = assistant_runtime::core_worker_plan(binary_role);
 
-    let is_slack_only = matches!(cli.command, Some(Command::Slack));
-
-    let is_mattermost_only = matches!(cli.command, Some(Command::Mattermost));
-
-    let is_nextcloud_only = matches!(cli.command, Some(Command::Nextcloud));
-
-    let is_signal_only = matches!(cli.command, Some(Command::Signal));
-
-    let is_matrix_only = matches!(cli.command, Some(Command::Matrix));
-
-    let is_worker_only = matches!(cli.command, Some(Command::Worker { .. }));
-
-    // Derive the binary role and infrastructure-worker plan. The plan is the
-    // single source of truth for which `main-worker` / `scheduler-worker` /
-    // `web-worker` / `TitleGeneratorWorker` / `memory_indexer` to spawn.
-    // See `assistant_runtime::worker_plan` for the rules and their unit tests.
-    let binary_role = if is_mcp {
-        assistant_runtime::BinaryRole::Mcp
-    } else if is_worker_only {
-        assistant_runtime::BinaryRole::WorkerOnly
-    } else if is_slack_only
-        || is_mattermost_only
-        || is_nextcloud_only
-        || is_signal_only
-        || is_matrix_only
-    {
-        assistant_runtime::BinaryRole::InterfaceOnly
-    } else if orchestrator_interface_filtered {
-        assistant_runtime::BinaryRole::OrchestratorFiltered
-    } else if matches!(cli.command, Some(Command::Orchestrator { .. })) {
-        assistant_runtime::BinaryRole::OrchestratorUnfiltered
-    } else {
-        assistant_runtime::BinaryRole::Repl
-    };
-    let worker_plan = assistant_runtime::core_worker_plan(binary_role.clone());
-
-    let confirmation_cb: Arc<dyn ConfirmationCallback> = if is_mcp
-        || is_slack_only
-        || is_mattermost_only
-        || is_nextcloud_only
-        || is_signal_only
-        || orchestrator_no_repl
-    {
-        Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
-            interface_name: "background",
-        })
-    } else {
-        Arc::new(CliConfirmation)
-    };
+    let confirmation_cb: Arc<dyn ConfirmationCallback> =
+        if wiring::uses_auto_deny_confirmation(cli.command.as_ref(), orchestrator_no_repl) {
+            Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
+                interface_name: "background",
+            })
+        } else {
+            Arc::new(CliConfirmation)
+        };
 
     if let Some(parent) = db_path.parent() {
         tokio::fs::create_dir_all(parent)
@@ -456,169 +356,18 @@ async fn main() -> Result<()> {
         })
         .transpose()?;
 
-    // 8. Slack-only mode.
-    if let Some(Command::Slack) = &cli.command {
-        use assistant_interfaces::SlackInterface;
-        let slack_cfg = bs.config.slack.clone().context(
-            "Slack is not configured. Add a [slack] section to ~/.assistant/config.toml",
-        )?;
-        let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
+    let messenger_deps = messengers::MessengerDeps {
+        config: &bs.config,
+        orchestrator: bs.orchestrator.clone(),
+        storage: bs.storage.clone(),
+        executor: bs.executor.clone(),
+        transcription: transcription_provider,
+        transcription_language,
+    };
 
-        // Register ambient tools (slack-post, slack-send-dm, slack-list-channels)
-        // so the LLM can see and invoke them during Slack turns.
-        for handler in iface.ambient_tools() {
-            let tool_name = handler.name().to_string();
-            bs.executor.register_ambient_tool(handler);
-            info!("Registered ambient tool: {tool_name}");
-        }
-
-        // Spawn a Slack-filtered turn worker. Using an interface filter avoids
-        // duplicate handling when other workers are active in the same process.
-        let worker_orch = bs.orchestrator.clone();
-        let _worker = tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("slack-worker", Some("Slack"))
-                .await;
-        });
-
-        // Spawn a scheduler worker so scheduled tasks are consumed in
-        // Slack-only mode (the main unfiltered worker is not started here).
-        let sched_orch = bs.orchestrator.clone();
-        let _sched_worker = tokio::spawn(async move {
-            sched_orch
-                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
-                .await;
-        });
-
-        info!("Starting Slack-only mode");
-        return iface.run().await;
-    }
-
-    // 9. Mattermost-only mode.
-    if let Some(Command::Mattermost) = &cli.command {
-        use assistant_interfaces::MattermostInterface;
-        let mm_cfg = bs.config.mattermost.clone().context(
-            "Mattermost is not configured. Add a [mattermost] section to ~/.assistant/config.toml",
-        )?;
-        let mut iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
-
-        // Spawn a Mattermost-filtered turn worker to prevent duplicate
-        // consumption with other workers.
-        let worker_orch = bs.orchestrator.clone();
-        let _worker = tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("mattermost-worker", Some("Mattermost"))
-                .await;
-        });
-
-        // Spawn a scheduler worker so scheduled tasks are consumed in
-        // Mattermost-only mode (the main unfiltered worker is not started here).
-        let sched_orch = bs.orchestrator.clone();
-        let _sched_worker = tokio::spawn(async move {
-            sched_orch
-                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
-                .await;
-        });
-
-        info!("Starting Mattermost-only mode");
-        return iface.run().await;
-    }
-
-    // 9b. Nextcloud-only mode.
-    if let Some(Command::Nextcloud) = &cli.command {
-        use assistant_interfaces::NextcloudInterface;
-        let nc_cfg = bs.config.nextcloud.clone().context(
-            "Nextcloud is not configured. Add a [nextcloud] section to ~/.assistant/config.toml",
-        )?;
-        let mut iface = NextcloudInterface::new(nc_cfg, bs.orchestrator.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
-
-        // Spawn a Nextcloud-filtered turn worker to prevent duplicate
-        // consumption with other workers.
-        let worker_orch = bs.orchestrator.clone();
-        let _worker = tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("nextcloud-worker", Some("Nextcloud"))
-                .await;
-        });
-
-        // Spawn a scheduler worker so scheduled tasks are consumed in
-        // Nextcloud-only mode (the main unfiltered worker is not started here).
-        let sched_orch = bs.orchestrator.clone();
-        let _sched_worker = tokio::spawn(async move {
-            sched_orch
-                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
-                .await;
-        });
-
-        info!("Starting Nextcloud Talk-only mode");
-        return iface.run().await;
-    }
-
-    // 9c. Matrix-only mode.
-    if let Some(Command::Matrix) = &cli.command {
-        use assistant_interfaces::MatrixInterface;
-        let matrix_cfg = bs.config.matrix.clone().context(
-            "Matrix is not configured. Add a [matrix] section to ~/.assistant/config.toml",
-        )?;
-        let mut iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
-
-        let worker_orch = bs.orchestrator.clone();
-        let _worker = tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("matrix-worker", Some("Matrix"))
-                .await;
-        });
-
-        let sched_orch = bs.orchestrator.clone();
-        let _sched_worker = tokio::spawn(async move {
-            sched_orch
-                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
-                .await;
-        });
-
-        info!("Starting Matrix-only mode");
-        return iface.run().await;
-    }
-
-    // 9d. Signal-only mode.
-    if let Some(Command::Signal) = &cli.command {
-        use assistant_interfaces::SignalInterface;
-        let sig_cfg = bs.config.signal.clone().context(
-            "Signal is not configured. Add a [signal] section to ~/.assistant/config.toml",
-        )?;
-        let mut iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
-
-        let worker_orch = bs.orchestrator.clone();
-        let _worker = tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("signal-worker", Some("Signal"))
-                .await;
-        });
-
-        let sched_orch = bs.orchestrator.clone();
-        let _sched_worker = tokio::spawn(async move {
-            sched_orch
-                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
-                .await;
-        });
-
-        info!("Starting Signal-only mode");
-        return iface.run().await;
+    // 8. Single-messenger mode (`assistant slack|mattermost|...`).
+    if let Some(messenger) = wiring::Messenger::from_command(cli.command.as_ref()) {
+        return messengers::run_dedicated(messenger, &messenger_deps).await;
     }
 
     // 10. Default mode: interactive REPL + background interfaces.
@@ -626,132 +375,12 @@ async fn main() -> Result<()> {
     //     Register ambient tools from configured interfaces first, then spawn
     //     background tasks for those interfaces.
 
-    // 10a. Slack — register slack-post as an ambient tool and start in background.
-    if bs.config.slack.is_some() && interface_selected(&orchestrator_interfaces, "slack") {
-        use assistant_interfaces::SlackInterface;
-        let slack_cfg = bs.config.slack.clone().unwrap_or_default();
-        let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+    for messenger in wiring::background_messengers(&bs.config, &orchestrator_interfaces) {
+        if let Some(result) =
+            messengers::start_background(messenger, &messenger_deps, orchestrator_no_repl).await?
+        {
+            return result;
         }
-        // Register proactive Slack posting tool.
-        for handler in iface.ambient_tools() {
-            let tool_name = handler.name().to_string();
-            bs.executor.register_ambient_tool(handler);
-            info!("Registered ambient tool: {tool_name}");
-        }
-
-        // Spawn a Slack-filtered turn worker so NATS turn requests are
-        // consumed when running in orchestrator mode.
-        let worker_orch = bs.orchestrator.clone();
-        tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("slack-worker", Some("Slack"))
-                .await;
-        });
-
-        // Spawn the Slack listener in the background.
-        tokio::spawn(async move {
-            if let Err(e) = iface.run().await {
-                tracing::error!("Slack interface error: {e}");
-            }
-        });
-    }
-
-    // 10b. Mattermost — start in background if configured.
-    if bs.config.mattermost.is_some() && interface_selected(&orchestrator_interfaces, "mattermost")
-    {
-        use assistant_interfaces::MattermostInterface;
-        let mm_cfg = bs.config.mattermost.clone().unwrap_or_default();
-        let mut iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
-
-        let worker_orch = bs.orchestrator.clone();
-        tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("mattermost-worker", Some("Mattermost"))
-                .await;
-        });
-
-        tokio::spawn(async move {
-            if let Err(e) = iface.run().await {
-                tracing::error!("Mattermost interface error: {e}");
-            }
-        });
-    }
-
-    // 10b-ii. Matrix — start in background if configured.
-    if bs.config.matrix.is_some() && interface_selected(&orchestrator_interfaces, "matrix") {
-        use assistant_interfaces::MatrixInterface;
-        let matrix_cfg = bs.config.matrix.clone().unwrap_or_default();
-        let mut iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
-
-        let worker_orch = bs.orchestrator.clone();
-        tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("matrix-worker", Some("Matrix"))
-                .await;
-        });
-
-        tokio::spawn(async move {
-            if let Err(e) = iface.run().await {
-                tracing::error!("Matrix interface error: {e}");
-            }
-        });
-    }
-
-    // 10c. Nextcloud Talk — start in background if configured.
-    //      Pass a CancellationToken so the HTTP server shuts down without
-    //      installing process-wide signal handlers (which would conflict
-    //      with the REPL's Ctrl-C handling).
-    if bs.config.nextcloud.is_some() && interface_selected(&orchestrator_interfaces, "nextcloud") {
-        use assistant_interfaces::NextcloudInterface;
-        let nc_cfg = bs.config.nextcloud.clone().unwrap_or_default();
-        let shutdown_token = tokio_util::sync::CancellationToken::new();
-        let mut iface =
-            NextcloudInterface::new(nc_cfg, bs.orchestrator.clone()).with_shutdown(shutdown_token);
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
-
-        let worker_orch = bs.orchestrator.clone();
-        tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("nextcloud-worker", Some("Nextcloud"))
-                .await;
-        });
-
-        tokio::spawn(async move {
-            if let Err(e) = iface.run().await {
-                tracing::error!("Nextcloud Talk interface error: {e}");
-            }
-        });
-    }
-
-    // 10d. Signal — start in background if configured.
-    if bs.config.signal.is_some() && interface_selected(&orchestrator_interfaces, "signal") {
-        use assistant_interfaces::SignalInterface;
-        let sig_cfg = bs.config.signal.clone().unwrap_or_default();
-        let mut iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
-        if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
-        }
-
-        if orchestrator_no_repl {
-            info!("Running Signal interface in foreground (--no-repl)");
-            return iface.run().await;
-        }
-
-        tokio::spawn(async move {
-            if let Err(e) = iface.run().await {
-                tracing::error!("Signal interface error: {e}");
-            }
-        });
     }
 
     // Spawn the interface-filtered workers (scheduler-worker, web-worker)
