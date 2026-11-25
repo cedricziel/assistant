@@ -1,6 +1,6 @@
 # ADR-0004: Backup and Restore Crate
 
-**Status**: Accepted
+**Status**: Accepted (decision 5 amended 2026-11-25)
 **Date**: 2026-03-29
 **Feature branch**: `004-backup-restore`
 
@@ -8,7 +8,7 @@
 
 ## Context
 
-The assistant application stores user-critical data in `~/.assistant/`: agent personas, skill definitions, memory files, configuration, and a SQLite database. Users need a reliable way to create point-in-time backups and restore from them, with strong integrity guarantees and no dependency on the production installation being healthy.
+The assistant application stores user-critical data in `~/.assistant/`: agent personas, skill definitions, memory files, configuration, SQLite databases and the keys that protect stored credentials. Users need a reliable way to create point-in-time backups and restore from them, with strong integrity guarantees and no dependency on the production installation being healthy.
 
 The spec identified testability as the primary constraint: all core backup/restore logic must be exercisable via automated tests without a live installation or a real filesystem.
 
@@ -79,9 +79,13 @@ Rationale for tar.gz over zip:
 
 Archives are written to `<output>.tar.gz.tmp`, then atomically renamed to the final path on success. On any failure (write error or rename error), the `.tmp` file is deleted. This prevents partial archives from being visible to `backup list` or used in a restore.
 
-### 5. SQLite WAL Checkpoint Before Copy
+### 5. SQLite Snapshot Per Database
 
-Before reading `assistant.db`, the engine issues `PRAGMA wal_checkpoint(TRUNCATE)` via a read-only sqlx connection. This flushes pending WAL frames into the main database file and truncates the WAL, ensuring the copied `.db` is consistent. The checkpoint is best-effort; `.db-wal` and `.db-shm` sidecar files are included in the archive as insurance.
+_Amended 2026-11-25. The original decision checkpointed the WAL of a single `assistant.db` and copied it with its `-wal` and `-shm` side files._
+
+Each `.db` file under the install tree (`org.db` and every `orgs/*/spaces/*/space.db`) is archived as a `VACUUM INTO` snapshot taken through a read-only sqlx connection. The snapshot is read in one transaction, so it is consistent while the server writes, and it includes rows that are only in the WAL. Side files are not archived; restore deletes stale `-wal`/`-shm` files next to a restored database because SQLite would replay them onto it. A database that cannot be snapshotted fails the backup rather than being copied raw.
+
+Discovery is an allowlist of install-root entries (`server.toml`, `org.db`, `secrets.key`, `jwt_secret`, `agents/`, `skills/`, `orgs/`, `matrix-state/`, `signal-store/`). The legacy single-user layout (`assistant.db`, `config.toml`) and the `db_path` override were removed with the rest of the legacy layout.
 
 ### 6. Path-Traversal Guard (Defence in Depth)
 
