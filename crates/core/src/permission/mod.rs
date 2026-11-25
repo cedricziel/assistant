@@ -122,10 +122,59 @@ impl Resolution {
         };
         Self { outcome, decision }
     }
+
+    /// Why the call must not run when no human can be asked, or `None` when
+    /// it is allowed. The text goes back to the caller in place of a result.
+    pub fn refusal(&self, tool_name: &str) -> Option<String> {
+        match self.outcome {
+            Outcome::Allow => None,
+            Outcome::Deny => Some(format!(
+                "Permission denied for '{tool_name}': {}",
+                self.decision.reason
+            )),
+            Outcome::Ask => Some(format!(
+                "Permission denied for '{tool_name}': approval is required but this turn \
+                 cannot prompt a user ({}). Ask the owner to add an allow rule for this call.",
+                self.decision.reason
+            )),
+        }
+    }
 }
 
 /// One stage of the pipeline.
 #[async_trait]
 pub trait ToolDecider: Send + Sync {
     async fn decide(&self, req: &PermissionRequest<'_>) -> Decision;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolution(verdict: Verdict) -> Resolution {
+        Resolution::from_decision(Decision::new(verdict, "static-rules", "because"))
+    }
+
+    #[test]
+    fn allowed_calls_have_no_refusal() {
+        assert_eq!(resolution(Verdict::Allow).refusal("bash"), None);
+    }
+
+    #[test]
+    fn denied_calls_name_the_tool_and_reason() {
+        let message = resolution(Verdict::Deny).refusal("bash").unwrap();
+        assert_eq!(message, "Permission denied for 'bash': because");
+    }
+
+    #[test]
+    fn undecided_calls_are_refused_when_nobody_can_be_asked() {
+        for verdict in [Verdict::Ask, Verdict::Abstain] {
+            let message = resolution(verdict).refusal("bash").unwrap();
+            assert!(
+                message.contains("approval is required but this turn cannot prompt a user")
+                    && message.contains("because"),
+                "{message}"
+            );
+        }
+    }
 }

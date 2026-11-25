@@ -388,27 +388,17 @@ impl Orchestrator {
             })
             .await;
 
-        match resolution.outcome {
-            Outcome::Allow => Ok(()),
-            Outcome::Deny => Err(format!(
-                "Permission denied for '{name}': {}",
-                resolution.decision.reason
-            )),
-            Outcome::Ask => match &self.confirmation_callback {
-                Some(cb) if ctx.interactive => {
-                    if cb.confirm(name, params) {
-                        Ok(())
-                    } else {
-                        Err(format!("User denied execution of '{name}'."))
-                    }
-                }
-                _ => Err(format!(
-                    "Permission denied for '{name}': approval is required but this turn cannot \
-                     prompt a user ({}). Ask the owner to add an allow rule for this call.",
-                    resolution.decision.reason
-                )),
-            },
+        if resolution.outcome == Outcome::Ask
+            && ctx.interactive
+            && let Some(cb) = &self.confirmation_callback
+        {
+            return if cb.confirm(name, params) {
+                Ok(())
+            } else {
+                Err(format!("User denied execution of '{name}'."))
+            };
         }
+        resolution.refusal(name).map_or(Ok(()), Err)
     }
 
     /// Dispatch a single tool call through the global executor, applying the

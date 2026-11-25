@@ -26,7 +26,7 @@ Checks run in this order. The first one that decides wins.
 - On an interactive turn, the CLI prompts you. Your answer decides.
 - On any other turn, the call is denied. The reason goes back to the LLM as the tool result, for example `Permission denied for 'bash': approval is required but this turn cannot prompt a user (...). Ask the owner to add an allow rule for this call.`
 
-Only the CLI REPL turn is interactive.
+Only the CLI REPL turn is interactive. Calls over MCP are never interactive.
 
 The final outcome is `allow`, `deny` or `ask`. `ask` is the label for "a human decides, or denial if nobody can be asked".
 
@@ -268,6 +268,6 @@ Each decision logs one `tracing` event at `info` level on the target `assistant:
 
 The default console filter is `info`, so the events show up without extra setup. See `docs/opentelemetry.md` for `RUST_LOG`.
 
-## Known gap
+## MCP server
 
-The MCP server entry point (`crates/mcp-server`) calls the tool executor directly. It does not go through this check, so none of the rules on this page apply to calls that arrive over MCP.
+Tool calls that arrive over MCP (`tools/call`, including `install-skill`) pass the same policy. An MCP caller cannot be prompted, so a call no rule allows is refused. The refusal comes back as a tool result with `isError: true` and the reason as text. `run-prompt` runs a normal turn, so the tools it calls pass the orchestrator's check.

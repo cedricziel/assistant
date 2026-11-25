@@ -10,7 +10,9 @@
 use std::sync::Arc;
 
 use assistant_core::ToolSpec;
+use assistant_core::permission::PermissionPolicy;
 use assistant_core::tool::{ToolDispatcher, ToolOutput};
+use assistant_core::types::permissions::PermissionsConfig;
 use assistant_mcp_server::protocol::{JsonRpcRequest, JsonRpcResponse};
 use assistant_mcp_server::server::handle_request;
 use assistant_runtime::{CancelOutcome, OrchestrationEngine, StubOrchestrationEngine, TurnResult};
@@ -46,17 +48,47 @@ fn workspace_skills_dir() -> std::path::PathBuf {
     tempfile::tempdir().expect("tempdir").keep()
 }
 
+/// Policy for tests that exercise dispatch rather than permissions.
+fn allow_everything() -> PermissionPolicy {
+    policy(&["*"], &[])
+}
+
+fn policy(allow: &[&str], deny: &[&str]) -> PermissionPolicy {
+    let rules = |texts: &[&str]| {
+        texts
+            .iter()
+            .map(|t| t.parse().expect("valid rule"))
+            .collect()
+    };
+    PermissionPolicy::from_config(&PermissionsConfig {
+        allow: rules(allow),
+        deny: rules(deny),
+        ..PermissionsConfig::default()
+    })
+}
+
 async fn call(
     req: JsonRpcRequest,
     orchestrator: Arc<dyn OrchestrationEngine>,
     executor: Arc<dyn ToolDispatcher>,
     registry: Arc<dyn SkillCatalog>,
 ) -> JsonRpcResponse {
+    call_with_policy(req, orchestrator, executor, registry, &allow_everything()).await
+}
+
+async fn call_with_policy(
+    req: JsonRpcRequest,
+    orchestrator: Arc<dyn OrchestrationEngine>,
+    executor: Arc<dyn ToolDispatcher>,
+    registry: Arc<dyn SkillCatalog>,
+    policy: &PermissionPolicy,
+) -> JsonRpcResponse {
     handle_request(
         req,
         registry,
         executor,
         orchestrator,
+        policy,
         workspace_skills_dir(),
         None,
     )
@@ -550,4 +582,109 @@ async fn tools_call_dispatcher_error_surfaces_internal_error() {
     let err = resp.error.expect("dispatcher Err must propagate");
     assert_eq!(err.code, -32603);
     assert!(err.message.contains("dispatcher failed"));
+}
+
+// ── Permission policy ─────────────────────────────────────────────────────
+
+/// Calls `echo` through `policy`; returns the response and the stub so the
+/// test can see whether the tool ran.
+async fn call_echo(policy: &PermissionPolicy) -> (JsonRpcResponse, Arc<StubToolDispatcher>) {
+    let (o, _, r) = default_stubs();
+    let stub = Arc::new(
+        StubToolDispatcher::new().queue_response("echo", ToolOutput::success("echoed: hi")),
+    );
+    let resp = call_with_policy(
+        make_request(
+            30,
+            "tools/call",
+            json!({"name": "echo", "arguments": {"text": "hi"}}),
+        ),
+        o,
+        stub.clone(),
+        r,
+        policy,
+    )
+    .await;
+    (resp, stub)
+}
+
+fn tool_error_text(resp: &JsonRpcResponse) -> String {
+    let result = resp.result.as_ref().expect("a refusal is a tool result");
+    assert_eq!(result["isError"], true, "{resp:?}");
+    result["content"][0]["text"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn tools_call_runs_tools_the_policy_allows() {
+    let (resp, stub) = call_echo(&policy(&["echo"], &[])).await;
+    assert!(resp.error.is_none(), "{resp:?}");
+    assert_eq!(stub.recorded_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn tools_call_refuses_tools_the_policy_denies() {
+    let (resp, stub) = call_echo(&policy(&["*"], &["echo"])).await;
+    let text = tool_error_text(&resp);
+    assert!(text.contains("Permission denied for 'echo'"), "{text}");
+    assert!(
+        stub.recorded_calls().is_empty(),
+        "a denied tool must not run"
+    );
+}
+
+#[tokio::test]
+async fn tools_call_refuses_undecided_tools_because_nobody_can_be_asked() {
+    let (resp, stub) = call_echo(&policy(&[], &[])).await;
+    let text = tool_error_text(&resp);
+    assert!(text.contains("cannot prompt a user"), "{text}");
+    assert!(
+        stub.recorded_calls().is_empty(),
+        "an undecided tool must not run"
+    );
+}
+
+#[tokio::test]
+async fn tools_call_refuses_tools_that_require_confirmation_without_an_allow_rule() {
+    let (o, _, r) = default_stubs();
+    let spec = ToolSpec {
+        name: "risky".to_string(),
+        description: "needs a human".to_string(),
+        params_schema: json!({"type": "object"}),
+        is_mutating: true,
+        requires_confirmation: true,
+    };
+    let stub = Arc::new(StubToolDispatcher::new().with_specs(vec![spec]));
+    let resp = call_with_policy(
+        make_request(31, "tools/call", json!({"name": "risky", "arguments": {}})),
+        o,
+        stub.clone(),
+        r,
+        &policy(&[], &[]),
+    )
+    .await;
+    let text = tool_error_text(&resp);
+    assert!(text.contains("requires confirmation"), "{text}");
+    assert!(stub.recorded_calls().is_empty());
+}
+
+#[tokio::test]
+async fn tools_call_install_skill_is_subject_to_the_policy() {
+    let (o, e, r) = default_stubs();
+    let resp = call_with_policy(
+        make_request(
+            32,
+            "tools/call",
+            json!({"name": "install-skill", "arguments": {"source": "owner/repo"}}),
+        ),
+        o,
+        e,
+        r,
+        &policy(&[], &[]),
+    )
+    .await;
+    let text = tool_error_text(&resp);
+    assert!(
+        text.contains("Permission denied for 'install-skill'"),
+        "{text}"
+    );
 }
