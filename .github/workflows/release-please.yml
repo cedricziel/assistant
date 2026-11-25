@@ -178,7 +178,7 @@ jobs:
           cp org.toml "${ARCHIVE}/org.toml.example"
 
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
-          echo "ARCHIVE=${ARCHIVE}.tar.gz" >> $GITHUB_ENV
+          echo "ARCHIVE=${ARCHIVE}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -253,13 +253,13 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           # Developer ID Application cert (for codesign + notarization)
-          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $RUNNER_TEMP/certificate.p12
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o "$RUNNER_TEMP/certificate.p12"
           security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_CERTIFICATE_PASSWORD" \
             -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
-          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build universal Rust binary for macOS bundle
         run: make build-macos-binary
@@ -276,7 +276,7 @@ jobs:
           cp server.toml "${STANDALONE}/server.toml.example"
           cp org.toml "${STANDALONE}/org.toml.example"
           tar czf "${STANDALONE}.tar.gz" "${STANDALONE}"
-          echo "STANDALONE_ARCHIVE=${STANDALONE}.tar.gz" >> $GITHUB_ENV
+          echo "STANDALONE_ARCHIVE=${STANDALONE}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Upload standalone binary artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -339,7 +339,7 @@ jobs:
           ditto -c -k --keepParent \
             "app/build/macos/Build/Products/Release/assistant_app.app" \
             "${ARCHIVE_NAME}"
-          echo "ARCHIVE=${ARCHIVE_NAME}" >> $GITHUB_ENV
+          echo "ARCHIVE=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
 
       - name: Generate checksums
         shell: bash
@@ -460,13 +460,15 @@ jobs:
           mkdir -p docker-context/bin/amd64 docker-context/bin/arm64
 
           cd dist/x86_64-musl
-          tar xzf "$(ls *.tar.gz | head -1)"
-          cp */assistant ../../docker-context/bin/amd64/assistant
+          archives=(./*.tar.gz)
+          tar xzf "${archives[0]}"
+          cp ./*/assistant ../../docker-context/bin/amd64/assistant
           cd ../..
 
           cd dist/aarch64-musl
-          tar xzf "$(ls *.tar.gz | head -1)"
-          cp */assistant ../../docker-context/bin/arm64/assistant
+          archives=(./*.tar.gz)
+          tar xzf "${archives[0]}"
+          cp ./*/assistant ../../docker-context/bin/arm64/assistant
           cd ../..
 
           cp server.toml org.toml docker-context/
@@ -492,7 +494,7 @@ jobs:
         with:
           images: ghcr.io/cedricziel/assistant/assistant
           tags: |
-            type=ref,event=tag
+            type=raw,value=${{ needs.release-please.outputs.tag_name }}
             type=raw,value=latest
 
       - name: Build and push Alpine image
@@ -543,24 +545,28 @@ jobs:
       - name: Extract binaries
         run: |
           cd dist/x86_64
-          ARCHIVE=$(ls *.tar.gz | head -1)
+          archives=(./*.tar.gz)
+          ARCHIVE="${archives[0]#./}"
           tar xzf "${ARCHIVE}"
-          echo "BIN_DIR_X86=dist/x86_64/${ARCHIVE%.tar.gz}" >> $GITHUB_ENV
+          echo "BIN_DIR_X86=dist/x86_64/${ARCHIVE%.tar.gz}" >> "$GITHUB_ENV"
 
           cd ../aarch64
-          ARCHIVE=$(ls *.tar.gz | head -1)
+          archives=(./*.tar.gz)
+          ARCHIVE="${archives[0]#./}"
           tar xzf "${ARCHIVE}"
-          echo "BIN_DIR_ARM64=dist/aarch64/${ARCHIVE%.tar.gz}" >> $GITHUB_ENV
+          echo "BIN_DIR_ARM64=dist/aarch64/${ARCHIVE%.tar.gz}" >> "$GITHUB_ENV"
 
           cd ../x86_64-musl
-          ARCHIVE=$(ls *.tar.gz | head -1)
+          archives=(./*.tar.gz)
+          ARCHIVE="${archives[0]#./}"
           tar xzf "${ARCHIVE}"
-          echo "BIN_DIR_X86_MUSL=dist/x86_64-musl/${ARCHIVE%.tar.gz}" >> $GITHUB_ENV
+          echo "BIN_DIR_X86_MUSL=dist/x86_64-musl/${ARCHIVE%.tar.gz}" >> "$GITHUB_ENV"
 
           cd ../aarch64-musl
-          ARCHIVE=$(ls *.tar.gz | head -1)
+          archives=(./*.tar.gz)
+          ARCHIVE="${archives[0]#./}"
           tar xzf "${ARCHIVE}"
-          echo "BIN_DIR_ARM64_MUSL=dist/aarch64-musl/${ARCHIVE%.tar.gz}" >> $GITHUB_ENV
+          echo "BIN_DIR_ARM64_MUSL=dist/aarch64-musl/${ARCHIVE%.tar.gz}" >> "$GITHUB_ENV"
 
       - name: Install nfpm
         run: |
