@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use super::channels::{MatrixConfig, MattermostConfig, NextcloudConfig, SignalConfig, SlackConfig};
 use super::features::{
-    CompactionConfig, LearningConfig, MemoryConfig, NotificationsConfig, TitlingConfig,
+    CompactionConfig, IntegrationsConfig, LearningConfig, MemoryConfig, NotificationsConfig,
+    TitlingConfig,
 };
 use super::llm::LlmConfig;
 use super::observability::ObservabilityConfig;
@@ -18,7 +19,7 @@ use super::transcription::{TranscriptionConfig, TtsConfig};
 ///
 /// Holds what every org and space in the process shares: the message-bus
 /// backend, the external MCP servers whose tools are registered everywhere, and
-/// the Web Push signing keys.
+/// the Web Push signing keys, and the integrations catalog source.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServerConfig {
     /// Message-bus backend (`[bus]`).
@@ -30,6 +31,9 @@ pub struct ServerConfig {
     /// Web Push / VAPID keys (`[notifications]`).
     #[serde(default)]
     pub notifications: NotificationsConfig,
+    /// Integrations catalog (`[integrations.catalog]`).
+    #[serde(default)]
+    pub integrations: IntegrationsConfig,
 }
 
 /// Per-organization settings, read from `~/.assistant/orgs/{slug}/org.toml`.
@@ -100,7 +104,7 @@ fn default_agent_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::OrgConfig;
+    use super::{OrgConfig, ServerConfig};
     use crate::types::llm::{EmbeddingProviderKind, LlmProviderKind};
 
     // -- TitlingConfig defaults / overrides ----------------------------------
@@ -132,6 +136,60 @@ mod tests {
         assert!(!titling.enabled);
         assert_eq!(titling.min_turns, 4);
         assert_eq!(titling.long_first_message_chars, 500);
+    }
+
+    // -- Integrations catalog ------------------------------------------------
+
+    #[test]
+    fn integrations_catalog_defaults_when_section_absent() {
+        let cfg: ServerConfig = toml::from_str("").unwrap();
+
+        assert!(cfg.integrations.catalog.enabled, "default: enabled = true");
+        assert_eq!(
+            cfg.integrations.catalog.source_url,
+            "https://integrations.sh/api.json"
+        );
+    }
+
+    #[test]
+    fn integrations_catalog_defaults_when_section_is_empty() {
+        let cfg: ServerConfig = toml::from_str("[integrations.catalog]").unwrap();
+
+        assert!(cfg.integrations.catalog.enabled);
+        assert_eq!(
+            cfg.integrations.catalog.source_url,
+            "https://integrations.sh/api.json"
+        );
+    }
+
+    #[test]
+    fn integrations_catalog_can_be_disabled() {
+        let toml_str = r#"
+            [integrations.catalog]
+            enabled = false
+        "#;
+        let cfg: ServerConfig = toml::from_str(toml_str).unwrap();
+
+        assert!(!cfg.integrations.catalog.enabled);
+        assert_eq!(
+            cfg.integrations.catalog.source_url, "https://integrations.sh/api.json",
+            "source_url keeps its default"
+        );
+    }
+
+    #[test]
+    fn integrations_catalog_source_url_can_point_at_a_mirror() {
+        let toml_str = r#"
+            [integrations.catalog]
+            source_url = "https://mirror.internal/api.json"
+        "#;
+        let cfg: ServerConfig = toml::from_str(toml_str).unwrap();
+
+        assert!(cfg.integrations.catalog.enabled);
+        assert_eq!(
+            cfg.integrations.catalog.source_url,
+            "https://mirror.internal/api.json"
+        );
     }
 
     // -- OrgConfig with embeddings section -----------------------------
