@@ -7,6 +7,7 @@ mod cors;
 pub(crate) mod errors;
 mod flutter_assets;
 pub mod install;
+mod mcp;
 mod oauth;
 mod openapi;
 pub(crate) mod push;
@@ -630,6 +631,13 @@ async fn run_with_args(args: Args) -> Result<()> {
         secure_cookie,
     };
 
+    let mcp_state = mcp::McpState {
+        auth: auth_config.auth_state.clone(),
+        spaces: space_resolver.clone(),
+        runtimes: runtimes.clone(),
+        issuer: base_url.clone(),
+    };
+
     // -- Management API states (orgs, users, spaces, members, API keys) ------
     let orgs_api_state = api::orgs::OrgsApiState {
         org_storage: org_storage.clone(),
@@ -677,7 +685,9 @@ async fn run_with_args(args: Args) -> Result<()> {
         // A2A agent card is public per spec — callers need it to discover auth.
         .merge(a2a::public_router().with_state(a2a_state.clone()))
         // OAuth2 endpoints (public — clients need these for auth flows).
-        .merge(oauth::oauth_router().with_state(oauth_state));
+        .merge(oauth::oauth_router().with_state(oauth_state))
+        // MCP over Streamable HTTP; authenticates on its own (resource server).
+        .merge(mcp::mcp_router(mcp_state));
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()

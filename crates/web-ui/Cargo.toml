@@ -23,6 +23,7 @@ assistant-workflow = { path = "../workflow" }
 assistant-workflow-http = { path = "../workflow-http" }
 assistant-storage = { path = "../storage" }
 assistant-mcp-client = { path = "../mcp-client" }
+assistant-mcp-server = { path = "../mcp-server" }
 assistant-transcription = { path = "../transcription" }
 axum = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
@@ -66,6 +67,10 @@ wiremock = { workspace = true }
 uuid = { workspace = true }
 jsonwebtoken = { workspace = true }
 serde_json = { workspace = true }
+rmcp = { workspace = true, features = [
+    "client",
+    "transport-streamable-http-client-reqwest",
+] }
 
 # Panic-free contract: all non-test code in this crate (and its sub-modules)
 # propagates errors via `Result<_, anyhow::Error>` or returns an HTTP error
