@@ -21,6 +21,8 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
+use assistant_core::clock::{Clock, SystemClock};
+
 /// Where a surface is in its single-shot lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceStatus {
@@ -153,11 +155,22 @@ pub trait SurfaceStore: Send + Sync {
 /// SQLite-backed [`SurfaceStore`].
 pub struct SqliteSurfaceStore {
     pool: SqlitePool,
+    /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
+    clock: Arc<dyn Clock>,
 }
 
 impl SqliteSurfaceStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -211,7 +224,7 @@ fn surface_from_row(row: &SqliteRow) -> Result<Surface> {
 #[async_trait]
 impl SurfaceStore for SqliteSurfaceStore {
     async fn create(&self, new: &NewSurface) -> Result<Surface> {
-        let now = timestamp(Utc::now());
+        let now = timestamp(self.clock.now());
         sqlx::query(
             "INSERT INTO ui_surfaces \
              (id, conversation_id, turn, anchor_message_id, anchor_call_index, tool_call_id, \
@@ -273,7 +286,7 @@ impl SurfaceStore for SqliteSurfaceStore {
         .bind(&changes.fallback_text)
         .bind(components)
         .bind(data_model)
-        .bind(timestamp(Utc::now()))
+        .bind(timestamp(self.clock.now()))
         .execute(&self.pool)
         .await?;
         if result.rows_affected() == 0 {
@@ -296,7 +309,7 @@ impl SurfaceStore for SqliteSurfaceStore {
         .bind(id.to_string())
         .bind(serde_json::to_string(action)?)
         .bind(action_message_id.to_string())
-        .bind(timestamp(Utc::now()))
+        .bind(timestamp(self.clock.now()))
         .execute(&self.pool)
         .await?;
         Ok(Transition::from_rows(result.rows_affected()))
@@ -310,7 +323,7 @@ impl SurfaceStore for SqliteSurfaceStore {
         )
         .bind(id.to_string())
         .bind(action_message_id.to_string())
-        .bind(timestamp(Utc::now()))
+        .bind(timestamp(self.clock.now()))
         .execute(&self.pool)
         .await?;
         Ok(Transition::from_rows(result.rows_affected()))
@@ -352,14 +365,29 @@ impl SurfaceStore for SqliteSurfaceStore {
 ///
 /// It is separate from the in-memory conversation store, so it never cascades
 /// on conversation deletion.
-#[derive(Default)]
 pub struct InMemorySurfaceStore {
     rows: Arc<Mutex<Vec<Surface>>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl Default for InMemorySurfaceStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InMemorySurfaceStore {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            rows: Arc::new(Mutex::new(Vec::new())),
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Surface>> {
@@ -373,7 +401,7 @@ impl InMemorySurfaceStore {
 #[async_trait]
 impl SurfaceStore for InMemorySurfaceStore {
     async fn create(&self, new: &NewSurface) -> Result<Surface> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let surface = Surface {
             id: new.id,
             conversation_id: new.conversation_id,
@@ -423,7 +451,7 @@ impl SurfaceStore for InMemorySurfaceStore {
         if let Some(data_model) = &changes.data_model {
             row.data_model = data_model.clone();
         }
-        row.updated_at = Utc::now();
+        row.updated_at = self.clock.now();
         Ok(Some(row.clone()))
     }
 
@@ -443,7 +471,7 @@ impl SurfaceStore for InMemorySurfaceStore {
         row.status = SurfaceStatus::Submitted;
         row.action = Some(action.clone());
         row.action_message_id = Some(action_message_id);
-        row.updated_at = Utc::now();
+        row.updated_at = self.clock.now();
         Ok(Transition::Applied)
     }
 
@@ -459,7 +487,7 @@ impl SurfaceStore for InMemorySurfaceStore {
         row.status = SurfaceStatus::Active;
         row.action = None;
         row.action_message_id = None;
-        row.updated_at = Utc::now();
+        row.updated_at = self.clock.now();
         Ok(Transition::Applied)
     }
 
@@ -487,7 +515,11 @@ impl SurfaceStore for InMemorySurfaceStore {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use serde_json::json;
+
+    use assistant_core::clock::FakeClock;
 
     use super::*;
     use crate::{ConversationStore, StorageLayer};
@@ -686,6 +718,47 @@ mod tests {
             .await
             .unwrap();
         id
+    }
+
+    /// Timestamps come from the injected clock, not the wall clock.
+    async fn assert_timestamps_follow_clock(
+        store: &impl SurfaceStore,
+        clock: &FakeClock,
+        conversation_id: Uuid,
+    ) {
+        let draft = new_surface(conversation_id, 1);
+        let created = store.create(&draft).await.unwrap();
+        assert_eq!(created.created_at, clock.now());
+        assert_eq!(created.updated_at, clock.now());
+
+        clock.advance(Duration::from_secs(90));
+        let updated = store
+            .update(draft.id, &SurfaceChanges::default())
+            .await
+            .unwrap()
+            .expect("surface exists");
+        assert_eq!(updated.created_at, created.created_at);
+        assert_eq!(updated.updated_at, clock.now());
+        assert_eq!(
+            updated.updated_at - created.created_at,
+            chrono::Duration::seconds(90)
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_uses_the_injected_clock() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let conversation_id = sqlite_conversation(&storage).await;
+        let clock = Arc::new(FakeClock::new_at_seed());
+        let store = storage.surface_store().with_clock(clock.clone());
+        assert_timestamps_follow_clock(&store, &clock, conversation_id).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_store_uses_the_injected_clock() {
+        let clock = Arc::new(FakeClock::new_at_seed());
+        let store = InMemorySurfaceStore::new().with_clock(clock.clone());
+        assert_timestamps_follow_clock(&store, &clock, Uuid::new_v4()).await;
     }
 
     #[tokio::test]
