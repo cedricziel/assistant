@@ -1722,7 +1722,11 @@ mod tests {
 
         let run_id_for_task = run_id;
         tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
+            // Publish only once the SSE handler has subscribed; a broadcast
+            // event sent earlier is lost and `finish_run` would hide the run.
+            while broadcast_tx.receiver_count() == 0 {
+                tokio::task::yield_now().await;
+            }
             let _ = broadcast_tx.send(assistant_storage::LiveEvent {
                 sequence: 0,
                 event_type: "token".to_string(),
