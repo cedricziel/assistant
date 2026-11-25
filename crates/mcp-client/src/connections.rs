@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use http::{HeaderName, HeaderValue};
-use rmcp::ServiceExt;
 use rmcp::model::Tool;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -31,6 +30,7 @@ use assistant_core::integrations::{
 use assistant_core::secret::Secret;
 
 use crate::client::McpClient;
+use crate::handler::StaleTools;
 
 /// The longest error text kept in the health row.
 const MAX_ERROR_LEN: usize = 300;
@@ -275,7 +275,12 @@ impl IntegrationConnections {
             let fresh = live.versions == versions
                 && live.connected.client.is_connected()
                 && !self.shared.idle(live, now);
-            if fresh && now.saturating_duration_since(live.listed_at) >= config.tools_ttl {
+            // Taken before listing: a change announced during the listing
+            // keeps the next listing coming.
+            let announced = fresh && live.connected.client.take_tools_stale();
+            if fresh
+                && (announced || now.saturating_duration_since(live.listed_at) >= config.tools_ttl)
+            {
                 match tokio::time::timeout(
                     config.connect_timeout,
                     live.connected.client.list_tools(),
@@ -708,8 +713,7 @@ async fn open(
             config = config.custom_headers(HashMap::from([(header_name, value)]));
         }
         let transport = StreamableHttpClientTransport::<reqwest::Client>::from_config(config);
-        let service = ().serve(transport).await.map_err(anyhow::Error::new)?;
-        let client = McpClient::new(name, service);
+        let client = McpClient::connect(name, transport, StaleTools::default()).await?;
         let tools = client.list_tools().await?;
         anyhow::Ok((client, tools))
     };

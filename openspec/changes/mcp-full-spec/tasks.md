@@ -50,10 +50,10 @@ Each numbered group is one PR in the stack, in order.
 
 ## 8. Client handler, freshness and content conversion (PR 8)
 
-- [ ] 8.1 Add failing tests (rmcp test server over duplex): client capabilities declare Tasks, Skills and Apps and not sampling, roots or elicitation; a tool-list-changed notification makes the next tool listing fresh; a `2025-11-25`-only server connects; confirm red
-- [ ] 8.2 Implement `AssistantClientHandler`, use it in the stdio manager and integration pool, open a `listen` subscription for `2026-07-28` servers, and verify the tests pass
-- [ ] 8.3 Add failing `bridge.rs` tests for audio, resource link, embedded text and binary resources, and structured-content-only results; implement conversion and verify they pass
-- [ ] 8.4 Add a failing test that a tool with visibility `["app"]` is not offered to the Persona; implement and verify it passes
+- [x] 8.1 Add failing tests (rmcp test server over duplex): client capabilities declare Tasks, Skills and Apps and not sampling, roots or elicitation; a tool-list-changed notification makes the next tool listing fresh; a `2025-11-25`-only server connects; confirm red
+- [x] 8.2 Implement `AssistantClientHandler`, use it in the stdio manager and integration pool, open a `listen` subscription for `2026-07-28` servers, and verify the tests pass
+- [x] 8.3 Add failing `bridge.rs` tests for audio, resource link, embedded text and binary resources, and structured-content-only results; implement conversion and verify they pass
+- [x] 8.4 Add a failing test that a tool with visibility `["app"]` is not offered to the Persona; implement and verify it passes
 
 ## 9. Client Tasks (PR 9)
 

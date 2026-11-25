@@ -32,6 +32,8 @@ struct Server {
     healthy: bool,
     /// How long `tools/list` takes; changeable mid-test.
     list_delay: Arc<std::sync::Mutex<Option<Duration>>>,
+    /// Also lists `widget`, a tool only an MCP App may call.
+    app_only_tool: bool,
 }
 
 impl Respond for Server {
@@ -51,15 +53,26 @@ impl Respond for Server {
             }
         };
         match body["method"].as_str().unwrap_or_default() {
+            // A server from before `server/discover`: the client falls back to `initialize`.
+            "server/discover" => ResponseTemplate::new(200).set_body_json(
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}}),
+            ),
             "initialize" => reply(json!({
                 "protocolVersion": body["params"]["protocolVersion"],
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "s", "version": "1"},
             })),
             "tools/list" => {
-                let response = reply(json!({"tools": [{
+                let mut tools = vec![json!({
                     "name": "ping", "description": "ping", "inputSchema": {"type": "object"},
-                }]}));
+                })];
+                if self.app_only_tool {
+                    tools.push(json!({
+                        "name": "widget", "description": "widget", "inputSchema": {"type": "object"},
+                        "_meta": {"ui": {"visibility": ["app"]}},
+                    }));
+                }
+                let response = reply(json!({ "tools": tools }));
                 match *self.list_delay.lock().unwrap() {
                     Some(delay) => response.set_delay(delay),
                     None => response,
@@ -75,6 +88,7 @@ async fn serve(delay: Option<Duration>, healthy: bool) -> MockServer {
         delay,
         healthy,
         list_delay: Arc::default(),
+        app_only_tool: false,
     })
     .await
 }
@@ -285,6 +299,31 @@ async fn another_user_in_the_same_space_does_not_get_the_first_users_tools() {
     assert_eq!(
         world.names(Some(V), "eng").await,
         vec!["mcp__org_linear__ping", "mcp__space_linear__ping"]
+    );
+}
+
+#[tokio::test]
+async fn a_tool_only_an_app_may_call_is_not_offered_to_the_persona() {
+    let server = serve_with(Server {
+        delay: None,
+        healthy: true,
+        list_delay: Arc::default(),
+        app_only_tool: true,
+    })
+    .await;
+    let world = World::new(ConnectionsConfig::default()).await;
+    world
+        .open(
+            "int_o",
+            IntegrationLayer::Org,
+            &server.uri(),
+            IntegrationTrust::Trust,
+        )
+        .await;
+
+    assert_eq!(
+        world.names(Some(U), "eng").await,
+        vec!["mcp__org_linear__ping"]
     );
 }
 
@@ -524,6 +563,7 @@ async fn an_integration_that_stops_answering_costs_the_turn_one_timeout_and_noth
         delay: None,
         healthy: true,
         list_delay: list_delay.clone(),
+        app_only_tool: false,
     })
     .await;
     let world = World::new(ConnectionsConfig {

@@ -4,12 +4,24 @@
 //! `RunningService` for lifecycle management.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use rmcp::model::{CallToolRequestParams, CallToolResult, ServerPeerInfo, Tool};
-use rmcp::service::{Peer, RoleClient, RunningService};
+use rmcp::ClientServiceExt;
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ProtocolVersion, ServerPeerInfo, SubscriptionFilter,
+    Tool,
+};
+use rmcp::service::{ClientLifecycleMode, Peer, RoleClient, RunningService};
+use rmcp::transport::IntoTransport;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tracing::debug;
+
+use crate::handler::{AssistantClientHandler, StaleTools};
+
+/// How long to wait before listening again after a subscription ends.
+const RELISTEN_DELAY: Duration = Duration::from_secs(30);
 
 /// An active session with a single MCP server.
 ///
@@ -23,18 +35,68 @@ pub struct McpClient {
     peer: Peer<RoleClient>,
     /// The running service that owns the background I/O task.
     /// Wrapped in `Mutex<Option<...>>` so we can `close()` it on shutdown.
-    _service: Mutex<Option<RunningService<RoleClient, ()>>>,
+    _service: Mutex<Option<RunningService<RoleClient, AssistantClientHandler>>>,
+    /// Whether the server announced a tool list change since the last listing.
+    stale: StaleTools,
+    /// Watches list-change notifications on a `2026-07-28` connection.
+    listener: Option<JoinHandle<()>>,
 }
 
 impl McpClient {
-    /// Create a new client wrapping an already-initialized rmcp service.
-    pub fn new(name: impl Into<String>, service: RunningService<RoleClient, ()>) -> Self {
+    /// Open a session over `transport`.
+    ///
+    /// Tries `2026-07-28` (`server/discover`) first and falls back to
+    /// `initialize` on `2025-11-25` for servers that do not know it. The
+    /// handler's tool-staleness flag is `stale`.
+    pub async fn connect<T, E, A>(
+        name: impl Into<String>,
+        transport: T,
+        stale: StaleTools,
+    ) -> Result<Self>
+    where
+        T: IntoTransport<RoleClient, E, A>,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        let service = AssistantClientHandler::new(stale.clone())
+            .serve_with_lifecycle(
+                transport,
+                ClientLifecycleMode::Auto {
+                    preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+                    legacy_version: Some(ProtocolVersion::LATEST_WITH_INITIALIZE),
+                },
+            )
+            .await
+            .map_err(anyhow::Error::new)?;
         let peer = service.peer().clone();
-        Self {
+        // A server on `2026-07-28` sends list changes only to a subscriber;
+        // earlier ones send them unsolicited, to the handler.
+        let listener = peer
+            .peer_info()
+            .is_some_and(|info| !info.protocol_version.has_initialize())
+            .then(|| tokio::spawn(watch_list_changes(peer.clone(), stale.clone())));
+        Ok(Self {
             name: name.into(),
             peer,
             _service: Mutex::new(Some(service)),
-        }
+            stale,
+            listener,
+        })
+    }
+
+    /// Whether the server signalled a tool list change since the last call.
+    /// Clears the mark.
+    pub fn take_tools_stale(&self) -> bool {
+        self.stale.take()
+    }
+
+    /// Whether a tool list change is waiting to be picked up.
+    pub fn tools_stale(&self) -> bool {
+        self.stale.is_marked()
+    }
+
+    /// Flag the tool list stale again, for a listing that failed.
+    pub fn mark_tools_stale(&self) {
+        self.stale.mark();
     }
 
     /// Fetch the list of tools from the remote server (handles pagination).
@@ -92,16 +154,6 @@ impl McpClient {
         self.peer.peer_info()
     }
 
-    /// Whether the server advertised tool-list-changed notifications.
-    pub fn supports_tool_list_changed(&self) -> bool {
-        self.peer.peer_info().is_some_and(|info| {
-            info.capabilities
-                .tools
-                .as_ref()
-                .is_some_and(|t| t.list_changed.unwrap_or(false))
-        })
-    }
-
     /// Gracefully shut down the MCP session.
     pub async fn shutdown(&self) -> Result<()> {
         debug!(server = %self.name, "shutting down MCP client");
@@ -114,5 +166,40 @@ impl McpClient {
             debug!(server = %self.name, "MCP client session closed");
         }
         Ok(())
+    }
+}
+
+impl Drop for McpClient {
+    fn drop(&mut self) {
+        if let Some(listener) = &self.listener {
+            listener.abort();
+        }
+    }
+}
+
+/// Keep a subscription for tool and prompt list changes open for as long as
+/// the connection lives, marking `stale` on each one.
+///
+/// A server that refuses the subscription gets no more attempts. One that
+/// ends it is asked again after a pause, and the tools count as stale in the
+/// meantime, since changes may have gone unannounced.
+async fn watch_list_changes(peer: Peer<RoleClient>, stale: StaleTools) {
+    let filter = SubscriptionFilter::builder()
+        .tools_list_changed()
+        .prompts_list_changed()
+        .build();
+    while !peer.is_transport_closed() {
+        let mut subscription = match peer.listen(filter.clone()).await {
+            Ok(subscription) => subscription,
+            Err(error) => {
+                debug!(%error, "server does not accept a list-changed subscription");
+                return;
+            }
+        };
+        while let Ok(Some(_)) = subscription.next().await {
+            stale.mark();
+        }
+        stale.mark();
+        tokio::time::sleep(RELISTEN_DELAY).await;
     }
 }
