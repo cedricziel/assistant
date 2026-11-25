@@ -572,9 +572,120 @@ pub struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
     use utoipa::OpenApi;
 
     use super::ApiDoc;
+
+    fn spec_json() -> serde_json::Value {
+        serde_json::to_value(ApiDoc::openapi()).expect("spec serialises")
+    }
+
+    /// The committed `openapi.json` is the contract the Dart client is generated
+    /// from, so it must equal what the code produces.
+    #[test]
+    fn committed_openapi_json_matches_code() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../openapi.json");
+        let committed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("openapi.json readable"))
+                .expect("openapi.json is valid JSON");
+        assert!(
+            committed == spec_json(),
+            "openapi.json is out of date with the code; run `make dump-openapi` and commit the result"
+        );
+    }
+
+    fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("src dir readable") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Names of the functions annotated with `#[utoipa::path(...)]` in `source`.
+    fn annotated_handlers(source: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut pending = false;
+        for line in source.lines() {
+            let line = line.trim_start();
+            if line.starts_with("#[utoipa::path(") {
+                pending = true;
+            } else if pending {
+                let signature = line
+                    .strip_prefix("pub ")
+                    .unwrap_or(line)
+                    .strip_prefix("async ")
+                    .unwrap_or(line);
+                if let Some(rest) = signature.strip_prefix("fn ") {
+                    let name: String = rest
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    names.push(name);
+                    pending = false;
+                }
+            }
+        }
+        names
+    }
+
+    /// `module::handler` for every `#[utoipa::path]` in `file`.
+    fn qualified_handlers(file: &Path) -> Vec<String> {
+        let module = match file.file_stem().and_then(|s| s.to_str()) {
+            Some("mod") => file.parent().and_then(|p| p.file_name()),
+            stem => stem.map(std::ffi::OsStr::new),
+        }
+        .and_then(|m| m.to_str())
+        .expect("module name")
+        .to_owned();
+        let source = std::fs::read_to_string(file).expect("source readable");
+        annotated_handlers(&source)
+            .into_iter()
+            .map(|name| format!("{module}::{name}"))
+            .collect()
+    }
+
+    /// A handler with `#[utoipa::path]` that is missing from `ApiDoc`'s
+    /// `paths(...)` list silently drops out of the spec and the Dart client.
+    #[test]
+    fn every_annotated_handler_is_listed_in_api_doc() {
+        let listed: BTreeSet<String> = include_str!("openapi.rs")
+            .lines()
+            .filter_map(|line| line.trim().strip_suffix(','))
+            .filter(|entry| {
+                entry
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+            })
+            .filter_map(|entry| {
+                let mut segments = entry.rsplit("::");
+                let name = segments.next()?;
+                Some(format!("{}::{name}", segments.next()?))
+            })
+            .collect();
+
+        let mut files = Vec::new();
+        rust_files(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        let missing: Vec<String> = files
+            .iter()
+            .filter(|file| !file.ends_with("openapi.rs"))
+            .flat_map(|file| qualified_handlers(file))
+            .filter(|handler| !listed.contains(handler))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "handlers with #[utoipa::path] missing from ApiDoc paths(...) in crates/web-ui/src/openapi.rs: {missing:?}"
+        );
+    }
 
     /// Telemetry is emitted over OTLP only; the REST API must not expose
     /// local trace, log or analytics viewers.
