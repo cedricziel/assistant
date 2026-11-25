@@ -107,6 +107,15 @@ pub(super) fn offered_in(rows: &[SpaceAccess], space: &SpaceId) -> bool {
     allows.peek().is_none() || allows.any(|row| &row.space_id == space)
 }
 
+/// Whether an org-layer integration with these rows is in use in `space`:
+/// offered to it and not opted out.
+pub(super) fn active_in(rows: &[SpaceAccess], space: &SpaceId) -> bool {
+    offered_in(rows, space)
+        && !rows
+            .iter()
+            .any(|row| row.mode == SpaceAccessMode::OptOut && &row.space_id == space)
+}
+
 fn offered_in_a_space_of(ctx: &AuthContext, rows: &[SpaceAccess]) -> bool {
     ctx.space_roles.keys().any(|space| offered_in(rows, space))
 }

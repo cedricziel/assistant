@@ -56,19 +56,40 @@ pub async fn list_integrations(
     query: Result<Query<ListIntegrationsQuery>, QueryRejection>,
 ) -> ApiResult<Json<IntegrationListResponse>> {
     let Query(query) = query?;
-    let filter = IntegrationFilter {
-        layer: query.layer.map(Into::into),
-        space_id: query.space_id.map(SpaceId::from),
+    let layer: Option<domain::IntegrationLayer> = query.layer.map(Into::into);
+    let space = query.space_id.map(SpaceId::from);
+    let wants = |wanted| layer.is_none_or(|layer| layer == wanted);
+    let by_layer = |layer, space_id| IntegrationFilter {
+        layer: Some(layer),
+        space_id,
         owner_user_id: None,
     };
-    // Space rows only matter for org-layer integrations.
-    let wants_org_layer = filter
-        .layer
-        .is_none_or(|layer| layer == domain::IntegrationLayer::Org);
     let (integrations, rows, policy) = futures::try_join!(
-        state.store.list(&ctx.org_id, &filter),
         async {
-            if wants_org_layer {
+            let org = &ctx.org_id;
+            let Some(space) = &space else {
+                let all = IntegrationFilter {
+                    layer,
+                    ..IntegrationFilter::default()
+                };
+                return state.store.list(org, &all).await;
+            };
+            // A space has its own integrations and the org-layer ones offered
+            // to it; the latter are narrowed in the loop below.
+            let mut found = Vec::new();
+            if wants(domain::IntegrationLayer::Space) {
+                let filter = by_layer(domain::IntegrationLayer::Space, Some(space.clone()));
+                found.extend(state.store.list(org, &filter).await?);
+            }
+            if wants(domain::IntegrationLayer::Org) {
+                let filter = by_layer(domain::IntegrationLayer::Org, None);
+                found.extend(state.store.list(org, &filter).await?);
+            }
+            Ok(found)
+        },
+        async {
+            // Space rows only matter for org-layer integrations.
+            if wants(domain::IntegrationLayer::Org) {
                 state.store.list_org_space_access(&ctx.org_id).await
             } else {
                 Ok(Vec::new())
@@ -89,6 +110,12 @@ pub async fn list_integrations(
             .get(&integration.id)
             .map_or(&[][..], Vec::as_slice);
         if !authz::access(&ctx, &integration, own_rows).can_view() {
+            continue;
+        }
+        let offered = space.as_ref().is_none_or(|space| {
+            integration.layer != domain::IntegrationLayer::Org || authz::active_in(own_rows, space)
+        });
+        if !offered {
             continue;
         }
         let (status, has_credential) = caller_view(&state, &ctx, &policy, &integration).await?;
@@ -183,7 +210,7 @@ async fn create(
         .name
         .or(source.default_name)
         .ok_or_else(|| ApiError::unprocessable("name is required for a custom URL"))?;
-    validate_name(&name)?;
+    let name = clean_name(name)?;
 
     let credential_mode: domain::CredentialMode = match (layer, request.credential_mode) {
         (domain::IntegrationLayer::User, Some(mode))
@@ -538,12 +565,16 @@ fn validate_header(name: &str, prefix: Option<&str>) -> ApiResult<()> {
 fn validate_connect_url(url: &str) -> ApiResult<()> {
     match url::Url::parse(url) {
         Ok(parsed)
-            if matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some() =>
+            if matches!(parsed.scheme(), "http" | "https")
+                && parsed.host_str().is_some()
+                && parsed.username().is_empty()
+                && parsed.password().is_none()
+                && parsed.fragment().is_none() =>
         {
             Ok(())
         }
         _ => Err(ApiError::unprocessable(
-            "connect_url must be an http(s) URL",
+            "connect_url must be an http(s) URL without credentials or a fragment",
         )),
     }
 }
@@ -609,10 +640,11 @@ fn validate_slug(slug: &str) -> ApiResult<()> {
     }
 }
 
-fn validate_name(name: &str) -> ApiResult<()> {
-    let length = name.trim().chars().count();
-    if (1..=MAX_NAME_LEN).contains(&length) {
-        Ok(())
+/// The trimmed name, if it is 1-`MAX_NAME_LEN` characters.
+fn clean_name(name: String) -> ApiResult<String> {
+    let name = name.trim();
+    if (1..=MAX_NAME_LEN).contains(&name.chars().count()) {
+        Ok(name.to_owned())
     } else {
         Err(ApiError::unprocessable(format!(
             "name must be 1-{MAX_NAME_LEN} characters"
@@ -628,8 +660,7 @@ fn apply_update(integration: &mut Integration, request: UpdateIntegrationRequest
         integration.slug = slug;
     }
     if let Some(name) = request.name {
-        validate_name(&name)?;
-        integration.name = name;
+        integration.name = clean_name(name)?;
     }
     if let Some(enabled) = request.enabled {
         integration.enabled = enabled;
@@ -1294,6 +1325,148 @@ mod tests {
         assert_eq!(ids(&space), ["int_space"]);
         assert!(ids(&none).is_empty());
         assert_eq!(bad, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn the_space_filter_includes_org_integrations_offered_there() {
+        let h = world().await;
+
+        let (_, both) = h.get(Who::Admin, "/api/integrations?space_id=sp_eng").await;
+        let (_, org_only) = h
+            .get(Who::Admin, "/api/integrations?layer=org&space_id=sp_eng")
+            .await;
+        let (_, user) = h
+            .get(Who::Admin, "/api/integrations?layer=user&space_id=sp_eng")
+            .await;
+
+        assert_eq!(ids(&both), ["int_org", "int_space"]);
+        assert_eq!(ids(&org_only), ["int_org"]);
+        assert!(
+            ids(&user).is_empty(),
+            "user-layer integrations have no space"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_space_filter_drops_org_integrations_not_offered_there() {
+        let h = world().await;
+        h.state
+            .store
+            .add_space_access("int_org", &"sp_sales".into(), SpaceAccessMode::Allow)
+            .await
+            .unwrap();
+
+        let (_, eng) = h.get(Who::Admin, "/api/integrations?space_id=sp_eng").await;
+        let (_, sales) = h
+            .get(Who::Admin, "/api/integrations?space_id=sp_sales")
+            .await;
+
+        assert_eq!(ids(&eng), ["int_space"], "restricted to sales");
+        assert_eq!(ids(&sales), ["int_org"]);
+    }
+
+    #[tokio::test]
+    async fn the_space_filter_drops_org_integrations_the_space_opted_out_of() {
+        let h = world().await;
+        h.state
+            .store
+            .add_space_access("int_org", &eng(), SpaceAccessMode::OptOut)
+            .await
+            .unwrap();
+
+        let (_, filtered) = h
+            .get(Who::EngAdmin, "/api/integrations?space_id=sp_eng")
+            .await;
+        let (_, unfiltered) = h.get(Who::EngAdmin, "/api/integrations").await;
+
+        assert_eq!(ids(&filtered), ["int_space"]);
+        assert!(
+            ids(&unfiltered).contains(&"int_org".to_owned()),
+            "still listed without the filter, so the space can opt back in"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_space_filter_still_follows_visibility() {
+        let h = world().await;
+
+        let (_, body) = h.get(Who::Other, "/api/integrations?space_id=sp_eng").await;
+
+        assert_eq!(ids(&body), ["int_org"], "no view of eng's own integrations");
+    }
+
+    // -- Input hygiene ---------------------------------------------------------
+
+    #[tokio::test]
+    async fn names_are_stored_trimmed() {
+        let h = Harness::new().await;
+        let mut body = linear("org", "linear");
+        body["name"] = json!("  Team Linear \n");
+
+        let (status, created) = h.post(Who::Admin, "/api/integrations", body).await;
+        let (patched, updated) = h
+            .patch(
+                Who::Admin,
+                &format!("/api/integrations/{}", created["id"].as_str().unwrap()),
+                json!({"name": "\t Renamed  "}),
+            )
+            .await;
+
+        assert_eq!(status, CREATED, "{created}");
+        assert_eq!(created["name"], "Team Linear");
+        assert_eq!(patched, OK, "{updated}");
+        assert_eq!(updated["name"], "Renamed");
+    }
+
+    #[tokio::test]
+    async fn blank_names_are_unprocessable() {
+        let h = world().await;
+        let mut body = linear("org", "linear");
+        body["name"] = json!("   ");
+
+        let (create, _) = h.post(Who::Admin, "/api/integrations", body).await;
+        let (patch, _) = h
+            .patch(
+                Who::Admin,
+                "/api/integrations/int_org",
+                json!({"name": " "}),
+            )
+            .await;
+
+        assert_eq!((create, patch), (UNPROCESSABLE, UNPROCESSABLE));
+    }
+
+    #[tokio::test]
+    async fn connect_urls_with_credentials_or_fragments_are_unprocessable() {
+        let h = Harness::new().await;
+        h.set_policy(|p| p.allow_custom_urls = true).await;
+        h.seed("int_custom", IntegrationLayer::Org, None, |i| {
+            i.catalog_entry_id = None;
+        })
+        .await;
+        for url in [
+            "https://bob:token@mcp.example.com/mcp",
+            "https://bob@mcp.example.com/mcp",
+            "https://:token@mcp.example.com/mcp",
+            "https://mcp.example.com/mcp#frag",
+        ] {
+            let (create, body) = h
+                .post(
+                    Who::Admin,
+                    "/api/integrations",
+                    json!({"layer": "org", "connect_url": url, "name": "x", "slug": "x", "auth_kind": "none"}),
+                )
+                .await;
+            let (patch, _) = h
+                .patch(
+                    Who::Admin,
+                    "/api/integrations/int_custom",
+                    json!({"connect_url": url}),
+                )
+                .await;
+            assert_eq!(create, UNPROCESSABLE, "create {url}: {body}");
+            assert_eq!(patch, UNPROCESSABLE, "patch {url}");
+        }
     }
 
     #[tokio::test]

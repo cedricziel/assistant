@@ -187,7 +187,11 @@ pub struct IntegrationListResponse {
 pub struct ListIntegrationsQuery {
     /// Only integrations of this layer.
     pub layer: Option<IntegrationLayer>,
-    /// Only space-layer integrations of this space.
+    /// Only integrations in use in this space: its own space-layer ones, plus
+    /// the org-layer ones offered to it that it has not opted out of. User-layer
+    /// integrations belong to no space and are never returned. Without this
+    /// filter, opted-out org integrations are listed too, so a space can opt
+    /// back in.
     pub space_id: Option<String>,
 }
 
