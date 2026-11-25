@@ -1,13 +1,72 @@
 //! Configuration loading for the assistant.
 //!
-//! Provides shared helpers so every interface binary (CLI, web-ui, Slack, …)
-//! loads `~/.assistant/config.toml` the same way.
+//! Settings live in two kinds of files under the install root
+//! (`~/.assistant`):
+//!
+//! * `server.toml` — process-wide settings ([`ServerConfig`]), loaded once at
+//!   startup.
+//! * `orgs/{slug}/org.toml` — one file per organization ([`OrgConfig`]), loaded
+//!   for the org a space belongs to.
+//!
+//! A missing file yields the defaults; an unreadable or malformed file is an
+//! error, so a typo never silently falls back to the defaults.
 
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result, bail};
 use tracing::{info, warn};
 
-use crate::types::agent::AssistantConfig;
+use crate::types::agent::{AssistantConfig, OrgConfig, ServerConfig};
+
+/// Path of `server.toml` under the install root `base_dir`.
+pub fn server_config_path(base_dir: &Path) -> PathBuf {
+    base_dir.join("server.toml")
+}
+
+/// Path of `orgs/{org_slug}/org.toml` under the install root `base_dir`.
+///
+/// Rejects slugs that could leave the `orgs/` directory.
+pub fn org_config_path(base_dir: &Path, org_slug: &str) -> Result<PathBuf> {
+    if org_slug.is_empty()
+        || !org_slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        bail!(
+            "org slug {org_slug:?} must be non-empty and contain only letters, digits, '-' and '_'"
+        );
+    }
+    Ok(base_dir.join("orgs").join(org_slug).join("org.toml"))
+}
+
+/// Load `server.toml` from the install root `base_dir`.
+pub fn load_server_config(base_dir: &Path) -> Result<ServerConfig> {
+    load_toml(&server_config_path(base_dir))
+}
+
+/// Load `orgs/{org_slug}/org.toml` from the install root `base_dir`.
+pub fn load_org_config(base_dir: &Path, org_slug: &str) -> Result<OrgConfig> {
+    load_toml(&org_config_path(base_dir, org_slug)?)
+}
+
+/// Read and parse `path`, or return `T::default()` when the file is absent.
+///
+/// Synchronous on purpose: config loads at startup (or once per org) from a
+/// tiny file, and this keeps the loaders usable without a tokio runtime.
+fn load_toml<T: Default + serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    if !path.exists() {
+        info!("No config file at {}; using defaults", path.display());
+        return Ok(T::default());
+    }
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let parsed =
+        toml::from_str(&raw).with_context(|| format!("Failed to parse {}", path.display()))?;
+    info!("Loaded config from {}", path.display());
+    Ok(parsed)
+}
+
+// -- Single-file loader (replaced by the server/org loaders above) --------------
 
 /// Return the default path to the assistant config file
 /// (`~/.assistant/config.toml`).
@@ -62,54 +121,133 @@ pub fn load_config(path: &Path) -> AssistantConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use crate::types::llm::LlmProviderKind;
+    use crate::types::storage::BusKind;
+
+    fn write(path: &Path, content: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
 
     #[test]
-    fn test_default_config_path_ends_with_config_toml() {
-        if let Some(p) = default_config_path() {
-            assert!(p.ends_with("config.toml"));
-            assert!(p.to_string_lossy().contains(".assistant"));
+    fn paths_follow_the_documented_layout() {
+        let base = Path::new("/home/u/.assistant");
+        assert_eq!(
+            server_config_path(base),
+            Path::new("/home/u/.assistant/server.toml")
+        );
+        assert_eq!(
+            org_config_path(base, "acme").unwrap(),
+            Path::new("/home/u/.assistant/orgs/acme/org.toml")
+        );
+    }
+
+    #[test]
+    fn org_config_path_rejects_slugs_that_escape_the_orgs_directory() {
+        let base = Path::new("/home/u/.assistant");
+        for slug in ["", "..", "../x", "a/b", "a b"] {
+            assert!(org_config_path(base, slug).is_err(), "slug {slug:?}");
         }
-        // If home_dir() returns None (CI), the test is a no-op.
     }
 
     #[test]
-    fn test_load_config_missing_file_returns_default() {
-        let cfg = load_config(Path::new("/nonexistent/path/config.toml"));
-        // Should be the default — Ollama provider
-        assert_eq!(cfg.llm.provider, crate::types::llm::LlmProviderKind::Ollama);
-    }
-
-    #[test]
-    fn test_load_config_parses_toml() {
+    fn missing_files_yield_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        let mut f = std::fs::File::create(&path).unwrap();
-        writeln!(
-            f,
+        let server = load_server_config(dir.path()).unwrap();
+        assert_eq!(server.bus.kind, BusKind::Sqlite);
+        let org = load_org_config(dir.path(), "acme").unwrap();
+        assert_eq!(org.llm.provider, LlmProviderKind::Ollama);
+    }
+
+    #[test]
+    fn server_config_reads_the_process_wide_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &server_config_path(dir.path()),
+            r#"
+[bus]
+kind = "nats"
+nats_url = "nats://broker:4222"
+
+[[mcp.servers]]
+name = "github"
+command = ["npx", "server-github"]
+
+[notifications]
+vapid_public_key = "pub"
+"#,
+        );
+        let server = load_server_config(dir.path()).unwrap();
+        assert_eq!(server.bus.kind, BusKind::Nats);
+        assert_eq!(server.mcp.servers.len(), 1);
+        assert_eq!(
+            server.notifications.vapid_public_key.as_deref(),
+            Some("pub")
+        );
+    }
+
+    #[test]
+    fn org_config_reads_the_tenant_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &org_config_path(dir.path(), "acme").unwrap(),
             r#"
 [llm]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-"#
-        )
-        .unwrap();
 
-        let cfg = load_config(&path);
-        assert_eq!(
-            cfg.llm.provider,
-            crate::types::llm::LlmProviderKind::Anthropic
+[agent]
+id = "ops"
+
+[slack]
+bot_token = "xoxb-1"
+app_token = "xapp-1"
+"#,
         );
-        assert_eq!(cfg.llm.model, "claude-sonnet-4-20250514");
+        let org = load_org_config(dir.path(), "acme").unwrap();
+        assert_eq!(org.llm.provider, LlmProviderKind::Anthropic);
+        assert_eq!(org.llm.model, "claude-sonnet-4-20250514");
+        assert_eq!(org.agent.id, "ops");
+        assert!(org.slack.is_some());
     }
 
     #[test]
-    fn test_load_config_invalid_toml_returns_default() {
+    fn each_org_gets_its_own_config() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "{{{{not valid toml").unwrap();
+        write(
+            &org_config_path(dir.path(), "acme").unwrap(),
+            "[llm]\nprovider = \"openai\"\n",
+        );
+        let acme = load_org_config(dir.path(), "acme").unwrap();
+        let other = load_org_config(dir.path(), "other").unwrap();
+        assert_eq!(acme.llm.provider, LlmProviderKind::OpenAI);
+        assert_eq!(other.llm.provider, LlmProviderKind::Ollama);
+    }
 
-        let cfg = load_config(&path);
-        assert_eq!(cfg.llm.provider, crate::types::llm::LlmProviderKind::Ollama);
+    #[test]
+    fn a_malformed_file_is_an_error_naming_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = org_config_path(dir.path(), "acme").unwrap();
+        write(&path, "{{{{not valid toml");
+        let err = load_org_config(dir.path(), "acme").unwrap_err();
+        assert!(
+            format!("{err:#}").contains(&path.display().to_string()),
+            "error should name {}: {err:#}",
+            path.display()
+        );
+        write(&server_config_path(dir.path()), "{{{{not valid toml");
+        assert!(load_server_config(dir.path()).is_err());
+    }
+
+    /// `config.toml` is no longer read.
+    #[test]
+    fn a_leftover_config_toml_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("config.toml"),
+            "[llm]\nprovider = \"anthropic\"\n",
+        );
+        let org = load_org_config(dir.path(), "default").unwrap();
+        assert_eq!(org.llm.provider, LlmProviderKind::Ollama);
     }
 }

@@ -74,6 +74,71 @@ pub struct AssistantConfig {
     pub permissions: PermissionsConfig,
 }
 
+/// Process-wide settings, read once at startup from `~/.assistant/server.toml`.
+///
+/// Holds what every org and space in the process shares: the message-bus
+/// backend, the external MCP servers whose tools are registered everywhere, and
+/// the Web Push signing keys.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ServerConfig {
+    /// Message-bus backend (`[bus]`).
+    #[serde(default)]
+    pub bus: BusConfig,
+    /// External MCP servers bridged into every space (`[mcp]`).
+    #[serde(default)]
+    pub mcp: McpConfig,
+    /// Web Push / VAPID keys (`[notifications]`).
+    #[serde(default)]
+    pub notifications: NotificationsConfig,
+}
+
+/// Per-organization settings, read from `~/.assistant/orgs/{slug}/org.toml`.
+///
+/// Everything a tenant controls: which LLM and speech providers it uses, how
+/// its persona and memory behave, and the credentials of its messenger
+/// interfaces.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OrgConfig {
+    #[serde(default)]
+    pub llm: LlmConfig,
+    #[serde(default)]
+    pub skills: SkillsConfig,
+    /// Observability settings that depend on the org's data (`[observability]`).
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
+    #[serde(default)]
+    pub compaction: CompactionConfig,
+    /// Autonomous learning configuration (`[learning]` section).
+    #[serde(default)]
+    pub learning: LearningConfig,
+    /// Conversation title-generator configuration (`[titling]` section).
+    #[serde(default)]
+    pub titling: TitlingConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
+    /// Tool-permission rules and decision model (`[permissions]` section).
+    #[serde(default)]
+    pub permissions: PermissionsConfig,
+    /// Signal messenger interface configuration (optional).
+    pub signal: Option<SignalConfig>,
+    /// Slack interface configuration (optional).
+    pub slack: Option<SlackConfig>,
+    /// Mattermost interface configuration (optional).
+    pub mattermost: Option<MattermostConfig>,
+    /// Nextcloud Talk interface configuration (optional).
+    pub nextcloud: Option<NextcloudConfig>,
+    /// Matrix interface configuration (optional).
+    pub matrix: Option<MatrixConfig>,
+    /// Audio transcription configuration (optional).
+    #[serde(default)]
+    pub transcription: Option<TranscriptionConfig>,
+    /// Text-to-speech configuration (optional).
+    #[serde(default)]
+    pub tts: Option<TtsConfig>,
+}
+
 /// Active assistant agent configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
