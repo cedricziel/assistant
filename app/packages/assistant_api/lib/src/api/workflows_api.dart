@@ -788,6 +788,8 @@ class WorkflowsApi {
   /// Receives an inbound HTTP POST from an external system and queues a workflow run with trigger type &#x60;Webhook&#x60;.  The &#x60;token&#x60; path parameter is the per-workflow HMAC secret that acts as authentication.
   ///
   /// Parameters:
+  /// * [orgSlug] - Slug of the org that owns the workflow's space
+  /// * [spaceSlug] - Slug of the space that owns the workflow
   /// * [id] - Workflow ID
   /// * [token] - Webhook HMAC token
   /// * [body]
@@ -801,6 +803,8 @@ class WorkflowsApi {
   /// Returns a [Future] containing a [Response] with a [WorkflowWebhookTriggerAccepted] as data
   /// Throws [DioException] if API call or serialization fails
   Future<Response<WorkflowWebhookTriggerAccepted>> publicWebhookTrigger({
+    required String orgSlug,
+    required String spaceSlug,
     required String id,
     required String token,
     JsonObject? body,
@@ -811,7 +815,16 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/workflow-hooks/{id}/{token}'
+    final _path = r'/workflow-hooks/{org_slug}/{space_slug}/{id}/{token}'
+        .replaceAll(
+            '{' r'org_slug' '}',
+            encodeQueryParameter(_serializers, orgSlug, const FullType(String))
+                .toString())
+        .replaceAll(
+            '{' r'space_slug' '}',
+            encodeQueryParameter(
+                    _serializers, spaceSlug, const FullType(String))
+                .toString())
         .replaceAll(
             '{' r'id' '}',
             encodeQueryParameter(_serializers, id, const FullType(String))

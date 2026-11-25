@@ -7093,7 +7093,7 @@
         ]
       }
     },
-    "/workflow-hooks/{id}/{token}": {
+    "/workflow-hooks/{org_slug}/{space_slug}/{id}/{token}": {
       "post": {
         "tags": [
           "workflows"
@@ -7102,6 +7102,24 @@
         "description": "Receives an inbound HTTP POST from an external system and queues a workflow\nrun with trigger type `Webhook`.  The `token` path parameter is the\nper-workflow HMAC secret that acts as authentication.",
         "operationId": "public_webhook_trigger",
         "parameters": [
+          {
+            "name": "org_slug",
+            "in": "path",
+            "description": "Slug of the org that owns the workflow's space",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_slug",
+            "in": "path",
+            "description": "Slug of the space that owns the workflow",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "id",
             "in": "path",
@@ -10864,7 +10882,6 @@
           "id",
           "name",
           "url",
-          "secret",
           "event_types",
           "active",
           "created_at",
@@ -10891,7 +10908,11 @@
             "type": "string"
           },
           "secret": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Signing secret; present only for space admins."
           },
           "updated_at": {
             "type": "string",

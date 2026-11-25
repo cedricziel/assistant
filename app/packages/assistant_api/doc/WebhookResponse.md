@@ -13,7 +13,7 @@ Name | Type | Description | Notes
 **eventTypes** | **BuiltList&lt;String&gt;** |  | 
 **id** | **String** |  | 
 **name** | **String** |  | 
-**secret** | **String** |  | 
+**secret** | **String** | Signing secret; present only for space admins. | [optional] 
 **updatedAt** | [**DateTime**](DateTime.md) |  | 
 **url** | **String** |  | 
 **verifiedAt** | [**DateTime**](DateTime.md) |  | [optional] 

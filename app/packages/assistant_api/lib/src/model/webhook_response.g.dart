@@ -18,7 +18,7 @@ class _$WebhookResponse extends WebhookResponse {
   @override
   final String name;
   @override
-  final String secret;
+  final String? secret;
   @override
   final DateTime updatedAt;
   @override
@@ -35,7 +35,7 @@ class _$WebhookResponse extends WebhookResponse {
       required this.eventTypes,
       required this.id,
       required this.name,
-      required this.secret,
+      this.secret,
       required this.updatedAt,
       required this.url,
       this.verifiedAt})
@@ -184,8 +184,7 @@ class WebhookResponseBuilder
                 id, r'WebhookResponse', 'id'),
             name: BuiltValueNullFieldError.checkNotNull(
                 name, r'WebhookResponse', 'name'),
-            secret: BuiltValueNullFieldError.checkNotNull(
-                secret, r'WebhookResponse', 'secret'),
+            secret: secret,
             updatedAt: BuiltValueNullFieldError.checkNotNull(
                 updatedAt, r'WebhookResponse', 'updatedAt'),
             url: BuiltValueNullFieldError.checkNotNull(
