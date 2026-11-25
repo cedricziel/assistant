@@ -35,7 +35,7 @@ self.addEventListener("push", function (event) {
   const options = {
     body: payload.body || "",
     icon: "/icons/Icon-192.png",
-    badge: "/icons/Icon-192.png",
+    badge: "/icons/badge-96.png",
     data: {
       conversationId: payload.conversationId || null,
       url: payload.conversationId ? "/chat/" + payload.conversationId : "/",
