@@ -20,7 +20,7 @@ use assistant_core::integrations::{
 use assistant_core::store::{OrgStore, SpaceStore};
 use assistant_core::tool::{ToolHandler, TurnScope, TurnToolSource};
 
-use crate::bridge::McpToolHandler;
+use crate::bridge::model_visible_handlers;
 use crate::connections::IntegrationConnections;
 
 /// The org-level stores a source reads.
@@ -143,14 +143,15 @@ impl TurnToolSource for IntegrationToolSource {
             };
             let namespace = format!("{}_{}", integration.layer, integration.slug);
             let requires_confirmation = integration.trust != IntegrationTrust::Trust;
-            handlers.extend(connected.tools.iter().map(|tool| {
-                Arc::new(McpToolHandler::from_remote(
+            handlers.extend(
+                model_visible_handlers(
                     &namespace,
-                    tool,
-                    connected.client.clone(),
+                    &connected.tools,
+                    &connected.client,
                     requires_confirmation,
-                )) as Arc<dyn ToolHandler>
-            }));
+                )
+                .map(|handler| Arc::new(handler) as Arc<dyn ToolHandler>),
+            );
         }
         handlers
     }

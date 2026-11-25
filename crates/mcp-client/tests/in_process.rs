@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use assistant_core::ToolHandler;
 use assistant_core::types::conversation::{ExecutionContext, Interface};
+use assistant_mcp_client::StaleTools;
 use assistant_mcp_client::bridge::{McpToolHandler, namespaced_name};
 use assistant_mcp_client::client::McpClient;
 use rmcp::handler::server::router::tool::{ToolRoute, ToolRouter};
@@ -149,8 +150,10 @@ async fn connect(list_changed: bool) -> (McpClient, tokio::task::JoinHandle<()>)
             let _ = running.waiting().await;
         }
     });
-    let service = ().serve(client_io).await.expect("client handshake succeeds");
-    (McpClient::new("test-srv", service), server_handle)
+    let client = McpClient::connect("test-srv", client_io, StaleTools::default())
+        .await
+        .expect("client handshake succeeds");
+    (client, server_handle)
 }
 
 fn ctx() -> ExecutionContext {
@@ -187,14 +190,6 @@ async fn server_info_populated_after_initialize() {
     let (client, _h) = connect(false).await;
     let info = client.server_info().expect("server info present");
     assert!(info.capabilities.tools.is_some());
-}
-
-#[tokio::test]
-async fn supports_tool_list_changed_reflects_server_capability() {
-    let (off, _h1) = connect(false).await;
-    let (on, _h2) = connect(true).await;
-    assert!(!off.supports_tool_list_changed());
-    assert!(on.supports_tool_list_changed());
 }
 
 #[tokio::test]

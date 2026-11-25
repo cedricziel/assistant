@@ -10,13 +10,15 @@ use assistant_core::ToolHandler;
 use assistant_core::types::skills_mcp::{McpServerEntry, McpTransportConfig, McpTrustLevel};
 use assistant_mcp_client::manager::McpClientManager;
 
-/// Answers `initialize` and `tools/list`; the single tool's description is the
+/// A server from before `server/discover`. Answers `initialize` and `tools/list`; the single tool's description is the
 /// value of `$GREETING`, which lets a test observe the child's environment.
 const SERVER_SCRIPT: &str = r#"
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   version=$(printf '%s' "$line" | sed -n 's/.*"protocolVersion":"\([^"]*\)".*/\1/p')
   case "$line" in
+    *'"method":"server/discover"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"Method not found"}}\n' "$id";;
     *'"method":"initialize"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"%s","capabilities":{"tools":{}},"serverInfo":{"name":"sh","version":"1"}}}\n' "$id" "$version";;
     *'"method":"tools/list"'*)

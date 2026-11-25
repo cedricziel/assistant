@@ -67,6 +67,10 @@ impl Respond for Script {
         let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
         let id = body["id"].clone();
         match body["method"].as_str().unwrap_or_default() {
+            // A server from before `server/discover`: the client falls back to `initialize`.
+            "server/discover" => ResponseTemplate::new(200).set_body_json(
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}}),
+            ),
             "initialize" => {
                 let response = rpc_result(
                     &id,
@@ -114,6 +118,32 @@ async fn serve(script: &Script) -> MockServer {
         .await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(405))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// Like [`serve`], but the server's event stream announces a tool list change
+/// shortly after the client opens it.
+async fn serve_announcing_tool_changes(script: &Script) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(script.clone())
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(300))
+                .set_body_raw(
+                    "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\n",
+                    "text/event-stream",
+                ),
+        )
         .mount(&server)
         .await;
     Mock::given(method("DELETE"))
@@ -411,6 +441,34 @@ async fn the_tool_list_is_refreshed_after_its_ttl_without_reconnecting() {
     let again = world.pool.connect(&eff).await.unwrap();
 
     assert_eq!(names(&again.tools), vec!["t", "added"]);
+    assert_eq!(count(&server, "initialize").await, 1);
+}
+
+#[tokio::test]
+async fn an_announced_tool_change_is_seen_without_waiting_for_the_ttl() {
+    let script = Script::new(&["t"]);
+    let server = serve_announcing_tool_changes(&script).await;
+    let world = World::new(ConnectionsConfig {
+        tools_ttl: Duration::from_secs(5 * 60),
+        ..ConnectionsConfig::default()
+    });
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+    let first = world.pool.connect(&eff).await.unwrap();
+    assert_eq!(names(&first.tools), vec!["t"]);
+
+    script.tools.lock().unwrap().push("added");
+    let mut seen = Vec::new();
+    for _ in 0..100 {
+        seen = names(&world.pool.connect(&eff).await.unwrap().tools);
+        if seen.len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(seen, vec!["t", "added"], "no clock advance, so not the TTL");
     assert_eq!(count(&server, "initialize").await, 1);
 }
 

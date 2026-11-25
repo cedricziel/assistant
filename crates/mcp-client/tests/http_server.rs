@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use assistant_core::ToolHandler;
 use assistant_core::types::conversation::{ExecutionContext, Interface};
@@ -56,6 +57,10 @@ impl Respond for Script {
         let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
         let id = body["id"].clone();
         match body["method"].as_str().unwrap_or_default() {
+            // A server from before `server/discover`: the client falls back to `initialize`.
+            "server/discover" => ResponseTemplate::new(200).set_body_json(
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}}),
+            ),
             "initialize" => rpc_result(
                 &id,
                 json!({
@@ -104,6 +109,33 @@ async fn serve(script: &Script) -> MockServer {
         .await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(405))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// Like [`serve`], but the server's event stream announces a tool list change
+/// shortly after the client opens it.
+async fn serve_announcing_tool_changes(script: &Script) -> MockServer {
+    let server = serve(script).await;
+    server.reset().await;
+    Mock::given(method("POST"))
+        .respond_with(script.clone())
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(300))
+                .set_body_raw(
+                    "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\n",
+                    "text/event-stream",
+                ),
+        )
         .mount(&server)
         .await;
     Mock::given(method("DELETE"))
@@ -388,7 +420,9 @@ async fn shutdown_terminates_the_http_session() {
     assert_eq!(request_methods(&server, "DELETE").await, 1);
 }
 
-#[tokio::test(start_paused = true)]
+// Real time: with a paused clock the runtime skips ahead while a response is
+// still on the wire, and the client's 10 s `server/discover` probe times out.
+#[tokio::test]
 async fn health_check_reconnects_a_recovered_server_and_registers_its_tools() {
     let script = Script::new(&["alpha", "beta"]);
     script.healthy.store(false, Ordering::SeqCst);
@@ -450,5 +484,48 @@ async fn health_check_pauses_reconnecting_after_five_consecutive_failures() {
         (attempts_during_pause, attempts_after_pause),
         (attempts_before, attempts_before + 1),
         "the cycle at the failure limit must skip the server, the next must retry"
+    );
+}
+
+#[tokio::test]
+async fn a_tool_list_change_is_picked_up_by_the_next_health_check() {
+    let script = Script::new(&["alpha"]);
+    let server = serve_announcing_tool_changes(&script).await;
+    let mgr = McpClientManager::start(&[entry("remote", &server.uri(), McpTrustLevel::Trust)])
+        .await
+        .unwrap();
+    script.tools.lock().unwrap().push("beta");
+    let registered = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = registered.clone();
+    let register: Arc<dyn Fn(Arc<dyn ToolHandler>) + Send + Sync> = Arc::new(move |h| {
+        sink.lock().unwrap().push(h.name().to_string());
+    });
+    let unregistered = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = unregistered.clone();
+    let unregister: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |prefix| {
+        sink.lock().unwrap().push(prefix.to_string());
+    });
+
+    for _ in 0..100 {
+        mgr.health_check(&register, &unregister).await;
+        if !registered.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let mut names = registered.lock().unwrap().clone();
+    names.sort();
+    names.dedup();
+    assert_eq!(
+        (names, unregistered.lock().unwrap().first().cloned()),
+        (
+            vec![
+                "mcp__remote__alpha".to_string(),
+                "mcp__remote__beta".to_string()
+            ],
+            Some("mcp__remote__".to_string())
+        ),
+        "the server's new tool list should replace the old registration"
     );
 }

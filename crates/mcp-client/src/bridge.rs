@@ -241,12 +241,27 @@ impl Converted {
     }
 }
 
+/// Handlers for the tools of `server_name` that the Persona may be offered.
+pub fn model_visible_handlers<'a>(
+    server_name: &'a str,
+    tools: &'a [Tool],
+    client: &'a Arc<McpClient>,
+    requires_confirmation: bool,
+) -> impl Iterator<Item = McpToolHandler> + 'a {
+    tools
+        .iter()
+        .filter(|tool| is_model_visible(tool))
+        .map(move |tool| {
+            McpToolHandler::from_remote(server_name, tool, client.clone(), requires_confirmation)
+        })
+}
+
 /// Whether the Persona may be offered `tool`.
 ///
 /// MCP Apps visibility lives in `_meta.ui.visibility` (the deprecated flat
 /// `_meta["ui/visibility"]` is accepted too) and defaults to
 /// `["model", "app"]`; a tool without `"model"` there is for apps only.
-pub fn is_model_visible(tool: &Tool) -> bool {
+fn is_model_visible(tool: &Tool) -> bool {
     let Some(meta) = &tool.meta else {
         return true;
     };

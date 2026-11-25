@@ -12,9 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use rmcp::ServiceExt;
 use rmcp::model::Tool;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tracing::{debug, error, info, warn};
 
 use assistant_core::ToolHandler;
@@ -22,6 +21,7 @@ use assistant_core::types::skills_mcp::{McpServerEntry, McpTransportConfig, McpT
 
 use crate::bridge::{self, McpToolHandler};
 use crate::client::McpClient;
+use crate::handler::StaleTools;
 
 /// Maximum number of consecutive reconnection attempts before giving up on a
 /// server until the next health-check cycle.
@@ -53,6 +53,8 @@ pub struct McpClientManager {
     servers: RwLock<HashMap<String, ServerState>>,
     /// All tool handlers produced from remote servers.
     handlers: RwLock<Vec<Arc<McpToolHandler>>>,
+    /// Woken when any server announces that its tools changed.
+    tools_changed: Arc<Notify>,
 }
 
 impl McpClientManager {
@@ -64,6 +66,7 @@ impl McpClientManager {
     pub async fn start(entries: &[McpServerEntry]) -> Result<Self> {
         let mut servers = HashMap::new();
         let mut handlers = Vec::new();
+        let tools_changed = Arc::new(Notify::new());
 
         for entry in entries {
             if !entry.enabled {
@@ -82,20 +85,20 @@ impl McpClientManager {
                 continue;
             }
 
-            match Self::connect_one(entry).await {
+            match Self::connect_one(entry, &tools_changed).await {
                 Ok((client, tools)) => {
                     let client = Arc::new(client);
                     let requires_confirmation = entry.trust != McpTrustLevel::Trust;
 
-                    for tool in &tools {
-                        let handler = McpToolHandler::from_remote(
+                    handlers.extend(
+                        bridge::model_visible_handlers(
                             &entry.name,
-                            tool,
-                            client.clone(),
+                            &tools,
+                            &client,
                             requires_confirmation,
-                        );
-                        handlers.push(Arc::new(handler));
-                    }
+                        )
+                        .map(Arc::new),
+                    );
 
                     info!(
                         server = %entry.name,
@@ -132,13 +135,18 @@ impl McpClientManager {
         Ok(Self {
             servers: RwLock::new(servers),
             handlers: RwLock::new(handlers),
+            tools_changed,
         })
     }
 
     /// Connect to a single MCP server using rmcp and perform the initialize
     /// handshake, then list tools.
-    async fn connect_one(entry: &McpServerEntry) -> Result<(McpClient, Vec<Tool>)> {
-        let service = match &entry.transport {
+    async fn connect_one(
+        entry: &McpServerEntry,
+        tools_changed: &Arc<Notify>,
+    ) -> Result<(McpClient, Vec<Tool>)> {
+        let stale = StaleTools::waking(tools_changed.clone());
+        let client = match &entry.transport {
             McpTransportConfig::Stdio { command } => {
                 let resolved_env = resolve_env_vars(&entry.env);
 
@@ -157,9 +165,11 @@ impl McpClientManager {
                         format!("failed to spawn MCP server '{}': {:?}", entry.name, command)
                     })?;
 
-                ().serve(transport).await.map_err(|e| {
-                    anyhow::anyhow!("MCP initialize handshake failed for '{}': {e}", entry.name)
-                })?
+                McpClient::connect(&entry.name, transport, stale)
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!("MCP initialize handshake failed for '{}': {e}", entry.name)
+                    })?
             }
             McpTransportConfig::Http { url, headers } => {
                 // Only explicitly configured `headers` are sent over HTTP.
@@ -194,17 +204,17 @@ impl McpClientManager {
                     rmcp::transport::StreamableHttpClientTransport::<reqwest::Client>::from_config(
                         config,
                     );
-                ().serve(transport).await.map_err(|e| {
-                    anyhow::anyhow!(
-                        "MCP initialize handshake failed for '{}' at {}: {e}",
-                        entry.name,
-                        url
-                    )
-                })?
+                McpClient::connect(&entry.name, transport, stale)
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "MCP initialize handshake failed for '{}' at {}: {e}",
+                            entry.name,
+                            url
+                        )
+                    })?
             }
         };
-
-        let client = McpClient::new(&entry.name, service);
 
         let tools = client
             .list_tools()
@@ -241,8 +251,8 @@ impl McpClientManager {
 
     /// Refresh tools from a specific server.
     ///
-    /// Called when we receive a `notifications/tools/list_changed` from the
-    /// server. Returns the new tool handlers so the caller can re-register them.
+    /// Called when the server has announced that its tools changed. Returns
+    /// the new tool handlers so the caller can re-register them.
     ///
     /// The confirmation requirement is derived from the server's configured
     /// trust level — callers cannot override it to prevent accidental or
@@ -262,7 +272,12 @@ impl McpClientManager {
         let requires_confirmation = state.entry.trust != McpTrustLevel::Trust;
         drop(servers);
 
-        let tools = client.list_tools().await?;
+        // Cleared before listing, so a change announced meanwhile is not lost.
+        client.take_tools_stale();
+        let tools = client
+            .list_tools()
+            .await
+            .inspect_err(|_| client.mark_tools_stale())?;
         let prefix = bridge::namespaced_name(server_name, "");
 
         // Remove old handlers for this server.
@@ -270,18 +285,15 @@ impl McpClientManager {
         handlers.retain(|h| !h.name().starts_with(&prefix));
 
         // Add new handlers.
-        let mut new_handlers = Vec::new();
-        for tool in &tools {
-            let handler = McpToolHandler::from_remote(
-                server_name,
-                tool,
-                client.clone(),
-                requires_confirmation,
-            );
-            let handler = Arc::new(handler);
-            new_handlers.push(Arc::clone(&handler) as Arc<dyn ToolHandler>);
-            handlers.push(handler);
-        }
+        let new_handlers: Vec<Arc<McpToolHandler>> =
+            bridge::model_visible_handlers(server_name, &tools, &client, requires_confirmation)
+                .map(Arc::new)
+                .collect();
+        handlers.extend(new_handlers.iter().cloned());
+        let new_handlers = new_handlers
+            .into_iter()
+            .map(|h| h as Arc<dyn ToolHandler>)
+            .collect();
 
         info!(
             server = %server_name,
@@ -290,6 +302,34 @@ impl McpClientManager {
         );
 
         Ok(new_handlers)
+    }
+
+    /// Re-list the tools of every connected server that announced a change,
+    /// replacing its registration.
+    async fn refresh_stale_servers(
+        &self,
+        register_tool: &Arc<dyn Fn(Arc<dyn ToolHandler>) + Send + Sync>,
+        unregister_prefix: &Arc<dyn Fn(&str) + Send + Sync>,
+    ) {
+        let stale: Vec<String> = self
+            .servers
+            .read()
+            .await
+            .iter()
+            .filter(|(_, state)| state.client.as_ref().is_some_and(|c| c.tools_stale()))
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in stale {
+            match self.refresh_server_tools(&name).await {
+                Ok(handlers) => {
+                    unregister_prefix(&bridge::namespaced_name(&name, ""));
+                    for handler in handlers {
+                        register_tool(handler);
+                    }
+                }
+                Err(e) => warn!(server = %name, error = %e, "could not refresh MCP server tools"),
+            }
+        }
     }
 
     /// Run a single health-check cycle.
@@ -305,6 +345,10 @@ impl McpClientManager {
         register_tool: &Arc<dyn Fn(Arc<dyn ToolHandler>) + Send + Sync>,
         unregister_prefix: &Arc<dyn Fn(&str) + Send + Sync>,
     ) {
+        // -- Phase 0: pick up tool list changes servers announced ---------------
+        self.refresh_stale_servers(register_tool, unregister_prefix)
+            .await;
+
         // -- Phase 1: detect dead connections (needs write lock) ---------------
         let mut reconnect_work: Vec<(McpServerEntry, Duration)> = Vec::new();
 
@@ -363,11 +407,12 @@ impl McpClientManager {
 
         // -- Phase 2: reconnect concurrently (no lock held) -------------------
         type ReconnectResult = (McpServerEntry, Result<(McpClient, Vec<Tool>)>);
+        let tools_changed = &self.tools_changed;
         let results: Vec<ReconnectResult> =
             futures::future::join_all(reconnect_work.into_iter().map(
                 |(entry, backoff)| async move {
                     tokio::time::sleep(backoff).await;
-                    let result = Self::connect_one(&entry).await;
+                    let result = Self::connect_one(&entry, tools_changed).await;
                     (entry, result)
                 },
             ))
@@ -380,17 +425,17 @@ impl McpClientManager {
                     let client = Arc::new(client);
                     let requires_confirmation = entry.trust != McpTrustLevel::Trust;
 
-                    let mut new_tool_handlers = Vec::new();
-                    for tool in &tools {
-                        let handler = McpToolHandler::from_remote(
+                    let new_tool_handlers: Vec<Arc<McpToolHandler>> =
+                        bridge::model_visible_handlers(
                             &entry.name,
-                            tool,
-                            client.clone(),
+                            &tools,
+                            &client,
                             requires_confirmation,
-                        );
-                        let handler = Arc::new(handler);
-                        register_tool(Arc::clone(&handler) as Arc<dyn ToolHandler>);
-                        new_tool_handlers.push(handler);
+                        )
+                        .map(Arc::new)
+                        .collect();
+                    for handler in &new_tool_handlers {
+                        register_tool(Arc::clone(handler) as Arc<dyn ToolHandler>);
                     }
 
                     let mut handlers = self.handlers.write().await;
@@ -427,6 +472,8 @@ impl McpClientManager {
     /// Spawn a background task that periodically health-checks all MCP server
     /// connections and reconnects dead ones.
     ///
+    /// Tool list changes announced by a server are picked up right away.
+    ///
     /// The task runs until the returned [`tokio::task::JoinHandle`] is aborted
     /// or the process exits.
     pub fn spawn_health_loop(
@@ -438,9 +485,22 @@ impl McpClientManager {
         let reg = register_tool;
         let unreg = unregister_prefix;
         tokio::spawn(async move {
+            // A ticker, not a sleep per iteration: announcements must not
+            // keep postponing the liveness check.
+            let mut ticker = tokio::time::interval_at(
+                tokio::time::Instant::now() + HEALTH_CHECK_INTERVAL,
+                HEALTH_CHECK_INTERVAL,
+            );
             loop {
-                tokio::time::sleep(HEALTH_CHECK_INTERVAL).await;
-                manager.health_check(&reg, &unreg).await;
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        manager.health_check(&reg, &unreg).await;
+                    }
+                    // A server announced a change: refresh now, not at the next cycle.
+                    _ = manager.tools_changed.notified() => {
+                        manager.refresh_stale_servers(&reg, &unreg).await;
+                    }
+                }
             }
         })
     }
