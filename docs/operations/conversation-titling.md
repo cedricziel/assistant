@@ -1,16 +1,18 @@
 # Conversation Titling
 
 Conversations are auto-titled by a background worker that consumes
-`turn.result` messages from the assistant's internal message bus. The worker
+`turn.completed` messages from the assistant's internal message bus. The worker
 is interface-agnostic: it titles conversations that originate from the web
 UI, Slack, Matrix, Mattermost, Nextcloud, Signal, the CLI REPL, MCP clients,
-and scheduler-driven runs.
+and scheduler-driven runs. The turn worker publishes `turn.completed` after
+every successful turn; the `turn.result` reply is left to the caller that
+submitted the turn.
 
 ## How it works
 
 ```text
 Any interface    ┌──────────────────┐
-─────────────▶   │  turn.result     │    ┌─────────────────────┐
+─────────────▶   │  turn.completed  │    ┌─────────────────────┐
 (turn done)      │  on MessageBus   │ ─▶ │  Title-generator    │
                  └──────────────────┘    │  worker             │
                                          │  • check eligibility│
@@ -41,7 +43,7 @@ during single-org operation):
 
 ```toml
 [titling]
-# Master switch. When false, the worker still consumes and acks turn.result
+# Master switch. When false, the worker still consumes and acks turn.completed
 # events but never calls the LLM.
 enabled = true
 

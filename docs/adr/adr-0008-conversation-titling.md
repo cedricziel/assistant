@@ -39,6 +39,14 @@ by `skill_learner`). Pros: direct access to `TurnContext`. Cons: doesn't
 survive process restart, runs in-process only, couples title generation to
 turn latency.
 
+**Amendment (2026-11-25):** the worker now claims `turn.completed`
+(`bus_messages::topic::TURN_COMPLETED`), which the turn worker publishes with
+the same `TurnResult` payload after every successful turn. On the SQLite bus a
+claim is exclusive, so when the title generator claimed a `turn.result` first,
+it acked the reply that `submit_turn` was waiting for and the caller hung until
+its deadline. `turn.result` is now the reply to one `turn.request` and only its
+submitter consumes it.
+
 Trade-off accepted: one extra DB query per turn to re-fetch history. Negligible
 against the LLM round-trip cost.
 
