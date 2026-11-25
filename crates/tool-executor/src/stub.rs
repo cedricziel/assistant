@@ -21,6 +21,7 @@ use serde_json::Value;
 pub struct RecordedToolCall {
     pub name: String,
     pub params: HashMap<String, Value>,
+    pub ctx: ExecutionContext,
 }
 
 /// Queued response — either a successful [`ToolOutput`] or an error
@@ -122,7 +123,7 @@ impl ToolDispatcher for StubToolDispatcher {
         &self,
         name: &str,
         params: HashMap<String, Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let mut state = match self.state.lock() {
             Ok(g) => g,
@@ -131,6 +132,7 @@ impl ToolDispatcher for StubToolDispatcher {
         state.recorded.push(RecordedToolCall {
             name: name.to_string(),
             params,
+            ctx: ctx.clone(),
         });
         if let Some(queue) = state.responses.get_mut(name)
             && !queue.is_empty()

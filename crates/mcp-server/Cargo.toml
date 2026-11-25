@@ -22,6 +22,7 @@ assistant-tool-executor = { path = "../tool-executor" }
 assistant-runtime = { path = "../runtime" }
 assistant-skills = { path = "../skills" }
 rmcp = { workspace = true, features = ["server", "transport-io"] }
+http = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

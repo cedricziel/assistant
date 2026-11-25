@@ -18,8 +18,8 @@ Each numbered group is one PR in the stack, in order.
 
 ## 3. Caller identity in the server (PR 3)
 
-- [ ] 3.1 Add a failing test: a `tools/call` whose request extensions carry a user `AuthContext` reaches the dispatcher with that user, org and space in `ExecutionContext`; confirm red
-- [ ] 3.2 Read `AuthContext` from request extensions (stdio injects `AuthContext::system()`), build `ExecutionContext` and `submit_turn` auth from it, and verify the test passes
+- [x] 3.1 Add a failing test: a `tools/call` whose request extensions carry a user `AuthContext` reaches the dispatcher with that user, org and space in `ExecutionContext`; confirm red
+- [x] 3.2 Read `AuthContext` from request extensions (stdio injects `AuthContext::system()`), build `ExecutionContext` and `submit_turn` auth from it, and verify the test passes
 
 ## 4. Prompts, completions, list changes, progress and cancellation (PR 4)
 

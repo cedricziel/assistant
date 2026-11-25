@@ -3,6 +3,7 @@
 //! The protocol itself (framing, lifecycle, version negotiation) comes from
 //! `rmcp`; this crate supplies the [`AssistantMcpServer`] handler.
 
+mod identity;
 mod resources;
 mod server;
 
@@ -10,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::auth::AuthContext;
 use assistant_runtime::Orchestrator;
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
@@ -18,6 +20,7 @@ use rmcp::transport::IntoTransport;
 use rmcp::{RoleServer, ServiceExt};
 use tracing::info;
 
+pub use identity::with_identity;
 pub use server::AssistantMcpServer;
 
 /// Serve MCP over the process's stdin and stdout until the client disconnects.
@@ -54,8 +57,14 @@ pub async fn run(
 }
 
 /// Serve `server` over stdin and stdout until the client disconnects.
+///
+/// Stdio callers act as the local system identity.
 pub async fn serve_stdio(server: AssistantMcpServer) -> Result<()> {
-    serve_transport(server, rmcp::transport::stdio()).await
+    serve_transport(
+        server,
+        with_identity(rmcp::transport::stdio(), AuthContext::system()),
+    )
+    .await
 }
 
 /// Serve `server` over `transport` until the peer disconnects.

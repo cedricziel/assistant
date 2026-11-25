@@ -59,6 +59,7 @@ impl OrchestrationEngine for crate::Orchestrator {
 /// A single recorded call to [`OrchestrationEngine::submit_turn`].
 #[derive(Debug, Clone)]
 pub struct RecordedSubmitTurn {
+    pub auth: AuthContext,
     pub prompt: String,
     pub conversation_id: Uuid,
     pub interface: Interface,
@@ -133,7 +134,7 @@ impl Default for StubOrchestrationEngine {
 impl OrchestrationEngine for StubOrchestrationEngine {
     async fn submit_turn(
         &self,
-        _auth: &AuthContext,
+        auth: &AuthContext,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
@@ -144,6 +145,7 @@ impl OrchestrationEngine for StubOrchestrationEngine {
             Err(p) => p.into_inner(),
         };
         state.submits.push(RecordedSubmitTurn {
+            auth: auth.clone(),
             prompt: prompt.to_string(),
             conversation_id,
             interface,

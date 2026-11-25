@@ -430,6 +430,7 @@ dependencies = [
  "assistant-skills",
  "assistant-storage",
  "assistant-tool-executor",
+ "http",
  "rmcp",
  "serde_json",
  "tempfile",
