@@ -52,7 +52,7 @@ impl std::error::Error for SecretBoxError {}
 
 /// Authenticated encryption under one server key.
 pub struct SecretBox {
-    key: [u8; KEY_LEN],
+    cipher: Aes256Gcm,
     key_id: String,
 }
 
@@ -67,8 +67,9 @@ impl std::fmt::Debug for SecretBox {
 impl SecretBox {
     pub fn from_key(key: [u8; KEY_LEN]) -> Self {
         let digest = Sha256::digest(key);
+        let key: &Key<Aes256Gcm> = (&key).into();
         Self {
-            key,
+            cipher: Aes256Gcm::new(key),
             key_id: hex::encode(&digest[..KEY_ID_BYTES]),
         }
     }
@@ -107,7 +108,7 @@ impl SecretBox {
         let mut nonce = [0u8; NONCE_LEN];
         getrandom::fill(&mut nonce).map_err(|e| anyhow!("generating nonce: {e}"))?;
         let mut buf = plaintext.expose().as_bytes().to_vec();
-        self.cipher()
+        self.cipher
             .encrypt_in_place(&Nonce::from(nonce), aad, &mut buf)
             .map_err(|_| anyhow!("encrypting secret"))?;
         Ok(Sealed {
@@ -134,16 +135,11 @@ impl SecretBox {
             )
         })?;
         let mut buf = sealed.ciphertext.clone();
-        self.cipher()
+        self.cipher
             .decrypt_in_place(&Nonce::from(nonce), aad, &mut buf)
             .map_err(|_| anyhow!("decrypting secret: authentication failed"))?;
         let text = String::from_utf8(buf).map_err(|_| anyhow!("decrypted secret is not UTF-8"))?;
         Ok(Secret::new(text))
-    }
-
-    fn cipher(&self) -> Aes256Gcm {
-        let key: &Key<Aes256Gcm> = (&self.key).into();
-        Aes256Gcm::new(key)
     }
 }
 

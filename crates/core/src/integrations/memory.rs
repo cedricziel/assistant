@@ -38,15 +38,20 @@ fn is_row(c: &StoredCredential, integration_id: &str, subject: Option<&UserId>) 
     c.integration_id == integration_id && c.subject_user_id.as_ref() == subject
 }
 
+fn find_mut<'a>(
+    rows: &'a mut [StoredCredential],
+    wanted: &StoredCredential,
+) -> Option<&'a mut StoredCredential> {
+    let subject = wanted.subject_user_id.as_ref();
+    rows.iter_mut()
+        .find(|c| is_row(c, &wanted.integration_id, subject))
+}
+
 #[async_trait]
 impl IntegrationCredentialStore for InMemoryIntegrationCredentialStore {
     async fn put(&self, credential: &StoredCredential) -> Result<()> {
         let mut rows = lock(&self.rows);
-        let subject = credential.subject_user_id.as_ref();
-        match rows
-            .iter_mut()
-            .find(|c| is_row(c, &credential.integration_id, subject))
-        {
+        match find_mut(&mut rows, credential) {
             Some(existing) => *existing = credential.clone(),
             None => rows.push(credential.clone()),
         }
@@ -77,11 +82,7 @@ impl IntegrationCredentialStore for InMemoryIntegrationCredentialStore {
         credential: &StoredCredential,
     ) -> Result<bool> {
         let mut rows = lock(&self.rows);
-        let subject = credential.subject_user_id.as_ref();
-        match rows
-            .iter_mut()
-            .find(|c| is_row(c, &credential.integration_id, subject))
-        {
+        match find_mut(&mut rows, credential) {
             Some(existing) if existing.updated_at == expected_updated_at => {
                 *existing = credential.clone();
                 Ok(true)

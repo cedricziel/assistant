@@ -77,34 +77,29 @@ impl EffectiveIntegrations {
         space: &SpaceId,
         user: Option<&UserId>,
     ) -> Result<Vec<EvaluatedIntegration>> {
-        let policy = self.integrations.get_policy(org).await?;
-        let mut candidates = self.org_candidates(org, space).await?;
-        candidates.extend(
-            self.integrations
-                .list(
-                    org,
-                    &IntegrationFilter {
-                        layer: Some(IntegrationLayer::Space),
-                        space_id: Some(space.clone()),
-                        owner_user_id: None,
-                    },
-                )
-                .await?,
-        );
-        if let Some(user) = user {
-            candidates.extend(
-                self.integrations
-                    .list(
-                        org,
-                        &IntegrationFilter {
-                            layer: Some(IntegrationLayer::User),
-                            space_id: None,
-                            owner_user_id: Some(user.clone()),
-                        },
-                    )
-                    .await?,
-            );
-        }
+        let space_filter = IntegrationFilter {
+            layer: Some(IntegrationLayer::Space),
+            space_id: Some(space.clone()),
+            owner_user_id: None,
+        };
+        let user_filter = user.map(|user| IntegrationFilter {
+            layer: Some(IntegrationLayer::User),
+            space_id: None,
+            owner_user_id: Some(user.clone()),
+        });
+        let (policy, mut candidates, space_own, user_own) = futures::try_join!(
+            self.integrations.get_policy(org),
+            self.org_candidates(org, space),
+            self.integrations.list(org, &space_filter),
+            async {
+                match &user_filter {
+                    Some(filter) => self.integrations.list(org, filter).await,
+                    None => Ok(Vec::new()),
+                }
+            },
+        )?;
+        candidates.extend(space_own);
+        candidates.extend(user_own);
 
         let mut evaluated = Vec::with_capacity(candidates.len());
         for integration in candidates {
@@ -137,9 +132,7 @@ impl EffectiveIntegrations {
             })
             .collect())
     }
-}
 
-impl EffectiveIntegrations {
     /// Org-layer integrations that apply to `space`: with no `allow` rows, all
     /// spaces; otherwise only the listed ones. A space opt-out always wins.
     async fn org_candidates(&self, org: &OrgId, space: &SpaceId) -> Result<Vec<Integration>> {
@@ -147,8 +140,10 @@ impl EffectiveIntegrations {
             layer: Some(IntegrationLayer::Org),
             ..IntegrationFilter::default()
         };
-        let integrations = self.integrations.list(org, &org_layer).await?;
-        let access = self.integrations.list_org_space_access(org).await?;
+        let (integrations, access) = futures::try_join!(
+            self.integrations.list(org, &org_layer),
+            self.integrations.list_org_space_access(org),
+        )?;
 
         Ok(integrations
             .into_iter()
