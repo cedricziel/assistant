@@ -58,12 +58,13 @@ pub(crate) fn find_running_assistant_processes(
 ///
 /// Uses `sysinfo` so the lookup is cross-platform (Linux/macOS/Windows). The
 /// CLI itself is excluded by filtering on its own pid.
-fn collect_process_cmdlines() -> Vec<(u32, String)> {
+fn collect_process_cmdlines() -> Result<Vec<(u32, String)>> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 
     let mut sys = System::new_with_specifics(
         RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
-    );
+    )
+    .context("reading the process table")?;
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
@@ -72,7 +73,8 @@ fn collect_process_cmdlines() -> Vec<(u32, String)> {
 
     let self_pid = std::process::id();
 
-    sys.processes()
+    Ok(sys
+        .processes()
         .iter()
         .filter_map(|(pid, proc)| {
             let pid_u32 = pid.as_u32();
@@ -90,7 +92,7 @@ fn collect_process_cmdlines() -> Vec<(u32, String)> {
                 Some((pid_u32, cmd.join(" ")))
             }
         })
-        .collect()
+        .collect())
 }
 
 /// Run `assistant migrate finalize` against `base_path` (default
@@ -106,7 +108,7 @@ pub async fn cmd_migrate_finalize(force: bool, base_path: &Path) -> Result<()> {
 pub(crate) async fn cmd_migrate_finalize_with_detector(
     force: bool,
     base_path: &Path,
-    detect: &dyn Fn() -> Vec<(u32, String)>,
+    detect: &dyn Fn() -> Result<Vec<(u32, String)>>,
 ) -> Result<()> {
     let legacy_db = base_path.join("assistant.db");
 
@@ -117,7 +119,7 @@ pub(crate) async fn cmd_migrate_finalize_with_detector(
     }
 
     if !force {
-        let running = find_running_assistant_processes(&detect());
+        let running = find_running_assistant_processes(&detect()?);
         if !running.is_empty() {
             for proc in &running {
                 eprintln!("refusing to finalize: pid {} is {}", proc.pid, proc.cmd);
@@ -312,16 +314,40 @@ mod tests {
 
     /// Detector that always reports an orchestrator running — used to simulate
     /// "services up" without spawning a real process.
-    fn fake_orchestrator_running() -> Vec<(u32, String)> {
-        vec![(
+    fn fake_orchestrator_running() -> Result<Vec<(u32, String)>> {
+        Ok(vec![(
             4242,
             "/usr/local/bin/assistant orchestrator run".to_string(),
-        )]
+        )])
     }
 
     /// Detector that always reports no assistant processes running.
-    fn no_running_processes() -> Vec<(u32, String)> {
-        vec![(1, "/sbin/init".to_string()), (42, "vim".to_string())]
+    fn no_running_processes() -> Result<Vec<(u32, String)>> {
+        Ok(vec![(1, "/sbin/init".to_string()), (42, "vim".to_string())])
+    }
+
+    fn failing_detector() -> Result<Vec<(u32, String)>> {
+        anyhow::bail!("process table unavailable")
+    }
+
+    /// A detector that cannot read the process table must not be treated as
+    /// "no processes running": finalize refuses without `--force`.
+    #[tokio::test]
+    async fn finalize_refuses_when_detector_fails() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("assistant.db"), b"").unwrap();
+
+        let err = cmd_migrate_finalize_with_detector(false, dir.path(), &failing_detector)
+            .await
+            .expect_err("finalize must refuse when the process check fails");
+        assert!(
+            format!("{err:#}").contains("process table unavailable"),
+            "error should carry the detector failure, got: {err:#}"
+        );
+        assert!(
+            dir.path().join("assistant.db").exists(),
+            "legacy db must be left untouched"
+        );
     }
 
     /// Integration test: services-running refusal — finalize must bail when
@@ -405,7 +431,7 @@ mod tests {
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let detector = || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Vec::new()
+            Ok(Vec::new())
         };
 
         cmd_migrate_finalize_with_detector(false, dir.path(), &detector)
