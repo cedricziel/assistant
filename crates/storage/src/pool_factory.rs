@@ -133,6 +133,30 @@ impl OrgPoolFactory {
         Ok(storage.clone())
     }
 
+    /// Serve `storage` for `(org_slug, space_slug)` instead of opening a
+    /// database under the base directory.
+    ///
+    /// Lets tests and embedders that already hold a [`StorageLayer`] (an
+    /// in-memory one, say) route per-request space resolution to it.
+    pub fn insert_space_storage(
+        &self,
+        org_slug: &str,
+        space_slug: &str,
+        storage: Arc<StorageLayer>,
+    ) -> Result<()> {
+        validate_slug(org_slug).context("invalid org slug")?;
+        validate_slug(space_slug).context("invalid space slug")?;
+        let mut spaces = self
+            .spaces
+            .lock()
+            .map_err(|_| anyhow::anyhow!("space pool cache poisoned"))?;
+        spaces.insert(
+            (org_slug.to_owned(), space_slug.to_owned()),
+            Arc::new(OnceCell::new_with(Some(storage))),
+        );
+        Ok(())
+    }
+
     /// Forget the cached pool for a space, e.g. after the space is deleted.
     ///
     /// Callers still holding the old `Arc` keep a working pool; the next
@@ -207,6 +231,24 @@ mod tests {
         assert!(Arc::ptr_eq(&first, &again), "same key must reuse the pool");
 
         assert!(factory.space_db_path("acme", "eng").exists());
+    }
+
+    #[tokio::test]
+    async fn insert_space_storage_serves_the_given_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let factory = OrgPoolFactory::new(dir.path());
+        let preloaded = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+
+        factory
+            .insert_space_storage("acme", "eng", preloaded.clone())
+            .unwrap();
+
+        let served = factory.space_storage("acme", "eng").await.unwrap();
+        assert!(Arc::ptr_eq(&preloaded, &served));
+        assert!(
+            !factory.space_db_path("acme", "eng").exists(),
+            "no database may be opened for a preloaded space"
+        );
     }
 
     #[tokio::test]
