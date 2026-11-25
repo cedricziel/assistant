@@ -36,6 +36,7 @@ test-tls = ["dep:ctor"]
 [dev-dependencies]
 tempfile = { workspace = true }
 reqwest = { workspace = true }
+jsonschema = { workspace = true }
 
 # Panic-free contract: all non-test code in this crate either propagates
 # errors via `Result<_, anyhow::Error>` or recovers from `std::sync::Mutex`
