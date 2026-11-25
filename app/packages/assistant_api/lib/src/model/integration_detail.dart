@@ -28,6 +28,7 @@ part 'integration_detail.g.dart';
 /// * [headerName] - Header that carries the credential, for `header` and `mixed` auth.
 /// * [headerValuePrefix] - Text before the secret in the header value, e.g. `Bearer `.
 /// * [id] - `int_<uuid>`.
+/// * [lastConnectedAt]
 /// * [layer]
 /// * [name]
 /// * [ownerUserId]
@@ -35,6 +36,7 @@ part 'integration_detail.g.dart';
 /// * [spaceAccess] - Space rows of an org-layer integration, limited to the spaces the caller belongs to unless the caller is an org admin.
 /// * [spaceId]
 /// * [status]
+/// * [toolCount]
 /// * [trust]
 /// * [updatedAt]
 @BuiltValue()
@@ -75,6 +77,9 @@ abstract class IntegrationDetail
   @BuiltValueField(wireName: r'id')
   String get id;
 
+  @BuiltValueField(wireName: r'last_connected_at')
+  DateTime? get lastConnectedAt;
+
   @BuiltValueField(wireName: r'layer')
   IntegrationLayer get layer;
   // enum layerEnum {  org,  space,  user,  };
@@ -98,6 +103,9 @@ abstract class IntegrationDetail
   @BuiltValueField(wireName: r'status')
   IntegrationStatus get status;
   // enum statusEnum {  ready,  needs_connection,  auth_expired,  unreachable,  blocked_by_policy,  disabled,  };
+
+  @BuiltValueField(wireName: r'tool_count')
+  int? get toolCount;
 
   @BuiltValueField(wireName: r'trust')
   IntegrationTrust get trust;
@@ -188,6 +196,13 @@ class _$IntegrationDetailSerializer
       object.id,
       specifiedType: const FullType(String),
     );
+    if (object.lastConnectedAt != null) {
+      yield r'last_connected_at';
+      yield serializers.serialize(
+        object.lastConnectedAt,
+        specifiedType: const FullType.nullable(DateTime),
+      );
+    }
     yield r'layer';
     yield serializers.serialize(
       object.layer,
@@ -227,6 +242,13 @@ class _$IntegrationDetailSerializer
       object.status,
       specifiedType: const FullType(IntegrationStatus),
     );
+    if (object.toolCount != null) {
+      yield r'tool_count';
+      yield serializers.serialize(
+        object.toolCount,
+        specifiedType: const FullType.nullable(int),
+      );
+    }
     yield r'trust';
     yield serializers.serialize(
       object.trust,
@@ -335,6 +357,14 @@ class _$IntegrationDetailSerializer
           ) as String;
           result.id = valueDes;
           break;
+        case r'last_connected_at':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(DateTime),
+          ) as DateTime?;
+          if (valueDes == null) continue;
+          result.lastConnectedAt = valueDes;
+          break;
         case r'layer':
           final valueDes = serializers.deserialize(
             value,
@@ -386,6 +416,14 @@ class _$IntegrationDetailSerializer
             specifiedType: const FullType(IntegrationStatus),
           ) as IntegrationStatus;
           result.status = valueDes;
+          break;
+        case r'tool_count':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(int),
+          ) as int?;
+          if (valueDes == null) continue;
+          result.toolCount = valueDes;
           break;
         case r'trust':
           final valueDes = serializers.deserialize(

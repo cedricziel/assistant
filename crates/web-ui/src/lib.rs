@@ -316,6 +316,23 @@ async fn run_with_args(args: Args) -> Result<()> {
         })
         .transpose()?;
 
+    // -- Integration tools: assembled per turn, never registered ambiently ----
+    let secrets = Arc::new(
+        assistant_core::integrations::SecretBox::load_from_env(&base_path)
+            .context("Failed to load the integration secrets key")?,
+    );
+    let integration_tools = Arc::new(assistant_mcp_client::IntegrationToolSource::from_stores(
+        assistant_mcp_client::IntegrationStores {
+            integrations: Arc::new(org_storage.integration_store()),
+            credentials: Arc::new(org_storage.integration_credential_store()),
+            health: Arc::new(org_storage.integration_health_store()),
+            orgs: Arc::new(org_storage.org_store()),
+            spaces: Arc::new(org_storage.space_store()),
+        },
+        secrets.clone(),
+        Arc::new(assistant_core::clock::SystemClock),
+    ));
+
     let mut runtimes = SpaceRuntimes::new(
         pool_factory.clone(),
         orgs.clone(),
@@ -323,7 +340,8 @@ async fn run_with_args(args: Args) -> Result<()> {
             interface_name: "Web",
         }),
     )
-    .with_audio_store(audio_store.clone());
+    .with_audio_store(audio_store.clone())
+    .with_turn_tool_source(integration_tools);
     if let Some(bus) = shared_nats_bus(&server_config).await? {
         runtimes = runtimes.with_shared_bus(bus);
     }
@@ -653,10 +671,8 @@ async fn run_with_args(args: Args) -> Result<()> {
     let catalog_api_state = api::catalog::CatalogApiState {
         org_storage: org_storage.clone(),
     };
-    let secrets = assistant_core::integrations::SecretBox::load_from_env(&base_path)
-        .context("Failed to load the integration secrets key")?;
     let integrations_api_state =
-        api::integrations::IntegrationsApiState::new(catalog_sync, &org_storage, secrets.key_id());
+        api::integrations::IntegrationsApiState::new(catalog_sync, &org_storage, secrets);
     let interfaces_api_state = api::interfaces::InterfacesApiState {
         org_storage: org_storage.clone(),
     };

@@ -121,8 +121,8 @@ pub async fn list_integrations(
         if !offered {
             continue;
         }
-        let (status, has_credential) = caller_view(&state, &ctx, &policy, &integration).await?;
-        items.push(summary(&integration, status, has_credential));
+        let view = caller_view(&state, &ctx, &policy, &integration).await?;
+        items.push(summary(&integration, view));
     }
     Ok(Json(IntegrationListResponse { items }))
 }
@@ -262,8 +262,7 @@ async fn create(
     };
     state.store.create(&integration).await?;
     // Nothing fallible may follow the write: the caller must learn the new id.
-    let (status, has_credential) = fresh_view(&integration);
-    Ok(detail(&integration, status, has_credential, Vec::new()))
+    Ok(detail(&integration, fresh_view(&integration), Vec::new()))
 }
 
 /// `GET /api/integrations/{id}` — get one integration.
@@ -342,7 +341,7 @@ pub async fn update_integration(
     // Everything fallible comes before the write, so a failure never follows a
     // saved change. Moving the URL deletes the credentials, so the view of the
     // moved integration is that of a fresh one.
-    let (status, has_credential) = if integration.connect_url != visible.integration.connect_url {
+    let view = if integration.connect_url != visible.integration.connect_url {
         fresh_view(&integration)
     } else {
         let policy = state.store.get_policy(&ctx.org_id).await?;
@@ -357,12 +356,7 @@ pub async fn update_integration(
     {
         return Err(ApiError::not_found("integration not found"));
     }
-    Ok(Json(detail(
-        &integration,
-        status,
-        has_credential,
-        visible.space_access(&ctx),
-    )))
+    Ok(Json(detail(&integration, view, visible.space_access(&ctx))))
 }
 
 /// `DELETE /api/integrations/{id}` — remove an integration and its credentials.
@@ -568,7 +562,7 @@ fn header_template(
     Ok((Some(name), request.header_value_prefix.clone()))
 }
 
-fn validate_header(name: &str, prefix: Option<&str>) -> ApiResult<()> {
+pub(super) fn validate_header(name: &str, prefix: Option<&str>) -> ApiResult<()> {
     if HeaderName::from_bytes(name.as_bytes()).is_err() {
         return Err(ApiError::unprocessable(
             "header_name is not a valid HTTP header name",
@@ -715,24 +709,34 @@ fn apply_update(integration: &mut Integration, request: UpdateIntegrationRequest
 
 // -- Representation ---------------------------------------------------------------
 
-/// The status of `integration` and whether the caller has a credential stored
-/// for it.
+/// What an integration looks like to the caller.
+pub(super) struct CallerView {
+    pub status: IntegrationStatus,
+    /// Whether the caller has a credential stored: the shared one, or their
+    /// own for a per-user integration.
+    pub has_credential: bool,
+    pub last_connected_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub tool_count: Option<u32>,
+}
+
+/// The view of `integration` for the caller.
 ///
 /// The status of a user-layer integration is its owner's, so an org admin
 /// looking at someone else's sees that state. `has_credential` is always the
 /// caller's own (the shared credential, or their own per-user one), so it
-/// reveals nothing about another user. Never the credential itself.
-async fn caller_view(
+/// reveals nothing about another user. Never the credential itself. A usable
+/// integration whose latest connection attempt failed is `unreachable`.
+pub(super) async fn caller_view(
     state: &IntegrationsApiState,
     ctx: &AuthContext,
     policy: &IntegrationPolicy,
     integration: &Integration,
-) -> anyhow::Result<(IntegrationStatus, bool)> {
+) -> anyhow::Result<CallerView> {
     let user = match integration.layer {
         domain::IntegrationLayer::User => integration.owner_user_id.clone(),
         _ => Some(ctx.user_id.clone()),
     };
-    let (availability, _) = state
+    let (availability, credential_subject) = state
         .effective
         .assess(policy, integration, user.as_ref())
         .await?;
@@ -746,13 +750,28 @@ async fn caller_view(
             .get(&integration.id, subject.as_ref())
             .await?
             .is_some();
-    Ok((availability.into(), has_credential))
+    // Health is recorded under the subject `assess` names (the owner's, for a
+    // user-layer integration; none for one that needs no credential).
+    let health = state
+        .health
+        .get(&integration.id, credential_subject.as_ref())
+        .await?;
+    let mut status: IntegrationStatus = availability.into();
+    if status == IntegrationStatus::Ready && health.as_ref().is_some_and(|h| !h.reachable) {
+        status = IntegrationStatus::Unreachable;
+    }
+    Ok(CallerView {
+        status,
+        has_credential,
+        last_connected_at: health.as_ref().and_then(|h| h.last_connected_at),
+        tool_count: health.and_then(|h| h.tool_count),
+    })
 }
 
 /// The view of an integration that has no credential yet (just installed, or
 /// its URL moved), without any lookup. Org policy is not consulted: installs
 /// are checked against it first, and the org layer is exempt.
-fn fresh_view(integration: &Integration) -> (IntegrationStatus, bool) {
+fn fresh_view(integration: &Integration) -> CallerView {
     let status = if !integration.enabled {
         IntegrationStatus::Disabled
     } else if integration.auth_kind == domain::IntegrationAuthKind::None {
@@ -760,7 +779,12 @@ fn fresh_view(integration: &Integration) -> (IntegrationStatus, bool) {
     } else {
         IntegrationStatus::NeedsConnection
     };
-    (status, false)
+    CallerView {
+        status,
+        has_credential: false,
+        last_connected_at: None,
+        tool_count: None,
+    }
 }
 
 async fn detail_for(
@@ -770,11 +794,11 @@ async fn detail_for(
     integration: &Integration,
     space_access: Vec<SpaceAccess>,
 ) -> ApiResult<IntegrationDetail> {
-    let (status, has_credential) = caller_view(state, ctx, policy, integration).await?;
-    Ok(detail(integration, status, has_credential, space_access))
+    let view = caller_view(state, ctx, policy, integration).await?;
+    Ok(detail(integration, view, space_access))
 }
 
-fn summary(i: &Integration, status: IntegrationStatus, has_credential: bool) -> IntegrationSummary {
+fn summary(i: &Integration, view: CallerView) -> IntegrationSummary {
     IntegrationSummary {
         id: i.id.clone(),
         layer: i.layer.into(),
@@ -788,19 +812,16 @@ fn summary(i: &Integration, status: IntegrationStatus, has_credential: bool) -> 
         credential_mode: i.credential_mode.into(),
         trust: i.trust.into(),
         enabled: i.enabled,
-        status,
-        has_credential,
+        status: view.status,
+        has_credential: view.has_credential,
+        last_connected_at: view.last_connected_at,
+        tool_count: view.tool_count,
         created_at: i.created_at,
         updated_at: i.updated_at,
     }
 }
 
-fn detail(
-    i: &Integration,
-    status: IntegrationStatus,
-    has_credential: bool,
-    space_access: Vec<SpaceAccess>,
-) -> IntegrationDetail {
+fn detail(i: &Integration, view: CallerView, space_access: Vec<SpaceAccess>) -> IntegrationDetail {
     IntegrationDetail {
         id: i.id.clone(),
         layer: i.layer.into(),
@@ -816,8 +837,10 @@ fn detail(
         credential_mode: i.credential_mode.into(),
         trust: i.trust.into(),
         enabled: i.enabled,
-        status,
-        has_credential,
+        status: view.status,
+        has_credential: view.has_credential,
+        last_connected_at: view.last_connected_at,
+        tool_count: view.tool_count,
         space_access: space_access
             .into_iter()
             .map(|row| SpaceAccessEntry {

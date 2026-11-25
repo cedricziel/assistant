@@ -19,7 +19,7 @@ All paths are relative to `~/.assistant/`.
 What the `server.toml` sections do:
 
 - `[bus]` selects the message bus backend, `sqlite` or `nats`.
-- `[mcp]` lists external MCP servers. Their tools are registered in every space.
+- `[mcp]` lists external MCP servers. Their tools are registered in every space. A server name must not start with `org_`, `space_` or `user_`: those prefixes belong to integration tools, and the file fails to load otherwise.
 - `[notifications]` holds the Web Push VAPID keys. The web UI generates them on
   first start and writes them back to this file.
 

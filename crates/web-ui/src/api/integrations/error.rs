@@ -13,6 +13,8 @@ use crate::errors::json_error;
 pub struct ApiError {
     status: StatusCode,
     message: String,
+    /// Seconds for a `Retry-After` header.
+    retry_after: Option<u64>,
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
@@ -22,6 +24,15 @@ impl ApiError {
         Self {
             status,
             message: message.into(),
+            retry_after: None,
+        }
+    }
+
+    /// `429`, telling the client to wait `retry_after` (at least one second).
+    pub fn too_many_requests(message: impl Into<String>, retry_after: std::time::Duration) -> Self {
+        Self {
+            retry_after: Some(retry_after.as_secs_f64().ceil().max(1.0) as u64),
+            ..Self::new(StatusCode::TOO_MANY_REQUESTS, message)
         }
     }
 
@@ -73,6 +84,12 @@ impl From<JsonRejection> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        json_error(self.status, self.message)
+        let mut response = json_error(self.status, self.message);
+        if let Some(seconds) = self.retry_after {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, seconds.into());
+        }
+        response
     }
 }

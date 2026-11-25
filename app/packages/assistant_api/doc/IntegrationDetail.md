@@ -18,6 +18,7 @@ Name | Type | Description | Notes
 **headerName** | **String** | Header that carries the credential, for `header` and `mixed` auth. | [optional] 
 **headerValuePrefix** | **String** | Text before the secret in the header value, e.g. `Bearer `. | [optional] 
 **id** | **String** | `int_<uuid>`. | 
+**lastConnectedAt** | [**DateTime**](DateTime.md) |  | [optional] 
 **layer** | [**IntegrationLayer**](IntegrationLayer.md) |  | 
 **name** | **String** |  | 
 **ownerUserId** | **String** |  | [optional] 
@@ -25,6 +26,7 @@ Name | Type | Description | Notes
 **spaceAccess** | [**BuiltList&lt;SpaceAccessEntry&gt;**](SpaceAccessEntry.md) | Space rows of an org-layer integration, limited to the spaces the caller belongs to unless the caller is an org admin. | 
 **spaceId** | **String** |  | [optional] 
 **status** | [**IntegrationStatus**](IntegrationStatus.md) |  | 
+**toolCount** | **int** |  | [optional] 
 **trust** | [**IntegrationTrust**](IntegrationTrust.md) |  | 
 **updatedAt** | [**DateTime**](DateTime.md) |  | 
 

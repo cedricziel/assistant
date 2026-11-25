@@ -1,10 +1,12 @@
 //! The `ToolHandler` trait for primitive, self-describing tools.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::identity::UserId;
 use crate::llm::tool_spec::ToolSpec;
 use crate::types::conversation::ExecutionContext;
 
@@ -177,6 +179,30 @@ pub trait ToolDispatcher: Send + Sync {
     /// (i.e. requires confirmation under the safety gate). Returns
     /// `false` if the tool is unknown.
     fn is_mutating(&self, name: &str) -> bool;
+}
+
+// ── TurnToolSource ───────────────────────────────────────────────────────────
+
+/// Who a turn runs for: the space it belongs to and, unless it is a system
+/// turn, the user it acts for.
+#[derive(Clone, Copy, Debug)]
+pub struct TurnScope<'a> {
+    pub org_slug: &'a str,
+    pub space_slug: &'a str,
+    /// `None` for a turn with no user, such as a scheduled one.
+    pub user_id: Option<&'a UserId>,
+}
+
+/// Contributes tools to one turn only.
+///
+/// The orchestrator asks it at the start of every turn. What it returns is
+/// visible to that turn alone and never enters the shared tool registry, so
+/// tools that depend on who is asking cannot reach another user's or space's
+/// turn. An implementation that cannot produce its tools returns fewer of
+/// them (and logs why) rather than failing the turn.
+#[async_trait]
+pub trait TurnToolSource: Send + Sync {
+    async fn tools_for_turn(&self, scope: &TurnScope<'_>) -> Vec<Arc<dyn ToolHandler>>;
 }
 
 #[cfg(test)]

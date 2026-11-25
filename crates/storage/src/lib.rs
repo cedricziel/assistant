@@ -68,7 +68,9 @@ pub use conversation_events::{
 pub use conversations::{
     ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
 };
-pub use integration_store::{SqliteIntegrationCredentialStore, SqliteIntegrationStore};
+pub use integration_store::{
+    SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
+};
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use memory_chunks::{
     FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,

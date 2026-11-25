@@ -64,6 +64,7 @@ doc/CreateTaskPushNotificationConfigRequest.md
 doc/CreateUserRequest.md
 doc/CreateWebhookRequest.md
 doc/CredentialMode.md
+doc/CredentialResponse.md
 doc/DeviceCodeOAuthFlow.md
 doc/DeviceCodeResponseSchema.md
 doc/ErrorBody.md
@@ -123,6 +124,7 @@ doc/SendMessageResponse.md
 doc/ServerCapabilities.md
 doc/ServerMetadata.md
 doc/SetActivePersonaRequest.md
+doc/SetCredentialRequest.md
 doc/SetSkillAccessModeRequest.md
 doc/SetSpaceAccessRequest.md
 doc/SkillDetail.md
@@ -157,6 +159,7 @@ doc/TaskStatusUpdateEvent.md
 doc/TasksApi.md
 doc/TemplateResponse.md
 doc/TemplatesApi.md
+doc/TestIntegrationResponse.md
 doc/TokenResponse.md
 doc/ToolCallSummary.md
 doc/TurnState.md
@@ -281,6 +284,7 @@ lib/src/model/create_task_push_notification_config_request.dart
 lib/src/model/create_user_request.dart
 lib/src/model/create_webhook_request.dart
 lib/src/model/credential_mode.dart
+lib/src/model/credential_response.dart
 lib/src/model/date.dart
 lib/src/model/device_code_o_auth_flow.dart
 lib/src/model/device_code_response_schema.dart
@@ -333,6 +337,7 @@ lib/src/model/send_message_response.dart
 lib/src/model/server_capabilities.dart
 lib/src/model/server_metadata.dart
 lib/src/model/set_active_persona_request.dart
+lib/src/model/set_credential_request.dart
 lib/src/model/set_skill_access_mode_request.dart
 lib/src/model/set_space_access_request.dart
 lib/src/model/skill_detail.dart
@@ -363,6 +368,7 @@ lib/src/model/task_state.dart
 lib/src/model/task_status.dart
 lib/src/model/task_status_update_event.dart
 lib/src/model/template_response.dart
+lib/src/model/test_integration_response.dart
 lib/src/model/token_response.dart
 lib/src/model/tool_call_summary.dart
 lib/src/model/turn_state.dart

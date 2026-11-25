@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use tokio::sync::OnceCell;
 use tracing::{info, warn};
 
-use assistant_core::tool::ToolHandler;
+use assistant_core::tool::{ToolHandler, TurnToolSource};
 use assistant_core::types::agent::OrgConfig;
 use assistant_core::{LlmProvider, MessageBus};
 use assistant_skills::SkillSource;
@@ -85,6 +85,7 @@ pub struct SpaceRuntimes {
     voice: Option<Arc<dyn TtsProvider>>,
     shared_bus: Option<Arc<dyn MessageBus>>,
     submit_timeout_secs: Option<u64>,
+    turn_tool_source: Option<Arc<dyn TurnToolSource>>,
     ambient_tools: RwLock<Vec<Arc<dyn ToolHandler>>>,
     slots: Mutex<HashMap<SpaceKey, Slot>>,
     builtins_synced: AtomicBool,
@@ -104,6 +105,7 @@ impl SpaceRuntimes {
             voice: None,
             shared_bus: None,
             submit_timeout_secs: None,
+            turn_tool_source: None,
             ambient_tools: RwLock::new(Vec::new()),
             slots: Mutex::new(HashMap::new()),
             builtins_synced: AtomicBool::new(false),
@@ -133,6 +135,14 @@ impl SpaceRuntimes {
     /// persona or defaults to three hours.
     pub fn with_submit_timeout(mut self, secs: u64) -> Self {
         self.submit_timeout_secs = Some(secs);
+        self
+    }
+
+    /// Let every space's turns ask `source` for the tools only that turn may
+    /// use. Unlike [`register_ambient_tool`](Self::register_ambient_tool), what
+    /// it returns never enters a registry shared between turns.
+    pub fn with_turn_tool_source(mut self, source: Arc<dyn TurnToolSource>) -> Self {
+        self.turn_tool_source = Some(source);
         self
     }
 
@@ -255,6 +265,9 @@ impl SpaceRuntimes {
             &config,
         )
         .with_confirmation_callback(self.confirmation.clone());
+        if let Some(source) = &self.turn_tool_source {
+            orchestrator = orchestrator.with_turn_tool_source(source.clone(), org_slug, space_slug);
+        }
         if let Some(store) = &self.audio_store {
             orchestrator = orchestrator.with_audio_store(store.clone());
         }
@@ -428,6 +441,86 @@ mod tests {
     async fn a_traversal_slug_is_rejected() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(runtimes(tmp.path()).get("acme", "../x").await.is_err());
+    }
+
+    struct Recording(Mutex<Vec<(String, String, Option<String>)>>);
+
+    #[async_trait::async_trait]
+    impl assistant_core::tool::TurnToolSource for Recording {
+        async fn tools_for_turn(
+            &self,
+            scope: &assistant_core::tool::TurnScope<'_>,
+        ) -> Vec<Arc<dyn ToolHandler>> {
+            self.0.lock().unwrap().push((
+                scope.org_slug.into(),
+                scope.space_slug.into(),
+                scope.user_id.map(|u| u.0.clone()),
+            ));
+            Vec::new()
+        }
+    }
+
+    #[tokio::test]
+    async fn every_space_asks_the_turn_tool_source_about_its_own_turns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = Arc::new(Recording(Mutex::default()));
+        let runtimes = {
+            let mut config = OrgConfig::default();
+            config.memory.enabled = false;
+            Arc::new(
+                SpaceRuntimes::new(
+                    Arc::new(OrgPoolFactory::new(tmp.path())),
+                    Arc::new(OrgContexts::fixed(
+                        config,
+                        Arc::new(ScriptedLlmProvider::new()),
+                    )),
+                    Arc::new(AutoDenyConfirmation {
+                        interface_name: "test",
+                    }),
+                )
+                .with_submit_timeout(10)
+                .with_turn_tool_source(source.clone()),
+            )
+        };
+        let mut auth = AuthContext::system();
+        auth.user_id = assistant_core::identity::UserId::from("usr_u");
+
+        for space in ["alpha", "beta"] {
+            let runtime = runtimes.get("acme", space).await.unwrap();
+            let worker = runtime.orchestrator.clone();
+            tokio::spawn(async move { worker.run_worker("worker").await });
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                runtime.orchestrator.submit_turn(
+                    &auth,
+                    "hello",
+                    Uuid::new_v4(),
+                    Interface::Web,
+                    None,
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        }
+
+        let mut seen = source.0.lock().unwrap().clone();
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                (
+                    "acme".to_string(),
+                    "alpha".to_string(),
+                    Some("usr_u".to_string())
+                ),
+                (
+                    "acme".to_string(),
+                    "beta".to_string(),
+                    Some("usr_u".to_string())
+                ),
+            ]
+        );
     }
 
     #[tokio::test]

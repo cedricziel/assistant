@@ -16,6 +16,9 @@
 //! | DELETE | `/api/integrations/{id}`            | Remove an integration             |
 //! | GET    | `/api/integrations/policy`          | Get the org policy                |
 //! | PUT    | `/api/integrations/policy`          | Replace the org policy (admin)    |
+//! | POST   | `/api/integrations/{id}/test`       | Connect and list the tools       |
+//! | PUT    | `/api/integrations/{id}/credential` | Set the header credential        |
+//! | DELETE | `/api/integrations/{id}/credential` | Clear the header credential      |
 //! | PUT    | `/api/integrations/{id}/spaces/{space_id}` | Allow or opt out a space   |
 //! | DELETE | `/api/integrations/{id}/spaces/{space_id}` | Remove that row            |
 
@@ -25,7 +28,7 @@ use axum::{
     Extension, Json, Router,
     extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
-    routing::{get, put},
+    routing::{get, post, put},
 };
 use serde::{Deserialize, Serialize};
 
@@ -36,8 +39,10 @@ use assistant_core::integrations::catalog::{
     CatalogAuth, CatalogAuthKind, CatalogEntry, CatalogQuery,
 };
 use assistant_core::integrations::{
-    EffectiveIntegrations, IntegrationCredentialStore, IntegrationLayer, IntegrationStore,
+    EffectiveIntegrations, IntegrationCredentialStore, IntegrationHealthStore, IntegrationLayer,
+    IntegrationStore, SecretBox,
 };
+use assistant_mcp_client::{ConnectionsConfig, IntegrationConnections};
 use assistant_storage::OrgStorageLayer;
 
 use crate::catalog_sync::CatalogSync;
@@ -45,6 +50,8 @@ use crate::openapi::ErrorBody;
 use error::{ApiError, ApiResult};
 
 mod authz;
+pub mod connection;
+pub mod credentials;
 mod error;
 pub mod manage;
 pub mod policy;
@@ -53,6 +60,8 @@ pub mod spaces;
 mod testing;
 pub mod types;
 
+use connection::test_integration;
+use credentials::{clear_credential, set_credential};
 use manage::{
     create_integration, delete_integration, get_integration, list_integrations, update_integration,
 };
@@ -68,34 +77,81 @@ pub struct IntegrationsApiState {
     credentials: Arc<dyn IntegrationCredentialStore>,
     spaces: Arc<dyn SpaceStore>,
     effective: Arc<EffectiveIntegrations>,
+    /// Seals credentials as they are written. Only the `test` endpoint opens
+    /// them again; turns connect in the orchestrator service.
+    secrets: Arc<SecretBox>,
     clock: Arc<dyn Clock>,
+    health: Arc<dyn IntegrationHealthStore>,
+    /// Used only to probe: the `test` endpoint connects once and keeps nothing.
+    connections: Arc<IntegrationConnections>,
+    connections_config: ConnectionsConfig,
 }
 
 impl IntegrationsApiState {
-    /// `key_id` identifies the server's secrets key; a credential sealed under
-    /// another key reports `auth_expired`.
-    pub fn new(catalog: Arc<CatalogSync>, org_storage: &OrgStorageLayer, key_id: &str) -> Self {
+    /// A credential sealed under a key other than `secrets`' reports
+    /// `auth_expired`.
+    pub fn new(
+        catalog: Arc<CatalogSync>,
+        org_storage: &OrgStorageLayer,
+        secrets: Arc<SecretBox>,
+    ) -> Self {
         let store: Arc<dyn IntegrationStore> = Arc::new(org_storage.integration_store());
         let credentials: Arc<dyn IntegrationCredentialStore> =
             Arc::new(org_storage.integration_credential_store());
+        let health: Arc<dyn IntegrationHealthStore> =
+            Arc::new(org_storage.integration_health_store());
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         Self {
             catalog,
             effective: Arc::new(EffectiveIntegrations::new(
                 store.clone(),
                 credentials.clone(),
-                key_id,
+                secrets.key_id(),
+            )),
+            spaces: Arc::new(org_storage.space_store()),
+            connections: Arc::new(IntegrationConnections::new(
+                store.clone(),
+                credentials.clone(),
+                health.clone(),
+                secrets.clone(),
+                clock.clone(),
             )),
             store,
+            connections_config: ConnectionsConfig::default(),
+            secrets,
+            clock,
+            health,
             credentials,
-            spaces: Arc::new(org_storage.space_store()),
-            clock: Arc::new(SystemClock),
         }
     }
 
     /// Stamp created and updated rows from `clock` instead of the system clock.
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
+        self.rebuild_connections();
         self
+    }
+
+    /// Let the `test` endpoint send credentials over plain `http://`, for tests
+    /// against local scripted servers.
+    #[cfg(test)]
+    pub fn with_plain_http(mut self) -> Self {
+        self.connections_config.allow_plain_http = true;
+        self.rebuild_connections();
+        self
+    }
+
+    fn rebuild_connections(&mut self) {
+        self.connections = Arc::new(
+            IntegrationConnections::new(
+                self.store.clone(),
+                self.credentials.clone(),
+                self.health.clone(),
+                self.secrets.clone(),
+                self.clock.clone(),
+            )
+            .with_config(self.connections_config.clone()),
+        );
     }
 }
 
@@ -229,6 +285,11 @@ pub fn integrations_api_router() -> Router<IntegrationsApiState> {
             get(get_integration)
                 .patch(update_integration)
                 .delete(delete_integration),
+        )
+        .route("/integrations/{id}/test", post(test_integration))
+        .route(
+            "/integrations/{id}/credential",
+            put(set_credential).delete(clear_credential),
         )
         .route(
             "/integrations/{id}/spaces/{space_id}",
@@ -375,7 +436,7 @@ mod tests {
                 integrations_api_router().with_state(IntegrationsApiState::new(
                     catalog,
                     &org_storage,
-                    "k",
+                    Arc::new(SecretBox::from_key([7; 32])),
                 )),
             )
             .route_layer(axum::middleware::from_fn_with_state(auth, require_auth))

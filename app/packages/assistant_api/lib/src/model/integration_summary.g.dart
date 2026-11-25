@@ -24,6 +24,8 @@ class _$IntegrationSummary extends IntegrationSummary {
   @override
   final String id;
   @override
+  final DateTime? lastConnectedAt;
+  @override
   final IntegrationLayer layer;
   @override
   final String name;
@@ -35,6 +37,8 @@ class _$IntegrationSummary extends IntegrationSummary {
   final String? spaceId;
   @override
   final IntegrationStatus status;
+  @override
+  final int? toolCount;
   @override
   final IntegrationTrust trust;
   @override
@@ -53,12 +57,14 @@ class _$IntegrationSummary extends IntegrationSummary {
       required this.enabled,
       required this.hasCredential,
       required this.id,
+      this.lastConnectedAt,
       required this.layer,
       required this.name,
       this.ownerUserId,
       required this.slug,
       this.spaceId,
       required this.status,
+      this.toolCount,
       required this.trust,
       required this.updatedAt})
       : super._();
@@ -83,12 +89,14 @@ class _$IntegrationSummary extends IntegrationSummary {
         enabled == other.enabled &&
         hasCredential == other.hasCredential &&
         id == other.id &&
+        lastConnectedAt == other.lastConnectedAt &&
         layer == other.layer &&
         name == other.name &&
         ownerUserId == other.ownerUserId &&
         slug == other.slug &&
         spaceId == other.spaceId &&
         status == other.status &&
+        toolCount == other.toolCount &&
         trust == other.trust &&
         updatedAt == other.updatedAt;
   }
@@ -104,12 +112,14 @@ class _$IntegrationSummary extends IntegrationSummary {
     _$hash = $jc(_$hash, enabled.hashCode);
     _$hash = $jc(_$hash, hasCredential.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
+    _$hash = $jc(_$hash, lastConnectedAt.hashCode);
     _$hash = $jc(_$hash, layer.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, ownerUserId.hashCode);
     _$hash = $jc(_$hash, slug.hashCode);
     _$hash = $jc(_$hash, spaceId.hashCode);
     _$hash = $jc(_$hash, status.hashCode);
+    _$hash = $jc(_$hash, toolCount.hashCode);
     _$hash = $jc(_$hash, trust.hashCode);
     _$hash = $jc(_$hash, updatedAt.hashCode);
     _$hash = $jf(_$hash);
@@ -127,12 +137,14 @@ class _$IntegrationSummary extends IntegrationSummary {
           ..add('enabled', enabled)
           ..add('hasCredential', hasCredential)
           ..add('id', id)
+          ..add('lastConnectedAt', lastConnectedAt)
           ..add('layer', layer)
           ..add('name', name)
           ..add('ownerUserId', ownerUserId)
           ..add('slug', slug)
           ..add('spaceId', spaceId)
           ..add('status', status)
+          ..add('toolCount', toolCount)
           ..add('trust', trust)
           ..add('updatedAt', updatedAt))
         .toString();
@@ -178,6 +190,11 @@ class IntegrationSummaryBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
+  DateTime? _lastConnectedAt;
+  DateTime? get lastConnectedAt => _$this._lastConnectedAt;
+  set lastConnectedAt(DateTime? lastConnectedAt) =>
+      _$this._lastConnectedAt = lastConnectedAt;
+
   IntegrationLayer? _layer;
   IntegrationLayer? get layer => _$this._layer;
   set layer(IntegrationLayer? layer) => _$this._layer = layer;
@@ -202,6 +219,10 @@ class IntegrationSummaryBuilder
   IntegrationStatus? get status => _$this._status;
   set status(IntegrationStatus? status) => _$this._status = status;
 
+  int? _toolCount;
+  int? get toolCount => _$this._toolCount;
+  set toolCount(int? toolCount) => _$this._toolCount = toolCount;
+
   IntegrationTrust? _trust;
   IntegrationTrust? get trust => _$this._trust;
   set trust(IntegrationTrust? trust) => _$this._trust = trust;
@@ -225,12 +246,14 @@ class IntegrationSummaryBuilder
       _enabled = $v.enabled;
       _hasCredential = $v.hasCredential;
       _id = $v.id;
+      _lastConnectedAt = $v.lastConnectedAt;
       _layer = $v.layer;
       _name = $v.name;
       _ownerUserId = $v.ownerUserId;
       _slug = $v.slug;
       _spaceId = $v.spaceId;
       _status = $v.status;
+      _toolCount = $v.toolCount;
       _trust = $v.trust;
       _updatedAt = $v.updatedAt;
       _$v = null;
@@ -269,6 +292,7 @@ class IntegrationSummaryBuilder
               hasCredential, r'IntegrationSummary', 'hasCredential'),
           id: BuiltValueNullFieldError.checkNotNull(
               id, r'IntegrationSummary', 'id'),
+          lastConnectedAt: lastConnectedAt,
           layer: BuiltValueNullFieldError.checkNotNull(
               layer, r'IntegrationSummary', 'layer'),
           name: BuiltValueNullFieldError.checkNotNull(
@@ -279,6 +303,7 @@ class IntegrationSummaryBuilder
           spaceId: spaceId,
           status: BuiltValueNullFieldError.checkNotNull(
               status, r'IntegrationSummary', 'status'),
+          toolCount: toolCount,
           trust: BuiltValueNullFieldError.checkNotNull(
               trust, r'IntegrationSummary', 'trust'),
           updatedAt: BuiltValueNullFieldError.checkNotNull(

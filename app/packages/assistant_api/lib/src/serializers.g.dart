@@ -60,6 +60,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(CreateUserRequest.serializer)
       ..add(CreateWebhookRequest.serializer)
       ..add(CredentialMode.serializer)
+      ..add(CredentialResponse.serializer)
       ..add(DeviceCodeOAuthFlow.serializer)
       ..add(DeviceCodeResponseSchema.serializer)
       ..add(ErrorBody.serializer)
@@ -111,6 +112,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ServerCapabilities.serializer)
       ..add(ServerMetadata.serializer)
       ..add(SetActivePersonaRequest.serializer)
+      ..add(SetCredentialRequest.serializer)
       ..add(SetSkillAccessModeRequest.serializer)
       ..add(SetSpaceAccessRequest.serializer)
       ..add(SkillDetail.serializer)
@@ -141,6 +143,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(TaskStatus.serializer)
       ..add(TaskStatusUpdateEvent.serializer)
       ..add(TemplateResponse.serializer)
+      ..add(TestIntegrationResponse.serializer)
       ..add(TokenResponse.serializer)
       ..add(ToolCallSummary.serializer)
       ..add(TurnState.serializer)
@@ -214,6 +217,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

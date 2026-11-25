@@ -9,6 +9,7 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**clearCredential**](IntegrationsApi.md#clearcredential) | **DELETE** /api/integrations/{id}/credential | &#x60;DELETE /api/integrations/{id}/credential&#x60; — remove the header credential.
 [**createIntegration**](IntegrationsApi.md#createintegration) | **POST** /api/integrations | &#x60;POST /api/integrations&#x60; — install an integration.
 [**deleteIntegration**](IntegrationsApi.md#deleteintegration) | **DELETE** /api/integrations/{id} | &#x60;DELETE /api/integrations/{id}&#x60; — remove an integration and its credentials.
 [**deleteSpaceAccess**](IntegrationsApi.md#deletespaceaccess) | **DELETE** /api/integrations/{id}/spaces/{space_id} | &#x60;DELETE /api/integrations/{id}/spaces/{space_id}?mode&#x3D;&#x60; — remove a space row.
@@ -19,8 +20,57 @@ Method | HTTP request | Description
 [**listIntegrations**](IntegrationsApi.md#listintegrations) | **GET** /api/integrations | &#x60;GET /api/integrations&#x60; — list the integrations the caller may see.
 [**putIntegrationPolicy**](IntegrationsApi.md#putintegrationpolicy) | **PUT** /api/integrations/policy | &#x60;PUT /api/integrations/policy&#x60; — replace the org&#39;s integration policy.
 [**putSpaceAccess**](IntegrationsApi.md#putspaceaccess) | **PUT** /api/integrations/{id}/spaces/{space_id} | &#x60;PUT /api/integrations/{id}/spaces/{space_id}&#x60; — add a space row.
+[**setCredential**](IntegrationsApi.md#setcredential) | **PUT** /api/integrations/{id}/credential | &#x60;PUT /api/integrations/{id}/credential&#x60; — store the header credential.
+[**testIntegration**](IntegrationsApi.md#testintegration) | **POST** /api/integrations/{id}/test | &#x60;POST /api/integrations/{id}/test&#x60; — connect and list the tools.
 [**updateIntegration**](IntegrationsApi.md#updateintegration) | **PATCH** /api/integrations/{id} | &#x60;PATCH /api/integrations/{id}&#x60; — update an integration.
 
+
+# **clearCredential**
+> CredentialResponse clearCredential(id)
+
+`DELETE /api/integrations/{id}/credential` — remove the header credential.
+
+Same permissions as setting it.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+
+final api = AssistantApi().getIntegrationsApi();
+final String id = id_example; // String | Integration id, `int_<uuid>`
+
+try {
+    final response = api.clearCredential(id);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling IntegrationsApi->clearCredential: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Integration id, `int_<uuid>` | 
+
+### Return type
+
+[**CredentialResponse**](CredentialResponse.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json, text/plain
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createIntegration**
 > IntegrationDetail createIntegration(createIntegrationRequest)
@@ -494,6 +544,102 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: application/json
+ - **Accept**: application/json, text/plain
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **setCredential**
+> CredentialResponse setCredential(id, setCredentialRequest)
+
+`PUT /api/integrations/{id}/credential` — store the header credential.
+
+For a `shared` integration the credential is the integration's own and needs someone who manages its layer. For a `per_user` one it is the caller's, and anyone who can see the integration may set theirs. A personal integration's credential is its owner's alone.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+
+final api = AssistantApi().getIntegrationsApi();
+final String id = id_example; // String | Integration id, `int_<uuid>`
+final SetCredentialRequest setCredentialRequest = ; // SetCredentialRequest | 
+
+try {
+    final response = api.setCredential(id, setCredentialRequest);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling IntegrationsApi->setCredential: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Integration id, `int_<uuid>` | 
+ **setCredentialRequest** | [**SetCredentialRequest**](SetCredentialRequest.md)|  | 
+
+### Return type
+
+[**CredentialResponse**](CredentialResponse.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json, text/plain
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **testIntegration**
+> TestIntegrationResponse testIntegration(id)
+
+`POST /api/integrations/{id}/test` — connect and list the tools.
+
+Uses the credential the caller's turns would use: the shared one, or their own for a per-user integration. A personal integration can be tested only by its owner. A failed connection is still a `200` with `ok: false` and the error, and marks the integration `unreachable` until a connection works. The error names a kind (`HTTP <status>`, `timeout`, `connection failed`, `protocol error`), never the raw transport error. An integration can be tested once every few seconds per caller (`429` with `Retry-After`).
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+
+final api = AssistantApi().getIntegrationsApi();
+final String id = id_example; // String | Integration id, `int_<uuid>`
+
+try {
+    final response = api.testIntegration(id);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling IntegrationsApi->testIntegration: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Integration id, `int_<uuid>` | 
+
+### Return type
+
+[**TestIntegrationResponse**](TestIntegrationResponse.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: application/json, text/plain
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

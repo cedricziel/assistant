@@ -1,4 +1,5 @@
-//! In-memory [`IntegrationStore`] and [`IntegrationCredentialStore`] for tests.
+//! In-memory [`IntegrationStore`], [`IntegrationCredentialStore`] and
+//! [`IntegrationHealthStore`] for tests.
 //!
 //! They enforce the same invariants as the SQLite schema: the layer/owner
 //! columns, `user` layer implies per-user credentials, slug length and
@@ -24,6 +25,7 @@ struct State {
     access: Vec<SpaceAccess>,
     policies: HashMap<OrgId, IntegrationPolicy>,
     credentials: Vec<StoredCredential>,
+    health: Vec<IntegrationHealth>,
 }
 
 type Shared = Arc<Mutex<State>>;
@@ -89,6 +91,7 @@ impl InMemoryIntegrationStore {
             state
                 .credentials
                 .retain(|c| c.integration_id != integration.id);
+            state.health.retain(|h| h.integration_id != integration.id);
         }
         Ok(true)
     }
@@ -100,6 +103,15 @@ impl InMemoryIntegrationStore {
     /// The credential store over the same integrations.
     pub fn credential_store(&self) -> Arc<InMemoryIntegrationCredentialStore> {
         Arc::new(InMemoryIntegrationCredentialStore {
+            state: self.state.clone(),
+        })
+    }
+}
+
+impl InMemoryIntegrationStore {
+    /// The health store over the same integrations.
+    pub fn health_store(&self) -> Arc<InMemoryIntegrationHealthStore> {
+        Arc::new(InMemoryIntegrationHealthStore {
             state: self.state.clone(),
         })
     }
@@ -215,6 +227,7 @@ impl IntegrationStore for InMemoryIntegrationStore {
         }
         state.access.retain(|a| a.integration_id != id);
         state.credentials.retain(|c| c.integration_id != id);
+        state.health.retain(|h| h.integration_id != id);
         Ok(true)
     }
 
@@ -364,5 +377,85 @@ impl IntegrationCredentialStore for InMemoryIntegrationCredentialStore {
             }
             _ => Ok(false),
         }
+    }
+}
+
+/// In-memory [`IntegrationHealthStore`], paired with an [`InMemoryIntegrationStore`].
+pub struct InMemoryIntegrationHealthStore {
+    state: Shared,
+}
+
+fn health_row<'a>(
+    state: &'a mut State,
+    integration_id: &str,
+    subject: Option<&UserId>,
+    at: DateTime<Utc>,
+) -> Result<&'a mut IntegrationHealth> {
+    if !state.integrations.iter().any(|i| i.id == integration_id) {
+        bail!("unknown integration: {integration_id}");
+    }
+    let pos = state
+        .health
+        .iter()
+        .position(|h| h.integration_id == integration_id && h.subject_user_id.as_ref() == subject);
+    let pos = pos.unwrap_or_else(|| {
+        state.health.push(IntegrationHealth {
+            integration_id: integration_id.to_owned(),
+            subject_user_id: subject.cloned(),
+            reachable: false,
+            last_connected_at: None,
+            tool_count: None,
+            last_error: None,
+            checked_at: at,
+        });
+        state.health.len() - 1
+    });
+    Ok(&mut state.health[pos])
+}
+
+#[async_trait]
+impl IntegrationHealthStore for InMemoryIntegrationHealthStore {
+    async fn record_connected(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+        tool_count: u32,
+        at: DateTime<Utc>,
+    ) -> Result<()> {
+        let mut state = lock(&self.state);
+        let row = health_row(&mut state, integration_id, subject, at)?;
+        row.reachable = true;
+        row.last_connected_at = Some(at);
+        row.tool_count = Some(tool_count);
+        row.last_error = None;
+        row.checked_at = at;
+        Ok(())
+    }
+
+    async fn record_failed(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+        error: &str,
+        at: DateTime<Utc>,
+    ) -> Result<()> {
+        let mut state = lock(&self.state);
+        let row = health_row(&mut state, integration_id, subject, at)?;
+        row.reachable = false;
+        row.last_error = Some(error.to_owned());
+        row.checked_at = at;
+        Ok(())
+    }
+
+    async fn get(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+    ) -> Result<Option<IntegrationHealth>> {
+        Ok(lock(&self.state)
+            .health
+            .iter()
+            .find(|h| h.integration_id == integration_id && h.subject_user_id.as_ref() == subject)
+            .cloned())
     }
 }

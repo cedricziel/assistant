@@ -2053,6 +2053,186 @@
         ]
       }
     },
+    "/api/integrations/{id}/credential": {
+      "put": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`PUT /api/integrations/{id}/credential` — store the header credential.",
+        "description": "For a `shared` integration the credential is the integration's own and\nneeds someone who manages its layer. For a `per_user` one it is the\ncaller's, and anyone who can see the integration may set theirs. A personal\nintegration's credential is its owner's alone.",
+        "operationId": "set_credential",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored. Only whether a credential exists is reported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not set this credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The integration changed while the credential was saved; the credential was not kept",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The integration takes no header credential, or the value or header name is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`DELETE /api/integrations/{id}/credential` — remove the header credential.",
+        "description": "Same permissions as setting it.",
+        "operationId": "clear_credential",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed; `has_credential` is false",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not clear this credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The integration takes no header credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
     "/api/integrations/{id}/spaces/{space_id}": {
       "put": {
         "tags": [
@@ -2234,6 +2414,117 @@
           },
           "422": {
             "description": "Not an org-layer integration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/{id}/test": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "`POST /api/integrations/{id}/test` — connect and list the tools.",
+        "description": "Uses the credential the caller's turns would use: the shared one, or their\nown for a per-user integration. A personal integration can be tested only\nby its owner. A failed connection is still a `200` with `ok: false` and the\nerror, and marks the integration `unreachable` until a connection works.\nThe error names a kind (`HTTP <status>`, `timeout`, `connection failed`,\n`protocol error`), never the raw transport error. An integration can be\ntested once every few seconds per caller (`429` with `Retry-After`).",
+        "operationId": "test_integration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Integration id, `int_<uuid>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The test ran; `ok` says whether it connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestIntegrationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not use this integration's credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such integration, or the caller may not see it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The integration changed while the test ran; test again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The integration cannot be used by the caller now: disabled, blocked by policy, or no usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Tested again too soon; wait the number of seconds in `Retry-After`",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "Seconds until the integration may be tested again"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -10259,6 +10550,26 @@
           "per_user"
         ]
       },
+      "CredentialResponse": {
+        "type": "object",
+        "description": "Whether a credential is stored for the caller's subject. The value itself is\nnever returned.",
+        "required": [
+          "has_credential"
+        ],
+        "properties": {
+          "has_credential": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the credential was last set; absent when there is none."
+          }
+        }
+      },
       "DeviceCodeOAuthFlow": {
         "type": "object",
         "description": "OAuth 2.0 Device Code flow configuration (RFC 8628).",
@@ -10530,6 +10841,13 @@
             "type": "string",
             "description": "`int_<uuid>`."
           },
+          "last_connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "layer": {
             "$ref": "#/components/schemas/IntegrationLayer"
           },
@@ -10560,6 +10878,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/IntegrationStatus"
+          },
+          "tool_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
           },
           "trust": {
             "$ref": "#/components/schemas/IntegrationTrust"
@@ -10692,6 +11018,14 @@
             "type": "string",
             "description": "`int_<uuid>`."
           },
+          "last_connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The last time a connection for the caller's subject succeeded."
+          },
           "layer": {
             "$ref": "#/components/schemas/IntegrationLayer"
           },
@@ -10719,6 +11053,15 @@
           "status": {
             "$ref": "#/components/schemas/IntegrationStatus",
             "description": "Whether the caller can use it. For an org admin looking at another\nuser's integration, the status is the owner's."
+          },
+          "tool_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The number of tools that connection found.",
+            "minimum": 0
           },
           "trust": {
             "$ref": "#/components/schemas/IntegrationTrust"
@@ -11837,6 +12180,27 @@
           }
         }
       },
+      "SetCredentialRequest": {
+        "type": "object",
+        "description": "Body of `PUT /api/integrations/{id}/credential`.",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "header_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The header that carries the value. Only accepted when the integration\nhas no header name yet, and then only from someone who manages its layer."
+          },
+          "value": {
+            "type": "string",
+            "format": "password",
+            "description": "The secret that fills the header template, e.g. the token after\n`Bearer `. Surrounding whitespace is dropped. It is stored encrypted\nand never returned."
+          }
+        }
+      },
       "SetSkillAccessModeRequest": {
         "type": "object",
         "description": "Body for `PATCH /api/personas/{id}/skill-access`.",
@@ -12497,6 +12861,54 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "TestIntegrationResponse": {
+        "type": "object",
+        "description": "The outcome of `POST /api/integrations/{id}/test`.",
+        "required": [
+          "ok",
+          "tool_names",
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the connection failed."
+          },
+          "last_connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "Whether a connection was made and its tools listed."
+          },
+          "status": {
+            "$ref": "#/components/schemas/IntegrationStatus",
+            "description": "The caller's status after this test."
+          },
+          "tool_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "tool_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tools the server offers, sorted. Empty when the test failed."
           }
         }
       },

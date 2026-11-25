@@ -11,6 +11,8 @@ use assistant_core::{
 use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use tracing::warn;
 
+use crate::overlay::{ToolOverlay, spec_of};
+
 pub struct ToolExecutor {
     storage: Arc<StorageLayer>,
     tool_handlers: RwLock<HashMap<String, Arc<dyn ToolHandler>>>,
@@ -137,6 +139,15 @@ impl ToolExecutor {
             .retain(|name, _| !name.starts_with(prefix));
     }
 
+    /// The registered handler named `name`.
+    pub fn handler(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
+        self.tool_handlers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(name)
+            .cloned()
+    }
+
     /// Returns all registered tool handlers.
     pub fn list_tools(&self) -> Vec<Arc<dyn ToolHandler>> {
         self.tool_handlers
@@ -154,13 +165,7 @@ impl ToolExecutor {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
-            .map(|t| ToolSpec {
-                name: t.name().to_string(),
-                description: t.description().to_string(),
-                params_schema: t.params_schema(),
-                is_mutating: t.is_mutating(),
-                requires_confirmation: t.requires_confirmation(),
-            })
+            .map(spec_of)
             .collect();
         specs.sort_by(|a, b| a.name.cmp(&b.name));
         specs
@@ -179,16 +184,40 @@ impl ToolExecutor {
                 Some(list) => list.iter().any(|a| a == t.name()),
                 None => true,
             })
-            .map(|t| ToolSpec {
-                name: t.name().to_string(),
-                description: t.description().to_string(),
-                params_schema: t.params_schema(),
-                is_mutating: t.is_mutating(),
-                requires_confirmation: t.requires_confirmation(),
-            })
+            .map(spec_of)
             .collect();
         specs.sort_by(|a, b| a.name.cmp(&b.name));
         specs
+    }
+
+    /// The registry's specs plus the turn's `overlay`, sorted by name. A
+    /// registered tool wins over an overlay tool of the same name, which is
+    /// dropped with a warning.
+    pub fn to_specs_with(&self, overlay: &ToolOverlay) -> Vec<ToolSpec> {
+        let mut specs = self.to_specs();
+        if overlay.is_empty() {
+            return specs;
+        }
+        let registered: std::collections::HashSet<String> =
+            specs.iter().map(|spec| spec.name.clone()).collect();
+        for handler in overlay.handlers() {
+            if registered.contains(handler.name()) {
+                warn!(
+                    tool = handler.name(),
+                    "turn tool shadows a registered tool; the registered one wins"
+                );
+            } else {
+                specs.push(spec_of(handler));
+            }
+        }
+        specs.sort_by(|a, b| a.name.cmp(&b.name));
+        specs
+    }
+
+    /// The handler a call to `name` runs: the registered one, else the turn's
+    /// `overlay` tool.
+    pub fn resolve(&self, overlay: &ToolOverlay, name: &str) -> Option<Arc<dyn ToolHandler>> {
+        self.handler(name).or_else(|| overlay.get(name).cloned())
     }
 
     /// Execute a tool by name with the given parameters.
@@ -197,6 +226,19 @@ impl ToolExecutor {
     /// executed; all others are rejected with a non-fatal error.
     pub async fn execute(
         &self,
+        name: &str,
+        params: HashMap<String, serde_json::Value>,
+        ctx: &ExecutionContext,
+    ) -> Result<ToolOutput> {
+        self.execute_with(&ToolOverlay::default(), name, params, ctx)
+            .await
+    }
+
+    /// [`execute`](Self::execute), looking in the turn's `overlay` before the
+    /// registry.
+    pub async fn execute_with(
+        &self,
+        overlay: &ToolOverlay,
         name: &str,
         params: HashMap<String, serde_json::Value>,
         ctx: &ExecutionContext,
@@ -212,12 +254,7 @@ impl ToolExecutor {
         }
 
         // Clone Arc before releasing the read lock to avoid holding it across an await.
-        let handler = self
-            .tool_handlers
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(name)
-            .cloned();
+        let handler = self.resolve(overlay, name);
 
         if let Some(handler) = handler {
             // Validate params against the declared JSON Schema before dispatch.
@@ -455,6 +492,165 @@ mod tests {
         let executor = make_executor_with_stubs().await;
         executor.unregister_tools_by_prefix("mcp__nonexistent__");
         assert_eq!(executor.list_tools().len(), 3);
+    }
+
+    // -- turn overlay ---------------------------------------------------------
+
+    fn overlay_of(names: &[&'static str]) -> ToolOverlay {
+        ToolOverlay::new(
+            names
+                .iter()
+                .map(|n| Arc::new(StubHandler { tool_name: n }) as Arc<dyn ToolHandler>)
+                .collect(),
+        )
+    }
+
+    #[tokio::test]
+    async fn overlay_specs_are_added_to_the_turn_list_only() {
+        let executor = make_executor_with_stubs().await;
+        let overlay = overlay_of(&["mcp__user_linear__create"]);
+
+        let names: Vec<String> = executor
+            .to_specs_with(&overlay)
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["alpha", "beta", "gamma", "mcp__user_linear__create"]
+        );
+        assert_eq!(
+            executor.to_specs().len(),
+            3,
+            "the registry itself must not learn the overlay's tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn overlay_tool_runs_without_being_registered() {
+        let executor = make_executor_with_stubs().await;
+        let overlay = overlay_of(&["mcp__user_linear__create"]);
+
+        let out = executor
+            .execute_with(
+                &overlay,
+                "mcp__user_linear__create",
+                HashMap::new(),
+                &ctx_unrestricted(),
+            )
+            .await
+            .unwrap();
+        assert!(out.success);
+
+        let without = executor
+            .execute(
+                "mcp__user_linear__create",
+                HashMap::new(),
+                &ctx_unrestricted(),
+            )
+            .await
+            .unwrap();
+        assert!(!without.success, "a plain execute must not see the overlay");
+    }
+
+    /// An overlay tool named like a registered one must not take its place: the
+    /// registry wins, so a per-turn tool can never impersonate an ambient one.
+    #[tokio::test]
+    async fn a_registered_tool_wins_over_an_overlay_tool_of_the_same_name() {
+        struct Marked;
+        #[async_trait]
+        impl ToolHandler for Marked {
+            fn name(&self) -> &str {
+                "alpha"
+            }
+            fn description(&self) -> &str {
+                "impostor"
+            }
+            fn params_schema(&self) -> serde_json::Value {
+                json!({"type": "object", "properties": {}, "required": []})
+            }
+            async fn run(
+                &self,
+                _params: HashMap<String, serde_json::Value>,
+                _ctx: &ExecutionContext,
+            ) -> Result<ToolOutput> {
+                Ok(ToolOutput::success("impostor"))
+            }
+        }
+        let executor = make_executor_with_stubs().await;
+        let overlay = ToolOverlay::new(vec![Arc::new(Marked) as Arc<dyn ToolHandler>]);
+
+        let specs = executor.to_specs_with(&overlay);
+        let alpha: Vec<_> = specs.iter().filter(|s| s.name == "alpha").collect();
+        assert_eq!(alpha.len(), 1, "a shadowed name is listed once");
+        assert_eq!(alpha[0].description, "stub", "with the registry's spec");
+
+        let out = executor
+            .execute_with(&overlay, "alpha", HashMap::new(), &ctx_unrestricted())
+            .await
+            .unwrap();
+        assert_eq!(out.content, "ok from alpha");
+        assert_eq!(
+            executor
+                .resolve(&overlay, "alpha")
+                .map(|h| h.description().to_owned()),
+            Some("stub".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn overlay_respects_the_allowed_tools_list() {
+        let executor = make_executor_with_stubs().await;
+        let overlay = overlay_of(&["mcp__user_linear__create"]);
+
+        let out = executor
+            .execute_with(
+                &overlay,
+                "mcp__user_linear__create",
+                HashMap::new(),
+                &ctx_restricted(vec!["alpha"]),
+            )
+            .await
+            .unwrap();
+        assert!(!out.success);
+    }
+
+    #[tokio::test]
+    async fn concurrent_turns_never_see_each_others_overlay() {
+        let executor = Arc::new(make_executor_with_stubs().await);
+        let turn = |tool: &'static str, other: &'static str| {
+            let executor = executor.clone();
+            async move {
+                let overlay = overlay_of(&[tool]);
+                tokio::task::yield_now().await;
+                let specs: Vec<String> = executor
+                    .to_specs_with(&overlay)
+                    .into_iter()
+                    .map(|s| s.name)
+                    .collect();
+                let own = executor
+                    .execute_with(&overlay, tool, HashMap::new(), &ctx_unrestricted())
+                    .await
+                    .unwrap();
+                let foreign = executor
+                    .execute_with(&overlay, other, HashMap::new(), &ctx_unrestricted())
+                    .await
+                    .unwrap();
+                (specs, own.success, foreign.success)
+            }
+        };
+
+        let (u, v) = tokio::join!(
+            turn("mcp__user_a__tool", "mcp__user_b__tool"),
+            turn("mcp__user_b__tool", "mcp__user_a__tool"),
+        );
+
+        assert!(u.0.contains(&"mcp__user_a__tool".to_string()));
+        assert!(!u.0.contains(&"mcp__user_b__tool".to_string()));
+        assert!(u.1 && !u.2, "U runs its own tool and not V's");
+        assert!(v.0.contains(&"mcp__user_b__tool".to_string()));
+        assert!(!v.0.contains(&"mcp__user_a__tool".to_string()));
+        assert!(v.1 && !v.2, "V runs its own tool and not U's");
     }
 
     // -- to_specs_filtered ---------------------------------------------------

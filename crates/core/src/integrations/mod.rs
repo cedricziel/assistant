@@ -10,6 +10,8 @@ pub mod secret;
 pub use effective::{
     Availability, EffectiveIntegration, EffectiveIntegrations, EvaluatedIntegration,
 };
-pub use memory::{InMemoryIntegrationCredentialStore, InMemoryIntegrationStore};
+pub use memory::{
+    InMemoryIntegrationCredentialStore, InMemoryIntegrationHealthStore, InMemoryIntegrationStore,
+};
 pub use model::*;
 pub use secret::{Sealed, SecretBox, SecretBoxError, credential_aad};
