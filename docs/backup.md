@@ -4,17 +4,23 @@ The assistant ships two CLI subcommands for creating and restoring point-in-time
 
 ## What gets backed up
 
-| Path                              | Description                                           |
-| --------------------------------- | ----------------------------------------------------- |
-| `server.toml`                     | Process-wide configuration                            |
-| `orgs/*/org.toml`                 | Per-organization configuration, one file per org      |
-| `assistant.db` (+ `-wal`, `-shm`) | SQLite database (WAL checkpointed before copy)        |
-| `agents/`                         | All agent personas, memory files, and skill overrides |
-| `skills/`                         | User-defined skill definitions                        |
-| `matrix-state/`                   | Matrix interface session state (if present)           |
-| `signal-store/`                   | Signal interface store (if present)                   |
+| Path                             | Description                                                                                  |
+| -------------------------------- | -------------------------------------------------------------------------------------------- |
+| `server.toml`                    | Process-wide configuration                                                                   |
+| `secrets.key`                    | Key that encrypts stored integration credentials                                             |
+| `jwt_secret`                     | Signing key for issued tokens                                                                |
+| `openai-oauth.json`              | OpenAI OAuth tokens, including the refresh token                                             |
+| `credentials.json`               | CLI login to a server (OAuth tokens)                                                         |
+| `org.db`                         | Org database: users, spaces, memberships, API keys, stored credentials                       |
+| `orgs/`                          | Every org's `org.toml` and `catalog/`, and every space's `space.db`, `agents/` and `skills/` |
+| `agents/`, `skills/`             | Persona workspaces and user-defined skills at the install root                               |
+| `matrix-state/`, `signal-store/` | Interface session state (if present)                                                         |
 
-The `backups/` subdirectory itself is excluded to avoid recursive inclusion.
+Not backed up: `backups/` (earlier archives), `cache/` (the integrations catalog cache, which the server downloads again), `*.legacy` snapshots and any other file at the install root.
+
+`secrets.key` is part of the archive. Without it, the credentials stored in `org.db` cannot be decrypted. The archive also holds the OAuth tokens above. It is created with mode `0600`; treat it as a secret and store it accordingly.
+
+Symlinks found while walking `orgs/`, `agents/`, `skills/` and the state directories, and those directories themselves when they are symlinks, are skipped with a warning. The files listed individually at the install root are read through a symlink.
 
 ## Commands
 
@@ -135,7 +141,10 @@ The first entry in every archive is `manifest.json`, which records the app versi
 - **Atomic restore** — all entries are verified in memory first; the live install tree is not touched until all checksums pass.
 - **Path-traversal protection** — entries with `..` components or destinations outside the install directory are skipped with a warning.
 - **Atomic write** — the archive is written to a `.tmp` file and renamed into place on success; the `.tmp` is deleted on any failure.
-- **SQLite safety** — a WAL checkpoint is issued before copying `assistant.db` to ensure the snapshot is consistent.
+- **SQLite safety** — every `.db` file is archived as a `VACUUM INTO` snapshot taken in one read transaction, so a running server cannot produce a torn copy. The snapshot includes rows still in the `-wal` file. `-wal` and `-shm` files are not archived, and restore deletes any that sit next to a restored database.
+- **Private keys** — those four files are written with mode `0600` on restore and stored with mode `0600` in the archive, so `tar xzf` does not extract them world-readable.
+- **Crash-safe restore writes** — each file is written to a uniquely named staging file in its directory, fsynced and renamed into place, and the directories are fsynced afterwards. A replaced file keeps its mode. For a database, the old `-wal`/`-shm` files are renamed aside first and deleted only after the new database is in place; a failed replacement puts them back. A crash between the two renames leaves the old database and its WAL under a `.pre-restore-*` name.
+- **Symlinks** — restore refuses to write when the destination, or a directory above it inside the install directory, is a symlink. Nothing is written before every destination has been checked.
 
 ## Automating backups
 

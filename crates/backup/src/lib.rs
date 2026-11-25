@@ -28,8 +28,8 @@ use crate::archive::{extract_tar_gz, read_tar_gz_manifest, write_tar_gz};
 use crate::checksum::sha256_hex;
 use crate::manifest::{BackupManifest, MANIFEST_VERSION, ManifestEntry};
 use crate::paths::{
-    checkpoint_sqlite, default_archive_name, default_backups_dir, default_install_dir,
-    discover_files,
+    default_archive_name, default_backups_dir, default_install_dir, discover_files, is_sqlite_db,
+    snapshot_sqlite,
 };
 
 // -- BackupFs trait --
@@ -179,8 +179,6 @@ pub struct BackupOptions {
     pub install_dir: PathBuf,
     /// Destination path for the `.tar.gz` archive.
     pub output_path: PathBuf,
-    /// Override for the SQLite database path (defaults to `install_dir/assistant.db`).
-    pub db_path: Option<PathBuf>,
 }
 
 impl BackupOptions {
@@ -191,7 +189,6 @@ impl BackupOptions {
         Self {
             install_dir,
             output_path,
-            db_path: None,
         }
     }
 }
@@ -298,60 +295,35 @@ impl BackupEngine {
                 .with_context(|| format!("creating output directory {:?}", parent))?;
         }
 
-        // Checkpoint SQLite WAL before copying
-        let db_path = opts
-            .db_path
-            .clone()
-            .unwrap_or_else(|| opts.install_dir.join("assistant.db"));
-        if self.fs.file_exists(&db_path).await
-            && let Err(e) = checkpoint_sqlite(&db_path).await
-        {
-            warn!("WAL checkpoint failed (continuing): {}", e);
-        }
+        let file_paths =
+            discover_files(&opts.install_dir).context("discovering installation files")?;
 
-        // Discover files
-        let file_paths = discover_files(&opts.install_dir, opts.db_path.as_deref())
-            .context("discovering installation files")?;
-
-        // Read all file contents and build manifest entries
+        // Read all file contents and build manifest entries. Databases are
+        // snapshotted rather than copied: the server may be writing to them.
         let mut file_data: Vec<(String, Vec<u8>)> = Vec::new();
         let mut manifest_entries: Vec<ManifestEntry> = Vec::new();
 
         for abs_path in &file_paths {
-            let data = match self.fs.read_file(abs_path).await {
-                Ok(data) => data,
-                // SQLite deletes `-wal`/`-shm` when the last connection closes,
-                // which can happen after `discover_files` listed them. The
-                // checkpoint above already folded the WAL into the main db.
-                Err(e) if is_sqlite_sidecar(abs_path) && is_not_found(&e) => {
-                    warn!("skipping {:?}: vanished during backup", abs_path);
-                    continue;
-                }
-                Err(e) => return Err(e).with_context(|| format!("reading {:?}", abs_path)),
+            let data = if is_sqlite_db(abs_path) {
+                snapshot_sqlite(abs_path).await?
+            } else {
+                self.fs
+                    .read_file(abs_path)
+                    .await
+                    .with_context(|| format!("reading {abs_path:?}"))?
             };
 
-            // archive_path is relative to install_dir.
-            // Files outside install_dir (e.g. a db at a custom path) are placed
-            // under an "external/" prefix so the archive entry is always relative
-            // and the restore dest-escape guard never triggers on them.
-            let rel = match abs_path.strip_prefix(&opts.install_dir) {
-                Ok(r) => r.to_string_lossy().to_string(),
-                Err(_) => format!(
-                    "external/{}",
-                    abs_path
-                        .components()
-                        .filter(|c| matches!(c, std::path::Component::Normal(_)))
-                        .collect::<std::path::PathBuf>()
-                        .to_string_lossy()
-                ),
-            };
+            let rel = abs_path
+                .strip_prefix(&opts.install_dir)
+                .with_context(|| format!("{abs_path:?} is outside {:?}", opts.install_dir))?
+                .to_string_lossy()
+                .to_string();
 
-            let sha = sha256_hex(&data);
             manifest_entries.push(ManifestEntry {
                 archive_path: rel.clone(),
                 install_path: abs_path.to_string_lossy().to_string(),
                 size_bytes: data.len() as u64,
-                sha256: sha,
+                sha256: sha256_hex(&data),
             });
             file_data.push((rel, data));
         }
@@ -389,20 +361,6 @@ impl BackupEngine {
             manifest,
         })
     }
-}
-
-/// Whether `path` is a SQLite `-wal` or `-shm` side file.
-fn is_sqlite_sidecar(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n.ends_with("-wal") || n.ends_with("-shm"))
-}
-
-/// Whether any error in the chain is an [`io::ErrorKind::NotFound`].
-fn is_not_found(err: &anyhow::Error) -> bool {
-    err.chain()
-        .filter_map(|c| c.downcast_ref::<io::Error>())
-        .any(|e| e.kind() == io::ErrorKind::NotFound)
 }
 
 impl Default for BackupEngine {
@@ -587,7 +545,6 @@ mod tests {
         let opts = BackupOptions {
             install_dir: install_dir.path().to_path_buf(),
             output_path: output_path.clone(),
-            db_path: None,
         };
 
         let result = BackupEngine::new().run(opts).await.unwrap();
@@ -613,7 +570,6 @@ mod tests {
         let opts = BackupOptions {
             install_dir: install_dir.path().to_path_buf(),
             output_path: bad_output.clone(),
-            db_path: None,
         };
 
         // The backup must fail because we cannot rename a file onto a directory.
@@ -658,40 +614,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_backup_skips_sqlite_sidecars_that_vanish_after_discovery() {
-        let install_dir = TempDir::new().unwrap();
-        let output_dir = TempDir::new().unwrap();
-        let db = install_dir.path().join("assistant.db");
-        let wal = install_dir.path().join("assistant.db-wal");
-        let shm = install_dir.path().join("assistant.db-shm");
-        for p in [&db, &wal, &shm] {
-            std::fs::write(p, b"x").unwrap();
-        }
-
-        let output_path = output_dir.path().join("backup.tar.gz");
-        let engine = BackupEngine::with_fs(Arc::new(VanishingFs {
-            vanished: vec![wal, shm],
-        }));
-        let result = engine
-            .run(BackupOptions {
-                install_dir: install_dir.path().to_path_buf(),
-                output_path,
-                db_path: None,
-            })
-            .await
-            .expect("a sidecar vanishing mid-backup must not fail the backup");
-
-        let archived: Vec<_> = result
-            .manifest
-            .entries
-            .iter()
-            .map(|e| e.archive_path.as_str())
-            .collect();
-        assert_eq!(archived, vec!["assistant.db"]);
-    }
-
-    #[tokio::test]
-    async fn test_backup_fails_when_non_sidecar_file_vanishes() {
+    async fn test_backup_fails_when_a_file_vanishes() {
         let install_dir = TempDir::new().unwrap();
         let output_dir = TempDir::new().unwrap();
         let config = install_dir.path().join("server.toml");
@@ -704,13 +627,12 @@ mod tests {
             .run(BackupOptions {
                 install_dir: install_dir.path().to_path_buf(),
                 output_path: output_dir.path().join("backup.tar.gz"),
-                db_path: None,
             })
             .await;
 
         assert!(
             result.is_err(),
-            "losing a non-sidecar file must still fail the backup"
+            "losing a file mid-backup must fail the backup"
         );
     }
 
