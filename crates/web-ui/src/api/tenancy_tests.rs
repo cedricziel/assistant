@@ -50,13 +50,10 @@ use assistant_storage::{
 use assistant_transcription::{TtsProvider, TtsRequest, TtsResult};
 
 use super::push::{PushApiState, push_api_router};
-use super::test_helpers::{
-    TestSpace, body_bytes, event_log_state, multipart_body, resolver_for, tiny_png,
-};
+use super::test_helpers::{TestSpace, body_bytes, multipart_body, state_over, tiny_png};
 use super::webhooks::{WebhooksApiState, webhooks_api_router};
 use super::workflows::{WorkflowsApiState, workflows_api_router};
 use super::{ApiState, api_router};
-use crate::space::SpaceResolver;
 
 const ORG_A: &str = "org_a";
 const ORG_B: &str = "org_b";
@@ -178,11 +175,11 @@ impl Resp {
     }
 }
 
-/// Resolver for the topology above. A1 is served from `a1`; the other spaces
-/// get empty storage of their own.
-async fn topology_resolver(a1: &Arc<StorageLayer>) -> SpaceResolver {
+/// Spaces of the topology above. A1 is served from `a1`; the other spaces get
+/// empty storage of their own.
+async fn topology(a1: &Arc<StorageLayer>) -> Vec<TestSpace> {
     let empty = || async { Arc::new(StorageLayer::new_in_memory().await.unwrap()) };
-    resolver_for(&[
+    vec![
         TestSpace {
             id: A1,
             org_id: ORG_A,
@@ -204,8 +201,7 @@ async fn topology_resolver(a1: &Arc<StorageLayer>) -> SpaceResolver {
             slug: "eng",
             storage: empty().await,
         },
-    ])
-    .await
+    ]
 }
 
 /// The wired data-plane router plus ids of the rows seeded into space A1.
@@ -225,9 +221,10 @@ struct Tenancy {
 
 impl Tenancy {
     async fn build() -> Self {
-        let (mut api_state, a1) = event_log_state().await;
+        let a1 = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let (mut api_state, _) =
+            state_over("http://127.0.0.1:1", &topology(&a1).await, false).await;
         api_state.tts_provider = Some(Arc::new(StubTts));
-        api_state.spaces = topology_resolver(&a1).await;
         let agent_id = Arc::new(RwLock::new("default".to_string()));
 
         let router = api_router()

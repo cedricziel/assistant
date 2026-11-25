@@ -32,6 +32,8 @@ pub mod webhooks;
 pub mod workflows;
 
 #[cfg(test)]
+mod space_turn_tests;
+#[cfg(test)]
 mod tenancy_tests;
 #[cfg(test)]
 mod test_helpers;
@@ -99,14 +101,13 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use assistant_core::ConversationConfig;
-use assistant_runtime::{AssistantInterface, CommandRegistry, Orchestrator};
+use assistant_runtime::{CommandRegistry, SpaceRuntime, SpaceRuntimes};
 use assistant_storage::{ConversationBroadcast, InMemoryConversationBroadcaster, RunBroadcaster};
 use assistant_transcription::{TranscriptionProvider, TtsProvider};
 use axum::{
     Router,
     extract::DefaultBodyLimit,
-    http::header,
+    http::{StatusCode, header},
     response::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
@@ -117,7 +118,8 @@ use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
-use crate::space::SpaceResolver;
+use crate::errors::json_error;
+use crate::space::{SpaceCtx, SpaceResolver};
 
 // -- State -------------------------------------------------------------------
 
@@ -128,7 +130,8 @@ pub struct ApiState {
     pub spaces: SpaceResolver,
     /// Shared live agent ID — updated when the user switches personas at runtime.
     pub agent_id: Arc<RwLock<String>>,
-    pub orchestrator: Arc<dyn AssistantInterface>,
+    /// Per-space orchestrators; a turn runs on the runtime of the caller's space.
+    pub runtimes: Arc<SpaceRuntimes>,
     /// Optional Web Push dispatcher — absent when VAPID keys are not configured.
     pub push_dispatcher: Option<Arc<crate::push::PushDispatcher>>,
     /// Optional transcription provider for voice message STT.
@@ -143,10 +146,6 @@ pub struct ApiState {
     pub command_registry: Arc<CommandRegistry>,
     /// Per-space conversation-list broadcasters for reactive SSE streaming.
     pub conversation_broadcasters: ConversationBroadcasters,
-    /// Per-conversation config overrides (model selection, etc.).
-    pub conversation_configs: Arc<RwLock<HashMap<Uuid, ConversationConfig>>>,
-    /// Concrete orchestrator reference for command execution.
-    pub orchestrator_ref: Arc<Orchestrator>,
     /// Active turns map: conv_id → request_id (for `/stop`).
     pub active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
     /// Default model name from global config.
@@ -156,15 +155,14 @@ pub struct ApiState {
 impl ApiState {
     pub fn new(
         spaces: SpaceResolver,
-        orchestrator: Arc<dyn AssistantInterface>,
+        runtimes: Arc<SpaceRuntimes>,
         agent_id: Arc<RwLock<String>>,
-        orchestrator_ref: Arc<Orchestrator>,
     ) -> Self {
-        let default_model = orchestrator_ref.llm.model_name().to_string();
+        let default_model = runtimes.llm().model_name().to_string();
         Self {
             spaces,
             agent_id,
-            orchestrator,
+            runtimes,
             push_dispatcher: None,
             transcription_provider: None,
             tts_provider: None,
@@ -172,11 +170,23 @@ impl ApiState {
             run_broadcaster: RunBroadcaster::new(),
             command_registry: Arc::new(CommandRegistry::new()),
             conversation_broadcasters: ConversationBroadcasters::default(),
-            conversation_configs: orchestrator_ref.conversation_configs(),
-            orchestrator_ref,
             active_turns: Arc::new(RwLock::new(HashMap::new())),
             default_model,
         }
+    }
+
+    /// The runtime of the space `ctx` is bound to.
+    pub(crate) async fn runtime(&self, ctx: &SpaceCtx) -> Result<Arc<SpaceRuntime>, Response> {
+        self.runtimes
+            .get(&ctx.org_slug, &ctx.space_slug)
+            .await
+            .map_err(|e| {
+                tracing::error!("space runtime unavailable: {e:#}");
+                json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "space runtime unavailable",
+                )
+            })
     }
 
     pub fn with_push_dispatcher(mut self, dispatcher: Arc<crate::push::PushDispatcher>) -> Self {

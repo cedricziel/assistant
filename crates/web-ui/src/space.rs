@@ -95,6 +95,11 @@ impl SpaceResolver {
         Self { org_storage, pools }
     }
 
+    /// The pool cache this resolver opens spaces from.
+    pub fn pools(&self) -> &Arc<OrgPoolFactory> {
+        &self.pools
+    }
+
     /// Bind `auth` to one space. `selector` is the raw space id, if the client
     /// sent one; an empty string counts as absent.
     pub async fn resolve(

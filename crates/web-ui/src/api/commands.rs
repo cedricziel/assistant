@@ -179,11 +179,16 @@ pub async fn execute_command(
             .into_response();
     }
 
+    let orchestrator = match state.runtime(&space).await {
+        Ok(runtime) => runtime.orchestrator.clone(),
+        Err(response) => return response,
+    };
+
     // Build a minimal command context for Web UI execution.
     let ctx = assistant_runtime::CommandContext {
         conversation_id: conv_id,
-        conversation_configs: state.conversation_configs.clone(),
-        orchestrator: state.orchestrator_ref.clone(),
+        conversation_configs: orchestrator.conversation_configs(),
+        orchestrator,
         active_turns: state.active_turns.clone(),
         evict_conversation: None, // Web UI doesn't have an LRU cache to evict
         default_model: state.default_model.clone(),

@@ -13,7 +13,6 @@ pub(crate) mod rate_limit;
 pub mod space;
 pub mod sw_version;
 
-use assistant_storage::PersonaStore as _;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::net::SocketAddr;
@@ -30,10 +29,8 @@ use assistant_core::{
     set_runtime_workspace_dir, types::conversation::Interface, validate_agent_id,
 };
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
-use assistant_runtime::{Orchestrator, init_tracing};
-use assistant_skills::SkillSource;
+use assistant_runtime::{Orchestrator, SpaceRuntimes, init_tracing};
 use assistant_storage::registry::SkillRegistry;
-use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use assistant_workflow::{
     AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
@@ -166,6 +163,30 @@ impl AssistantTurnClient for OrchestratorTurnClient {
     }
 }
 
+/// The broker shared by every space, when `[bus] kind = "nats"`; otherwise each
+/// space uses the SQLite bus in its own database.
+async fn shared_nats_bus(
+    config: &assistant_core::types::agent::AssistantConfig,
+) -> Result<Option<Arc<dyn MessageBus>>> {
+    if config.bus.kind != BusKind::Nats {
+        return Ok(None);
+    }
+    #[cfg(feature = "nats")]
+    {
+        tracing::info!("Using NATS message bus");
+        let bus = assistant_bus_nats::NatsMessageBus::connect(&config.bus)
+            .await
+            .context("failed to connect to NATS")?;
+        Ok(Some(Arc::new(bus)))
+    }
+    #[cfg(not(feature = "nats"))]
+    {
+        anyhow::bail!(
+            "[bus] kind = \"nats\" configured but this binary was built without the `nats` feature"
+        )
+    }
+}
+
 async fn run_with_args(args: Args) -> Result<()> {
     // -- OpenAPI spec dump (no server required) -------------------------------
     if args.print_openapi {
@@ -226,17 +247,6 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     // -- Org-level storage (users, spaces, auth state) --------------------------
     let pool_factory = Arc::new(assistant_storage::OrgPoolFactory::new(base_path.clone()));
-
-    // The runtime (orchestrator, tool executor, workflow runner) is not yet
-    // space-aware, so it works against the default space's database. The data
-    // plane reaches that same pool through the factory's per-space cache.
-    let storage = pool_factory
-        .space_storage(
-            assistant_storage::migration::DEFAULT_ORG_SLUG,
-            assistant_storage::migration::DEFAULT_SPACE_SLUG,
-        )
-        .await
-        .context("Failed to open the default space database")?;
 
     let org_storage = Arc::new(
         pool_factory
@@ -324,57 +334,91 @@ async fn run_with_args(args: Args) -> Result<()> {
         .await
         .with_context(|| format!("Failed to create workspace at {}", workspace_dir.display()))?;
 
-    let personas = storage.persona_store();
-    personas.ensure_exists(&selected_agent).await?;
-
-    // -- Build the full orchestrator chain -----------------------------------
+    // -- Per-space runtimes --------------------------------------------------
     //
     // The web UI MUST route chat messages through the Orchestrator so the
     // assistant gets the same system prompt, tools, skills, memory, and ReAct
-    // loop as every other interface (CLI, Slack, etc.).
+    // loop as every other interface (CLI, Slack, etc.). Each space has its own
+    // orchestrator over its own database; `SpaceRuntimes` builds them on first
+    // use.
     //
     // See skills/interface-implementation/SKILL.md for the canonical checklist.
+    let llm: Arc<dyn LlmProvider> = assistant_llm_provider::create_provider(&config.llm)
+        .context("Failed to create LLM provider")?;
+    info!(
+        "Chat LLM: provider={}, model={}",
+        llm.provider_name(),
+        llm.model_name()
+    );
 
-    // 1. Skill registry
-    let registry = SkillRegistry::new(storage.pool.clone())
-        .await
-        .context("Failed to create skill registry")?;
+    // Create the audio store early so every orchestrator can reference it.
+    let audio_store = Arc::new(audio_store::AudioStore::new());
 
-    let project_root = std::env::current_dir().ok();
-    let dirs_to_scan = assistant_runtime::bootstrap::skill_dirs(&config, project_root.as_deref());
-    let dirs_ref: Vec<(&std::path::Path, SkillSource)> = dirs_to_scan
-        .iter()
-        .map(|(p, s)| (p.as_path(), s.clone()))
-        .collect();
+    // -- Build TTS provider (for voice message playback) ---------------------
+    let tts_provider = config
+        .tts
+        .as_ref()
+        .map(|tc| {
+            let provider = build_tts_provider(tc)?;
+            info!(provider = provider.name(), "TTS enabled (web UI)");
+            Ok::<_, anyhow::Error>(provider)
+        })
+        .transpose()?;
 
-    registry
-        .load_embedded()
-        .await
-        .context("Failed to load embedded builtin skills")?;
+    let mut runtimes = SpaceRuntimes::new(
+        pool_factory.clone(),
+        Arc::new(config.clone()),
+        llm,
+        Arc::new(AutoDenyConfirmation {
+            interface_name: "Web",
+        }),
+    )
+    .with_audio_store(audio_store.clone());
+    if let Some(bus) = shared_nats_bus(&config).await? {
+        runtimes = runtimes.with_shared_bus(bus);
+    }
+    if let Some(ref tts) = tts_provider {
+        runtimes = runtimes.with_voice_response(tts.clone());
+    }
+    let runtimes = Arc::new(runtimes);
 
-    if let Some(home) = dirs::home_dir() {
-        let builtin_target = home.join(".assistant").join("skills");
-        match registry.sync_builtins_to_disk(&builtin_target) {
-            Ok(updated) if !updated.is_empty() => {
-                tracing::info!(
-                    "Synced {} built-in skill(s) to disk: {}",
-                    updated.len(),
-                    updated.join(", ")
-                );
-            }
-            Err(e) => {
-                tracing::warn!("Failed to sync built-in skills to disk: {e}");
-            }
-            _ => {}
+    // Connect to configured external MCP servers and register their tools in
+    // every space.
+    if !config.mcp.servers.is_empty() {
+        let mcp_manager =
+            Arc::new(assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?);
+        let mcp_tools = mcp_manager.tool_handlers().await;
+        for handler in &mcp_tools {
+            runtimes.register_ambient_tool(handler.clone());
         }
+        tracing::info!(
+            servers = mcp_manager.server_count().await,
+            tools = mcp_tools.len(),
+            "registered MCP client tools"
+        );
+
+        // Spawn background health-check loop for reconnection.
+        let register = runtimes.clone();
+        let unregister = runtimes.clone();
+        mcp_manager.spawn_health_loop(
+            Arc::new(move |h| register.register_ambient_tool(h)),
+            Arc::new(move |prefix| unregister.unregister_tools_by_prefix(prefix)),
+        );
     }
 
-    registry
-        .load_from_dirs(&dirs_ref)
+    // The A2A routes, workflow runner and persona/skills/template routes are
+    // not space-aware yet and keep working against the default space.
+    let default_runtime = runtimes
+        .get(
+            assistant_storage::migration::DEFAULT_ORG_SLUG,
+            assistant_storage::migration::DEFAULT_SPACE_SLUG,
+        )
         .await
-        .context("Failed to load skills from directories")?;
-
-    let registry = Arc::new(registry);
+        .context("Failed to open the default space runtime")?;
+    let storage = default_runtime.storage.clone();
+    let registry = default_runtime.registry.clone();
+    let orchestrator = default_runtime.orchestrator.clone();
+    let bus = default_runtime.bus.clone();
 
     // -- Push dispatcher (built here so AppState can hold a reference) -------
     let push_store_for_state = Arc::new(storage.push_subscription_store());
@@ -405,105 +449,6 @@ async fn run_with_args(args: Args) -> Result<()> {
             .or_else(|| std::env::var("NATS_TOKEN").ok()),
         push_dispatcher: push_dispatcher_for_state,
     };
-
-    // 2. LLM provider
-    let llm: Arc<dyn LlmProvider> = assistant_llm_provider::create_provider(&config.llm)
-        .context("Failed to create LLM provider")?;
-
-    info!(
-        "Chat LLM: provider={}, model={}",
-        llm.provider_name(),
-        llm.model_name()
-    );
-
-    // 3. Tool executor
-    let executor = Arc::new(ToolExecutor::new(
-        storage.clone(),
-        llm.clone(),
-        registry.clone(),
-        Arc::new(config.clone()),
-    ));
-
-    // 4. Message bus + Orchestrator
-    let bus: Arc<dyn MessageBus> = {
-        #[cfg(feature = "nats")]
-        {
-            if config.bus.kind == BusKind::Nats {
-                tracing::info!("Using NATS message bus");
-                Arc::new(
-                    assistant_bus_nats::NatsMessageBus::connect(&config.bus)
-                        .await
-                        .context("failed to connect to NATS")?,
-                )
-            } else {
-                Arc::new(storage.message_bus())
-            }
-        }
-        #[cfg(not(feature = "nats"))]
-        {
-            if config.bus.kind == BusKind::Nats {
-                anyhow::bail!(
-                    "[bus] kind = \"nats\" configured but this binary was built without the `nats` feature"
-                );
-            }
-            Arc::new(storage.message_bus())
-        }
-    };
-    let persona_timeout = storage
-        .persona_store()
-        .get(&config.agent.id)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|p| p.turn_timeout_secs);
-
-    // Create the audio store early so the orchestrator can reference it.
-    let audio_store = Arc::new(audio_store::AudioStore::new());
-
-    let orchestrator = Arc::new({
-        let mut o = Orchestrator::new(
-            llm.clone(),
-            storage.clone(),
-            executor.clone(),
-            registry,
-            bus.clone(),
-            &config,
-        )
-        .with_confirmation_callback(Arc::new(AutoDenyConfirmation {
-            interface_name: "Web",
-        }))
-        .with_audio_store(audio_store.clone());
-        if let Some(secs) = persona_timeout {
-            o = o.with_submit_timeout(secs);
-        }
-        o
-    });
-
-    // Wire up subagent support (breaks the init-time circular dep).
-    executor.set_subagent_runner(orchestrator.clone());
-
-    // Connect to configured external MCP servers and register their tools.
-    if !config.mcp.servers.is_empty() {
-        let mcp_manager =
-            Arc::new(assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?);
-        let mcp_tools = mcp_manager.tool_handlers().await;
-        for handler in &mcp_tools {
-            executor.register_ambient_tool(handler.clone());
-        }
-        tracing::info!(
-            servers = mcp_manager.server_count().await,
-            tools = mcp_tools.len(),
-            "registered MCP client tools"
-        );
-
-        // Spawn background health-check loop for reconnection.
-        let exec_register = executor.clone();
-        let exec_unregister = executor.clone();
-        mcp_manager.spawn_health_loop(
-            Arc::new(move |h| exec_register.register_ambient_tool(h)),
-            Arc::new(move |prefix| exec_unregister.unregister_tools_by_prefix(prefix)),
-        );
-    }
 
     // The web-ui binary intentionally does NOT spawn its own turn-processing
     // worker pool or title-generator. Both are owned by the orchestrator
@@ -599,17 +544,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         })
         .transpose()?;
 
-    // -- Build TTS provider (for voice message playback) ---------------------
-    let tts_provider = config
-        .tts
-        .as_ref()
-        .map(|tc| {
-            let provider = build_tts_provider(tc)?;
-            info!(provider = provider.name(), "TTS enabled (web UI)");
-            Ok::<_, anyhow::Error>(provider)
-        })
-        .transpose()?;
-
     // -- Spawn TTL sweep task ------------------------------------------------
     {
         let store = audio_store.clone();
@@ -622,19 +556,11 @@ async fn run_with_args(args: Args) -> Result<()> {
         });
     }
 
-    // Register the voice-response tool when TTS is configured.
-    if let Some(ref tts) = tts_provider {
-        executor.register_voice_response(tts.clone(), audio_store.clone());
-        tracing::info!("voice-response tool registered");
-    }
-
     let api_state = {
-        let orchestrator_ref = orchestrator.clone();
         let mut s = api::ApiState::new(
             space_resolver.clone(),
-            orchestrator,
+            runtimes.clone(),
             state.agent_id.clone(),
-            orchestrator_ref,
         );
         if let Some(ref d) = state.push_dispatcher {
             s = s.with_push_dispatcher(d.clone());

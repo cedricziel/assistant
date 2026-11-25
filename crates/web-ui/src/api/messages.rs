@@ -143,12 +143,11 @@ pub async fn send_message(
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
     let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(64);
 
-    state
-        .orchestrator
-        .register_token_sink(conv_id, event_tx)
-        .await;
-
-    let orchestrator = state.orchestrator.clone();
+    let orchestrator = match state.runtime(&ctx).await {
+        Ok(runtime) => runtime.orchestrator.clone(),
+        Err(response) => return response,
+    };
+    orchestrator.register_token_sink(conv_id, event_tx).await;
     let user_attachment_ids = body.attachment_ids;
     // Use `run_id` as the orchestrator's `request_id` so external cancel
     // calls — `POST .../turns/{run_id}/cancel` — can find the matching
@@ -793,6 +792,11 @@ pub async fn quick_message(
             .into_response();
     }
 
+    let orchestrator = match state.runtime(&ctx).await {
+        Ok(runtime) => runtime.orchestrator.clone(),
+        Err(response) => return response,
+    };
+
     // Resolve persona: use explicit persona_id if valid, otherwise active.
     let agent_id = if let Some(ref pid) = body.persona_id {
         let persona_store =
@@ -801,13 +805,13 @@ pub async fn quick_message(
             // The shared orchestrator and its bus worker only process
             // conversations owned by their own persona, so a turn for any
             // other persona would fail after the conversation was created.
-            if pid != state.orchestrator_ref.agent_id() {
+            if pid != orchestrator.agent_id() {
                 return (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     Json(serde_json::json!({
                         "error": format!(
                             "Persona '{pid}' is not served by this instance (serving '{}')",
-                            state.orchestrator_ref.agent_id()
+                            orchestrator.agent_id()
                         )
                     })),
                 )
@@ -852,8 +856,7 @@ pub async fn quick_message(
     };
 
     // Submit the turn and await the full result (synchronous).
-    let result = state
-        .orchestrator
+    let result = orchestrator
         .submit_turn(&auth, &prompt, conv.id, Interface::Web, None)
         .await;
 
@@ -1015,12 +1018,11 @@ pub async fn send_voice_message(
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
     let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(64);
 
-    state
-        .orchestrator
-        .register_token_sink(conv_id, event_tx)
-        .await;
-
-    let orchestrator = state.orchestrator.clone();
+    let orchestrator = match state.runtime(&ctx).await {
+        Ok(runtime) => runtime.orchestrator.clone(),
+        Err(response) => return response,
+    };
+    orchestrator.register_token_sink(conv_id, event_tx).await;
     let content = transcript.clone();
     let turn_result_rx = {
         let (tx, rx) =
@@ -1109,15 +1111,12 @@ mod tests {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use tokio::sync::RwLock;
     use tower::ServiceExt;
     use uuid::Uuid;
     use wiremock::MockServer;
 
-    use assistant_runtime::CommandRegistry;
     use assistant_storage::{
-        ConversationEventStore, ConversationStore, RunBroadcaster, SkillRegistry,
-        SqliteConversationStore, StorageLayer,
+        ConversationEventStore, ConversationStore, SqliteConversationStore, StorageLayer,
     };
 
     use super::super::ApiState;
@@ -1824,52 +1823,18 @@ mod tests {
         short_ttl_store.prune_expired().await.unwrap();
 
         // Build a state that uses the same pool (events are now gone).
-        use assistant_core::types::agent::AssistantConfig;
-        use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
-        use assistant_llm_provider::retry::RetryConfig;
-        use assistant_runtime::Orchestrator;
-        use assistant_tool_executor::ToolExecutor;
-        let mut config = AssistantConfig::default();
-        config.memory.enabled = false;
-        let registry = Arc::new(SkillRegistry::new(sl.pool.clone()).await.unwrap());
-        let llm = Arc::new(
-            LlmClient::new(LlmClientConfig {
-                model: "test".to_string(),
-                base_url: "http://127.0.0.1:1".to_string(),
-                timeout_secs: 1,
-                retry_config: RetryConfig::disabled(),
-            })
-            .unwrap(),
-        );
-        let executor = Arc::new(ToolExecutor::new(
-            sl.clone(),
-            llm.clone(),
-            registry.clone(),
-            Arc::new(config.clone()),
-        ));
-        let bus = Arc::new(sl.message_bus());
-        let orchestrator = Arc::new(
-            Orchestrator::new(llm, sl.clone(), executor, registry, bus, &config)
-                .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
-        );
-        let orchestrator_ref = orchestrator.clone();
-        let default_model = orchestrator_ref.llm.model_name().to_string();
-        let state = ApiState {
-            spaces: super::super::test_helpers::default_resolver(&sl).await,
-            agent_id: Arc::new(RwLock::new("default".to_string())),
-            orchestrator,
-            push_dispatcher: None,
-            transcription_provider: None,
-            tts_provider: None,
-            audio_store: Arc::new(crate::audio_store::AudioStore::new()),
-            run_broadcaster: RunBroadcaster::new(),
-            command_registry: Arc::new(CommandRegistry::new()),
-            conversation_broadcasters: crate::api::ConversationBroadcasters::default(),
-            conversation_configs: Arc::new(RwLock::new(HashMap::new())),
-            orchestrator_ref,
-            active_turns: Arc::new(RwLock::new(HashMap::new())),
-            default_model,
-        };
+        let (state, _) = super::super::test_helpers::state_over(
+            "http://127.0.0.1:1",
+            &[super::super::test_helpers::TestSpace {
+                id: "default",
+                org_id: "default",
+                org_slug: "default",
+                slug: "default",
+                storage: sl.clone(),
+            }],
+            false,
+        )
+        .await;
 
         let app = app(state);
         let req = Request::builder()
@@ -1984,7 +1949,14 @@ mod tests {
         mount_llm_reply(&server, "persona answer").await;
 
         let (state, storage) = test_state(&server.uri()).await;
-        let serving = state.orchestrator_ref.agent_id().to_string();
+        let serving = state
+            .runtimes
+            .get("default", "default")
+            .await
+            .unwrap()
+            .orchestrator
+            .agent_id()
+            .to_string();
 
         let persona_store =
             assistant_storage::personas::SqlitePersonaStore::new(storage.pool.clone());
