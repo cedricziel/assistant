@@ -716,7 +716,21 @@ fn extract_response_meta(response: &Response) -> LlmResponseMeta {
         response_id: Some(response.id.clone()),
         input_tokens: response.usage.as_ref().map(|u| u.input_tokens as u64),
         output_tokens: response.usage.as_ref().map(|u| u.output_tokens as u64),
+        cached_input_tokens: response
+            .usage
+            .as_ref()
+            .map(|u| u64::from(u.input_tokens_details.cached_tokens)),
+        cache_write_input_tokens: response
+            .usage
+            .as_ref()
+            .and_then(|u| u.input_tokens_details.cache_write_tokens)
+            .and_then(|t| u64::try_from(t).ok()),
+        reasoning_tokens: response
+            .usage
+            .as_ref()
+            .map(|u| u64::from(u.output_tokens_details.reasoning_tokens)),
         finish_reason: Some(status),
+        cost_usd: None,
     }
 }
 
@@ -742,6 +756,35 @@ fn normalise_base_url(url: &str) -> String {
 mod tests {
     use super::*;
     use assistant_core::{ChatHistoryMessage, ChatRole, ToolCallItem};
+
+    #[test]
+    fn extract_response_meta_reads_cached_and_reasoning_tokens() {
+        let response: Response = serde_json::from_value(serde_json::json!({
+            "id": "resp_1",
+            "object": "response",
+            "created_at": 0,
+            "model": "gpt-5.6",
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "input_tokens": 1200,
+                "input_tokens_details": {"cached_tokens": 1024},
+                "output_tokens": 80,
+                "output_tokens_details": {"reasoning_tokens": 64},
+                "total_tokens": 1280
+            }
+        }))
+        .unwrap();
+        let meta = extract_response_meta(&response);
+        assert_eq!(
+            meta.input_tokens,
+            Some(1200),
+            "input_tokens already include cached"
+        );
+        assert_eq!(meta.cached_input_tokens, Some(1024));
+        assert_eq!(meta.reasoning_tokens, Some(64));
+        assert_eq!(meta.cost_usd, None);
+    }
 
     #[test]
     fn normalise_base_url_adds_v1() {

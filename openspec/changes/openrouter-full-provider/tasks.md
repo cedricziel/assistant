@@ -14,9 +14,9 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 - [x] 2.1 Write a failing test for `with_retry`: it waits at least `retry_after` when the error carries one, and does not retry non-transient errors. Confirm red.
 - [x] 2.2 Add a retry-aware error type to `retry.rs` and honor `retry_after`. Verify 2.1.
-- [ ] 2.3 Write failing tests: Anthropic and OpenAI responses fill `cached_input_tokens`, `cache_write_input_tokens` and `reasoning_tokens`; Ollama leaves `cost_usd` unset. Confirm red.
-- [ ] 2.4 Add the four `Option` fields to `LlmResponseMeta` and fill them in the Anthropic and OpenAI parsers. Verify 2.3.
-- [ ] 2.5 Write failing tests in `otel_spans.rs` and `metrics.rs` for the cache-read, cache-creation and reasoning attributes and `assistant.llm.cost_usd`. Confirm red. Implement, then verify.
+- [x] 2.3 Write failing tests: Anthropic and OpenAI responses fill `cached_input_tokens`, `cache_write_input_tokens` and `reasoning_tokens`; Ollama leaves `cost_usd` unset. Confirm red.
+- [x] 2.4 Add the four `Option` fields to `LlmResponseMeta` and fill them in the Anthropic and OpenAI parsers. Verify 2.3.
+- [x] 2.5 Write failing tests in `otel_spans.rs` and `metrics.rs` for the cache-read, cache-creation and reasoning attributes and `assistant.llm.cost_usd`. Confirm red. Implement, then verify.
 
 ## 3. Provider state refactor (no behavior change)
 

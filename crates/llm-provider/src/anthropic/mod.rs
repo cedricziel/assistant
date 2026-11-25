@@ -725,7 +725,9 @@ async fn process_sse_event(
             if let Some(msg) = json.get("message") {
                 meta.model = msg.get("model").and_then(|v| v.as_str()).map(String::from);
                 meta.response_id = msg.get("id").and_then(|v| v.as_str()).map(String::from);
-                meta.input_tokens = msg.pointer("/usage/input_tokens").and_then(|v| v.as_u64());
+                if let Some(usage) = msg.get("usage") {
+                    apply_anthropic_usage(meta, usage);
+                }
             }
         }
 
@@ -902,18 +904,40 @@ fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<Ll
 /// Top-level fields: `model`, `id`, `stop_reason`, `usage.input_tokens`,
 /// `usage.output_tokens`.
 fn extract_anthropic_meta(json: &Value) -> LlmResponseMeta {
-    LlmResponseMeta {
+    let mut meta = LlmResponseMeta {
         model: json.get("model").and_then(|v| v.as_str()).map(String::from),
         response_id: json.get("id").and_then(|v| v.as_str()).map(String::from),
         finish_reason: json
             .get("stop_reason")
             .and_then(|v| v.as_str())
             .map(String::from),
-        input_tokens: json.pointer("/usage/input_tokens").and_then(|v| v.as_u64()),
         output_tokens: json
             .pointer("/usage/output_tokens")
             .and_then(|v| v.as_u64()),
+        ..Default::default()
+    };
+    if let Some(usage) = json.get("usage") {
+        apply_anthropic_usage(&mut meta, usage);
     }
+    meta
+}
+
+/// Copy input-side token counts from an Anthropic `usage` object. Anthropic's
+/// `input_tokens` excludes cache reads and writes; the GenAI conventions count
+/// them as input, so `meta.input_tokens` is the sum.
+fn apply_anthropic_usage(meta: &mut LlmResponseMeta, usage: &Value) {
+    let count = |key: &str| usage.get(key).and_then(Value::as_u64);
+    let uncached = count("input_tokens");
+    meta.cached_input_tokens = count("cache_read_input_tokens");
+    meta.cache_write_input_tokens = count("cache_creation_input_tokens");
+    meta.input_tokens = match (
+        uncached,
+        meta.cached_input_tokens,
+        meta.cache_write_input_tokens,
+    ) {
+        (None, None, None) => None,
+        (a, b, c) => Some(a.unwrap_or(0) + b.unwrap_or(0) + c.unwrap_or(0)),
+    };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1368,6 +1392,28 @@ mod tests {
     }
 
     #[test]
+    fn extract_meta_counts_cache_tokens_as_input() {
+        let json = serde_json::json!({
+            "usage": {
+                "input_tokens": 100,
+                "cache_read_input_tokens": 900,
+                "cache_creation_input_tokens": 50,
+                "output_tokens": 10
+            }
+        });
+        let m = extract_anthropic_meta(&json);
+        assert_eq!(
+            m.input_tokens,
+            Some(1050),
+            "Anthropic excludes cache tokens from input_tokens; semconv wants the total"
+        );
+        assert_eq!(m.cached_input_tokens, Some(900));
+        assert_eq!(m.cache_write_input_tokens, Some(50));
+        assert_eq!(m.reasoning_tokens, None);
+        assert_eq!(m.cost_usd, None);
+    }
+
+    #[test]
     fn extract_meta_handles_missing_fields_gracefully() {
         let json = serde_json::json!({});
         let m = extract_anthropic_meta(&json);
@@ -1427,6 +1473,35 @@ mod tests {
         assert_eq!(meta.model.as_deref(), Some("claude-3-5-sonnet"));
         assert_eq!(meta.response_id.as_deref(), Some("msg_xyz"));
         assert_eq!(meta.input_tokens, Some(100));
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_message_start_counts_cache_tokens() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        let evt = serde_json::json!({
+            "message": {
+                "usage": {
+                    "input_tokens": 5,
+                    "cache_read_input_tokens": 2000,
+                    "cache_creation_input_tokens": 300
+                }
+            }
+        });
+        process_sse_event(
+            "message_start",
+            &evt,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            &mut meta,
+        )
+        .await;
+        assert_eq!(meta.input_tokens, Some(2305));
+        assert_eq!(meta.cached_input_tokens, Some(2000));
+        assert_eq!(meta.cache_write_input_tokens, Some(300));
     }
 
     #[tokio::test]

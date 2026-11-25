@@ -92,10 +92,18 @@ pub struct ToolCallItem {
 pub struct LlmResponseMeta {
     /// Model identifier echoed by the provider (e.g. `"qwen2.5:7b"`).
     pub model: Option<String>,
-    /// Number of tokens in the prompt (input).
+    /// Number of tokens in the prompt (input), including cached tokens.
     pub input_tokens: Option<u64>,
-    /// Number of tokens in the completion (output).
+    /// Number of tokens in the completion (output), including reasoning tokens.
     pub output_tokens: Option<u64>,
+    /// Input tokens served from the provider's prompt cache.
+    pub cached_input_tokens: Option<u64>,
+    /// Input tokens written to the provider's prompt cache.
+    pub cache_write_input_tokens: Option<u64>,
+    /// Output tokens spent on reasoning.
+    pub reasoning_tokens: Option<u64>,
+    /// Cost of the call in US dollars, when the provider reports it.
+    pub cost_usd: Option<f64>,
     /// Provider-specific finish/stop reason (e.g. `"stop"`, `"tool_calls"`).
     pub finish_reason: Option<String>,
     /// Provider-assigned response/message ID.
