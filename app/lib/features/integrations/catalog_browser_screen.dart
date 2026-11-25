@@ -40,15 +40,19 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
     return AdaptiveScaffold(
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final gutter = ((constraints.maxWidth - _maxContentWidth) / 2).clamp(
+          // Left-aligned with the title; extra width becomes right margin.
+          final sidePadding = EdgeInsets.fromLTRB(
             AssistantSpacing.lg,
-            double.infinity,
+            0,
+            (constraints.maxWidth - AssistantSpacing.lg - _maxContentWidth)
+                .clamp(AssistantSpacing.lg, double.infinity),
+            0,
           );
           return CustomScrollView(
             slivers: [
               const AdaptiveSliverNavBar(title: 'Integrations'),
               SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: gutter),
+                padding: sidePadding,
                 sliver: SliverToBoxAdapter(
                   child: AdaptiveTextField(
                     controller: _searchController,
@@ -61,7 +65,7 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
               ),
               ...switch (state.value) {
                 null => [_centered(const CircularProgressIndicator.adaptive())],
-                final catalog => _dataSlivers(catalog, gutter, notifier),
+                final catalog => _dataSlivers(catalog, sidePadding, notifier),
               },
             ],
           );
@@ -72,10 +76,9 @@ class _CatalogBrowserScreenState extends ConsumerState<CatalogBrowserScreen> {
 
   List<Widget> _dataSlivers(
     CatalogState catalog,
-    double gutter,
+    EdgeInsets sidePadding,
     CatalogViewModel notifier,
   ) {
-    final sidePadding = EdgeInsets.symmetric(horizontal: gutter);
     final chips = SliverPadding(
       padding: sidePadding.copyWith(top: AssistantSpacing.md),
       sliver: SliverToBoxAdapter(

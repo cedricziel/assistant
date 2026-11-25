@@ -12,25 +12,26 @@ class AuthKindBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final (label, swatch, fill) = switch (kind) {
+    // Text uses the on-container role so it stays readable in both themes.
+    final (label, text, fill) = switch (kind) {
       CatalogAuthKindResponse.none => (
         'No auth',
-        colors.tertiary,
+        colors.onTertiaryContainer,
         colors.tertiaryContainer,
       ),
       CatalogAuthKindResponse.header => (
         'API key',
-        colors.secondary,
+        colors.onSecondaryContainer,
         colors.secondaryContainer,
       ),
       CatalogAuthKindResponse.oauth => (
         'OAuth',
-        colors.primary,
+        colors.onPrimaryContainer,
         colors.primaryContainer,
       ),
       CatalogAuthKindResponse.mixed => (
         'API key or OAuth',
-        colors.secondary,
+        colors.onSecondaryContainer,
         colors.secondaryContainer,
       ),
       _ => (
@@ -48,14 +49,14 @@ class AuthKindBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: fill,
         borderRadius: BorderRadius.circular(AssistantRadius.md),
-        border: Border.all(color: swatch.withValues(alpha: 0.4)),
+        border: Border.all(color: text.withValues(alpha: 0.4)),
       ),
       child: Text(
         label,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: swatch,
+          color: text,
         ),
       ),
     );
