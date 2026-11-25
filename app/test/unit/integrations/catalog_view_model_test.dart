@@ -188,6 +188,24 @@ void main() {
       expect(state.error, 'The server answered with status 500.');
     });
 
+    test('maps a 403 like every other integration request', () async {
+      final t = _setup(
+        (_) async => throw DioException.badResponse(
+          statusCode: 403,
+          requestOptions: RequestOptions(path: '/api/integrations/catalog'),
+          response: Response(
+            requestOptions: RequestOptions(path: '/api/integrations/catalog'),
+            statusCode: 403,
+          ),
+        ),
+      );
+      addTearDown(t.container.dispose);
+
+      final state = await t.container.read(catalogViewModelProvider.future);
+
+      expect(state.error, contains('does not allow'));
+    });
+
     test('describes an unreachable server', () async {
       final t = _setup(
         (_) async => throw DioException.connectionError(

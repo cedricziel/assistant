@@ -69,3 +69,9 @@ class AccountNotifier extends AsyncNotifier<AccountState> {
 final accountProvider = AsyncNotifierProvider<AccountNotifier, AccountState>(
   AccountNotifier.new,
 );
+
+/// Id of the signed-in user.
+final currentUserIdProvider = FutureProvider.autoDispose<String>((ref) async {
+  final account = await ref.watch(accountProvider.future);
+  return account.user.id;
+});

@@ -1,13 +1,27 @@
 import 'dart:async';
 
 import 'package:assistant_api/assistant_api.dart';
+import 'package:assistant_app/features/integrations/caller_roles.dart';
 import 'package:assistant_app/features/integrations/catalog_browser_screen.dart';
 import 'package:assistant_app/features/integrations/catalog_entry_tile.dart';
 import 'package:assistant_app/features/integrations/catalog_view_model.dart';
+import 'package:assistant_app/features/integrations/integration_policy_view_model.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+
+import '../../unit/integrations/integration_fakes.dart';
+
+class _StubPolicy extends IntegrationPolicyViewModel {
+  _StubPolicy(this._policy);
+
+  final IntegrationPolicyResponse _policy;
+
+  @override
+  Future<IntegrationPolicyState> build() async =>
+      IntegrationPolicyState(policy: _policy);
+}
 
 class _StubViewModel extends CatalogViewModel {
   _StubViewModel(this._initial);
@@ -43,6 +57,7 @@ CatalogEntrySummary _entry(
   String id, {
   CatalogAuthResponse? auth,
   String? description,
+  List<IntegrationLayer> layers = const [IntegrationLayer.user],
 }) {
   return CatalogEntrySummary(
     (b) => b
@@ -52,6 +67,7 @@ CatalogEntrySummary _entry(
       ..domain = '$id.example.com'
       ..connectUrl = 'https://$id.example.com/mcp'
       ..categories = ListBuilder<String>(['dev'])
+      ..installableLayers = ListBuilder<IntegrationLayer>(layers)
       ..auth = (auth ?? CatalogAuthResponse((a) => a..kind = .none))
           .toBuilder(),
   );
@@ -61,6 +77,8 @@ Future<_StubViewModel> _pump(
   WidgetTester tester,
   FutureOr<CatalogState> state, {
   Size size = const Size(800, 1200),
+  CallerRoles? roles,
+  IntegrationPolicyResponse? installPolicy,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -68,7 +86,15 @@ Future<_StubViewModel> _pump(
   final stub = _StubViewModel(Future.value(state));
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [catalogViewModelProvider.overrideWith(() => stub)],
+      overrides: [
+        catalogViewModelProvider.overrideWith(() => stub),
+        callerRolesProvider.overrideWith(
+          (ref) => roles ?? const CallerRoles(spaces: [], roles: {}),
+        ),
+        integrationPolicyViewModelProvider.overrideWith(
+          () => _StubPolicy(installPolicy ?? policy()),
+        ),
+      ],
       child: const MaterialApp(home: CatalogBrowserScreen()),
     ),
   );
@@ -264,18 +290,80 @@ void main() {
       expect(find.text('Sign in with OAuth when you connect.'), findsOneWidget);
     });
 
-    testWidgets('shows a disabled Install button that says "Coming soon"', (
+    testWidgets('Install opens the install sheet for the entry', (
       tester,
     ) async {
       await _pump(tester, CatalogState(items: [_entry('linear')]));
 
       await tester.tap(find.byType(CatalogEntryTile));
       await tester.pumpAndSettle();
+      final install = find.widgetWithText(FilledButton, 'Install');
+      expect(tester.widget<FilledButton>(install).onPressed, isNotNull);
+
+      await tester.tap(install);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Install linear'), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, 'Just me'), findsOneWidget);
+    });
+
+    testWidgets('Install is disabled and explained when nothing is allowed', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        CatalogState(items: [_entry('linear', layers: const [])]),
+      );
+
+      await tester.tap(find.byType(CatalogEntryTile));
+      await tester.pumpAndSettle();
 
       final install = find.widgetWithText(FilledButton, 'Install');
-      expect(install, findsOneWidget);
       expect(tester.widget<FilledButton>(install).onPressed, isNull);
-      expect(find.byTooltip('Coming soon'), findsOneWidget);
+      expect(
+        find.byTooltip(
+          'Your role or your organization\'s policy does not allow installing this.',
+        ),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('custom integration', () {
+    testWidgets('is offered when the policy allows custom URLs', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        CatalogState(items: [_entry('linear')]),
+        installPolicy: policy(customUrls: true),
+      );
+
+      await tester.tap(find.text('Add custom integration'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextFormField, 'Server URL'), findsOneWidget);
+    });
+
+    testWidgets('is offered to org admins whatever the policy says', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        CatalogState(items: [_entry('linear')]),
+        roles: CallerRoles(
+          spaces: [spaceSummary('eng')],
+          roles: const {'eng': 'org_admin'},
+        ),
+      );
+
+      expect(find.text('Add custom integration'), findsOneWidget);
+    });
+
+    testWidgets('is hidden when custom URLs are not allowed', (tester) async {
+      await _pump(tester, CatalogState(items: [_entry('linear')]));
+
+      expect(find.text('Add custom integration'), findsNothing);
     });
   });
 }
