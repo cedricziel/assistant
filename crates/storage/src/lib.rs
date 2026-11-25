@@ -472,6 +472,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "045_skill_executions",
             include_str!("../../../migrations/045_skill_executions.sql"),
         ),
+        (
+            "051_persona_starter_prompts",
+            include_str!("../../../migrations/051_persona_starter_prompts.sql"),
+        ),
     ];
 
     for &(name, sql) in migrations {
