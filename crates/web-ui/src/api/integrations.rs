@@ -42,7 +42,7 @@ use assistant_core::integrations::{
     EffectiveIntegrations, IntegrationCredentialStore, IntegrationHealthStore, IntegrationLayer,
     IntegrationStore, SecretBox,
 };
-use assistant_mcp_client::IntegrationConnections;
+use assistant_mcp_client::{ConnectionsConfig, IntegrationConnections};
 use assistant_storage::OrgStorageLayer;
 
 use crate::catalog_sync::CatalogSync;
@@ -84,6 +84,7 @@ pub struct IntegrationsApiState {
     health: Arc<dyn IntegrationHealthStore>,
     /// Used only to probe: the `test` endpoint connects once and keeps nothing.
     connections: Arc<IntegrationConnections>,
+    connections_config: ConnectionsConfig,
 }
 
 impl IntegrationsApiState {
@@ -115,6 +116,7 @@ impl IntegrationsApiState {
                 secrets.clone(),
                 clock.clone(),
             )),
+            connections_config: ConnectionsConfig::default(),
             secrets,
             clock,
             health,
@@ -124,14 +126,30 @@ impl IntegrationsApiState {
 
     /// Stamp created and updated rows from `clock` instead of the system clock.
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
-        self.connections = Arc::new(IntegrationConnections::new(
-            self.credentials.clone(),
-            self.health.clone(),
-            self.secrets.clone(),
-            clock.clone(),
-        ));
         self.clock = clock;
+        self.rebuild_connections();
         self
+    }
+
+    /// Let the `test` endpoint send credentials over plain `http://`, for tests
+    /// against local scripted servers.
+    #[cfg(test)]
+    pub fn with_plain_http(mut self) -> Self {
+        self.connections_config.allow_plain_http = true;
+        self.rebuild_connections();
+        self
+    }
+
+    fn rebuild_connections(&mut self) {
+        self.connections = Arc::new(
+            IntegrationConnections::new(
+                self.credentials.clone(),
+                self.health.clone(),
+                self.secrets.clone(),
+                self.clock.clone(),
+            )
+            .with_config(self.connections_config.clone()),
+        );
     }
 }
 

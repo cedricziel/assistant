@@ -108,6 +108,11 @@ const V: &str = "usr_v";
 
 impl World {
     async fn new(config: ConnectionsConfig) -> Self {
+        // The scripted servers speak plain HTTP.
+        let config = ConnectionsConfig {
+            allow_plain_http: true,
+            ..config
+        };
         let store = Arc::new(InMemoryIntegrationStore::new());
         let secrets = Arc::new(SecretBox::from_key([5; 32]));
         let credentials = store.credential_store();

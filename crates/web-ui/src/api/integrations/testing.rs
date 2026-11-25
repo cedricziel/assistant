@@ -127,7 +127,8 @@ impl Harness {
             &org_storage,
             Arc::new(SecretBox::from_key([7; 32])),
         )
-        .with_clock(Arc::new(clock.clone()));
+        .with_clock(Arc::new(clock.clone()))
+        .with_plain_http();
         Self {
             state,
             org_storage,

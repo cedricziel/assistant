@@ -141,7 +141,15 @@ struct World {
 }
 
 impl World {
+    /// A pool that may talk plain HTTP, since the scripted server does.
     fn new(config: ConnectionsConfig) -> Self {
+        Self::with_exact_config(ConnectionsConfig {
+            allow_plain_http: true,
+            ..config
+        })
+    }
+
+    fn with_exact_config(config: ConnectionsConfig) -> Self {
         let store = Arc::new(InMemoryIntegrationStore::new());
         let credentials: Arc<dyn IntegrationCredentialStore> = store.credential_store();
         let health: Arc<dyn IntegrationHealthStore> = store.health_store();
@@ -783,17 +791,23 @@ async fn a_credential_replaced_during_a_slow_read_ends_up_as_the_connection_in_u
     let world = World::new(ConnectionsConfig::default());
     let paused = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
-    let pool = Arc::new(IntegrationConnections::new(
-        Arc::new(StaleFirstRead {
-            inner: world.credentials.clone(),
-            first: Default::default(),
-            paused: paused.clone(),
-            release: release.clone(),
+    let pool = Arc::new(
+        IntegrationConnections::new(
+            Arc::new(StaleFirstRead {
+                inner: world.credentials.clone(),
+                first: Default::default(),
+                paused: paused.clone(),
+                release: release.clone(),
+            }),
+            world.health.clone(),
+            world.secrets.clone(),
+            Arc::new(world.clock.clone()),
+        )
+        .with_config(ConnectionsConfig {
+            allow_plain_http: true,
+            ..ConnectionsConfig::default()
         }),
-        world.health.clone(),
-        world.secrets.clone(),
-        Arc::new(world.clock.clone()),
-    ));
+    );
     let integration = world.integration(&server.uri(), |_| {}).await;
     world.credential(&integration, None, "old", 0).await;
     let eff = effective(&integration, None);
@@ -1039,5 +1053,50 @@ async fn failures_are_reported_by_kind_and_never_with_the_raw_transport_error() 
     assert_eq!(
         unreachable_message(&world, &integration).await,
         "connection failed"
+    );
+}
+
+// -- Credentials only travel over https ------------------------------------------
+
+#[tokio::test]
+async fn a_credential_is_never_sent_over_plain_http() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::with_exact_config(ConnectionsConfig::default());
+    let integration = world.integration(&server.uri(), |_| {}).await;
+    world.credential(&integration, None, "ghp_abc", 0).await;
+    let eff = effective(&integration, None);
+
+    let connect = world.pool.connect(&eff).await.err();
+    let probe = world.pool.probe(&eff).await.err();
+
+    for result in [connect, probe] {
+        assert!(
+            matches!(&result, Some(ConnectError::Credential(m)) if m.contains("https")),
+            "got {result:?}"
+        );
+    }
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "nothing may reach the server, let alone the credential"
+    );
+}
+
+#[tokio::test]
+async fn an_integration_without_a_credential_may_use_plain_http() {
+    let server = serve(&Script::new(&["t"])).await;
+    let world = World::with_exact_config(ConnectionsConfig::default());
+    let integration = world
+        .integration(&server.uri(), |i| {
+            i.auth_kind = IntegrationAuthKind::None;
+            i.header_name = None;
+            i.header_value_prefix = None;
+        })
+        .await;
+    assert!(
+        world
+            .pool
+            .connect(&effective(&integration, None))
+            .await
+            .is_ok()
     );
 }

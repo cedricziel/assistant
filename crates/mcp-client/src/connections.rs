@@ -52,6 +52,9 @@ pub struct ConnectionsConfig {
     /// The shortest time between two [`probe`](IntegrationConnections::probe)s
     /// of the same integration and subject.
     pub probe_interval: Duration,
+    /// Send credentials over plain `http://` too. Off by default: a credential
+    /// would travel in the clear. For tests against local servers only.
+    pub allow_plain_http: bool,
 }
 
 impl Default for ConnectionsConfig {
@@ -63,6 +66,7 @@ impl Default for ConnectionsConfig {
             tools_ttl: Duration::from_secs(5 * 60),
             sweep_interval: Duration::from_secs(60),
             probe_interval: Duration::from_secs(5),
+            allow_plain_http: false,
         }
     }
 }
@@ -455,6 +459,15 @@ impl IntegrationConnections {
         let Some(stored) = stored else {
             return Ok(None);
         };
+        let https = integration
+            .connect_url
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
+        if !https && !self.shared.config.allow_plain_http {
+            return Err(ConnectError::Credential(
+                "credentials are only sent over https".into(),
+            ));
+        }
         if stored.kind != CredentialKind::Header {
             return Err(ConnectError::Credential(
                 "OAuth credentials are not supported yet".into(),
