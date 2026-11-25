@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.1](https://github.com/cedricziel/assistant/compare/v0.2.0...v0.2.1) (2026-11-25)
+
+
+### Features
+
+* **app:** install integrations and manage them per layer ([5a07a77](https://github.com/cedricziel/assistant/commit/5a07a77310047790966c068c24c79226a7583460))
+* **runtime:** give turns their scoped integration tools ([d757748](https://github.com/cedricziel/assistant/commit/d75774892a605b8fab0b3ed4089341ec29a85d78))
+
+
+### Bug Fixes
+
+* **backup:** back up the multi-org install tree ([502d8a5](https://github.com/cedricziel/assistant/commit/502d8a55aa5ac8f12f36ecf9d0f41bb4b3cb013b))
+* **backup:** back up the multi-org install tree ([0b6cae6](https://github.com/cedricziel/assistant/commit/0b6cae6949ba61f83fb5b7e25b99c8017c014092))
+* **backup:** harden restore writes and back up credential files ([a8c6f07](https://github.com/cedricziel/assistant/commit/a8c6f07430a3f01e10c66d96535b19ddd0609a26))
+* **backup:** make restore writes crash-safe and keep modes ([cdccfed](https://github.com/cedricziel/assistant/commit/cdccfede70eec3cc181b8f431fe51c5f9632ee33))
+* **runtime:** stop the title generator stealing submit_turn replies ([5c100d8](https://github.com/cedricziel/assistant/commit/5c100d8d3545d6b3bfd60beff0eaa469f97e6167))
+* **runtime:** stop the title generator stealing submit_turn replies ([667ed19](https://github.com/cedricziel/assistant/commit/667ed198c4ccef26ea2af9627222e6a1e5732b03))
+
 ## [0.2.0](https://github.com/cedricziel/assistant/compare/v0.1.165...v0.2.0) (2026-11-25)
 
 
