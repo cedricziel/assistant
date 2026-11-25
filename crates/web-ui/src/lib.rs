@@ -389,7 +389,7 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     // -- Integrations catalog: disk cache now, refreshed in the background ------
     let catalog_sync = Arc::new(
-        catalog_sync::CatalogSync::new(config.integrations.catalog.clone(), &base_path)
+        catalog_sync::CatalogSync::new(server_config.integrations.catalog.clone(), &base_path)
             .context("Failed to set up the integrations catalog sync")?,
     );
     catalog_sync.start().await;

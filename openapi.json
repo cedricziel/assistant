@@ -1485,11 +1485,11 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
             "content": {
-              "application/json": {
+              "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
+                  "type": "string"
                 }
               }
             }
@@ -1535,11 +1535,11 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "Unauthorized; the body is the plain text `Unauthorized`",
             "content": {
-              "application/json": {
+              "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
+                  "type": "string"
                 }
               }
             }
