@@ -70,7 +70,7 @@ pub use llm::stream_chunk::StreamChunk;
 pub use llm::tool_spec::ToolSpec;
 pub use llm::types::{
     ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ToolCallItem,
-    ToolCallResponse,
+    ToolCallResponse, TurnTiming,
 };
 pub use memory::{
     MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,

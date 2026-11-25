@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Record every conversation run as a durable, replayable event log so a client that reconnects mid-run or after it finished can recover the full stream.
+
+## Requirements
 
 ### Requirement: Orchestrator emits a run_started event with a run ID
 

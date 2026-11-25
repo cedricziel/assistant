@@ -102,6 +102,24 @@ pub struct LlmResponseMeta {
     pub response_id: Option<String>,
 }
 
+/// How long one turn took, measured by the orchestrator.
+///
+/// Persisted per assistant message and delivered to clients so they can show
+/// time to first token, total time and tokens per second.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TurnTiming {
+    /// Turn start to the first visible answer token. `None` when the turn
+    /// had no token sink.
+    pub time_to_first_token_ms: Option<u64>,
+    /// Turn start to just before the final answer is persisted.
+    pub total_ms: u64,
+    /// Output tokens summed over every LLM call. `None` if any call did not
+    /// report a count.
+    pub output_tokens: Option<u64>,
+    /// Time spent generating tokens. `None` when `output_tokens` is `None`.
+    pub decode_ms: Option<u64>,
+}
+
 /// Structured payload for a tool-call response from the LLM.
 ///
 /// Carries the tool calls themselves, response metadata, and any thinking
