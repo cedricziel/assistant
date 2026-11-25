@@ -164,7 +164,7 @@ pub fn integrations_api_router() -> Router<IntegrationsApiState> {
     responses(
         (status = 200, description = "A page of catalog entries", body = CatalogEntryListResponse),
         (status = 400, description = "Invalid query or cursor", body = ErrorBody),
-        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 401, description = "Unauthorized; the body is the plain text `Unauthorized`", content_type = "text/plain", body = String),
     )
 )]
 pub async fn list_catalog_entries(
@@ -179,9 +179,9 @@ pub async fn list_catalog_entries(
     let index = state.catalog.index().await;
     let search = CatalogQuery {
         q: query.q.as_deref(),
-        category: query.category.as_deref(),
+        category: query.category.as_deref().filter(|c| !c.is_empty()),
         limit: query.limit,
-        cursor: query.cursor.as_deref(),
+        cursor: query.cursor.as_deref().filter(|c| !c.is_empty()),
     };
     match index.search(&search) {
         Ok(page) => Json(CatalogEntryListResponse {
@@ -202,7 +202,7 @@ pub async fn list_catalog_entries(
     params(("id" = String, Path, description = "Catalog entry id, e.g. `curated/linear-app-mcp`. It contains one slash; send it as is or percent-encoded.")),
     responses(
         (status = 200, description = "The catalog entry", body = CatalogEntrySummary),
-        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 401, description = "Unauthorized; the body is the plain text `Unauthorized`", content_type = "text/plain", body = String),
         (status = 404, description = "No such catalog entry", body = ErrorBody),
     )
 )]
@@ -547,5 +547,59 @@ mod tests {
         let (status, _) = get(&app, "/api/integrations/catalog/curated/exa", true).await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn list_treats_empty_cursor_and_category_as_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(catalog_with_fixture(dir.path()).await);
+
+        let (status, empty) =
+            get(&app, "/api/integrations/catalog?cursor=&category=&q=", true).await;
+        let (_, plain) = get(&app, "/api/integrations/catalog", true).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(empty, plain);
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_response_is_the_plain_text_the_middleware_sends() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(catalog_with_fixture(dir.path()).await);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/integrations/catalog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"Unauthorized");
+    }
+
+    #[test]
+    fn documented_401_matches_the_plain_text_the_middleware_sends() {
+        use utoipa::OpenApi;
+
+        let spec = serde_json::to_value(crate::openapi::ApiDoc::openapi()).unwrap();
+
+        for path in [
+            "/api/integrations/catalog",
+            "/api/integrations/catalog/{id}",
+        ] {
+            let content = &spec["paths"][path]["get"]["responses"]["401"]["content"];
+            assert!(content.get("text/plain").is_some(), "{path}: {content}");
+            assert!(
+                content.get("application/json").is_none(),
+                "{path}: {content}"
+            );
+        }
     }
 }
