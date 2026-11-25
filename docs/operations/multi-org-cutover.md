@@ -22,15 +22,15 @@ Starting with this release:
 
 1. **Runtime data lives at `space.db`.** Both the orchestrator
    (`assistant orchestrator run`) and the web-ui (`assistant webui serve`)
-   open the per-space database resolved by
-   `OrgPoolFactory::space_db_path("default", "default")`.
+   open the per-space database of every space in `org.db`, resolved by
+   `OrgPoolFactory::space_db_path(org_slug, space_slug)`. A migrated install
+   has one space, `default/default`.
 2. **The first startup atomically cuts over** legacy installs. The
    migration helper renames `assistant.db` to `assistant.db.legacy` and
    removes the `*-shm` / `*-wal` sidecars, so the two databases cannot
    diverge after a successful migration.
-3. **`config.storage.db_path` is deprecated.** It still works for
-   tests/dev, but the orchestrator emits a `warn!` when it is set in
-   production config and the knob will be removed in a future release.
+3. **`config.storage.db_path` is removed.** The install root is always
+   `~/.assistant`; delete a leftover `[storage]` section from `config.toml`.
 
 ## Verifying with `assistant doctor`
 

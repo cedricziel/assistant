@@ -7,23 +7,19 @@
 //!
 //! ## Production callers
 //!
-//! After the multi-org runtime cutover (`openspec/changes/multi-org-runtime-cutover/`)
-//! the runtime path resolution lives in exactly these places:
+//! The install root is always `~/.assistant`; there is no path override.
 //!
-//! - `crates/interface-cli/src/main.rs` — orchestrator startup. Resolves
-//!   the runtime database via `OrgPoolFactory::space_db_path("default",
-//!   "default")` unless `config.storage.db_path` is set (deprecated dev
-//!   override). Also calls `assistant_web_ui::install::ensure_migrated`
-//!   before opening the database.
+//! - `crates/interface-cli/src/main.rs` — the `assistant` binary. Resolves the
+//!   default space's `space.db` for one-shot commands, builds per-space
+//!   runtimes through [`OrgPoolFactory::space_storage`], and calls
+//!   `assistant_web_ui::install::ensure_migrated` before opening any database.
 //! - `crates/interface-cli/src/cmd_migrate.rs` — `assistant migrate
 //!   finalize` resolves the same `space.db` path to overwrite it from a
 //!   live legacy database during recovery.
 //! - `crates/web-ui/src/lib.rs` — `assistant webui serve`. Opens `org.db`
-//!   through the factory and resolves every data-plane request to a space
-//!   database through [`OrgPoolFactory::space_storage`]. Until the runtime is
-//!   space-aware it also opens the default space's pool for the orchestrator
-//!   and workflow runner. The install root is always `~/.assistant`; there is
-//!   no path override.
+//!   through the factory and resolves every data-plane request, and every
+//!   per-space runtime, to a space database through
+//!   [`OrgPoolFactory::space_storage`].
 //! - `crates/storage/src/migration.rs` — the `migrate_database` step of
 //!   the legacy-to-multi-org migration writes the initial `space.db` at
 //!   the path resolved by these helpers.

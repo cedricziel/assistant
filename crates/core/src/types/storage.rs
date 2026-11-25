@@ -1,14 +1,8 @@
-//! Storage and message-bus configuration.
+//! Message-bus configuration.
 
 use serde::{Deserialize, Serialize};
 
 use crate::secret::Secret;
-
-/// Storage configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct StorageConfig {
-    pub db_path: Option<String>,
-}
 
 /// Message bus backend kind.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

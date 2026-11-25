@@ -158,10 +158,6 @@ timeout_secs = 120
 # # [llm.moonshot.web_search]
 # # enabled = true
 
-[storage]
-# Path to SQLite database (~/.assistant/assistant.db by default)
-# db_path = "~/.assistant/assistant.db"
-
 [agent]
 # Active assistant context ID. Each agent gets its own memory/workspace root at
 # ~/.assistant/agents/<id>/ while sharing the same SQLite database.
