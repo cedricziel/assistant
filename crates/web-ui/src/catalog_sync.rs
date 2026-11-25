@@ -326,7 +326,7 @@ fn header_value(response: &reqwest::Response, name: HeaderName) -> Option<String
 /// reader never sees a half-written file.
 async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut tmp_name = path.as_os_str().to_owned();
-    tmp_name.push(".tmp");
+    tmp_name.push(format!(".{}.tmp", uuid::Uuid::new_v4()));
     let tmp = PathBuf::from(tmp_name);
     let result = async {
         tokio::fs::write(&tmp, bytes).await?;
