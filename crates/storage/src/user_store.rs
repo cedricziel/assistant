@@ -17,6 +17,27 @@ impl SqliteUserStore {
         Self { pool }
     }
 
+    /// Look up a user in one org by their IdP (issuer, subject) pair.
+    ///
+    /// Orgs can share an IdP, so the lookup must not cross org boundaries.
+    pub async fn get_user_by_idp_in_org(
+        &self,
+        org_id: &OrgId,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<Option<User>> {
+        let row = sqlx::query(
+            "SELECT id, org_id, email, name, password_hash, idp_issuer, idp_subject, created_at, updated_at
+             FROM users WHERE org_id = ? AND idp_issuer = ? AND idp_subject = ?",
+        )
+        .bind(&org_id.0)
+        .bind(issuer)
+        .bind(subject)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(row_to_user))
+    }
+
     /// Look up a user by email across all organizations.
     ///
     /// Used during OAuth login when the caller does not yet know which org
