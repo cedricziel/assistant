@@ -44,6 +44,10 @@ Position-based access level within the multi-user model. Four predefined roles: 
 
 Fine-grained permission in `resource:action` format (e.g. `conversations:write`, `personas:read`). Used by API keys to restrict access beyond what the user's role grants.
 
+## Interaction
+
+A typed question that a running turn puts to the turn's owner, such as a tool approval or a question from the `ask-user` tool. It has an id, a `kind`, a kind-specific request, and at most one response. Stored in `space.db` and carried to the browser as `interaction_requested` and `interaction_resolved` events. See [ADR-0017](adr/adr-0017-turn-interactions.md).
+
 ## Naming Rules
 
 - Prefer explicit terms: `Persona`, `Subagent Process`, `A2A Profile`.
