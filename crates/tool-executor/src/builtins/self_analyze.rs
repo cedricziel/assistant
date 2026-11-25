@@ -1,6 +1,6 @@
 //! Builtin handler for self-analyze tool.
 //!
-//! Queries the TraceStore for statistics on a given skill, sends those stats
+//! Queries the `SkillStatsProvider` for statistics on a given skill, sends those stats
 //! along with the current SKILL.md body to the LLM, and stores the resulting
 //! improved SKILL.md as a pending refinement proposal.
 
@@ -94,7 +94,7 @@ impl ToolHandler for SelfAnalyzeHandler {
             Ok(s) => s,
             Err(e) => {
                 return Ok(ToolOutput::error(format!(
-                    "Failed to fetch trace stats for '{}': {}",
+                    "Failed to fetch skill stats for '{}': {}",
                     skill_name, e
                 )));
             }

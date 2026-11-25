@@ -8,7 +8,7 @@ use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{
     LlmProvider, SubagentRunner, ToolHandler, ToolOutput, ToolSpec, types::agent::AssistantConfig,
 };
-use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
+use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer, UnavailableSkillStats};
 use tracing::warn;
 
 pub struct ToolExecutor {
@@ -23,8 +23,8 @@ impl ToolExecutor {
         registry: Arc<SkillRegistry>,
         config: Arc<AssistantConfig>,
     ) -> Self {
-        // Default: use SQLite trace store as the stats provider.
-        let stats_provider: Arc<dyn SkillStatsProvider> = Arc::new(storage.trace_store());
+        // No execution statistics are collected yet; see `UnavailableSkillStats`.
+        let stats_provider: Arc<dyn SkillStatsProvider> = Arc::new(UnavailableSkillStats);
         let executor = Self {
             storage: storage.clone(),
             tool_handlers: RwLock::new(HashMap::new()),
