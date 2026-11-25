@@ -8,7 +8,8 @@
 //!
 //! Unknown spaces, spaces of another org, and spaces the caller holds no role
 //! in all produce the same `403`, so the response cannot be used to enumerate
-//! spaces. See `openspec/changes/multi-tenant-data-plane/design.md`.
+//! spaces. See `openspec/specs/web-data-plane-tenancy/spec.md` and
+//! `docs/adr/adr-0013-per-space-runtimes.md`.
 
 use std::sync::Arc;
 

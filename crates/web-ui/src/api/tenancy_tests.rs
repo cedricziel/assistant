@@ -1,6 +1,6 @@
 //! Cross-tenant isolation harness for the data-plane routes.
 //!
-//! Contract under test (`openspec/changes/multi-tenant-data-plane`): a caller
+//! Contract under test (`openspec/specs/web-data-plane-tenancy`): a caller
 //! reaches only the spaces they hold a role in, each route enforces a minimum
 //! role, and conversations are private to their owner.
 //!

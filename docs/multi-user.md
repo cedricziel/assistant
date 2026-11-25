@@ -50,6 +50,45 @@ Spaces are isolated workgroups within an organization. They scope:
 
 Spaces enable teams to have separate contexts without cross-contamination.
 
+Every space has its own database (`space.db`) and its own runtime: an
+orchestrator, tool executor, skill registry and message bus bound to that
+database. A turn, schedule or workflow in one space only reads and writes
+that space's data. The LLM provider, config and MCP tools are shared by all
+spaces. See [ADR-0013](adr/adr-0013-per-space-runtimes.md).
+
+### Selecting a space
+
+Data-plane routes (conversations, messages, personas, skills, templates,
+webhooks, workflows, A2A) act on one space. The client names it with the
+`X-Space-Id` header. A browser `EventSource` cannot set headers, so it sends
+the `space_id` query parameter instead.
+
+The selector is optional when the caller holds a role in exactly one space.
+Otherwise a request without it gets `400 space selector required`. An
+unknown space, a space of another org, and a space the caller holds no role
+in all return the same `403`.
+
+The role in the selected space decides what the caller may do:
+
+| Role                     | Access                                                                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Viewer`                 | Read routes                                                                                                                                      |
+| `Member`                 | Read, plus routes that create or change data                                                                                                     |
+| `SpaceAdmin`, `OrgAdmin` | Everything, including destructive and secret operations (for example deleting a webhook or workflow, rotating a secret, reading webhook secrets) |
+
+Conversations are further limited to their owner: another user's
+conversation returns `404`.
+
+### Workflow webhooks
+
+The public workflow webhook URL names its space:
+
+```
+POST /workflow-hooks/{org_slug}/{space_slug}/{id}/{token}
+```
+
+`GET /workflows/{id}/webhook-secrets` returns the full URL.
+
 ### Roles
 
 Roles form a hierarchy (highest to lowest):
@@ -81,12 +120,16 @@ Permission checks use `AuthContext::can(space, resource, action)`:
 
 ## Storage
 
-Multi-user data lives in a **separate database** (`org.db`) from the
-main assistant data (`assistant.db`). This separation allows:
+All data lives under the install root, which is always `~/.assistant`:
 
-- Clean upgrades — org schema evolves independently
-- Backup isolation — org data can be backed up separately
-- Single-user mode — works without `org.db` at all
+- `orgs/{slug}/org.db` holds users, spaces, memberships, API keys, OAuth
+  clients and interface instances.
+- `orgs/{slug}/spaces/{space}/space.db` holds one space's conversations,
+  messages, personas and scheduled tasks. With the SQLite message bus, the
+  space's bus tables live here too.
+
+The `--db-path` flag and the `[storage] db_path` config key are removed.
+There is no way to point the assistant at a single database file.
 
 ### Database tables (org.db)
 
@@ -176,16 +219,17 @@ export ASSISTANT_API_KEY=ask_live_...
 export ASSISTANT_SERVER=http://your-server:8080
 ```
 
-## Backward compatibility
+## Upgrading a single-database install
 
-The multi-user system is fully backward compatible:
+The assistant does not keep compatibility with the old single-database
+layout. On first startup it migrates a legacy `assistant.db` into
+`orgs/default/spaces/default/` and renames the original to
+`assistant.db.legacy`. A host that kept writing to `assistant.db` after
+that migration needs `assistant migrate finalize`; see
+[multi-org-cutover.md](operations/multi-org-cutover.md).
 
-- **No org.db** → single-user mode with legacy token auth
-- **Legacy `--auth-token`** → still works, returns a default AuthContext
-- **Existing `assistant.db`** → untouched, personas and conversations
-  continue to work
-- The `is_default` column on personas is preserved in the database for
-  backward compatibility but is no longer exposed in the API
+Workflow webhook URLs without the org and space slugs no longer work.
+Re-copy them from `GET /workflows/{id}/webhook-secrets`.
 
 ## OIDC federation (optional)
 

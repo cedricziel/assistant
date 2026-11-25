@@ -2,8 +2,10 @@
 
 The assistant ships an optional web UI for chatting with Personas, managing
 skills, Persona A2A Profiles and webhooks. It runs through the unified
-`assistant` binary (`assistant webui serve`) and reads from the same SQLite
-database the runtime writes to. Telemetry is not shown here: it is exported
+`assistant` binary (`assistant webui serve`) and reads the same per-space
+databases under `~/.assistant/orgs/` that the runtime writes to. Each request
+runs against the space the caller selects (see
+[Selecting a space](multi-user.md#selecting-a-space)). Telemetry is not shown here: it is exported
 over OTLP ([docs/opentelemetry.md](opentelemetry.md)).
 
 ## Quick start
@@ -22,20 +24,23 @@ Authorization Code + PKCE to authenticate.
 
 ## Operator note: web-ui requires the orchestrator service
 
-`assistant webui serve` is intentionally a thin HTTP/SSE/UI server. It
-publishes chat turns to the shared message bus but **does not spawn the
-turn-processing worker pool or the title-generator worker**. Operators
-must run an orchestrator service alongside it, e.g.
+`assistant webui serve` publishes chat turns to the message bus of the
+caller's space but **does not spawn the turn-processing worker pool or the
+title-generator worker**. It does run the workflow runner, schedule adapter
+and event adapter, once per space. Operators must run an orchestrator
+service alongside it, e.g.
 
 ```sh
 assistant orchestrator run --no-repl                # in another systemd unit
 # (or: --interfaces slack,matrix to also handle messengers)
 ```
 
-The orchestrator service includes a `Web`-filtered worker that consumes
-the turns published by every `assistant webui serve` instance, so a
-single orchestrator handles Web + Slack + Matrix + Scheduler turns from
-one process. Running runtime workers in both processes simultaneously
+The orchestrator service supervises every space in `org.db` and runs its
+workers (turn workers, scheduler, title generator, memory indexer) once per
+space. It picks up new spaces and drops deleted ones every 30 seconds, so one
+orchestrator handles Web, messenger and Scheduler turns for all spaces. A
+messenger runs in the space its interface instance is bound to, or in the
+default space if it has none. Running runtime workers in both processes simultaneously
 causes per-second `claim failed` warnings as the two consumers race for
 every bus claim.
 
@@ -101,16 +106,16 @@ foreground / background pairs meet WCAG AA on both light and dark themes
 
 ## CLI options
 
-| Flag                 | Env var                     | Default                     | Description                                               |
-| -------------------- | --------------------------- | --------------------------- | --------------------------------------------------------- |
-| `--auth-token`       | `ASSISTANT_WEB_TOKEN`       | _(required)_                | Token used for Bearer auth                                |
-| `--listen`           |                             | `127.0.0.1:8080`            | Address to bind                                           |
-| `--cors-origin`      | `ASSISTANT_WEB_CORS_ORIGIN` | _(none: same-origin)_       | Allowed cross-origin `http(s)://host[:port]` origins; repeat the flag or comma-separate. An invalid value aborts startup |
-| `--no-secure-cookie` |                             | `false`                     | Disable `Secure` attribute on session cookies (see below) |
-| `--auth-rate-limit-per-minute` | `ASSISTANT_WEB_AUTH_RATE_LIMIT` | `30` | Credential-endpoint requests per client IP per minute (see below) |
-| `--register-rate-limit-per-hour` | `ASSISTANT_WEB_REGISTER_RATE_LIMIT` | `10` | Dynamic client registrations per client IP per hour |
-| `--login-max-failures` | `ASSISTANT_WEB_LOGIN_MAX_FAILURES` | `10` | Failed password attempts per account before lockout; one attempt is restored per minute |
-| `--trust-forwarded-for` | `ASSISTANT_WEB_TRUST_FORWARDED_FOR` | `false` | Take the client IP from the rightmost `X-Forwarded-For` entry (reverse proxy only) |
+| Flag                             | Env var                             | Default               | Description                                                                                                              |
+| -------------------------------- | ----------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--auth-token`                   | `ASSISTANT_WEB_TOKEN`               | _(required)_          | Token used for Bearer auth                                                                                               |
+| `--listen`                       |                                     | `127.0.0.1:8080`      | Address to bind                                                                                                          |
+| `--cors-origin`                  | `ASSISTANT_WEB_CORS_ORIGIN`         | _(none: same-origin)_ | Allowed cross-origin `http(s)://host[:port]` origins; repeat the flag or comma-separate. An invalid value aborts startup |
+| `--no-secure-cookie`             |                                     | `false`               | Disable `Secure` attribute on session cookies (see below)                                                                |
+| `--auth-rate-limit-per-minute`   | `ASSISTANT_WEB_AUTH_RATE_LIMIT`     | `30`                  | Credential-endpoint requests per client IP per minute (see below)                                                        |
+| `--register-rate-limit-per-hour` | `ASSISTANT_WEB_REGISTER_RATE_LIMIT` | `10`                  | Dynamic client registrations per client IP per hour                                                                      |
+| `--login-max-failures`           | `ASSISTANT_WEB_LOGIN_MAX_FAILURES`  | `10`                  | Failed password attempts per account before lockout; one attempt is restored per minute                                  |
+| `--trust-forwarded-for`          | `ASSISTANT_WEB_TRUST_FORWARDED_FOR` | `false`               | Take the client IP from the rightmost `X-Forwarded-For` entry (reverse proxy only)                                       |
 
 ### Rate limiting
 
@@ -155,36 +160,36 @@ persona switching, and skills views.
 
 These endpoints power the Flutter app and are also consumable directly:
 
-| Route                                  | Method | Description                                       |
-| -------------------------------------- | ------ | ------------------------------------------------- |
-| `/api/conversations`                   | GET    | List conversations                                |
-| `/api/conversations`                   | POST   | Create conversation                               |
-| `/api/conversations/{id}`              | GET    | Get conversation with messages                    |
-| `/api/conversations/{id}`              | PATCH  | Rename conversation                               |
-| `/api/conversations/{id}`              | DELETE | Delete conversation                               |
-| `/api/conversations/{id}/messages`     | POST   | Send message (SSE streaming response)             |
-| `/api/personas`                        | GET    | List personas                                     |
-| `/api/personas/active`                 | POST   | Switch active persona                             |
-| `/api/personas/{id}/skills`            | GET    | List skills for a persona                         |
-| `/api/orgs`                            | GET    | List organizations (filtered by user access)      |
-| `/api/orgs`                            | POST   | Create organization                               |
-| `/api/orgs/{id}`                       | GET    | Get organization details                          |
-| `/api/orgs/{id}`                       | PATCH  | Update organization settings                      |
-| `/api/orgs/{org}/users`                | GET    | List users in org                                 |
-| `/api/orgs/{org}/users`                | POST   | Invite user to org                                |
-| `/api/orgs/{org}/users/{uid}`          | GET    | Get user details                                  |
-| `/api/orgs/{org}/users/{uid}`          | PATCH  | Update user (name, role)                          |
-| `/api/orgs/{org}/users/{uid}`          | DELETE | Remove user from org                              |
-| `/api/orgs/{org}/spaces`               | GET    | List spaces (filtered by membership)              |
-| `/api/orgs/{org}/spaces`               | POST   | Create space                                      |
-| `/api/orgs/{org}/spaces/{sid}`         | GET    | Get space details                                 |
-| `/api/orgs/{org}/spaces/{sid}`         | PATCH  | Update space                                      |
-| `/api/orgs/{org}/spaces/{sid}`         | DELETE | Delete space (org-admin only)                     |
-| `/api/orgs/{org}/spaces/{sid}/members` | GET    | List space members                                |
-| `/api/orgs/{org}/spaces/{sid}/members` | POST   | Add user to space with role                       |
-| `/api/users/me/api-keys`               | GET    | List API keys (prefix + name, no secrets)         |
-| `/api/users/me/api-keys`               | POST   | Create scoped API key (returns plaintext once)    |
-| `/api/users/me/api-keys/{kid}`         | DELETE | Revoke API key                                    |
+| Route                                  | Method | Description                                    |
+| -------------------------------------- | ------ | ---------------------------------------------- |
+| `/api/conversations`                   | GET    | List conversations                             |
+| `/api/conversations`                   | POST   | Create conversation                            |
+| `/api/conversations/{id}`              | GET    | Get conversation with messages                 |
+| `/api/conversations/{id}`              | PATCH  | Rename conversation                            |
+| `/api/conversations/{id}`              | DELETE | Delete conversation                            |
+| `/api/conversations/{id}/messages`     | POST   | Send message (SSE streaming response)          |
+| `/api/personas`                        | GET    | List personas                                  |
+| `/api/personas/active`                 | POST   | Switch active persona                          |
+| `/api/personas/{id}/skills`            | GET    | List skills for a persona                      |
+| `/api/orgs`                            | GET    | List organizations (filtered by user access)   |
+| `/api/orgs`                            | POST   | Create organization                            |
+| `/api/orgs/{id}`                       | GET    | Get organization details                       |
+| `/api/orgs/{id}`                       | PATCH  | Update organization settings                   |
+| `/api/orgs/{org}/users`                | GET    | List users in org                              |
+| `/api/orgs/{org}/users`                | POST   | Invite user to org                             |
+| `/api/orgs/{org}/users/{uid}`          | GET    | Get user details                               |
+| `/api/orgs/{org}/users/{uid}`          | PATCH  | Update user (name, role)                       |
+| `/api/orgs/{org}/users/{uid}`          | DELETE | Remove user from org                           |
+| `/api/orgs/{org}/spaces`               | GET    | List spaces (filtered by membership)           |
+| `/api/orgs/{org}/spaces`               | POST   | Create space                                   |
+| `/api/orgs/{org}/spaces/{sid}`         | GET    | Get space details                              |
+| `/api/orgs/{org}/spaces/{sid}`         | PATCH  | Update space                                   |
+| `/api/orgs/{org}/spaces/{sid}`         | DELETE | Delete space (org-admin only)                  |
+| `/api/orgs/{org}/spaces/{sid}/members` | GET    | List space members                             |
+| `/api/orgs/{org}/spaces/{sid}/members` | POST   | Add user to space with role                    |
+| `/api/users/me/api-keys`               | GET    | List API keys (prefix + name, no secrets)      |
+| `/api/users/me/api-keys`               | POST   | Create scoped API key (returns plaintext once) |
+| `/api/users/me/api-keys/{kid}`         | DELETE | Revoke API key                                 |
 
 Full OpenAPI spec is served at `/api/openapi.json`; Swagger UI at `/api/docs`.
 
@@ -208,11 +213,11 @@ See [authentication.md](authentication.md) for flow details.
 
 ## Server-side management pages
 
-| Route                    | Description                                                                |
-| ------------------------ | -------------------------------------------------------------------------- |
-| `/agents`                | A2A Profile management — list, create, edit, delete                        |
-| `/agents/{id}/card.json` | Raw A2A Profile card JSON                                                  |
-| `/webhooks`              | Webhook management — list, create, toggle, rotate secrets                  |
+| Route                    | Description                                               |
+| ------------------------ | --------------------------------------------------------- |
+| `/agents`                | A2A Profile management — list, create, edit, delete       |
+| `/agents/{id}/card.json` | Raw A2A Profile card JSON                                 |
+| `/webhooks`              | Webhook management — list, create, toggle, rotate secrets |
 
 ## A2A protocol endpoints
 

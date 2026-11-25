@@ -28,6 +28,10 @@ Top-level tenant containing users, spaces, and shared resources. Each org has it
 
 Isolated workgroup within an organization. Scopes personas, conversations, skills, and interface bindings. Each space has its own database (`space.db`) for hard data isolation.
 
+## Space Runtime
+
+The orchestrator, tool executor, skill registry and message bus bound to one space's database (`SpaceRuntime` in `crates/runtime`). Built on first use and cached per (org, space).
+
 ## AuthContext
 
 Runtime context object carrying user identity, org membership, space roles, and scopes through the request/execution stack. Built from JWT tokens or API keys by the auth middleware.
