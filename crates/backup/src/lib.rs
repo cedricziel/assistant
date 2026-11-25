@@ -318,11 +318,17 @@ impl BackupEngine {
         let mut manifest_entries: Vec<ManifestEntry> = Vec::new();
 
         for abs_path in &file_paths {
-            let data = self
-                .fs
-                .read_file(abs_path)
-                .await
-                .with_context(|| format!("reading {:?}", abs_path))?;
+            let data = match self.fs.read_file(abs_path).await {
+                Ok(data) => data,
+                // SQLite deletes `-wal`/`-shm` when the last connection closes,
+                // which can happen after `discover_files` listed them. The
+                // checkpoint above already folded the WAL into the main db.
+                Err(e) if is_sqlite_sidecar(abs_path) && is_not_found(&e) => {
+                    warn!("skipping {:?}: vanished during backup", abs_path);
+                    continue;
+                }
+                Err(e) => return Err(e).with_context(|| format!("reading {:?}", abs_path)),
+            };
 
             // archive_path is relative to install_dir.
             // Files outside install_dir (e.g. a db at a custom path) are placed
@@ -383,6 +389,20 @@ impl BackupEngine {
             manifest,
         })
     }
+}
+
+/// Whether `path` is a SQLite `-wal` or `-shm` side file.
+fn is_sqlite_sidecar(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with("-wal") || n.ends_with("-shm"))
+}
+
+/// Whether any error in the chain is an [`io::ErrorKind::NotFound`].
+fn is_not_found(err: &anyhow::Error) -> bool {
+    err.chain()
+        .filter_map(|c| c.downcast_ref::<io::Error>())
+        .any(|e| e.kind() == io::ErrorKind::NotFound)
 }
 
 impl Default for BackupEngine {
@@ -654,6 +674,92 @@ mod tests {
         assert!(
             !tmp.exists(),
             "no partial .tmp file should remain after failure"
+        );
+    }
+
+    /// [`RealFs`] that reports `NotFound` for the paths in `vanished`,
+    /// mimicking files deleted after `discover_files` listed them.
+    struct VanishingFs {
+        vanished: Vec<PathBuf>,
+    }
+
+    #[async_trait]
+    impl BackupFs for VanishingFs {
+        async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
+            if self.vanished.iter().any(|p| p == path) {
+                return Err(io::Error::from(io::ErrorKind::NotFound))
+                    .with_context(|| format!("reading {:?}", path));
+            }
+            RealFs.read_file(path).await
+        }
+        async fn write_file(&self, path: &Path, data: &[u8]) -> Result<()> {
+            RealFs.write_file(path, data).await
+        }
+        async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>> {
+            RealFs.list_dir(path).await
+        }
+        async fn file_exists(&self, path: &Path) -> bool {
+            RealFs.file_exists(path).await
+        }
+        async fn file_size(&self, path: &Path) -> Result<u64> {
+            RealFs.file_size(path).await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_backup_skips_sqlite_sidecars_that_vanish_after_discovery() {
+        let install_dir = TempDir::new().unwrap();
+        let output_dir = TempDir::new().unwrap();
+        let db = install_dir.path().join("assistant.db");
+        let wal = install_dir.path().join("assistant.db-wal");
+        let shm = install_dir.path().join("assistant.db-shm");
+        for p in [&db, &wal, &shm] {
+            std::fs::write(p, b"x").unwrap();
+        }
+
+        let output_path = output_dir.path().join("backup.tar.gz");
+        let engine = BackupEngine::with_fs(Arc::new(VanishingFs {
+            vanished: vec![wal, shm],
+        }));
+        let result = engine
+            .run(BackupOptions {
+                install_dir: install_dir.path().to_path_buf(),
+                output_path,
+                db_path: None,
+            })
+            .await
+            .expect("a sidecar vanishing mid-backup must not fail the backup");
+
+        let archived: Vec<_> = result
+            .manifest
+            .entries
+            .iter()
+            .map(|e| e.archive_path.as_str())
+            .collect();
+        assert_eq!(archived, vec!["assistant.db"]);
+    }
+
+    #[tokio::test]
+    async fn test_backup_fails_when_non_sidecar_file_vanishes() {
+        let install_dir = TempDir::new().unwrap();
+        let output_dir = TempDir::new().unwrap();
+        let config = install_dir.path().join("config.toml");
+        std::fs::write(&config, b"x").unwrap();
+
+        let engine = BackupEngine::with_fs(Arc::new(VanishingFs {
+            vanished: vec![config],
+        }));
+        let result = engine
+            .run(BackupOptions {
+                install_dir: install_dir.path().to_path_buf(),
+                output_path: output_dir.path().join("backup.tar.gz"),
+                db_path: None,
+            })
+            .await;
+
+        assert!(
+            result.is_err(),
+            "losing a non-sidecar file must still fail the backup"
         );
     }
 
