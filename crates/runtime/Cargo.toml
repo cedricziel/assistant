@@ -30,7 +30,6 @@ chrono = { workspace = true }
 cron = { workspace = true }
 # bootstrap helpers
 dirs = { workspace = true }
-toml = { workspace = true }
 sha2 = { workspace = true }
 reqwest = { workspace = true }
 hmac = { workspace = true }
