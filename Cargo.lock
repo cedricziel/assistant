@@ -183,6 +183,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant-a2ui"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "jsonschema",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "assistant-auth"
 version = "0.3.0"
 dependencies = [
