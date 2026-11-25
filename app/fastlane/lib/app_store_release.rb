@@ -71,8 +71,9 @@ module AppStoreRelease
       # Publishing an approved version stays a manual step.
       automatic_release: false,
       # A version still waiting for review has to be pulled back before the
-      # next one can take its place.
-      reject_if_possible: true,
+      # next one can take its place. deliver does that before it uploads
+      # anything, so a dry run must not.
+      reject_if_possible: !dry_run,
       force: true,
       precheck_include_in_app_purchases: false,
       run_precheck_before_submit: false,

@@ -99,8 +99,10 @@ class AppStoreReleaseTest < Minitest::Test
     refute params.key?(:app_review_information)
   end
 
-  def test_a_dry_run_does_not_submit
-    refute AppStoreRelease.submit_options(version: "0.1.166", dry_run: true, notes: nil, review: nil)[:submit_for_review]
+  def test_a_dry_run_neither_submits_nor_pulls_back_a_version_in_review
+    params = AppStoreRelease.submit_options(version: "0.1.166", dry_run: true, notes: nil, review: nil)
+    refute params[:submit_for_review]
+    refute params[:reject_if_possible], "deliver cancels any waiting submission before it uploads"
   end
 
   def test_notes_and_review_information_are_passed_on
