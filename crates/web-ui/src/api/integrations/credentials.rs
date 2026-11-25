@@ -8,7 +8,7 @@
 use axum::{
     Extension, Json,
     extract::{Path, State, rejection::JsonRejection},
-    http::HeaderValue,
+    http::{HeaderValue, StatusCode},
 };
 
 use assistant_core::auth::AuthContext;
@@ -46,6 +46,7 @@ const MAX_VALUE_LEN: usize = 4096;
         (status = 401, description = "Unauthorized; the body is the plain text `Unauthorized`", content_type = "text/plain", body = String),
         (status = 403, description = "The caller may not set this credential", body = ErrorBody),
         (status = 404, description = "No such integration, or the caller may not see it", body = ErrorBody),
+        (status = 409, description = "The integration changed while the credential was saved; the credential was not kept", body = ErrorBody),
         (status = 422, description = "The integration takes no header credential, or the value or header name is invalid", body = ErrorBody),
     )
 )]
@@ -64,32 +65,43 @@ pub async fn set_credential(
     validate_value(&integration, &value)?;
     let now = state.clock.now();
 
-    if let Some(name) = request.header_name {
-        if integration.header_name.is_some() {
+    match request.header_name {
+        // Naming the header it already has changes nothing, so a retry after a
+        // failure partway through is not refused.
+        Some(name)
+            if integration
+                .header_name
+                .as_deref()
+                .is_some_and(|current| current.eq_ignore_ascii_case(&name)) => {}
+        Some(_) if integration.header_name.is_some() => {
             return Err(ApiError::unprocessable(
                 "the header name is fixed for this integration",
             ));
         }
-        if !visible.access.can_manage() {
-            return Err(ApiError::forbidden(
-                "only someone who manages this integration can set its header name",
+        Some(name) => {
+            if !visible.access.can_manage() {
+                return Err(ApiError::forbidden(
+                    "only someone who manages this integration can set its header name",
+                ));
+            }
+            validate_header(&name, integration.header_value_prefix.as_deref())?;
+            let read_at = integration.updated_at;
+            integration.header_name = Some(name);
+            integration.updated_at = now;
+            if !state
+                .store
+                .update_if_unchanged(&integration, read_at)
+                .await?
+            {
+                return Err(ApiError::not_found("integration not found"));
+            }
+        }
+        None if integration.header_name.is_none() => {
+            return Err(ApiError::unprocessable(
+                "this integration has no header name yet: send header_name with the value",
             ));
         }
-        validate_header(&name, integration.header_value_prefix.as_deref())?;
-        let read_at = integration.updated_at;
-        integration.header_name = Some(name);
-        integration.updated_at = now;
-        if !state
-            .store
-            .update_if_unchanged(&integration, read_at)
-            .await?
-        {
-            return Err(ApiError::not_found("integration not found"));
-        }
-    } else if integration.header_name.is_none() {
-        return Err(ApiError::unprocessable(
-            "this integration has no header name yet: send header_name with the value",
-        ));
+        None => {}
     }
 
     let aad = credential_aad(
@@ -98,10 +110,11 @@ pub async fn set_credential(
         CredentialKind::Header.as_str(),
     );
     let sealed = state.secrets.seal(&value, aad.as_bytes())?;
+    let credential_subject = subject.clone();
     state
         .credentials
         .put(&StoredCredential {
-            integration_id: integration.id,
+            integration_id: integration.id.clone(),
             subject_user_id: subject,
             kind: CredentialKind::Header,
             ciphertext: sealed.ciphertext,
@@ -112,6 +125,28 @@ pub async fn set_credential(
             updated_at: now,
         })
         .await?;
+
+    // The credential belongs to the URL it was entered for. A change to the
+    // integration since it was read (a moved URL drops its credentials first)
+    // may have run before this write, so check and take the write back.
+    let unchanged = state
+        .store
+        .get(&integration.id)
+        .await?
+        .is_some_and(|stored| {
+            stored.updated_at == integration.updated_at
+                && stored.connect_url == integration.connect_url
+        });
+    if !unchanged {
+        state
+            .credentials
+            .delete(&integration.id, credential_subject.as_ref())
+            .await?;
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "the integration changed while the credential was saved; set it again",
+        ));
+    }
     Ok(Json(CredentialResponse {
         has_credential: true,
         updated_at: Some(now),
@@ -213,8 +248,12 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::{Value, json};
 
+    use std::sync::Arc;
+
+    use assistant_core::identity::UserId;
     use assistant_core::integrations::{
-        CredentialKind, CredentialMode, IntegrationAuthKind, IntegrationLayer, Sealed,
+        CredentialKind, CredentialMode, Integration, IntegrationAuthKind,
+        IntegrationCredentialStore, IntegrationLayer, IntegrationStore, Sealed, StoredCredential,
         credential_aad,
     };
 
@@ -585,6 +624,102 @@ mod tests {
         assert!(!stored.enabled, "the rival's change survives");
         assert_eq!(stored.header_name, None, "and the stale write did not land");
         assert!(!h.has_credential("int_space", None).await);
+    }
+
+    /// A retry after a failure partway through (the template was saved, the
+    /// credential was not) must not be refused for naming the header again.
+    #[tokio::test]
+    async fn repeating_the_same_header_name_is_accepted_but_another_is_not() {
+        let h = Harness::new().await;
+        h.seed("int_space", IntegrationLayer::Space, None, |i| {
+            i.catalog_entry_id = None;
+            i.header_name = None;
+            i.header_value_prefix = None;
+        })
+        .await;
+        let body = json!({"value": "t", "header_name": "X-Api-Key"});
+
+        let (first, _) = h.put(Who::EngAdmin, &uri("int_space"), body.clone()).await;
+        let (retry, retry_body) = h.put(Who::EngAdmin, &uri("int_space"), body).await;
+        let (other, _) = h
+            .put(
+                Who::EngAdmin,
+                &uri("int_space"),
+                json!({"value": "t", "header_name": "X-Other"}),
+            )
+            .await;
+
+        assert_eq!(first, OK);
+        assert_eq!(retry, OK, "{retry_body}");
+        assert_eq!(other, UNPROCESSABLE);
+    }
+
+    /// Saves a different URL for the integration just before the credential is
+    /// written, as a concurrent PATCH would (which drops the credentials).
+    struct UrlMovesBeforePut {
+        inner: Arc<dyn IntegrationCredentialStore>,
+        store: Arc<dyn IntegrationStore>,
+        moved: std::sync::Mutex<Option<Integration>>,
+    }
+
+    #[async_trait::async_trait]
+    impl IntegrationCredentialStore for UrlMovesBeforePut {
+        async fn put(&self, c: &StoredCredential) -> anyhow::Result<()> {
+            let moved = self.moved.lock().unwrap().take();
+            if let Some(moved) = moved {
+                self.store.update(&moved).await?;
+            }
+            self.inner.put(c).await
+        }
+        async fn get(
+            &self,
+            id: &str,
+            subject: Option<&UserId>,
+        ) -> anyhow::Result<Option<StoredCredential>> {
+            self.inner.get(id, subject).await
+        }
+        async fn delete(&self, id: &str, subject: Option<&UserId>) -> anyhow::Result<bool> {
+            self.inner.delete(id, subject).await
+        }
+        async fn compare_and_swap(
+            &self,
+            expected: chrono::DateTime<chrono::Utc>,
+            c: &StoredCredential,
+        ) -> anyhow::Result<bool> {
+            self.inner.compare_and_swap(expected, c).await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_credential_written_after_the_url_moved_is_removed_and_reported() {
+        let mut h = Harness::new().await;
+        let integration = h
+            .seed("int_space", IntegrationLayer::Space, None, |i| {
+                i.catalog_entry_id = None;
+            })
+            .await;
+        let mut moved = integration.clone();
+        moved.connect_url = "https://elsewhere.example.com/mcp".into();
+        moved.updated_at = super::super::testing::at(500);
+        h.state.credentials = Arc::new(UrlMovesBeforePut {
+            inner: h.state.credentials.clone(),
+            store: h.state.store.clone(),
+            moved: std::sync::Mutex::new(Some(moved)),
+        });
+
+        let (status, body) = h
+            .put(
+                Who::EngAdmin,
+                &uri("int_space"),
+                value("secret-for-the-old-host"),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert!(
+            !h.has_credential("int_space", None).await,
+            "the credential entered for the old URL must not survive the move"
+        );
     }
 
     #[tokio::test]
