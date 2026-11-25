@@ -111,6 +111,7 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**clearCredential**](doc/IntegrationsApi.md#clearcredential) | **DELETE** /api/integrations/{id}/credential | &#x60;DELETE /api/integrations/{id}/credential&#x60; — remove the header credential.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**createIntegration**](doc/IntegrationsApi.md#createintegration) | **POST** /api/integrations | &#x60;POST /api/integrations&#x60; — install an integration.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**deleteIntegration**](doc/IntegrationsApi.md#deleteintegration) | **DELETE** /api/integrations/{id} | &#x60;DELETE /api/integrations/{id}&#x60; — remove an integration and its credentials.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**deleteSpaceAccess**](doc/IntegrationsApi.md#deletespaceaccess) | **DELETE** /api/integrations/{id}/spaces/{space_id} | &#x60;DELETE /api/integrations/{id}/spaces/{space_id}?mode&#x3D;&#x60; — remove a space row.
@@ -121,6 +122,8 @@ Class | Method | HTTP request | Description
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**listIntegrations**](doc/IntegrationsApi.md#listintegrations) | **GET** /api/integrations | &#x60;GET /api/integrations&#x60; — list the integrations the caller may see.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**putIntegrationPolicy**](doc/IntegrationsApi.md#putintegrationpolicy) | **PUT** /api/integrations/policy | &#x60;PUT /api/integrations/policy&#x60; — replace the org&#39;s integration policy.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**putSpaceAccess**](doc/IntegrationsApi.md#putspaceaccess) | **PUT** /api/integrations/{id}/spaces/{space_id} | &#x60;PUT /api/integrations/{id}/spaces/{space_id}&#x60; — add a space row.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**setCredential**](doc/IntegrationsApi.md#setcredential) | **PUT** /api/integrations/{id}/credential | &#x60;PUT /api/integrations/{id}/credential&#x60; — store the header credential.
+[*IntegrationsApi*](doc/IntegrationsApi.md) | [**testIntegration**](doc/IntegrationsApi.md#testintegration) | **POST** /api/integrations/{id}/test | &#x60;POST /api/integrations/{id}/test&#x60; — connect and list the tools.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**updateIntegration**](doc/IntegrationsApi.md#updateintegration) | **PATCH** /api/integrations/{id} | &#x60;PATCH /api/integrations/{id}&#x60; — update an integration.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**createInterface**](doc/InterfacesApi.md#createinterface) | **POST** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — create an interface instance.
 [*InterfacesApi*](doc/InterfacesApi.md) | [**deleteInterface**](doc/InterfacesApi.md#deleteinterface) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}&#x60; — delete an interface instance.
@@ -263,6 +266,7 @@ Class | Method | HTTP request | Description
  - [CreateUserRequest](doc/CreateUserRequest.md)
  - [CreateWebhookRequest](doc/CreateWebhookRequest.md)
  - [CredentialMode](doc/CredentialMode.md)
+ - [CredentialResponse](doc/CredentialResponse.md)
  - [DeviceCodeOAuthFlow](doc/DeviceCodeOAuthFlow.md)
  - [DeviceCodeResponseSchema](doc/DeviceCodeResponseSchema.md)
  - [ErrorBody](doc/ErrorBody.md)
@@ -314,6 +318,7 @@ Class | Method | HTTP request | Description
  - [ServerCapabilities](doc/ServerCapabilities.md)
  - [ServerMetadata](doc/ServerMetadata.md)
  - [SetActivePersonaRequest](doc/SetActivePersonaRequest.md)
+ - [SetCredentialRequest](doc/SetCredentialRequest.md)
  - [SetSkillAccessModeRequest](doc/SetSkillAccessModeRequest.md)
  - [SetSpaceAccessRequest](doc/SetSpaceAccessRequest.md)
  - [SkillDetail](doc/SkillDetail.md)
@@ -344,6 +349,7 @@ Class | Method | HTTP request | Description
  - [TaskStatus](doc/TaskStatus.md)
  - [TaskStatusUpdateEvent](doc/TaskStatusUpdateEvent.md)
  - [TemplateResponse](doc/TemplateResponse.md)
+ - [TestIntegrationResponse](doc/TestIntegrationResponse.md)
  - [TokenResponse](doc/TokenResponse.md)
  - [ToolCallSummary](doc/ToolCallSummary.md)
  - [TurnState](doc/TurnState.md)

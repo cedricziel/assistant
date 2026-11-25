@@ -28,6 +28,8 @@ class _$IntegrationDetail extends IntegrationDetail {
   @override
   final String id;
   @override
+  final DateTime? lastConnectedAt;
+  @override
   final IntegrationLayer layer;
   @override
   final String name;
@@ -41,6 +43,8 @@ class _$IntegrationDetail extends IntegrationDetail {
   final String? spaceId;
   @override
   final IntegrationStatus status;
+  @override
+  final int? toolCount;
   @override
   final IntegrationTrust trust;
   @override
@@ -61,6 +65,7 @@ class _$IntegrationDetail extends IntegrationDetail {
       this.headerName,
       this.headerValuePrefix,
       required this.id,
+      this.lastConnectedAt,
       required this.layer,
       required this.name,
       this.ownerUserId,
@@ -68,6 +73,7 @@ class _$IntegrationDetail extends IntegrationDetail {
       required this.spaceAccess,
       this.spaceId,
       required this.status,
+      this.toolCount,
       required this.trust,
       required this.updatedAt})
       : super._();
@@ -93,6 +99,7 @@ class _$IntegrationDetail extends IntegrationDetail {
         headerName == other.headerName &&
         headerValuePrefix == other.headerValuePrefix &&
         id == other.id &&
+        lastConnectedAt == other.lastConnectedAt &&
         layer == other.layer &&
         name == other.name &&
         ownerUserId == other.ownerUserId &&
@@ -100,6 +107,7 @@ class _$IntegrationDetail extends IntegrationDetail {
         spaceAccess == other.spaceAccess &&
         spaceId == other.spaceId &&
         status == other.status &&
+        toolCount == other.toolCount &&
         trust == other.trust &&
         updatedAt == other.updatedAt;
   }
@@ -117,6 +125,7 @@ class _$IntegrationDetail extends IntegrationDetail {
     _$hash = $jc(_$hash, headerName.hashCode);
     _$hash = $jc(_$hash, headerValuePrefix.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
+    _$hash = $jc(_$hash, lastConnectedAt.hashCode);
     _$hash = $jc(_$hash, layer.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, ownerUserId.hashCode);
@@ -124,6 +133,7 @@ class _$IntegrationDetail extends IntegrationDetail {
     _$hash = $jc(_$hash, spaceAccess.hashCode);
     _$hash = $jc(_$hash, spaceId.hashCode);
     _$hash = $jc(_$hash, status.hashCode);
+    _$hash = $jc(_$hash, toolCount.hashCode);
     _$hash = $jc(_$hash, trust.hashCode);
     _$hash = $jc(_$hash, updatedAt.hashCode);
     _$hash = $jf(_$hash);
@@ -143,6 +153,7 @@ class _$IntegrationDetail extends IntegrationDetail {
           ..add('headerName', headerName)
           ..add('headerValuePrefix', headerValuePrefix)
           ..add('id', id)
+          ..add('lastConnectedAt', lastConnectedAt)
           ..add('layer', layer)
           ..add('name', name)
           ..add('ownerUserId', ownerUserId)
@@ -150,6 +161,7 @@ class _$IntegrationDetail extends IntegrationDetail {
           ..add('spaceAccess', spaceAccess)
           ..add('spaceId', spaceId)
           ..add('status', status)
+          ..add('toolCount', toolCount)
           ..add('trust', trust)
           ..add('updatedAt', updatedAt))
         .toString();
@@ -204,6 +216,11 @@ class IntegrationDetailBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
+  DateTime? _lastConnectedAt;
+  DateTime? get lastConnectedAt => _$this._lastConnectedAt;
+  set lastConnectedAt(DateTime? lastConnectedAt) =>
+      _$this._lastConnectedAt = lastConnectedAt;
+
   IntegrationLayer? _layer;
   IntegrationLayer? get layer => _$this._layer;
   set layer(IntegrationLayer? layer) => _$this._layer = layer;
@@ -234,6 +251,10 @@ class IntegrationDetailBuilder
   IntegrationStatus? get status => _$this._status;
   set status(IntegrationStatus? status) => _$this._status = status;
 
+  int? _toolCount;
+  int? get toolCount => _$this._toolCount;
+  set toolCount(int? toolCount) => _$this._toolCount = toolCount;
+
   IntegrationTrust? _trust;
   IntegrationTrust? get trust => _$this._trust;
   set trust(IntegrationTrust? trust) => _$this._trust = trust;
@@ -259,6 +280,7 @@ class IntegrationDetailBuilder
       _headerName = $v.headerName;
       _headerValuePrefix = $v.headerValuePrefix;
       _id = $v.id;
+      _lastConnectedAt = $v.lastConnectedAt;
       _layer = $v.layer;
       _name = $v.name;
       _ownerUserId = $v.ownerUserId;
@@ -266,6 +288,7 @@ class IntegrationDetailBuilder
       _spaceAccess = $v.spaceAccess.toBuilder();
       _spaceId = $v.spaceId;
       _status = $v.status;
+      _toolCount = $v.toolCount;
       _trust = $v.trust;
       _updatedAt = $v.updatedAt;
       _$v = null;
@@ -308,6 +331,7 @@ class IntegrationDetailBuilder
             headerValuePrefix: headerValuePrefix,
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'IntegrationDetail', 'id'),
+            lastConnectedAt: lastConnectedAt,
             layer: BuiltValueNullFieldError.checkNotNull(
                 layer, r'IntegrationDetail', 'layer'),
             name: BuiltValueNullFieldError.checkNotNull(
@@ -319,6 +343,7 @@ class IntegrationDetailBuilder
             spaceId: spaceId,
             status: BuiltValueNullFieldError.checkNotNull(
                 status, r'IntegrationDetail', 'status'),
+            toolCount: toolCount,
             trust: BuiltValueNullFieldError.checkNotNull(
                 trust, r'IntegrationDetail', 'trust'),
             updatedAt: BuiltValueNullFieldError.checkNotNull(

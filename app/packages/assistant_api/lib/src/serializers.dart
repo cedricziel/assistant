@@ -67,6 +67,7 @@ import 'package:assistant_api/src/model/create_task_push_notification_config_req
 import 'package:assistant_api/src/model/create_user_request.dart';
 import 'package:assistant_api/src/model/create_webhook_request.dart';
 import 'package:assistant_api/src/model/credential_mode.dart';
+import 'package:assistant_api/src/model/credential_response.dart';
 import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/device_code_response_schema.dart';
 import 'package:assistant_api/src/model/error_body.dart';
@@ -118,6 +119,7 @@ import 'package:assistant_api/src/model/send_message_response.dart';
 import 'package:assistant_api/src/model/server_capabilities.dart';
 import 'package:assistant_api/src/model/server_metadata.dart';
 import 'package:assistant_api/src/model/set_active_persona_request.dart';
+import 'package:assistant_api/src/model/set_credential_request.dart';
 import 'package:assistant_api/src/model/set_skill_access_mode_request.dart';
 import 'package:assistant_api/src/model/set_space_access_request.dart';
 import 'package:assistant_api/src/model/skill_detail.dart';
@@ -148,6 +150,7 @@ import 'package:assistant_api/src/model/task_state.dart';
 import 'package:assistant_api/src/model/task_status.dart';
 import 'package:assistant_api/src/model/task_status_update_event.dart';
 import 'package:assistant_api/src/model/template_response.dart';
+import 'package:assistant_api/src/model/test_integration_response.dart';
 import 'package:assistant_api/src/model/token_response.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
 import 'package:assistant_api/src/model/turn_state.dart';
@@ -237,6 +240,7 @@ part 'serializers.g.dart';
   CreateUserRequest,
   CreateWebhookRequest,
   CredentialMode,
+  CredentialResponse,
   DeviceCodeOAuthFlow,
   DeviceCodeResponseSchema,
   ErrorBody,
@@ -288,6 +292,7 @@ part 'serializers.g.dart';
   ServerCapabilities,
   ServerMetadata,
   SetActivePersonaRequest,
+  SetCredentialRequest,
   SetSkillAccessModeRequest,
   SetSpaceAccessRequest,
   SkillDetail,
@@ -318,6 +323,7 @@ part 'serializers.g.dart';
   TaskStatus,
   TaskStatusUpdateEvent,
   TemplateResponse,
+  TestIntegrationResponse,
   TokenResponse,
   ToolCallSummary,
   TurnState,
