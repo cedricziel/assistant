@@ -29,6 +29,8 @@ pub struct PendingOidcSession {
     pub client_state: Option<String>,
     /// Requested scopes.
     pub scope: Option<String>,
+    /// RFC 8707 resource the client asked the token for (already validated).
+    pub resource: Option<String>,
     /// When this session was created.
     created_at: Instant,
 }
@@ -79,6 +81,7 @@ impl PendingOidcSession {
         code_challenge: Option<String>,
         client_state: Option<String>,
         scope: Option<String>,
+        resource: Option<String>,
     ) -> Self {
         Self {
             org_id,
@@ -87,6 +90,7 @@ impl PendingOidcSession {
             code_challenge,
             client_state,
             scope,
+            resource,
             created_at: Instant::now(),
         }
     }
@@ -105,6 +109,7 @@ mod tests {
             "http://localhost/cb".into(),
             None,
             Some("abc".into()),
+            None,
             None,
         );
 
@@ -127,6 +132,7 @@ mod tests {
             OrgId::from("org-1"),
             "client-2".into(),
             "http://localhost/cb".into(),
+            None,
             None,
             None,
             None,

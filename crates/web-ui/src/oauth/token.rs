@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use assistant_auth::oauth2::device::PollResult;
+use assistant_auth::oauth2::server::{InvalidTarget, TokenPair};
+use assistant_core::identity::{Action, ResourceKind, Scope};
 
 use super::{OAuthError, OAuthErrorResponse, OAuthState, build_auth_context_for_user};
 
@@ -31,6 +33,13 @@ pub struct TokenRequest {
     pub refresh_token: Option<String>,
     /// Device code (for device code grant).
     pub device_code: Option<String>,
+    /// RFC 8707 resource the token is for. Only the MCP endpoint URL
+    /// (`<public base URL>/mcp`) is accepted; any other value is rejected as
+    /// `invalid_target`. On `authorization_code` and `refresh_token` it must
+    /// equal the resource the grant was authorized for; omit it to inherit
+    /// that one. The device code grant takes it here, as the device
+    /// authorization request carries none.
+    pub resource: Option<String>,
 }
 
 /// Standard OAuth2 token response.
@@ -52,15 +61,19 @@ pub struct TokenResponse {
     request_body(content = TokenRequest, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "Token issued", body = TokenResponse),
-        (status = 400, description = "Invalid grant", body = OAuthErrorResponse),
+        (status = 400, description = "Invalid grant, or `invalid_target` for an unknown `resource`", body = OAuthErrorResponse),
         (status = 429, description = "Rate limit exceeded; see the Retry-After header"),
         (status = 500, description = "Server error", body = OAuthErrorResponse),
     )
 )]
 pub async fn token(
     State(state): State<OAuthState>,
-    Form(req): Form<TokenRequest>,
+    Form(mut req): Form<TokenRequest>,
 ) -> impl IntoResponse {
+    req.resource = req.resource.filter(|r| !r.is_empty());
+    if let Err(e) = state.validate_resource(req.resource.as_deref()) {
+        return grant_error(e.into());
+    }
     match req.grant_type.as_str() {
         "authorization_code" => handle_auth_code(state, req).await,
         "refresh_token" => handle_refresh(state, req).await,
@@ -124,43 +137,12 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
             &client_id,
             &redirect_uri,
             req.code_verifier.as_deref(),
+            req.resource.as_deref(),
         )
         .await
     {
-        Ok(pair) => {
-            // Sign a JWT access token for the user.
-            let ttl = state.jwt_manager.access_ttl_secs();
-            let jwt = match issue_access_jwt(&state, &pair.user_id, &client_id).await {
-                Ok(t) => t,
-                Err(resp) => return resp,
-            };
-
-            let cookie = session_cookie(&jwt, state.secure_cookie, ttl);
-            let mut resp = Json(TokenResponse {
-                access_token: jwt,
-                token_type: "Bearer",
-                expires_in: ttl,
-                refresh_token: Some(pair.refresh_token),
-            })
-            .into_response();
-            if let Some(cookie) = cookie {
-                resp.headers_mut().insert(SET_COOKIE, cookie);
-            } else {
-                warn!(
-                    "handle_authorization_code: skipping Set-Cookie header — \
-                     session_cookie returned None (invalid header value)"
-                );
-            }
-            resp
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(OAuthError {
-                error: "invalid_grant",
-                error_description: e.to_string(),
-            }),
-        )
-            .into_response(),
+        Ok(pair) => token_response(&state, &client_id, pair).await,
+        Err(e) => grant_error(e),
     }
 }
 
@@ -182,43 +164,78 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
 
     match state
         .oauth2_server
-        .refresh(&refresh_token, &client_id)
+        .refresh(&refresh_token, &client_id, req.resource.as_deref())
         .await
     {
-        Ok(pair) => {
-            let ttl = state.jwt_manager.access_ttl_secs();
-            let jwt = match issue_access_jwt(&state, &pair.user_id, &client_id).await {
-                Ok(t) => t,
-                Err(resp) => return resp,
-            };
-
-            let cookie = session_cookie(&jwt, state.secure_cookie, ttl);
-            let mut resp = Json(TokenResponse {
-                access_token: jwt,
-                token_type: "Bearer",
-                expires_in: ttl,
-                refresh_token: Some(pair.refresh_token),
-            })
-            .into_response();
-            if let Some(cookie) = cookie {
-                resp.headers_mut().insert(SET_COOKIE, cookie);
-            } else {
-                warn!(
-                    "handle_refresh: skipping Set-Cookie header — \
-                     session_cookie returned None (invalid header value)"
-                );
-            }
-            resp
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(OAuthError {
-                error: "invalid_grant",
-                error_description: e.to_string(),
-            }),
-        )
-            .into_response(),
+        Ok(pair) => token_response(&state, &client_id, pair).await,
+        Err(e) => grant_error(e),
     }
+}
+
+/// Sign the access token for a successful auth-code or refresh exchange and
+/// build the response (with the session cookie when the token is for the API).
+async fn token_response(
+    state: &OAuthState,
+    client_id: &str,
+    pair: TokenPair,
+) -> axum::response::Response {
+    let ttl = state.jwt_manager.access_ttl_secs();
+    let jwt =
+        match issue_access_jwt(state, &pair.user_id, client_id, pair.resource.as_deref()).await {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        };
+
+    let cookie = session_cookie_for(state, &pair, &jwt, ttl);
+    let mut resp = Json(TokenResponse {
+        access_token: jwt,
+        token_type: "Bearer",
+        expires_in: ttl,
+        refresh_token: Some(pair.refresh_token),
+    })
+    .into_response();
+    if let Some(cookie) = cookie {
+        resp.headers_mut().insert(SET_COOKIE, cookie);
+    }
+    resp
+}
+
+/// Map a failed grant to its OAuth error: `invalid_target` for a conflicting
+/// `resource`, `invalid_grant` for everything else.
+fn grant_error(e: anyhow::Error) -> axum::response::Response {
+    let error = if e.downcast_ref::<InvalidTarget>().is_some() {
+        "invalid_target"
+    } else {
+        "invalid_grant"
+    };
+    (
+        StatusCode::BAD_REQUEST,
+        Json(OAuthError {
+            error,
+            error_description: e.to_string(),
+        }),
+    )
+        .into_response()
+}
+
+/// The session cookie for a freshly issued token, if it gets one.
+///
+/// Only a token for the web API may become the browser session: an MCP token
+/// is rejected there and would log the browser out.
+fn session_cookie_for(
+    state: &OAuthState,
+    pair: &TokenPair,
+    jwt: &str,
+    ttl: u64,
+) -> Option<HeaderValue> {
+    if pair.resource.is_some() {
+        return None;
+    }
+    let cookie = session_cookie(jwt, state.secure_cookie, ttl);
+    if cookie.is_none() {
+        warn!("skipping Set-Cookie header: session_cookie returned None (invalid header value)");
+    }
+    cookie
 }
 
 /// Sign the access JWT for `user_id`, bound to the user's current session
@@ -230,6 +247,7 @@ async fn issue_access_jwt(
     state: &OAuthState,
     user_id: &str,
     client_id: &str,
+    resource: Option<&str>,
 ) -> Result<String, axum::response::Response> {
     let server_error = |description: String| {
         (
@@ -242,7 +260,9 @@ async fn issue_access_jwt(
             .into_response()
     };
 
-    let identity = match build_auth_context_for_user(&state.org_storage, user_id, client_id).await {
+    let mut identity = match build_auth_context_for_user(&state.org_storage, user_id, client_id)
+        .await
+    {
         Ok(Some(identity)) => identity,
         Ok(None) => {
             return Err((
@@ -260,15 +280,25 @@ async fn issue_access_jwt(
         }
     };
 
-    state
-        .jwt_manager
-        .sign(
-            &identity.ctx,
-            identity.ctx.org_id.as_ref(),
-            user_id,
-            identity.token_version,
-        )
-        .map_err(|e| server_error(e.to_string()))
+    let org = identity.ctx.org_id.to_string();
+    let signed = match resource {
+        None => state
+            .jwt_manager
+            .sign(&identity.ctx, &org, user_id, identity.token_version),
+        Some(resource) => {
+            // A token for the MCP endpoint carries exactly the MCP scope,
+            // whatever else the client asked for.
+            identity.ctx.scopes = vec![Scope::new(ResourceKind::Mcp, Action::Execute)];
+            state.jwt_manager.sign_for_audience(
+                &identity.ctx,
+                &org,
+                user_id,
+                identity.token_version,
+                resource,
+            )
+        }
+    };
+    signed.map_err(|e| server_error(e.to_string()))
 }
 
 /// Build the `Set-Cookie` header value for the `assistant_session` JWT cookie.
@@ -344,7 +374,7 @@ async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::respo
             // Issue a refresh token so the CLI can maintain its session.
             let pair = match state
                 .oauth2_server
-                .issue_token_pair(&user_id, &client_id, scopes)
+                .issue_token_pair(&user_id, &client_id, scopes, req.resource.as_deref())
                 .await
             {
                 Ok(p) => p,
@@ -361,7 +391,9 @@ async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::respo
             };
 
             let ttl = state.jwt_manager.access_ttl_secs();
-            let jwt = match issue_access_jwt(&state, &user_id, &client_id).await {
+            let jwt = match issue_access_jwt(&state, &user_id, &client_id, req.resource.as_deref())
+                .await
+            {
                 Ok(t) => t,
                 Err(resp) => return resp,
             };

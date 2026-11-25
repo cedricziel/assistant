@@ -196,6 +196,10 @@ async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
             "009_org_oidc_configs",
             include_str!("../../../migrations/org/009_org_oidc_configs.sql"),
         ),
+        (
+            "010_oauth_resource_indicators",
+            include_str!("../../../migrations/org/010_oauth_resource_indicators.sql"),
+        ),
     ];
 
     for &(name, sql) in migrations {

@@ -69,6 +69,7 @@ mod tests {
                 user_id: user.into(),
                 client_id: "webui".into(),
                 scopes: vec![],
+                resource: None,
                 expires_at: Utc::now() + Duration::days(1),
                 consumed: false,
             })

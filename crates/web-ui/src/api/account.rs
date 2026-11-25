@@ -757,6 +757,7 @@ mod tests {
             user_id: user_id.into(),
             client_id: "test".into(),
             scopes: vec![],
+            resource: None,
             expires_at: chrono::Utc::now() + chrono::Duration::days(30),
             consumed: false,
         }

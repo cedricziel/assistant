@@ -107,6 +107,8 @@ pub struct ServerMetadata {
     pub grant_types_supported: Vec<String>,
     pub token_endpoint_auth_methods_supported: Vec<String>,
     pub code_challenge_methods_supported: Vec<String>,
+    /// Scopes an OAuth client can request.
+    pub scopes_supported: Vec<String>,
 }
 
 /// GET /.well-known/oauth-authorization-server
@@ -140,5 +142,6 @@ pub async fn metadata(State(state): State<OAuthState>) -> Json<ServerMetadata> {
             "client_secret_basic".into(),
         ],
         code_challenge_methods_supported: vec!["S256".into()],
+        scopes_supported: vec!["mcp:execute".into()],
     })
 }
