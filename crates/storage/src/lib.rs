@@ -67,7 +67,8 @@ pub use conversation_events::{
     RunBroadcaster, SqliteConversationEventStore,
 };
 pub use conversations::{
-    ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
+    ConversationPatch, ConversationRecord, ConversationStore, InMemoryConversationStore,
+    MetadataUpdate, SqliteConversationStore,
 };
 pub use integration_store::{
     SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
@@ -471,6 +472,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "045_skill_executions",
             include_str!("../../../migrations/045_skill_executions.sql"),
+        ),
+        (
+            "052_conversation_pinned_at",
+            include_str!("../../../migrations/052_conversation_pinned_at.sql"),
         ),
     ];
 
