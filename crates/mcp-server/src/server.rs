@@ -10,9 +10,9 @@ use rmcp::model::{
     ContentBlock, GetPromptRequestParams, GetPromptResponse, Implementation, ListPromptsResult,
     ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
     ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
-    ServerConfig, Tool,
+    ServerConfig, SubscriptionFilter, Tool,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{NotificationContext, RequestContext, SubscriptionContext};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 use tracing::warn;
@@ -26,6 +26,7 @@ use assistant_storage::{SkillCatalog, SkillRegistry};
 use assistant_tool_executor::install_skill_from_source;
 
 use crate::identity::{Caller, resolve_caller};
+use crate::listeners::ListChangeListeners;
 use crate::{prompts, resources};
 
 const RUN_PROMPT: &str = "run-prompt";
@@ -48,6 +49,7 @@ pub struct AssistantMcpServer {
     policy: PermissionPolicy,
     user_skills_dir: PathBuf,
     install_registry: Option<Arc<SkillRegistry>>,
+    listeners: ListChangeListeners,
 }
 
 impl AssistantMcpServer {
@@ -65,6 +67,7 @@ impl AssistantMcpServer {
             policy,
             user_skills_dir,
             install_registry: None,
+            listeners: ListChangeListeners::default(),
         }
     }
 
@@ -149,6 +152,7 @@ impl AssistantMcpServer {
                 warn!(source, error = %e, "install_skill failed");
                 ErrorData::internal_error(e.to_string(), None)
             })?;
+        self.listeners.notify_all_changed().await;
         Ok(text_result(format!("Skill '{name}' installed.")))
     }
 }
@@ -181,8 +185,11 @@ pub(crate) fn server_info() -> ServerConfig {
         ServerCapabilities::builder()
             .enable_completions()
             .enable_prompts()
+            .enable_prompts_list_changed()
             .enable_resources()
+            .enable_resources_list_changed()
             .enable_tools()
+            .enable_tool_list_changed()
             .build(),
     )
     .with_server_info(Implementation::new(
@@ -326,5 +333,28 @@ impl ServerHandler for AssistantMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
         prompts::complete(self.catalog.as_ref(), &request).await
+    }
+
+    fn accepted_subscription_filter(
+        &self,
+        _requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        // rmcp narrows this to what the client requested.
+        Some(
+            SubscriptionFilter::builder()
+                .tools_list_changed()
+                .prompts_list_changed()
+                .resources_list_changed()
+                .build(),
+        )
+    }
+
+    async fn listen(&self, subscription: SubscriptionContext) -> Result<(), ErrorData> {
+        self.listeners.listen(subscription).await;
+        Ok(())
+    }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
+        self.listeners.add_legacy_peer(context.peer).await;
     }
 }

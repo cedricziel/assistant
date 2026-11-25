@@ -25,7 +25,7 @@ Each numbered group is one PR in the stack, in order.
 
 - [x] 4.1 Add failing tests for `prompts/list`, `prompts/get` with and without `input`, and `completion/complete` for prompt names and the skill template; confirm red
 - [x] 4.2 Implement prompts and completions from the skill catalog and verify the tests pass
-- [ ] 4.3 Add a failing test: a client listening for tool and prompt list changes receives notifications after `install-skill`; implement change fan-out and verify it passes
+- [x] 4.3 Add a failing test: a client listening for tool and prompt list changes receives notifications after `install-skill`; implement change fan-out and verify it passes
 - [ ] 4.4 Add failing tests for `run-prompt` progress notifications with a progress token and turn cancellation on request cancel (using `StubOrchestrationEngine`); implement and verify they pass
 
 ## 5. Audience-bound tokens and `mcp:execute` (PR 5)
