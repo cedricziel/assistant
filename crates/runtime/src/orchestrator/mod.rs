@@ -249,6 +249,14 @@ pub struct Orchestrator {
     /// The skill loaded via `load-skill` in the current turn (for tracing).
     /// Reset at the start of each turn.
     pub(crate) active_skill: tokio::sync::RwLock<Option<String>>,
+    /// Per-conversation settings from slash commands (`/model`). Shared with
+    /// the command contexts of every interface.
+    pub(crate) conversation_configs:
+        Arc<tokio::sync::RwLock<HashMap<Uuid, assistant_core::ConversationConfig>>>,
+    /// Providers built for `/model` overrides, by model name.
+    pub(crate) model_providers: std::sync::Mutex<HashMap<String, Arc<dyn LlmProvider>>>,
+    /// Provider settings an override model is combined with.
+    pub(crate) llm_config: assistant_core::types::llm::LlmConfig,
     /// Learning configuration for autonomous skill creation and improvement.
     pub(crate) learning_config: assistant_core::types::features::LearningConfig,
     /// Clock used for timestamp generation on persisted records and for
@@ -309,6 +317,9 @@ impl Orchestrator {
             adapter_registry: crate::AdapterRegistry::new(),
             audio_store: None,
             active_skill: tokio::sync::RwLock::new(None),
+            conversation_configs: Arc::default(),
+            model_providers: std::sync::Mutex::default(),
+            llm_config: config.llm.clone(),
             learning_config: config.learning.clone(),
             clock: Arc::new(assistant_core::clock::SystemClock),
         }
@@ -411,6 +422,44 @@ impl Orchestrator {
     ) -> Self {
         self.permission_policy = policy;
         self
+    }
+
+    /// Per-conversation settings set by slash commands. Pass this to
+    /// [`CommandContext`](crate::CommandContext) so `/model` reaches turns.
+    pub fn conversation_configs(
+        &self,
+    ) -> Arc<tokio::sync::RwLock<HashMap<Uuid, assistant_core::ConversationConfig>>> {
+        Arc::clone(&self.conversation_configs)
+    }
+
+    /// The provider a turn of `conversation_id` runs on: the default, or one
+    /// for the model its `/model` override names.
+    async fn llm_for(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
+        let model = self
+            .conversation_configs
+            .read()
+            .await
+            .get(&conversation_id)
+            .and_then(|config| config.model_override.clone());
+        let Some(model) = model.filter(|m| m != self.llm.model_name()) else {
+            return Ok(Arc::clone(&self.llm));
+        };
+
+        let mut providers = self
+            .model_providers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(provider) = providers.get(&model) {
+            return Ok(Arc::clone(provider));
+        }
+        let provider =
+            assistant_llm_provider::create_provider(&assistant_core::types::llm::LlmConfig {
+                model: model.clone(),
+                ..self.llm_config.clone()
+            })
+            .map_err(|e| anyhow::anyhow!("cannot use model '{model}': {e}"))?;
+        providers.insert(model, Arc::clone(&provider));
+        Ok(provider)
     }
 
     /// Attach a confirmation callback (used by the CLI interface).
@@ -682,7 +731,8 @@ impl Orchestrator {
 
         // 4. Load global tool specs and merge with extensions.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
-        let provider_caps = self.llm.capabilities();
+        let llm = self.llm_for(conversation_id).await?;
+        let provider_caps = llm.capabilities();
         let global_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
         let all_specs: Vec<ToolSpec> = ext_specs
             .iter()
@@ -716,7 +766,7 @@ impl Orchestrator {
                 if crate::compaction::should_compact(estimated, &self.compaction_config) {
                     crate::compaction::maybe_compact(
                         &mut history,
-                        &self.llm,
+                        &llm,
                         &self.compaction_config,
                         Some((&conv_store, conversation_id)),
                     )
@@ -748,7 +798,7 @@ impl Orchestrator {
 
             let mut llm_span = crate::otel_spans::start_llm_span(
                 conversation_id,
-                self.llm.as_ref(),
+                llm.as_ref(),
                 iteration,
                 &turn_cx,
                 self.trace_content,
@@ -770,8 +820,7 @@ impl Orchestrator {
                         let _ = oe_sink_clone.send(event).await;
                     }
                 });
-                let result = self
-                    .llm
+                let result = llm
                     .chat_streaming(&system_prompt, &history, &all_specs, Some(chunk_tx))
                     .await;
                 // Wait for the forwarding task to drain any buffered tokens before
@@ -779,7 +828,7 @@ impl Orchestrator {
                 forward_handle.await.ok();
                 result
             } else {
-                self.llm.chat(&system_prompt, &history, &all_specs).await
+                llm.chat(&system_prompt, &history, &all_specs).await
             };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
@@ -802,7 +851,7 @@ impl Orchestrator {
                 Some((
                     &self.metrics,
                     &self.agent_id,
-                    self.llm.provider_name(),
+                    llm.provider_name(),
                     llm_elapsed,
                 )),
             );
@@ -815,7 +864,7 @@ impl Orchestrator {
             {
                 crate::compaction::maybe_compact(
                     &mut history,
-                    &self.llm,
+                    &llm,
                     &self.compaction_config,
                     Some((&conv_store, conversation_id)),
                 )
@@ -1087,7 +1136,8 @@ impl Orchestrator {
             .await?;
 
         // 4. Load all registered tool specs.
-        let provider_caps = self.llm.capabilities();
+        let llm = self.llm_for(conversation_id).await?;
+        let provider_caps = llm.capabilities();
         let tool_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
 
         // 5. Build the system prompt fresh from disk.
@@ -1111,7 +1161,7 @@ impl Orchestrator {
                 if crate::compaction::should_compact(estimated, &self.compaction_config) {
                     crate::compaction::maybe_compact(
                         &mut history,
-                        &self.llm,
+                        &llm,
                         &self.compaction_config,
                         Some((&conv_store, conversation_id)),
                     )
@@ -1144,7 +1194,7 @@ impl Orchestrator {
 
             let mut llm_span = crate::otel_spans::start_llm_span(
                 conversation_id,
-                self.llm.as_ref(),
+                llm.as_ref(),
                 iteration,
                 &turn_cx,
                 self.trace_content,
@@ -1166,8 +1216,7 @@ impl Orchestrator {
                         let _ = oe_sink_clone.send(event).await;
                     }
                 });
-                let result = self
-                    .llm
+                let result = llm
                     .chat_streaming(&system_prompt, &history, &tool_specs, Some(chunk_tx))
                     .instrument(iteration_span.clone())
                     .await;
@@ -1176,8 +1225,7 @@ impl Orchestrator {
                 forward_handle.await.ok();
                 result
             } else {
-                self.llm
-                    .chat(&system_prompt, &history, &tool_specs)
+                llm.chat(&system_prompt, &history, &tool_specs)
                     .instrument(iteration_span.clone())
                     .await
             };
@@ -1209,7 +1257,7 @@ impl Orchestrator {
                 Some((
                     &self.metrics,
                     &self.agent_id,
-                    self.llm.provider_name(),
+                    llm.provider_name(),
                     llm_elapsed,
                 )),
             );
@@ -1220,7 +1268,7 @@ impl Orchestrator {
             {
                 crate::compaction::maybe_compact(
                     &mut history,
-                    &self.llm,
+                    &llm,
                     &self.compaction_config,
                     Some((&conv_store, conversation_id)),
                 )
