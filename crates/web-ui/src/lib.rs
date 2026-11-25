@@ -293,7 +293,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         config.llm.base_url = base_url;
     }
 
-    let _otel_guard = init_tracing(storage.pool.clone(), &config.observability).await?;
+    let _otel_guard = init_tracing()?;
 
     // -- VAPID key provisioning (once, at startup) ---------------------------
     //

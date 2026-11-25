@@ -6,11 +6,9 @@
 
 use std::time::Duration;
 
-use assistant_core::types::observability::{ObservabilityConfig, OtelExporter};
 use assistant_runtime::telemetry::init_tracing;
 use opentelemetry::global;
 use opentelemetry::trace::{Tracer, TracerProvider};
-use sqlx::SqlitePool;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -33,20 +31,7 @@ async fn sdk_disabled_suppresses_otlp_export() {
         std::env::set_var("OTEL_SDK_DISABLED", "true");
     }
 
-    let pool = SqlitePool::connect("sqlite::memory:")
-        .await
-        .expect("in-memory sqlite pool");
-
-    // `exporter = "sqlite"` too, so this also pins that OTEL_SDK_DISABLED
-    // takes precedence over the config file, not just over the env vars.
-    let observability = ObservabilityConfig {
-        exporter: OtelExporter::Sqlite,
-        trace_content: false,
-    };
-
-    let guard = init_tracing(pool, &observability)
-        .await
-        .expect("init_tracing must succeed when the SDK is disabled");
+    let guard = init_tracing().expect("init_tracing must succeed when the SDK is disabled");
 
     assert!(
         guard.is_none(),

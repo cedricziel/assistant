@@ -453,9 +453,15 @@ fn check_interfaces(config: &AssistantConfig) -> CheckResult {
     result
 }
 
-fn check_observability(config: &AssistantConfig) -> CheckResult {
-    let exporter = &config.observability.exporter;
-    CheckResult::ok("Observability", format!("Local exporter: {exporter:?}"))
+fn check_observability() -> CheckResult {
+    if assistant_runtime::telemetry::otlp_export_enabled() {
+        CheckResult::ok("Observability", "OTLP export enabled")
+    } else {
+        CheckResult::skipped(
+            "Observability",
+            "OTLP export off (set OTEL_EXPORTER_OTLP_ENDPOINT to enable)",
+        )
+    }
 }
 
 fn check_learning(config: &AssistantConfig) -> CheckResult {
@@ -569,7 +575,7 @@ pub async fn cmd_doctor(
         check_skill_directories(config, assistant_dir),
         check_message_bus(config),
         check_interfaces(config),
-        check_observability(config),
+        check_observability(),
         check_learning(config),
     ];
 

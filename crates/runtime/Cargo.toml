@@ -9,7 +9,6 @@ description = "ReAct orchestrator and safety gate for the assistant runtime"
 assistant-core = { path = "../core" }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-storage = { path = "../storage" }
-opentelemetry-exporter-sqlite = { path = "../opentelemetry-exporter-sqlite" }
 assistant-skills = { path = "../skills" }
 assistant-tool-executor = { path = "../tool-executor" }
 assistant-transcription = { path = "../transcription" }
@@ -32,7 +31,6 @@ cron = { workspace = true }
 # bootstrap helpers
 dirs = { workspace = true }
 toml = { workspace = true }
-sqlx = { workspace = true }
 sha2 = { workspace = true }
 reqwest = { workspace = true }
 hmac = { workspace = true }
@@ -43,6 +41,7 @@ base64 = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]
+sqlx = { workspace = true }
 wiremock = { workspace = true }
 # Decompress gzipped OTLP payloads in tests/otlp_env_config.rs.
 flate2 = { workspace = true }
