@@ -2429,7 +2429,7 @@
           "integrations"
         ],
         "summary": "`POST /api/integrations/{id}/test` — connect and list the tools.",
-        "description": "Uses the credential the caller's turns would use: the shared one, or their\nown for a per-user integration. A personal integration can be tested only\nby its owner. A failed connection is still a `200` with `ok: false` and the\nerror, and marks the integration `unreachable` until a connection works.",
+        "description": "Uses the credential the caller's turns would use: the shared one, or their\nown for a per-user integration. A personal integration can be tested only\nby its owner. A failed connection is still a `200` with `ok: false` and the\nerror, and marks the integration `unreachable` until a connection works.\nThe error names a kind (`HTTP <status>`, `timeout`, `connection failed`,\n`protocol error`), never the raw transport error. An integration can be\ntested once every few seconds per caller (`429` with `Retry-After`).",
         "operationId": "test_integration",
         "parameters": [
           {
@@ -2485,6 +2485,26 @@
           },
           "422": {
             "description": "The integration cannot be used by the caller now: disabled, blocked by policy, or no usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Tested again too soon; wait the number of seconds in `Retry-After`",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "Seconds until the integration may be tested again"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
