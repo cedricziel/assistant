@@ -3028,4 +3028,199 @@ void main() {
       expect(notifier.needsReconnect, isFalse);
     });
   });
+
+  // -- Stream event parity ----------------------------------------------------
+  //
+  // The text, voice and replay paths all consume the same SSE event
+  // vocabulary; the timeline they build must not depend on which path
+  // delivered the events.
+
+  group('ChatNotifier — stream event parity across paths', () {
+    final subagentEvents = <StreamEvent>[
+      SubagentStartedEvent.fromJson({'agent_id': 'a1', 'task': 'Research'}),
+      const SubagentTokenEvent(agentId: 'a1', content: 'partial '),
+      const SubagentTokenEvent(agentId: 'a1', content: 'answer'),
+      const SubagentThinkingEvent(agentId: 'a1', content: 'hmm'),
+      const SubagentToolResultEvent(
+        agentId: 'a1',
+        toolName: 'web-fetch',
+        status: 'ok',
+        result: 'page body',
+      ),
+      const SubagentStatusEvent(agentId: 'a1', message: 'working'),
+    ];
+
+    final timelineEvents = <StreamEvent>[
+      const ThinkingEvent('reasoning'),
+      const StatusEvent('Running tool: web-search'),
+      const ToolResultEvent(toolName: 'web-search', status: 'ok'),
+      ...subagentEvents,
+      SubagentCompletedEvent.fromJson({
+        'agent_id': 'a1',
+        'status': 'ok',
+        'summary': 'done researching',
+      }),
+    ];
+
+    Future<void> deliver(
+      WidgetTester tester,
+      StreamController<StreamEvent> ctrl,
+      Iterable<StreamEvent> events,
+    ) async {
+      await tester.runAsync(() async {
+        for (final event in events) {
+          ctrl.add(event);
+          await Future<void>.delayed(Duration.zero);
+        }
+      });
+      await tester.pump();
+    }
+
+    testWidgets('text path: subagent token, thinking and tool-result events '
+        'reach the subagent timeline entry', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('go'));
+      await tester.pump();
+      await deliver(tester, ctrl, subagentEvents);
+
+      final entry = notifier.state.value!.messages.firstWhere(
+        (m) => m.timelineType == TimelineEntryType.subagent,
+      );
+      expect(entry.subagentContent, 'partial answer');
+      expect(entry.subagentThinking, 'hmm');
+      expect(entry.subagentToolCalls.map((c) => c.toolName), ['web-fetch']);
+
+      ctrl
+        ..add(const DoneEvent(role: 'assistant', content: 'done'))
+        ..close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+      'voice path: subagent events reach the subagent timeline entry',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueVoiceStream();
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(
+          notifier.sendVoiceMessage(
+            Uint8List.fromList([1, 2, 3]),
+            'audio/webm',
+          ),
+        );
+        await tester.pump();
+        await deliver(tester, ctrl, subagentEvents);
+
+        final entry = notifier.state.value!.messages.firstWhere(
+          (m) => m.timelineType == TimelineEntryType.subagent,
+        );
+        expect(entry.subagentContent, 'partial answer');
+        expect(entry.subagentThinking, 'hmm');
+        expect(entry.subagentToolCalls.map((c) => c.toolName), ['web-fetch']);
+
+        ctrl
+          ..add(const DoneEvent(role: 'assistant', content: 'done'))
+          ..close();
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'replay path: thinking and subagent events reach the timeline',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl1 = fakeApi.enqueueStream();
+        fakeApi.enqueueReplayStream()
+          ..add(const ThinkingEvent('reasoning'))
+          ..add(SubagentStartedEvent.fromJson({'agent_id': 'a1', 'task': 'T'}))
+          ..add(const SubagentTokenEvent(agentId: 'a1', content: 'tok'))
+          ..add(const DoneEvent(role: 'assistant', content: 'ok'))
+          ..close();
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('ping'));
+        await tester.pump();
+        await tester.runAsync(() async {
+          ctrl1.add(const RunStartedEvent('run-abc'));
+          await Future<void>.delayed(Duration.zero);
+          ctrl1.addError(const SocketException('network drop'));
+          await ctrl1.close();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pumpAndSettle();
+
+        final msgs = notifier.state.value!.messages;
+        expect(
+          msgs.where((m) => m.timelineType == TimelineEntryType.thinking),
+          isNotEmpty,
+          reason: 'replayed ThinkingEvent should produce a thinking entry',
+        );
+        final entry = msgs.firstWhere(
+          (m) => m.timelineType == TimelineEntryType.subagent,
+        );
+        expect(entry.subagentContent, 'tok');
+      },
+    );
+
+    testWidgets('text and voice paths build identical timelines', (
+      tester,
+    ) async {
+      List<String> snapshot(ChatState s) => [
+        for (final m in s.messages)
+          if (m.timelineType != TimelineEntryType.message)
+            [
+              m.timelineType.name,
+              m.thinkingContent,
+              m.subagentId,
+              m.subagentSummary,
+              m.subagentContent,
+              m.subagentThinking,
+              m.subagentToolCalls.map((c) => '${c.toolName}:${c.status}'),
+              m.toolCalls.map((c) => '${c.toolName}:${c.status}'),
+              m.isStreaming,
+            ].join('|'),
+      ];
+
+      final textApi = _FakeApiClient();
+      final textCtrl = textApi.enqueueStream();
+      final textNotifier = await _pumpTestApp(tester, textApi);
+      unawaited(textNotifier.sendMessage('go'));
+      await tester.pump();
+      await deliver(tester, textCtrl, timelineEvents);
+      final textSnapshot = snapshot(textNotifier.state.value!);
+      textCtrl
+        ..add(const DoneEvent(role: 'assistant', content: 'done'))
+        ..close();
+      await tester.pumpAndSettle();
+
+      // Tear down the first scope so the voice run starts from a fresh state.
+      await tester.pumpWidget(const SizedBox());
+
+      final voiceApi = _FakeApiClient();
+      final voiceCtrl = voiceApi.enqueueVoiceStream();
+      final voiceNotifier = await _pumpTestApp(tester, voiceApi);
+      unawaited(
+        voiceNotifier.sendVoiceMessage(
+          Uint8List.fromList([1, 2, 3]),
+          'audio/webm',
+        ),
+      );
+      await tester.pump();
+      await deliver(tester, voiceCtrl, timelineEvents);
+      final voiceSnapshot = snapshot(voiceNotifier.state.value!);
+      voiceCtrl
+        ..add(const DoneEvent(role: 'assistant', content: 'done'))
+        ..close();
+      await tester.pumpAndSettle();
+
+      expect(textSnapshot, isNotEmpty);
+      expect(voiceSnapshot, textSnapshot);
+    });
+  });
 }
