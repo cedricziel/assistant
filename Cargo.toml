@@ -114,7 +114,7 @@ opentelemetry-appender-tracing = "0.33"
 opentelemetry-semantic-conventions = { version = "0.33", features = ["semconv_experimental"] }
 # CLI / config
 clap = { version = "4", features = ["derive", "env"] }
-dirs = "6"
+dirs = "7"
 toml = "1.1"
 # HTTP server
 axum = { version = "0.8", features = ["macros", "multipart"] }
