@@ -13,21 +13,41 @@ use assistant_core::ToolHandler;
 use assistant_interfaces::{
     MatrixInterface, MattermostInterface, NextcloudInterface, SignalInterface, SlackInterface,
 };
-use assistant_runtime::{InterfaceRunner, Orchestrator};
-use assistant_storage::StorageLayer;
+use assistant_runtime::{InterfaceRunner, Orchestrator, SpaceRuntime, SpaceRuntimes};
+use assistant_storage::OrgStorageLayer;
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::TranscriptionProvider;
+use assistant_web_ui::install::DefaultSpace;
 
+use crate::space_binding::{SpaceBinding, messenger_space};
 use crate::wiring::{Messenger, RunMode};
 
 /// Shared inputs every messenger is built from.
 pub struct MessengerDeps<'a> {
     pub config: &'a assistant_core::types::agent::AssistantConfig,
-    pub orchestrator: Arc<Orchestrator>,
-    pub storage: Arc<StorageLayer>,
-    pub executor: Arc<ToolExecutor>,
+    pub runtimes: Arc<SpaceRuntimes>,
+    pub org_storage: Arc<OrgStorageLayer>,
+    pub default_space: DefaultSpace,
     pub transcription: Option<Arc<dyn TranscriptionProvider>>,
     pub transcription_language: Option<String>,
+}
+
+impl MessengerDeps<'_> {
+    /// The space `messenger` is bound to, and its runtime.
+    pub async fn bound_space(&self, messenger: Messenger) -> Result<SpaceBinding> {
+        messenger_space(&self.org_storage, messenger.key(), &self.default_space).await
+    }
+
+    async fn runtime_for(&self, messenger: Messenger) -> Result<Arc<SpaceRuntime>> {
+        let binding = self.bound_space(messenger).await?;
+        info!(
+            interface = messenger.key(),
+            org = %binding.org_slug,
+            space = %binding.space_slug,
+            "messenger bound to space"
+        );
+        Ok(binding.space_ref(&self.runtimes).await?.runtime)
+    }
 }
 
 struct Built {
@@ -68,14 +88,21 @@ macro_rules! with_transcription {
     }};
 }
 
-fn build(messenger: Messenger, deps: &MessengerDeps<'_>, mode: RunMode) -> Result<Built> {
-    let orch = deps.orchestrator.clone();
+fn build(
+    messenger: Messenger,
+    deps: &MessengerDeps<'_>,
+    runtime: &SpaceRuntime,
+    mode: RunMode,
+) -> Result<Built> {
+    let orch = runtime.orchestrator.clone();
     let missing = || not_configured(messenger);
     let built = match messenger {
         Messenger::Slack => {
             let cfg = deps.config.slack.clone().with_context(missing)?;
-            let iface =
-                with_transcription!(SlackInterface::new(cfg, orch, deps.storage.clone()), deps);
+            let iface = with_transcription!(
+                SlackInterface::new(cfg, orch, runtime.storage.clone()),
+                deps
+            );
             Built {
                 ambient_tools: iface.ambient_tools(),
                 runner: Box::new(iface),
@@ -145,9 +172,10 @@ fn spawn_workers(orchestrator: &Arc<Orchestrator>, messenger: Messenger, mode: R
 /// Run `messenger` as the whole process: register its tools, spawn its
 /// workers and block on the interface until it stops.
 pub async fn run_dedicated(messenger: Messenger, deps: &MessengerDeps<'_>) -> Result<()> {
-    let built = build(messenger, deps, RunMode::Dedicated)?;
-    register_ambient_tools(&deps.executor, built.ambient_tools);
-    spawn_workers(&deps.orchestrator, messenger, RunMode::Dedicated);
+    let runtime = deps.runtime_for(messenger).await?;
+    let built = build(messenger, deps, &runtime, RunMode::Dedicated)?;
+    register_ambient_tools(&runtime.executor, built.ambient_tools);
+    spawn_workers(&runtime.orchestrator, messenger, RunMode::Dedicated);
     info!("Starting {}-only mode", messenger.display_name());
     built.runner.run().await
 }
@@ -161,8 +189,9 @@ pub async fn start_background(
     deps: &MessengerDeps<'_>,
     no_repl: bool,
 ) -> Result<Option<Result<()>>> {
-    let built = build(messenger, deps, RunMode::Background)?;
-    register_ambient_tools(&deps.executor, built.ambient_tools);
+    let runtime = deps.runtime_for(messenger).await?;
+    let built = build(messenger, deps, &runtime, RunMode::Background)?;
+    register_ambient_tools(&runtime.executor, built.ambient_tools);
 
     if no_repl && messenger.foreground_without_repl() {
         info!(
@@ -172,7 +201,7 @@ pub async fn start_background(
         return Ok(Some(built.runner.run().await));
     }
 
-    spawn_workers(&deps.orchestrator, messenger, RunMode::Background);
+    spawn_workers(&runtime.orchestrator, messenger, RunMode::Background);
     let name = messenger.display_name();
     tokio::spawn(async move {
         if let Err(e) = built.runner.run().await {
