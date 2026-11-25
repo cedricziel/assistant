@@ -114,6 +114,18 @@ impl OrgStorageLayer {
         super::interface_instance_store::SqliteInterfaceInstanceStore::new(self.pool.clone())
     }
 
+    /// Build a [`SqliteIntegrationStore`](super::integration_store::SqliteIntegrationStore).
+    pub fn integration_store(&self) -> super::integration_store::SqliteIntegrationStore {
+        super::integration_store::SqliteIntegrationStore::new(self.pool.clone())
+    }
+
+    /// Build a [`SqliteIntegrationCredentialStore`](super::integration_store::SqliteIntegrationCredentialStore).
+    pub fn integration_credential_store(
+        &self,
+    ) -> super::integration_store::SqliteIntegrationCredentialStore {
+        super::integration_store::SqliteIntegrationCredentialStore::new(self.pool.clone())
+    }
+
     /// Build a [`SqliteBindingStore`](super::binding_store::SqliteBindingStore).
     pub fn binding_store(&self) -> super::binding_store::SqliteBindingStore {
         super::binding_store::SqliteBindingStore::new(self.pool.clone())
