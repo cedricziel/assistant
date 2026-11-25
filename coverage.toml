@@ -47,7 +47,6 @@ crates = [
     #
     # Last measured (2026-05-18 via `make coverage`):
     "interface-cli",                     # 59.4% (delta -20.6%)
-    "mcp-client",                        # 78.7% (delta -1.3%)
 ]
 
 # Crates promoted off `report_only` and now ENFORCING the 80% floor.
@@ -71,6 +70,7 @@ crates = [
 #   runtime       (80.3%) — bootstrap, memory_indexer, scheduler/loop+prune, compaction chunked path, dispatch helpers, title_generator helpers, skill_learner format_history_for_judge, interface_trait default impls
 #   web-ui        (80.1%) — a2a handlers + routers, push.rs crypto (encrypt_payload, build_vapid_jwt, signing_key), oauth session_cookie + escape_html_attr, api/webhooks toggle/rotate/update, api/conversations PATCH/DELETE edge cases, api/skills get/update/delete edge cases, auth.rs login_html + parse_host_from_url + extract_cookie edge cases, lib.rs harden_agent_card + nats_reachable + resolve_base_url, api/mod.rs internal_error
 #   interfaces    (80.9%) — wiremock-driven tests for all 8 slack ambient skills (post/react/delete/update/list/get-history/lookup-user/send-dm), slack per-turn tools (reply/react/upload three-step flow), matrix tools (build_matrix_tools + reply handler), nextcloud runner (new/with_shutdown/with_transcription/run-error paths), mattermost tools success paths (full upload flow + already-exists branch), common.rs (rand_jitter + sleep_backoff cap/early-cancel)
+#   mcp-client    (93.1%) — wiremock-scripted Streamable HTTP server (connect/refresh/reconnect/shutdown/headers) + shell-script stdio server (env expansion)
 #   bus-nats      (86.0%) — un-ignored the testcontainers-based JetStream integration tests; start_nats now returns Option so they skip cleanly when Docker is unavailable. CI ubuntu-latest has Docker so these tests exercise publish/claim/claim_filtered/ack/nack/fail/consumer_for/parse_nats_message.
 
 # File path regex patterns excluded from coverage measurement.
