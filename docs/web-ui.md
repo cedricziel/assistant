@@ -198,18 +198,19 @@ Full OpenAPI spec is served at `/api/openapi.json`; Swagger UI at `/api/docs`.
 These endpoints implement the assistant's OAuth2 Authorization Server.
 See [authentication.md](authentication.md) for flow details.
 
-| Route                                     | Method   | Description                                       |
-| ----------------------------------------- | -------- | ------------------------------------------------- |
-| `/oauth/register`                         | POST     | Dynamic client registration (RFC 7591)            |
-| `/oauth/authorize`                        | GET      | Render login form or redirect to IdP (OIDC)       |
-| `/oauth/authorize`                        | POST     | Validate credentials, redirect with auth code     |
-| `/oauth/token`                            | POST     | Exchange auth code, refresh token, or device code |
-| `/oauth/device`                           | POST     | Initiate device code flow (RFC 8628)              |
-| `/oauth/device/verify`                    | GET/POST | User enters device code and authenticates         |
-| `/oauth/callback`                         | GET      | OIDC IdP callback (server as OIDC client)         |
-| `/oauth/complete`                         | GET      | Auth code delivery as JSON (Flutter web)          |
-| `/oauth/revoke`                           | POST     | Token revocation (RFC 7009)                       |
-| `/.well-known/oauth-authorization-server` | GET      | Server metadata (RFC 8414)                        |
+| Route                                     | Method   | Description                                                            |
+| ----------------------------------------- | -------- | ---------------------------------------------------------------------- |
+| `/oauth/register`                         | POST     | Dynamic client registration (RFC 7591)                                 |
+| `/oauth/authorize`                        | GET      | Render the email form, the password form, or redirect to the org's IdP |
+| `/oauth/authorize/identify`               | POST     | Find the org an email signs in to                                      |
+| `/oauth/authorize`                        | POST     | Validate one org's credentials, redirect with auth code                |
+| `/oauth/token`                            | POST     | Exchange auth code, refresh token, or device code                      |
+| `/oauth/device`                           | POST     | Initiate device code flow (RFC 8628)                                   |
+| `/oauth/device/verify`                    | GET/POST | User enters device code, org slug, and credentials                     |
+| `/oauth/callback`                         | GET      | Callback from the org's OIDC IdP (server as OIDC client)               |
+| `/oauth/complete`                         | GET      | Auth code delivery as JSON (Flutter web)                               |
+| `/oauth/revoke`                           | POST     | Token revocation (RFC 7009)                                            |
+| `/.well-known/oauth-authorization-server` | GET      | Server metadata (RFC 8414)                                             |
 
 ## Server-side management pages
 

@@ -47,7 +47,7 @@ There is no migration from the old single-user layout (`~/.assistant/assistant.d
 The assistant runs its own OAuth2 Authorization Server (`assistant-auth` crate). Two modes:
 
 - **Password mode** — local email/password credentials, server issues JWTs
-- **OIDC mode** — delegates authentication to an external IdP (Keycloak, Auth0, etc.), server still issues its own JWTs for authorization
+- **OIDC mode** — delegates authentication to an external IdP (Keycloak, Auth0, etc.), server still issues its own JWTs for authorization. Configured per org through `PUT /api/orgs/{id}/oidc` plus `auth_mode: "oidc"` on the org, not through server flags or `org.toml`. See `docs/authentication.md`.
 
 Key OAuth2 endpoints: `/oauth/authorize`, `/oauth/token`, `/oauth/register` (RFC 7591 dynamic client registration), `/oauth/device` (RFC 8628 device code flow), `/.well-known/oauth-authorization-server` (RFC 8414 metadata).
 
