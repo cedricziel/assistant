@@ -156,6 +156,10 @@ async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
             "004_catalog_interfaces_bindings",
             include_str!("../../../migrations/org/004_catalog_interfaces_bindings.sql"),
         ),
+        (
+            "006_integrations",
+            include_str!("../../../migrations/org/006_integrations.sql"),
+        ),
     ];
 
     for &(name, sql) in migrations {
@@ -215,5 +219,168 @@ mod tests {
         let layer = OrgStorageLayer::new_in_memory().await.unwrap();
         // Running migrations again should not fail.
         run_org_migrations(layer.pool()).await.unwrap();
+    }
+
+    // -- 006_integrations --
+
+    async fn seeded() -> OrgStorageLayer {
+        let layer = OrgStorageLayer::new_in_memory().await.unwrap();
+        for sql in [
+            "INSERT INTO organizations (id, name, slug) VALUES ('org_1', 'Acme', 'acme')",
+            "INSERT INTO users (id, org_id, email) VALUES ('usr_1', 'org_1', 'a@x.io')",
+            "INSERT INTO spaces (id, org_id, name, slug) VALUES ('sp_1', 'org_1', 'Eng', 'eng')",
+        ] {
+            sqlx::query(sql).execute(layer.pool()).await.unwrap();
+        }
+        layer
+    }
+
+    async fn insert_integration(
+        layer: &OrgStorageLayer,
+        id: &str,
+        layer_kind: &str,
+        space_id: Option<&str>,
+        owner: Option<&str>,
+        slug: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO integrations
+               (id, org_id, layer, space_id, owner_user_id, connect_url, slug, name,
+                auth_kind, credential_mode)
+             VALUES (?, 'org_1', ?, ?, ?, 'https://mcp.example.com', ?, 'Example', 'none', 'per_user')",
+        )
+        .bind(id)
+        .bind(layer_kind)
+        .bind(space_id)
+        .bind(owner)
+        .bind(slug)
+        .execute(layer.pool())
+        .await
+        .map(|_| ())
+    }
+
+    #[tokio::test]
+    async fn integrations_accept_a_valid_row_per_layer() {
+        let layer = seeded().await;
+        insert_integration(&layer, "int_o", "org", None, None, "linear")
+            .await
+            .unwrap();
+        insert_integration(&layer, "int_s", "space", Some("sp_1"), None, "linear")
+            .await
+            .unwrap();
+        insert_integration(&layer, "int_u", "user", None, Some("usr_1"), "linear")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn integrations_reject_layer_owner_mismatch() {
+        let layer = seeded().await;
+        insert_integration(&layer, "ok", "org", None, None, "ok")
+            .await
+            .unwrap();
+        let cases = [
+            ("space without space_id", "space", None, None),
+            ("space with owner", "space", Some("sp_1"), Some("usr_1")),
+            ("user without owner", "user", None, None),
+            ("user with space", "user", Some("sp_1"), Some("usr_1")),
+            ("org with space", "org", Some("sp_1"), None),
+            ("org with owner", "org", None, Some("usr_1")),
+            ("unknown layer", "team", None, None),
+        ];
+        for (name, kind, space, owner) in cases {
+            let res = insert_integration(&layer, "bad", kind, space, owner, "bad").await;
+            assert!(res.is_err(), "{name} must be rejected");
+        }
+    }
+
+    #[tokio::test]
+    async fn integrations_reject_duplicate_slug_within_layer_and_owner() {
+        let layer = seeded().await;
+        insert_integration(&layer, "a", "org", None, None, "linear")
+            .await
+            .unwrap();
+        assert!(
+            insert_integration(&layer, "b", "org", None, None, "linear")
+                .await
+                .is_err(),
+            "duplicate org-layer slug (NULL owners must still collide)"
+        );
+        insert_integration(&layer, "c", "space", Some("sp_1"), None, "linear")
+            .await
+            .unwrap();
+        assert!(
+            insert_integration(&layer, "d", "space", Some("sp_1"), None, "linear")
+                .await
+                .is_err()
+        );
+        insert_integration(&layer, "e", "user", None, Some("usr_1"), "linear")
+            .await
+            .unwrap();
+        assert!(
+            insert_integration(&layer, "f", "user", None, Some("usr_1"), "linear")
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_an_integration_cascades_to_children() {
+        let layer = seeded().await;
+        insert_integration(&layer, "int_o", "org", None, None, "linear")
+            .await
+            .unwrap();
+        for sql in [
+            "INSERT INTO integration_space_access (integration_id, space_id, mode) VALUES ('int_o', 'sp_1', 'allow')",
+            "INSERT INTO integration_credentials (integration_id, kind, ciphertext, nonce, key_id, updated_at)
+             VALUES ('int_o', 'header', x'00', x'00', 'k', '2026-01-01T00:00:00Z')",
+            "INSERT INTO integration_oauth_states (state_hash, integration_id, pkce_verifier_ct, pkce_verifier_nonce, pkce_verifier_key_id, created_at)
+             VALUES ('h', 'int_o', x'00', x'00', 'k', '2026-01-01T00:00:00Z')",
+        ] {
+            sqlx::query(sql).execute(layer.pool()).await.unwrap();
+        }
+        sqlx::query("DELETE FROM integrations WHERE id = 'int_o'")
+            .execute(layer.pool())
+            .await
+            .unwrap();
+        for sql in [
+            "SELECT COUNT(*) FROM integration_space_access",
+            "SELECT COUNT(*) FROM integration_credentials",
+            "SELECT COUNT(*) FROM integration_oauth_states",
+        ] {
+            let n: i64 = sqlx::query_scalar(sql)
+                .fetch_one(layer.pool())
+                .await
+                .unwrap();
+            assert_eq!(n, 0, "{sql} must be empty after cascade");
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_credential_is_unique_per_integration() {
+        let layer = seeded().await;
+        insert_integration(&layer, "int_o", "org", None, None, "linear")
+            .await
+            .unwrap();
+        let insert = "INSERT INTO integration_credentials (integration_id, subject_user_id, kind, ciphertext, nonce, key_id, updated_at)
+             VALUES ('int_o', ?, 'header', x'00', x'00', 'k', '2026-01-01T00:00:00Z')";
+        sqlx::query(insert)
+            .bind(None::<&str>)
+            .execute(layer.pool())
+            .await
+            .unwrap();
+        assert!(
+            sqlx::query(insert)
+                .bind(None::<&str>)
+                .execute(layer.pool())
+                .await
+                .is_err(),
+            "second shared credential (NULL subject) must collide"
+        );
+        sqlx::query(insert)
+            .bind("usr_1")
+            .execute(layer.pool())
+            .await
+            .unwrap();
     }
 }
