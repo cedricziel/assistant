@@ -11,6 +11,7 @@ description: >
 
 | File                                   | Trigger             | Purpose                                                                  |
 | -------------------------------------- | ------------------- | ------------------------------------------------------------------------ |
+| `.github/workflows/app-store.yml`      | `release: released` / `workflow_dispatch` | Submit a promoted release's TestFlight build to App Review (`fastlane ios submit`) |
 | `.github/workflows/ci.yml`             | push/PR to `main`   | Check, test, lint, format, visual regression, integration smoke          |
 | `.github/workflows/docker.yml`         | `workflow_dispatch` | Manual Docker build from source (dev/tag builds)                         |
 | `.github/workflows/release-please.yml` | push to `main`      | Release automation → binary matrix → Docker → OS packages → package repo |
@@ -25,6 +26,7 @@ Jobs run in parallel. Order of gates (fast → slow):
 3. **test** — `cargo test --workspace`.
 4. **visual-regression** — Playwright screenshot tests against the Flutter SPA served by the embedded binary. The Flutter web build comes from the `build-flutter-web` job (artifact `flutter-web-build`); cargo itself never runs Flutter. `continue-on-error: true`.
 5. **integration** — Smoke tests against live Ollama. `continue-on-error: true`, `timeout-minutes: 45`.
+6. **release-scripts** — `python3 -m unittest discover -s scripts` and `ruby app/fastlane/test/app_store_release_test.rb`. No apt deps.
 
 ## Principles
 
@@ -123,6 +125,7 @@ release-please → build-binaries (matrix, 6 targets) → build-docker → build
 - **build-docker**: downloads pre-built musl artifacts from `build-binaries` — does **not** rebuild from source. Multi-arch (amd64 + arm64), Alpine image via `docker/Dockerfile.assistant-alpine`.
 - **build-packages**: produces `.deb`, `.rpm`, `.apk` via `nfpm`.
 - **publish-repo**: orphan-commit strategy on `gh-pages` to keep APT/YUM/APK indices small.
+- Releases are cut as pre-releases (`"prerelease": true` in `release-please-config.json`); promoting one to a full release triggers `app-store.yml`.
 
 ## Action Version Pins
 

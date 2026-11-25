@@ -16,6 +16,17 @@ Set these in **Settings → Secrets and variables → Actions** in the GitHub re
 | `MATCH_PASSWORD`                      | Passphrase used to encrypt/decrypt certificates in the match repo    |
 | `MATCH_DEPLOY_KEY`                    | SSH private key with read access to the match certificate repo       |
 
+### Optional App Review Secrets
+
+`.github/workflows/app-store.yml` passes these to `ios submit`. Without them, App Store Connect keeps the review details it already has.
+
+| Secret                                                                                                  | Description                                                                                      |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `REVIEW_CONTACT_FIRST_NAME`, `REVIEW_CONTACT_LAST_NAME`, `REVIEW_CONTACT_PHONE`, `REVIEW_CONTACT_EMAIL` | The person App Review contacts. Set all four, or none is sent.                                   |
+| `REVIEW_DEMO_URL`, `REVIEW_DEMO_USER`, `REVIEW_DEMO_PASSWORD`                                           | The server and demo account App Review signs in with. Set all three, or no demo account is sent. |
+
+Set the demo secrets whenever you set the contact. Sending the contact without a demo account clears "Sign-in required", and App Review needs a server to sign in to.
+
 ### Creating an App Store Connect API Key
 
 1. Go to [App Store Connect → Users and Access → Integrations → App Store Connect API](https://appstoreconnect.apple.com/access/api)
@@ -24,6 +35,16 @@ Set these in **Settings → Secrets and variables → Actions** in the GitHub re
 4. Note the **Key ID** and **Issuer ID**
 5. Base64-encode the `.p8`: `base64 -i AuthKey_XXXXX.p8 | pbcopy`
 6. Set `APP_STORE_CONNECT_API_KEY_KEY` to the base64 output and `APP_STORE_CONNECT_API_KEY_IS_BASE64=true`
+
+## Release Flow
+
+1. release-please cuts every release as a GitHub pre-release. `release-please.yml` still builds and ships every artifact, and uploads the iOS build to TestFlight for internal testers, with the release notes as plain text in "What to Test".
+2. Promoting the pre-release to a full release in the GitHub UI starts `app-store.yml`. It runs `ios submit`, which attaches the version's existing TestFlight build (no rebuild), sets "What's New" from the release notes, and submits it for review. A version already waiting for review, in review or released is left alone. An older version still waiting for review is pulled back so the new one takes its place.
+3. After App Review approves the version, publish it by hand in App Store Connect.
+
+To submit any tag, run `app-store.yml` from the Actions tab with `tag` and `dry_run`. `dry_run` defaults to `true`: it updates the version and its notes without submitting.
+
+GitHub's "Latest" release moves only when a release is promoted. The desktop app's updater polls `/releases/latest`, so it sees a new version only after promotion.
 
 ## One-Time Setup
 
@@ -57,8 +78,8 @@ cd app
 # Upload a build to TestFlight
 bundle exec fastlane ios beta
 
-# Submit a build to App Store review
-bundle exec fastlane ios release
+# Send a version's TestFlight build to App Review (dry run: update notes only)
+bundle exec fastlane ios submit version:X.Y.Z dry_run:true
 ```
 
 Required env vars for local runs:
