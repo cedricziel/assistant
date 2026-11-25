@@ -129,6 +129,17 @@ pub trait OrgStore: Send + Sync {
     async fn list_orgs(&self) -> Result<Vec<Organization>>;
 }
 
+/// What a bearer token must still agree with on every request: the user's org
+/// and their session generation.
+///
+/// [`UserStore::bump_token_version`] advances the generation, which makes every
+/// access token signed under an older one invalid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionState {
+    pub org_id: OrgId,
+    pub token_version: u64,
+}
+
 /// User CRUD operations.
 #[async_trait]
 pub trait UserStore: Send + Sync {
@@ -139,6 +150,11 @@ pub trait UserStore: Send + Sync {
     async fn list_users(&self, org_id: &OrgId) -> Result<Vec<User>>;
     async fn update_user(&self, user: &User) -> Result<()>;
     async fn delete_user(&self, id: &UserId) -> Result<bool>;
+    /// The user's org and session generation, or `None` if the user is gone.
+    async fn session_state(&self, id: &UserId) -> Result<Option<SessionState>>;
+    /// Invalidate every access token issued to the user so far. Returns
+    /// `false` if the user does not exist.
+    async fn bump_token_version(&self, id: &UserId) -> Result<bool>;
 }
 
 /// Space CRUD operations.
@@ -281,6 +297,7 @@ impl OrgStore for InMemoryOrgStore {
 #[derive(Default)]
 pub struct InMemoryUserStore {
     users: Mutex<Vec<User>>,
+    token_versions: Mutex<HashMap<UserId, u64>>,
 }
 
 #[async_trait]
@@ -367,6 +384,48 @@ impl UserStore for InMemoryUserStore {
         let len_before = users.len();
         users.retain(|u| u.id != *id);
         Ok(users.len() < len_before)
+    }
+
+    async fn session_state(&self, id: &UserId) -> Result<Option<SessionState>> {
+        let Some(org_id) = self
+            .users
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|u| u.id == *id)
+            .map(|u| u.org_id.clone())
+        else {
+            return Ok(None);
+        };
+        let token_version = self
+            .token_versions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id)
+            .copied()
+            .unwrap_or(0);
+        Ok(Some(SessionState {
+            org_id,
+            token_version,
+        }))
+    }
+
+    async fn bump_token_version(&self, id: &UserId) -> Result<bool> {
+        let exists = self
+            .users
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|u| u.id == *id);
+        if exists {
+            *self
+                .token_versions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(id.clone())
+                .or_insert(0) += 1;
+        }
+        Ok(exists)
     }
 }
 
@@ -784,6 +843,51 @@ mod tests {
             role,
             created_at: now(),
         }
+    }
+
+    // -- UserStore session state --
+
+    #[tokio::test]
+    async fn session_state_of_unknown_user_is_none() {
+        let store = InMemoryUserStore::default();
+        let state = store.session_state(&UserId::from("ghost")).await.unwrap();
+        assert_eq!(state, None);
+    }
+
+    #[tokio::test]
+    async fn bump_token_version_advances_only_that_user() {
+        let store = InMemoryUserStore::default();
+        store
+            .create_user(&make_user("usr_a", "org_1", "a@acme.com"))
+            .await
+            .unwrap();
+        store
+            .create_user(&make_user("usr_b", "org_1", "b@acme.com"))
+            .await
+            .unwrap();
+
+        assert!(
+            store
+                .bump_token_version(&UserId::from("usr_a"))
+                .await
+                .unwrap()
+        );
+
+        let a = store.session_state(&UserId::from("usr_a")).await.unwrap();
+        let b = store.session_state(&UserId::from("usr_b")).await.unwrap();
+        assert_eq!(a.unwrap().token_version, 1, "bumped user advances");
+        assert_eq!(b.unwrap().token_version, 0, "other users are untouched");
+    }
+
+    #[tokio::test]
+    async fn bump_token_version_of_unknown_user_returns_false() {
+        let store = InMemoryUserStore::default();
+        assert!(
+            !store
+                .bump_token_version(&UserId::from("ghost"))
+                .await
+                .unwrap()
+        );
     }
 
     // -- OrgStore --

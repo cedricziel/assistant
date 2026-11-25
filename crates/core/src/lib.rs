@@ -58,7 +58,8 @@ pub use store::{
     InMemoryBindingStore, InMemoryCatalogItemStore, InMemoryCatalogSubscriptionStore,
     InMemoryInterfaceInstanceStore, InMemoryMembershipStore, InMemoryOrgStore, InMemorySpaceStore,
     InMemoryUserStore, InterfaceInstance, InterfaceInstanceStore, MembershipStore, OrgStore,
-    Organization, PersonaBinding, Space, SpaceMembership, SpaceStore, User, UserStore,
+    Organization, PersonaBinding, SessionState, Space, SpaceMembership, SpaceStore, User,
+    UserStore,
 };
 // -- LLM abstractions (types, traits, streaming) --
 pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};
