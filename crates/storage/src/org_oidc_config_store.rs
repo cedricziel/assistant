@@ -224,6 +224,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upsert_keeps_the_first_created_at() {
+        let layer = setup_with_org("org_1").await;
+        let store = layer.oidc_config_store();
+        let first = make_config("org_1", "https://old.example");
+        let mut second = make_config("org_1", "https://new.example");
+        second.created_at = first.created_at + chrono::Duration::hours(1);
+        store.upsert_oidc_config(&first).await.unwrap();
+        store.upsert_oidc_config(&second).await.unwrap();
+
+        let found = store
+            .get_oidc_config(&OrgId::from("org_1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.issuer_url, "https://new.example");
+        assert_eq!(
+            found.created_at, first.created_at,
+            "replacing a config must not move its creation time"
+        );
+    }
+
+    #[tokio::test]
     async fn delete_reports_whether_removed() {
         let layer = setup_with_org("org_1").await;
         let store = layer.oidc_config_store();

@@ -837,10 +837,15 @@ impl OrgOidcConfigStore for InMemoryOrgOidcConfigStore {
     }
 
     async fn upsert_oidc_config(&self, config: &OrgOidcConfig) -> Result<()> {
-        self.configs
+        let mut configs = self
+            .configs
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(config.org_id.clone(), config.clone());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut stored = config.clone();
+        if let Some(existing) = configs.get(&config.org_id) {
+            stored.created_at = existing.created_at;
+        }
+        configs.insert(config.org_id.clone(), stored);
         Ok(())
     }
 
@@ -1595,6 +1600,27 @@ mod tests {
         assert_eq!(
             found.issuer_url, "https://new.example",
             "second upsert should replace the first"
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_config_upsert_keeps_the_first_created_at() {
+        let store = InMemoryOrgOidcConfigStore::default();
+        let first = make_oidc_config("org_1", "https://old.example");
+        let mut second = make_oidc_config("org_1", "https://new.example");
+        second.created_at = first.created_at + chrono::Duration::hours(1);
+        store.upsert_oidc_config(&first).await.unwrap();
+        store.upsert_oidc_config(&second).await.unwrap();
+
+        let found = store
+            .get_oidc_config(&OrgId::from("org_1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.issuer_url, "https://new.example");
+        assert_eq!(
+            found.created_at, first.created_at,
+            "replacing a config must not move its creation time"
         );
     }
 
