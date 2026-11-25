@@ -216,6 +216,25 @@ pub struct StoredCredential {
     pub updated_at: DateTime<Utc>,
 }
 
+/// What the last connection attempts to an integration's MCP server showed,
+/// for one subject.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IntegrationHealth {
+    pub integration_id: String,
+    /// `None` is the shared credential, or an integration that needs none.
+    pub subject_user_id: Option<UserId>,
+    /// Whether the latest attempt connected.
+    pub reachable: bool,
+    /// The latest successful connection, kept across later failures.
+    pub last_connected_at: Option<DateTime<Utc>>,
+    /// Tools discovered by that connection.
+    pub tool_count: Option<u32>,
+    /// Why the latest attempt failed; `None` after a success.
+    pub last_error: Option<String>,
+    /// When the latest attempt happened.
+    pub checked_at: DateTime<Utc>,
+}
+
 /// Store-level failures callers map to specific API responses.
 #[derive(Debug, PartialEq, Eq)]
 pub enum IntegrationStoreError {
@@ -320,6 +339,36 @@ pub trait IntegrationCredentialStore: Send + Sync {
         expected_updated_at: DateTime<Utc>,
         credential: &StoredCredential,
     ) -> Result<bool>;
+}
+
+/// Connection health, one row per `(integration, subject)`. It is shared
+/// between the processes that connect (orchestrator, web test endpoint) and the
+/// one that reports status, and it never affects an integration's `updated_at`.
+#[async_trait]
+pub trait IntegrationHealthStore: Send + Sync {
+    /// A connection worked and found `tool_count` tools. Fails if the
+    /// integration does not exist.
+    async fn record_connected(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+        tool_count: u32,
+        at: DateTime<Utc>,
+    ) -> Result<()>;
+    /// A connection attempt failed; the last good connection is kept. Fails if
+    /// the integration does not exist.
+    async fn record_failed(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+        error: &str,
+        at: DateTime<Utc>,
+    ) -> Result<()>;
+    async fn get(
+        &self,
+        integration_id: &str,
+        subject: Option<&UserId>,
+    ) -> Result<Option<IntegrationHealth>>;
 }
 
 #[cfg(test)]

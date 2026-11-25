@@ -12,6 +12,7 @@ use assistant_storage::OrgStorageLayer;
 pub struct Fixture {
     pub store: Arc<dyn IntegrationStore>,
     pub credentials: Arc<dyn IntegrationCredentialStore>,
+    pub health: Arc<dyn IntegrationHealthStore>,
     /// Kept so the SQLite pool outlives the stores.
     pub layer: Option<OrgStorageLayer>,
 }
@@ -31,6 +32,7 @@ pub async fn sqlite() -> Fixture {
     Fixture {
         store: Arc::new(layer.integration_store()),
         credentials: Arc::new(layer.integration_credential_store()),
+        health: Arc::new(layer.integration_health_store()),
         layer: Some(layer),
     }
 }
@@ -38,9 +40,11 @@ pub async fn sqlite() -> Fixture {
 pub fn memory() -> Fixture {
     let store = InMemoryIntegrationStore::new();
     let credentials = store.credential_store();
+    let health = store.health_store();
     Fixture {
         store: Arc::new(store),
         credentials,
+        health,
         layer: None,
     }
 }
