@@ -19,6 +19,7 @@ use assistant_storage::{
 };
 use assistant_tool_executor::{ToolExecutor, ToolOverlay};
 use assistant_transcription::AudioStore;
+use async_trait::async_trait;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,
     trace::{Span as _, Status as OtelStatus, TraceContextExt, Tracer as _},
@@ -45,12 +46,70 @@ pub use stream_event::OrchestratorEvent;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+/// Which answers a [`ConfirmationCallback`] may offer the user.
+///
+/// The once answers (`AllowOnce`, `RejectOnce`) are always available; the
+/// "always" answers persist a rule and are offered only when the request
+/// carries a suggested rule to save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ApprovalOptions {
+    /// `AllowAlways` may be offered.
+    pub allow_always: bool,
+    /// `RejectAlways` may be offered.
+    pub reject_always: bool,
+}
+
+impl ApprovalOptions {
+    /// Offer only `AllowOnce` and `RejectOnce`.
+    pub const fn once_only() -> Self {
+        Self {
+            allow_always: false,
+            reject_always: false,
+        }
+    }
+
+    /// Whether neither "always" answer may be offered.
+    pub const fn is_once_only(&self) -> bool {
+        !self.allow_always && !self.reject_always
+    }
+}
+
+/// One tool call awaiting a human decision.
+pub struct ConfirmationRequest<'a> {
+    pub tool_name: &'a str,
+    pub params: &'a serde_json::Value,
+    pub ctx: &'a ExecutionContext,
+    /// Provider id of the call, when the turn streams one.
+    pub tool_call_id: Option<&'a str>,
+    /// Why the permission pipeline could not decide on its own.
+    pub reason: &'a str,
+    /// Which answers may be offered.
+    pub options: ApprovalOptions,
+    /// Stream sink for the turn, when it has one.
+    pub event_sink: Option<&'a mpsc::Sender<OrchestratorEvent>>,
+}
+
+/// A human's (or a timeout's) answer to a [`ConfirmationRequest`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationAnswer {
+    AllowOnce,
+    AllowAlways,
+    RejectOnce,
+    RejectAlways,
+    /// Nobody answered before the request timed out.
+    Expired,
+    /// The turn ended or was cancelled while the request was open.
+    Cancelled,
+}
+
 /// Callback trait for requesting user confirmation before executing a tool.
-/// Typically implemented by the CLI interface.
+///
+/// A runtime without a callback denies every call the pipeline leaves
+/// undecided.
+#[async_trait]
 pub trait ConfirmationCallback: Send + Sync {
-    /// Return `true` if the user confirms execution of `tool_name` with
-    /// `params`, or `false` to deny.
-    fn confirm(&self, tool_name: &str, params: &serde_json::Value) -> bool;
+    /// Ask for a decision on `req`. May wait for as long as the human takes.
+    async fn confirm(&self, req: ConfirmationRequest<'_>) -> ConfirmationAnswer;
 }
 
 /// Outcome of [`Orchestrator::cancel_turn`].

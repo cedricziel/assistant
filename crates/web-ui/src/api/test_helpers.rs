@@ -19,7 +19,6 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use assistant_core::types::agent::OrgConfig;
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_llm_provider::retry::RetryConfig;
-use assistant_runtime::bootstrap::AutoDenyConfirmation;
 use assistant_runtime::{OrgContexts, SpaceRuntimes};
 use assistant_storage::StorageLayer;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
@@ -196,9 +195,7 @@ pub(crate) async fn state_over_in(
         SpaceRuntimes::new(
             resolver.pools().clone(),
             Arc::new(OrgContexts::fixed(config, llm)),
-            Arc::new(AutoDenyConfirmation {
-                interface_name: "test",
-            }),
+            None,
         )
         .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
     );

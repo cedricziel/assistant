@@ -72,7 +72,6 @@ mod tests {
     use assistant_core::store::{OrgStore as _, Organization, Space, SpaceStore as _};
     use assistant_core::types::agent::OrgConfig;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
-    use assistant_runtime::bootstrap::AutoDenyConfirmation;
     use assistant_runtime::{OrgContexts, SpaceRuntimes, SpaceSupervisor};
     use assistant_storage::{
         ConversationStore as _, OrgPoolFactory, SqliteConversationStore, StorageLayer,
@@ -154,9 +153,7 @@ mod tests {
                     config,
                     Arc::new(ScriptedLlmProvider::new()),
                 )),
-                Arc::new(AutoDenyConfirmation {
-                    interface_name: "test",
-                }),
+                None,
             )
             .with_submit_timeout(20),
         );

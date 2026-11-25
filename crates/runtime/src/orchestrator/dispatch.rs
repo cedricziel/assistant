@@ -20,7 +20,10 @@ use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info, warn};
 use uuid::Uuid;
 
-use super::{DispatchOutcome, Orchestrator, OrchestratorEvent, value_to_params_map};
+use super::{
+    ApprovalOptions, ConfirmationAnswer, ConfirmationRequest, DispatchOutcome, Orchestrator,
+    OrchestratorEvent, value_to_params_map,
+};
 use crate::webhook_dispatch;
 
 /// Result of [`Orchestrator::finalize_tool_result`].
@@ -367,6 +370,7 @@ impl Orchestrator {
     /// text to return to the LLM in place of a tool result. Undecided calls
     /// defer to the confirmation callback on interactive turns and are denied
     /// on every other turn.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn authorize_tool_call(
         &self,
         name: &str,
@@ -374,6 +378,8 @@ impl Orchestrator {
         ctx: &ExecutionContext,
         requires_confirmation: bool,
         task_context: Option<&str>,
+        event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
+        tool_call_id: Option<&str>,
     ) -> Result<(), String> {
         let resolution = self
             .permission_policy
@@ -390,10 +396,27 @@ impl Orchestrator {
             && ctx.interactive
             && let Some(cb) = &self.confirmation_callback
         {
-            return if cb.confirm(name, params) {
-                Ok(())
-            } else {
-                Err(format!("User denied execution of '{name}'."))
+            let answer = cb
+                .confirm(ConfirmationRequest {
+                    tool_name: name,
+                    params,
+                    ctx,
+                    tool_call_id,
+                    reason: &resolution.decision.reason,
+                    options: ApprovalOptions::once_only(),
+                    event_sink,
+                })
+                .await;
+            return match answer {
+                ConfirmationAnswer::AllowOnce | ConfirmationAnswer::AllowAlways => Ok(()),
+                ConfirmationAnswer::RejectOnce
+                | ConfirmationAnswer::RejectAlways
+                | ConfirmationAnswer::Cancelled => {
+                    Err(format!("User denied execution of '{name}'."))
+                }
+                ConfirmationAnswer::Expired => Err(format!(
+                    "The approval request for '{name}' expired before the user answered, so it was not run."
+                )),
             };
         }
         resolution.refusal(name).map_or(Ok(()), Err)
@@ -430,7 +453,15 @@ impl Orchestrator {
             .is_some_and(|h| h.requires_confirmation());
 
         let authorization = self
-            .authorize_tool_call(name, params, ctx, requires_confirm, task_context(history))
+            .authorize_tool_call(
+                name,
+                params,
+                ctx,
+                requires_confirm,
+                task_context(history),
+                event_sink,
+                tool_call_id,
+            )
             .await;
         if let Err(observation) = authorization {
             info!(%observation);
