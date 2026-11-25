@@ -6,7 +6,7 @@ use axum::{
     Extension, Json,
     extract::{State, rejection::JsonRejection},
 };
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 
 use assistant_core::auth::AuthContext;
 use assistant_core::integrations::IntegrationPolicy;
@@ -71,7 +71,7 @@ pub async fn put_integration_policy(
         allowed_catalog_ids,
         allow_custom_urls: request.allow_custom_urls,
         allow_user_integrations: request.allow_user_integrations,
-        updated_at: Utc::now(),
+        updated_at: state.clock.now(),
     };
     state.store.put_policy(&policy).await?;
     Ok(Json(response(policy)))
@@ -92,7 +92,7 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::{Value, json};
 
-    use super::super::testing::{Harness, Who};
+    use super::super::testing::{Harness, Who, now};
 
     const OK: StatusCode = StatusCode::OK;
     const CREATED: StatusCode = StatusCode::CREATED;
@@ -194,6 +194,21 @@ mod tests {
         );
         assert!(put["updated_at"].is_string(), "{put}");
         assert_eq!(got, put);
+    }
+
+    #[tokio::test]
+    async fn the_policy_is_stamped_by_the_injected_clock() {
+        let h = Harness::new().await;
+
+        let (_, put) = h
+            .put(
+                Who::Admin,
+                "/api/integrations/policy",
+                policy("all", &[], false, true),
+            )
+            .await;
+
+        assert_eq!(put["updated_at"], json!(now()));
     }
 
     #[tokio::test]

@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use assistant_core::SpaceStore;
 use assistant_core::auth::AuthContext;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::integrations::catalog::{
     CatalogAuth, CatalogAuthKind, CatalogEntry, CatalogQuery,
 };
@@ -67,6 +68,7 @@ pub struct IntegrationsApiState {
     credentials: Arc<dyn IntegrationCredentialStore>,
     spaces: Arc<dyn SpaceStore>,
     effective: Arc<EffectiveIntegrations>,
+    clock: Arc<dyn Clock>,
 }
 
 impl IntegrationsApiState {
@@ -86,7 +88,14 @@ impl IntegrationsApiState {
             store,
             credentials,
             spaces: Arc::new(org_storage.space_store()),
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// Stamp created and updated rows from `clock` instead of the system clock.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 

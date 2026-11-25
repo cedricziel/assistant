@@ -10,7 +10,6 @@ use axum::{
     },
     http::{HeaderName, HeaderValue, StatusCode},
 };
-use chrono::Utc;
 
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::SpaceId;
@@ -233,7 +232,7 @@ async fn create(
         (_, None) => domain::CredentialMode::Shared,
     };
 
-    let now = Utc::now();
+    let now = state.clock.now();
     let integration = Integration {
         id: format!("int_{}", uuid::Uuid::new_v4()),
         org_id: ctx.org_id.clone(),
@@ -329,7 +328,7 @@ pub async fn update_integration(
     }
     let mut integration = visible.integration.clone();
     apply_update(&mut integration, request)?;
-    integration.updated_at = Utc::now();
+    integration.updated_at = state.clock.now();
     if !state.store.update(&integration).await? {
         return Err(ApiError::not_found("integration not found"));
     }
@@ -807,7 +806,7 @@ mod tests {
 
     use assistant_core::integrations::{CredentialStatus, IntegrationLayer, SpaceAccessMode};
 
-    use super::super::testing::{Harness, Who, eng};
+    use super::super::testing::{Harness, Who, eng, now};
 
     const OK: StatusCode = StatusCode::OK;
     const CREATED: StatusCode = StatusCode::CREATED;
@@ -1627,6 +1626,26 @@ mod tests {
         assert!(body["updated_at"] != body["created_at"]);
         let (_, stored) = h.get(Who::EngAdmin, "/api/integrations/int_space").await;
         assert_eq!(stored["name"], "Renamed");
+    }
+
+    #[tokio::test]
+    async fn timestamps_come_from_the_injected_clock() {
+        let h = world().await;
+
+        let (_, created) = h
+            .post(Who::Admin, "/api/integrations", linear("org", "linear"))
+            .await;
+        let (_, patched) = h
+            .patch(
+                Who::Admin,
+                "/api/integrations/int_org",
+                json!({"name": "New"}),
+            )
+            .await;
+
+        assert_eq!(created["created_at"], json!(now()));
+        assert_eq!(created["updated_at"], json!(now()));
+        assert_eq!(patched["updated_at"], json!(now()));
     }
 
     #[tokio::test]

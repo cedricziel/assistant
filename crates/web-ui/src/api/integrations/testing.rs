@@ -13,6 +13,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use assistant_core::auth::AuthContext;
+use assistant_core::clock::FakeClock;
 use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 use assistant_core::integrations::{
     CredentialKind, CredentialMode, CredentialStatus, Integration, IntegrationAuthKind,
@@ -95,6 +96,11 @@ pub fn eng() -> SpaceId {
     SpaceId::from("sp_eng")
 }
 
+/// The time the harness's clock stands at.
+pub fn now() -> DateTime<Utc> {
+    at(1_000)
+}
+
 pub fn at(secs: i64) -> DateTime<Utc> {
     Utc.timestamp_opt(1_700_000_000 + secs, 0).unwrap()
 }
@@ -113,7 +119,8 @@ impl Harness {
         let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
         seed_org(&org_storage).await;
         let state =
-            IntegrationsApiState::new(catalog_with_fixture(dir.path()).await, &org_storage, KEY_ID);
+            IntegrationsApiState::new(catalog_with_fixture(dir.path()).await, &org_storage, KEY_ID)
+                .with_clock(Arc::new(FakeClock::new(now())));
         Self {
             state,
             org_storage,
