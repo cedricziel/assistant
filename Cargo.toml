@@ -134,8 +134,6 @@ include_dir = "0.7"
 rust-embed = "8"
 # MIME type detection from file extension
 mime_guess = "2"
-# Type-safe compiled templates
-askama = "0.15"
 # SQL persistence
 sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio", "chrono", "uuid"] }
 # cron expression parsing
