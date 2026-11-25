@@ -32,6 +32,10 @@ use utoipa::{
         AuthorizationCode, ClientCredentials, Flow, HttpAuthScheme, HttpBuilder, OAuth2, Scopes,
         SecurityScheme,
     },
+    openapi::{
+        ObjectBuilder, RefOr, Required,
+        path::{Parameter, ParameterBuilder, ParameterIn},
+    },
 };
 
 use crate::a2a::handlers;
@@ -85,6 +89,68 @@ use crate::api::{
         WorkflowWebhookTriggerAccepted,
     },
 };
+
+/// Path prefixes of the data-plane routes, which act inside one space.
+const DATA_PLANE_PREFIXES: [&str; 10] = [
+    "/api/conversations",
+    "/api/quick-message",
+    "/api/attachments",
+    "/api/messages",
+    "/api/audio",
+    "/api/commands",
+    "/api/capabilities",
+    "/api/push",
+    "/api/webhooks",
+    "/api/workflows",
+];
+
+/// Documents the `X-Space-Id` header on every data-plane operation.
+struct SpaceSelectorAddon;
+
+impl Modify for SpaceSelectorAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        for (path, item) in openapi.paths.paths.iter_mut() {
+            let is_data_plane = DATA_PLANE_PREFIXES
+                .iter()
+                .any(|prefix| path == prefix || path.starts_with(&format!("{prefix}/")));
+            if !is_data_plane {
+                continue;
+            }
+            for operation in [
+                &mut item.get,
+                &mut item.put,
+                &mut item.post,
+                &mut item.delete,
+                &mut item.patch,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                operation
+                    .parameters
+                    .get_or_insert_with(Vec::new)
+                    .push(RefOr::T(space_header_parameter()));
+            }
+        }
+    }
+}
+
+fn space_header_parameter() -> Parameter {
+    ParameterBuilder::new()
+        .name("X-Space-Id")
+        .parameter_in(ParameterIn::Header)
+        .required(Required::False)
+        .description(Some(
+            "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when \
+             the caller holds a role in exactly one space. Clients that cannot set headers, \
+             such as the browser `EventSource`, may send the same value as the `space_id` \
+             query parameter.",
+        ))
+        .schema(Some(
+            ObjectBuilder::new().schema_type(utoipa::openapi::Type::String),
+        ))
+        .build()
+}
 
 /// Adds the Bearer token and OAuth2 security schemes to the OpenAPI components.
 struct SecuritySchemesAddon;
@@ -187,7 +253,7 @@ pub struct ApiErrorResponse {
                        The token is an OAuth2 access token issued by `/oauth/token`, or an API key (`ask_live_...`).",
         license(name = "MIT", identifier = "MIT"),
     ),
-    modifiers(&SecuritySchemesAddon),
+    modifiers(&SecuritySchemesAddon, &SpaceSelectorAddon),
     paths(
         crate::api::capabilities::get_capabilities,
         crate::api::conversations::list_conversations,
@@ -685,6 +751,56 @@ mod tests {
             missing.is_empty(),
             "handlers with #[utoipa::path] missing from ApiDoc paths(...) in crates/web-ui/src/openapi.rs: {missing:?}"
         );
+    }
+
+    fn space_header_operations(spec: &serde_json::Value) -> Vec<String> {
+        let mut documented = Vec::new();
+        for (path, item) in spec["paths"].as_object().expect("paths object") {
+            for (method, op) in item.as_object().expect("path item") {
+                let has_header = op["parameters"].as_array().is_some_and(|params| {
+                    params
+                        .iter()
+                        .any(|p| p["name"] == "X-Space-Id" && p["in"] == "header")
+                });
+                if has_header {
+                    documented.push(format!("{method} {path}"));
+                }
+            }
+        }
+        documented
+    }
+
+    /// Data-plane operations take their space from `X-Space-Id`; control-plane
+    /// and public operations do not.
+    #[test]
+    fn data_plane_operations_document_the_space_selector() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let documented = space_header_operations(&spec);
+
+        for expected in [
+            "get /api/conversations",
+            "post /api/conversations/{id}/messages",
+            "get /api/attachments/{id}",
+            "get /api/capabilities",
+            "post /api/webhooks",
+            "put /api/workflows/{id}",
+            "post /api/push/subscribe",
+        ] {
+            assert!(
+                documented.contains(&expected.to_string()),
+                "{expected} must document X-Space-Id; documented: {documented:?}"
+            );
+        }
+        for excluded in [
+            "get /api/orgs",
+            "get /api/spaces",
+            "post /workflow-hooks/{org_slug}/{space_slug}/{id}/{token}",
+        ] {
+            assert!(
+                !documented.contains(&excluded.to_string()),
+                "{excluded} must not document X-Space-Id"
+            );
+        }
     }
 
     /// Telemetry is emitted over OTLP only; the REST API must not expose
