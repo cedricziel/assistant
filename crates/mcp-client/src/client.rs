@@ -9,10 +9,10 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rmcp::ClientServiceExt;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ProtocolVersion, ServerPeerInfo, SubscriptionFilter,
-    Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams, ContentBlock,
+    GetTaskParams, ProtocolVersion, ServerPeerInfo, SubscriptionFilter, Task, TaskPayload, Tool,
 };
-use rmcp::service::{ClientLifecycleMode, Peer, RoleClient, RunningService};
+use rmcp::service::{ClientLifecycleMode, Peer, RoleClient, RunningService, ServiceError};
 use rmcp::transport::IntoTransport;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -22,6 +22,20 @@ use crate::handler::{AssistantClientHandler, StaleTools};
 
 /// How long to wait before listening again after a subscription ends.
 const RELISTEN_DELAY: Duration = Duration::from_secs(30);
+
+/// How long a tool call may take unless [`McpClient::with_tool_timeout`] says
+/// otherwise; the same as the `bash` tool's default.
+const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How often to poll a task whose server suggests no interval.
+const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+/// The longest wait between polls, whatever the server suggests.
+const MAX_POLL_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The shortest wait between polls, so that a suggestion of zero does not
+/// turn into a busy loop.
+const MIN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// An active session with a single MCP server.
 ///
@@ -40,6 +54,8 @@ pub struct McpClient {
     stale: StaleTools,
     /// Watches list-change notifications on a `2026-07-28` connection.
     listener: Option<JoinHandle<()>>,
+    /// Longest a single tool call may take, task polling included.
+    tool_timeout: Duration,
 }
 
 impl McpClient {
@@ -80,7 +96,14 @@ impl McpClient {
             _service: Mutex::new(Some(service)),
             stale,
             listener,
+            tool_timeout: DEFAULT_TOOL_TIMEOUT,
         })
+    }
+
+    /// Bound every tool call, task polling included, to `timeout`.
+    pub fn with_tool_timeout(mut self, timeout: Duration) -> Self {
+        self.tool_timeout = timeout;
+        self
     }
 
     /// Whether the server signalled a tool list change since the last call.
@@ -117,6 +140,12 @@ impl McpClient {
     }
 
     /// Call a tool on the remote server.
+    ///
+    /// A server may answer with a task instead of a result. The task is polled
+    /// until it ends and its outcome comes back like any other result: a task
+    /// that failed, was cancelled or needs input yields an error result. The
+    /// whole call, polling included, is bounded by the tool timeout; when it
+    /// expires, or when this future is dropped, the task is cancelled.
     pub async fn call_tool(
         &self,
         name: &str,
@@ -127,13 +156,22 @@ impl McpClient {
             params = params.with_arguments(args);
         }
 
-        let result = self
-            .peer
-            .call_tool(params)
-            .await
-            .with_context(|| format!("tools/call '{name}' request failed"))?;
-
-        Ok(result)
+        let call = async {
+            match self.peer.call_tool_once(params).await? {
+                CallToolResponse::Complete(result) => Ok(result),
+                CallToolResponse::Task(created) => poll_task(&self.peer, created.task).await,
+                _ => Ok(CallToolResult::error(vec![ContentBlock::text(
+                    "the server asked for input, which this client cannot give",
+                )])),
+            }
+        };
+        match tokio::time::timeout(self.tool_timeout, call).await {
+            Ok(result) => result.with_context(|| format!("tools/call '{name}' request failed")),
+            Err(_) => anyhow::bail!(
+                "tools/call '{name}' timed out after {}s",
+                self.tool_timeout.as_secs()
+            ),
+        }
     }
 
     /// The user-assigned name for this server.
@@ -201,5 +239,94 @@ async fn watch_list_changes(peer: Peer<RoleClient>, stale: StaleTools) {
         }
         stale.mark();
         tokio::time::sleep(RELISTEN_DELAY).await;
+    }
+}
+
+/// Poll `task` until it ends and turn its outcome into a tool result.
+///
+/// Dropping this future, which is how a cancelled turn or an expired timeout
+/// stops it, cancels the task on the server.
+async fn poll_task(peer: &Peer<RoleClient>, task: Task) -> Result<CallToolResult, ServiceError> {
+    let mut guard = CancelOnDrop::new(peer.clone(), task.task_id.clone());
+    if !task.status.is_terminal() {
+        tokio::time::sleep(poll_interval(&task)).await;
+    }
+    loop {
+        let detailed = peer
+            .get_task(GetTaskParams::new(task.task_id.clone()))
+            .await?
+            .task;
+        let failure = match detailed.payload {
+            TaskPayload::Completed { result } => {
+                guard.disarm();
+                return serde_json::from_value(serde_json::Value::Object(result))
+                    .map_err(|_| ServiceError::UnexpectedResponse);
+            }
+            TaskPayload::Failed { error } => {
+                guard.disarm();
+                error
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .map_or_else(|| "the task failed".to_string(), str::to_string)
+            }
+            TaskPayload::Cancelled => {
+                guard.disarm();
+                "the task was cancelled".to_string()
+            }
+            TaskPayload::InputRequired { .. } => {
+                "the task needs input, which this client cannot give".to_string()
+            }
+            _ => {
+                tokio::time::sleep(poll_interval(&detailed.task)).await;
+                continue;
+            }
+        };
+        return Ok(CallToolResult::error(vec![ContentBlock::text(failure)]));
+    }
+}
+
+/// How long to wait before polling `task` again.
+fn poll_interval(task: &Task) -> Duration {
+    task.poll_interval_ms
+        .map_or(DEFAULT_POLL_INTERVAL, Duration::from_millis)
+        .clamp(MIN_POLL_INTERVAL, MAX_POLL_INTERVAL)
+}
+
+/// Sends `tasks/cancel` for a task when dropped, unless disarmed.
+struct CancelOnDrop {
+    peer: Peer<RoleClient>,
+    task_id: String,
+    armed: bool,
+}
+
+impl CancelOnDrop {
+    fn new(peer: Peer<RoleClient>, task_id: String) -> Self {
+        Self {
+            peer,
+            task_id,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let peer = self.peer.clone();
+        let task_id = std::mem::take(&mut self.task_id);
+        runtime.spawn(async move {
+            if let Err(error) = peer.cancel_task(CancelTaskParams::new(&task_id)).await {
+                debug!(%error, task_id, "could not cancel the task");
+            }
+        });
     }
 }

@@ -57,8 +57,8 @@ Each numbered group is one PR in the stack, in order.
 
 ## 9. Client Tasks (PR 9)
 
-- [ ] 9.1 Add failing tests: an external tool returning a task is polled at `pollIntervalMs` until completed; turn cancellation sends `tasks/cancel`; the tool timeout bounds polling; confirm red (use `tokio::time::pause`)
-- [ ] 9.2 Switch the bridge to `call_tool_once` with a polling loop and verify the tests pass
+- [x] 9.1 Add failing tests: an external tool returning a task is polled at `pollIntervalMs` until completed; turn cancellation sends `tasks/cancel`; the tool timeout bounds polling; confirm red (use `tokio::time::pause`)
+- [x] 9.2 Switch the bridge to `call_tool_once` with a polling loop and verify the tests pass
 
 ## 10. Client Skills extension (PR 10)
 
