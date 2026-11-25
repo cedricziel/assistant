@@ -38,21 +38,6 @@ impl SqliteUserStore {
         Ok(row.map(row_to_user))
     }
 
-    /// Look up a user by email across all organizations.
-    ///
-    /// Used during OAuth login when the caller does not yet know which org
-    /// the user belongs to. Returns the first matching user.
-    pub async fn get_user_by_email_any(&self, email: &str) -> Result<Option<User>> {
-        let row = sqlx::query(
-            "SELECT id, org_id, email, name, password_hash, idp_issuer, idp_subject, created_at, updated_at
-             FROM users WHERE email = ? LIMIT 1",
-        )
-        .bind(email)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(row_to_user))
-    }
-
     /// List the users with this email in every organization.
     ///
     /// Emails are only unique per org, so the sign-in flow uses this to find
