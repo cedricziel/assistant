@@ -35,7 +35,7 @@ impl StaticRules {
     pub fn builtin() -> Self {
         Self {
             deny: builtin_deny(),
-            ask: Vec::new(),
+            ask: builtin_ask(),
             allow: builtin_allow(),
             extra_roots: Vec::new(),
         }
@@ -282,6 +282,19 @@ fn builtin_deny() -> Vec<Rule> {
     out
 }
 
+/// Calls that always need the user's confirmation, whatever allow rules say.
+///
+/// Skills published by external MCP servers are cached under `mcp-skills/`
+/// and are untrusted, so running anything from there asks first. Matching is
+/// on the command text: a command that never names that directory is not
+/// caught here and is left to the rest of the pipeline.
+fn builtin_ask() -> Vec<Rule> {
+    rules(&[
+        ("bash", Some("*/mcp-skills/*")),
+        ("process", Some("*/mcp-skills/*")),
+    ])
+}
+
 fn builtin_allow() -> Vec<Rule> {
     let mut out = rules(&[
         ("memory-get", None),
@@ -358,6 +371,26 @@ mod tests {
 
     fn bash(rules: &StaticRules, command: &str) -> Verdict {
         verdict(rules, "bash", json!({ "command": command }))
+    }
+
+    #[test]
+    fn running_a_script_from_a_remote_mcp_skill_always_asks() {
+        let rules = StaticRules::from_config(&cfg(&[], &[], &["bash(*)", "process(*)"], &[]));
+        let script = "/home/a/.assistant/cache/mcp-skills/acme/deploy/scripts/run.sh";
+        for command in [
+            format!("sh {script}"),
+            format!("cd /tmp && {script} --prod"),
+        ] {
+            assert_eq!(bash(&rules, &command), Verdict::Ask, "{command}");
+        }
+        assert_eq!(
+            verdict(
+                &rules,
+                "process",
+                json!({ "command": format!("sh {script}") })
+            ),
+            Verdict::Ask
+        );
     }
 
     #[test]
