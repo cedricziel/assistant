@@ -25,4 +25,4 @@ pub use bridge::McpToolHandler;
 pub use client::McpClient;
 pub use connections::{ConnectError, Connected, ConnectionsConfig, IntegrationConnections};
 pub use manager::McpClientManager;
-pub use tool_source::IntegrationToolSource;
+pub use tool_source::{IntegrationStores, IntegrationToolSource};

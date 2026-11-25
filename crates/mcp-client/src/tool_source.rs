@@ -11,13 +11,26 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::warn;
 
+use assistant_core::clock::Clock;
 use assistant_core::identity::{OrgId, SpaceId};
-use assistant_core::integrations::{EffectiveIntegrations, IntegrationTrust};
+use assistant_core::integrations::{
+    EffectiveIntegrations, IntegrationCredentialStore, IntegrationHealthStore, IntegrationStore,
+    IntegrationTrust, SecretBox,
+};
 use assistant_core::store::{OrgStore, SpaceStore};
 use assistant_core::tool::{ToolHandler, TurnScope, TurnToolSource};
 
 use crate::bridge::McpToolHandler;
 use crate::connections::IntegrationConnections;
+
+/// The org-level stores a source reads.
+pub struct IntegrationStores {
+    pub integrations: Arc<dyn IntegrationStore>,
+    pub credentials: Arc<dyn IntegrationCredentialStore>,
+    pub health: Arc<dyn IntegrationHealthStore>,
+    pub orgs: Arc<dyn OrgStore>,
+    pub spaces: Arc<dyn SpaceStore>,
+}
 
 pub struct IntegrationToolSource {
     effective: Arc<EffectiveIntegrations>,
@@ -39,6 +52,28 @@ impl IntegrationToolSource {
             orgs,
             spaces,
         }
+    }
+
+    /// A source with its own connection pool over `stores`. Build one per
+    /// process and share it between spaces, so a credential is not connected
+    /// once per space.
+    pub fn from_stores(
+        stores: IntegrationStores,
+        secrets: Arc<SecretBox>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        let effective = Arc::new(EffectiveIntegrations::new(
+            stores.integrations,
+            stores.credentials.clone(),
+            secrets.key_id(),
+        ));
+        let connections = Arc::new(IntegrationConnections::new(
+            stores.credentials,
+            stores.health,
+            secrets,
+            clock,
+        ));
+        Self::new(effective, connections, stores.orgs, stores.spaces)
     }
 
     /// The ids behind the turn's org and space slugs.

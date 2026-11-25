@@ -64,8 +64,32 @@ pub async fn bootstrap(
     // With the `nats` feature and `[bus] kind = "nats"`, turns travel over NATS
     // JetStream (namespaced per space) to avoid SQLite write-lock contention
     // between the bus and the rest of the storage layer.
+    // Integration tools are assembled per turn from org.db, through one
+    // connection pool for the whole process; they are never registered as
+    // ambient tools.
+    let org_storage = pools
+        .org_storage()
+        .await
+        .context("Failed to open org.db for integrations")?;
+    let secrets = Arc::new(
+        assistant_core::integrations::SecretBox::load_from_env(pools.base_dir())
+            .context("Failed to load the integration secrets key")?,
+    );
+    let integration_tools = Arc::new(assistant_mcp_client::IntegrationToolSource::from_stores(
+        assistant_mcp_client::IntegrationStores {
+            integrations: Arc::new(org_storage.integration_store()),
+            credentials: Arc::new(org_storage.integration_credential_store()),
+            health: Arc::new(org_storage.integration_health_store()),
+            orgs: Arc::new(org_storage.org_store()),
+            spaces: Arc::new(org_storage.space_store()),
+        },
+        secrets,
+        Arc::new(assistant_core::clock::SystemClock),
+    ));
+
     let mut runtimes = SpaceRuntimes::new(pools.clone(), orgs.clone(), confirmation_cb)
-        .with_audio_store(Arc::new(assistant_transcription::AudioStore::new()));
+        .with_audio_store(Arc::new(assistant_transcription::AudioStore::new()))
+        .with_turn_tool_source(integration_tools);
     if let Some(bus) = shared_nats_bus(&server).await? {
         runtimes = runtimes.with_shared_bus(bus);
     }
