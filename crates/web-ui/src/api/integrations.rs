@@ -124,6 +124,12 @@ impl IntegrationsApiState {
 
     /// Stamp created and updated rows from `clock` instead of the system clock.
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.connections = Arc::new(IntegrationConnections::new(
+            self.credentials.clone(),
+            self.health.clone(),
+            self.secrets.clone(),
+            clock.clone(),
+        ));
         self.clock = clock;
         self
     }

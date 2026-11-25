@@ -109,6 +109,8 @@ pub fn at(secs: i64) -> DateTime<Utc> {
 pub struct Harness {
     pub state: IntegrationsApiState,
     pub org_storage: Arc<OrgStorageLayer>,
+    /// The clock of the state; advance it to move past cooldowns.
+    pub clock: FakeClock,
     _dir: tempfile::TempDir,
 }
 
@@ -119,15 +121,17 @@ impl Harness {
         let dir = tempfile::tempdir().unwrap();
         let org_storage = Arc::new(OrgStorageLayer::new_in_memory().await.unwrap());
         seed_org(&org_storage).await;
+        let clock = FakeClock::new(now());
         let state = IntegrationsApiState::new(
             catalog_with_fixture(dir.path()).await,
             &org_storage,
             Arc::new(SecretBox::from_key([7; 32])),
         )
-        .with_clock(Arc::new(FakeClock::new(now())));
+        .with_clock(Arc::new(clock.clone()));
         Self {
             state,
             org_storage,
+            clock,
             _dir: dir,
         }
     }

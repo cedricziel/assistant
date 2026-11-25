@@ -25,6 +25,9 @@ use crate::openapi::ErrorBody;
 /// own for a per-user integration. A personal integration can be tested only
 /// by its owner. A failed connection is still a `200` with `ok: false` and the
 /// error, and marks the integration `unreachable` until a connection works.
+/// The error names a kind (`HTTP <status>`, `timeout`, `connection failed`,
+/// `protocol error`), never the raw transport error. An integration can be
+/// tested once every few seconds per caller (`429` with `Retry-After`).
 #[utoipa::path(
     post,
     path = "/api/integrations/{id}/test",
@@ -37,6 +40,7 @@ use crate::openapi::ErrorBody;
         (status = 403, description = "The caller may not use this integration's credential", body = ErrorBody),
         (status = 404, description = "No such integration, or the caller may not see it", body = ErrorBody),
         (status = 422, description = "The integration cannot be used by the caller now: disabled, blocked by policy, or no usable credential", body = ErrorBody),
+        (status = 429, description = "Tested again too soon; wait the number of seconds in `Retry-After`", body = ErrorBody, headers(("Retry-After" = u64, description = "Seconds until the integration may be tested again"))),
     )
 )]
 pub async fn test_integration(
@@ -79,6 +83,9 @@ pub async fn test_integration(
         }
         Err(ConnectError::Internal(message)) => {
             return Err(anyhow::anyhow!(message).into());
+        }
+        Err(error @ ConnectError::Throttled { retry_after }) => {
+            return Err(ApiError::too_many_requests(error.message(), retry_after));
         }
         Err(error) => (false, Vec::new(), Some(error.message())),
     };
@@ -280,6 +287,7 @@ mod tests {
         assert_eq!(detail["status"], json!("unreachable"));
         assert_eq!(detail["tool_count"], json!(2));
 
+        h.clock.advance(std::time::Duration::from_secs(6));
         let (_, body) = h.post(Who::EngAdmin, &uri("int_space"), json!({})).await;
         assert_eq!(body["status"], json!("ready"), "{body}");
     }
@@ -390,6 +398,52 @@ mod tests {
         let (_, mine) = h.get(Who::Member, "/api/integrations/int_mine").await;
         assert_eq!(mine["tool_count"], json!(4), "{mine}");
         assert_eq!(mine["status"], json!("unreachable"), "{mine}");
+    }
+
+    #[tokio::test]
+    async fn testing_again_too_soon_is_429_with_retry_after() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let server = serve(&["t"], true).await;
+        let h = Harness::new().await;
+        connected_space(&h, &server.uri()).await;
+        let (status, _) = h.post(Who::EngAdmin, &uri("int_space"), json!({})).await;
+        assert_eq!(status, OK);
+        let requests = server.received_requests().await.unwrap().len();
+
+        h.clock.advance(std::time::Duration::from_secs(2));
+        let response = h
+            .app(Who::EngAdmin)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri("int_space"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok()),
+            Some("3")
+        );
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            requests,
+            "a throttled test must not contact the server"
+        );
+
+        h.clock.advance(std::time::Duration::from_secs(3));
+        let (status, _) = h.post(Who::EngAdmin, &uri("int_space"), json!({})).await;
+        assert_eq!(status, OK);
     }
 
     #[tokio::test]
