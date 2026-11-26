@@ -93,7 +93,7 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 13. Embeddings
 
-- [ ] 13.1 Write failing tests: `embedding_model` is optional, and Ollama, OpenAI and OpenRouter each resolve their own default. Confirm red. Make the field `Option` and update the providers and `cmd_doctor`, then verify.
+- [x] 13.1 Write failing tests: `embedding_model` is optional, and Ollama, OpenAI and OpenRouter each resolve their own default. Confirm red. Make the field `Option` and update the providers and `cmd_doctor`, then verify.
 - [ ] 13.2 Write failing wiremock tests for OpenRouter `embed` and `embed_batch`: one request with an `input` array, results reordered by `index`, a count mismatch is an error, batches over 2048 are split, and errors are mapped. Confirm red. Implement, then verify.
 - [ ] 13.3 Write a failing `org_context` test for `EmbeddingProviderKind::OpenRouter`, covering the default model, key reuse and routing keys. Confirm red. Implement, then verify.
 - [ ] 13.4 Document embeddings in `docs/openrouter.md` and `docs/operations/configuration.md`.
