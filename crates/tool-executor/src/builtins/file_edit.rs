@@ -4,9 +4,12 @@ use std::collections::HashMap;
 use std::fs;
 
 use anyhow::Result;
+use assistant_core::tool_render::{DiffOperation, ToolRenderData};
 use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionContext};
 use async_trait::async_trait;
 use tracing::debug;
+
+use super::render_diff::code_diff;
 
 #[derive(Default)]
 pub struct FileEditHandler {
@@ -49,6 +52,10 @@ impl ToolHandler for FileEditHandler {
 
     fn is_mutating(&self) -> bool {
         true
+    }
+
+    fn output_schema(&self) -> Option<serde_json::Value> {
+        ToolRenderData::schema("code_diff")
     }
 
     async fn run(
@@ -98,7 +105,8 @@ impl ToolHandler for FileEditHandler {
         let patched = content.replacen(old_string.as_str(), new_string.as_str(), 1);
 
         match fs::write(&path, patched.as_bytes()) {
-            Ok(()) => Ok(ToolOutput::success(format!("Edited '{}'", path.display()))),
+            Ok(()) => Ok(ToolOutput::success(format!("Edited '{}'", path.display()))
+                .with_render(code_diff(&path, DiffOperation::Edit, &content, &patched))),
             Err(e) => Ok(ToolOutput::error(format!(
                 "Failed to write '{}': {}",
                 path.display(),

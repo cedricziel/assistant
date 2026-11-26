@@ -27,6 +27,7 @@ doc/AuthenticationInfo.md
 doc/AuthorizationCodeOAuthFlow.md
 doc/BindingResponse.md
 doc/BindingsApi.md
+doc/BranchInfo.md
 doc/CallMcpAppToolRequest.md
 doc/CancelTaskRequest.md
 doc/CapabilitiesApi.md
@@ -47,6 +48,7 @@ doc/CommandEventResponse.md
 doc/CommandsApi.md
 doc/CompleteResponse.md
 doc/ConversationDetail.md
+doc/ConversationSearchSummary.md
 doc/ConversationSummary.md
 doc/ConversationsApi.md
 doc/CreateApiKeyRequest.md
@@ -97,6 +99,7 @@ doc/MembersApi.md
 doc/Message.md
 doc/MessageFeedbackResponse.md
 doc/MessageFeedbackSummary.md
+doc/MessageSearchMatch.md
 doc/MessageSummary.md
 doc/MessagesApi.md
 doc/ModelPart.md
@@ -136,6 +139,7 @@ doc/RespondToInteractionRequestOneOf2.md
 doc/Role.md
 doc/RotateSecretResponse.md
 doc/RuleScope.md
+doc/SearchSegment.md
 doc/SecurityRequirement.md
 doc/SecurityScheme.md
 doc/SendMessageConfiguration.md
@@ -165,6 +169,8 @@ doc/SseSubagentStatusEvent.md
 doc/SseSubagentThinkingEvent.md
 doc/SseSubagentTokenEvent.md
 doc/SseSubagentToolResultEvent.md
+doc/SseSuggestion.md
+doc/SseSuggestionsEvent.md
 doc/SseThinkingEvent.md
 doc/SseTokenEvent.md
 doc/SseToolResultEvent.md
@@ -174,6 +180,7 @@ doc/StringList.md
 doc/SubscribeRequest.md
 doc/SubscriptionResponse.md
 doc/SurfaceSummary.md
+doc/SwitchBranchRequest.md
 doc/Task.md
 doc/TaskArtifactUpdateEvent.md
 doc/TaskPushNotificationConfig.md
@@ -281,6 +288,7 @@ lib/src/model/attachment_meta_response.dart
 lib/src/model/authentication_info.dart
 lib/src/model/authorization_code_o_auth_flow.dart
 lib/src/model/binding_response.dart
+lib/src/model/branch_info.dart
 lib/src/model/call_mcp_app_tool_request.dart
 lib/src/model/cancel_task_request.dart
 lib/src/model/catalog_auth_kind_response.dart
@@ -298,6 +306,7 @@ lib/src/model/command_def_response.dart
 lib/src/model/command_event_response.dart
 lib/src/model/complete_response.dart
 lib/src/model/conversation_detail.dart
+lib/src/model/conversation_search_summary.dart
 lib/src/model/conversation_summary.dart
 lib/src/model/create_api_key_request.dart
 lib/src/model/create_api_key_response.dart
@@ -345,6 +354,7 @@ lib/src/model/member_entry.dart
 lib/src/model/message.dart
 lib/src/model/message_feedback_response.dart
 lib/src/model/message_feedback_summary.dart
+lib/src/model/message_search_match.dart
 lib/src/model/message_summary.dart
 lib/src/model/model_part.dart
 lib/src/model/mutual_tls_security_scheme.dart
@@ -379,6 +389,7 @@ lib/src/model/respond_to_interaction_request_one_of2.dart
 lib/src/model/role.dart
 lib/src/model/rotate_secret_response.dart
 lib/src/model/rule_scope.dart
+lib/src/model/search_segment.dart
 lib/src/model/security_requirement.dart
 lib/src/model/security_scheme.dart
 lib/src/model/send_message_configuration.dart
@@ -406,6 +417,8 @@ lib/src/model/sse_subagent_status_event.dart
 lib/src/model/sse_subagent_thinking_event.dart
 lib/src/model/sse_subagent_token_event.dart
 lib/src/model/sse_subagent_tool_result_event.dart
+lib/src/model/sse_suggestion.dart
+lib/src/model/sse_suggestions_event.dart
 lib/src/model/sse_thinking_event.dart
 lib/src/model/sse_token_event.dart
 lib/src/model/sse_tool_result_event.dart
@@ -415,6 +428,7 @@ lib/src/model/string_list.dart
 lib/src/model/subscribe_request.dart
 lib/src/model/subscription_response.dart
 lib/src/model/surface_summary.dart
+lib/src/model/switch_branch_request.dart
 lib/src/model/task.dart
 lib/src/model/task_artifact_update_event.dart
 lib/src/model/task_push_notification_config.dart

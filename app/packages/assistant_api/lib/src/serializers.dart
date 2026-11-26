@@ -34,6 +34,7 @@ import 'package:assistant_api/src/model/attachment_meta_response.dart';
 import 'package:assistant_api/src/model/authentication_info.dart';
 import 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/binding_response.dart';
+import 'package:assistant_api/src/model/branch_info.dart';
 import 'package:assistant_api/src/model/call_mcp_app_tool_request.dart';
 import 'package:assistant_api/src/model/cancel_task_request.dart';
 import 'package:assistant_api/src/model/catalog_auth_kind_response.dart';
@@ -51,6 +52,7 @@ import 'package:assistant_api/src/model/command_def_response.dart';
 import 'package:assistant_api/src/model/command_event_response.dart';
 import 'package:assistant_api/src/model/complete_response.dart';
 import 'package:assistant_api/src/model/conversation_detail.dart';
+import 'package:assistant_api/src/model/conversation_search_summary.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
 import 'package:assistant_api/src/model/create_api_key_request.dart';
 import 'package:assistant_api/src/model/create_api_key_response.dart';
@@ -97,6 +99,7 @@ import 'package:assistant_api/src/model/member_entry.dart';
 import 'package:assistant_api/src/model/message.dart';
 import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/message_feedback_summary.dart';
+import 'package:assistant_api/src/model/message_search_match.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
@@ -131,6 +134,7 @@ import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.d
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
 import 'package:assistant_api/src/model/rule_scope.dart';
+import 'package:assistant_api/src/model/search_segment.dart';
 import 'package:assistant_api/src/model/security_requirement.dart';
 import 'package:assistant_api/src/model/security_scheme.dart';
 import 'package:assistant_api/src/model/send_message_configuration.dart';
@@ -158,6 +162,8 @@ import 'package:assistant_api/src/model/sse_subagent_status_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_thinking_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_token_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_tool_result_event.dart';
+import 'package:assistant_api/src/model/sse_suggestion.dart';
+import 'package:assistant_api/src/model/sse_suggestions_event.dart';
 import 'package:assistant_api/src/model/sse_thinking_event.dart';
 import 'package:assistant_api/src/model/sse_token_event.dart';
 import 'package:assistant_api/src/model/sse_tool_result_event.dart';
@@ -167,6 +173,7 @@ import 'package:assistant_api/src/model/string_list.dart';
 import 'package:assistant_api/src/model/subscribe_request.dart';
 import 'package:assistant_api/src/model/subscription_response.dart';
 import 'package:assistant_api/src/model/surface_summary.dart';
+import 'package:assistant_api/src/model/switch_branch_request.dart';
 import 'package:assistant_api/src/model/task.dart';
 import 'package:assistant_api/src/model/task_artifact_update_event.dart';
 import 'package:assistant_api/src/model/task_push_notification_config.dart';
@@ -235,6 +242,7 @@ part 'serializers.g.dart';
   AuthenticationInfo,
   AuthorizationCodeOAuthFlow,
   BindingResponse,
+  BranchInfo,
   CallMcpAppToolRequest,
   CancelTaskRequest,
   CatalogAuthKindResponse,
@@ -252,6 +260,7 @@ part 'serializers.g.dart';
   CommandEventResponse,
   CompleteResponse,
   ConversationDetail,
+  ConversationSearchSummary,
   ConversationSummary,
   CreateApiKeyRequest,
   CreateApiKeyResponse,
@@ -298,6 +307,7 @@ part 'serializers.g.dart';
   Message,
   MessageFeedbackResponse,
   MessageFeedbackSummary,
+  MessageSearchMatch,
   MessageSummary,
   ModelPart,
   MutualTlsSecurityScheme,
@@ -332,6 +342,7 @@ part 'serializers.g.dart';
   Role,
   RotateSecretResponse,
   RuleScope,
+  SearchSegment,
   SecurityRequirement,
   SecurityScheme,
   SendMessageConfiguration,
@@ -359,6 +370,8 @@ part 'serializers.g.dart';
   SseSubagentThinkingEvent,
   SseSubagentTokenEvent,
   SseSubagentToolResultEvent,
+  SseSuggestion,
+  SseSuggestionsEvent,
   SseThinkingEvent,
   SseTokenEvent,
   SseToolResultEvent,
@@ -368,6 +381,7 @@ part 'serializers.g.dart';
   SubscribeRequest,
   SubscriptionResponse,
   SurfaceSummary,
+  SwitchBranchRequest,
   Task,
   TaskArtifactUpdateEvent,
   TaskPushNotificationConfig,
@@ -425,6 +439,10 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(ApiKeySummary)]),
         () => ListBuilder<ApiKeySummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(ConversationSearchSummary)]),
+        () => ListBuilder<ConversationSearchSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(OrgSummary)]),

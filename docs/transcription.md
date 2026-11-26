@@ -98,13 +98,13 @@ Any other recognized format is converted to 16 kHz mono WAV with ffmpeg before i
 
 ## How it works
 
-1. An interface (Slack, Signal, ...) receives a message with audio file attachments.
+1. An interface (web, Slack, Signal, Matrix, Mattermost, Nextcloud) receives a message with audio file attachments.
 2. The audio bytes are downloaded and passed to the configured `TranscriptionProvider`.
 3. The provider returns the transcript text.
-4. The transcript is prepended to the user's message (Slack uses `[Voice transcription]: <text>`; Signal uses `[Voice message]: <text>`).
-5. The agent processes the combined text normally.
+4. The transcript becomes the message text, before any text the user typed (Slack uses `[Voice transcription]: <text>`; the other messengers use `[Voice message]: <text>`; the web UI uses the plain transcript).
+5. The turn also carries the first recording. Models that hear audio receive it for that turn only; for every other model, and in later turns, the text stands in.
 
-If transcription fails, the Slack interface inserts a `[Voice message: transcription failed]` placeholder instead — the message is never silently dropped.
+Without `[transcription]`, or when transcription fails or returns no text, the message text is `[Voice message]`. The message is never dropped.
 
 ## Interface support
 
@@ -129,3 +129,51 @@ The `assistant-transcription` crate provides:
 - **`is_audio_mime(mime)`** — helper to detect audio MIME types
 
 Providers are injected into interfaces via `Arc<dyn TranscriptionProvider>`, following the same pattern as `LlmProvider`.
+
+## Text-to-speech
+
+`[tts]` in `org.toml` turns assistant replies into audio for the `voice_response` tool and `GET /api/messages/{id}/audio`. Providers: `openai`, `deepgram`, `openrouter`.
+
+### Output format
+
+`[tts] format` picks the audio the provider delivers:
+
+| `format`        | Audio       | MIME type    |
+| --------------- | ----------- | ------------ |
+| `mp3` (default) | MP3         | `audio/mpeg` |
+| `wav`           | WAV         | `audio/wav`  |
+| `ogg`           | Opus in Ogg | `audio/ogg`  |
+
+Any other value fails config load. `format = "pcm"` fails at startup too: clients play the configured audio, and raw PCM has no header with its sample rate. A request can still ask for `pcm` (raw 16-bit little-endian mono, `audio/pcm`). The MIME type of the delivered audio always matches the format, and `GET /api/messages/{id}/audio` sends it as `Content-Type`. A request that names a format overrides `[tts] format`; `voice_response` names none, so it uses the configured one.
+
+- **OpenAI** honors every format. Ogg is requested from OpenAI as `opus`.
+- **Deepgram** delivers mp3 only. Any other `format` fails startup.
+
+### OpenRouter TTS
+
+```toml
+[tts]
+provider = "openrouter"
+# model = "openai/gpt-4o-mini-tts"   # default
+# voice = "alloy"                    # default
+# format = "mp3"
+# speed = 1.0                        # sent when set
+# instructions = "Speak calmly"      # sent when set
+# pcm_sample_rate = 24000            # rate of the model's raw PCM
+# api_key = "sk-or-..."              # else the [llm] key, else OPENROUTER_API_KEY
+# base_url = "https://openrouter.ai/api/v1"
+```
+
+Each reply posts `model`, `input`, `voice` and `response_format` to `{base_url}/audio/speech`, plus `speed` and `instructions` when set. The key is `[tts] api_key`, else the `[llm]` key when `[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`.
+
+At startup the provider reads the model's entry from `{base_url}/audio/speech/models/{model}` and checks the config against it. Startup fails, naming the allowed values, when:
+
+- `voice` is not one of the model's listed voices
+- `speed` is outside the model's range
+- `instructions` is set and the model doesn't accept them
+
+A voice given in a single request that isn't in the list fails that request without calling OpenRouter.
+
+The provider requests the configured format when the model supports it. Otherwise it requests the first of wav, mp3 and pcm the model supports and transcodes with ffmpeg. OpenRouter never returns Ogg, so `format = "ogg"` always needs ffmpeg. Raw PCM is read at `pcm_sample_rate`, else 44100 Hz for `heygen/*` models and 24000 Hz for the rest. If a transcode is needed and ffmpeg can't run, startup fails and names ffmpeg.
+
+If the model entry can't be fetched, startup logs a warning and continues without validation, requesting formats directly (Ogg through WAV).

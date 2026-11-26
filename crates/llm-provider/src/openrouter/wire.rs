@@ -3,11 +3,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use assistant_core::types::llm::{OpenRouterReasoning, OpenRouterRouting};
+use assistant_core::types::llm::{OpenRouterImageConfig, OpenRouterReasoning, OpenRouterRouting};
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
 
 use super::citations::sources_block;
 use super::errors::{ErrorBody, body_error};
+use super::media::{ImageEntry, collect_urls};
 use super::reasoning::{budget_exhausted, provider_state, visible_text};
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +41,10 @@ pub struct ChatRequest {
     pub plugins: Vec<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub web_search_options: Option<Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub modalities: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_config: Option<OpenRouterImageConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +80,8 @@ pub struct Message {
     pub reasoning_details: Vec<Value>,
     #[serde(default)]
     pub annotations: Vec<Value>,
+    #[serde(default)]
+    pub images: Vec<ImageEntry>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,6 +144,15 @@ impl Usage {
 }
 
 impl ChatResponse {
+    /// The URLs of the first choice's images, without duplicates.
+    pub fn take_image_urls(&mut self) -> Vec<String> {
+        let mut urls = Vec::new();
+        if let Some(choice) = self.choices.first_mut() {
+            collect_urls(&mut urls, std::mem::take(&mut choice.message.images));
+        }
+        urls
+    }
+
     /// The response; reasoning becomes the tool calls' thinking unless
     /// `show_reasoning` is off. A final answer has no slot for thinking.
     /// `model` is the requested model, which stored reasoning is keyed by.

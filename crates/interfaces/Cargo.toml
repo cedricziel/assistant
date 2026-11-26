@@ -48,7 +48,6 @@ tracing = { workspace = true }
 lru = { workspace = true }
 
 # Matrix-specific: home directory, URL encoding
-dirs = { workspace = true }
 urlencoding = { workspace = true }
 
 # Nextcloud-specific: webhook HTTP server + HMAC signing
@@ -68,6 +67,7 @@ toml = { workspace = true }
 assistant-core = { path = "../core", features = ["test-tls"] }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-tool-executor = { path = "../tool-executor" }
+tempfile = { workspace = true }
 toml = { workspace = true }
 wiremock = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }

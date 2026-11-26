@@ -3,8 +3,8 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use crate::context::{default_workspace_dir, runtime_workspace_dir};
-use crate::memory::expand_tilde;
+use crate::context::{default_workspace_dir, runtime_install_root, runtime_workspace_dir};
+use crate::home::expand_tilde;
 
 const MAX_SYMLINK_HOPS: usize = 40;
 
@@ -130,11 +130,13 @@ impl WorkspaceRoots {
         if let Some(w) = runtime_workspace_dir() {
             all.push(w.to_string_lossy().into_owned());
         }
-        all.push(
-            default_workspace_dir(agent_id)
-                .to_string_lossy()
-                .into_owned(),
-        );
+        if let Some(root) = runtime_install_root() {
+            all.push(
+                default_workspace_dir(&root, agent_id)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
         all.extend(extra.iter().map(|s| s.as_ref().to_string()));
         Self::new(all)
     }

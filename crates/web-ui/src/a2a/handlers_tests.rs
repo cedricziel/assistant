@@ -450,6 +450,59 @@ async fn send_message_without_conversations_write_scope_returns_403() {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
+/// In the packaged install `assistant orchestrator run` runs the turn, so no
+/// worker in the web process ever takes the stream's event sink.
+#[tokio::test]
+async fn send_message_streaming_completes_when_another_process_runs_the_turn() {
+    use std::sync::Arc;
+
+    use crate::api::test_helpers::{default_resolver, mount_llm_reply, split_process_state};
+
+    let llm = wiremock::MockServer::start().await;
+    mount_llm_reply(&llm, "from afar").await;
+    let (web, storage) = split_process_state(&llm.uri()).await;
+    let orchestrator = web
+        .runtimes
+        .get("default", "default")
+        .await
+        .unwrap()
+        .orchestrator
+        .clone();
+    let state = A2AState {
+        spaces: default_resolver(&storage).await,
+        backend: Arc::new(super::handlers::test_support::FixedBackend {
+            interface: orchestrator,
+            task_store: Arc::new(crate::a2a::task_store::InMemoryA2aTaskStore::new()),
+        }),
+        agent_card: build_default_agent_card("https://example.com"),
+        agent_id: "default".to_string(),
+    };
+
+    let resp = make_app(state)
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/message/stream")
+                .header("Content-Type", "application/json")
+                .body(Body::from(user_message("stream please").to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        resp.into_body().collect(),
+    )
+    .await
+    .expect("the stream must end once the turn completes")
+    .unwrap()
+    .to_bytes();
+
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("from afar"), "got: {text}");
+    assert!(text.contains("[DONE]"), "missing terminal marker: {text}");
+}
+
 #[tokio::test]
 async fn send_message_streaming_emits_completed_task() {
     let app = make_app(make_state("https://example.com").await);

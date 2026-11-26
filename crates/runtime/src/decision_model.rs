@@ -12,7 +12,7 @@ use std::time::Duration;
 use assistant_core::permission::{Decision, PermissionRequest, ToolDecider, Verdict};
 use assistant_core::types::llm::{LlmConfig, resolve_openrouter_key};
 use assistant_core::types::permissions::DecisionModelConfig;
-use assistant_core::{default_workspace_dir, runtime_workspace_dir};
+use assistant_core::{default_workspace_dir, runtime_install_root, runtime_workspace_dir};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tracing::warn;
@@ -165,9 +165,9 @@ impl ToolDecider for JevDecider {
 
 fn project_dir(agent_id: &str) -> String {
     runtime_workspace_dir()
-        .unwrap_or_else(|| default_workspace_dir(agent_id))
-        .to_string_lossy()
-        .into_owned()
+        .or_else(|| runtime_install_root().map(|root| default_workspace_dir(&root, agent_id)))
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn truncate_chars(s: &str, max: usize) -> String {

@@ -9,6 +9,7 @@ mod listeners;
 mod prompts;
 mod resources;
 mod server;
+mod tasks;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,9 +25,10 @@ use rmcp::{RoleServer, ServiceExt};
 use tracing::info;
 
 pub use http::{RequestBoundServer, streamable_http_service};
-pub use identity::with_identity;
+pub use identity::{Caller, with_identity};
 pub use listeners::ListChangeListeners;
 pub use server::AssistantMcpServer;
+pub use tasks::TaskStore;
 
 /// Serve MCP over the process's stdin and stdout until the client disconnects.
 ///
@@ -55,6 +57,7 @@ pub async fn run(
         policy,
         user_skills_dir,
         ListChangeListeners::default(),
+        TaskStore::default(),
     )
     .with_install_registry(registry);
 

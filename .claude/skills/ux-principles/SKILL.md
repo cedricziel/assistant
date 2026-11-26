@@ -51,23 +51,32 @@ widgets.
 
 ## Responsive Breakpoints
 
-Three adaptive layout tiers, matching the Playwright viewport sizes:
+One layout breakpoint: `Breakpoints.wide` (768 px,
+`app/lib/shared/layout/breakpoints.dart`). It is the single width at which a
+region switches from a single pane to a split layout (`adaptive-shell` REQ-5).
 
-| Tier    | Width      | Flutter pattern                             |
-| ------- | ---------- | ------------------------------------------- |
-| Desktop | >= 900 px  | `NavigationRail` (left) + wide content area |
-| Tablet  | 640–899 px | `Drawer` (hamburger) + medium content       |
-| Mobile  | < 640 px   | `NavigationBar` (bottom tabs) + full-width  |
+| Region width          | Layout                                      |
+| --------------------- | ------------------------------------------- |
+| >= `Breakpoints.wide` | Split: sidebar / inline list beside content |
+| < `Breakpoints.wide`  | Single pane: bottom nav bar or drawer       |
 
-Use `LayoutBuilder` or `MediaQuery.of(context).size.width` to switch layouts:
+**Compare the region you split, not the window.** `NavShell` compares the
+window width. `ChatScreen` compares the width of its own pane (the window
+minus the nav sidebar), measured by a `LayoutBuilder` above its `Scaffold`.
+Never compare a width against a numeric literal or a private `k…` constant
+in `app/lib`; `test/unit/layout_breakpoints_lint_test.dart` enforces this.
+
+Timeline density (`kTimelineCompactMaxWidth` 400, `kTimelineExpandedMinWidth`
+700 in `assistant_ui`) describes content density, not layout. Feed it from the
+width available to the thread.
 
 ```dart
-Widget build(BuildContext context) {
-  final width = MediaQuery.of(context).size.width;
-  if (width >= 900) return _DesktopLayout();
-  if (width >= 640) return _TabletLayout();
-  return _MobileLayout();
-}
+LayoutBuilder(
+  builder: (context, constraints) {
+    final isWide = constraints.maxWidth >= Breakpoints.wide;
+    return isWide ? _SplitLayout() : _SinglePaneLayout();
+  },
+)
 ```
 
 **Rules:**

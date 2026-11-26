@@ -3,6 +3,7 @@
 //! Endpoints:
 //! - `GET    /api/conversations`           — list conversations
 //! - `GET    /api/conversations/stream`    — SSE stream of conversation list changes
+//! - `GET    /api/conversations/search`    — search conversations by title and message text
 //! - `POST   /api/conversations`           — create a new conversation
 //! - `GET    /api/conversations/{id}`      — get a conversation with its history
 //! - `DELETE /api/conversations/{id}`      — delete a conversation
@@ -13,7 +14,7 @@ use std::convert::Infallible;
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Response};
@@ -24,10 +25,11 @@ use tracing::warn;
 use uuid::Uuid;
 
 use assistant_core::types::conversation::MessageRole;
+use assistant_storage::conversation_search::{SearchSegment as StoredSegment, tokenize_query};
 use assistant_storage::{
     AttachmentStore as _, ConversationEvent, ConversationPatch, ConversationRecord,
-    ConversationStore, MessageFeedbackRow, MessageFeedbackStore as _, MetadataUpdate,
-    SqliteConversationStore, SurfaceStore as _,
+    ConversationSearchHit, ConversationStore, MessageFeedbackRow, MessageFeedbackStore as _,
+    MessageHit, MetadataUpdate, SqliteConversationStore, SurfaceStore as _,
 };
 
 use crate::errors::json_error;
@@ -35,6 +37,7 @@ use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::attachments::AttachmentMetaResponse;
+use super::branches::{BranchInfo, project_branches};
 use super::surfaces::{SurfaceSummary, surface_summaries};
 use super::{ApiState, sse_response};
 
@@ -92,6 +95,88 @@ impl From<&ConversationRecord> for ConversationSummary {
             created_at: record.created_at,
             updated_at: record.updated_at,
             pinned_at: record.pinned_at,
+        }
+    }
+}
+
+/// A run of text in a search result, flagged when it matched a query token.
+///
+/// Concatenating the `text` of a list of segments yields the displayed string.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct SearchSegment {
+    pub text: String,
+    pub highlighted: bool,
+}
+
+impl From<StoredSegment> for SearchSegment {
+    fn from(segment: StoredSegment) -> Self {
+        Self {
+            text: segment.text,
+            highlighted: segment.highlighted,
+        }
+    }
+}
+
+/// A message that matched a search query.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct MessageSearchMatch {
+    pub message_id: Uuid,
+    /// `user` or `assistant`.
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+    /// An excerpt around the hits; elided text is marked with `…`.
+    pub segments: Vec<SearchSegment>,
+}
+
+impl From<MessageHit> for MessageSearchMatch {
+    fn from(hit: MessageHit) -> Self {
+        Self {
+            message_id: hit.message_id,
+            role: hit.role.to_string(),
+            created_at: hit.created_at,
+            segments: hit.segments.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// A conversation matched by a search: the [`ConversationSummary`] fields plus
+/// highlighted title and message excerpts.
+///
+/// The summary fields are repeated rather than flattened so the generated
+/// client keeps `ConversationSummary` a plain instantiable model.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ConversationSearchSummary {
+    pub id: Uuid,
+    pub title: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    /// When the conversation was pinned; absent when it is not pinned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<DateTime<Utc>>,
+    /// The title split into highlighted and plain runs.
+    pub title_segments: Vec<SearchSegment>,
+    /// Up to 3 matching messages, best first; empty when only the title
+    /// matched.
+    pub matches: Vec<MessageSearchMatch>,
+}
+
+impl From<ConversationSearchHit> for ConversationSearchSummary {
+    fn from(hit: ConversationSearchHit) -> Self {
+        let ConversationSummary {
+            id,
+            title,
+            created_at,
+            updated_at,
+            pinned_at,
+        } = ConversationSummary::from(&hit.record);
+        Self {
+            id,
+            title,
+            created_at,
+            updated_at,
+            pinned_at,
+            title_segments: hit.title_segments.into_iter().map(Into::into).collect(),
+            matches: hit.matches.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -276,6 +361,19 @@ pub struct MessageSummary {
     /// Omitted for every other message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+    /// The message this one follows in the conversation tree. Omitted for a
+    /// root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
+    /// This message's place among its versions, present only when it has
+    /// siblings. On a user message: the edited versions. On an assistant
+    /// message: the versions of the reply it ends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<BranchInfo>,
+    /// On a user message whose reply has no visible assistant row: the
+    /// versions of that reply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_branch: Option<BranchInfo>,
     /// The calling user's verdict on this message. Omitted when the caller has
     /// not rated it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -347,6 +445,7 @@ impl UpdateConversationRequest {
         Ok(ConversationPatch {
             title,
             pinned: self.pinned,
+            archived: None,
         })
     }
 }
@@ -382,6 +481,80 @@ pub async fn list_conversations(ctx: SpaceCtx, State(state): State<ApiState>) ->
                 "Failed to list conversations",
             )
                 .into_response()
+        }
+    }
+}
+
+/// Longest accepted search query, in Unicode scalar values.
+const MAX_SEARCH_QUERY_CHARS: usize = 200;
+/// Results returned when `limit` is omitted.
+const DEFAULT_SEARCH_LIMIT: usize = 20;
+/// Largest `limit` honoured; bigger values are capped.
+const MAX_SEARCH_LIMIT: usize = 50;
+
+/// Query parameters for `GET /api/conversations/search`.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct SearchConversationsQuery {
+    /// Search text, split on whitespace into at most 8 tokens (at most 200
+    /// characters). Each token is a prefix of a message word or a substring of
+    /// the title.
+    #[serde(default)]
+    pub q: String,
+    /// Maximum results (default 20, capped at 50).
+    pub limit: Option<usize>,
+}
+
+/// Search conversations by title and message text.
+#[utoipa::path(
+    get,
+    path = "/api/conversations/search",
+    operation_id = "search_conversations",
+    tag = "conversations",
+    params(SearchConversationsQuery),
+    responses(
+        (status = 200, description = "Matching conversations, best first", body = Vec<ConversationSearchSummary>),
+        (status = 400, description = "Blank query, query over 200 characters or more than 8 words", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn search_conversations(
+    ctx: SpaceCtx,
+    State(state): State<ApiState>,
+    Query(query): Query<SearchConversationsQuery>,
+) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
+    if query.q.trim().is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "q must not be blank");
+    }
+    if query.q.chars().count() > MAX_SEARCH_QUERY_CHARS {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            format!("q must be at most {MAX_SEARCH_QUERY_CHARS} characters"),
+        );
+    }
+    if let Err(e) = tokenize_query(&query.q) {
+        return json_error(StatusCode::BAD_REQUEST, e.to_string());
+    }
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_SEARCH_LIMIT)
+        .min(MAX_SEARCH_LIMIT);
+    let store = caller_store(&ctx, &state).await;
+    match store.search_conversations(&query.q, limit).await {
+        Ok(hits) => {
+            let results: Vec<ConversationSearchSummary> =
+                hits.into_iter().map(Into::into).collect();
+            Json(results).into_response()
+        }
+        Err(e) => {
+            warn!("Failed to search conversations: {e}");
+            json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to search conversations",
+            )
         }
     }
 }
@@ -599,6 +772,17 @@ pub async fn get_conversation(
         Err(response) => return response,
     };
 
+    Json(conversation_detail(&ctx, &state, &store, &conv).await).into_response()
+}
+
+/// The conversation `conv` with its active path, as `GET` returns it.
+pub(crate) async fn conversation_detail(
+    ctx: &SpaceCtx,
+    state: &ApiState,
+    store: &SqliteConversationStore,
+    conv: &ConversationRecord,
+) -> ConversationDetail {
+    let conv_id = conv.id;
     let history = store.load_history(conv_id).await.unwrap_or_default();
     let tts_configured = state.tts_provider.is_some();
 
@@ -657,6 +841,11 @@ pub async fn get_conversation(
             .collect(),
     );
 
+    let mut branches = project_branches(store, conv_id, &history, |m| {
+        !m.content.is_empty() || attachments_by_msg.contains_key(&m.id)
+    })
+    .await;
+
     let messages = history
         .into_iter()
         .filter(|m| !matches!(m.role, MessageRole::System | MessageRole::Tool))
@@ -682,20 +871,22 @@ pub async fn get_conversation(
                 tts_available,
                 attachments,
                 finish_reason: m.finish_reason.map(|r| r.as_str().to_string()),
+                parent_id: m.parent_id,
+                branch: branches.branch.remove(&m.id),
+                reply_branch: branches.reply_branch.remove(&m.id),
                 feedback,
             }
         })
         .collect();
 
-    Json(ConversationDetail {
+    ConversationDetail {
         id: conv.id,
-        title: display_title(&conv),
+        title: display_title(conv),
         created_at: conv.created_at,
         updated_at: conv.updated_at,
         messages,
         surfaces,
-    })
-    .into_response()
+    }
 }
 
 /// `DELETE /api/conversations/{id}` — delete a conversation and all its messages.
@@ -797,6 +988,10 @@ pub async fn update_conversation(
             Json(ConversationSummary::from(&record)).into_response()
         }
         Ok(MetadataUpdate::NotFound) => json_error(StatusCode::NOT_FOUND, "Conversation not found"),
+        Ok(MetadataUpdate::Invalid) => json_error(
+            StatusCode::BAD_REQUEST,
+            "A conversation cannot be pinned and archived at once",
+        ),
         Err(e) => {
             warn!("Failed to update conversation {conv_id}: {e}");
             json_error(
@@ -2136,6 +2331,7 @@ mod tests {
                 assistant_storage::ConversationPatch {
                     title: None,
                     pinned: Some(true),
+                    archived: None,
                 },
             )
             .await
@@ -2162,6 +2358,7 @@ mod tests {
                 assistant_storage::ConversationPatch {
                     title: Some("Renamed".into()),
                     pinned: None,
+                    archived: None,
                 },
             )
             .await
@@ -2268,6 +2465,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 pinned_at: None,
+                archived_at: None,
             },
         ));
 
@@ -2282,6 +2480,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 pinned_at: None,
+                archived_at: None,
             },
         ));
 
@@ -2393,6 +2592,237 @@ mod tests {
         );
     }
 
+    // -- GET /conversations/search ---------------------------------------------
+
+    async fn search_as(
+        state: super::super::ApiState,
+        auth: assistant_core::auth::AuthContext,
+        query: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let resp = app_with_auth(state, auth)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/search?{query}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = body_bytes(resp.into_body()).await;
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    async fn search(state: super::super::ApiState, query: &str) -> (StatusCode, serde_json::Value) {
+        search_as(state, assistant_core::auth::AuthContext::system(), query).await
+    }
+
+    /// Seed a conversation owned by `user` with one assistant message.
+    async fn seed_with_message(
+        storage: &assistant_storage::StorageLayer,
+        user: &str,
+        title: Option<&str>,
+        text: &str,
+    ) -> Uuid {
+        use assistant_core::types::conversation::{Message, MessageRole};
+        let store =
+            SqliteConversationStore::for_agent(storage.pool.clone(), "default").with_user_id(user);
+        let conv = store.create_conversation(title).await.unwrap();
+        store
+            .save_message(&Message::new(conv.id, MessageRole::Assistant, text))
+            .await
+            .unwrap();
+        conv.id
+    }
+
+    #[tokio::test]
+    async fn search_returns_bare_array_with_message_segments() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let id = seed_with_message(
+            &storage,
+            "system",
+            Some("Trip"),
+            "The Lisbon itinerary is ready",
+        )
+        .await;
+
+        let (status, json) = search(state, "q=lisb").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let hits = json.as_array().expect("bare array");
+        assert_eq!(hits.len(), 1, "one conversation matches: {json}");
+        assert_eq!(hits[0]["id"], id.to_string());
+        assert_eq!(hits[0]["title"], "Trip");
+        assert_eq!(
+            hits[0]["title_segments"],
+            serde_json::json!([
+                {"text": "Trip", "highlighted": false}
+            ])
+        );
+        let matches = hits[0]["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0]["role"], "assistant");
+        assert!(matches[0]["message_id"].is_string());
+        assert!(matches[0]["created_at"].is_string());
+        assert_eq!(
+            matches[0]["segments"],
+            serde_json::json!([
+                {"text": "The ", "highlighted": false},
+                {"text": "Lisbon", "highlighted": true},
+                {"text": " itinerary is ready", "highlighted": false},
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn search_title_only_match_has_empty_matches() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system")
+            .create_conversation(Some("Lisbon trip"))
+            .await
+            .unwrap();
+
+        let (status, json) = search(state, "q=lisbon").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json[0]["matches"], serde_json::json!([]));
+        assert_eq!(
+            json[0]["title_segments"][0],
+            serde_json::json!({"text": "Lisbon", "highlighted": true})
+        );
+    }
+
+    #[tokio::test]
+    async fn search_rejects_invalid_queries_with_400_and_error_key() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        let too_long = format!("q={}", "é".repeat(201));
+        let cases = [
+            ("blank", "q=%20".to_owned()),
+            ("missing", String::new()),
+            ("over 200 scalar values", too_long),
+            ("nine tokens", "q=a+b+c+d+e+f+g+h+i".to_owned()),
+        ];
+        for (name, query) in cases {
+            let (status, json) = search(state.clone(), &query).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+            assert!(json["error"].is_string(), "{name}: missing error: {json}");
+        }
+    }
+
+    #[tokio::test]
+    async fn search_accepts_exactly_200_scalar_values() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let (status, json) = search(state, &format!("q={}", "é".repeat(200))).await;
+
+        assert_eq!(status, StatusCode::OK, "{json}");
+    }
+
+    #[tokio::test]
+    async fn search_caps_limit_at_50() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        for _ in 0..55 {
+            seed_with_message(&storage, "system", None, "Lisbon plans").await;
+        }
+
+        let (_, capped) = search(state.clone(), "q=lisbon&limit=500").await;
+        let (_, limited) = search(state.clone(), "q=lisbon&limit=2").await;
+        let (_, default) = search(state, "q=lisbon").await;
+
+        assert_eq!(capped.as_array().unwrap().len(), 50, "limit=500 caps at 50");
+        assert_eq!(limited.as_array().unwrap().len(), 2);
+        assert_eq!(default.as_array().unwrap().len(), 20, "default is 20");
+    }
+
+    #[tokio::test]
+    async fn search_hides_other_users_conversations() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        seed_with_message(&storage, "alice", None, "Lisbon plans").await;
+
+        let (status, as_bob) = search_as(
+            state.clone(),
+            caller("bob", assistant_core::identity::Role::Member),
+            "q=lisbon",
+        )
+        .await;
+        let (_, as_alice) = search_as(
+            state,
+            caller("alice", assistant_core::identity::Role::Member),
+            "q=lisbon",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            as_bob,
+            serde_json::json!([]),
+            "bob must not see alice's hit"
+        );
+        assert_eq!(as_alice.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_without_credentials_is_401_with_error_key() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = crate::api::api_router()
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/conversations/search?q=lisbon")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let json = body_json(resp.into_body()).await;
+        assert!(json["error"].is_string(), "missing error key: {json}");
+    }
+
+    #[tokio::test]
+    async fn search_treats_fts_operators_as_literal_text() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let (status, json) = search(state, "q=%22foo%22%20OR%20bar*").await;
+
+        assert_eq!(status, StatusCode::OK, "{json}");
+    }
+
+    #[tokio::test]
+    async fn search_route_does_not_shadow_get_conversation_by_id() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let id = seed_conversation(&storage).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["id"], id.to_string());
+    }
+
     // -- ConversationSummary projection ----------------------------------------
 
     fn record_with_title(title: Option<&str>) -> assistant_storage::ConversationRecord {
@@ -2406,6 +2836,7 @@ mod tests {
             created_at,
             updated_at: created_at + chrono::Duration::hours(1),
             pinned_at: None,
+            archived_at: None,
         }
     }
 

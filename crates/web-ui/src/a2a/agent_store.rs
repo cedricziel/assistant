@@ -86,12 +86,14 @@ impl AgentStore {
         Ok(Self { agents_dir })
     }
 
-    /// Creates a Persona-attached store for A2A profiles.
-    pub fn for_persona(persona_id: &str) -> Result<Self> {
-        let base = dirs::home_dir()
-            .map(|h| h.join(".assistant"))
-            .unwrap_or_else(|| PathBuf::from(".assistant"));
-        Self::new(base.join("agents").join(persona_id).join("a2a-profiles"))
+    /// Creates a Persona-attached store for A2A profiles under `install_root`.
+    pub fn for_persona(install_root: &Path, persona_id: &str) -> Result<Self> {
+        Self::new(
+            install_root
+                .join("agents")
+                .join(persona_id)
+                .join("a2a-profiles"),
+        )
     }
 
     // -- CRUD operations --
@@ -538,11 +540,10 @@ mod tests {
 
     #[test]
     fn for_persona_uses_persona_scoped_directory_layout() {
-        let store = AgentStore::for_persona("marketing").unwrap();
-        let rendered = store.agents_dir.to_string_lossy();
-        assert!(
-            rendered.contains("agents/marketing/a2a-profiles"),
-            "expected persona-scoped A2A profile dir, got: {rendered}"
-        );
+        let install_root = TempDir::new().unwrap();
+        let store = AgentStore::for_persona(install_root.path(), "marketing").unwrap();
+        let expected = install_root.path().join("agents/marketing/a2a-profiles");
+        assert_eq!(store.agents_dir, expected);
+        assert!(expected.is_dir(), "the store creates its directory");
     }
 }

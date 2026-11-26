@@ -9,6 +9,7 @@ pub mod clock;
 pub mod command;
 pub mod config;
 pub mod context;
+pub mod home;
 pub mod identity;
 pub mod integrations;
 pub mod llm;
@@ -45,14 +46,14 @@ pub use bus_messages::{
     TurnRequest, TurnResult, TurnStatus, topic,
 };
 pub use catalog::{CatalogEntry, CatalogResolver, CatalogResourceType};
-pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
+pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, VOICE_PLACEHOLDER};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use command::{CommandArg, CommandDef, CommandResult, ConversationConfig};
 pub use config::{load_org_config, load_server_config, org_config_path, server_config_path};
 pub use context::{
     agent_base_dir, apply_agent_context, default_agent_id, default_workspace_dir,
-    runtime_agent_root, runtime_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
-    validate_agent_id,
+    runtime_agent_root, runtime_install_root, runtime_workspace_dir, set_runtime_agent_root,
+    set_runtime_install_root, set_runtime_workspace_dir, validate_agent_id,
 };
 pub use identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
 // -- Multi-tenant stores --
@@ -66,7 +67,11 @@ pub use store::{
     UserStore,
 };
 // -- LLM abstractions (types, traits, streaming) --
+pub use home::expand_tilde;
 pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};
+pub use llm::images::{
+    GeneratedImage, ImageGenerationProvider, ImageRequest, ImageResult, ReferenceImage,
+};
 pub use llm::options::{ChatOptions, ChatOptionsSupport, ResponseFormat, ToolChoice};
 pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport, chat_with_fallback};
 pub use llm::stream_chunk::StreamChunk;
@@ -76,12 +81,14 @@ pub use llm::types::{
     ChatHistoryMessage, ChatRole, ContentBlock, GeneratedMedia, LlmResponse, LlmResponseMeta,
     MediaKind, ProviderState, ToolCallItem, ToolCallResponse, TurnTiming,
 };
-pub use memory::{
-    MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,
-};
+pub use memory::{MemoryLoader, base_dir, resolve, strip_html_comments};
 pub use secret::Secret;
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput, TurnScope, TurnToolSource};
-pub use tool_render::{SourceResult, SourcesData, TerminalData, ToolRenderData};
+pub use tool_render::{
+    CodeDiffData, CodeFileData, DataTableData, DiffHunk, DiffLine, DiffOp, DiffOperation,
+    LinkPreviewData, PlanData, PlanStep, PlanStepStatus, SourceResult, SourcesData, TableColumn,
+    TerminalData, ToolRenderData,
+};
 pub use upload::resolve_upload_bytes;

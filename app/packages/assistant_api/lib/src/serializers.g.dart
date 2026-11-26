@@ -27,6 +27,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(AuthenticationInfo.serializer)
       ..add(AuthorizationCodeOAuthFlow.serializer)
       ..add(BindingResponse.serializer)
+      ..add(BranchInfo.serializer)
       ..add(CallMcpAppToolRequest.serializer)
       ..add(CancelTaskRequest.serializer)
       ..add(CatalogAuthKindResponse.serializer)
@@ -44,6 +45,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(CommandEventResponse.serializer)
       ..add(CompleteResponse.serializer)
       ..add(ConversationDetail.serializer)
+      ..add(ConversationSearchSummary.serializer)
       ..add(ConversationSummary.serializer)
       ..add(CreateApiKeyRequest.serializer)
       ..add(CreateApiKeyResponse.serializer)
@@ -90,6 +92,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(Message.serializer)
       ..add(MessageFeedbackResponse.serializer)
       ..add(MessageFeedbackSummary.serializer)
+      ..add(MessageSearchMatch.serializer)
       ..add(MessageSummary.serializer)
       ..add(ModelPart.serializer)
       ..add(MutualTlsSecurityScheme.serializer)
@@ -127,6 +130,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(Role.serializer)
       ..add(RotateSecretResponse.serializer)
       ..add(RuleScope.serializer)
+      ..add(SearchSegment.serializer)
       ..add(SecurityRequirement.serializer)
       ..add(SecurityScheme.serializer)
       ..add(SendMessageConfiguration.serializer)
@@ -154,6 +158,8 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SseSubagentThinkingEvent.serializer)
       ..add(SseSubagentTokenEvent.serializer)
       ..add(SseSubagentToolResultEvent.serializer)
+      ..add(SseSuggestion.serializer)
+      ..add(SseSuggestionsEvent.serializer)
       ..add(SseThinkingEvent.serializer)
       ..add(SseTokenEvent.serializer)
       ..add(SseToolResultEvent.serializer)
@@ -163,6 +169,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SubscribeRequest.serializer)
       ..add(SubscriptionResponse.serializer)
       ..add(SurfaceSummary.serializer)
+      ..add(SwitchBranchRequest.serializer)
       ..add(Task.serializer)
       ..add(TaskArtifactUpdateEvent.serializer)
       ..add(TaskPushNotificationConfig.serializer)
@@ -243,6 +250,12 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(JsonObject)]),
           () => ListBuilder<JsonObject>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(MessageSearchMatch)]),
+          () => ListBuilder<MessageSearchMatch>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SearchSegment)]),
+          () => ListBuilder<SearchSegment>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(MessageSummary)]),
           () => ListBuilder<MessageSummary>())
       ..addBuilderFactory(
@@ -258,8 +271,17 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(QuestionAnswer)]),
           () => ListBuilder<QuestionAnswer>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SearchSegment)]),
+          () => ListBuilder<SearchSegment>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SseSuggestion)]),
+          () => ListBuilder<SseSuggestion>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

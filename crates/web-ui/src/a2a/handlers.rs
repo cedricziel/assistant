@@ -384,7 +384,6 @@ pub async fn send_message_streaming(
     let (sse_tx, sse_rx) = tokio::sync::mpsc::unbounded_channel::<Result<Event, Infallible>>();
     let (event_tx, mut event_rx) =
         tokio::sync::mpsc::channel::<assistant_runtime::OrchestratorEvent>(64);
-    orchestrator.register_token_sink(conv_id, event_tx).await;
 
     // Run the turn; capture the final result via a oneshot.
     let (result_tx, result_rx) = tokio::sync::oneshot::channel();
@@ -393,7 +392,10 @@ pub async fn send_message_streaming(
     let turn_text = user_text.clone();
     tokio::spawn(async move {
         let r = orchestrator
-            .submit(SubmitTurn::new(turn_text, conv_id, Interface::A2a).with_auth(&turn_auth))
+            .submit_streaming(
+                SubmitTurn::new(turn_text, conv_id, Interface::A2a).with_auth(&turn_auth),
+                event_tx,
+            )
             .await;
         let _ = result_tx.send(r);
     });
@@ -922,13 +924,6 @@ pub(crate) mod test_support {
 
     #[async_trait]
     impl AssistantInterface for EchoInterface {
-        async fn register_token_sink(
-            &self,
-            _conversation_id: Uuid,
-            _sink: mpsc::Sender<OrchestratorEvent>,
-        ) {
-        }
-
         async fn submit(&self, turn: SubmitTurn) -> anyhow::Result<TurnResult> {
             Ok(TurnResult {
                 answer: format!("echo: {}", turn.prompt),
@@ -938,6 +933,14 @@ pub(crate) mod test_support {
                 had_errors: false,
                 timing: None,
             })
+        }
+
+        async fn submit_streaming(
+            &self,
+            turn: SubmitTurn,
+            _sink: mpsc::Sender<OrchestratorEvent>,
+        ) -> anyhow::Result<TurnResult> {
+            self.submit(turn).await
         }
 
         async fn run_boot(

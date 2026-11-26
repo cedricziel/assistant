@@ -9,9 +9,9 @@ use assistant_core::Secret;
 use assistant_core::types::transcription::TtsFormat;
 use assistant_llm_provider::retry::RetryConfig;
 
-use crate::converter::AudioFormat;
-use crate::pipeline::{AudioInput, AudioPipeline};
 use crate::provider::{TtsProvider, TtsRequest, TtsResult};
+use assistant_audio::AudioFormat;
+use assistant_audio::{AudioInput, AudioPipeline};
 
 /// OpenRouter's default text-to-speech model.
 pub const DEFAULT_MODEL: &str = "openai/gpt-4o-mini-tts";
@@ -178,15 +178,19 @@ impl TtsProvider for OpenRouterTts {
             .map_err(|e| anyhow::anyhow!("Failed to read OpenRouter speech audio: {e}"))?
             .to_vec();
 
+        let input = match plan.wire {
+            TtsFormat::Pcm => AudioInput::Pcm {
+                sample_rate: self.pcm_sample_rate(),
+            },
+            other => AudioInput::Encoded(audio_format(other)),
+        };
         let audio_data = if plan.wire == target {
             audio
+        } else if target == TtsFormat::Pcm {
+            self.pipeline
+                .to_pcm_s16le(&audio, input, self.pcm_sample_rate())
+                .await?
         } else {
-            let input = match plan.wire {
-                TtsFormat::Pcm => AudioInput::Pcm {
-                    sample_rate: self.pcm_sample_rate(),
-                },
-                other => AudioInput::Encoded(audio_format(other)),
-            };
             self.pipeline
                 .transcode(&audio, input, audio_format(target))
                 .await?
@@ -333,8 +337,8 @@ mod tests {
     use assistant_core::types::transcription::TtsFormat;
 
     use super::{OpenRouterTts, OpenRouterTtsSettings};
-    use crate::pipeline::AudioPipeline;
     use crate::provider::{TtsProvider, TtsRequest};
+    use assistant_audio::AudioPipeline;
 
     fn settings(server: &MockServer, model: &str, format: TtsFormat) -> OpenRouterTtsSettings {
         OpenRouterTtsSettings {
@@ -495,8 +499,8 @@ mod tests {
             .pipeline
             .transcode(
                 &result.audio_data,
-                crate::pipeline::AudioInput::Encoded(crate::converter::AudioFormat::Mp3),
-                crate::converter::AudioFormat::Wav,
+                assistant_audio::AudioInput::Encoded(assistant_audio::AudioFormat::Mp3),
+                assistant_audio::AudioFormat::Wav,
             )
             .await
             .unwrap();
@@ -554,6 +558,41 @@ mod tests {
             result.audio_data[27],
         ]);
         assert_eq!(rate, 16_000);
+    }
+
+    #[tokio::test]
+    async fn pcm_from_a_wav_only_model_is_raw_samples() {
+        let Some(wav) = wav_tone() else {
+            eprintln!("skipped: ffmpeg is not installed");
+            return;
+        };
+        let server = MockServer::start().await;
+        let model = "acme/wav-tts";
+        mount_model(&server, model, &["wav"]).await;
+        mount_speech(&server, wav, "audio/wav").await;
+        let tts = OpenRouterTts::connect(
+            settings(&server, model, TtsFormat::Mp3),
+            AudioPipeline::default(),
+        )
+        .await
+        .unwrap();
+
+        let result = tts
+            .synthesize(TtsRequest {
+                format: Some("pcm".into()),
+                ..say("Hi")
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.mime_type, "audio/pcm");
+        assert_ne!(&result.audio_data[..4], b"RIFF", "no WAV header");
+        // One second of 16-bit mono at the 24 kHz default rate.
+        assert!(
+            (result.audio_data.len() as i64 - 48_000).abs() < 2_000,
+            "{} bytes",
+            result.audio_data.len()
+        );
     }
 
     #[tokio::test]

@@ -153,6 +153,12 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Build the MCP Apps demo server
+        working-directory: examples/mcp-apps-demo
+        run: |
+          npm ci
+          npm run build
+
       - name: Install Playwright dependencies
         working-directory: crates/web-ui/e2e
         run: |

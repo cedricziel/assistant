@@ -269,9 +269,26 @@ timeout_secs = 120
 # # prompt = "Names: Acme"             # vocabulary hint
 # # max_chunk_secs = 50                # split longer audio; capped at 55
 
+# ── Image generation ─────────────────────────────────────────────────────────
+# Enables the image-generate tool. Provider: "openrouter". See docs/images.md.
+#
+# [images]
+# provider = "openrouter"
+# # enabled = true                     # false: no provider, no tool
+# # model = "openai/gpt-image-2.6-flare" # default
+# # api_key = "sk-or-..."              # else the [llm] key, else OPENROUTER_API_KEY
+# # base_url = "https://openrouter.ai/api/v1"
+# # output_format = "png"              # "png" | "jpeg" | "webp"
+# # quality = "high"                   # default for requests that set none
+#
+# # Provider routing; same keys as [llm.openrouter.provider].
+# [images.openrouter.provider]
+# data_collection = "deny"
+
 # ── Text-to-speech (TTS) ─────────────────────────────────────────────────────
-# Providers: "openai", "deepgram"
-# API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY
+# Providers: "openai", "deepgram", "openrouter"
+# API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY, OPENROUTER_API_KEY
+# format: mp3 (default), wav or ogg; Deepgram delivers mp3 only
 #
 # [tts]
 # provider = "deepgram"
@@ -289,6 +306,17 @@ timeout_secs = 120
 # de = "aura-2-julius-de"              # German   (default)
 # es = "aura-2-lucia-es"               # Spanish  (default)
 # fr = "aura-2-chloe-fr"              # French   (default)
+#
+# [tts]
+# provider = "openrouter"
+# model    = "openai/gpt-4o-mini-tts"   # default
+# # voice  = "alloy"                   # default; checked against the model's voices
+# # format = "mp3"                     # mp3, wav or ogg; ffmpeg transcodes what the model lacks
+# # speed  = 1.0                       # checked against the model's range
+# # instructions = "Speak calmly"      # only for models that accept them
+# # pcm_sample_rate = 24000            # default 44100 for heygen/*, else 24000
+# # api_key = "sk-or-..."              # else the [llm] key, else OPENROUTER_API_KEY
+# # base_url = "https://openrouter.ai/api/v1"
 
 # ── Autonomous Learning ───────────────────────────────────────────────────────
 # The agent creates skills from complex tasks and periodically improves them.

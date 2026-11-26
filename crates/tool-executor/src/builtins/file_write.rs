@@ -2,11 +2,18 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 
 use anyhow::Result;
+use assistant_core::tool_render::{DiffOperation, ToolRenderData};
 use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionContext};
 use async_trait::async_trait;
 use tracing::debug;
+
+use super::render_diff::code_diff;
+
+/// Prior content larger than this is not diffed (design D6).
+const MAX_PRIOR_BYTES: u64 = 256 * 1024;
 
 #[derive(Default)]
 pub struct FileWriteHandler {
@@ -50,6 +57,10 @@ impl ToolHandler for FileWriteHandler {
         true
     }
 
+    fn output_schema(&self) -> Option<serde_json::Value> {
+        ToolRenderData::schema("code_diff")
+    }
+
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
@@ -71,6 +82,8 @@ impl ToolHandler for FileWriteHandler {
         };
         debug!(path = %path.display(), "file-write access");
 
+        let prior = read_prior(&path);
+
         // Create parent directories if needed.
         if let Some(parent) = path.parent()
             && let Err(e) = fs::create_dir_all(parent)
@@ -83,16 +96,55 @@ impl ToolHandler for FileWriteHandler {
         }
 
         match fs::write(&path, content.as_bytes()) {
-            Ok(()) => Ok(ToolOutput::success(format!(
-                "Written {} bytes to '{}'",
-                content.len(),
-                path.display()
-            ))),
+            Ok(()) => {
+                let output = ToolOutput::success(format!(
+                    "Written {} bytes to '{}'",
+                    content.len(),
+                    path.display()
+                ));
+                Ok(match prior {
+                    Prior::Missing => {
+                        output.with_render(code_diff(&path, DiffOperation::Create, "", &content))
+                    }
+                    Prior::Text(old) => output.with_render(code_diff(
+                        &path,
+                        DiffOperation::Overwrite,
+                        &old,
+                        &content,
+                    )),
+                    Prior::Unreadable => output,
+                })
+            }
             Err(e) => Ok(ToolOutput::error(format!(
                 "Failed to write '{}': {}",
                 path.display(),
                 e
             ))),
         }
+    }
+}
+
+/// What `file-write` found at the path before writing.
+enum Prior {
+    /// No file there: the write creates it.
+    Missing,
+    /// UTF-8 content of at most [`MAX_PRIOR_BYTES`].
+    Text(String),
+    /// Too large, not UTF-8 or not readable: no diff is published.
+    Unreadable,
+}
+
+fn read_prior(path: &Path) -> Prior {
+    let meta = match fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Prior::Missing,
+        Err(_) => return Prior::Unreadable,
+    };
+    if !meta.is_file() || meta.len() > MAX_PRIOR_BYTES {
+        return Prior::Unreadable;
+    }
+    match fs::read_to_string(path) {
+        Ok(text) => Prior::Text(text),
+        Err(_) => Prior::Unreadable,
     }
 }

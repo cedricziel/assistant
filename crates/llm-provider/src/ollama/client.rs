@@ -158,28 +158,7 @@ impl LlmClient {
             .pointer("/message/tool_calls")
             .and_then(|v| v.as_array())
         {
-            let items: Vec<ToolCallItem> = tool_calls
-                .iter()
-                .filter_map(|tc| {
-                    let name = tc
-                        .pointer("/function/name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if name.is_empty() {
-                        return None;
-                    }
-                    let params = tc
-                        .pointer("/function/arguments")
-                        .cloned()
-                        .unwrap_or(Value::Object(serde_json::Map::new()));
-                    Some(ToolCallItem {
-                        name,
-                        params,
-                        id: None,
-                    })
-                })
-                .collect();
+            let items = tool_call_items(tool_calls);
             if !items.is_empty() {
                 debug!(count = items.len(), "Native tool calls received");
                 let thinking = json
@@ -368,28 +347,7 @@ impl LlmClient {
         if let Some(tc) = tool_calls_json
             && let Some(arr) = tc.as_array()
         {
-            let items: Vec<ToolCallItem> = arr
-                .iter()
-                .filter_map(|entry| {
-                    let name = entry
-                        .pointer("/function/name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if name.is_empty() {
-                        return None;
-                    }
-                    let params = entry
-                        .pointer("/function/arguments")
-                        .cloned()
-                        .unwrap_or(Value::Object(serde_json::Map::new()));
-                    Some(ToolCallItem {
-                        name,
-                        params,
-                        id: None,
-                    })
-                })
-                .collect();
+            let items = tool_call_items(arr);
             if !items.is_empty() {
                 debug!(count = items.len(), "Native streaming: tool calls received");
                 return Ok(LlmResponse::ToolCalls(ToolCallResponse {
@@ -560,10 +518,11 @@ fn build_json_messages(
                             images.push(json!(data));
                         }
                         ContentBlock::Image { .. } => { /* vision disabled — skip */ }
-                        ContentBlock::Document { .. } => {
-                            // Ollama/OpenAI do not support native document blocks.
-                            // The orchestrator should have converted these to Text
-                            // before reaching the provider; skip if not.
+                        ContentBlock::Document { .. } | ContentBlock::Audio { .. } => {
+                            // Ollama/OpenAI do not support native document or
+                            // audio blocks. The orchestrator should have
+                            // removed these before reaching the provider;
+                            // skip if not.
                         }
                     }
                 }
@@ -587,6 +546,34 @@ fn build_json_messages(
     }
 
     messages
+}
+
+/// The named entries of Ollama's `message.tool_calls`. A call keeps the `id`
+/// Ollama sent, or gets a fresh one: MCP Apps and approvals address a stored
+/// tool call by its id.
+fn tool_call_items(calls: &[Value]) -> Vec<ToolCallItem> {
+    calls
+        .iter()
+        .filter_map(|call| {
+            let name = call.pointer("/function/name")?.as_str()?;
+            if name.is_empty() {
+                return None;
+            }
+            let id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map_or_else(|| format!("call_{}", uuid::Uuid::new_v4()), str::to_owned);
+            Some(ToolCallItem {
+                name: name.to_owned(),
+                params: call
+                    .pointer("/function/arguments")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+                id: Some(id),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -650,6 +637,60 @@ mod tests {
         assert_eq!(resp.items.len(), 1);
         assert_eq!(resp.items[0].name, "my-tool");
         assert_eq!(resp.items[0].params["key"], "val");
+    }
+
+    #[tokio::test]
+    async fn keeps_the_tool_call_id_ollama_sends() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
+                serde_json::json!([
+                    { "id": "call_abc", "function": { "name": "my-tool", "arguments": {} } }
+                ]),
+            )))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::ToolCalls(resp) = resp else {
+            panic!("expected ToolCalls, got {resp:?}");
+        };
+        assert_eq!(resp.items[0].id.as_deref(), Some("call_abc"));
+    }
+
+    #[tokio::test]
+    async fn gives_each_tool_call_without_an_id_a_unique_one() {
+        let server = MockServer::start().await;
+        let body = tool_calls_body(serde_json::json!([
+            { "function": { "name": "tool-a", "arguments": {} } },
+            { "function": { "name": "tool-b", "arguments": {} } }
+        ]));
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body.clone()))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let ids = |resp: LlmResponse| match resp {
+            LlmResponse::ToolCalls(resp) => resp
+                .items
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            other => panic!("expected ToolCalls, got {other:?}"),
+        };
+        let mut all = ids(client.chat("sys", &[], &[]).await.unwrap());
+        all.extend(ids(client
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap()));
+
+        let unique: std::collections::HashSet<_> = all.iter().flatten().collect();
+        assert_eq!(unique.len(), 4, "every call gets its own id: {all:?}");
     }
 
     #[tokio::test]
@@ -810,6 +851,23 @@ mod tests {
             msgs[0].get("images").is_none(),
             "images must be stripped when vision is false"
         );
+    }
+
+    #[test]
+    fn audio_blocks_are_dropped() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("[Voice message]: hi".into()),
+                ContentBlock::Audio {
+                    media_type: "audio/ogg".into(),
+                    data: "T2dnUw==".into(),
+                },
+            ],
+        }];
+        let msgs = build_json_messages("", &history, true);
+        assert_eq!(msgs[0]["content"], "[Voice message]: hi");
+        assert!(msgs[0].get("images").is_none());
+        assert!(!msgs[0].to_string().contains("T2dnUw=="));
     }
 
     #[test]

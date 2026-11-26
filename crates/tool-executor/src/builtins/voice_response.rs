@@ -92,7 +92,8 @@ impl ToolHandler for VoiceResponseHandler {
         let request = TtsRequest {
             text,
             voice,
-            format: Some("mp3".to_string()),
+            // The provider delivers its configured `[tts] format`.
+            format: None,
             speed: None,
         };
 
@@ -130,6 +131,7 @@ mod tests {
 
     use super::VoiceResponseHandler;
 
+    /// Delivers its configured MIME type unless the request names a format.
     struct FakeTts {
         audio: Vec<u8>,
     }
@@ -140,12 +142,40 @@ mod tests {
             "fake-tts"
         }
 
-        async fn synthesize(&self, _request: TtsRequest) -> anyhow::Result<TtsResult> {
+        async fn synthesize(&self, request: TtsRequest) -> anyhow::Result<TtsResult> {
+            let mime_type = match request.format.as_deref() {
+                Some("mp3") => "audio/mpeg",
+                Some(other) => anyhow::bail!("unexpected format {other}"),
+                None => "audio/ogg",
+            };
             Ok(TtsResult {
                 audio_data: self.audio.clone(),
-                mime_type: "audio/mpeg".to_string(),
+                mime_type: mime_type.to_string(),
             })
         }
+    }
+
+    #[tokio::test]
+    async fn uses_the_configured_format_instead_of_forcing_mp3() {
+        let store = Arc::new(AudioStore::new());
+        let handler = VoiceResponseHandler::new(
+            Arc::new(FakeTts {
+                audio: b"OggS".to_vec(),
+            }),
+            store.clone(),
+        );
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), serde_json::json!("hello"));
+
+        let output = handler.run(params, &make_ctx()).await.unwrap();
+
+        let id: Uuid = output.data.unwrap()["audio_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let (_, mime) = store.get(id).await.unwrap();
+        assert_eq!(mime, "audio/ogg");
     }
 
     struct FailingTts;
@@ -212,7 +242,7 @@ mod tests {
 
         // The audio should be retrievable from the store.
         let stored = store.get(uuid).await;
-        assert_eq!(stored, Some((audio_bytes, "audio/mpeg".to_string())));
+        assert_eq!(stored, Some((audio_bytes, "audio/ogg".to_string())));
         assert_eq!(data["voiced"], serde_json::json!(true));
     }
 

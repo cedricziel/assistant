@@ -49,6 +49,7 @@ sections in `~/.assistant/orgs/default/org.toml`.
 | `max_tokens`      | `8192`   | Maximum completion tokens per response, sent as `max_completion_tokens`                            |
 | `fallback_models` | `[]`     | Models to try in order when `model` fails. Sent as `models` with `model` first; omitted when empty |
 | `pdf_engine`      | unset    | PDF parser: `"native"`, `"cloudflare-ai"` or `"mistral-ocr"`. See [PDFs](#pdfs)                    |
+| `image_output`    | `false`  | Ask the model to answer with images. See [Chat image output](#chat-image-output)                   |
 
 ### `[llm.openrouter.provider]` section
 
@@ -89,6 +90,17 @@ take that effort, the provider logs the reason followed by
 `; chat calls will fail`, and every chat call fails with that reason
 without contacting OpenRouter. See
 [Troubleshooting](#troubleshooting) for the messages.
+
+### `[llm.openrouter.image_config]` section
+
+Sent as the request's `image_config` when `image_output = true`. Only the
+keys you set are sent. An unknown key fails config load. See
+[Chat image output](#chat-image-output).
+
+| Key            | Type   | Description                                |
+| -------------- | ------ | ------------------------------------------ |
+| `aspect_ratio` | string | Image proportions, for example `"16:9"`    |
+| `image_size`   | string | Image resolution: `"1K"`, `"2K"` or `"4K"` |
 
 ### `[llm.openrouter.cache]` section
 
@@ -331,6 +343,59 @@ error. Errors and retries work as for chat, and errors name the model.
 
 `[transcription] provider = "openrouter"` transcribes voice messages through OpenRouter's `/audio/transcriptions` endpoint, by default with `openai/whisper-1`. The key is `[transcription] api_key`, else the `[llm]` key when `[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`. See [Voice Transcription](transcription.md#openrouter).
 
+## Text-to-speech
+
+`[tts] provider = "openrouter"` speaks replies through OpenRouter's `/audio/speech` endpoint, by default with `openai/gpt-4o-mini-tts` and voice `alloy`. The key resolves as for transcription. At startup the provider checks the voice, `speed` and `instructions` against the model's catalog entry. See [Text-to-speech](transcription.md#openrouter-tts).
+
+## Image generation
+
+`[images] provider = "openrouter"` enables the `image-generate` tool, which creates and edits images through OpenRouter's `/images` endpoint, by default with `openai/gpt-image-2.6-flare`. The key resolves as for transcription. See [Image Generation](images.md).
+
+## Chat image output
+
+Some models, such as Gemini image models (`google/gemini-2.5-flash-image`),
+answer with images directly. With `image_output = true`, every chat
+request carries `modalities: ["image", "text"]`, plus `image_config` when
+you set [`[llm.openrouter.image_config]`](#llmopenrouterimage_config-section).
+With `image_output = false`, neither is sent.
+
+```toml
+[llm]
+provider = "openrouter"
+model    = "google/gemini-2.5-flash-image"
+
+[llm.openrouter]
+image_output = true
+
+[llm.openrouter.image_config]
+aspect_ratio = "16:9"
+image_size   = "2K"
+```
+
+The provider checks the model's catalog entry (see
+[Capabilities](#capabilities)). If `architecture.output_modalities` lacks
+`image`, it logs the reason followed by `; chat calls will fail`, and
+every chat call fails with that reason without contacting OpenRouter. See
+[Troubleshooting](#openrouter-model-slug-does-not-output-images-remove-image_output-from-llmopenrouter).
+
+Images are read from `message.images[].image_url.url`. When streaming,
+they are read from `delta.images` and from the `message.images` of the
+last chunk. A URL that appears more than once is kept once.
+
+- A data URI is decoded from base64.
+- Any other URL is downloaded at once. The MIME type comes from
+  `Content-Type`, or is `image/png` when that is missing or not an
+  `image/*` type.
+- A failed download or invalid base64 fails the call.
+
+The images are attached to the reply as generated media. The
+orchestrator stores them as attachments of the assistant message, so
+every interface delivers them the way it delivers tool attachments.
+
+This is separate from the `image-generate` tool, which the model calls
+and which uses its own `[images]` settings. See
+[Image generation](#image-generation).
+
 ## Models
 
 OpenRouter provides access to 300+ models. Use the `provider/model`
@@ -571,3 +636,10 @@ Set `effort` to one listed in the message, then restart.
 ### "reasoning is mandatory for OpenRouter model `<slug>`, so effort `none` is not allowed"
 
 The model always reasons. Set another `effort`, then restart.
+
+### "OpenRouter model `<slug>` does not output images; remove `image_output` from [llm.openrouter]"
+
+`image_output = true`, but the model's catalog entry does not list
+`image` in its output modalities. Remove `image_output`, or pick an
+image-output model such as `google/gemini-2.5-flash-image`. Restart after
+the fix; the catalog is not fetched again.

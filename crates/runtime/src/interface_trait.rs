@@ -23,22 +23,21 @@ use crate::orchestrator::{Orchestrator, SubmitTurn, TurnResult};
 /// than the concrete [`Orchestrator`], enabling lightweight mock implementations.
 #[async_trait]
 pub trait AssistantInterface: Send + Sync {
-    /// Register a streaming event sink for the given conversation.
-    ///
-    /// [`OrchestratorEvent`]s emitted during the turn are forwarded to `sink`
-    /// as they are produced.  Call this *before*
-    /// [`submit_turn`](Self::submit_turn).
-    async fn register_token_sink(
-        &self,
-        conversation_id: Uuid,
-        sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
-    );
-
     /// Submit a turn and wait for the assistant's reply.
     ///
     /// Set [`SubmitTurn::request_id`] to let the SSE `run_id` double as the
     /// orchestrator's request id, enabling external cancellation by `run_id`.
     async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult>;
+
+    /// Like [`submit`](Self::submit), forwarding the turn's
+    /// [`OrchestratorEvent`](crate::orchestrator::OrchestratorEvent)s to
+    /// `sink`. The sink is dropped by the time this returns, so its receiver
+    /// closes when the turn ends.
+    async fn submit_streaming(
+        &self,
+        turn: SubmitTurn,
+        sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
+    ) -> Result<TurnResult>;
 
     /// Cancel an in-flight turn by `request_id`. Returns whether a token was
     /// found and triggered.
@@ -58,16 +57,16 @@ pub trait AssistantInterface: Send + Sync {
 
 #[async_trait]
 impl AssistantInterface for Orchestrator {
-    async fn register_token_sink(
-        &self,
-        conversation_id: Uuid,
-        sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
-    ) {
-        self.register_token_sink(conversation_id, sink).await;
-    }
-
     async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult> {
         self.submit(turn).await
+    }
+
+    async fn submit_streaming(
+        &self,
+        turn: SubmitTurn,
+        sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
+    ) -> Result<TurnResult> {
+        self.submit_streaming(turn, sink).await
     }
 
     async fn cancel_turn(&self, request_id: Uuid) -> bool {
@@ -87,23 +86,15 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    /// Minimal mock that only implements the two required trait methods
-    /// (`submit` + `run_boot`). The other trait
-    /// methods fall back to the trait's default implementations, which is
-    /// what these tests exercise.
+    /// Minimal mock that only implements the required trait methods. The
+    /// others fall back to the trait's default implementations, which is what
+    /// these tests exercise.
     struct MinimalMock {
         recorded_prompt: tokio::sync::Mutex<Option<String>>,
     }
 
     #[async_trait]
     impl AssistantInterface for MinimalMock {
-        async fn register_token_sink(
-            &self,
-            _conversation_id: Uuid,
-            _sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
-        ) {
-        }
-
         async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult> {
             *self.recorded_prompt.lock().await = Some(turn.prompt.clone());
             Ok(TurnResult {
@@ -114,6 +105,14 @@ mod tests {
                 had_errors: false,
                 timing: None,
             })
+        }
+
+        async fn submit_streaming(
+            &self,
+            turn: SubmitTurn,
+            _sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
+        ) -> Result<TurnResult> {
+            self.submit(turn).await
         }
 
         async fn run_boot(&self, _conversation_id: Uuid, _interface: Interface) -> Result<bool> {

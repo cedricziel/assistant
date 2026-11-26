@@ -13,7 +13,8 @@ schemas/tool-results/
   fixtures/{kind}/invalid-*.json   must fail the schema and parse to null
 ```
 
-Contracts today: `terminal`, `sources`. More kinds follow in later changes.
+Contracts today: `terminal`, `sources`, `link_preview`, `code_file`,
+`code_diff`, `data_table`, `plan`.
 
 ## Rules
 
@@ -31,7 +32,11 @@ Contracts today: `terminal`, `sources`. More kinds follow in later changes.
   with per-contract limits that do not reuse the LLM-facing output limits, cut
   on a character boundary and set the contract's truncation flag:
   `terminal` tails at most 12 KiB per stream; `sources` at most 20 results with
-  snippets of at most 300 characters.
+  snippets of at most 300 characters; `code_file.content` at most
+  min(`limit`, 24 KiB); `code_diff` at most 400 lines of at most 512
+  characters; `data_table` at most 200 rows with cells of at most 256
+  characters; `link_preview.excerpt` at most 280 characters; `plan` at most 50
+  steps. Where the schema can express a limit (`maxLength`, `maxItems`) it does.
 - **Data is for clients only.** It never enters the LLM context; the model sees
   the tool's text content.
 - **MCP servers can opt in.** An MCP tool that returns `structuredContent` with

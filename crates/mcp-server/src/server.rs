@@ -6,13 +6,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, CompleteRequestParams, CompleteResult,
-    ContentBlock, GetPromptRequestParams, GetPromptResponse, Implementation, ListPromptsResult,
+    CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams,
+    CompleteRequestParams, CompleteResult, ContentBlock, CreateTaskResult, GetPromptRequestParams,
+    GetPromptResponse, GetTaskParams, GetTaskResult, Implementation, ListPromptsResult,
     ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
     ProgressNotificationParam, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
     ServerCapabilities, ServerConfig, SubscriptionFilter, Tool,
 };
 use rmcp::service::{NotificationContext, RequestContext, SubscriptionContext};
+use rmcp::task_manager::TaskExit;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 use tracing::{debug, warn};
@@ -27,6 +29,7 @@ use assistant_tool_executor::install_skill_from_source;
 
 use crate::identity::{Caller, resolve_caller};
 use crate::listeners::ListChangeListeners;
+use crate::tasks::TaskStore;
 use crate::{prompts, resources};
 
 const RUN_PROMPT: &str = "run-prompt";
@@ -50,11 +53,13 @@ pub struct AssistantMcpServer {
     user_skills_dir: PathBuf,
     install_registry: Option<Arc<SkillRegistry>>,
     listeners: ListChangeListeners,
+    tasks: TaskStore,
 }
 
 impl AssistantMcpServer {
     /// Builds a server that tells `listeners` when installed skills change and
-    /// registers its own listening sessions with them.
+    /// registers its own listening sessions with them, and keeps its
+    /// `run-prompt` tasks in `tasks`.
     pub fn new(
         orchestrator: Arc<dyn OrchestrationEngine>,
         executor: Arc<dyn ToolDispatcher>,
@@ -62,6 +67,7 @@ impl AssistantMcpServer {
         policy: PermissionPolicy,
         user_skills_dir: PathBuf,
         listeners: ListChangeListeners,
+        tasks: TaskStore,
     ) -> Self {
         Self {
             catalog,
@@ -71,6 +77,7 @@ impl AssistantMcpServer {
             user_skills_dir,
             install_registry: None,
             listeners,
+            tasks,
         }
     }
 
@@ -159,6 +166,45 @@ impl AssistantMcpServer {
         Ok(text_result(turn.answer))
     }
 
+    /// Starts one turn as a task, cancelled through the orchestrator when the
+    /// client cancels the task.
+    async fn spawn_prompt_task(
+        &self,
+        caller: Caller,
+        input: &Value,
+    ) -> Result<CreateTaskResult, ErrorData> {
+        let prompt = required_str(input, "prompt")?.to_owned();
+        let orchestrator = self.orchestrator.clone();
+        let auth = caller.auth.clone();
+        let task = self
+            .tasks
+            .spawn(&caller.auth, move |task| {
+                Box::pin(async move {
+                    let request_id = Uuid::new_v4();
+                    let turn = orchestrator.submit_turn_with_request_id(
+                        &auth,
+                        request_id,
+                        &prompt,
+                        Uuid::new_v4(),
+                        Interface::Mcp,
+                        None,
+                    );
+                    tokio::select! {
+                        turn = turn => turn.map(|turn| text_result(turn.answer)).map_err(|e| {
+                            warn!(error = %e, "run_prompt task failed");
+                            TaskExit::Error(ErrorData::internal_error(e.to_string(), None))
+                        }),
+                        () = task.cancelled() => {
+                            orchestrator.cancel_turn(request_id).await;
+                            Err(TaskExit::Cancelled)
+                        }
+                    }
+                })
+            })
+            .await;
+        Ok(task)
+    }
+
     async fn install_skill(&self, input: &Value) -> Result<CallToolResult, ErrorData> {
         let source = required_str(input, "source")?;
         let Some(registry) = self.install_registry.clone() else {
@@ -224,6 +270,7 @@ pub(crate) fn server_info() -> ServerConfig {
             .enable_resources_list_changed()
             .enable_tools()
             .enable_tool_list_changed()
+            .enable_tasks()
             .build(),
     )
     .with_server_info(Implementation::new(
@@ -277,6 +324,12 @@ impl ServerHandler for AssistantMcpServer {
         // `run-prompt` is exempt from the policy: its tool calls pass the
         // orchestrator's own gate.
         if tool_name == RUN_PROMPT {
+            if context
+                .client_capabilities()
+                .is_some_and(|capabilities| capabilities.supports_tasks())
+            {
+                return self.spawn_prompt_task(caller, &input).await.map(Into::into);
+            }
             return self
                 .run_prompt(&caller, &input, &context)
                 .await
@@ -380,6 +433,25 @@ impl ServerHandler for AssistantMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
         prompts::complete(self.catalog.as_ref(), &request).await
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        let caller = resolve_caller(&context.extensions)?;
+        let task = self.tasks.get(&caller.auth, &request.task_id).await?;
+        Ok(GetTaskResult::new(task))
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let caller = resolve_caller(&context.extensions)?;
+        self.tasks.cancel(&caller.auth, &request.task_id).await
     }
 
     fn accepted_subscription_filter(

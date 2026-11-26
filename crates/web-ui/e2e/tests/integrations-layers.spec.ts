@@ -1,5 +1,6 @@
 import { test, expect, Page } from "@playwright/test";
 
+import { enableAccessibility } from "./support/flutter";
 import {
   integration,
   mockEverything,
@@ -37,13 +38,6 @@ async function loginFlutter(page: Page) {
 async function navigateAndSettle(page: Page, path: string) {
   await page.goto(path, { waitUntil: "load" });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
-}
-
-/** Flutter builds its semantics tree only once this placeholder is clicked. */
-async function enableAccessibility(page: Page) {
-  await page
-    .getByRole("button", { name: "Enable accessibility" })
-    .evaluate((el) => (el as HTMLElement).click());
 }
 
 async function shot(page: Page, name: string) {

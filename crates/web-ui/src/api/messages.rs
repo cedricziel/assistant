@@ -8,8 +8,9 @@
 //! - `POST /api/quick-message`                       — synchronous send
 //! - `GET  /api/conversations/{id}/runs/{run_id}/events/stream` — run replay
 
-use assistant_storage::PersonaStore as _;
+use assistant_storage::{AttachmentStore as _, PersonaStore as _};
 use std::convert::Infallible;
+use std::time::Duration;
 
 use axum::Extension;
 use axum::Json;
@@ -19,12 +20,16 @@ use axum::response::sse::Event;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
+use assistant_core::VOICE_PLACEHOLDER;
 use assistant_core::auth::AuthContext;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::{Action, ResourceKind};
+use assistant_core::llm::provider::LlmProvider;
 use assistant_core::types::conversation::Interface;
+use assistant_core::types::features::SuggestionsConfig;
 use assistant_runtime::OrchestratorEvent;
 use assistant_runtime::SubmitTurn;
 use assistant_runtime::projection::{SseProjector, StreamProjector};
@@ -150,12 +155,8 @@ pub async fn send_message(
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    let events = TurnEvents {
-        rx: event_rx,
-        sink: event_tx.downgrade(),
-    };
-    orchestrator.register_token_sink(conv_id, event_tx).await;
     let user_attachment_ids = body.attachment_ids;
+    let user_message = content.clone();
     // Use `run_id` as the orchestrator's `request_id` so external cancel
     // calls — `POST .../turns/{run_id}/cancel` — can find the matching
     // CancellationToken via `Orchestrator::cancel_turn`.
@@ -165,14 +166,15 @@ pub async fn send_message(
         let submit_request_id = run_id;
         tokio::spawn(async move {
             let result = orchestrator
-                .submit(
+                .submit_streaming(
                     SubmitTurn::new(content, conv_id, Interface::Web)
                         .with_auth(&auth)
                         .with_request_id(submit_request_id)
                         .with_attachments(user_attachment_ids)
-                        // The turn may run in another process, which has no
-                        // access to the sink registered above.
+                        // The turn may run in another process, which relays
+                        // its events over the bus instead of into `event_tx`.
                         .with_relay_events(true),
+                    event_tx,
                 )
                 .await;
             let _ = tx.send(result);
@@ -185,8 +187,12 @@ pub async fn send_message(
         &state,
         run_id,
         conv_id,
-        RunOptions { push: true },
-        events,
+        RunOptions {
+            push: true,
+            suggestions: true,
+        },
+        user_message,
+        event_rx,
         turn_result_rx,
     )
     .await
@@ -197,40 +203,40 @@ pub async fn send_message(
 pub(crate) struct RunOptions {
     /// Send Web Push notifications for skill, error and completion events.
     pub push: bool,
-}
-
-/// The orchestrator events of one turn, plus the handle the runner needs to
-/// release the turn's token sink when the turn ends before a worker ever
-/// consumed it.
-pub(crate) struct TurnEvents {
-    /// Receiving end of the sink registered with the orchestrator.
-    pub rx: mpsc::Receiver<OrchestratorEvent>,
-    /// Weak handle to the registered sink. It must not keep `rx` open: a
-    /// worker drops the sink when its turn ends, which closes the stream.
-    pub sink: mpsc::WeakSender<OrchestratorEvent>,
+    /// Offer follow-up suggestions after a completed turn (`[suggestions]`
+    /// still has to be enabled for the org).
+    pub suggestions: bool,
 }
 
 /// Drive one turn to its SSE response: emit `run_started` (sequence 0), forward
 /// orchestrator events as SSE frames while persisting them to the durable run
 /// log and the live broadcaster, then emit the terminal frame (`done`, or
 /// `agent_error` for a cancelled or failed turn) and send the completion push.
+/// The POST stream closes right after the terminal frame. When
+/// `opts.suggestions` is set and the turn ended in `done`, the run then stays
+/// open for the follow-up suggestion phase (see [`follow_up_prompts`]), whose
+/// result reaches clients on the replay tail as a `suggestions` frame.
 ///
-/// The caller has already registered the token sink behind `events` and
-/// submitted the turn whose outcome arrives on `turn_result_rx`. A turn that is
-/// cancelled before any worker claims it ends the stream at once: no worker
-/// will ever consume its sink, so the runner does not wait for it to close. The returned response
-/// carries the run id in `X-Run-Id` for clients that drop the stream before
-/// `run_started` arrives.
+/// `user_message` is the text the turn answered; the suggestion call reads it.
+///
+/// The caller has already submitted the turn with
+/// [`submit_streaming`](assistant_runtime::Orchestrator::submit_streaming),
+/// streaming into `event_rx`; its outcome arrives on `turn_result_rx`. The
+/// returned response carries the run id in `X-Run-Id` for clients that drop the
+/// stream before `run_started` arrives.
+// Every argument is a distinct per-turn input; the sibling entry points
+// (edit, regenerate, voice) each pass all of them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_turn_to_sse(
     ctx: &SpaceCtx,
     state: &ApiState,
     run_id: Uuid,
     conv_id: Uuid,
     opts: RunOptions,
-    events: TurnEvents,
+    user_message: String,
+    event_rx: mpsc::Receiver<OrchestratorEvent>,
     turn_result_rx: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
 ) -> Response {
-    let TurnEvents { rx: event_rx, sink } = events;
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
     let push_dispatcher_for_sse = state.push_dispatcher.clone().filter(|_| opts.push);
@@ -239,17 +245,22 @@ pub(crate) async fn stream_turn_to_sse(
     let event_store = ctx.storage.conversation_event_store();
     let run_broadcaster = state.run_broadcaster.clone();
     // Events of a turn another process runs arrive over the bus; the stream
-    // ends with the turn either way.
-    let orchestrator = match state.runtime(ctx).await {
-        Ok(runtime) => Some(runtime.orchestrator.clone()),
+    // ends with the turn either way. The same runtime supplies the org's
+    // suggestion settings and LLM; without it the turn still streams, only
+    // the relay and the chips are lost.
+    let runtime = match state.runtime(ctx).await {
+        Ok(runtime) => Some(runtime),
         Err(_) => {
             warn!("No runtime to relay events for run {run_id}; streaming local events only");
             None
         }
     };
-    let relay = orchestrator
+    let relay = runtime
         .as_ref()
-        .map(|orchestrator| orchestrator.run_event_relay(conv_id, run_id));
+        .map(|runtime| runtime.orchestrator.run_event_relay(conv_id, run_id));
+    let suggestion_setup = runtime
+        .filter(|runtime| opts.suggestions && runtime.config.suggestions.enabled)
+        .map(|runtime| (runtime.config.suggestions.clone(), runtime.llm.clone()));
     let mut run_events = RunEvents::new(event_rx, relay, turn_result_rx);
 
     // Emit run_started event (sequence 0) to the durable log.
@@ -467,42 +478,37 @@ pub(crate) async fn stream_turn_to_sse(
             },
             Errored(String),
         }
-        let turn_result = run_events.into_turn_result().await;
-        if matches!(
-            &turn_result,
-            Ok(Err(e)) if e.to_string().contains(assistant_runtime::TURN_CANCELLED_MARKER)
-        ) && let (Some(orchestrator), Some(sink)) = (&orchestrator, sink.upgrade())
-        {
-            // A turn cancelled before a worker claimed it leaves its sink
-            // registered. Free it so a newer turn of this conversation is not
-            // routed here.
-            orchestrator.release_token_sink(conv_id, &sink).await;
-        }
-        let (reply_text, reply_message_id, reply_attachment_ids, terminal) = match turn_result {
-            Ok(Ok(result)) => (
-                result.answer,
-                result.message_id,
-                result.attachment_ids,
-                TerminalKind::Done,
-            ),
-            Ok(Err(e)) => {
-                let msg = e.to_string();
-                let kind = if msg.contains(assistant_runtime::TURN_CANCELLED_MARKER) {
-                    TerminalKind::Cancelled {
-                        before_start: msg
-                            .contains(assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER),
-                    }
-                } else {
-                    TerminalKind::Errored(msg)
-                };
-                (full_text, None, vec![], kind)
-            }
-            Err(_) => (
-                full_text,
-                None,
-                vec![],
-                TerminalKind::Errored("submit_turn channel dropped".to_string()),
-            ),
+        let (reply_text, reply_message_id, reply_attachment_ids, terminal) =
+            match run_events.into_turn_result().await {
+                Ok(Ok(result)) => (
+                    result.answer,
+                    result.message_id,
+                    result.attachment_ids,
+                    TerminalKind::Done,
+                ),
+                Ok(Err(e)) => {
+                    let msg = e.to_string();
+                    let kind = if msg.contains(assistant_runtime::TURN_CANCELLED_MARKER) {
+                        TerminalKind::Cancelled {
+                            before_start: msg
+                                .contains(assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER),
+                        }
+                    } else {
+                        TerminalKind::Errored(msg)
+                    };
+                    (full_text, None, vec![], kind)
+                }
+                Err(_) => (
+                    full_text,
+                    None,
+                    vec![],
+                    TerminalKind::Errored("submit_turn channel dropped".to_string()),
+                ),
+            };
+
+        let done_message_id = match terminal {
+            TerminalKind::Done => reply_message_id,
+            TerminalKind::Cancelled { .. } | TerminalKind::Errored(_) => None,
         };
 
         let (event_type, payload) = match &terminal {
@@ -562,14 +568,10 @@ pub(crate) async fn stream_turn_to_sse(
             .event(event_type)
             .data(payload.to_string())
             .id(seq.to_string());
-        if !client_gone {
-            let _ = sse_tx.send(Ok(terminal_sse)).await;
-        }
+        let client_present_at_done = !client_gone && sse_tx.send(Ok(terminal_sse)).await.is_ok();
 
-        // Signal run completion — drops broadcast channel, subscribers observe close.
-        run_broadcaster.finish_run(&run_id).await;
-
-        // Fire Web Push notification after emitting the SSE done event.
+        // Fire Web Push notification after emitting the SSE done event, ahead
+        // of the suggestion phase so its latency never delays the push.
         if let Some(dispatcher) = push_dispatcher_for_sse {
             let body = reply_text.chars().take(80).collect::<String>();
             if let Err(e) = dispatcher
@@ -579,6 +581,42 @@ pub(crate) async fn stream_turn_to_sse(
                 warn!("Push dispatch failed: {e}");
             }
         }
+
+        // The POST stream ends at the terminal frame. Suggestions travel on
+        // the run's replay tail, so a client that buffers the body until close
+        // still gets the whole answer without waiting for them.
+        drop(sse_tx);
+
+        if let (Some((cfg, llm)), Some(message_id)) = (suggestion_setup, done_message_id)
+            && (client_present_at_done || broadcast_tx.receiver_count() > 0)
+        {
+            let prompts =
+                follow_up_prompts(&cfg, &*llm, &user_message, &reply_text, &broadcast_tx).await;
+            if !prompts.is_empty() {
+                let payload = serde_json::json!({
+                    "message_id": message_id.to_string(),
+                    "suggestions": prompts
+                        .iter()
+                        .map(|prompt| serde_json::json!({"prompt": prompt}))
+                        .collect::<Vec<_>>(),
+                });
+                let seq = seq + 1;
+                if let Err(e) = event_store
+                    .append_event(&run_id_str, &conv_id_str, seq, "suggestions", &payload)
+                    .await
+                {
+                    warn!("Failed to persist suggestions event for run {run_id}: {e}");
+                }
+                let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                    sequence: seq,
+                    event_type: "suggestions".to_string(),
+                    payload,
+                });
+            }
+        }
+
+        // Signal run completion — drops broadcast channel, subscribers observe close.
+        run_broadcaster.finish_run(&run_id).await;
     });
 
     // Include run_id in response headers as a fallback for clients that crash
@@ -590,6 +628,57 @@ pub(crate) async fn stream_turn_to_sse(
     response
 }
 
+// -- Follow-up suggestion phase ----------------------------------------------
+
+/// How long after `done` a replay subscriber may take to attach before the
+/// suggestion call is judged to have no audience.
+const SUGGESTION_ATTACH_GRACE: Duration = Duration::from_secs(2);
+
+/// How often the departed-listener watchdog re-reads the receiver count.
+const SUGGESTION_LISTENER_POLL: Duration = Duration::from_millis(500);
+
+/// Resolve once no replay subscriber is connected, after the attach grace.
+async fn listener_departed(tx: &tokio::sync::broadcast::Sender<assistant_storage::LiveEvent>) {
+    tokio::time::sleep(SUGGESTION_ATTACH_GRACE).await;
+    while tx.receiver_count() > 0 {
+        tokio::time::sleep(SUGGESTION_LISTENER_POLL).await;
+    }
+}
+
+/// Ask the org's LLM for follow-up prompts, bounded by the configured timeout
+/// and abandoned (dropping the in-flight call) when the listener leaves.
+///
+/// Errors, timeouts and aborts only log; they yield no prompts.
+async fn follow_up_prompts(
+    cfg: &SuggestionsConfig,
+    llm: &dyn LlmProvider,
+    user_message: &str,
+    answer: &str,
+    tx: &tokio::sync::broadcast::Sender<assistant_storage::LiveEvent>,
+) -> Vec<String> {
+    let call = tokio::time::timeout(
+        cfg.effective_timeout(),
+        assistant_runtime::follow_ups::generate(user_message, answer, cfg.effective_max(), llm),
+    );
+    tokio::select! {
+        result = call => match result {
+            Ok(Ok(generated)) => generated.prompts,
+            Ok(Err(e)) => {
+                warn!("Follow-up suggestion call failed: {e:#}");
+                Vec::new()
+            }
+            Err(_) => {
+                debug!("Follow-up suggestion call timed out");
+                Vec::new()
+            }
+        },
+        () = listener_departed(tx) => {
+            debug!("No replay listener for follow-up suggestions; call aborted");
+            Vec::new()
+        }
+    }
+}
+
 /// How often the runner looks for relayed events while the turn is quiet.
 /// Events that arrive back to back are read without waiting.
 const RELAY_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
@@ -599,8 +688,8 @@ type TurnOutcome =
 
 /// The events of one turn, from whichever side delivers them: the local sink
 /// when a worker in this process runs the turn, the bus relay when a worker in
-/// another process does. It ends with the turn's outcome, not with the sink,
-/// because a sink nobody consumes never closes.
+/// another process does. It ends with the turn's outcome, because the relay
+/// has no end of its own.
 struct RunEvents {
     local: mpsc::Receiver<OrchestratorEvent>,
     local_open: bool,
@@ -730,6 +819,25 @@ pub struct SseToolResultEvent {
     pub app: Option<super::mcp_apps::McpAppView>,
 }
 
+/// SSE `suggestions` event: tappable follow-up prompts for a finished turn.
+///
+/// Sent only on the run's replay stream, after `done`, when
+/// `[suggestions].enabled` is on for the org.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseSuggestionsEvent {
+    /// The assistant message the suggestions follow (`done.message_id`).
+    pub message_id: Uuid,
+    /// Prompts the user could send next, best first.
+    pub suggestions: Vec<SseSuggestion>,
+}
+
+/// One follow-up prompt in an [`SseSuggestionsEvent`].
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseSuggestion {
+    /// Text to send as the user's next message.
+    pub prompt: String,
+}
+
 /// SSE `subagent_started` event — a subagent has been spawned.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct SseSubagentStartedEvent {
@@ -795,6 +903,10 @@ pub struct SseSubagentStatusEvent {
 ///
 /// Returns `404` if no events exist for `run_id` and the run is not active
 /// (never started, unknown, or pruned after the TTL elapsed).
+///
+/// After `done` the stream may carry one `suggestions` frame
+/// (`SseSuggestionsEvent`) with follow-up prompts for the finished turn; it
+/// then closes when the run finishes.
 #[utoipa::path(
     get,
     path = "/api/conversations/{id}/runs/{run_id}/events/stream",
@@ -1091,8 +1203,12 @@ struct VoiceUploadForm {
     audio: Vec<u8>,
 }
 
-/// `POST /api/conversations/{id}/voice` — upload audio, transcribe it, run
-/// through the orchestrator, and stream the response as SSE.
+/// `POST /api/conversations/{id}/voice` — upload audio, keep it as the user
+/// message's attachment, transcribe it, run through the orchestrator, and
+/// stream the response as SSE.
+///
+/// The message text is the transcript, or `[Voice message]` when no
+/// transcription provider is configured or transcription fails.
 #[utoipa::path(
     post,
     path = "/api/conversations/{id}/voice",
@@ -1108,7 +1224,6 @@ struct VoiceUploadForm {
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
         (status = 404, description = "Conversation not found", body = ErrorBody),
-        (status = 503, description = "Voice not configured"),
     ),
     security(("bearer_token" = []))
 )]
@@ -1128,17 +1243,6 @@ pub async fn send_voice_message(
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
-    };
-
-    let transcription_provider = match &state.transcription_provider {
-        Some(p) => p.clone(),
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Voice transcription not configured",
-            )
-                .into_response();
-        }
     };
 
     // Parse the multipart body — expect a single "audio" field.
@@ -1186,26 +1290,55 @@ pub async fn send_voice_message(
         return response;
     }
 
-    // Transcribe.
-    let transcript = match transcription_provider
-        .transcribe(TranscriptionRequest {
-            audio_data: audio_bytes,
-            mime_type: mime_type.clone(),
-            filename: None,
-            language: None,
-        })
+    // Keep the recording as an attachment so the turn can carry the audio.
+    let meta = assistant_core::AttachmentMeta {
+        id: Uuid::new_v4(),
+        message_id: None,
+        conversation_id: conv_id,
+        agent_id: state.agent_id.read().await.clone(),
+        filename: "voice".to_string(),
+        mime_type: mime_type.clone(),
+        size_bytes: audio_bytes.len() as u64,
+        created_at: SystemClock.now(),
+    };
+    if let Err(e) = ctx
+        .storage
+        .attachment_store()
+        .store(&meta, &audio_bytes)
         .await
     {
-        Ok(r) => r.text,
-        Err(e) => {
-            warn!("Transcription failed: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Transcription failed").into_response();
-        }
-    };
-
-    if transcript.trim().is_empty() {
-        return (StatusCode::BAD_REQUEST, "Transcription returned empty text").into_response();
+        warn!("Failed to store voice recording: {e}");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to store voice recording",
+        )
+            .into_response();
     }
+
+    // The transcript stands in for the recording; without one the turn still
+    // runs on the recording alone.
+    let transcript = match &state.transcription_provider {
+        Some(provider) => match provider
+            .transcribe(TranscriptionRequest {
+                audio_data: audio_bytes,
+                mime_type,
+                filename: None,
+                language: None,
+            })
+            .await
+        {
+            Ok(r) if !r.text.trim().is_empty() => r.text,
+            Ok(_) => {
+                warn!("Transcription returned empty text");
+                VOICE_PLACEHOLDER.to_string()
+            }
+            Err(e) => {
+                warn!("Transcription failed: {e}");
+                VOICE_PLACEHOLDER.to_string()
+            }
+        },
+        None => VOICE_PLACEHOLDER.to_string(),
+    };
 
     // Run through orchestrator (same flow as send_message).
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
@@ -1215,14 +1348,19 @@ pub async fn send_voice_message(
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    orchestrator.register_token_sink(conv_id, event_tx).await;
     let content = transcript.clone();
+    let recording_id = meta.id;
     let turn_result_rx = {
         let (tx, rx) =
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
             let result = orchestrator
-                .submit(SubmitTurn::new(content, conv_id, Interface::Web).with_auth(&auth))
+                .submit_streaming(
+                    SubmitTurn::new(content, conv_id, Interface::Web)
+                        .with_auth(&auth)
+                        .with_attachments(vec![recording_id]),
+                    event_tx,
+                )
                 .await;
             let _ = tx.send(result);
         });
@@ -1924,6 +2062,42 @@ mod tests {
         );
     }
 
+    // -- Turns run by an orchestrator in another process --
+
+    /// Bound on a stream that should end on its own; a hung stream fails the
+    /// test instead of running into the submit timeout.
+    async fn frames_within_10s(resp: axum::response::Response) -> Vec<Frame> {
+        tokio::time::timeout(std::time::Duration::from_secs(10), sse_frames(resp))
+            .await
+            .expect("the SSE stream must end once the turn completes")
+    }
+
+    #[tokio::test]
+    async fn send_message_ends_with_cancelled_agent_error_when_cancelled_before_any_worker_claims_it()
+     {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let (state, _) = state_over("http://127.0.0.1:1", &[default_space(&storage)], false).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state, conv_id, "never claimed").await;
+        let run_id = Uuid::parse_str(&run_id_of(&resp)).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !orchestrator.is_turn_in_flight(run_id).await {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("precondition: the turn is submitted");
+        orchestrator.cancel_turn(run_id).await;
+        let frames = frames_within_10s(resp).await;
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "cancelled");
+    }
+
     /// Give `state` a dispatcher that delivers to `push_server`, and subscribe
     /// one browser (with valid RFC 8291 key material) in `storage`.
     async fn with_push_subscriber(
@@ -2014,17 +2188,24 @@ mod tests {
 
     // -- stream_turn_to_sse driven directly -----------------------------------
 
-    use super::{RunOptions, TurnEvents, stream_turn_to_sse};
+    use super::{RunOptions, stream_turn_to_sse};
 
     fn system_ctx(storage: &Arc<StorageLayer>) -> crate::space::SpaceCtx {
         crate::space::SpaceCtx {
             auth: assistant_core::auth::AuthContext::system(),
+            space_id: assistant_core::identity::SpaceId::from("default"),
             org_slug: "default".into(),
             space_slug: "default".into(),
             role: assistant_core::identity::Role::OrgAdmin,
             storage: storage.clone(),
         }
     }
+
+    /// Runner options with the suggestion phase off.
+    const NO_SUGGESTIONS: RunOptions = RunOptions {
+        push: true,
+        suggestions: false,
+    };
 
     /// Run the shared runner over hand-fed channels; returns the run id and SSE frames.
     async fn run_runner(
@@ -2035,12 +2216,23 @@ mod tests {
         outcome: Option<anyhow::Result<assistant_runtime::TurnResult>>,
     ) -> (String, Vec<Frame>) {
         let conv_id = new_conversation(storage).await;
+        run_runner_in(state, storage, conv_id, opts, events, outcome).await
+    }
+
+    /// [`run_runner`] in an existing conversation.
+    async fn run_runner_in(
+        state: &ApiState,
+        storage: &Arc<StorageLayer>,
+        conv_id: Uuid,
+        opts: RunOptions,
+        events: Vec<assistant_runtime::OrchestratorEvent>,
+        outcome: Option<anyhow::Result<assistant_runtime::TurnResult>>,
+    ) -> (String, Vec<Frame>) {
         let run_id = Uuid::new_v4();
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
         for event in events {
             event_tx.send(event).await.unwrap();
         }
-        let sink = event_tx.downgrade();
         drop(event_tx);
         let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
         match outcome {
@@ -2057,7 +2249,8 @@ mod tests {
             run_id,
             conv_id,
             opts,
-            TurnEvents { rx: event_rx, sink },
+            "the user message".to_string(),
+            event_rx,
             turn_rx,
         )
         .await;
@@ -2090,7 +2283,7 @@ mod tests {
         let (run_id, frames) = run_runner(
             &state,
             &storage,
-            RunOptions { push: true },
+            NO_SUGGESTIONS,
             vec![assistant_runtime::OrchestratorEvent::Token("part".into())],
             Some(Ok(result)),
         )
@@ -2125,11 +2318,12 @@ mod tests {
             &state,
             run_id,
             conv_id,
-            RunOptions { push: false },
-            TurnEvents {
-                rx: event_rx,
-                sink: event_tx.downgrade(),
+            RunOptions {
+                push: false,
+                suggestions: false,
             },
+            "hi".to_string(),
+            event_rx,
             turn_rx,
         )
         .await;
@@ -2188,7 +2382,7 @@ mod tests {
         let (_, frames) = run_runner(
             &state,
             &storage,
-            RunOptions { push: true },
+            NO_SUGGESTIONS,
             vec![assistant_runtime::OrchestratorEvent::Token("par".into())],
             Some(Err(anyhow::anyhow!(
                 assistant_runtime::TURN_CANCELLED_MARKER
@@ -2207,8 +2401,7 @@ mod tests {
     async fn runner_reports_a_dropped_turn_channel_as_an_error() {
         let (state, storage) = event_log_state().await;
 
-        let (_, frames) =
-            run_runner(&state, &storage, RunOptions { push: true }, vec![], None).await;
+        let (_, frames) = run_runner(&state, &storage, NO_SUGGESTIONS, vec![], None).await;
 
         let (event, data, _) = frames.last().unwrap();
         assert_eq!(event, "agent_error");
@@ -2226,7 +2419,10 @@ mod tests {
         let (_, frames) = run_runner(
             &state,
             &storage,
-            RunOptions { push: false },
+            RunOptions {
+                push: false,
+                suggestions: false,
+            },
             vec![],
             Some(Ok(turn_result("quiet"))),
         )
@@ -2238,6 +2434,392 @@ mod tests {
             0,
             "push: false suppresses the completion push"
         );
+    }
+
+    // -- suggestion phase ------------------------------------------------------
+
+    const SUGGEST: RunOptions = RunOptions {
+        push: true,
+        suggestions: true,
+    };
+
+    /// State over `llm` whose org has `[suggestions]` set as given.
+    async fn suggestions_state(
+        llm: &MockServer,
+        workers: bool,
+        enabled: bool,
+        timeout_secs: u64,
+    ) -> (ApiState, Arc<StorageLayer>) {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let mut config = assistant_core::types::agent::OrgConfig::default();
+        config.memory.enabled = false;
+        config.suggestions.enabled = enabled;
+        config.suggestions.timeout_secs = timeout_secs;
+        let (state, _) = state_over_config(
+            std::path::Path::new("/nonexistent/assistant-test-root"),
+            &llm.uri(),
+            &[default_space(&storage)],
+            workers,
+            config,
+        )
+        .await;
+        (state, storage)
+    }
+
+    fn done_with_message(answer: &str) -> assistant_runtime::TurnResult {
+        assistant_runtime::TurnResult {
+            message_id: Some(Uuid::new_v4()),
+            ..turn_result(answer)
+        }
+    }
+
+    async fn chat_calls(llm: &MockServer) -> usize {
+        llm.received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|r| r.url.path() == "/api/chat")
+            .count()
+    }
+
+    /// Wait until the run has been unregistered from the broadcaster.
+    async fn wait_run_finished(state: &ApiState, run_id: &str, within: std::time::Duration) {
+        let id = Uuid::parse_str(run_id).unwrap();
+        tokio::time::timeout(within, async {
+            while state.run_broadcaster.is_active(&id).await {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("run must finish");
+    }
+
+    async fn replay_frames(state: ApiState, conv_id: Uuid, run_id: &str, since: i64) -> Vec<Frame> {
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/conversations/{conv_id}/runs/{run_id}/events/stream?since={since}"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        sse_frames(resp).await
+    }
+
+    fn suggestion_prompts(frame: &Frame) -> Vec<String> {
+        let payload: serde_json::Value = serde_json::from_str(&frame.1).unwrap();
+        payload["suggestions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["prompt"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn suggestions_arrive_on_the_replay_tail_after_the_post_stream_closes() {
+        let llm = MockServer::start().await;
+        mount_llm_replies(&llm, &["The answer", "1. Show an example\n2. Explain more"]).await;
+        let (state, storage) = suggestions_state(&llm, true, true, 10).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state.clone(), conv_id, "hi").await;
+        let run_id = run_id_of(&resp);
+        let frames = sse_frames(resp).await;
+
+        let (event, data, done_seq) = frames.last().unwrap();
+        assert_eq!(event, "done", "the POST stream ends with done");
+        assert!(
+            frames.iter().all(|f| f.0 != "suggestions"),
+            "the POST stream carries no suggestions: {frames:?}"
+        );
+        let done_seq = done_seq.unwrap();
+        let message_id = serde_json::from_str::<serde_json::Value>(data).unwrap()["message_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let replayed = replay_frames(state, conv_id, &run_id, done_seq + 1).await;
+        assert_eq!(
+            replayed.len(),
+            1,
+            "only suggestions follow done: {replayed:?}"
+        );
+        assert_eq!(replayed[0].0, "suggestions");
+        assert_eq!(replayed[0].2, Some(done_seq + 1));
+        let payload: serde_json::Value = serde_json::from_str(&replayed[0].1).unwrap();
+        assert_eq!(payload["message_id"], message_id);
+        assert_eq!(
+            suggestion_prompts(&replayed[0]),
+            ["Show an example", "Explain more"]
+        );
+
+        let log = event_log(&storage, &run_id).await;
+        let (seq, kind, _) = log.last().unwrap();
+        assert_eq!((*seq, kind.as_str()), (done_seq + 1, "suggestions"));
+    }
+
+    #[tokio::test]
+    async fn disabled_suggestions_make_no_extra_llm_call() {
+        let llm = MockServer::start().await;
+        mount_llm_replies(&llm, &["The answer", "1. Never asked"]).await;
+        let (state, storage) = suggestions_state(&llm, true, false, 10).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state.clone(), conv_id, "hi").await;
+        let run_id = run_id_of(&resp);
+        let _ = sse_frames(resp).await;
+        wait_run_finished(&state, &run_id, std::time::Duration::from_secs(5)).await;
+
+        assert_eq!(chat_calls(&llm).await, 1, "only the turn's own call");
+        assert!(
+            event_log(&storage, &run_id)
+                .await
+                .iter()
+                .all(|e| e.1 != "suggestions")
+        );
+    }
+
+    /// Run a hand-fed turn with the suggestion phase on and an LLM that would
+    /// answer a suggestion call; returns how many `/api/chat` calls were made.
+    async fn suggestion_calls_for(
+        outcome: Option<anyhow::Result<assistant_runtime::TurnResult>>,
+    ) -> usize {
+        let llm = MockServer::start().await;
+        mount_llm_reply(&llm, "1. A suggestion").await;
+        let (state, storage) = suggestions_state(&llm, false, true, 10).await;
+        let (run_id, _) = run_runner(&state, &storage, SUGGEST, vec![], outcome).await;
+        wait_run_finished(&state, &run_id, std::time::Duration::from_secs(5)).await;
+        assert!(
+            event_log(&storage, &run_id)
+                .await
+                .iter()
+                .all(|e| e.1 != "suggestions")
+        );
+        chat_calls(&llm).await
+    }
+
+    #[tokio::test]
+    async fn cancelled_turn_makes_no_suggestion_call() {
+        let outcome = Err(anyhow::anyhow!(assistant_runtime::TURN_CANCELLED_MARKER));
+        assert_eq!(suggestion_calls_for(Some(outcome)).await, 0);
+    }
+
+    #[tokio::test]
+    async fn errored_turn_makes_no_suggestion_call() {
+        assert_eq!(
+            suggestion_calls_for(Some(Err(anyhow::anyhow!("boom")))).await,
+            0
+        );
+        assert_eq!(suggestion_calls_for(None).await, 0, "dropped turn channel");
+    }
+
+    #[tokio::test]
+    async fn done_without_message_id_makes_no_suggestion_call() {
+        assert_eq!(
+            suggestion_calls_for(Some(Ok(turn_result("answer")))).await,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn receiver_dropped_before_done_makes_no_suggestion_call() {
+        let llm = MockServer::start().await;
+        mount_llm_reply(&llm, "1. A suggestion").await;
+        let (state, storage) = suggestions_state(&llm, false, true, 10).await;
+        let conv_id = new_conversation(&storage).await;
+        let run_id = Uuid::new_v4();
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
+        let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
+
+        let resp = stream_turn_to_sse(
+            &system_ctx(&storage),
+            &state,
+            run_id,
+            conv_id,
+            SUGGEST,
+            "hi".to_string(),
+            event_rx,
+            turn_rx,
+        )
+        .await;
+        drop(resp); // the client leaves before the turn ends
+        drop(event_tx);
+        let _ = turn_tx.send(Ok(done_with_message("answer")));
+
+        wait_run_finished(
+            &state,
+            &run_id.to_string(),
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+        assert_eq!(chat_calls(&llm).await, 0, "nobody is listening");
+    }
+
+    #[tokio::test]
+    async fn suggestion_call_that_outlasts_the_timeout_persists_nothing() {
+        let llm = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({
+                        "model": "test",
+                        "message": {"role": "assistant", "content": "1. Too late"},
+                        "done": true
+                    }))
+                    .set_delay(std::time::Duration::from_secs(3)),
+            )
+            .mount(&llm)
+            .await;
+        let (state, storage) = suggestions_state(&llm, false, true, 1).await;
+
+        let (run_id, _) = run_runner(
+            &state,
+            &storage,
+            SUGGEST,
+            vec![],
+            Some(Ok(done_with_message("answer"))),
+        )
+        .await;
+        let started = std::time::Instant::now();
+        wait_run_finished(&state, &run_id, std::time::Duration::from_secs(5)).await;
+
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(1800),
+            "the run finishes about one timeout after done, took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            event_log(&storage, &run_id)
+                .await
+                .iter()
+                .all(|e| e.1 != "suggestions")
+        );
+    }
+
+    #[tokio::test]
+    async fn client_that_never_opens_a_replay_has_its_call_aborted_after_the_grace() {
+        let llm = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({
+                        "model": "test",
+                        "message": {"role": "assistant", "content": "1. Nobody reads this"},
+                        "done": true
+                    }))
+                    .set_delay(std::time::Duration::from_secs(8)),
+            )
+            .mount(&llm)
+            .await;
+        let (state, storage) = suggestions_state(&llm, false, true, 15).await;
+
+        // The client reads the POST stream to `done` but never replays.
+        let (run_id, _) = run_runner(
+            &state,
+            &storage,
+            SUGGEST,
+            vec![],
+            Some(Ok(done_with_message("answer"))),
+        )
+        .await;
+        let started = std::time::Instant::now();
+        wait_run_finished(&state, &run_id, std::time::Duration::from_secs(6)).await;
+
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= std::time::Duration::from_millis(1500)
+                && elapsed < std::time::Duration::from_secs(4),
+            "aborted after the 2 s attach grace, took {elapsed:?}"
+        );
+        assert!(
+            event_log(&storage, &run_id)
+                .await
+                .iter()
+                .all(|e| e.1 != "suggestions")
+        );
+    }
+
+    #[tokio::test]
+    async fn push_is_sent_before_the_suggestion_call_starts() {
+        // One server answers both the LLM and the push endpoint, so the order
+        // wiremock saw the requests in is the order they were made.
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "1. A suggestion").await;
+        let (state, storage) = suggestions_state(&server, false, true, 10).await;
+        let state = with_push_subscriber(state, &storage, &server).await;
+
+        let (run_id, _) = run_runner(
+            &state,
+            &storage,
+            SUGGEST,
+            vec![],
+            Some(Ok(done_with_message("answer"))),
+        )
+        .await;
+        wait_run_finished(&state, &run_id, std::time::Duration::from_secs(5)).await;
+
+        let order: Vec<String> = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .collect();
+        assert_eq!(
+            order,
+            ["/push", "/api/chat"],
+            "push first, then suggestions"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_runner_call_without_the_flag_makes_no_suggestion_call() {
+        let llm = MockServer::start().await;
+        mount_llm_reply(&llm, "1. A suggestion").await;
+        let (state, storage) = suggestions_state(&llm, false, true, 10).await;
+
+        let (run_id, _) = run_runner(
+            &state,
+            &storage,
+            NO_SUGGESTIONS,
+            vec![],
+            Some(Ok(done_with_message("answer"))),
+        )
+        .await;
+        wait_run_finished(&state, &run_id, std::time::Duration::from_secs(5)).await;
+
+        assert_eq!(chat_calls(&llm).await, 0);
+    }
+
+    #[tokio::test]
+    async fn quick_message_makes_no_suggestion_call() {
+        let llm = MockServer::start().await;
+        mount_llm_replies(&llm, &["Quick answer", "1. Never asked"]).await;
+        let (state, _) = suggestions_state(&llm, true, true, 10).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hi"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let _ = body_bytes(resp.into_body()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        assert_eq!(chat_calls(&llm).await, 1, "only the turn's own call");
     }
 
     #[tokio::test]
@@ -2307,39 +2889,156 @@ mod tests {
         );
     }
 
-    // -- POST /conversations/{id}/voice — MIME validation & size limit ---------
-
     #[tokio::test]
-    async fn voice_upload_without_transcription_provider_returns_503() {
+    async fn voice_message_ends_with_done_when_another_process_runs_the_turn() {
         let server = MockServer::start().await;
-        let (state, storage) = test_state(&server.uri()).await;
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
-            .with_user_id("system");
-        let conv = store.create_conversation(Some("test")).await.unwrap();
-
-        // Build a minimal multipart body
+        mount_llm_reply(&server, "Voice from afar").await;
+        let (state, storage) = split_process_state(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+        let state = ApiState {
+            transcription_provider: Some(Arc::new(StubTranscriptionProvider {
+                transcript: "hello from voice".to_string(),
+            })),
+            ..state
+        };
         let boundary = "testboundary";
-        let body_bytes = format!(
+        let body = format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.webm\"\r\nContent-Type: audio/webm\r\n\r\nfakeaudio\r\n--{boundary}--\r\n",
-            boundary = boundary
         );
 
         let resp = app(state)
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri(format!("/conversations/{}/voice", conv.id))
+                    .uri(format!("/conversations/{conv_id}/voice"))
                     .header(
                         "content-type",
                         format!("multipart/form-data; boundary={boundary}"),
                     )
-                    .body(Body::from(body_bytes))
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
             .unwrap();
+        let text = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            body_bytes(resp.into_body()),
+        )
+        .await
+        .expect("the voice stream must end once the turn completes");
 
-        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let text = String::from_utf8_lossy(&text);
+        assert!(
+            text.contains("Voice from afar"),
+            "the reply reaches the stream: {text}"
+        );
+    }
+
+    // -- POST /conversations/{id}/voice — MIME validation & size limit ---------
+
+    /// Post a `fakeaudio` webm recording to the voice endpoint and return the
+    /// SSE body.
+    async fn post_voice(state: ApiState, conv_id: uuid::Uuid) -> String {
+        let boundary = "testboundary";
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.webm\"\r\nContent-Type: audio/webm\r\n\r\nfakeaudio\r\n--{boundary}--\r\n",
+        );
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/voice"))
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        String::from_utf8_lossy(&body_bytes(resp.into_body()).await).into_owned()
+    }
+
+    /// The text of the SSE `transcript` event.
+    fn transcript_text(sse: &str) -> String {
+        let payloads = frame_payloads(sse, "transcript");
+        assert_eq!(payloads.len(), 1, "one transcript event: {sse}");
+        let json: serde_json::Value = serde_json::from_str(&payloads[0]).unwrap();
+        json["content"].as_str().unwrap().to_string()
+    }
+
+    /// The conversation's only attachment must be the recording, linked to
+    /// the user message so the orchestrator turned it into an audio block.
+    async fn assert_recording_attached(storage: &StorageLayer, conv_id: uuid::Uuid) {
+        use assistant_storage::AttachmentStore as _;
+        let store = storage.attachment_store();
+        let attachments = store.list_for_conversation(conv_id).await.unwrap();
+        assert_eq!(attachments.len(), 1, "one stored recording");
+        let meta = &attachments[0];
+        assert_eq!(meta.mime_type, "audio/webm");
+        assert!(meta.message_id.is_some(), "linked to the user message");
+        assert_eq!(store.load_bytes(meta.id).await.unwrap(), b"fakeaudio");
+    }
+
+    #[tokio::test]
+    async fn voice_with_transcription_stores_the_recording() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Voice reply").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+        let state = ApiState {
+            transcription_provider: Some(Arc::new(StubTranscriptionProvider {
+                transcript: "hello from voice".to_string(),
+            })),
+            ..state
+        };
+
+        let sse = post_voice(state, conv_id).await;
+
+        assert_eq!(transcript_text(&sse), "hello from voice");
+        assert_recording_attached(&storage, conv_id).await;
+    }
+
+    #[tokio::test]
+    async fn voice_upload_without_transcription_provider_runs_turn_with_placeholder() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Voice reply").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+        assert!(state.transcription_provider.is_none());
+
+        let sse = post_voice(state, conv_id).await;
+
+        assert_eq!(transcript_text(&sse), "[Voice message]");
+        assert!(sse.contains("Voice reply"), "the turn ran: {sse}");
+        assert_recording_attached(&storage, conv_id).await;
+    }
+
+    #[tokio::test]
+    async fn voice_upload_keeps_the_turn_when_transcription_fails_or_is_empty() {
+        let providers: [Arc<dyn assistant_transcription::TranscriptionProvider>; 2] = [
+            Arc::new(FailingTranscriptionProvider),
+            Arc::new(StubTranscriptionProvider {
+                transcript: "  ".to_string(),
+            }),
+        ];
+        for provider in providers {
+            let server = MockServer::start().await;
+            mount_llm_reply(&server, "Voice reply").await;
+            let (state, storage) = test_state(&server.uri()).await;
+            let conv_id = seed_conversation(&storage).await;
+            let state = ApiState {
+                transcription_provider: Some(provider),
+                ..state
+            };
+
+            let sse = post_voice(state, conv_id).await;
+
+            assert_eq!(transcript_text(&sse), "[Voice message]");
+            assert_recording_attached(&storage, conv_id).await;
+        }
     }
 
     #[tokio::test]

@@ -36,6 +36,17 @@ pub enum ContentBlock {
         /// Base64-encoded document data.
         data: String,
     },
+    /// A base64-encoded recording of the user's voice message. Sent only to
+    /// providers that report [`ChatOptionsSupport::audio_input`], and only
+    /// for the current turn; everywhere else the message's text stands in.
+    ///
+    /// [`ChatOptionsSupport::audio_input`]: crate::ChatOptionsSupport::audio_input
+    Audio {
+        /// MIME type, e.g. `"audio/ogg"`.
+        media_type: String,
+        /// Base64-encoded audio data.
+        data: String,
+    },
 }
 
 /// A single message in the chat history as tracked by the caller.
@@ -200,6 +211,14 @@ impl LlmResponse {
     pub fn meta(&self) -> &LlmResponseMeta {
         match self {
             LlmResponse::ToolCalls(resp) => &resp.meta,
+            LlmResponse::FinalAnswer(_, m) => m,
+            LlmResponse::Thinking(_, m) => m,
+        }
+    }
+
+    pub fn meta_mut(&mut self) -> &mut LlmResponseMeta {
+        match self {
+            LlmResponse::ToolCalls(resp) => &mut resp.meta,
             LlmResponse::FinalAnswer(_, m) => m,
             LlmResponse::Thinking(_, m) => m,
         }

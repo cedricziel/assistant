@@ -20,7 +20,6 @@ mod ollama;
 mod openai_tts;
 mod openrouter;
 pub mod openrouter_tts;
-pub mod pipeline;
 mod provider;
 mod whisper;
 
@@ -28,11 +27,11 @@ use std::sync::Arc;
 
 use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::types::transcription::{
-    TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsProviderKind,
+    TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsFormat, TtsProviderKind,
 };
 
+use assistant_audio::{AudioPipeline, essence};
 pub use audio_store::AudioStore;
-pub use converter::AudioFormat;
 pub use converting::ConvertingTranscriber;
 pub use deepgram::DeepgramProvider;
 pub use deepgram_tts::DeepgramTtsProvider;
@@ -75,23 +74,58 @@ pub const AUDIO_MIME_TYPES: &[&str] = &[
     "video/quicktime",
 ];
 
-/// `mime` lowercased, without parameters such as `; codecs=opus`.
-pub fn essence(mime: &str) -> String {
-    mime.split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_lowercase()
-}
-
 /// Returns `true` if `mime` is an audio (or video) type to transcribe.
 pub fn is_audio_mime(mime: &str) -> bool {
     AUDIO_MIME_TYPES.contains(&essence(mime).as_str())
 }
 
-/// Build a [`TtsProvider`] from the assistant TTS configuration.
-pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvider>> {
+/// Build a [`TtsProvider`] from `[tts]`. `llm` supplies the OpenRouter key
+/// when `[tts]` has none. The OpenRouter provider reads and validates the
+/// model's speech-catalog entry, so building it is async.
+pub async fn build_tts_provider(
+    config: &TtsConfig,
+    llm: &LlmConfig,
+) -> anyhow::Result<Arc<dyn TtsProvider>> {
+    // Configured speech is stored and played by clients, and raw PCM has no
+    // header telling them its sample rate. Requests may still ask for it.
+    if config.format == Some(TtsFormat::Pcm) {
+        anyhow::bail!("[tts] format = \"pcm\" can't be played by clients; use mp3, wav or ogg");
+    }
     match config.provider {
+        TtsProviderKind::OpenRouter => {
+            let api_key = resolve_openrouter_key(
+                config.api_key.as_ref(),
+                llm,
+                OPENROUTER_API_KEY_ENV,
+                |name| std::env::var(name).ok(),
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "OpenRouter TTS requires an API key. Set api_key in [tts] or [llm], \
+                     or the OPENROUTER_API_KEY env var."
+                )
+            })?;
+            let settings = OpenRouterTtsSettings {
+                base_url: config.base_url.clone().unwrap_or_else(|| {
+                    assistant_llm_provider::openrouter::DEFAULT_BASE_URL.to_string()
+                }),
+                api_key,
+                model: config
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| openrouter_tts::DEFAULT_MODEL.to_string()),
+                voice: config
+                    .voice
+                    .clone()
+                    .unwrap_or_else(|| openrouter_tts::DEFAULT_VOICE.to_string()),
+                format: config.format.unwrap_or_default(),
+                speed: config.speed,
+                instructions: config.instructions.clone(),
+                pcm_sample_rate: config.pcm_sample_rate,
+            };
+            let provider = OpenRouterTts::connect(settings, AudioPipeline::default()).await?;
+            Ok(Arc::new(provider))
+        }
         TtsProviderKind::OpenAI => {
             let api_key = config
                 .api_key
@@ -115,6 +149,9 @@ pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvi
             if let Some(ref voice) = config.voice {
                 provider = provider.with_voice(voice);
             }
+            if let Some(format) = config.format {
+                provider = provider.with_format(format);
+            }
             Ok(Arc::new(provider))
         }
         TtsProviderKind::Deepgram => {
@@ -130,6 +167,12 @@ pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvi
                     )
                 })?;
 
+            if let Some(format) = config.format.filter(|f| *f != TtsFormat::Mp3) {
+                anyhow::bail!(
+                    "Deepgram TTS delivers mp3 only; remove [tts] format = \"{}\"",
+                    format.as_str()
+                );
+            }
             let mut provider = DeepgramTtsProvider::new(api_key)?;
             if let Some(ref url) = config.base_url {
                 provider = provider.with_base_url(url);
