@@ -38,8 +38,8 @@ dependencies:
     path: packages/assistant_api
   assistant_ui:
     path: packages/assistant_ui
-  tray_manager: ^0.5.3
-  window_manager: ^0.5.2
+  tray_manager: ^0.9.1
+  window_manager: ^0.7.1
   flutter_smooth_markdown: ^0.8.1
   google_fonts: ^9.0.0
   pwa_install: 0.0.6
