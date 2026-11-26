@@ -383,3 +383,28 @@ mod tests {
         assert_eq!(cfg.indexing_interval_seconds, Some(60));
     }
 }
+
+// -- UiConfig -----------------------------------------------------------------
+
+/// Generative-UI settings (`[ui]` section of `org.toml`).
+///
+/// Host entries are exact hostnames, lower-cased on load.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiConfig {
+    /// Hosts `https:` surface images may load from. Empty allows any `https:`
+    /// host; the server enforces the list, clients never see it.
+    #[serde(default, deserialize_with = "lowercase_hosts")]
+    pub image_hosts: Vec<String>,
+    /// Hosts whose `openUrl` targets open without a confirmation prompt.
+    /// Empty means every link asks first.
+    #[serde(default, deserialize_with = "lowercase_hosts")]
+    pub link_hosts: Vec<String>,
+}
+
+fn lowercase_hosts<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let hosts = Vec::<String>::deserialize(deserializer)?;
+    Ok(hosts.into_iter().map(|h| h.to_lowercase()).collect())
+}

@@ -168,6 +168,14 @@ timeout_secs = 120
 # enabled = true   # false sends no cache_control
 # ttl     = "5m"   # "5m" | "1h" (1h: Anthropic models only)
 #
+# # OpenRouter's `web` plugin. When enabled, the local `web-search` tool is
+# # not offered. See docs/openrouter.md.
+# [llm.openrouter.web_search]
+# enabled     = true
+# # engine      = "exa"   # "native" | "exa" | "firecrawl" | "parallel" | "perplexity"
+# # max_results = 5
+# # search_context_size = "high"   # "low" | "medium" | "high"; native engine only
+#
 # Browse models at: https://openrouter.ai/models
 
 # ── Moonshot AI (Kimi) cloud provider ─────────────────────────────────────────
