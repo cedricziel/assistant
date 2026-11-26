@@ -10,6 +10,7 @@ import 'components/feedback_buttons.dart';
 import 'components/feedback_comment_field.dart';
 import 'components/generic_tool_result_view.dart';
 import 'components/highlighted_segments.dart';
+import 'components/json_tree_view.dart';
 import 'components/message_action_button.dart';
 import 'components/message_actions.dart';
 import 'components/message_editor.dart';
@@ -58,7 +59,6 @@ final List<WidgetbookComponent> kComponents = [
   // dataTableResultViewComponent, // slot: tool-result-renderers C6
   // feedbackButtonsComponent, // slot: message-feedback 5
   // feedbackCommentFieldComponent, // slot: message-feedback 5
-  // jsonTreeViewComponent, // slot: tool-result-renderers C2b
   // linkPreviewResultViewComponent, // slot: tool-result-renderers C5
   // messageBodyComponent, // slot: chat-element-library 8b
   // messageBubbleComponent, // slot: chat-element-library 8b
@@ -85,6 +85,7 @@ final List<WidgetbookComponent> kComponents = [
   feedbackCommentFieldComponent,
   genericToolResultViewComponent,
   highlightedSegmentsComponent,
+  jsonTreeViewComponent,
   messageActionButtonComponent,
   messageActionsComponent,
   messageEditorComponent,

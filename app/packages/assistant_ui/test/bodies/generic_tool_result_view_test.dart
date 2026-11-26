@@ -57,4 +57,43 @@ void main() {
       scheme.error,
     );
   });
+
+  testWidgets('shows data as a JSON tree beneath the result', (tester) async {
+    await _pump(
+      tester,
+      ToolCallRecord(
+        toolName: 'file-glob',
+        status: ToolCallStatus.ok,
+        result: '2 files',
+        data: const {
+          'paths': ['a.txt', 'b.txt'],
+          'truncated': false,
+        },
+      ),
+    );
+
+    expect(find.byType(JsonTreeView), findsOneWidget);
+    expect(find.text('Data'), findsOneWidget);
+    expect(find.text('paths'), findsOneWidget);
+    expect(find.text('truncated'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.byType(JsonTreeView)).dy,
+      greaterThan(tester.getBottomLeft(find.text('2 files')).dy),
+    );
+  });
+
+  testWidgets('shows no tree and no Data label without data', (tester) async {
+    await _pump(
+      tester,
+      ToolCallRecord(
+        toolName: 'bash',
+        status: ToolCallStatus.ok,
+        arguments: {'command': 'ls'},
+        result: 'a.txt',
+      ),
+    );
+
+    expect(find.byType(JsonTreeView), findsNothing);
+    expect(find.text('Data'), findsNothing);
+  });
 }
