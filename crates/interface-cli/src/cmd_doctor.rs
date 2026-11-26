@@ -2,7 +2,8 @@
 //!
 //! Inspired by `flutter doctor`, this command checks the assistant's environment
 //! and reports the status of each component: config, database, LLM provider,
-//! embeddings, MCP servers, skill directories, message bus, and interfaces.
+//! embeddings, OpenRouter keys, MCP servers, skill directories, message bus,
+//! and interfaces.
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +17,8 @@ use assistant_core::{
     expand_tilde, load_org_config, load_server_config, org_config_path, server_config_path,
 };
 use assistant_storage::DEFAULT_ORG_SLUG;
+
+mod openrouter_keys;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -554,6 +557,7 @@ pub async fn cmd_doctor(assistant_dir: &Path, db_path: &Path) -> Result<()> {
         check_database(db_path),
         check_llm_provider(&config),
         check_embeddings(&config),
+        openrouter_keys::check_openrouter_keys(&config, |name| std::env::var(name).ok()).await,
         check_mcp_servers(&server),
         check_skill_directories(&config, assistant_dir),
         check_message_bus(&server),

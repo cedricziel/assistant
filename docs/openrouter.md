@@ -16,63 +16,134 @@ mkdir -p ~/.assistant/orgs/default
 cat <<'EOF' >> ~/.assistant/orgs/default/org.toml
 [llm]
 provider = "openrouter"
-model    = "anthropic/claude-sonnet-4-20250514"
+model    = "anthropic/claude-sonnet-5.5"
 EOF
 
 # Run the assistant
 cargo run -p assistant-cli
 ```
 
+## One key for everything
+
+One OpenRouter key can serve chat, embeddings, transcription, speech,
+image generation and the permission decision model. Set it once in `[llm]`:
+
+```toml
+[llm]
+provider = "openrouter"
+model    = "anthropic/claude-sonnet-5.5"
+api_key  = "sk-or-..."
+
+# Optional. Without this section, embeddings already go through [llm].
+[llm.embeddings]
+provider = "openrouter"
+
+[transcription]
+provider = "openrouter"
+
+[tts]
+provider = "openrouter"
+
+[images]
+provider = "openrouter"
+
+[permissions.decision_model]
+enabled = true
+```
+
+None of the feature sections sets `api_key`, so each uses the `[llm]` key.
+Each feature picks its key in this order, and a blank value counts as unset:
+
+1. The feature's own `api_key`.
+2. The `api_key` in `[llm]`, only when `[llm] provider = "openrouter"`. A key
+   for another provider is never sent to OpenRouter.
+3. The environment variable.
+
+| Feature        | Own key                                | Environment variable                                                  |
+| -------------- | -------------------------------------- | --------------------------------------------------------------------- |
+| Chat           | _(none; `[llm] api_key` is the key)_   | `OPENROUTER_API_KEY`                                                  |
+| Embeddings     | `[llm.embeddings] api_key`             | `OPENROUTER_API_KEY`                                                  |
+| Transcription  | `[transcription] api_key`              | `OPENROUTER_API_KEY`                                                  |
+| Speech         | `[tts] api_key`                        | `OPENROUTER_API_KEY`                                                  |
+| Images         | `[images] api_key`                     | `OPENROUTER_API_KEY`                                                  |
+| Decision model | `[permissions.decision_model] api_key` | the variable named by its `api_key_env`, default `OPENROUTER_API_KEY` |
+
+With a chat provider other than OpenRouter, step 2 never applies. Give each
+feature its own `api_key`, or export `OPENROUTER_API_KEY` once.
+
+See [Embeddings](#embeddings), [Transcription](#transcription),
+[Text-to-speech](#text-to-speech), [Image generation](#image-generation)
+and [Decision model](tool-permissions.md#decision-model) for the other
+settings of each feature.
+
+`assistant doctor` lists each configured OpenRouter feature with where its
+key comes from: the feature's own section, `[llm]`, or the name of the
+environment variable. It checks each distinct key once, per base URL, with
+`GET /key`, and reports one of:
+
+- valid, with the remaining limit (or `no limit`) and `free tier` when it
+  applies;
+- invalid or revoked, when OpenRouter answers 401. This is an error;
+- unreachable, for any other failure. This is a warning.
+
+A feature with no key at all is an error. `doctor` never prints a key.
+
 ## Configuration
 
 All OpenRouter settings live under the `[llm]` and `[llm.openrouter]`
-sections in `~/.assistant/orgs/default/org.toml`.
+sections in `~/.assistant/orgs/default/org.toml`. The sub-tables of
+`[llm.openrouter]` follow, each with its own section below.
 
 ### `[llm]` section
 
-| Key              | Env var              | Default                          | Description                                   |
-| ---------------- | -------------------- | -------------------------------- | --------------------------------------------- |
-| `provider`       |                      | `"ollama"`                       | Set to `"openrouter"` to use this provider    |
-| `model`          |                      | _(required)_                     | OpenRouter model slug (see [Models](#models)) |
-| `api_key`        | `OPENROUTER_API_KEY` | _(required)_                     | API key; env var is checked as fallback       |
-| `base_url`       |                      | `"https://openrouter.ai/api/v1"` | API base URL                                  |
-| `max_iterations` |                      | `80`                             | Max tool-calling iterations per turn          |
-| `timeout_secs`   |                      | `120`                            | Timeout for each LLM call (seconds)           |
+| Key                   | Env var              | Default                    | Description                                                                                                             |
+| --------------------- | -------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `provider`            |                      | `"ollama"`                 | Set to `"openrouter"` to use this provider                                                                              |
+| `model`               |                      | `"qwen2.5:7b"`             | OpenRouter model slug (see [Models](#models)). The default is an Ollama model, so always set it                         |
+| `api_key`             | `OPENROUTER_API_KEY` | _(none)_                   | API key. Without it and the env var, the provider fails to build. See [One key for everything](#one-key-for-everything) |
+| `base_url`            |                      | `"http://localhost:11434"` | Left at this Ollama default, the provider uses `https://openrouter.ai/api/v1`. Any other value is used as set           |
+| `max_iterations`      |                      | `80`                       | Max tool-calling iterations per turn                                                                                    |
+| `timeout_secs`        |                      | `120`                      | Timeout for each LLM call (seconds)                                                                                     |
+| `parallel_tool_calls` |                      | unset                      | Whether the model may request several tool calls at once. Unset keeps the provider's default                            |
+| `embedding_model`     |                      | unset                      | Embedding model for vector search. Unset, `openai/text-embedding-3-small`. See [Embeddings](#embeddings)                |
+| `available_models`    |                      | `[]`                       | Models a member may pick for one regenerated reply, besides `model`. Empty offers only `model`                          |
 
 ### `[llm.openrouter]` section
 
-| Key               | Default  | Description                                                                                        |
-| ----------------- | -------- | -------------------------------------------------------------------------------------------------- |
-| `referer`         | _(none)_ | `HTTP-Referer` header, used by OpenRouter for app attribution                                      |
-| `title`           | _(none)_ | `X-OpenRouter-Title` header, shown in the OpenRouter dashboard                                     |
-| `categories`      | `[]`     | `X-OpenRouter-Categories` header, comma-joined. At most two; more fails config load                |
-| `max_tokens`      | `8192`   | Maximum completion tokens per response, sent as `max_completion_tokens`                            |
-| `fallback_models` | `[]`     | Models to try in order when `model` fails. Sent as `models` with `model` first; omitted when empty |
-| `pdf_engine`      | unset    | PDF parser: `"native"`, `"cloudflare-ai"` or `"mistral-ocr"`. See [PDFs](#pdfs)                    |
-| `image_output`    | `false`  | Ask the model to answer with images. See [Chat image output](#chat-image-output)                   |
+| Key               | Type            | Default  | Description                                                                                        |
+| ----------------- | --------------- | -------- | -------------------------------------------------------------------------------------------------- |
+| `referer`         | string          | _(none)_ | `HTTP-Referer` header, used by OpenRouter for app attribution                                      |
+| `title`           | string          | _(none)_ | `X-OpenRouter-Title` header, shown in the OpenRouter dashboard                                     |
+| `categories`      | list of strings | `[]`     | `X-OpenRouter-Categories` header, comma-joined. At most two; more fails config load                |
+| `max_tokens`      | integer         | `8192`   | Maximum completion tokens per response, sent as `max_completion_tokens`                            |
+| `fallback_models` | list of strings | `[]`     | Models to try in order when `model` fails. Sent as `models` with `model` first; omitted when empty |
+| `pdf_engine`      | string          | unset    | PDF parser: `"native"`, `"cloudflare-ai"` or `"mistral-ocr"`. See [PDFs](#pdfs)                    |
+| `image_output`    | boolean         | `false`  | Ask the model to answer with images. See [Chat image output](#chat-image-output)                   |
 
 ### `[llm.openrouter.provider]` section
 
 Provider routing preferences, sent as the request's `provider` object.
-Only the keys you set are sent. An unknown key fails config load.
+No key has a default; only the keys you set are sent. An unknown key fails
+config load.
 
-| Key                  | Type                                              | Description                                           |
-| -------------------- | ------------------------------------------------- | ----------------------------------------------------- |
-| `order`              | list of provider slugs                            | Providers to try, in this order                       |
-| `only`               | list of provider slugs                            | Use only these providers                              |
-| `ignore`             | list of provider slugs                            | Never use these providers                             |
-| `allow_fallbacks`    | boolean                                           | Whether OpenRouter may fall back to other providers   |
-| `require_parameters` | boolean                                           | Use only providers that support every request field   |
-| `data_collection`    | `"allow"` or `"deny"`                             | Whether providers that store or train on data qualify |
-| `zdr`                | boolean                                           | Use only zero-data-retention endpoints                |
-| `sort`               | `"price"`, `"throughput"` or `"latency"`          | How to rank providers                                 |
-| `quantizations`      | list                                              | Accepted quantization levels                          |
-| `max_price`          | table: `prompt`, `completion`, `request`, `image` | Highest acceptable prices; unknown keys fail load     |
+| Key                  | Type                                              | Description                                                                                                                                                        |
+| -------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `order`              | list of provider slugs                            | Providers to try, in this order                                                                                                                                    |
+| `only`               | list of provider slugs                            | Use only these providers                                                                                                                                           |
+| `ignore`             | list of provider slugs                            | Never use these providers                                                                                                                                          |
+| `allow_fallbacks`    | boolean                                           | Whether OpenRouter may fall back to other providers                                                                                                                |
+| `require_parameters` | boolean                                           | Use only providers that support every request field                                                                                                                |
+| `data_collection`    | `"allow"` or `"deny"`                             | Whether providers that store or train on data qualify                                                                                                              |
+| `zdr`                | boolean                                           | Use only zero-data-retention endpoints                                                                                                                             |
+| `sort`               | `"price"`, `"throughput"` or `"latency"`          | How to rank providers                                                                                                                                              |
+| `quantizations`      | list of strings                                   | Accepted quantization levels                                                                                                                                       |
+| `max_price`          | table: `prompt`, `completion`, `request`, `image` | Highest acceptable prices, as numbers in US dollars: per million tokens for `prompt` and `completion`, per request or image for the others. Unknown keys fail load |
 
 ### `[llm.openrouter.reasoning]` section
 
-Reasoning settings, sent as the request's `reasoning` object. Only the
-keys you set are sent. An unknown key fails config load.
+Reasoning settings, sent as the request's `reasoning` object. No key has
+a default; only the keys you set are sent. An unknown key fails config
+load.
 
 | Key          | Type                                                                       | Description                            |
 | ------------ | -------------------------------------------------------------------------- | -------------------------------------- |
@@ -93,39 +164,62 @@ without contacting OpenRouter. See
 
 ### `[llm.openrouter.image_config]` section
 
-Sent as the request's `image_config` when `image_output = true`. Only the
-keys you set are sent. An unknown key fails config load. See
+Sent as the request's `image_config` when `image_output = true`. No key
+has a default; only the keys you set are sent. An unknown key fails config
+load. See
 [Chat image output](#chat-image-output).
 
-| Key            | Type   | Description                                |
-| -------------- | ------ | ------------------------------------------ |
-| `aspect_ratio` | string | Image proportions, for example `"16:9"`    |
-| `image_size`   | string | Image resolution: `"1K"`, `"2K"` or `"4K"` |
+| Key            | Type   | Description                                            |
+| -------------- | ------ | ------------------------------------------------------ |
+| `aspect_ratio` | string | Image proportions, for example `"16:9"`                |
+| `image_size`   | string | Image resolution, for example `"1K"`, `"2K"` or `"4K"` |
+
+### `[llm.openrouter.audio_input]` section
+
+Sends voice notes to the model as audio. An unknown key fails config
+load. See [Voice](#voice).
+
+| Key        | Type            | Default          | Description                                                         |
+| ---------- | --------------- | ---------------- | ------------------------------------------------------------------- |
+| `enabled`  | boolean         | `false`          | Send the recording of a voice turn                                  |
+| `formats`  | list of strings | `["wav", "mp3"]` | Formats sent unchanged. Any other format is converted to 16 kHz WAV |
+| `max_secs` | integer         | `600`            | Longer recordings are sent as text only                             |
+
+### `[llm.openrouter.audio_output]` section
+
+Asks the model to speak its reply to a voice turn. An unknown key fails
+config load. See [Voice](#voice).
+
+| Key               | Type    | Default   | Description                                |
+| ----------------- | ------- | --------- | ------------------------------------------ |
+| `enabled`         | boolean | `false`   | Ask for a spoken reply on voice turns      |
+| `voice`           | string  | `"alloy"` | Voice sent in the request's `audio` object |
+| `pcm_sample_rate` | integer | `24000`   | Sample rate of the model's raw PCM, in Hz  |
 
 ### `[llm.openrouter.cache]` section
 
 Prompt caching settings. An unknown key fails config load. See
 [Prompt caching](#prompt-caching).
 
-| Key       | Default | Description                                                               |
-| --------- | ------- | ------------------------------------------------------------------------- |
-| `enabled` | `true`  | Send `cache_control` breakpoints. `false` sends none                      |
-| `ttl`     | `"5m"`  | Cache lifetime, `"5m"` or `"1h"`. `"1h"` applies to Anthropic models only |
+| Key       | Type    | Default | Description                                                               |
+| --------- | ------- | ------- | ------------------------------------------------------------------------- |
+| `enabled` | boolean | `true`  | Send `cache_control` breakpoints. `false` sends none                      |
+| `ttl`     | string  | `"5m"`  | Cache lifetime, `"5m"` or `"1h"`. `"1h"` applies to Anthropic models only |
 
 ### `[llm.openrouter.web_search]` section
 
 OpenRouter's `web` plugin. Only set keys are sent. An unknown key fails
 config load. See [Web search](#web-search).
 
-| Key                   | Default | Description                                                                                      |
-| --------------------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `enabled`             | `false` | Send the `web` plugin                                                                            |
-| `engine`              | unset   | `"native"`, `"exa"`, `"firecrawl"`, `"parallel"` or `"perplexity"`. Unset lets OpenRouter choose |
-| `max_results`         | unset   | Maximum search results                                                                           |
-| `search_prompt`       | unset   | Prompt that introduces the results to the model                                                  |
-| `include_domains`     | unset   | Domains to search                                                                                |
-| `exclude_domains`     | unset   | Domains to skip                                                                                  |
-| `search_context_size` | unset   | `"low"`, `"medium"` or `"high"`. Needs `engine = "native"` or no `engine`                        |
+| Key                   | Type            | Default | Description                                                                                      |
+| --------------------- | --------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `enabled`             | boolean         | `false` | Send the `web` plugin                                                                            |
+| `engine`              | string          | unset   | `"native"`, `"exa"`, `"firecrawl"`, `"parallel"` or `"perplexity"`. Unset lets OpenRouter choose |
+| `max_results`         | integer         | unset   | Maximum search results                                                                           |
+| `search_prompt`       | string          | unset   | Prompt that introduces the results to the model                                                  |
+| `include_domains`     | list of strings | unset   | Domains to search                                                                                |
+| `exclude_domains`     | list of strings | unset   | Domains to skip                                                                                  |
+| `search_context_size` | string          | unset   | `"low"`, `"medium"` or `"high"`. Needs `engine = "native"` or no `engine`                        |
 
 Which domain filters each engine honours is up to OpenRouter; see
 [OpenRouter's web search docs](https://openrouter.ai/docs/features/web-search).
@@ -260,9 +354,11 @@ Obtain an API key from [openrouter.ai/keys](https://openrouter.ai/keys)
 and set it via environment variable or config file:
 
 ```sh
-# Environment variable (recommended — avoids secrets in config files)
+# Environment variable (recommended: keeps secrets out of config files)
 export OPENROUTER_API_KEY=sk-or-...
+```
 
+```toml
 # Or in org.toml
 [llm]
 provider = "openrouter"
@@ -270,7 +366,8 @@ api_key  = "sk-or-..."
 ```
 
 The provider checks `api_key` in the config first, then falls back to
-the `OPENROUTER_API_KEY` environment variable.
+the `OPENROUTER_API_KEY` environment variable. Other OpenRouter-backed
+features reuse this key too. See [One key for everything](#one-key-for-everything).
 
 ## Capabilities
 
@@ -285,6 +382,8 @@ chat call waits for that fetch for at most 5 seconds.
 | Streaming      | Yes                                                                                                                                                                                                                                |
 | Vision         | Yes when the model lists `image` in its input modalities; otherwise each image is replaced by a short text note                                                                                                                    |
 | PDF input      | Native when the model lists `file` in its input modalities; otherwise parsed by the `file-parser` plugin. See [PDFs](#pdfs)                                                                                                        |
+| Audio input    | Sent as audio when `audio_input.enabled` and the model lists `audio` in its input modalities. See [Voice](#voice)                                                                                                                  |
+| Audio output   | Spoken replies when `audio_output.enabled` and the model lists `audio` in its output modalities. See [Voice](#voice)                                                                                                               |
 | Context window | Smallest `context_length` among the endpoints routing can select                                                                                                                                                                   |
 | Chat options   | `tool_choice`, `parallel_tool_calls` and JSON schemas are sent natively when the model lists them in `supported_parameters`, with `provider.require_parameters = true`; otherwise `tool_choice` falls back to a prompt instruction |
 | Embeddings     | Yes, through OpenRouter's embeddings endpoint                                                                                                                                                                                      |
@@ -328,8 +427,8 @@ model    = "openai/text-embedding-3-small" # default
 data_collection = "deny"
 ```
 
-The key is `[llm.embeddings] api_key`, else the `[llm]` key when
-`[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`.
+The key resolves as in [One key for everything](#one-key-for-everything),
+with `[llm.embeddings] api_key` as the section key.
 `[llm.embeddings.openrouter.provider]` takes the same keys as
 `[llm.openrouter.provider]` and is sent as the request's `provider`.
 Chat routing does not apply to embeddings.
@@ -341,15 +440,89 @@ error. Errors and retries work as for chat, and errors name the model.
 
 ## Transcription
 
-`[transcription] provider = "openrouter"` transcribes voice messages through OpenRouter's `/audio/transcriptions` endpoint, by default with `openai/whisper-1`. The key is `[transcription] api_key`, else the `[llm]` key when `[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`. See [Voice Transcription](transcription.md#openrouter).
+`[transcription] provider = "openrouter"` transcribes voice messages through OpenRouter's `/audio/transcriptions` endpoint, by default with `openai/whisper-1`. The key resolves as in [One key for everything](#one-key-for-everything), with `[transcription] api_key` as the section key. See [Voice Transcription](transcription.md#openrouter).
 
 ## Text-to-speech
 
-`[tts] provider = "openrouter"` speaks replies through OpenRouter's `/audio/speech` endpoint, by default with `openai/gpt-4o-mini-tts` and voice `alloy`. The key resolves as for transcription. At startup the provider checks the voice, `speed` and `instructions` against the model's catalog entry. See [Text-to-speech](transcription.md#openrouter-tts).
+`[tts] provider = "openrouter"` speaks replies through OpenRouter's `/audio/speech` endpoint, by default with `openai/gpt-4o-mini-tts` and voice `alloy`. The key resolves as in [One key for everything](#one-key-for-everything), with `[tts] api_key` as the section key. At startup the provider checks the voice, `speed` and `instructions` against the model's catalog entry. See [Text-to-speech](transcription.md#openrouter-tts).
+
+## Voice
+
+A voice turn is a message that carries a recording. Every interface that
+accepts voice passes the recording into the turn, with the transcript as
+the message text, or `[Voice message]` when there is no transcript. See
+[Voice Transcription](transcription.md#how-it-works).
+
+The recording reaches the model only on the turn it arrives. History
+never replays audio. A provider that doesn't take audio, including
+OpenRouter without `audio_input`, gets the text alone.
+
+```toml
+[llm]
+provider = "openrouter"
+model    = "<slug of a model with audio input and output>"
+
+[llm.openrouter.audio_input]
+enabled = true
+
+[llm.openrouter.audio_output]
+enabled = true
+voice   = "alloy"
+```
+
+### Audio input
+
+Audio input is active when `audio_input.enabled` is true and the model's
+catalog entry lists `audio` in its input modalities (see
+[Capabilities](#capabilities)).
+
+The recording goes in the user message as an `input_audio` part. A format
+missing from `formats` is converted to 16 kHz mono WAV with ffmpeg. A
+recording longer than `max_secs`, or one that ffprobe can't read or ffmpeg
+can't convert, is left out, and the text is sent alone. Both tools must be
+on `PATH`.
+
+With audio attached, the text part is prefixed with
+`Transcript (may contain errors): `, unless it is just `[Voice message]`.
+
+If OpenRouter answers 400 with a message that mentions audio or
+modalities, the call is repeated once without audio. Audio input then
+stays off until restart. The reason is logged once. See
+[Troubleshooting](#openrouter-rejected-audio-input-sending-voice-notes-as-text-from-now-on).
+
+### Spoken replies
+
+On a voice turn, when `audio_output.enabled` is true and the model's
+catalog entry lists `audio` in its output modalities, the call streams
+with `modalities` including `audio` and
+`audio: {"voice": ..., "format": "pcm16"}`.
+
+The PCM is transcoded with ffmpeg to the `[tts] format` (`mp3` by
+default, or `wav` or `ogg`; see
+[Output format](transcription.md#output-format)) and attached to the reply
+as an audio clip. When the model sends no text, the
+transcript of its speech becomes the answer text. If the transcode fails,
+the answer is text only.
+
+If OpenRouter answers 400 with a message that mentions audio or
+modalities, the call is repeated once without audio. Spoken replies then
+stay off until restart. See
+[Troubleshooting](#openrouter-rejected-audio-output-replying-in-text-from-now-on).
+
+### Fallback
+
+Any provider can speak a voice turn's answer. When `[tts]` is
+configured and the turn produced no audio, neither from the model nor from
+a tool such as `voice-response`, the orchestrator speaks the final answer
+with the TTS provider and attaches the clip. See
+[Text-to-speech](transcription.md#text-to-speech).
+
+Without `[tts]`, voice turns reply in text, and so does a turn whose
+synthesis fails. Typed turns never get a clip.
 
 ## Image generation
 
-`[images] provider = "openrouter"` enables the `image-generate` tool, which creates and edits images through OpenRouter's `/images` endpoint, by default with `openai/gpt-image-2.6-flare`. The key resolves as for transcription. See [Image Generation](images.md).
+`[images] provider = "openrouter"` enables the `image-generate` tool, which creates and edits images through OpenRouter's `/images` endpoint, by default with `openai/gpt-image-2.6-flare`. The key resolves as in [One key for everything](#one-key-for-everything), with `[images] api_key` as the section key. See [Image Generation](images.md).
 
 ## Chat image output
 
@@ -402,27 +575,30 @@ OpenRouter provides access to 300+ models. Use the `provider/model`
 slug format. Browse the full catalog at
 [openrouter.ai/models](https://openrouter.ai/models).
 
-### Popular choices
+### Example slugs
 
-| Model slug                           | Provider  | Notes                        |
-| ------------------------------------ | --------- | ---------------------------- |
-| `anthropic/claude-sonnet-4-20250514` | Anthropic | Claude Sonnet 4, recommended |
-| `anthropic/claude-opus-4-20250514`   | Anthropic | Claude Opus 4, most capable  |
-| `openai/gpt-4o`                      | OpenAI    | GPT-4o                       |
-| `openai/o3-mini`                     | OpenAI    | Reasoning model              |
-| `google/gemini-2.5-pro-preview`      | Google    | Gemini 2.5 Pro               |
-| `meta-llama/llama-3.3-70b-instruct`  | Meta      | Llama 3.3 70B                |
-| `mistralai/mistral-large-latest`     | Mistral   | Mistral Large                |
+| Model slug                          | Provider  | Notes             |
+| ----------------------------------- | --------- | ----------------- |
+| `anthropic/claude-sonnet-5.5`       | Anthropic | Claude Sonnet 5.5 |
+| `anthropic/claude-opus-5.5`         | Anthropic | Claude Opus 5.5   |
+| `openai/gpt-4o`                     | OpenAI    | GPT-4o            |
+| `openai/o3`                         | OpenAI    | Reasoning model   |
+| `google/gemini-2.5-pro`             | Google    | Gemini 2.5 Pro    |
+| `meta-llama/llama-3.3-70b-instruct` | Meta      | Llama 3.3 70B     |
+| `mistralai/mistral-large`           | Mistral   | Mistral Large     |
+
+Slugs come and go. A slug missing from the catalog fails every chat call
+(see [Troubleshooting](#openrouter-has-no-model-slug)).
 
 ### Free models
 
 OpenRouter offers several free-tier models (rate-limited):
 
-| Model slug                              | Notes             |
-| --------------------------------------- | ----------------- |
-| `meta-llama/llama-3.3-8b-instruct:free` | Llama 3.3 8B free |
-| `mistralai/mistral-7b-instruct:free`    | Mistral 7B free   |
-| `google/gemma-2-9b-it:free`             | Gemma 2 9B free   |
+| Model slug                                           | Notes                |
+| ---------------------------------------------------- | -------------------- |
+| `google/gemma-4-26b-a4b-it:free`                     | Gemma 4 26B free     |
+| `google/gemma-4-31b-it:free`                         | Gemma 4 31B free     |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | Nemotron 3 Nano free |
 
 ## OpenRouter vs direct providers
 
@@ -451,16 +627,16 @@ when you need provider-specific features.
 ```toml
 [llm]
 provider = "openrouter"
-model    = "anthropic/claude-sonnet-4-20250514"
+model    = "anthropic/claude-sonnet-5.5"
 # api_key set via OPENROUTER_API_KEY env var
 ```
 
-### Full
+### Typical
 
 ```toml
 [llm]
 provider        = "openrouter"
-model           = "anthropic/claude-sonnet-4-20250514"
+model           = "anthropic/claude-sonnet-5.5"
 api_key         = "sk-or-..."
 max_iterations  = 80
 timeout_secs    = 120
@@ -487,12 +663,12 @@ zdr             = true
 
 ### Fallback models
 
-Requests send `models = ["anthropic/claude-sonnet-4-20250514", "openai/gpt-4o"]`:
+Requests send `models = ["anthropic/claude-sonnet-5.5", "openai/gpt-4o"]`:
 
 ```toml
 [llm]
 provider = "openrouter"
-model    = "anthropic/claude-sonnet-4-20250514"
+model    = "anthropic/claude-sonnet-5.5"
 
 [llm.openrouter]
 fallback_models = ["openai/gpt-4o"]
@@ -520,7 +696,7 @@ exclude_domains = ["example.com"]
 ```toml
 [llm]
 provider = "openrouter"
-model    = "meta-llama/llama-3.3-8b-instruct:free"
+model    = "google/gemma-4-26b-a4b-it:free"
 ```
 
 ## Troubleshooting
@@ -534,6 +710,10 @@ export OPENROUTER_API_KEY=sk-or-...
 ```
 
 Or add `api_key = "sk-or-..."` to the `[llm]` section in org.toml.
+
+Embeddings, transcription, speech, image generation and the decision model
+report their own errors, such as `OpenRouter TTS requires an API key`, when
+no key reaches them. See [One key for everything](#one-key-for-everything).
 
 ### Requests timing out
 
@@ -554,7 +734,7 @@ again, so fix the slug and restart.
 
 Check the slug at [openrouter.ai/models](https://openrouter.ai/models).
 Slugs use the `provider/model-name` format (e.g.
-`anthropic/claude-sonnet-4-20250514`).
+`anthropic/claude-sonnet-5.5`).
 
 ### "OpenRouter model catalog unavailable; using conservative capabilities"
 
@@ -643,3 +823,29 @@ The model always reasons. Set another `effort`, then restart.
 `image` in its output modalities. Remove `image_output`, or pick an
 image-output model such as `google/gemini-2.5-flash-image`. Restart after
 the fix; the catalog is not fetched again.
+
+### "OpenRouter rejected audio input; sending voice notes as text from now on"
+
+OpenRouter answered 400 about audio or modalities. The call was repeated
+without the recording, and no audio is sent until restart. Pick a model
+that lists `audio` in its input modalities, or remove `audio_input`.
+
+### "OpenRouter rejected audio output; replying in text from now on"
+
+OpenRouter answered 400 about audio or modalities. The call was repeated
+without asking for speech, and no audio is requested until restart. Pick a
+model that lists `audio` in its output modalities, or remove
+`audio_output`. With `[tts]` configured, the TTS provider still speaks
+voice turns.
+
+### "could not convert the voice note; sending text only"
+
+ffmpeg failed to convert a recording to WAV. The turn went ahead on the
+transcript. Check that `ffmpeg` and `ffprobe` are on `PATH`. The same
+fallback logs `could not probe the voice note` when ffprobe fails and
+`voice note has no readable duration` when it reports no duration.
+
+### "could not transcode OpenRouter's spoken reply"
+
+ffmpeg failed to turn the model's PCM into the `[tts] format`. The reply
+is text only. Check that `ffmpeg` is on `PATH`.
