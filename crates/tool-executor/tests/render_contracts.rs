@@ -327,7 +327,12 @@ async fn file_read_publishes_code_file_data() {
     assert_eq!(data["kind"], "code_file");
     assert_eq!(
         data["path"],
-        dir.path().join("main.rs").to_string_lossy().as_ref()
+        dir.path()
+            .canonicalize()
+            .unwrap()
+            .join("main.rs")
+            .to_string_lossy()
+            .as_ref()
     );
     assert_eq!(data["language"], "rust");
     assert_eq!(data["content"], "fn main() {}");
@@ -765,7 +770,12 @@ async fn file_edit_publishes_a_code_diff() {
     assert_eq!(data["kind"], "code_diff");
     assert_eq!(
         data["path"],
-        dir.path().join("main.rs").to_string_lossy().as_ref()
+        dir.path()
+            .canonicalize()
+            .unwrap()
+            .join("main.rs")
+            .to_string_lossy()
+            .as_ref()
     );
     assert_eq!(data["language"], "rust");
     assert_eq!(data["operation"], "edit");
