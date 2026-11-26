@@ -162,6 +162,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(UpdateIntegrationRequest.serializer)
       ..add(UpdateMemberRequest.serializer)
       ..add(UpdateOrgRequest.serializer)
+      ..add(UpdatePersonaRequest.serializer)
       ..add(UpdateSkillRequest.serializer)
       ..add(UpdateSpaceRequest.serializer)
       ..add(UpdateUserRequest.serializer)
@@ -220,8 +221,14 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
           () => ListBuilder<PersonaFileSlot>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

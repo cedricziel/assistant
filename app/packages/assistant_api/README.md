@@ -165,6 +165,7 @@ Class | Method | HTTP request | Description
 [*PersonasApi*](doc/PersonasApi.md) | [**patchSkillAccessMode**](doc/PersonasApi.md#patchskillaccessmode) | **PATCH** /api/personas/{id}/skill-access | &#x60;PATCH /api/personas/{id}/skill-access&#x60; — set skill access mode.
 [*PersonasApi*](doc/PersonasApi.md) | [**putPersonaFile**](doc/PersonasApi.md#putpersonafile) | **PUT** /api/personas/{id}/files/{filename} | &#x60;PUT /api/personas/{id}/files/{filename}&#x60; — write a persona file slot.
 [*PersonasApi*](doc/PersonasApi.md) | [**setActivePersona**](doc/PersonasApi.md#setactivepersona) | **POST** /api/personas/active | &#x60;POST /api/personas/active&#x60; — switch the active persona for the session.
+[*PersonasApi*](doc/PersonasApi.md) | [**updatePersona**](doc/PersonasApi.md#updatepersona) | **PATCH** /api/personas/{id} | &#x60;PATCH /api/personas/{id}&#x60; — update a persona&#39;s starter prompts.
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**createPushNotificationConfig**](doc/PushNotificationsApi.md#createpushnotificationconfig) | **POST** /tasks/{task_id}/pushNotificationConfigs | &#x60;POST /tasks/:task_id/pushNotificationConfigs&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**deletePushNotificationConfig**](doc/PushNotificationsApi.md#deletepushnotificationconfig) | **DELETE** /tasks/{task_id}/pushNotificationConfigs/{config_id} | &#x60;DELETE /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**getPushNotificationConfig**](doc/PushNotificationsApi.md#getpushnotificationconfig) | **GET** /tasks/{task_id}/pushNotificationConfigs/{config_id} | &#x60;GET /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
@@ -374,6 +375,7 @@ Class | Method | HTTP request | Description
  - [UpdateIntegrationRequest](doc/UpdateIntegrationRequest.md)
  - [UpdateMemberRequest](doc/UpdateMemberRequest.md)
  - [UpdateOrgRequest](doc/UpdateOrgRequest.md)
+ - [UpdatePersonaRequest](doc/UpdatePersonaRequest.md)
  - [UpdateSkillRequest](doc/UpdateSkillRequest.md)
  - [UpdateSpaceRequest](doc/UpdateSpaceRequest.md)
  - [UpdateUserRequest](doc/UpdateUserRequest.md)

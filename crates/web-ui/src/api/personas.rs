@@ -8,6 +8,7 @@
 //! | POST   | `/api/personas`                               | Create a persona                 |
 //! | POST   | `/api/personas/active`                        | Switch active persona            |
 //! | GET    | `/api/personas/{id}`                          | Get persona detail               |
+//! | PATCH  | `/api/personas/{id}`                          | Update starter prompts           |
 //! | GET    | `/api/personas/{id}/files/{filename}`         | Read a persona file slot         |
 //! | PUT    | `/api/personas/{id}/files/{filename}`         | Write a persona file slot        |
 //! | GET    | `/api/personas/{id}/skill-access`             | Get skill access config          |
@@ -33,6 +34,7 @@ use tracing::warn;
 
 use assistant_core::auth::AuthContext;
 use assistant_core::validate_agent_id;
+use assistant_storage::personas::PersonaRecord;
 
 use crate::space::{Access, SpaceCtx, SpaceResolver};
 
@@ -63,6 +65,12 @@ const PERSONA_FILE_SLOTS: [(&str, &str, &str); 8] = [
 
 const MAX_FILE_BYTES: usize = 2 * 1024 * 1024; // 2 MB
 
+/// Most starter prompts a Persona may hold.
+const MAX_STARTER_PROMPTS: usize = 4;
+
+/// Longest starter prompt, in Unicode scalar values after trimming.
+const MAX_STARTER_PROMPT_CHARS: usize = 200;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -87,6 +95,86 @@ fn persona_agent_dir(id: &str) -> Option<PathBuf> {
 
 fn is_valid_filename(filename: &str) -> bool {
     PERSONA_FILE_SLOTS.iter().any(|(f, _, _)| *f == filename)
+}
+
+/// Whether the caller may change this Persona's starter prompts.
+///
+/// A personal Persona (owner set) is editable by its owner only. An org-owned
+/// Persona is shown to every member, so only a space or org admin may edit it.
+/// The caller also needs `Access::Write`, which admins and owners-with-write
+/// hold; a viewer who owns a Persona still cannot edit it.
+fn can_edit_starter_prompts(space: &SpaceCtx, persona: &PersonaRecord, user_id: &str) -> bool {
+    if space.require(Access::Write).is_err() {
+        return false;
+    }
+    match persona.owner_user_id.as_deref() {
+        Some(owner) => owner == user_id,
+        None => space.require(Access::Admin).is_ok(),
+    }
+}
+
+/// Trim and validate starter prompts; the error is the message for a `400`.
+fn validate_starter_prompts(prompts: Vec<String>) -> Result<Vec<String>, String> {
+    if prompts.len() > MAX_STARTER_PROMPTS {
+        return Err(format!(
+            "At most {MAX_STARTER_PROMPTS} starter prompts are allowed"
+        ));
+    }
+    prompts
+        .into_iter()
+        .map(|p| {
+            let trimmed = p.trim();
+            if trimmed.is_empty() {
+                Err("Starter prompts must not be empty".to_string())
+            } else if trimmed.chars().count() > MAX_STARTER_PROMPT_CHARS {
+                Err(format!(
+                    "Starter prompts must be at most {MAX_STARTER_PROMPT_CHARS} characters"
+                ))
+            } else {
+                Ok(trimmed.to_string())
+            }
+        })
+        .collect()
+}
+
+fn persona_detail(
+    space: &SpaceCtx,
+    persona: PersonaRecord,
+    user_id: &str,
+    files: Vec<PersonaFileSlot>,
+) -> PersonaDetail {
+    let can_edit_starter_prompts = can_edit_starter_prompts(space, &persona, user_id);
+    PersonaDetail {
+        id: persona.id,
+        name: persona.name,
+        skill_access_mode: persona.skill_access_mode,
+        turn_timeout_secs: persona.turn_timeout_secs,
+        created_at: persona.created_at.to_rfc3339(),
+        updated_at: persona.updated_at.to_rfc3339(),
+        files,
+        starter_prompts: persona.starter_prompts,
+        can_edit_starter_prompts,
+    }
+}
+
+/// Load a Persona the caller can see, or the `404`/`500` response to return.
+async fn load_accessible(
+    store: &assistant_storage::personas::SqlitePersonaStore,
+    id: &str,
+    user_id: &str,
+) -> Result<PersonaRecord, Response> {
+    match store.get_accessible(id, user_id).await {
+        Ok(Some(p)) => Ok(p),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Persona not found"})),
+        )
+            .into_response()),
+        Err(e) => {
+            warn!("Failed to get persona {id}: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
+        }
+    }
 }
 
 async fn build_file_slots(id: &str) -> Vec<PersonaFileSlot> {
@@ -130,6 +218,10 @@ pub struct PersonaDetail {
     pub created_at: String,
     pub updated_at: String,
     pub files: Vec<PersonaFileSlot>,
+    /// Up to 4 prompts shown as suggestions in an empty chat. Always present.
+    pub starter_prompts: Vec<String>,
+    /// True when the caller may `PATCH` this Persona's starter prompts.
+    pub can_edit_starter_prompts: bool,
 }
 
 /// A single persona file slot.
@@ -170,6 +262,14 @@ pub struct CreatePersonaRequest {
     pub name: String,
 }
 
+/// Body for `PATCH /api/personas/{id}`.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct UpdatePersonaRequest {
+    /// Replaces the starter prompts: at most 4, each 1 to 200 characters
+    /// after trimming. Absent leaves them unchanged; `[]` clears them.
+    pub starter_prompts: Option<Vec<String>>,
+}
+
 /// Body for `PUT /api/personas/{id}/files/{filename}`.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct WritePersonaFileRequest {
@@ -196,7 +296,7 @@ pub fn personas_router() -> Router<PersonaApiState> {
     Router::new()
         .route("/personas", get(list_personas).post(create_persona))
         .route("/personas/active", post(set_active_persona))
-        .route("/personas/{id}", get(get_persona))
+        .route("/personas/{id}", get(get_persona).patch(update_persona))
         .route(
             "/personas/{id}/files/{filename}",
             get(get_persona_file).put(put_persona_file),
@@ -301,15 +401,7 @@ pub async fn create_persona(
                     exists: false,
                 })
                 .collect();
-            let detail = PersonaDetail {
-                id: p.id,
-                name: p.name,
-                skill_access_mode: p.skill_access_mode,
-                turn_timeout_secs: p.turn_timeout_secs,
-                created_at: p.created_at.to_rfc3339(),
-                updated_at: p.updated_at.to_rfc3339(),
-                files,
-            };
+            let detail = persona_detail(&space, p, &ctx.user_id.0, files);
             (StatusCode::CREATED, Json(detail)).into_response()
         }
         Err(e) => {
@@ -414,32 +506,89 @@ pub async fn get_persona(
     }
 
     let store = assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
-    let persona = match store.get_accessible(&id, &ctx.user_id.0).await {
-        Ok(Some(p)) => p,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "Persona not found"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            warn!("Failed to get persona {id}: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-        }
+    let persona = match load_accessible(&store, &id, &ctx.user_id.0).await {
+        Ok(p) => p,
+        Err(resp) => return resp,
     };
 
     let files = build_file_slots(&id).await;
-    let detail = PersonaDetail {
-        id: persona.id,
-        name: persona.name,
-        skill_access_mode: persona.skill_access_mode,
-        turn_timeout_secs: persona.turn_timeout_secs,
-        created_at: persona.created_at.to_rfc3339(),
-        updated_at: persona.updated_at.to_rfc3339(),
-        files,
+    Json(persona_detail(&space, persona, &ctx.user_id.0, files)).into_response()
+}
+
+/// `PATCH /api/personas/{id}` — update a persona's starter prompts.
+#[utoipa::path(
+    patch,
+    path = "/api/personas/{id}",
+    tag = "personas",
+    params(("id" = String, Path, description = "Persona ID")),
+    request_body = UpdatePersonaRequest,
+    responses(
+        (status = 200, description = "Updated persona", body = PersonaDetail),
+        (status = 400, description = "Invalid ID or starter prompts"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Caller may not edit this persona's starter prompts"),
+        (status = 404, description = "Persona not found"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn update_persona(
+    space: SpaceCtx,
+    Extension(ctx): Extension<AuthContext>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdatePersonaRequest>,
+) -> Response {
+    if let Err(denied) = space.require(Access::Write) {
+        return denied.into_response();
+    }
+    if !validate_agent_id(&id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid persona ID"})),
+        )
+            .into_response();
+    }
+
+    let store = assistant_storage::personas::SqlitePersonaStore::new(space.storage.pool.clone());
+    let persona = match load_accessible(&store, &id, &ctx.user_id.0).await {
+        Ok(p) => p,
+        Err(resp) => return resp,
     };
-    Json(detail).into_response()
+
+    if !can_edit_starter_prompts(&space, &persona, &ctx.user_id.0) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(
+                serde_json::json!({"error": "Not allowed to edit this persona's starter prompts"}),
+            ),
+        )
+            .into_response();
+    }
+
+    let prompts = match body.starter_prompts.map(validate_starter_prompts) {
+        Some(Ok(prompts)) => Some(prompts),
+        Some(Err(msg)) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": msg})),
+            )
+                .into_response();
+        }
+        None => None,
+    };
+    if let Some(prompts) = &prompts
+        && let Err(e) = store.set_starter_prompts(&id, prompts).await
+    {
+        warn!("Failed to update starter prompts for {id}: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+    }
+
+    // Re-read so the response carries the stored values and the new `updated_at`.
+    let persona = match load_accessible(&store, &id, &ctx.user_id.0).await {
+        Ok(p) => p,
+        Err(resp) => return resp,
+    };
+    let files = build_file_slots(&id).await;
+    Json(persona_detail(&space, persona, &ctx.user_id.0, files)).into_response()
 }
 
 /// `GET /api/personas/{id}/files/{filename}` — read a persona file slot.
@@ -1457,6 +1606,272 @@ mod tests {
             StatusCode::OK,
             "org-owned personas should be accessible to any user"
         );
+    }
+
+    // -- starter prompts --
+
+    fn app_as(state: PersonaApiState, user: &str, role: Role) -> axum::Router {
+        let ctx = AuthContext {
+            user_id: UserId::from(user),
+            space_roles: HashMap::from([(SpaceId::from("default"), role)]),
+            ..make_test_ctx()
+        };
+        personas_router().with_state(state).layer(Extension(ctx))
+    }
+
+    async fn get_detail(app: axum::Router, id: &str) -> serde_json::Value {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/personas/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        body_json(resp.into_body()).await
+    }
+
+    async fn patch_persona(
+        app: axum::Router,
+        id: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/personas/{id}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        (status, body_json(resp.into_body()).await)
+    }
+
+    async fn stored_starters(storage: &StorageLayer, id: &str) -> Vec<String> {
+        storage
+            .persona_store()
+            .get(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .starter_prompts
+    }
+
+    #[tokio::test]
+    async fn get_persona_includes_empty_starter_prompts() {
+        let (state, _) = test_state().await;
+        let json = get_detail(app(state), "default").await;
+        assert_eq!(json["starter_prompts"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn patch_persona_stores_trimmed_starters() {
+        let (state, storage) = test_state().await;
+        let (status, json) = patch_persona(
+            app(state),
+            "default",
+            serde_json::json!({"starter_prompts": ["  Plan my week ", "Summarize inbox"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            json["starter_prompts"],
+            serde_json::json!(["Plan my week", "Summarize inbox"])
+        );
+        assert_eq!(
+            stored_starters(&storage, "default").await,
+            vec!["Plan my week".to_string(), "Summarize inbox".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_persona_rejects_five_starters() {
+        let (state, storage) = test_state().await;
+        let (status, json) = patch_persona(
+            app(state),
+            "default",
+            serde_json::json!({"starter_prompts": ["a", "b", "c", "d", "e"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json["error"].is_string());
+        assert!(stored_starters(&storage, "default").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn patch_persona_rejects_blank_and_over_long_starters() {
+        let (state, storage) = test_state().await;
+        for bad in [
+            "   ".to_string(),
+            "x".repeat(201),
+            format!("  {}  ", "x".repeat(201)),
+        ] {
+            let (status, json) = patch_persona(
+                app(state.clone()),
+                "default",
+                serde_json::json!({"starter_prompts": ["fine", bad]}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "prompt {bad:?}");
+            assert!(json["error"].is_string());
+        }
+        assert!(stored_starters(&storage, "default").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn patch_persona_counts_characters_not_bytes() {
+        let (state, storage) = test_state().await;
+        let prompt = "é".repeat(200);
+        assert!(prompt.len() > 200);
+        let (status, _) = patch_persona(
+            app(state),
+            "default",
+            serde_json::json!({"starter_prompts": [prompt.clone()]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(stored_starters(&storage, "default").await, vec![prompt]);
+    }
+
+    #[tokio::test]
+    async fn patch_persona_unknown_id_returns_404() {
+        let (state, _) = test_state().await;
+        let (status, json) = patch_persona(
+            app(state),
+            "missing",
+            serde_json::json!({"starter_prompts": ["a"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(json["error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn patch_persona_read_only_returns_403_and_stores_nothing() {
+        let (state, storage) = test_state().await;
+        let (status, _) = patch_persona(
+            app_as(state, "test-user", Role::Viewer),
+            "default",
+            serde_json::json!({"starter_prompts": ["a"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(stored_starters(&storage, "default").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn patch_persona_empty_body_leaves_starters_unchanged() {
+        let (state, storage) = test_state().await;
+        storage
+            .persona_store()
+            .set_starter_prompts("default", &["Plan my week".to_string()])
+            .await
+            .unwrap();
+        let (status, json) = patch_persona(app(state), "default", serde_json::json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["starter_prompts"], serde_json::json!(["Plan my week"]));
+    }
+
+    #[tokio::test]
+    async fn patch_persona_empty_list_clears() {
+        let (state, storage) = test_state().await;
+        storage
+            .persona_store()
+            .set_starter_prompts("default", &["Plan my week".to_string()])
+            .await
+            .unwrap();
+        let (status, _) = patch_persona(
+            app(state),
+            "default",
+            serde_json::json!({"starter_prompts": []}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(stored_starters(&storage, "default").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn owner_edits_personal_persona() {
+        let (state, storage) = test_state().await;
+        storage
+            .persona_store()
+            .create_owned("mine", "Mine", "alice")
+            .await
+            .unwrap();
+        let detail = get_detail(app_as(state.clone(), "alice", Role::Member), "mine").await;
+        assert_eq!(detail["can_edit_starter_prompts"], true);
+        let (status, json) = patch_persona(
+            app_as(state, "alice", Role::Member),
+            "mine",
+            serde_json::json!({"starter_prompts": ["Plan my week"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["can_edit_starter_prompts"], true);
+        assert_eq!(
+            stored_starters(&storage, "mine").await,
+            vec!["Plan my week".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn space_admin_edits_org_owned_persona() {
+        let (state, storage) = test_state().await;
+        let detail = get_detail(app_as(state.clone(), "admin", Role::SpaceAdmin), "default").await;
+        assert_eq!(detail["can_edit_starter_prompts"], true);
+        let (status, _) = patch_persona(
+            app_as(state, "admin", Role::SpaceAdmin),
+            "default",
+            serde_json::json!({"starter_prompts": ["Plan my week"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            stored_starters(&storage, "default").await,
+            vec!["Plan my week".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn member_cannot_edit_org_owned_persona() {
+        let (state, storage) = test_state().await;
+        let detail = get_detail(app_as(state.clone(), "bob", Role::Member), "default").await;
+        assert_eq!(detail["can_edit_starter_prompts"], false);
+        let (status, json) = patch_persona(
+            app_as(state, "bob", Role::Member),
+            "default",
+            serde_json::json!({"starter_prompts": ["Plan my week"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(json["error"].is_string());
+        assert!(stored_starters(&storage, "default").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn space_admin_cannot_edit_another_users_personal_persona() {
+        // A personal Persona is invisible to others (404), so admins get no
+        // back door through the starters route.
+        let (state, storage) = test_state().await;
+        storage
+            .persona_store()
+            .create_owned("mine", "Mine", "alice")
+            .await
+            .unwrap();
+        let (status, _) = patch_persona(
+            app_as(state, "admin", Role::SpaceAdmin),
+            "mine",
+            serde_json::json!({"starter_prompts": ["a"]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(stored_starters(&storage, "mine").await.is_empty());
     }
 
     #[tokio::test]
