@@ -342,7 +342,7 @@ async fn rows_of_run(rig: &Rig, run_id: Uuid) -> i64 {
 }
 
 /// Stores a text attachment bound to `message_id`. In-memory storage keeps
-/// the bytes in a temporary directory removed with the rig.
+/// the bytes in memory, so nothing reaches the disk.
 async fn attach(rig: &Rig, message_id: Uuid, text: &str) -> AttachmentMeta {
     let meta = AttachmentMeta {
         id: Uuid::new_v4(),
