@@ -343,9 +343,11 @@ impl SubagentRunner for Orchestrator {
                             };
                             if let Err(e) = persist_final_answer(
                                 &conv_store,
+                                &self.storage.message_timing_store(),
                                 assistant_msg,
                                 FinalAnswerMeta {
                                     traceparent: llm_traceparent,
+                                    timing: None,
                                 },
                             )
                             .instrument(iteration_span.clone())

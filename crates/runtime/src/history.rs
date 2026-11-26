@@ -10,7 +10,10 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use assistant_core::types::conversation::{Message, MessageRole};
-use assistant_core::{ChatHistoryMessage, ChatRole, ContentBlock, ProviderState, ToolCallItem};
+use assistant_core::{
+    ChatHistoryMessage, ChatRole, ContentBlock, ProviderState, ToolCallItem, TurnTiming,
+};
+use assistant_storage::MessageTimingStore;
 use assistant_storage::conversations::ConversationStore;
 
 /// Pre-loaded attachment content blocks keyed by message ID.
@@ -216,16 +219,29 @@ pub(crate) struct FinalAnswerMeta {
     /// W3C `traceparent` of the LLM span that produced the answer; `None`
     /// when tracing is off.
     pub traceparent: Option<String>,
+    /// How long the turn took; stored under the saved message's id. `None`
+    /// for paths that do not measure it.
+    pub timing: Option<TurnTiming>,
 }
 
 /// Save a final assistant answer, stamping it with `meta`.
+///
+/// The timing is stored after the message is saved. A failure to store it is
+/// logged and does not fail the save.
 pub(crate) async fn persist_final_answer(
     conv_store: &dyn ConversationStore,
+    timing_store: &dyn MessageTimingStore,
     mut msg: Message,
     meta: FinalAnswerMeta,
 ) -> anyhow::Result<()> {
     msg.traceparent = meta.traceparent;
-    conv_store.save_message(&msg).await
+    conv_store.save_message(&msg).await?;
+    if let Some(timing) = meta.timing
+        && let Err(e) = timing_store.put(msg.conversation_id, msg.id, &timing).await
+    {
+        warn!(message_id = %msg.id, "Failed to persist message timing: {e}");
+    }
+    Ok(())
 }
 
 /// Persist a synthetic assistant message so the conversation history
