@@ -568,7 +568,15 @@ impl Orchestrator {
 
     /// The provider a turn of `conversation_id` runs on: the default, or one
     /// for the model its `/model` override names.
+    /// The provider is [`ready`](LlmProvider::ready), so the capabilities a
+    /// turn reads are final.
     async fn llm_for(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
+        let llm = self.select_llm(conversation_id).await?;
+        llm.ready().await;
+        Ok(llm)
+    }
+
+    async fn select_llm(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
         let model = self
             .conversation_configs
             .read()
