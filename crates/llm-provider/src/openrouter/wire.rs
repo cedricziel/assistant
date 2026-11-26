@@ -6,8 +6,9 @@ use serde_json::Value;
 use assistant_core::types::llm::{OpenRouterReasoning, OpenRouterRouting};
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
 
+use super::citations::sources_block;
 use super::errors::{ErrorBody, body_error};
-use super::reasoning::{budget_exhausted, visible_text};
+use super::reasoning::{budget_exhausted, provider_state, visible_text};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatRequest {
@@ -37,6 +38,8 @@ pub struct ChatRequest {
     pub response_format: Option<Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plugins: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_search_options: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,6 +73,8 @@ pub struct Message {
     pub reasoning: Option<String>,
     #[serde(default)]
     pub reasoning_details: Vec<Value>,
+    #[serde(default)]
+    pub annotations: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,7 +139,12 @@ impl Usage {
 impl ChatResponse {
     /// The response; reasoning becomes the tool calls' thinking unless
     /// `show_reasoning` is off. A final answer has no slot for thinking.
-    pub fn into_llm_response(self, show_reasoning: bool) -> anyhow::Result<LlmResponse> {
+    /// `model` is the requested model, which stored reasoning is keyed by.
+    pub fn into_llm_response(
+        self,
+        model: &str,
+        show_reasoning: bool,
+    ) -> anyhow::Result<LlmResponse> {
         if let Some(error) = &self.error
             && self.choices.is_empty()
         {
@@ -173,10 +183,11 @@ impl ChatResponse {
                 items,
                 meta,
                 thinking: (show_reasoning && !thinking.is_empty()).then_some(thinking),
-                provider_state: None,
+                provider_state: provider_state(model, message.reasoning_details),
             }));
         }
-        Ok(LlmResponse::FinalAnswer(answer, meta))
+        let sources = sources_block(&answer, &message.annotations).unwrap_or_default();
+        Ok(LlmResponse::FinalAnswer(answer + &sources, meta))
     }
 }
 

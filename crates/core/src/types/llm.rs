@@ -402,6 +402,126 @@ pub struct OpenRouterOptions {
     pub provider: Option<OpenRouterRouting>,
     /// Reasoning controls, sent as the request's `reasoning` object.
     pub reasoning: Option<OpenRouterReasoning>,
+    /// Prompt-cache breakpoints (`[llm.openrouter.cache]`).
+    #[serde(default)]
+    pub cache: OpenRouterCache,
+    /// OpenRouter's `web` plugin (`[llm.openrouter.web_search]`).
+    #[serde(default)]
+    pub web_search: OpenRouterWebSearch,
+    /// Parser for PDF attachments. Unset: models with native file input read
+    /// PDFs themselves, others use `cloudflare-ai`.
+    pub pdf_engine: Option<OpenRouterPdfEngine>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OpenRouterPdfEngine {
+    Native,
+    CloudflareAi,
+    MistralOcr,
+}
+
+/// `[llm.openrouter.web_search]`. `search_context_size` needs the native
+/// engine, or no engine so OpenRouter may pick native search.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawOpenRouterWebSearch")]
+pub struct OpenRouterWebSearch {
+    pub enabled: bool,
+    pub engine: Option<OpenRouterSearchEngine>,
+    pub max_results: Option<u32>,
+    pub search_prompt: Option<String>,
+    pub include_domains: Option<Vec<String>>,
+    pub exclude_domains: Option<Vec<String>>,
+    pub search_context_size: Option<OpenRouterSearchContextSize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOpenRouterWebSearch {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    engine: Option<OpenRouterSearchEngine>,
+    #[serde(default)]
+    max_results: Option<u32>,
+    #[serde(default)]
+    search_prompt: Option<String>,
+    #[serde(default)]
+    include_domains: Option<Vec<String>>,
+    #[serde(default)]
+    exclude_domains: Option<Vec<String>>,
+    #[serde(default)]
+    search_context_size: Option<OpenRouterSearchContextSize>,
+}
+
+impl TryFrom<RawOpenRouterWebSearch> for OpenRouterWebSearch {
+    type Error = String;
+
+    fn try_from(raw: RawOpenRouterWebSearch) -> Result<Self, Self::Error> {
+        if raw.search_context_size.is_some()
+            && raw
+                .engine
+                .is_some_and(|e| e != OpenRouterSearchEngine::Native)
+        {
+            return Err("`search_context_size` works only with `engine = \"native\"`".to_owned());
+        }
+        Ok(Self {
+            enabled: raw.enabled,
+            engine: raw.engine,
+            max_results: raw.max_results,
+            search_prompt: raw.search_prompt,
+            include_domains: raw.include_domains,
+            exclude_domains: raw.exclude_domains,
+            search_context_size: raw.search_context_size,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterSearchEngine {
+    Native,
+    Exa,
+    Firecrawl,
+    Parallel,
+    Perplexity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterSearchContextSize {
+    Low,
+    Medium,
+    High,
+}
+
+/// `[llm.openrouter.cache]`: where models that need explicit breakpoints
+/// get `cache_control`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterCache {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub ttl: OpenRouterCacheTtl,
+}
+
+impl Default for OpenRouterCache {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl: OpenRouterCacheTtl::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpenRouterCacheTtl {
+    #[default]
+    #[serde(rename = "5m")]
+    FiveMinutes,
+    #[serde(rename = "1h")]
+    OneHour,
 }
 
 /// `[llm.openrouter.reasoning]`. `effort` and `max_tokens` are exclusive.
@@ -613,6 +733,64 @@ mod tests {
                 serde_json::to_value(reasoning).unwrap(),
                 serde_json::json!({"effort": "high", "exclude": true})
             );
+        }
+
+        #[test]
+        fn cache_defaults_on_with_five_minutes() {
+            use super::super::{OpenRouterCache, OpenRouterCacheTtl};
+
+            assert_eq!(parse("").unwrap().cache, OpenRouterCache::default());
+            let cache = parse("[cache]\nttl = \"1h\"").unwrap().cache;
+            assert!(cache.enabled);
+            assert_eq!(cache.ttl, OpenRouterCacheTtl::OneHour);
+            assert!(parse("[cache]\nttl = \"2h\"").is_err());
+            assert!(!parse("[cache]\nenabled = false").unwrap().cache.enabled);
+        }
+
+        #[test]
+        fn web_search_parses_and_defaults_off() {
+            use super::super::OpenRouterSearchEngine;
+
+            assert!(!parse("").unwrap().web_search.enabled);
+            let search = parse(
+                "[web_search]\nenabled = true\nengine = \"exa\"\nmax_results = 3\nexclude_domains = [\"reddit.com\"]",
+            )
+            .unwrap()
+            .web_search;
+            assert!(search.enabled);
+            assert_eq!(search.engine, Some(OpenRouterSearchEngine::Exa));
+            assert_eq!(search.max_results, Some(3));
+            assert!(parse("[web_search]\nsearch_context_size = \"high\"").is_ok());
+            assert!(
+                parse("[web_search]\nengine = \"native\"\nsearch_context_size = \"low\"").is_ok()
+            );
+        }
+
+        #[test]
+        fn search_context_size_with_a_non_native_engine_is_rejected() {
+            let err = parse("[web_search]\nengine = \"exa\"\nsearch_context_size = \"high\"")
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("search_context_size") && err.contains("native"),
+                "{err}"
+            );
+            assert!(
+                parse("[web_search]\nengin = \"exa\"").is_err(),
+                "unknown keys are rejected"
+            );
+        }
+
+        #[test]
+        fn pdf_engine_parses_kebab_case() {
+            use super::super::OpenRouterPdfEngine;
+
+            assert_eq!(parse("").unwrap().pdf_engine, None);
+            assert_eq!(
+                parse("pdf_engine = \"mistral-ocr\"").unwrap().pdf_engine,
+                Some(OpenRouterPdfEngine::MistralOcr)
+            );
+            assert!(parse("pdf_engine = \"tesseract\"").is_err());
         }
 
         #[test]

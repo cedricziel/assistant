@@ -70,26 +70,26 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 - [x] 9.1 Write failing tests: config parsing, `effort` combined with `max_tokens` rejected, `reasoning` sent, and an effort the catalog does not support fails with the supported list. Confirm red. Implement, then verify.
 - [x] 9.2 Write failing tests: text and summary details stream as `Thinking`, encrypted details are hidden, `exclude` emits nothing, and `finish_reason: "length"` with empty content is an error. Confirm red. Implement, then verify.
-- [ ] 9.3 Write failing tests: tool-call `reasoning_details` are stored as `ProviderState`, sent back unchanged and in order, survive a history rebuild from storage, and are not sent when the state's provider differs. Confirm red. Implement, then verify.
-- [ ] 9.4 Document reasoning in `docs/openrouter.md`.
+- [x] 9.3 Write failing tests: tool-call `reasoning_details` are stored as `ProviderState`, sent back unchanged and in order, survive a history rebuild from storage, and are not sent when the state's provider differs. Confirm red. Implement, then verify.
+- [x] 9.4 Document reasoning in `docs/openrouter.md`.
 
 ## 10. Prompt caching
 
-- [ ] 10.1 Write failing table tests for breakpoint placement on Anthropic, Google, Qwen and OpenAI, with caching disabled, and with `ttl = "1h"`. Confirm red. Implement, then verify.
-- [ ] 10.2 Write a failing test that cached and cache-write tokens reach meta. Confirm red. Implement, then verify.
-- [ ] 10.3 Document caching in `docs/openrouter.md`.
+- [x] 10.1 Write failing table tests for breakpoint placement on Anthropic, Google, Qwen and OpenAI, with caching disabled, and with `ttl = "1h"`. Confirm red. Implement, then verify.
+- [x] 10.2 Write a failing test that cached and cache-write tokens reach meta. Confirm red. Implement, then verify.
+- [x] 10.3 Document caching in `docs/openrouter.md`.
 
 ## 11. Web search
 
-- [ ] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
-- [ ] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
-- [ ] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
+- [x] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
+- [x] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
+- [x] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
 
 ## 12. PDFs
 
-- [ ] 12.1 Write failing tests: a PDF becomes a `file` part with a data URI, and the default filename is `document.pdf`. Confirm red. Implement, then verify.
-- [ ] 12.2 Write failing tests for the `pdf_engine` plugin, the `cloudflare-ai` default for models without native file input, no plugin for native models, and coexistence with the web plugin. Confirm red. Implement, then verify.
-- [ ] 12.3 Document PDFs in `docs/openrouter.md`.
+- [x] 12.1 Write failing tests: a PDF becomes a `file` part with a data URI, and the default filename is `document.pdf`. Confirm red. Implement, then verify.
+- [x] 12.2 Write failing tests for the `pdf_engine` plugin, the `cloudflare-ai` default for models without native file input, no plugin for native models, and coexistence with the web plugin. Confirm red. Implement, then verify.
+- [x] 12.3 Document PDFs in `docs/openrouter.md`.
 
 ## 13. Embeddings
 
