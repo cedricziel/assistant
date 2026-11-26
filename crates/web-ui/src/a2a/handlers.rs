@@ -23,8 +23,8 @@ use assistant_a2a_json_schema::responses::*;
 use assistant_a2a_json_schema::types::*;
 use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::Interface;
-use assistant_runtime::AssistantInterface;
 use assistant_runtime::projection::StreamProjector;
+use assistant_runtime::{AssistantInterface, SubmitTurn};
 use assistant_storage::{ConversationStore, SqliteConversationStore};
 
 use super::backend::A2aSpaceBackend;
@@ -255,7 +255,7 @@ pub async fn send_message(
 
     // Run the real turn through the Orchestrator.
     let result = orchestrator
-        .submit_turn(&auth, &user_text, conv_id, Interface::A2a, None)
+        .submit(SubmitTurn::new(user_text.as_str(), conv_id, Interface::A2a).with_auth(&auth))
         .await;
 
     let answer = match result {
@@ -393,7 +393,7 @@ pub async fn send_message_streaming(
     let turn_text = user_text.clone();
     tokio::spawn(async move {
         let r = orchestrator
-            .submit_turn(&turn_auth, &turn_text, conv_id, Interface::A2a, None)
+            .submit(SubmitTurn::new(turn_text, conv_id, Interface::A2a).with_auth(&turn_auth))
             .await;
         let _ = result_tx.send(r);
     });
@@ -908,9 +908,8 @@ pub(crate) mod test_support {
     //! an `A2AState` backed by in-memory storage.
     use std::sync::Arc;
 
-    use assistant_core::auth::AuthContext;
     use assistant_core::types::conversation::Interface;
-    use assistant_runtime::{AssistantInterface, OrchestratorEvent, TurnResult};
+    use assistant_runtime::{AssistantInterface, OrchestratorEvent, SubmitTurn, TurnResult};
     use async_trait::async_trait;
     use tokio::sync::mpsc;
     use uuid::Uuid;
@@ -930,17 +929,9 @@ pub(crate) mod test_support {
         ) {
         }
 
-        async fn submit_turn_with_attachments(
-            &self,
-            _auth: &AuthContext,
-            prompt: &str,
-            _conversation_id: Uuid,
-            _interface: Interface,
-            _timestamp: Option<chrono::DateTime<chrono::Utc>>,
-            _attachment_ids: Vec<Uuid>,
-        ) -> anyhow::Result<TurnResult> {
+        async fn submit(&self, turn: SubmitTurn) -> anyhow::Result<TurnResult> {
             Ok(TurnResult {
-                answer: format!("echo: {prompt}"),
+                answer: format!("echo: {}", turn.prompt),
                 attachments: vec![],
                 attachment_ids: vec![],
                 message_id: None,

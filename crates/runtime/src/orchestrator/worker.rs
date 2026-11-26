@@ -3,17 +3,16 @@
 //! These methods handle claiming messages from the message bus, dispatching
 //! them to the appropriate `run_turn*` variant, and publishing results back.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
     ClaimFilter, ContentBlock, MAX_TURN_REDELIVERIES, MessageBus, OrgId, PublishRequest, SpaceId,
-    ToolHandler, UserId, auth::AuthContext, bus_messages, topic, types::conversation::Interface,
+    ToolHandler, UserId, bus_messages, topic, types::conversation::Interface,
     types::conversation::TurnIdentity,
 };
-use chrono::{DateTime, Local, Utc};
+use chrono::Local;
 use opentelemetry::{
     Context as OtelContext, KeyValue,
     trace::{Span as _, SpanKind, TraceContextExt},
@@ -24,7 +23,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::turn_cancellations::Claim;
-use super::{ExtensionRegistration, Orchestrator, TurnResult, parse_interface};
+use super::{ExtensionRegistration, Orchestrator, SubmitTurn, TurnResult, parse_interface};
 use crate::webhook_dispatch;
 
 /// Periodically refreshes the claim of a bus message while a turn runs.
@@ -53,18 +52,6 @@ impl Drop for ClaimHeartbeat {
     fn drop(&mut self) {
         self.0.abort();
     }
-}
-
-/// Per-submit flags for [`Orchestrator::submit_turn`] and
-/// [`Orchestrator::submit_turn_with_request_id`].
-///
-/// The default is a non-interactive turn: tools that need a human's answer are
-/// denied instead of prompting.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SubmitOptions {
-    /// A human is waiting on this turn and can answer prompts (tool approvals,
-    /// questions). Reaches tools as `ExecutionContext::interactive`.
-    pub interactive: bool,
 }
 
 impl Orchestrator {
@@ -689,138 +676,18 @@ impl Orchestrator {
 
     /// Submit a turn through the message bus and wait for the result.
     ///
-    /// Publishes a [`TurnRequest`](bus_messages::TurnRequest) to the bus and
-    /// polls for the corresponding [`TurnResult`](bus_messages::TurnResult).
-    /// Requires [`run_worker`](Self::run_worker) to be running in a
-    /// background task.
+    /// Publishes a [`TurnRequest`](bus_messages::TurnRequest) built from `turn`
+    /// to the bus and polls for the corresponding
+    /// [`TurnResult`](bus_messages::TurnResult). Requires
+    /// [`run_worker`](Self::run_worker) to be running in a background task.
     ///
-    /// # Parameters
-    /// * `prompt` — the user message
-    /// * `conversation_id` — conversation to continue (or start)
-    /// * `interface` — originating interface
-    /// * `timestamp` — when the message was received (injected as a prefix into
-    ///   the prompt by the worker)
-    /// * `options` — per-submit flags, see [`SubmitOptions`]
-    pub async fn submit_turn(
-        &self,
-        auth: &AuthContext,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        options: SubmitOptions,
-    ) -> Result<TurnResult> {
-        self.submit_turn_internal(
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            HashMap::new(),
-            vec![],
-            TurnIdentity::from_auth(auth),
-            None,
-            options,
-        )
-        .await
-    }
-
-    /// Submit a turn with user-provided attachment IDs.
-    pub async fn submit_turn_with_attachments(
-        &self,
-        auth: &AuthContext,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        attachment_ids: Vec<Uuid>,
-    ) -> Result<TurnResult> {
-        self.submit_turn_internal(
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            HashMap::new(),
-            attachment_ids,
-            TurnIdentity::from_auth(auth),
-            None,
-            SubmitOptions::default(),
-        )
-        .await
-    }
-
-    /// Submit a turn with full identity context.
-    pub async fn submit_turn_with_identity(
-        &self,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        attachment_ids: Vec<Uuid>,
-        identity: TurnIdentity,
-    ) -> Result<TurnResult> {
-        self.submit_turn_internal(
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            HashMap::new(),
-            attachment_ids,
-            identity,
-            None,
-            SubmitOptions::default(),
-        )
-        .await
-    }
-
-    /// Submit a turn using a caller-supplied `request_id`.
-    ///
-    /// Used by streaming HTTP handlers in `assistant-web-ui` so that the SSE
-    /// `run_id` doubles as the orchestrator's `request_id` — letting clients
-    /// invoke [`Self::cancel_turn`] with the same id they already observe in
-    /// the `run_started` event. Behaviour is otherwise identical to
-    /// [`Self::submit_turn_with_attachments`].
-    #[allow(clippy::too_many_arguments)]
-    pub async fn submit_turn_with_request_id(
-        &self,
-        auth: &AuthContext,
-        request_id: Uuid,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        attachment_ids: Vec<Uuid>,
-        options: SubmitOptions,
-    ) -> Result<TurnResult> {
-        self.submit_turn_internal(
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            HashMap::new(),
-            attachment_ids,
-            TurnIdentity::from_auth(auth),
-            Some(request_id),
-            options,
-        )
-        .await
-    }
-
-    /// Submit a turn through the message bus and wait for the result, enriched
-    /// with interface-provided metadata attributes and optional attachment IDs.
-    #[allow(clippy::too_many_arguments)]
-    async fn submit_turn_internal(
-        &self,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        submit_metadata: HashMap<String, String>,
-        attachment_ids: Vec<Uuid>,
-        identity: TurnIdentity,
-        request_id_override: Option<Uuid>,
-        options: SubmitOptions,
-    ) -> Result<TurnResult> {
-        let request_id = request_id_override.unwrap_or_else(Uuid::new_v4);
+    /// Streaming HTTP handlers set [`SubmitTurn::request_id`] so the SSE
+    /// `run_id` doubles as the request id, letting clients call
+    /// [`Self::cancel_turn`] with the id they already observe in `run_started`.
+    pub async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult> {
+        let request_id = turn.request_id.unwrap_or_else(Uuid::new_v4);
+        let conversation_id = turn.conversation_id;
+        let interface = turn.interface.clone();
         // Register a cancellation token so the worker can be interrupted if
         // submit_turn times out before the turn finishes.
         let cancel_token = CancellationToken::new();
@@ -840,11 +707,6 @@ impl Orchestrator {
         interface_cx
             .span()
             .set_attribute(KeyValue::new("bus.correlation_id", request_id.to_string()));
-        for (key, value) in &submit_metadata {
-            interface_cx
-                .span()
-                .set_attribute(KeyValue::new(key.clone(), value.clone()));
-        }
         info!(
             conversation_id = %conversation_id,
             request_id = %request_id,
@@ -852,18 +714,7 @@ impl Orchestrator {
             submit_state = "pending",
             "submit_turn waiter state"
         );
-        let turn_req = bus_messages::TurnRequest {
-            prompt: prompt.to_string(),
-            conversation_id,
-            extension_tools: vec![],
-            timestamp,
-            traceparent: crate::otel_spans::traceparent_from_context(&interface_cx),
-            attachment_ids,
-            interactive: options.interactive,
-            user_id: identity.user_id.as_ref().map(|u| u.to_string()),
-            org_id: identity.org_id.as_ref().map(|o| o.to_string()),
-            space_id: identity.space_id.as_ref().map(|s| s.to_string()),
-        };
+        let turn_req = turn.to_request(crate::otel_spans::traceparent_from_context(&interface_cx));
 
         let mut produce_request_span = crate::otel_spans::start_bus_span(
             SpanKind::Producer,
@@ -871,9 +722,6 @@ impl Orchestrator {
             Some(conversation_id),
             &interface_cx,
         );
-        for (key, value) in &submit_metadata {
-            produce_request_span.set_attribute(KeyValue::new(key.clone(), value.clone()));
-        }
         let publish_result = self
             .bus
             .publish(

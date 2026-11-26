@@ -11,7 +11,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::{Interface, TurnIdentity};
 
-use super::super::OrchestratorEvent;
+use super::super::{OrchestratorEvent, SubmitTurn};
 use super::{build, ollama_answer, ollama_thinking};
 
 /// Build a newline-delimited JSON (NDJSON) streaming body that the Ollama
@@ -163,13 +163,9 @@ async fn worker_routes_ext_plus_sink_to_streaming_path() {
 
     // submit_turn triggers the worker which should pick up both registrations.
     let _ = orch
-        .submit_turn(
-            &AuthContext::system(),
-            "stream please",
-            conv_id,
-            Interface::Slack,
-            None,
-            crate::orchestrator::SubmitOptions::default(),
+        .submit(
+            SubmitTurn::new("stream please", conv_id, Interface::Slack)
+                .with_auth(&AuthContext::system()),
         )
         .await;
 
