@@ -121,10 +121,121 @@ pub struct ToolCallSummary {
     pub result: Option<String>,
     /// `"ok"`, `"error"`, or `"denied"`.
     pub status: String,
+    /// Provider-assigned id of the call, when the provider supplied one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// Structured output of the tool, a JSON object with a `kind` tag. Absent
+    /// when the tool returned text only, the data exceeded the size limit, or
+    /// the call predates structured data. Each `kind` is defined by a JSON
+    /// Schema in `schemas/tool-results/`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub data: Option<serde_json::Value>,
 }
 
 /// Maximum length for tool result strings in history summaries.
 const TOOL_RESULT_HISTORY_LIMIT: usize = 512;
+
+/// The tool-result rows of a conversation, with a record of which have been
+/// joined to an assistant tool call.
+struct ToolRows {
+    rows: Vec<assistant_core::types::conversation::Message>,
+    claimed: Vec<bool>,
+}
+
+impl ToolRows {
+    fn new(rows: Vec<assistant_core::types::conversation::Message>) -> Self {
+        let claimed = vec![false; rows.len()];
+        Self { rows, claimed }
+    }
+
+    /// Claim the unclaimed row of `turn` that satisfies `matches`, the
+    /// earliest first.
+    fn claim(
+        &mut self,
+        turn: i64,
+        matches: impl Fn(&assistant_core::types::conversation::Message) -> bool,
+    ) -> Option<usize> {
+        let idx = self
+            .rows
+            .iter()
+            .enumerate()
+            .position(|(i, r)| !self.claimed[i] && r.turn == turn && matches(r))?;
+        self.claimed[idx] = true;
+        Some(idx)
+    }
+
+    /// Summarise the `tool_calls_json` entries of one assistant row.
+    ///
+    /// Each call joins to its result row by `tool_call_id`. Calls without a
+    /// matching id take the next unclaimed row of the same tool name in the
+    /// turn, which is the dispatch order.
+    fn summaries(&mut self, turn: i64, items: &[serde_json::Value]) -> Vec<ToolCallSummary> {
+        let calls: Vec<(String, Option<String>, &serde_json::Value)> = items
+            .iter()
+            .filter_map(|v| {
+                let name = v.get("name").and_then(|n| n.as_str())?.to_string();
+                let id = v.get("id").and_then(|i| i.as_str()).map(str::to_string);
+                Some((name, id, v))
+            })
+            .collect();
+
+        let mut joined: Vec<Option<usize>> = calls
+            .iter()
+            .map(|(_, id, _)| {
+                let id = id.as_deref()?;
+                self.claim(turn, |r| r.tool_call_id.as_deref() == Some(id))
+            })
+            .collect();
+        for (slot, (name, _, _)) in joined.iter_mut().zip(&calls) {
+            if slot.is_none() {
+                *slot = self.claim(turn, |r| r.skill_name.as_deref() == Some(name.as_str()));
+            }
+        }
+
+        calls
+            .into_iter()
+            .zip(joined)
+            .map(|((name, id, v), row)| {
+                let row = row.map(|i| &self.rows[i]);
+                let result = row.map(|r| truncate_for_history(&r.content));
+                let status = match row.and_then(|r| r.tool_status.as_deref()) {
+                    Some(status) => status.to_string(),
+                    None => status_from_content(result.as_deref()).to_string(),
+                };
+                ToolCallSummary {
+                    name,
+                    arguments: v.get("params").cloned(),
+                    result,
+                    status,
+                    tool_call_id: row.and_then(|r| r.tool_call_id.clone()).or(id),
+                    data: row
+                        .and_then(|r| r.tool_data_json.as_deref())
+                        .and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok())
+                        .filter(serde_json::Value::is_object),
+                }
+            })
+            .collect()
+    }
+}
+
+/// Cut `s` to [`TOOL_RESULT_HISTORY_LIMIT`] bytes on a character boundary.
+fn truncate_for_history(s: &str) -> String {
+    if s.len() <= TOOL_RESULT_HISTORY_LIMIT {
+        return s.to_string();
+    }
+    let cut = s.floor_char_boundary(TOOL_RESULT_HISTORY_LIMIT);
+    format!("{}…", &s[..cut])
+}
+
+/// Status of a row stored before `tool_status` existed.
+fn status_from_content(result: Option<&str>) -> &'static str {
+    match result {
+        Some(r) if r.starts_with("Error executing") => "error",
+        Some(r) if r.starts_with("User denied") => "denied",
+        _ => "ok",
+    }
+}
 
 /// A single message in a conversation.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -472,16 +583,14 @@ pub async fn get_conversation(
         }
     }
 
-    // Collect tool-result messages (role=tool) keyed by (turn, tool_name)
-    // so we can join them with the corresponding assistant tool-call messages.
-    let mut tool_results: HashMap<(i64, String), String> = HashMap::new();
-    for m in &history {
-        if matches!(m.role, MessageRole::Tool)
-            && let Some(ref name) = m.skill_name
-        {
-            tool_results.insert((m.turn, name.clone()), m.content.clone());
-        }
-    }
+    // Tool-result rows (role=tool), joined to assistant tool calls below.
+    let mut tool_rows = ToolRows::new(
+        history
+            .iter()
+            .filter(|m| matches!(m.role, MessageRole::Tool) && m.skill_name.is_some())
+            .cloned()
+            .collect(),
+    );
 
     let messages = history
         .into_iter()
@@ -490,45 +599,7 @@ pub async fn get_conversation(
             let tool_calls = m.tool_calls_json.as_deref().and_then(|json| {
                 serde_json::from_str::<Vec<serde_json::Value>>(json)
                     .ok()
-                    .map(|items| {
-                        items
-                            .into_iter()
-                            .filter_map(|v| {
-                                let name =
-                                    v.get("name").and_then(|n| n.as_str()).map(str::to_string)?;
-                                let arguments = v.get("params").cloned();
-                                let raw_result = tool_results.get(&(m.turn, name.clone())).cloned();
-                                let result = raw_result.map(|r| {
-                                    if r.len() > TOOL_RESULT_HISTORY_LIMIT {
-                                        let mut s = r[..TOOL_RESULT_HISTORY_LIMIT].to_string();
-                                        s.push('…');
-                                        s
-                                    } else {
-                                        r
-                                    }
-                                });
-                                let status = if result
-                                    .as_ref()
-                                    .is_some_and(|r| r.starts_with("Error executing"))
-                                {
-                                    "error"
-                                } else if result
-                                    .as_ref()
-                                    .is_some_and(|r| r.starts_with("User denied"))
-                                {
-                                    "denied"
-                                } else {
-                                    "ok"
-                                };
-                                Some(ToolCallSummary {
-                                    name,
-                                    arguments,
-                                    result,
-                                    status: status.to_string(),
-                                })
-                            })
-                            .collect::<Vec<_>>()
-                    })
+                    .map(|items| tool_rows.summaries(m.turn, &items))
                     .filter(|v: &Vec<_>| !v.is_empty())
             });
             let tts_available =
@@ -848,6 +919,166 @@ mod tests {
         assert_eq!(json["id"], id.to_string());
         assert_eq!(json["title"], "Test");
         assert_eq!(json["messages"], serde_json::json!([]));
+    }
+
+    /// Seed an assistant tool-call row followed by tool rows, then load the
+    /// conversation through the handler and return the assistant's
+    /// `tool_calls` array.
+    async fn history_tool_calls(
+        calls: serde_json::Value,
+        tool_rows: Vec<assistant_core::types::conversation::Message>,
+    ) -> Vec<serde_json::Value> {
+        use assistant_core::types::conversation::Message;
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Tools")).await.unwrap();
+
+        let mut user = Message::user(conv.id, "go");
+        user.turn = 1;
+        store.save_message(&user).await.unwrap();
+        let mut assistant = Message::assistant(conv.id, "");
+        assistant.turn = 1;
+        assistant.tool_calls_json = Some(calls.to_string());
+        store.save_message(&assistant).await.unwrap();
+        for mut row in tool_rows {
+            row.conversation_id = conv.id;
+            row.turn = 1;
+            store.save_message(&row).await.unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        json["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|m| m["tool_calls"].as_array().cloned())
+            .expect("assistant message carries tool_calls")
+    }
+
+    fn tool_row(
+        name: &str,
+        content: &str,
+        id: Option<&str>,
+        status: Option<&str>,
+        data: Option<serde_json::Value>,
+    ) -> assistant_core::types::conversation::Message {
+        use assistant_core::types::conversation::{Message, MessageRole};
+
+        let mut m = Message::new(Uuid::nil(), MessageRole::Tool, content);
+        m.skill_name = Some(name.into());
+        m.tool_call_id = id.map(str::to_string);
+        m.tool_status = status.map(str::to_string);
+        m.tool_data_json = data.map(|d| d.to_string());
+        m
+    }
+
+    #[tokio::test]
+    async fn history_joins_same_named_calls_by_ordinal_without_ids() {
+        let calls = serde_json::json!([
+            {"name": "bash", "params": {"command": "echo A"}},
+            {"name": "bash", "params": {"command": "echo B"}},
+        ]);
+        let rows = vec![
+            tool_row("bash", "A", None, None, None),
+            tool_row("bash", "B", None, None, None),
+        ];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["result"], "A");
+        assert_eq!(tc[1]["result"], "B");
+    }
+
+    #[tokio::test]
+    async fn history_joins_by_tool_call_id_with_own_data() {
+        let calls = serde_json::json!([
+            {"name": "bash", "params": {}, "id": "c1"},
+            {"name": "bash", "params": {}, "id": "c2"},
+        ]);
+        // Rows stored in the opposite order: the id wins over position.
+        let rows = vec![
+            tool_row(
+                "bash",
+                "B",
+                Some("c2"),
+                Some("ok"),
+                Some(serde_json::json!({"kind": "terminal", "stdout": "B"})),
+            ),
+            tool_row(
+                "bash",
+                "A",
+                Some("c1"),
+                Some("ok"),
+                Some(serde_json::json!({"kind": "terminal", "stdout": "A"})),
+            ),
+        ];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["result"], "A");
+        assert_eq!(tc[0]["data"]["stdout"], "A");
+        assert_eq!(tc[0]["tool_call_id"], "c1");
+        assert_eq!(tc[1]["result"], "B");
+        assert_eq!(tc[1]["data"]["stdout"], "B");
+        assert_eq!(tc[1]["tool_call_id"], "c2");
+    }
+
+    #[tokio::test]
+    async fn history_status_comes_from_the_column() {
+        let calls = serde_json::json!([{"name": "bash", "params": {}}]);
+        let rows = vec![tool_row("bash", "exit 1", None, Some("error"), None)];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["status"], "error");
+    }
+
+    #[tokio::test]
+    async fn history_null_metadata_omits_data_and_uses_prefix_rule() {
+        let calls = serde_json::json!([
+            {"name": "a", "params": {}},
+            {"name": "b", "params": {}},
+            {"name": "c", "params": {}},
+        ]);
+        let rows = vec![
+            tool_row("a", "Error executing a: boom", None, None, None),
+            tool_row("b", "User denied b", None, None, None),
+            tool_row("c", "fine", None, None, None),
+        ];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["status"], "error");
+        assert_eq!(tc[1]["status"], "denied");
+        assert_eq!(tc[2]["status"], "ok");
+        for call in &tc {
+            assert!(call.get("data").is_none(), "NULL data must be omitted");
+        }
+    }
+
+    #[tokio::test]
+    async fn history_truncates_multibyte_result_without_panicking() {
+        // 'é' is two bytes, so byte 512 falls inside a character.
+        let content = format!("x{}", "é".repeat(400));
+        let calls = serde_json::json!([{"name": "bash", "params": {}}]);
+        let rows = vec![tool_row("bash", &content, None, None, None)];
+        let tc = history_tool_calls(calls, rows).await;
+        let result = tc[0]["result"].as_str().unwrap();
+        assert!(result.ends_with('…'));
+        assert!(content.starts_with(result.trim_end_matches('…')));
+    }
+
+    #[tokio::test]
+    async fn history_surfaces_tool_call_id_when_row_has_it() {
+        let calls = serde_json::json!([{"name": "bash", "params": {}, "id": "call_7"}]);
+        let rows = vec![tool_row("bash", "ok", Some("call_7"), Some("ok"), None)];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["tool_call_id"], "call_7");
     }
 
     #[tokio::test]
