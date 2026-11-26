@@ -1508,14 +1508,27 @@ mod tests {
             .clone()
     }
 
-    /// Wait until the turn registered under `run_id` is in flight, then cancel it.
-    async fn cancel_when_in_flight(orchestrator: &assistant_runtime::Orchestrator, run_id: Uuid) {
+    /// Wait until a worker has claimed the turn and called the LLM at `llm`,
+    /// then cancel it.
+    ///
+    /// Cancelling earlier would hit the cancel-before-claim path, which leaves
+    /// the turn's token sink registered so the stream never ends; that is
+    /// current behaviour, owned by the `chat-stop-cancels-turn` change.
+    async fn cancel_when_running(
+        orchestrator: &assistant_runtime::Orchestrator,
+        llm: &MockServer,
+        run_id: Uuid,
+    ) {
         for _ in 0..200 {
-            if orchestrator.is_turn_in_flight(run_id).await {
+            if !llm.received_requests().await.unwrap_or_default().is_empty() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
+        assert!(
+            !llm.received_requests().await.unwrap_or_default().is_empty(),
+            "precondition: the turn reached the LLM"
+        );
         assert!(
             orchestrator.is_turn_in_flight(run_id).await,
             "precondition: the turn is in flight"
@@ -1627,7 +1640,7 @@ mod tests {
 
         let resp = post_message(state, conv_id, "slow").await;
         let run_id = run_id_of(&resp);
-        cancel_when_in_flight(&orchestrator, Uuid::parse_str(&run_id).unwrap()).await;
+        cancel_when_running(&orchestrator, &server, Uuid::parse_str(&run_id).unwrap()).await;
         let frames = sse_frames(resp).await;
 
         let (event, data, _) = frames.last().unwrap();
@@ -1745,7 +1758,12 @@ mod tests {
         let conv_id = new_conversation(&storage).await;
 
         let resp = post_message(state, conv_id, "slow").await;
-        cancel_when_in_flight(&orchestrator, Uuid::parse_str(&run_id_of(&resp)).unwrap()).await;
+        cancel_when_running(
+            &orchestrator,
+            &llm,
+            Uuid::parse_str(&run_id_of(&resp)).unwrap(),
+        )
+        .await;
         let _ = sse_frames(resp).await;
 
         assert_eq!(
@@ -1814,6 +1832,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: None,
             had_errors: false,
+            timing: None,
         }
     }
 
