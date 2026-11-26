@@ -144,8 +144,7 @@ pub async fn send_message(
     // Generate a unique ID for this orchestrator run.
     let run_id = Uuid::new_v4();
 
-    let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
-    let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(64);
+    let (event_tx, event_rx) = mpsc::channel::<OrchestratorEvent>(64);
 
     let orchestrator = match state.runtime(&ctx).await {
         Ok(runtime) => runtime.orchestrator.clone(),
@@ -174,10 +173,48 @@ pub async fn send_message(
         rx
     };
 
-    let push_dispatcher_for_sse = state.push_dispatcher.clone();
+    stream_turn_to_sse(
+        &ctx,
+        &state,
+        run_id,
+        conv_id,
+        RunOptions { push: true },
+        event_rx,
+        turn_result_rx,
+    )
+    .await
+}
+
+/// Per-entry-point policy for [`stream_turn_to_sse`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RunOptions {
+    /// Send Web Push notifications for skill, error and completion events.
+    pub push: bool,
+}
+
+/// Drive one turn to its SSE response: emit `run_started` (sequence 0), forward
+/// orchestrator events as SSE frames while persisting them to the durable run
+/// log and the live broadcaster, then emit the terminal frame (`done`, or
+/// `agent_error` for a cancelled or failed turn) and send the completion push.
+///
+/// The caller has already registered the token sink behind `event_rx` and
+/// submitted the turn whose outcome arrives on `turn_result_rx`. The returned response
+/// carries the run id in `X-Run-Id` for clients that drop the stream before
+/// `run_started` arrives.
+pub(crate) async fn stream_turn_to_sse(
+    ctx: &SpaceCtx,
+    state: &ApiState,
+    run_id: Uuid,
+    conv_id: Uuid,
+    opts: RunOptions,
+    mut event_rx: mpsc::Receiver<OrchestratorEvent>,
+    turn_result_rx: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+) -> Response {
+    let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+
+    let push_dispatcher_for_sse = state.push_dispatcher.clone().filter(|_| opts.push);
     let push_store: std::sync::Arc<dyn PushSubscriptionStore> =
         std::sync::Arc::new(ctx.storage.push_subscription_store());
-    let conv_id_for_push = conv_id;
     let event_store = ctx.storage.conversation_event_store();
     let run_broadcaster = state.run_broadcaster.clone();
 
@@ -213,7 +250,7 @@ pub async fn send_message(
     tokio::spawn(async move {
         let mut full_text = String::new();
         let mut seq: i64 = 1; // sequence 0 was run_started
-        let conv_id_str = conv_id_for_push.to_string();
+        let conv_id_str = conv_id.to_string();
 
         // Throttle thinking persistence: accumulate tokens, flush every 20 tokens
         // or when a non-thinking event arrives. SSE is still sent immediately.
@@ -1366,6 +1403,532 @@ mod tests {
         );
     }
 
+    // -- send_message frame sequence (characterisation of the streamed runner) --
+
+    /// One parsed SSE frame: `(event, data, id)`.
+    type Frame = (String, String, Option<i64>);
+
+    fn parse_sse(text: &str) -> Vec<Frame> {
+        text.split("\n\n")
+            .filter(|block| !block.trim().is_empty())
+            .map(|block| {
+                let (mut event, mut data, mut id) = (String::new(), String::new(), None);
+                for line in block.lines() {
+                    if let Some(v) = line.strip_prefix("event:") {
+                        event = v.trim().to_string();
+                    } else if let Some(v) = line.strip_prefix("data:") {
+                        data = v.trim().to_string();
+                    } else if let Some(v) = line.strip_prefix("id:") {
+                        id = v.trim().parse().ok();
+                    }
+                }
+                (event, data, id)
+            })
+            .collect()
+    }
+
+    /// Mount an Ollama-shaped NDJSON stream: `thinking_chunks` thinking
+    /// chunks of one character each, then `answer` as a single content chunk.
+    async fn mount_llm_stream(server: &MockServer, thinking_chunks: usize, answer: &str) {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+
+        let mut ndjson = String::new();
+        for _ in 0..thinking_chunks {
+            ndjson.push_str(
+                &serde_json::json!({
+                    "model": "test",
+                    "message": {"role": "assistant", "content": "", "thinking": "t"},
+                    "done": false
+                })
+                .to_string(),
+            );
+            ndjson.push('\n');
+        }
+        ndjson.push_str(
+            &serde_json::json!({
+                "model": "test",
+                "message": {"role": "assistant", "content": answer},
+                "done": true
+            })
+            .to_string(),
+        );
+        ndjson.push('\n');
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(ndjson))
+            .mount(server)
+            .await;
+    }
+
+    /// An LLM that never answers, so a turn stays in flight until cancelled.
+    async fn mount_llm_hang(server: &MockServer) {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(30)))
+            .mount(server)
+            .await;
+    }
+
+    async fn post_message(state: ApiState, conv_id: Uuid, text: &str) -> axum::response::Response {
+        app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "message": text }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn new_conversation(storage: &Arc<StorageLayer>) -> Uuid {
+        SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system")
+            .create_conversation(Some("Frames"))
+            .await
+            .unwrap()
+            .id
+    }
+
+    async fn default_orchestrator(state: &ApiState) -> Arc<assistant_runtime::Orchestrator> {
+        state
+            .runtimes
+            .get("default", "default")
+            .await
+            .unwrap()
+            .orchestrator
+            .clone()
+    }
+
+    /// Wait until a worker has claimed the turn and called the LLM at `llm`,
+    /// then cancel it.
+    ///
+    /// Cancelling earlier would hit the cancel-before-claim path, which leaves
+    /// the turn's token sink registered so the stream never ends; that is
+    /// current behaviour, owned by the `chat-stop-cancels-turn` change.
+    async fn cancel_when_running(
+        orchestrator: &assistant_runtime::Orchestrator,
+        llm: &MockServer,
+        run_id: Uuid,
+    ) {
+        for _ in 0..200 {
+            if !llm.received_requests().await.unwrap_or_default().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(
+            !llm.received_requests().await.unwrap_or_default().is_empty(),
+            "precondition: the turn reached the LLM"
+        );
+        assert!(
+            orchestrator.is_turn_in_flight(run_id).await,
+            "precondition: the turn is in flight"
+        );
+        orchestrator.cancel_turn(run_id).await;
+    }
+
+    /// The durable event log of one run, in sequence order, as `(seq, type, payload)`.
+    async fn event_log(
+        storage: &Arc<StorageLayer>,
+        run_id: &str,
+    ) -> Vec<(i64, String, serde_json::Value)> {
+        storage
+            .conversation_event_store()
+            .list_events_since(run_id, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.sequence, row.event_type, row.payload))
+            .collect()
+    }
+
+    fn run_id_of(resp: &axum::response::Response) -> String {
+        resp.headers()
+            .get("x-run-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("X-Run-Id header")
+            .to_string()
+    }
+
+    async fn sse_frames(resp: axum::response::Response) -> Vec<Frame> {
+        parse_sse(&String::from_utf8_lossy(
+            &body_bytes(resp.into_body()).await,
+        ))
+    }
+
+    #[tokio::test]
+    async fn send_message_streams_run_started_first_at_sequence_zero() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Hello world").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state, conv_id, "hi").await;
+        let run_id = run_id_of(&resp);
+        let frames = sse_frames(resp).await;
+
+        let (event, data, id) = &frames[0];
+        assert_eq!(event, "run_started", "first SSE frame is run_started");
+        assert_eq!(*id, Some(0), "run_started carries sequence 0");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["run_id"], run_id, "run_started names the run");
+
+        let log = event_log(&storage, &run_id).await;
+        assert_eq!(log[0].1, "run_started", "the durable log starts with it");
+        let sequences: Vec<i64> = log.iter().map(|(seq, _, _)| *seq).collect();
+        let expected: Vec<i64> = (0..log.len() as i64).collect();
+        assert_eq!(sequences, expected, "log sequences are contiguous from 0");
+        assert_eq!(
+            log.last().map(|(_, ty, _)| ty.as_str()),
+            Some("done"),
+            "a completed turn ends the log with done"
+        );
+        let sse_ids: Vec<Option<i64>> = frames.iter().map(|(_, _, id)| *id).collect();
+        let log_ids: Vec<Option<i64>> = log.iter().map(|(seq, _, _)| Some(*seq)).collect();
+        assert_eq!(sse_ids, log_ids, "SSE ids mirror the durable log");
+    }
+
+    #[tokio::test]
+    async fn send_message_persists_thinking_in_batches_of_twenty() {
+        let server = MockServer::start().await;
+        mount_llm_stream(&server, 45, "Done thinking").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state, conv_id, "think hard").await;
+        let run_id = run_id_of(&resp);
+        let frames = sse_frames(resp).await;
+
+        let live_thinking = frames.iter().filter(|(ev, _, _)| ev == "thinking").count();
+        assert_eq!(live_thinking, 45, "every thinking token streams live");
+
+        let log = event_log(&storage, &run_id).await;
+        let batches: Vec<usize> = log
+            .iter()
+            .filter(|(_, ty, _)| ty == "thinking")
+            .map(|(_, _, p)| p["content"].as_str().unwrap_or_default().len())
+            .collect();
+        assert_eq!(
+            batches,
+            vec![20, 20, 5],
+            "thinking persists every 20 tokens; the remainder flushes before the next event"
+        );
+        let first_token = log.iter().position(|(_, ty, _)| ty == "token").unwrap();
+        let last_thinking = log.iter().rposition(|(_, ty, _)| ty == "thinking").unwrap();
+        assert!(
+            last_thinking < first_token,
+            "the remainder is flushed before the first non-thinking event"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_message_ends_with_cancelled_agent_error_when_turn_is_cancelled() {
+        let server = MockServer::start().await;
+        mount_llm_hang(&server).await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state, conv_id, "slow").await;
+        let run_id = run_id_of(&resp);
+        cancel_when_running(&orchestrator, &server, Uuid::parse_str(&run_id).unwrap()).await;
+        let frames = sse_frames(resp).await;
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error", "a cancelled turn ends in agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(payload["message"], "Turn cancelled by user");
+        assert!(
+            frames.iter().all(|(ev, _, _)| ev != "done"),
+            "a cancelled turn never emits done"
+        );
+
+        let log = event_log(&storage, &run_id).await;
+        let (_, last_type, last_payload) = log.last().unwrap();
+        assert_eq!(last_type, "agent_error", "the terminal is persisted too");
+        assert_eq!(last_payload["reason"], "cancelled");
+    }
+
+    #[tokio::test]
+    async fn send_message_ends_with_error_agent_error_when_turn_fails() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+            .mount(&server)
+            .await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let frames = sse_frames(post_message(state, conv_id, "fail").await).await;
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error", "a failed turn ends in agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "error");
+        assert!(
+            payload["message"].as_str().is_some_and(|m| !m.is_empty()),
+            "the terminal carries the failure message: {payload}"
+        );
+    }
+
+    /// Give `state` a dispatcher that delivers to `push_server`, and subscribe
+    /// one browser (with valid RFC 8291 key material) in `storage`.
+    async fn with_push_subscriber(
+        mut state: ApiState,
+        storage: &Arc<StorageLayer>,
+        push_server: &MockServer,
+    ) -> ApiState {
+        use base64::Engine as _;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+
+        Mock::given(method("POST"))
+            .and(path("/push"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(push_server)
+            .await;
+
+        let (vapid_private, _) = crate::push::generate_vapid_keypair().unwrap();
+        state.push_dispatcher = Some(Arc::new(crate::push::PushDispatcher::new(vapid_private)));
+
+        let subscriber =
+            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let p256dh = URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_encoded_point(false));
+        let auth = URL_SAFE_NO_PAD.encode([7u8; 16]);
+        assistant_storage::PushSubscriptionStore::upsert(
+            &storage.push_subscription_store(),
+            &format!("{}/push", push_server.uri()),
+            &p256dh,
+            &auth,
+        )
+        .await
+        .unwrap();
+        state
+    }
+
+    async fn push_count(push_server: &MockServer) -> usize {
+        push_server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .len()
+    }
+
+    #[tokio::test]
+    async fn send_message_dispatches_one_push_when_the_turn_completes() {
+        let llm = MockServer::start().await;
+        mount_llm_reply(&llm, "Hello world").await;
+        let push_server = MockServer::start().await;
+        let (state, storage) = test_state(&llm.uri()).await;
+        let state = with_push_subscriber(state, &storage, &push_server).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let _ = sse_frames(post_message(state, conv_id, "hi").await).await;
+
+        assert_eq!(
+            push_count(&push_server).await,
+            1,
+            "a completed turn sends one Web Push after the done frame"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_message_dispatches_push_when_the_turn_is_cancelled() {
+        let llm = MockServer::start().await;
+        mount_llm_hang(&llm).await;
+        let push_server = MockServer::start().await;
+        let (state, storage) = test_state(&llm.uri()).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let state = with_push_subscriber(state, &storage, &push_server).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state, conv_id, "slow").await;
+        cancel_when_running(
+            &orchestrator,
+            &llm,
+            Uuid::parse_str(&run_id_of(&resp)).unwrap(),
+        )
+        .await;
+        let _ = sse_frames(resp).await;
+
+        assert_eq!(
+            push_count(&push_server).await,
+            1,
+            "the terminal push fires for a cancelled turn too"
+        );
+    }
+
+    // -- stream_turn_to_sse driven directly -----------------------------------
+
+    use super::{RunOptions, stream_turn_to_sse};
+
+    fn system_ctx(storage: &Arc<StorageLayer>) -> crate::space::SpaceCtx {
+        crate::space::SpaceCtx {
+            auth: assistant_core::auth::AuthContext::system(),
+            org_slug: "default".into(),
+            space_slug: "default".into(),
+            role: assistant_core::identity::Role::OrgAdmin,
+            storage: storage.clone(),
+        }
+    }
+
+    /// Run the shared runner over hand-fed channels; returns the run id and SSE frames.
+    async fn run_runner(
+        state: &ApiState,
+        storage: &Arc<StorageLayer>,
+        opts: RunOptions,
+        events: Vec<assistant_runtime::OrchestratorEvent>,
+        outcome: Option<anyhow::Result<assistant_runtime::TurnResult>>,
+    ) -> (String, Vec<Frame>) {
+        let conv_id = new_conversation(storage).await;
+        let run_id = Uuid::new_v4();
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
+        for event in events {
+            event_tx.send(event).await.unwrap();
+        }
+        drop(event_tx);
+        let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
+        match outcome {
+            Some(outcome) => {
+                let _ = turn_tx.send(outcome);
+            }
+            // No outcome: the submit task died, so the sender is dropped.
+            None => drop(turn_tx),
+        }
+
+        let resp = stream_turn_to_sse(
+            &system_ctx(storage),
+            state,
+            run_id,
+            conv_id,
+            opts,
+            event_rx,
+            turn_rx,
+        )
+        .await;
+        assert_eq!(run_id_of(&resp), run_id.to_string());
+        (run_id.to_string(), sse_frames(resp).await)
+    }
+
+    fn turn_result(answer: &str) -> assistant_runtime::TurnResult {
+        assistant_runtime::TurnResult {
+            answer: answer.to_string(),
+            attachments: vec![],
+            attachment_ids: vec![],
+            message_id: None,
+            had_errors: false,
+            timing: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn runner_done_frame_carries_message_and_attachment_ids() {
+        let (state, storage) = event_log_state().await;
+        let message_id = Uuid::new_v4();
+        let attachment_id = Uuid::new_v4();
+        let result = assistant_runtime::TurnResult {
+            message_id: Some(message_id),
+            attachment_ids: vec![attachment_id],
+            ..turn_result("final answer")
+        };
+
+        let (run_id, frames) = run_runner(
+            &state,
+            &storage,
+            RunOptions { push: true },
+            vec![assistant_runtime::OrchestratorEvent::Token("part".into())],
+            Some(Ok(result)),
+        )
+        .await;
+
+        let (event, data, id) = frames.last().unwrap();
+        assert_eq!(event, "done");
+        assert_eq!(*id, Some(2), "run_started=0, token=1, done=2");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["role"], "assistant");
+        assert_eq!(payload["content"], "final answer");
+        assert_eq!(payload["message_id"], message_id.to_string());
+        assert_eq!(
+            payload["attachment_ids"],
+            serde_json::json!([attachment_id.to_string()])
+        );
+        assert_eq!(event_log(&storage, &run_id).await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn runner_cancelled_terminal_reports_the_partial_text() {
+        let (state, storage) = event_log_state().await;
+
+        let (_, frames) = run_runner(
+            &state,
+            &storage,
+            RunOptions { push: true },
+            vec![assistant_runtime::OrchestratorEvent::Token("par".into())],
+            Some(Err(anyhow::anyhow!(
+                assistant_runtime::TURN_CANCELLED_MARKER
+            ))),
+        )
+        .await;
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(payload["partial_content"], "par");
+    }
+
+    #[tokio::test]
+    async fn runner_reports_a_dropped_turn_channel_as_an_error() {
+        let (state, storage) = event_log_state().await;
+
+        let (_, frames) =
+            run_runner(&state, &storage, RunOptions { push: true }, vec![], None).await;
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "error");
+        assert_eq!(payload["message"], "submit_turn channel dropped");
+    }
+
+    #[tokio::test]
+    async fn runner_with_push_disabled_sends_no_push_even_when_configured() {
+        let (state, storage) = event_log_state().await;
+        let push_server = MockServer::start().await;
+        let state = with_push_subscriber(state, &storage, &push_server).await;
+
+        let (_, frames) = run_runner(
+            &state,
+            &storage,
+            RunOptions { push: false },
+            vec![],
+            Some(Ok(turn_result("quiet"))),
+        )
+        .await;
+
+        assert_eq!(frames.last().unwrap().0, "done");
+        assert_eq!(
+            push_count(&push_server).await,
+            0,
+            "push: false suppresses the completion push"
+        );
+    }
+
     #[tokio::test]
     async fn send_voice_message_done_event_contains_message_id() {
         let server = MockServer::start().await;
@@ -1525,18 +2088,27 @@ mod tests {
         }
     }
 
-    /// The `tool_result` frames in an SSE body, parsed from their `data:` lines.
-    fn tool_result_frames(sse: &str) -> Vec<serde_json::Value> {
+    /// The raw `data:` payload of every `event` frame in an SSE body.
+    fn frame_payloads(sse: &str, event: &str) -> Vec<String> {
+        let marker = format!("event: {event}");
         sse.split("\n\n")
-            .filter(|frame| frame.lines().any(|l| l.trim() == "event: tool_result"))
-            .filter_map(|frame| {
-                let data: Vec<&str> = frame
+            .filter(|frame| frame.lines().any(|l| l.trim() == marker))
+            .map(|frame| {
+                frame
                     .lines()
                     .filter_map(|l| l.strip_prefix("data:"))
                     .map(str::trim_start)
-                    .collect();
-                serde_json::from_str(&data.join("\n")).ok()
+                    .collect::<Vec<_>>()
+                    .join("\n")
             })
+            .collect()
+    }
+
+    /// The `tool_result` frames in an SSE body, parsed from their `data:` lines.
+    fn tool_result_frames(sse: &str) -> Vec<serde_json::Value> {
+        frame_payloads(sse, "tool_result")
+            .iter()
+            .filter_map(|data| serde_json::from_str(data).ok())
             .collect()
     }
 
@@ -1621,6 +2193,59 @@ mod tests {
         assert_eq!(
             replayed_frames, live_frames,
             "replayed tool_result must equal the live frame; replay: {replayed}"
+        );
+    }
+
+    /// A persisted `surface_update` frame replays with the exact `data:` bytes
+    /// the live projection sent, so a reload sees the surface unchanged.
+    #[tokio::test]
+    async fn stream_run_events_replays_surface_update_byte_identically() {
+        use assistant_runtime::orchestrator::OrchestratorEvent;
+        use assistant_runtime::projection::{SseProjector, StreamProjector};
+
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await.to_string();
+        let run_id = Uuid::new_v4().to_string();
+
+        let live = SseProjector.project(&OrchestratorEvent::SurfaceUpdate {
+            surface_id: "s-1".into(),
+            tool_call_id: Some("call_9".into()),
+            anchor_message_id: "m-1".into(),
+            anchor_call_index: 2,
+            title: "Trip form".into(),
+            fallback_text: "Trip form: choose a date".into(),
+            status: "active".into(),
+            messages: vec![serde_json::json!({
+                "version": "1.0",
+                "createSurface": {"surfaceId": "s-1", "components": [{"id": "root", "component": "Text", "text": "héllo"}]}
+            })],
+        });
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].event, "surface_update");
+        storage
+            .conversation_event_store()
+            .append_event(&run_id, &conv_id, 0, &live[0].event, &live[0].log_payload)
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/conversations/{conv_id}/runs/{run_id}/events/stream"
+                    ))
+                    .header("Authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let replayed = String::from_utf8_lossy(&body_bytes(resp.into_body()).await).into_owned();
+        assert_eq!(
+            frame_payloads(&replayed, "surface_update"),
+            vec![live[0].sse_data.clone()],
+            "replay: {replayed}"
         );
     }
 

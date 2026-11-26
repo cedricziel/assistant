@@ -38,6 +38,8 @@ use turn_timing::{CallMarks, TurnTimer};
 
 mod dispatch;
 mod prompt;
+mod surface_hook;
+use self::surface_hook::{SurfaceCall, SurfaceTurn};
 pub mod stream_event;
 mod turn_cancellations;
 mod turn_control;
@@ -368,6 +370,8 @@ pub struct Orchestrator {
     /// Where each turn gets the tools only it may see, with the space it is
     /// asked for.
     pub(crate) turn_tool_source: Option<TurnToolBinding>,
+    /// Where `render-surface` results are persisted (see `surface_hook`).
+    pub(crate) surface_store: Arc<dyn assistant_storage::SurfaceStore>,
 }
 
 /// A [`TurnToolSource`] bound to the space this orchestrator runs.
@@ -393,6 +397,7 @@ impl Orchestrator {
         let compaction_config = config.compaction.clone();
 
         let skill_executions = Arc::new(storage.skill_execution_store());
+        let surface_store = Arc::new(storage.surface_store());
 
         Self {
             llm,
@@ -425,7 +430,15 @@ impl Orchestrator {
             learning_config: config.learning.clone(),
             clock: Arc::new(assistant_core::clock::SystemClock),
             turn_tool_source: None,
+            surface_store,
         }
+    }
+
+    /// Persist surfaces in `store` instead of the space database. Tests use
+    /// this to inspect rows without SQLite.
+    pub fn with_surface_store(mut self, store: Arc<dyn assistant_storage::SurfaceStore>) -> Self {
+        self.surface_store = store;
+        self
     }
 
     /// Give every turn the tools `source` returns for `(org_slug, space_slug)`
@@ -601,23 +614,35 @@ impl Orchestrator {
         config
     }
 
-    /// The provider a turn of `conversation_id` runs on: the default, or one
-    /// for the model its `/model` override names.
+    /// The provider a turn of `conversation_id` runs on: the model the turn
+    /// itself asks for, else the one its `/model` override names, else the
+    /// default.
     /// The provider is [`ready`](LlmProvider::ready), so the capabilities a
     /// turn reads are final.
-    async fn llm_for(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
-        let llm = self.select_llm(conversation_id).await?;
+    async fn llm_for(
+        &self,
+        conversation_id: Uuid,
+        turn_model: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>> {
+        let llm = self.select_llm(conversation_id, turn_model).await?;
         llm.ready().await;
         Ok(llm)
     }
 
-    async fn select_llm(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
-        let model = self
-            .conversation_configs
-            .read()
-            .await
-            .get(&conversation_id)
-            .and_then(|config| config.model_override.clone());
+    async fn select_llm(
+        &self,
+        conversation_id: Uuid,
+        turn_model: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>> {
+        let model = match turn_model {
+            Some(model) => Some(model.to_string()),
+            None => self
+                .conversation_configs
+                .read()
+                .await
+                .get(&conversation_id)
+                .and_then(|config| config.model_override.clone()),
+        };
         let Some(model) = model.filter(|m| m != self.llm.model_name()) else {
             return Ok(Arc::clone(&self.llm));
         };
@@ -916,7 +941,9 @@ impl Orchestrator {
 
         // 4. Load global tool specs and merge with extensions.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
-        let llm = self.llm_for(conversation_id).await?;
+        let llm = self
+            .llm_for(conversation_id, identity.model_override.as_deref())
+            .await?;
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
@@ -945,6 +972,7 @@ impl Orchestrator {
         let mut turn_attachment_ids: Vec<Uuid> = Vec::new();
         let mut turn_had_errors = false;
         let mut active_skill: Option<String> = None;
+        let mut surface_turn = SurfaceTurn::new(base_turn);
 
         // 5. Tool-calling loop.
         for iteration in 0..self.max_iterations {
@@ -1096,6 +1124,7 @@ impl Orchestrator {
                         FinalAnswerMeta {
                             traceparent: llm_traceparent,
                             timing: None,
+                            model: Some(llm.model_name().to_string()),
                         },
                     )
                     .await?;
@@ -1124,7 +1153,7 @@ impl Orchestrator {
                         iteration, "LLM requested tool execution(s)"
                     );
 
-                    Self::persist_tool_calls(
+                    let anchor_message_id = Self::persist_tool_calls(
                         &mut history,
                         &conv_store,
                         conversation_id,
@@ -1136,7 +1165,7 @@ impl Orchestrator {
 
                     let has_real_calls = tool_call_items.iter().any(|t| t.name != "end_turn");
 
-                    for tool_call_item in tool_call_items {
+                    for (call_index, tool_call_item) in tool_call_items.into_iter().enumerate() {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
                         let tool_call_id = tool_call_item.id;
@@ -1210,6 +1239,7 @@ impl Orchestrator {
                                     &mut active_skill,
                                     token_sink.as_ref(),
                                     tool_call_id.as_deref(),
+                                    None,
                                 )
                                 .await;
                             turn_had_errors |= finalized.had_error;
@@ -1237,6 +1267,11 @@ impl Orchestrator {
                                     &builtin_span,
                                     token_sink.as_ref(),
                                     tool_call_id.as_deref(),
+                                    Some(SurfaceCall {
+                                        turn: &mut surface_turn,
+                                        anchor_message_id,
+                                        call_index,
+                                    }),
                                 )
                                 .await;
                             match outcome {
@@ -1350,7 +1385,9 @@ impl Orchestrator {
             .await?;
 
         // 4. Load all registered tool specs.
-        let llm = self.llm_for(conversation_id).await?;
+        let llm = self
+            .llm_for(conversation_id, identity.model_override.as_deref())
+            .await?;
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
@@ -1370,6 +1407,7 @@ impl Orchestrator {
         let mut turn_tool_count: usize = 0;
         let mut turn_had_errors = false;
         let mut active_skill: Option<String> = None;
+        let mut surface_turn = SurfaceTurn::new(base_turn);
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
@@ -1549,6 +1587,7 @@ impl Orchestrator {
                             FinalAnswerMeta {
                                 traceparent: llm_traceparent,
                                 timing: Some(timing.clone()),
+                                model: Some(llm.model_name().to_string()),
                             },
                         )
                         .instrument(iteration_span.clone())
@@ -1608,7 +1647,7 @@ impl Orchestrator {
                         iteration, "LLM requested tool execution(s)"
                     );
 
-                    Self::persist_tool_calls(
+                    let anchor_message_id = Self::persist_tool_calls(
                         &mut history,
                         &conv_store,
                         conversation_id,
@@ -1619,7 +1658,7 @@ impl Orchestrator {
                     .instrument(iteration_span.clone())
                     .await;
 
-                    for tool_call_item in tool_call_items {
+                    for (call_index, tool_call_item) in tool_call_items.into_iter().enumerate() {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
                         let tool_call_id = tool_call_item.id;
@@ -1652,6 +1691,11 @@ impl Orchestrator {
                                 &iteration_span,
                                 token_sink.as_ref(),
                                 tool_call_id.as_deref(),
+                                Some(SurfaceCall {
+                                    turn: &mut surface_turn,
+                                    anchor_message_id,
+                                    call_index,
+                                }),
                             )
                             .await;
                         match outcome {

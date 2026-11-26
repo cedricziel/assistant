@@ -18,6 +18,7 @@ Method | HTTP request | Description
 [**deviceVerifySubmit**](OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
 [**identifyPost**](OauthApi.md#identifypost) | **POST** /oauth/authorize/identify | POST /oauth/authorize/identify — find the org an email signs in to.
 [**metadata**](OauthApi.md#metadata) | **GET** /.well-known/oauth-authorization-server | GET /.well-known/oauth-authorization-server
+[**protectedResourceMetadata**](OauthApi.md#protectedresourcemetadata) | **GET** /.well-known/oauth-protected-resource/mcp | GET /.well-known/oauth-protected-resource/mcp
 [**register**](OauthApi.md#register) | **POST** /oauth/register | POST /oauth/register — register a new OAuth2 client.
 [**revoke**](OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh or access token.
 [**token**](OauthApi.md#token) | **POST** /oauth/token | POST /oauth/token
@@ -442,6 +443,43 @@ This endpoint does not need any parameter.
 ### Return type
 
 [**ServerMetadata**](ServerMetadata.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **protectedResourceMetadata**
+> ProtectedResourceMetadata protectedResourceMetadata()
+
+GET /.well-known/oauth-protected-resource/mcp
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getOauthApi();
+
+try {
+    final response = api.protectedResourceMetadata();
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling OauthApi->protectedResourceMetadata: $e\n');
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+
+### Return type
+
+[**ProtectedResourceMetadata**](ProtectedResourceMetadata.md)
 
 ### Authorization
 

@@ -6,6 +6,7 @@ edition.workspace = true
 description = "ReAct orchestrator and safety gate for the assistant runtime"
 
 [dependencies]
+assistant-a2ui = { path = "../a2ui" }
 assistant-core = { path = "../core" }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-storage = { path = "../storage" }

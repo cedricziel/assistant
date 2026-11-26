@@ -3,6 +3,7 @@
 //! The protocol itself (framing, lifecycle, version negotiation) comes from
 //! `rmcp`; this crate supplies the [`AssistantMcpServer`] handler.
 
+mod http;
 mod identity;
 mod resources;
 mod server;
@@ -20,6 +21,7 @@ use rmcp::transport::IntoTransport;
 use rmcp::{RoleServer, ServiceExt};
 use tracing::info;
 
+pub use http::{RequestBoundServer, streamable_http_service};
 pub use identity::with_identity;
 pub use server::AssistantMcpServer;
 

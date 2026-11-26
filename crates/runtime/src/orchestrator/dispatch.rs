@@ -22,6 +22,7 @@ use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info, warn};
 use uuid::Uuid;
 
+use super::surface_hook::{RENDER_SURFACE_TOOL, SurfaceCall};
 use super::{
     ApprovalOptions, ConfirmationAnswer, ConfirmationRequest, DispatchOutcome, Orchestrator,
     OrchestratorEvent, value_to_params_map,
@@ -133,7 +134,8 @@ impl Orchestrator {
     /// Record tool calls in the chat history and persist them to the database.
     ///
     /// This is the common pre-execution step shared by all turn variants
-    /// (extension-tools, core, and subagent).
+    /// (extension-tools, core, and subagent). Returns the id of the persisted
+    /// tool-call message, which surfaces anchor to.
     pub(crate) async fn persist_tool_calls(
         history: &mut TurnHistory,
         conv_store: &dyn ConversationStore,
@@ -141,7 +143,7 @@ impl Orchestrator {
         turn_index: i64,
         tool_call_items: &[ToolCallItem],
         provider_state: Option<&ProviderState>,
-    ) {
+    ) -> Uuid {
         let mut tc_msg = Self::make_tool_call_message(conversation_id, turn_index, tool_call_items);
         tc_msg.provider_state_json = provider_state.and_then(|s| serde_json::to_string(s).ok());
         history.push(
@@ -154,6 +156,7 @@ impl Orchestrator {
         if let Err(e) = conv_store.save_message(&tc_msg).await {
             warn!("Failed to persist tool-call message: {e}");
         }
+        tc_msg.id
     }
 
     /// Process a tool execution result: record metrics, set OTel span
@@ -188,6 +191,7 @@ impl Orchestrator {
         active_skill: &mut Option<String>,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
+        surface: Option<SurfaceCall<'_>>,
     ) -> FinalizedTool {
         let duration_ms = elapsed.as_millis() as i64;
         let span_name = format!("execute_tool {tool_name}");
@@ -199,6 +203,15 @@ impl Orchestrator {
             &span_name,
             duration_ms as f64 / 1000.0,
         );
+
+        // `render-surface` output is consumed here, before the voice, data and
+        // observation handling below can see it.
+        let exec_result = match exec_result {
+            Ok(output) if tool_name == RENDER_SURFACE_TOOL => Ok(self
+                .surface_hook(output, surface, conversation_id, event_sink, tool_call_id)
+                .await),
+            other => other,
+        };
 
         let mut tool_status = "ok";
 
@@ -544,6 +557,7 @@ impl Orchestrator {
         instrument_span: &tracing::Span,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
+        surface: Option<SurfaceCall<'_>>,
     ) -> DispatchOutcome {
         let requires_confirm = self
             .executor
@@ -635,6 +649,7 @@ impl Orchestrator {
                 active_skill,
                 event_sink,
                 tool_call_id,
+                surface,
             )
             .await;
 

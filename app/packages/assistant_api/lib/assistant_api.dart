@@ -133,6 +133,7 @@ export 'package:assistant_api/src/model/persona_file_slot.dart';
 export 'package:assistant_api/src/model/persona_from_template_response.dart';
 export 'package:assistant_api/src/model/persona_skill_access.dart';
 export 'package:assistant_api/src/model/persona_summary.dart';
+export 'package:assistant_api/src/model/protected_resource_metadata.dart';
 export 'package:assistant_api/src/model/publish_catalog_item_request.dart';
 export 'package:assistant_api/src/model/push_notification_config.dart';
 export 'package:assistant_api/src/model/put_org_oidc_config_request.dart';
