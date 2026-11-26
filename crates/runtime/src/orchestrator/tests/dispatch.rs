@@ -11,6 +11,7 @@ use assistant_storage::conversations::ConversationStore;
 use uuid::Uuid;
 
 use crate::orchestrator::Orchestrator;
+use crate::orchestrator::dispatch::ToolResultMeta;
 
 fn make_spec(name: &str) -> ToolSpec {
     ToolSpec {
@@ -177,17 +178,34 @@ async fn persist_tool_calls_without_provider_state_stores_none() {
 #[test]
 fn make_tool_result_message_records_tool_name_and_content() {
     let conv = Uuid::new_v4();
-    let msg = Orchestrator::make_tool_result_message(conv, 9, "bash", "stdout: ok");
+    let msg = Orchestrator::make_tool_result_message(
+        conv,
+        9,
+        "bash",
+        "stdout: ok",
+        ToolResultMeta {
+            tool_call_id: Some("call_9"),
+            status: "ok",
+            data: Some(&serde_json::json!({"kind": "terminal"})),
+        },
+    );
     assert_eq!(msg.conversation_id, conv);
     assert_eq!(msg.turn, 9);
     assert!(matches!(msg.role, MessageRole::Tool));
     assert_eq!(msg.content, "stdout: ok");
     assert_eq!(msg.skill_name.as_deref(), Some("bash"));
+    assert_eq!(msg.tool_call_id.as_deref(), Some("call_9"));
+    assert_eq!(msg.tool_status.as_deref(), Some("ok"));
+    assert_eq!(
+        msg.tool_data_json.as_deref(),
+        Some(r#"{"kind":"terminal"}"#)
+    );
 }
 
 #[test]
 fn make_tool_result_message_handles_empty_observation() {
-    let msg = Orchestrator::make_tool_result_message(Uuid::new_v4(), 0, "noop", "");
+    let msg =
+        Orchestrator::make_tool_result_message(Uuid::new_v4(), 0, "noop", "", ToolResultMeta::ok());
     assert_eq!(msg.content, "");
     assert_eq!(msg.skill_name.as_deref(), Some("noop"));
 }
