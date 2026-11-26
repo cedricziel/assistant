@@ -84,7 +84,7 @@ Each numbered group is one PR in the stack, in order.
 
 ## 13. Docs and ADR (PR 13)
 
-- [ ] 13.1 Add `docs/adr/adr-0017-mcp-on-rmcp.md` covering the rmcp migration, audience-bound tokens and the opaque-origin app sandbox
+- [x] 13.1 Add `docs/adr/adr-0022-mcp-on-rmcp.md` (0017 was taken) covering the rmcp migration, audience-bound tokens and the opaque-origin app sandbox
 - [ ] 13.2 Write `docs/mcp.md` (stdio and HTTP setup, OAuth/DCR and API keys, tasks, remote skills, MCP Apps and their limitation) and update `docs/tool-permissions.md`, `docs/authentication.md` and `docs/operations/configuration.md`; check every claim against the code
 
 ## 14. Verification
