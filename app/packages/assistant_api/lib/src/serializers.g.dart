@@ -27,6 +27,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(AuthenticationInfo.serializer)
       ..add(AuthorizationCodeOAuthFlow.serializer)
       ..add(BindingResponse.serializer)
+      ..add(CallMcpAppToolRequest.serializer)
       ..add(CancelTaskRequest.serializer)
       ..add(CatalogAuthKindResponse.serializer)
       ..add(CatalogAuthResponse.serializer)
@@ -82,6 +83,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(InterfaceInstanceResponse.serializer)
       ..add(ListTaskPushNotificationConfigsResponse.serializer)
       ..add(ListTasksResponse.serializer)
+      ..add(McpAppCspView.serializer)
+      ..add(McpAppPermissionsView.serializer)
+      ..add(McpAppView.serializer)
       ..add(MemberEntry.serializer)
       ..add(Message.serializer)
       ..add(MessageFeedbackResponse.serializer)
@@ -110,6 +114,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(QuestionAnswer.serializer)
       ..add(QuickMessageRequest.serializer)
       ..add(QuickMessageResponse.serializer)
+      ..add(ReadMcpAppResourceRequest.serializer)
       ..add(RegisterAgentRequest.serializer)
       ..add(RespondToInteractionRequest.serializer)
       ..add(RespondToInteractionRequestOneOf.serializer)
@@ -364,6 +369,18 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(
               BuiltList, const [const FullType(SecurityRequirement)]),
           () => ListBuilder<SecurityRequirement>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

@@ -1,4 +1,4 @@
-# ADR 0011: Tool Permissions With Static Rules and a Pinned Decision Model
+# ADR 0023: Tool Permissions With Static Rules and a Pinned Decision Model
 
 **Status**: Accepted
 **Date**: 2026-11-25

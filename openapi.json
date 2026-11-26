@@ -729,6 +729,290 @@
         ]
       }
     },
+    "/api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read`",
+        "description": "Read a resource from the server of the app this tool call rendered, as the\ncaller. Returns the MCP `ReadResourceResult`.",
+        "operationId": "read_mcp_app_resource",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tool_call_id",
+            "in": "path",
+            "description": "Id of the tool call that carries the app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadMcpAppResourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The MCP ReadResourceResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewer access, or missing conversations:write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or tool call not found, or the tool call has no app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body larger than 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The app's server failed the read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The app's server is not available to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call`",
+        "description": "Call a tool on the server of the app this tool call rendered, as the\ncaller. The tool must be on that server and visible to apps; the call is\nchecked against the permission policy, and one that needs a human (any\ntool not marked read-only, an untrusted server, or a policy `ask`) runs\nonly with `confirmed: true`. Returns the MCP `CallToolResult`.",
+        "operationId": "call_mcp_app_tool",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tool_call_id",
+            "in": "path",
+            "description": "Id of the tool call that carries the app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallMcpAppToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The MCP CallToolResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewer access, missing conversations:write scope, a tool not on the app's server or not visible to apps, or denied by the permission policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or tool call not found, or the tool call has no app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The call needs the user's confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body larger than 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The app's server failed the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The app's server is not available to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/{conversation_id}/turns/{turn_id}/cancel": {
       "post": {
         "tags": [
@@ -10590,6 +10874,28 @@
           }
         }
       },
+      "CallMcpAppToolRequest": {
+        "type": "object",
+        "description": "Body of `POST .../app/tools-call`: a call the app makes to one of its\nserver's tools.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "object",
+            "description": "The tool's arguments."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "The user confirmed this call. Required for a tool without\n`readOnlyHint: true`, and for any call the permission policy leaves\nto a human; without it such a call is refused with `409`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The tool's name on the app's server."
+          }
+        },
+        "additionalProperties": false
+      },
       "CancelTaskRequest": {
         "type": "object",
         "description": "Request for the `CancelTask` method.",
@@ -12251,6 +12557,98 @@
           }
         }
       },
+      "McpAppCspView": {
+        "type": "object",
+        "description": "The origins the app may reach. An empty list means the restrictive default.",
+        "properties": {
+          "base_uri_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "connect_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "frame_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resource_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "McpAppPermissionsView": {
+        "type": "object",
+        "description": "The device permissions the app asks for.",
+        "required": [
+          "camera",
+          "microphone",
+          "geolocation",
+          "clipboard_write"
+        ],
+        "properties": {
+          "camera": {
+            "type": "boolean"
+          },
+          "clipboard_write": {
+            "type": "boolean"
+          },
+          "geolocation": {
+            "type": "boolean"
+          },
+          "microphone": {
+            "type": "boolean"
+          }
+        }
+      },
+      "McpAppView": {
+        "type": "object",
+        "description": "The interactive UI an external MCP tool declared for its result.",
+        "required": [
+          "server",
+          "resource_uri",
+          "html",
+          "csp",
+          "permissions"
+        ],
+        "properties": {
+          "csp": {
+            "$ref": "#/components/schemas/McpAppCspView"
+          },
+          "html": {
+            "type": "string",
+            "description": "The app document, served as `text/html;profile=mcp-app`."
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/McpAppPermissionsView"
+          },
+          "prefers_border": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the app asks to be drawn with a border."
+          },
+          "resource_uri": {
+            "type": "string",
+            "description": "The `ui://` resource the HTML was read from."
+          },
+          "server": {
+            "type": "string",
+            "description": "Namespace of the server the tool came from, as in\n`mcp__{server}__{tool}`."
+          }
+        }
+      },
       "MemberEntry": {
         "type": "object",
         "description": "A space member entry.",
@@ -13127,6 +13525,20 @@
           }
         }
       },
+      "ReadMcpAppResourceRequest": {
+        "type": "object",
+        "description": "Body of `POST .../app/resources-read`.",
+        "required": [
+          "uri"
+        ],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "The resource to read from the app's server."
+          }
+        },
+        "additionalProperties": false
+      },
       "RegisterAgentRequest": {
         "type": "object",
         "description": "Body for `POST /api/agents`.",
@@ -13968,6 +14380,17 @@
           "status"
         ],
         "properties": {
+          "app": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/McpAppView",
+                "description": "The MCP App the tool declared for its result. Absent for tools\nwithout one, and on subagent tool results."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "arguments": {
             "type": [
               "object",
@@ -14477,6 +14900,17 @@
           "status"
         ],
         "properties": {
+          "app": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/McpAppView",
+                "description": "The MCP App the tool declared for its result. Absent for tools\nwithout one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "arguments": {
             "description": "The JSON arguments passed to the tool."
           },

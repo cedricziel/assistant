@@ -243,7 +243,7 @@ TDD is mandatory: every PR starts with a failing test, confirmed red before impl
 
 ### 12. Detach, grace and refresh
 
-- [ ] 12.1 Failing tests:
+- [x] 12.1 Failing tests:
   - (a) the cancel returns `null` twice and then `running`: no error;
   - (b) the cancel returns `null` three times: local detach, stopped partial, the "Couldn't reach the server…" error, and the queue resumes;
   - (c) the cancel returns `unknown` with two queued messages: detach and refresh, both queued messages stay in `pendingQueue`, and a refresh that completes after the next queued turn started does not overwrite it;
@@ -253,14 +253,14 @@ TDD is mandatory: every PR starts with a failing test, confirmed red before impl
 
   Confirm RED.
 
-- [ ] 12.2 Implement the retry loop (reusing `ChatStreamSession.retryDelay`), `ChatStreamSession.stopGrace = Duration(seconds: 10)` started in `stopTurn()`, the `detach` completer, and an `_untilDetached` wrapper on the sources in `_streamMessage`, `_streamVoiceMessage` and `_replayRun`. Extract `_refreshFromServer(conversationId)` from `_recoverStalledStream` (`chat_provider.dart:968-995`). GREEN.
-- [ ] 12.3 Remove `_session.cancelled`. `_recoverStalledStream` completes `detach`, and the readers at `chat_provider.dart:509`, `:652`, `:766`, `:865` and `:919-941` use `detach.isCompleted`. Port the existing stall-recovery tests (group 12, including "stalled recovery does not clobber a concurrently-started stream") and keep them green.
-- [ ] 12.4 Failing test: during a stopped turn with two queued messages and a silent server, the first queued message is sent right after the cancelled frame, with no further event needed. Then a regression test showing that detach also unblocks the drain. RED → GREEN.
+- [x] 12.2 Implement the retry loop (reusing `ChatStreamSession.retryDelay`), `ChatStreamSession.stopGrace = Duration(seconds: 10)` started in `stopTurn()`, the `detach` completer, and an `_untilDetached` wrapper on the sources in `_streamMessage`, `_streamVoiceMessage` and `_replayRun`. Extract `_refreshFromServer(conversationId)` from `_recoverStalledStream` (`chat_provider.dart:968-995`). GREEN.
+- [x] 12.3 Remove `_session.cancelled`. `_recoverStalledStream` completes `detach`, and the readers at `chat_provider.dart:509`, `:652`, `:766`, `:865` and `:919-941` use `detach.isCompleted`. Port the existing stall-recovery tests (group 12, including "stalled recovery does not clobber a concurrently-started stream") and keep them green.
+- [x] 12.4 Failing test: during a stopped turn with two queued messages and a silent server, the first queued message is sent right after the cancelled frame, with no further event needed. Then a regression test showing that detach also unblocks the drain. RED → GREEN.
 
 ### 13. Voice run id
 
-- [ ] 13.1 Failing test in `client_test.dart`: `sendVoiceMessage` yields `RunStartedEvent` from the `X-Run-Id` response header before any body frame, and yields none when the header is absent. Implement in `api_client.dart:357-397`, as `streamMessages` does at `:294-299`. GREEN.
-- [ ] 13.2 Failing tests (stale run id): after a completed text turn `T`, a voice turn starts and Stop is tapped before its run id arrives, and no cancel for `T` is sent. Then the voice stream's `RunStartedEvent("V")` leads Stop to cancel `V`. Make `_streamVoiceMessage` call `_session.beginTurn()` and capture `RunStartedEvent` (`chat_provider.dart:595`). RED → GREEN.
+- [x] 13.1 Failing test in `client_test.dart`: `sendVoiceMessage` yields `RunStartedEvent` from the `X-Run-Id` response header before any body frame, and yields none when the header is absent. Implement in `api_client.dart:357-397`, as `streamMessages` does at `:294-299`. GREEN.
+- [x] 13.2 Failing tests (stale run id): after a completed text turn `T`, a voice turn starts and Stop is tapped before its run id arrives, and no cancel for `T` is sent. Then the voice stream's `RunStartedEvent("V")` leads Stop to cancel `V`. Make `_streamVoiceMessage` call `_session.beginTurn()` and capture `RunStartedEvent` (`chat_provider.dart:595`). RED → GREEN.
 
 ---
 

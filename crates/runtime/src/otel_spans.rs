@@ -15,9 +15,10 @@ use assistant_core::{
 };
 use opentelemetry::{
     Array, Context as OtelContext, KeyValue, StringValue, Value, global,
-    propagation::{Extractor, Injector},
+    propagation::{Extractor, Injector, TextMapPropagator as _},
     trace::{Span as _, SpanKind, TraceContextExt, Tracer as _},
 };
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_semantic_conventions::attribute::{
     GEN_AI_CONVERSATION_ID, GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL,
     GEN_AI_RESPONSE_FINISH_REASONS, GEN_AI_RESPONSE_ID, GEN_AI_RESPONSE_MODEL,
@@ -112,6 +113,66 @@ pub fn traceparent_from_span(span: &impl opentelemetry::trace::Span) -> Option<S
             ctx.trace_flags().to_u8()
         )
     })
+}
+
+// -- User feedback ------------------------------------------------------------
+
+/// What a user feedback event reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedbackLabel {
+    Positive,
+    Negative,
+    /// The user withdrew a previous vote.
+    Cleared,
+}
+
+/// A user feedback event to export as `gen_ai.evaluation.result`.
+///
+/// Deliberately has no comment field: comment text must never reach an
+/// exporter, only whether a comment exists.
+#[derive(Debug, Clone)]
+pub struct FeedbackTelemetry {
+    pub label: FeedbackLabel,
+    pub conversation_id: Uuid,
+    pub agent_id: String,
+    pub message_id: Uuid,
+    pub has_comment: bool,
+    /// W3C `traceparent` of the evaluated `chat {model}` span, if one was stored.
+    pub traceparent: Option<String>,
+}
+
+/// Export a `gen_ai.evaluation.result` log record for user feedback.
+///
+/// The record is parented to the evaluated span when `traceparent` parses:
+/// the stored value is parsed with a local [`TraceContextPropagator`] (the
+/// global one is a no-op unless OTLP export is enabled) and attached while the
+/// event is emitted, which is when the SDK logger reads the trace context.
+/// `cleared` carries no `score.value`, so averaging backends do not count a
+/// withdrawn vote as a neutral one.
+pub fn record_user_feedback(feedback: &FeedbackTelemetry) {
+    let _guard = feedback.traceparent.as_deref().and_then(|tp| {
+        let cx = TraceContextPropagator::new().extract(&HeaderExtractor {
+            traceparent: Some(tp),
+        });
+        cx.span().span_context().is_valid().then(|| cx.attach())
+    });
+    let (label, score) = match feedback.label {
+        FeedbackLabel::Positive => ("positive", Some(1.0_f64)),
+        FeedbackLabel::Negative => ("negative", Some(-1.0_f64)),
+        FeedbackLabel::Cleared => ("cleared", None),
+    };
+    tracing::event!(
+        name: "gen_ai.evaluation.result",
+        target: "gen_ai.evaluation.result",
+        tracing::Level::INFO,
+        { gen_ai.evaluation.name = "user_feedback",
+        gen_ai.evaluation.score.label = label,
+        gen_ai.evaluation.score.value = score,
+        gen_ai.conversation.id = %feedback.conversation_id,
+        gen_ai.agent.id = feedback.agent_id.as_str(),
+        assistant.message.id = %feedback.message_id,
+        assistant.feedback.has_comment = feedback.has_comment }
+    );
 }
 
 /// Rebuild an OpenTelemetry context from a W3C `traceparent` value.
@@ -664,5 +725,143 @@ mod tests {
             !has_active_skill,
             "active_skill attribute should not be present when None"
         );
+    }
+    // -- record_user_feedback ---------------------------------------------------
+
+    const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+    fn feedback(label: FeedbackLabel, comment: bool, tp: Option<&str>) -> FeedbackTelemetry {
+        FeedbackTelemetry {
+            label,
+            conversation_id: Uuid::nil(),
+            agent_id: "default".into(),
+            message_id: Uuid::from_u128(7),
+            has_comment: comment,
+            traceparent: tp.map(str::to_owned),
+        }
+    }
+
+    /// Emit `feedback` through a thread-scoped log pipeline and return the
+    /// exported records.
+    fn exported_logs(
+        feedback: &FeedbackTelemetry,
+    ) -> Vec<opentelemetry_sdk::logs::in_memory_exporter::LogDataWithResource> {
+        use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+        use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        let exporter = InMemoryLogExporter::default();
+        let provider = SdkLoggerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let subscriber =
+            tracing_subscriber::registry().with(OpenTelemetryTracingBridge::new(&provider));
+        tracing::subscriber::with_default(subscriber, || record_user_feedback(feedback));
+        exporter.get_emitted_logs().unwrap_or_default()
+    }
+
+    fn log_attrs(
+        log: &opentelemetry_sdk::logs::in_memory_exporter::LogDataWithResource,
+    ) -> HashMap<String, opentelemetry::logs::AnyValue> {
+        log.record
+            .attributes_iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn negative_feedback_is_exported_in_the_stored_trace() {
+        let logs = exported_logs(&feedback(FeedbackLabel::Negative, false, Some(TRACEPARENT)));
+        assert_eq!(logs.len(), 1, "one record per event");
+        let record = &logs[0].record;
+        assert_eq!(record.event_name(), Some("gen_ai.evaluation.result"));
+        let tc = record.trace_context().expect("trace context");
+        assert_eq!(
+            tc.trace_id.to_string(),
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "trace id"
+        );
+        assert_eq!(tc.span_id.to_string(), "00f067aa0ba902b7", "span id");
+
+        let attrs = log_attrs(&logs[0]);
+        let text = |k: &str| match attrs.get(k) {
+            Some(opentelemetry::logs::AnyValue::String(s)) => Some(s.to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            text("gen_ai.evaluation.name").as_deref(),
+            Some("user_feedback")
+        );
+        assert_eq!(
+            text("gen_ai.evaluation.score.label").as_deref(),
+            Some("negative")
+        );
+        assert!(
+            matches!(
+                attrs.get("gen_ai.evaluation.score.value"),
+                Some(opentelemetry::logs::AnyValue::Double(v)) if *v == -1.0
+            ),
+            "score.value must be -1.0, got {:?}",
+            attrs.get("gen_ai.evaluation.score.value")
+        );
+        assert_eq!(
+            text("gen_ai.conversation.id").as_deref(),
+            Some(Uuid::nil().to_string().as_str())
+        );
+        assert_eq!(text("gen_ai.agent.id").as_deref(), Some("default"));
+        assert_eq!(
+            text("assistant.message.id").as_deref(),
+            Some(Uuid::from_u128(7).to_string().as_str())
+        );
+        assert!(matches!(
+            attrs.get("assistant.feedback.has_comment"),
+            Some(opentelemetry::logs::AnyValue::Boolean(false))
+        ));
+        assert!(!attrs.contains_key("gen_ai.evaluation.explanation"));
+    }
+
+    #[test]
+    fn positive_feedback_scores_plus_one() {
+        let logs = exported_logs(&feedback(FeedbackLabel::Positive, false, None));
+        let attrs = log_attrs(&logs[0]);
+        assert!(matches!(
+            attrs.get("gen_ai.evaluation.score.value"),
+            Some(opentelemetry::logs::AnyValue::Double(v)) if *v == 1.0
+        ));
+    }
+
+    #[test]
+    fn has_comment_is_reported_and_no_text_is_exported() {
+        for label in [FeedbackLabel::Positive, FeedbackLabel::Negative] {
+            let logs = exported_logs(&feedback(label, true, Some(TRACEPARENT)));
+            let attrs = log_attrs(&logs[0]);
+            assert!(matches!(
+                attrs.get("assistant.feedback.has_comment"),
+                Some(opentelemetry::logs::AnyValue::Boolean(true))
+            ));
+            assert!(!attrs.contains_key("gen_ai.evaluation.explanation"));
+        }
+    }
+
+    #[test]
+    fn cleared_has_a_label_but_no_score_value() {
+        let logs = exported_logs(&feedback(FeedbackLabel::Cleared, false, Some(TRACEPARENT)));
+        assert_eq!(logs.len(), 1);
+        let attrs = log_attrs(&logs[0]);
+        assert!(matches!(
+            attrs.get("gen_ai.evaluation.score.label"),
+            Some(opentelemetry::logs::AnyValue::String(s)) if s.as_str() == "cleared"
+        ));
+        assert!(!attrs.contains_key("gen_ai.evaluation.score.value"));
+    }
+
+    #[test]
+    fn missing_or_malformed_traceparent_exports_without_trace_context() {
+        for tp in [None, Some("garbage")] {
+            let logs = exported_logs(&feedback(FeedbackLabel::Positive, false, tp));
+            assert_eq!(logs.len(), 1, "event still emitted for {tp:?}");
+            assert!(logs[0].record.trace_context().is_none(), "for {tp:?}");
+            assert!(log_attrs(&logs[0]).contains_key("assistant.message.id"));
+        }
     }
 }

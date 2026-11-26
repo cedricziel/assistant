@@ -10,16 +10,18 @@ use std::sync::Arc;
 
 use http::request::Parts;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, Extensions, ListResourceTemplatesResult,
+    CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, Extensions,
+    GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
     ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
-    ReadResourceRequestParams, ReadResourceResponse, ServerConfig,
+    ReadResourceRequestParams, ReadResourceResponse, ServerConfig, SubscriptionFilter,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{NotificationContext, RequestContext, SubscriptionContext};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
+use tracing::debug;
 
-use crate::server::{AssistantMcpServer, SUPPORTED_VERSIONS, server_info};
+use crate::server::{AssistantMcpServer, SUPPORTED_VERSIONS, listenable, server_info};
 
 /// The Streamable HTTP service for `/mcp`.
 ///
@@ -109,5 +111,53 @@ impl ServerHandler for RequestBoundServer {
         bound(&context.extensions)?
             .read_resource(request, context)
             .await
+    }
+
+    async fn list_prompts(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        bound(&context.extensions)?
+            .list_prompts(request, context)
+            .await
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        bound(&context.extensions)?
+            .get_prompt(request, context)
+            .await
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        bound(&context.extensions)?.complete(request, context).await
+    }
+
+    fn accepted_subscription_filter(
+        &self,
+        _requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        Some(listenable())
+    }
+
+    async fn listen(&self, subscription: SubscriptionContext) -> Result<(), ErrorData> {
+        bound(&subscription.request_context().extensions)?
+            .listen(subscription)
+            .await
+    }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
+        match bound(&context.extensions) {
+            Ok(server) => server.on_initialized(context).await,
+            Err(error) => debug!(%error, "initialized session not registered for notifications"),
+        }
     }
 }

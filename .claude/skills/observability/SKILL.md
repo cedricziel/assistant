@@ -46,9 +46,15 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 assistant
   `tool_error`, `conversation_id`, `turn`, and `active_skill`.
 - Logs: `tracing` events from `assistant_*` crates, bridged to OTel log
   records with trace and span context.
+- User feedback: a `gen_ai.evaluation.result` log record per rating or
+  withdrawal (`score.label` `positive`/`negative`/`cleared`, no
+  `score.value` on `cleared`), parented to the reply's `chat {model}` span
+  when a traceparent is stored. It carries `assistant.feedback.has_comment`,
+  never the comment text.
 - Metrics (meter `assistant-runtime`): GenAI token usage and operation
-  duration, plus `assistant.turn.*`, `assistant.tool.*`, and
-  `assistant.error.count`.
+  duration, plus `assistant.turn.*`, `assistant.tool.*`,
+  `assistant.error.count`, and `assistant.feedback.count{rating, agent_id}`
+  (counts feedback events, not current votes).
 
 The full attribute and metric reference is in `docs/opentelemetry.md`.
 

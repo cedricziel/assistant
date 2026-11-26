@@ -132,6 +132,10 @@ pub struct ToolCallSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<Object>)]
     pub data: Option<serde_json::Value>,
+    /// The MCP App the tool declared for its result. Absent for tools
+    /// without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<super::mcp_apps::McpAppView>,
 }
 
 /// Maximum length for tool result strings in history summaries.
@@ -214,6 +218,9 @@ impl ToolRows {
                         .and_then(|r| r.tool_data_json.as_deref())
                         .and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok())
                         .filter(serde_json::Value::is_object),
+                    app: row
+                        .and_then(|r| super::mcp_apps::stored_app(r.tool_app_json.as_deref()))
+                        .map(Into::into),
                 }
             })
             .collect()
@@ -1031,6 +1038,48 @@ mod tests {
         assert_eq!(tc[1]["result"], "B");
         assert_eq!(tc[1]["data"]["stdout"], "B");
         assert_eq!(tc[1]["tool_call_id"], "c2");
+    }
+
+    #[tokio::test]
+    async fn history_carries_the_mcp_app_of_the_call() {
+        let calls =
+            serde_json::json!([{"name": "mcp__weather__forecast", "params": {}, "id": "c1"}]);
+        let mut row = tool_row(
+            "mcp__weather__forecast",
+            "21 degrees",
+            Some("c1"),
+            Some("ok"),
+            None,
+        );
+        row.tool_app_json = Some(
+            serde_json::json!({
+                "server": "weather",
+                "resource_uri": "ui://weather/forecast",
+                "html": "<p>sunny</p>",
+                "csp": {"connect_domains": ["https://api.weather.test"]},
+                "permissions": {"geolocation": true},
+                "prefers_border": true,
+            })
+            .to_string(),
+        );
+        let tc = history_tool_calls(calls, vec![row]).await;
+        assert_eq!(tc[0]["app"]["server"], "weather");
+        assert_eq!(tc[0]["app"]["resource_uri"], "ui://weather/forecast");
+        assert_eq!(tc[0]["app"]["html"], "<p>sunny</p>");
+        assert_eq!(
+            tc[0]["app"]["csp"]["connect_domains"][0],
+            "https://api.weather.test"
+        );
+        assert_eq!(tc[0]["app"]["permissions"]["geolocation"], true);
+        assert_eq!(tc[0]["app"]["prefers_border"], true);
+    }
+
+    #[tokio::test]
+    async fn history_without_an_app_omits_the_field() {
+        let calls = serde_json::json!([{"name": "bash", "params": {}}]);
+        let rows = vec![tool_row("bash", "ok", None, Some("ok"), None)];
+        let tc = history_tool_calls(calls, rows).await;
+        assert!(tc[0].get("app").is_none(), "no app, no field");
     }
 
     #[tokio::test]
