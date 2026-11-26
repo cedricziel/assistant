@@ -31,6 +31,7 @@ class ToolCallRecord {
     this.toolCallId,
     this.arguments,
     this.result,
+    this.data,
     DateTime? startedAt,
     this.duration,
   }) : startedAt = startedAt ?? DateTime.now();
@@ -50,6 +51,12 @@ class ToolCallRecord {
 
   /// The tool's output, truncated for display (populated on completion).
   String? result;
+
+  /// Structured output of the tool, a JSON object with a `kind` tag.
+  ///
+  /// Null while pending, for text-only tools, when the server dropped
+  /// oversized data, and for calls that predate structured data.
+  Map<String, Object?>? data;
 
   /// When this tool call started (set on StatusEvent).
   final DateTime startedAt;
