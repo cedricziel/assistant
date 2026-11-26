@@ -27,6 +27,7 @@ base64               = { workspace = true }
 sha2                 = { workspace = true }
 url                  = { workspace = true }
 getrandom            = { workspace = true }
+uuid                 = { workspace = true }
 
 [dev-dependencies]
 # Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
