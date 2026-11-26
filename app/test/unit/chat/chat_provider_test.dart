@@ -5,8 +5,10 @@ import 'dart:typed_data';
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
+import 'package:assistant_app/features/chat/chat_announcer.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_stream_session.dart';
+import 'package:assistant_app/features/chat/turn_progress_card.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:material_ui/material_ui.dart';
@@ -4030,5 +4032,181 @@ void main() {
         await tester.pump();
       },
     );
+  });
+
+  group('ChatNotifier.lifecycle', () {
+    Future<void> deliver(
+      WidgetTester tester,
+      StreamController<StreamEvent> ctrl,
+      StreamEvent e,
+    ) async {
+      await tester.runAsync(() async {
+        ctrl.add(e);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump();
+    }
+
+    Future<
+      ({
+        ChatNotifier notifier,
+        _FakeApiClient api,
+        StreamController<StreamEvent> ctrl,
+        List<ChatLifecycleEvent> events,
+      })
+    >
+    start(WidgetTester tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      final events = <ChatLifecycleEvent>[];
+      notifier.lifecycle.listen(events.add);
+      unawaited(notifier.sendMessage('go'));
+      await tester.pump();
+      return (notifier: notifier, api: fakeApi, ctrl: ctrl, events: events);
+    }
+
+    testWidgets('a live turn emits TurnStarted then TurnCompleted(live)', (
+      tester,
+    ) async {
+      final r = await start(tester);
+      expect(r.events.map((e) => e.runtimeType), [TurnStarted]);
+
+      await deliver(tester, r.ctrl, const RunStartedEvent('run-1'));
+      await deliver(tester, r.ctrl, const TokenEvent('**Hi**'));
+      await deliver(
+        tester,
+        r.ctrl,
+        const DoneEvent(role: 'assistant', content: '**Hi**'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(r.events.map((e) => e.runtimeType), [TurnStarted, TurnCompleted]);
+      final done = r.events.last as TurnCompleted;
+      expect(done.source, TurnSource.live);
+      expect(done.content, '**Hi**');
+      unawaited(r.ctrl.close());
+    });
+
+    testWidgets('a resumed replay emits one TurnCompleted(replay)', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl1 = fakeApi.enqueueStream();
+      fakeApi.enqueueReplayStream()
+        ..add(const TokenEvent('hello'))
+        ..add(const DoneEvent(role: 'assistant', content: 'hello'))
+        ..close();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      final events = <ChatLifecycleEvent>[];
+      notifier.lifecycle.listen(events.add);
+
+      unawaited(notifier.sendMessage('ping'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        ctrl1.add(const RunStartedEvent('run-abc'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl1.addError(const SocketException('network drop'));
+        await ctrl1.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+
+      final completed = events.whereType<TurnCompleted>().toList();
+      expect(completed, hasLength(1));
+      expect(completed.single.source, TurnSource.replay);
+      expect(completed.single.content, 'hello');
+      expect(events.whereType<TurnStarted>(), hasLength(1));
+    });
+
+    testWidgets('opening a conversation with finished messages is silent', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      fakeApi.conversationsFake.serverMessages = [
+        for (var i = 0; i < 10; i++)
+          ('m$i', i.isEven ? 'user' : 'assistant', 'message $i'),
+      ];
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      final events = <ChatLifecycleEvent>[];
+      notifier.lifecycle.listen(events.add);
+
+      await notifier.loadConversation('conv-1');
+      await tester.pump();
+
+      expect(notifier.state.value!.messages, hasLength(10));
+      expect(events, isEmpty);
+    });
+
+    testWidgets('stopTurn reconciling to stopped emits TurnStopped', (
+      tester,
+    ) async {
+      final r = await start(tester);
+      await deliver(tester, r.ctrl, const RunStartedEvent('run-1'));
+      await deliver(tester, r.ctrl, const TokenEvent('part'));
+      r.notifier.stopTurn();
+      await tester.pump();
+      expect(r.events.whereType<TurnStopped>(), isEmpty);
+
+      await deliver(
+        tester,
+        r.ctrl,
+        const AgentErrorEvent(
+          reason: AgentErrorReason.cancelled,
+          message: 'Turn cancelled',
+          partialContent: 'part',
+          messageId: 'M',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(r.events.whereType<TurnStopped>(), hasLength(1));
+      expect(r.events.whereType<TurnCompleted>(), isEmpty);
+      unawaited(r.ctrl.close());
+    });
+
+    testWidgets('_failTurn emits TurnFailed with the message', (tester) async {
+      final r = await start(tester);
+      await deliver(tester, r.ctrl, const RunStartedEvent('run-1'));
+      await deliver(tester, r.ctrl, const ErrorEvent('rate limited'));
+      await tester.pumpAndSettle();
+
+      final failed = r.events.whereType<TurnFailed>().toList();
+      expect(failed, hasLength(1));
+      expect(failed.single.message, 'rate limited');
+      unawaited(r.ctrl.close());
+    });
+
+    testWidgets('no status update for kTurnStallThreshold emits one stall', (
+      tester,
+    ) async {
+      final r = await start(tester);
+      await deliver(tester, r.ctrl, const RunStartedEvent('run-1'));
+      await deliver(tester, r.ctrl, const TokenEvent('x'));
+
+      await tester.pump(kTurnStallThreshold - const Duration(seconds: 1));
+      expect(r.events.whereType<TurnStalled>(), isEmpty);
+
+      // A status update re-arms the timer.
+      await deliver(tester, r.ctrl, const StatusEvent('searching'));
+      await tester.pump(kTurnStallThreshold - const Duration(seconds: 1));
+      expect(r.events.whereType<TurnStalled>(), isEmpty);
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(r.events.whereType<TurnStalled>(), hasLength(1));
+
+      await deliver(
+        tester,
+        r.ctrl,
+        const DoneEvent(role: 'assistant', content: 'x'),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(kTurnStallThreshold * 2);
+      expect(r.events.whereType<TurnStalled>(), hasLength(1));
+      unawaited(r.ctrl.close());
+    });
   });
 }

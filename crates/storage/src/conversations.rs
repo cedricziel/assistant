@@ -2088,4 +2088,221 @@ mod tests {
         store.set_leaf(conv.id, a.id).await.unwrap();
         assert_no_event(&mut rx);
     }
+
+    // -- messages_fts --
+
+    async fn fts_ids(storage: &StorageLayer, query: &str) -> Vec<String> {
+        let mut ids: Vec<String> =
+            sqlx::query_scalar("SELECT message_id FROM messages_fts WHERE messages_fts MATCH ?1")
+                .bind(query)
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        ids.sort();
+        ids
+    }
+
+    async fn fts_integrity_check(storage: &StorageLayer) {
+        sqlx::query("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+            .execute(&storage.pool)
+            .await
+            .expect("messages_fts integrity-check");
+        // The side table maps every indexed message to exactly one FTS row.
+        let unmapped: i64 = sqlx::query_scalar(
+            "SELECT (SELECT COUNT(*) FROM messages_fts) \
+                  + (SELECT COUNT(*) FROM messages_fts_map) \
+                  - 2 * (SELECT COUNT(*) FROM messages_fts f \
+                         JOIN messages_fts_map m \
+                           ON m.fts_rowid = f.rowid AND m.message_id = f.message_id)",
+        )
+        .fetch_one(&storage.pool)
+        .await
+        .unwrap();
+        assert_eq!(unmapped, 0, "messages_fts_map matches messages_fts");
+    }
+
+    fn sorted(ids: &[Uuid]) -> Vec<String> {
+        let mut v: Vec<String> = ids.iter().map(Uuid::to_string).collect();
+        v.sort();
+        v
+    }
+
+    #[tokio::test]
+    async fn fts_indexes_only_user_and_assistant_prose() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let user = Message::user(conv.id, "Planning a trip to Lisbon");
+        let assistant = Message::assistant(conv.id, "Lisbon is lovely in spring");
+        let tool = Message::new(
+            conv.id,
+            assistant_core::types::conversation::MessageRole::Tool,
+            "Lisbon search result page",
+        );
+        let thinking = Message::assistant(conv.id, "<think>Lisbon…</think>");
+        let mut tool_call = Message::assistant(conv.id, "");
+        tool_call.tool_calls_json = Some(r#"[{"name":"lisbon"}]"#.to_string());
+        let blank = Message::assistant(conv.id, "  \n ");
+        for m in [&user, &assistant, &tool, &thinking, &tool_call, &blank] {
+            store.save_message(m).await.unwrap();
+        }
+
+        assert_eq!(
+            fts_ids(&storage, "lisbon").await,
+            sorted(&[user.id, assistant.id]),
+            "only user and assistant prose is indexed"
+        );
+        fts_integrity_check(&storage).await;
+    }
+
+    #[tokio::test]
+    async fn fts_reindexes_on_content_edit_and_ignores_other_columns() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+        let a = Message::user(conv.id, "Planning a trip to Lisbon");
+        let b = Message::assistant(conv.id, "Sounds great");
+        store.save_message(&a).await.unwrap();
+        store.save_message(&b).await.unwrap();
+
+        sqlx::query("UPDATE messages SET content = 'Madrid instead' WHERE id = ?1")
+            .bind(a.id.to_string())
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        assert!(fts_ids(&storage, "lisbon").await.is_empty());
+        assert_eq!(fts_ids(&storage, "madrid").await, sorted(&[a.id]));
+        fts_integrity_check(&storage).await;
+
+        // An edit into a non-indexable shape removes the row, and back again.
+        sqlx::query("UPDATE messages SET content = '<think>madrid</think>' WHERE id = ?1")
+            .bind(a.id.to_string())
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        assert!(fts_ids(&storage, "madrid").await.is_empty());
+        sqlx::query("UPDATE messages SET content = 'Madrid again' WHERE id = ?1")
+            .bind(a.id.to_string())
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(fts_ids(&storage, "madrid").await, sorted(&[a.id]));
+
+        // Updating a different column leaves the index untouched.
+        let before: Vec<(i64, String)> =
+            sqlx::query_as("SELECT rowid, message_id FROM messages_fts ORDER BY rowid")
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        sqlx::query("UPDATE messages SET turn = turn + 1, model = 'm', parent_id = parent_id")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        let after: Vec<(i64, String)> =
+            sqlx::query_as("SELECT rowid, message_id FROM messages_fts ORDER BY rowid")
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            before, after,
+            "non-content updates must not churn the index"
+        );
+        fts_integrity_check(&storage).await;
+    }
+
+    #[tokio::test]
+    async fn fts_rows_vanish_with_message_and_conversation_delete() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let keep = store.create_conversation(None).await.unwrap();
+        let gone = store.create_conversation(None).await.unwrap();
+        let kept = Message::user(keep.id, "Lisbon forever");
+        let m1 = Message::user(gone.id, "Lisbon one");
+        let m2 = Message::assistant(gone.id, "Lisbon two");
+        for m in [&kept, &m1, &m2] {
+            store.save_message(m).await.unwrap();
+        }
+
+        // `m2` is the leaf; deleting a row that still has children would break
+        // the `parent_id` foreign key.
+        sqlx::query("DELETE FROM messages WHERE id = ?1")
+            .bind(m2.id.to_string())
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(fts_ids(&storage, "lisbon").await, sorted(&[kept.id, m1.id]));
+        fts_integrity_check(&storage).await;
+
+        store.delete_conversation(gone.id).await.unwrap();
+        assert_eq!(fts_ids(&storage, "lisbon").await, sorted(&[kept.id]));
+        let orphans: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages_fts WHERE conversation_id = ?1")
+                .bind(gone.id.to_string())
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(orphans, 0, "cascade delete leaves no FTS rows");
+        fts_integrity_check(&storage).await;
+    }
+
+    #[tokio::test]
+    async fn fts_indexed_copy_strips_highlight_sentinels_but_stored_message_is_unchanged() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+        let raw = "pre\u{E000}lisbon\u{E001}post";
+        let msg = Message::user(conv.id, raw);
+        store.save_message(&msg).await.unwrap();
+
+        let stored: String = sqlx::query_scalar("SELECT content FROM messages WHERE id = ?1")
+            .bind(msg.id.to_string())
+            .fetch_one(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, raw, "stored message is unchanged");
+
+        let indexed: String =
+            sqlx::query_scalar("SELECT content FROM messages_fts WHERE message_id = ?1")
+                .bind(msg.id.to_string())
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(indexed, "pre lisbon post", "sentinels become spaces");
+
+        // The same holds after an edit.
+        sqlx::query("UPDATE messages SET content = ?2 WHERE id = ?1")
+            .bind(msg.id.to_string())
+            .bind("a\u{E001}b\u{E000}c")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        let reindexed: String =
+            sqlx::query_scalar("SELECT content FROM messages_fts WHERE message_id = ?1")
+                .bind(msg.id.to_string())
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(reindexed, "a b c");
+    }
+
+    #[tokio::test]
+    async fn fts_covers_every_branch_of_the_message_tree() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+        let root = Message::user(conv.id, "Lisbon question");
+        store.save_message(&root).await.unwrap();
+        let first = Message::assistant(conv.id, "Lisbon answer one");
+        let second = Message::assistant(conv.id, "Lisbon answer two");
+        store.branch_message(&first, Some(root.id)).await.unwrap();
+        store.branch_message(&second, Some(root.id)).await.unwrap();
+
+        assert_eq!(
+            fts_ids(&storage, "lisbon").await,
+            sorted(&[root.id, first.id, second.id]),
+            "inactive branches stay searchable"
+        );
+        fts_integrity_check(&storage).await;
+    }
 }

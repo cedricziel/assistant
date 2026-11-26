@@ -1173,6 +1173,70 @@ mod tests {
         assert_eq!(tc[0]["tool_call_id"], "call_7");
     }
 
+    /// The rows a compaction leaves behind: a summary row below the kept
+    /// turn, and the kept rows with their original turn and tool metadata.
+    #[tokio::test]
+    async fn history_after_compaction_joins_kept_calls_with_their_own_data() {
+        use assistant_core::types::conversation::{Message, MessageRole};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Compacted")).await.unwrap();
+
+        let mut summary = Message::assistant(conv.id, "[Conversation summary]");
+        summary.turn = 4;
+        let mut user = Message::user(conv.id, "run both");
+        user.turn = 5;
+        let mut assistant = Message::assistant(conv.id, "");
+        assistant.turn = 6;
+        assistant.tool_calls_json = Some(
+            serde_json::json!([
+                {"name": "bash", "params": {}, "id": "c1"},
+                {"name": "bash", "params": {}, "id": "c2"},
+            ])
+            .to_string(),
+        );
+        let mut rows = vec![summary, user, assistant];
+        for (id, out) in [("c1", "A"), ("c2", "B")] {
+            let mut m = Message::new(conv.id, MessageRole::Tool, out);
+            m.turn = 6;
+            m.skill_name = Some("bash".into());
+            m.tool_call_id = Some(id.into());
+            m.tool_status = Some("ok".into());
+            m.tool_data_json =
+                Some(serde_json::json!({"kind": "terminal", "stdout": out}).to_string());
+            rows.push(m);
+        }
+        for m in &rows {
+            store.save_message(m).await.unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let tc = json["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|m| m["tool_calls"].as_array().cloned())
+            .expect("kept assistant message carries tool_calls");
+        for (call, (id, out)) in tc.iter().zip([("c1", "A"), ("c2", "B")]) {
+            assert_eq!(call["tool_call_id"], id);
+            assert_eq!(call["result"], out);
+            assert_eq!(call["data"]["stdout"], out);
+        }
+    }
+
     #[tokio::test]
     async fn get_conversation_exposes_finish_reason_only_when_set() {
         use assistant_core::types::conversation::{Message, MessageFinishReason};
