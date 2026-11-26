@@ -18,6 +18,8 @@ use assistant_core::{
 use assistant_storage::conversations::ConversationStore;
 use assistant_storage::{ConversationSummaryStore, MessageTimingStore};
 
+use crate::orchestrator::TurnStore;
+
 /// Pre-loaded attachment content blocks keyed by message ID.
 ///
 /// Built by callers that load bytes from the [`AttachmentStore`] and convert
@@ -378,10 +380,13 @@ pub(crate) async fn persist_final_answer(
 /// The user message was already persisted by `prepare_history`; without
 /// this recovery message the orphaned user entry would poison subsequent
 /// turns.
-pub(crate) async fn persist_error_recovery(
-    conv_store: &dyn ConversationStore,
-    conversation_id: Uuid,
-) {
+///
+/// A regenerate that has persisted nothing yet already has a reply to fall
+/// back on, so it persists no placeholder: the old reply stays active.
+pub(crate) async fn persist_error_recovery(conv_store: &TurnStore, conversation_id: Uuid) {
+    if conv_store.branch_pending() {
+        return;
+    }
     let error_msg = Message::assistant(
         conversation_id,
         "[An error occurred processing this message.]",

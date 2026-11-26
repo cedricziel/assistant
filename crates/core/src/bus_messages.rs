@@ -121,9 +121,13 @@ pub enum TurnAnchor {
     /// Append the prompt after the conversation's current leaf.
     #[default]
     Append,
-    /// Replace an earlier user message: the prompt becomes a sibling branch
-    /// under `parent_message_id` (`None` for a first message).
-    Edit { parent_message_id: Option<Uuid> },
+    /// Replace the earlier user message `edited_message_id`: the prompt
+    /// becomes a sibling branch under `parent_message_id` (`None` for a first
+    /// message), and the attachments of the edited message carry forward.
+    Edit {
+        parent_message_id: Option<Uuid>,
+        edited_message_id: Uuid,
+    },
     /// Re-run the reply to an existing user message without a new user row.
     Regenerate { user_message_id: Uuid },
 }
@@ -409,9 +413,11 @@ mod tests {
             TurnAnchor::Append,
             TurnAnchor::Edit {
                 parent_message_id: Some(parent),
+                edited_message_id: user_message_id,
             },
             TurnAnchor::Edit {
                 parent_message_id: None,
+                edited_message_id: user_message_id,
             },
             TurnAnchor::Regenerate {
                 user_message_id: parent,
