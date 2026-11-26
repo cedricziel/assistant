@@ -32,6 +32,7 @@ use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 use crate::history::{FinalAnswerMeta, persist_final_answer};
+use turn_timing::{CallMarks, TurnTimer};
 
 // ── Submodules ────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ mod prompt;
 pub mod stream_event;
 mod turn_cancellations;
 mod turn_control;
+mod turn_timing;
 
 mod subagent;
 mod submit;
@@ -568,7 +570,15 @@ impl Orchestrator {
 
     /// The provider a turn of `conversation_id` runs on: the default, or one
     /// for the model its `/model` override names.
+    /// The provider is [`ready`](LlmProvider::ready), so the capabilities a
+    /// turn reads are final.
     async fn llm_for(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
+        let llm = self.select_llm(conversation_id).await?;
+        llm.ready().await;
+        Ok(llm)
+    }
+
+    async fn select_llm(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
         let model = self
             .conversation_configs
             .read()
@@ -1048,9 +1058,11 @@ impl Orchestrator {
                         &interface,
                         &ext_map,
                         &conv_store,
+                        &self.storage.message_timing_store(),
                         turn_had_errors,
                         FinalAnswerMeta {
                             traceparent: llm_traceparent,
+                            timing: None,
                         },
                     )
                     .await?;
@@ -1287,6 +1299,7 @@ impl Orchestrator {
             "Starting turn"
         );
 
+        let mut timer = TurnTimer::new(self.clock.now_instant());
         let (_conv_cx, turn_cx) = setup_turn_trace(trace_cx, conversation_id, &interface);
 
         // 1-3. Set up conversation, load prior history, persist user message.
@@ -1378,12 +1391,26 @@ impl Orchestrator {
             );
             let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
             let llm_start = std::time::Instant::now();
-            let response = if let Some(ref oe_sink) = token_sink {
+            let call_start = self.clock.now_instant();
+            let (response, call_end, marks) = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
                 let (chunk_tx, mut chunk_rx) = mpsc::channel::<StreamChunk>(64);
                 let oe_sink_clone = oe_sink.clone();
+                let marks = Arc::new(tokio::sync::Mutex::new(CallMarks::default()));
+                let forward_marks = Arc::clone(&marks);
+                let forward_clock = Arc::clone(&self.clock);
                 let forward_handle = tokio::spawn(async move {
                     while let Some(chunk) = chunk_rx.recv().await {
+                        // Read the clock before any await so the instant is
+                        // the chunk's arrival, not the lock's.
+                        let arrived = forward_clock.now_instant();
+                        {
+                            let mut m = forward_marks.lock().await;
+                            m.first_chunk.get_or_insert(arrived);
+                            if matches!(chunk, StreamChunk::Text(_)) {
+                                m.first_text.get_or_insert(arrived);
+                            }
+                        }
                         let event = match chunk {
                             StreamChunk::Text(t) => OrchestratorEvent::Token(t),
                             StreamChunk::Thinking(t) => OrchestratorEvent::Thinking(t),
@@ -1401,20 +1428,24 @@ impl Orchestrator {
                     )
                     .instrument(iteration_span.clone())
                     .await;
+                let call_end = self.clock.now_instant();
                 // Wait for the forwarding task to drain any buffered tokens before
                 // continuing — ensures callers see all Token events after this await.
                 forward_handle.await.ok();
-                result
+                let marks = *marks.lock().await;
+                (result, call_end, marks)
             } else {
-                llm.chat_with(
-                    &system_prompt,
-                    &history,
-                    &tool_specs,
-                    &self.chat_options(),
-                    None,
-                )
-                .instrument(iteration_span.clone())
-                .await
+                let result = llm
+                    .chat_with(
+                        &system_prompt,
+                        &history,
+                        &tool_specs,
+                        &self.chat_options(),
+                        None,
+                    )
+                    .instrument(iteration_span.clone())
+                    .await;
+                (result, self.clock.now_instant(), CallMarks::default())
             };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
@@ -1436,6 +1467,7 @@ impl Orchestrator {
                     return Err(e);
                 }
             };
+            timer.record_call(call_start, call_end, marks, response.meta().output_tokens);
             crate::otel_spans::finish_llm_span(
                 &mut llm_span,
                 response.meta(),
@@ -1466,7 +1498,8 @@ impl Orchestrator {
                 LlmResponse::FinalAnswer(text, _meta) => {
                     info!(iteration, "LLM returned final answer");
 
-                    let saved_message_id = if !text.trim().is_empty() {
+                    let (saved_message_id, timing) = if !text.trim().is_empty() {
+                        let timing = timer.finish(self.clock.now_instant());
                         let assistant_msg = {
                             let mut m = Message::assistant(conversation_id, &text);
                             m.turn = base_turn + iteration as i64 + 1;
@@ -1475,16 +1508,18 @@ impl Orchestrator {
                         let msg_id = assistant_msg.id;
                         persist_final_answer(
                             &conv_store,
+                            &self.storage.message_timing_store(),
                             assistant_msg,
                             FinalAnswerMeta {
                                 traceparent: llm_traceparent,
+                                timing: Some(timing.clone()),
                             },
                         )
                         .instrument(iteration_span.clone())
                         .await?;
-                        Some(msg_id)
+                        (Some(msg_id), Some(timing))
                     } else {
-                        None
+                        (None, None)
                     };
 
                     crate::conversation_indexer::spawn_index(
@@ -1518,7 +1553,7 @@ impl Orchestrator {
                         attachment_ids: turn_attachment_ids,
                         message_id: saved_message_id,
                         had_errors: turn_had_errors,
-                        timing: None,
+                        timing,
                     });
                 }
 

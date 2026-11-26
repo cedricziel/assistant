@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use assistant_core::types::conversation::{Interface, MessageRole};
+use assistant_storage::InMemoryMessageTimingStore;
 use assistant_storage::conversations::{ConversationStore, InMemoryConversationStore};
 
 use super::super::Orchestrator;
@@ -24,9 +25,11 @@ async fn saved_traceparent(replied: bool) -> Option<String> {
         &Interface::Cli,
         &HashMap::new(),
         &store,
+        &InMemoryMessageTimingStore::new(),
         false,
         FinalAnswerMeta {
             traceparent: Some(TRACEPARENT.into()),
+            timing: None,
         },
     )
     .await

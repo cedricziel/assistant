@@ -139,6 +139,7 @@ impl SubagentRunner for Orchestrator {
         };
 
         // Determine the tool specs to advertise to the LLM for this subagent.
+        self.llm.ready().await;
         let provider_caps = self.llm.capabilities();
         let tool_specs = Self::filter_tool_specs(
             self.executor.to_specs_filtered(&allowed_tools),
@@ -342,9 +343,11 @@ impl SubagentRunner for Orchestrator {
                             };
                             if let Err(e) = persist_final_answer(
                                 &conv_store,
+                                &self.storage.message_timing_store(),
                                 assistant_msg,
                                 FinalAnswerMeta {
                                     traceparent: llm_traceparent,
+                                    timing: None,
                                 },
                             )
                             .instrument(iteration_span.clone())

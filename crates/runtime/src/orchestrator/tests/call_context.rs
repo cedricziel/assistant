@@ -148,3 +148,88 @@ fn compaction_window_is_the_smaller_of_config_and_provider() {
         "a larger provider window never raises the configured limit"
     );
 }
+
+/// Learns after `ready()` that it hosts web search, and records the tools
+/// each call was offered.
+#[derive(Default)]
+struct LateCapabilities {
+    ready: std::sync::atomic::AtomicBool,
+    offered: Mutex<Vec<Vec<String>>>,
+}
+
+impl LateCapabilities {
+    fn answer(&self, tools: &[ToolSpec]) -> LlmResponse {
+        self.offered
+            .lock()
+            .unwrap()
+            .push(tools.iter().map(|t| t.name.clone()).collect());
+        LlmResponse::FinalAnswer("done".into(), LlmResponseMeta::default())
+    }
+}
+
+#[async_trait]
+impl LlmProvider for LateCapabilities {
+    fn capabilities(&self) -> Capabilities {
+        let ready = self.ready.load(Ordering::SeqCst);
+        Capabilities {
+            tools: ToolSupport::Native,
+            streaming: true,
+            vision: false,
+            hosted_tools: if ready {
+                vec![assistant_core::HostedTool::WebSearch]
+            } else {
+                vec![]
+            },
+            context_window_tokens: None,
+        }
+    }
+
+    async fn ready(&self) {
+        self.ready.store(true, Ordering::SeqCst);
+    }
+
+    async fn chat(
+        &self,
+        _system_prompt: &str,
+        _history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+    ) -> anyhow::Result<LlmResponse> {
+        Ok(self.answer(tools))
+    }
+
+    async fn chat_streaming(
+        &self,
+        _system_prompt: &str,
+        _history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        _chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+    ) -> anyhow::Result<LlmResponse> {
+        Ok(self.answer(tools))
+    }
+}
+
+#[tokio::test]
+async fn a_turn_reads_capabilities_after_the_provider_is_ready() {
+    let provider = Arc::new(LateCapabilities::default());
+    let (orch, _) = build_with_llm(provider.clone(), quiet_config(), |o| o).await;
+
+    orch.run_turn_with_tools(
+        "hi",
+        Uuid::new_v4(),
+        Interface::Web,
+        vec![],
+        None,
+        vec![],
+        vec![],
+        TurnIdentity::default(),
+    )
+    .await
+    .unwrap();
+
+    let offered = provider.offered.lock().unwrap().clone();
+    let first = offered.first().expect("the turn called the provider");
+    assert!(
+        !first.iter().any(|name| name == "web-search"),
+        "the hosted web search learned at ready() suppresses the local tool: {first:?}"
+    );
+}

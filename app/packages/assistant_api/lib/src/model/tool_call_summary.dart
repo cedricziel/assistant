@@ -13,14 +13,20 @@ part 'tool_call_summary.g.dart';
 ///
 /// Properties:
 /// * [arguments]
+/// * [data] - Structured output of the tool, a JSON object with a `kind` tag. Absent when the tool returned text only, the data exceeded the size limit, or the call predates structured data. Each `kind` is defined by a JSON Schema in `schemas/tool-results/`.
 /// * [name] - The tool that was called.
 /// * [result] - The tool's output, truncated to a reasonable display length.
 /// * [status] - `\"ok\"`, `\"error\"`, or `\"denied\"`.
+/// * [toolCallId] - Provider-assigned id of the call, when the provider supplied one.
 @BuiltValue()
 abstract class ToolCallSummary
     implements Built<ToolCallSummary, ToolCallSummaryBuilder> {
   @BuiltValueField(wireName: r'arguments')
   JsonObject? get arguments;
+
+  /// Structured output of the tool, a JSON object with a `kind` tag. Absent when the tool returned text only, the data exceeded the size limit, or the call predates structured data. Each `kind` is defined by a JSON Schema in `schemas/tool-results/`.
+  @BuiltValueField(wireName: r'data')
+  JsonObject? get data;
 
   /// The tool that was called.
   @BuiltValueField(wireName: r'name')
@@ -33,6 +39,10 @@ abstract class ToolCallSummary
   /// `\"ok\"`, `\"error\"`, or `\"denied\"`.
   @BuiltValueField(wireName: r'status')
   String get status;
+
+  /// Provider-assigned id of the call, when the provider supplied one.
+  @BuiltValueField(wireName: r'tool_call_id')
+  String? get toolCallId;
 
   ToolCallSummary._();
 
@@ -67,6 +77,13 @@ class _$ToolCallSummarySerializer
         specifiedType: const FullType.nullable(JsonObject),
       );
     }
+    if (object.data != null) {
+      yield r'data';
+      yield serializers.serialize(
+        object.data,
+        specifiedType: const FullType.nullable(JsonObject),
+      );
+    }
     yield r'name';
     yield serializers.serialize(
       object.name,
@@ -84,6 +101,13 @@ class _$ToolCallSummarySerializer
       object.status,
       specifiedType: const FullType(String),
     );
+    if (object.toolCallId != null) {
+      yield r'tool_call_id';
+      yield serializers.serialize(
+        object.toolCallId,
+        specifiedType: const FullType.nullable(String),
+      );
+    }
   }
 
   @override
@@ -117,6 +141,14 @@ class _$ToolCallSummarySerializer
           if (valueDes == null) continue;
           result.arguments = valueDes;
           break;
+        case r'data':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(JsonObject),
+          ) as JsonObject?;
+          if (valueDes == null) continue;
+          result.data = valueDes;
+          break;
         case r'name':
           final valueDes = serializers.deserialize(
             value,
@@ -138,6 +170,14 @@ class _$ToolCallSummarySerializer
             specifiedType: const FullType(String),
           ) as String;
           result.status = valueDes;
+          break;
+        case r'tool_call_id':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(String),
+          ) as String?;
+          if (valueDes == null) continue;
+          result.toolCallId = valueDes;
           break;
         default:
           unhandled.add(key);

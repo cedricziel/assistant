@@ -3,8 +3,10 @@
 use serde_json::json;
 
 use assistant_core::llm::call_context::LlmCallContext;
-use assistant_core::types::llm::OpenRouterRouting;
-use assistant_core::{ChatHistoryMessage, ChatOptions, ResponseFormat, ToolChoice, ToolSpec};
+use assistant_core::types::llm::{OpenRouterReasoning, OpenRouterRouting};
+use assistant_core::{
+    ChatHistoryMessage, ChatOptions, ContentBlock, ResponseFormat, ToolChoice, ToolSpec,
+};
 
 use super::wire::ChatRequest;
 use crate::chat_completions::build_raw_messages;
@@ -16,16 +18,29 @@ pub struct RequestSettings {
     /// Fallback models after the primary one; empty when none are set.
     pub fallback_models: Vec<String>,
     pub routing: Option<OpenRouterRouting>,
+    pub reasoning: Option<OpenRouterReasoning>,
 }
 
+/// Stands in for an image sent to a model that doesn't accept images.
+const IMAGE_OMITTED: &str = "[An image was attached, but this model cannot view images.]";
+
 /// Builds a request. Inside a turn, [`LlmCallContext`] supplies
-/// `session_id` and `user`; outside one, both are omitted.
+/// `session_id` and `user`; outside one, both are omitted. Without
+/// `vision`, each image becomes a short text note.
 pub fn build_chat_request(
     settings: &RequestSettings,
     system_prompt: &str,
     history: &[ChatHistoryMessage],
     tools: &[ToolSpec],
+    vision: bool,
 ) -> ChatRequest {
+    let text_only;
+    let history = if vision {
+        history
+    } else {
+        text_only = without_images(history);
+        &text_only[..]
+    };
     let context = LlmCallContext::current();
     let models = if settings.fallback_models.is_empty() {
         Vec::new()
@@ -54,6 +69,7 @@ pub fn build_chat_request(
         stream: false,
         models,
         provider: settings.routing.clone(),
+        reasoning: settings.reasoning.clone(),
         session_id: context.as_ref().map(|c| c.conversation_id.to_string()),
         user: context.and_then(|c| c.user_hash),
         tool_choice: None,
@@ -61,6 +77,24 @@ pub fn build_chat_request(
         response_format: None,
         plugins: Vec::new(),
     }
+}
+
+fn without_images(history: &[ChatHistoryMessage]) -> Vec<ChatHistoryMessage> {
+    history
+        .iter()
+        .map(|message| match message {
+            ChatHistoryMessage::MultimodalUser { content } => ChatHistoryMessage::MultimodalUser {
+                content: content
+                    .iter()
+                    .map(|block| match block {
+                        ContentBlock::Image { .. } => ContentBlock::Text(IMAGE_OMITTED.into()),
+                        other => other.clone(),
+                    })
+                    .collect(),
+            },
+            other => other.clone(),
+        })
+        .collect()
 }
 
 /// Adds `options` to `request` in OpenRouter's wire format. The caller
