@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **attachments** | [**BuiltList&lt;AttachmentMetaResponse&gt;**](AttachmentMetaResponse.md) | Attachments linked to this message. | [optional] 
 **content** | **String** |  | 
 **createdAt** | [**DateTime**](DateTime.md) |  | 
+**finishReason** | **String** | Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message. | [optional] 
 **id** | **String** |  | 
 **role** | **String** |  | 
 **skillName** | **String** | Name of the tool or skill that produced this result (present when `role == \"tool\"`). | [optional] 
