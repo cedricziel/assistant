@@ -110,7 +110,9 @@ export default defineConfig({
       timeout: 10_000,
     },
     {
-      command: `node tests/support/e2e-server.mjs ${JSON.stringify(homeDir)} ${MOCK_LLM_PORT} ${assistant}`,
+      // The server reads its HOME from ASSISTANT_E2E_HOME, inherited
+      // from this process.
+      command: `node tests/support/e2e-server.mjs ${MOCK_LLM_PORT} ${assistant}`,
       url: "http://127.0.0.1:8787/login",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
