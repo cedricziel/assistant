@@ -776,7 +776,7 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           // ignore malformed subagent_status events
         }
       } else if (eventType == 'agent_error' && dataLine != null) {
-        yield AgentErrorEvent(dataLine, sequenceId: seq);
+        yield AgentErrorEvent.fromData(dataLine, sequenceId: seq);
       } else if (eventType == 'audio_ready' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;

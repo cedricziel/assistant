@@ -240,6 +240,22 @@ void main() {
       expect(chips.single.toolCalls.single.status, ToolCallStatus.pending);
     });
 
+    test('cancelled tool-call status maps to ToolCallStatus.cancelled', () {
+      final history = [
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [(name: 'bash', status: 'cancelled', result: null)],
+        ),
+      ];
+
+      final chips = chatMessagesFromHistory(history)
+          .where((m) => m.timelineType == TimelineEntryType.toolCall)
+          .toList();
+      expect(chips.single.toolCalls.single.status, ToolCallStatus.cancelled);
+    });
+
     test('multiple invocations of the same tool produce distinct chip ids', () {
       // Defensive: if a single assistant row carries two `bash` invocations,
       // both chips must have unique ids so Flutter widget keying does not
