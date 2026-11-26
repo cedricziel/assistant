@@ -157,7 +157,8 @@ pub fn apply_cache_breakpoints(messages: &mut [Value], model: &str, cache: &Open
         return;
     }
     let mut control = json!({"type": "ephemeral"});
-    if cache.ttl == OpenRouterCacheTtl::OneHour {
+    // Only Claude caches take a TTL; Gemini and Qwen caches last 5 minutes.
+    if author == "anthropic" && cache.ttl == OpenRouterCacheTtl::OneHour {
         control["ttl"] = json!("1h");
     }
     if let Some(system) = messages.iter_mut().find(|m| m["role"] == "system") {
@@ -267,13 +268,20 @@ mod tests {
     }
 
     #[test]
-    fn one_hour_ttl_is_sent() {
+    fn one_hour_ttl_is_sent_to_anthropic_only() {
         let cache = OpenRouterCache {
             ttl: OpenRouterCacheTtl::OneHour,
             ..OpenRouterCache::default()
         };
-        let (_, found) = placed("google/gemini-2.5-pro", cache);
-        assert_eq!(found, [(0, json!({"type": "ephemeral", "ttl": "1h"}))]);
+        let one_hour = json!({"type": "ephemeral", "ttl": "1h"});
+        let (_, found) = placed("anthropic/claude-sonnet-4.5", cache.clone());
+        assert_eq!(found, [(0, one_hour.clone()), (3, one_hour)]);
+
+        // Gemini and Qwen caches always last five minutes.
+        for model in ["google/gemini-2.5-pro", "qwen/qwen3-max"] {
+            let (_, found) = placed(model, cache.clone());
+            assert_eq!(found, [(0, json!({"type": "ephemeral"}))], "{model}");
+        }
     }
 
     #[test]
