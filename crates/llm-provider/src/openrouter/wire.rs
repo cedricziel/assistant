@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use assistant_core::types::llm::OpenRouterRouting;
+use assistant_core::types::llm::{OpenRouterReasoning, OpenRouterRouting};
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
 
 use super::errors::{ErrorBody, body_error};
@@ -22,6 +22,8 @@ pub struct ChatRequest {
     pub models: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<OpenRouterRouting>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<OpenRouterReasoning>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
