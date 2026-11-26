@@ -14,7 +14,8 @@ the design behind this, see [ADR-0022](adr/adr-0022-mcp-on-rmcp.md).
 External tools can attach an interactive app to their result. The chat shows
 it below the tool call. See [MCP Apps](#mcp-apps).
 
-<!-- TODO: server tasks once merged -->
+As a server, `run-prompt` can run as a task that the client polls. See
+[Run prompts as tasks](#run-prompts-as-tasks).
 
 ## Connect an MCP client over stdio
 
@@ -147,7 +148,7 @@ The same handler serves stdio and HTTP.
 - every tool of the space's tool executor, except tools that need a rich
   client to render their output,
 - `run-prompt`, which sends a prompt through a full turn of the Persona and
-  returns the answer,
+  returns the answer (or a task, see [Run prompts as tasks](#run-prompts-as-tasks)),
 - `install-skill`, which installs a skill from a local path or from GitHub
   (`owner/repo[/path]`).
 
@@ -214,6 +215,63 @@ progress notifications out of a total of 1: `0` with the message
 
 If the client cancels a `run-prompt` request, the server cancels the
 Persona's turn and sends no response for that request.
+
+### Run prompts as tasks
+
+A turn can run for minutes. If the client declares the Tasks extension
+(`io.modelcontextprotocol/tasks`) in its `initialize` capabilities, `run-prompt`
+returns a task at once instead of blocking:
+
+```json
+{ "capabilities": { "extensions": { "io.modelcontextprotocol/tasks": {} } } }
+```
+
+The server advertises the extension in its own capabilities. A client without
+it gets the blocking result described above. Other tools always answer
+directly.
+
+The `tools/call` result is the task itself:
+
+```json
+{
+  "resultType": "task",
+  "taskId": "66dcd908-2a4e-4cfa-9d43-255362e82670",
+  "status": "working",
+  "ttlMs": 1800000,
+  "pollIntervalMs": 1000
+}
+```
+
+Then:
+
+- Poll `tasks/get` with `{"taskId": "..."}`. `pollIntervalMs` suggests 1
+  second.
+- `working` means the turn is running. The terminal statuses are `completed`,
+  `failed` and `cancelled`.
+- A `completed` task carries the `run-prompt` tool result in `result`: the
+  Persona's answer as a text block.
+- `failed` means the turn errored or the task outlived its TTL.
+- `tasks/cancel` with `{"taskId": "..."}` cancels the turn through the
+  orchestrator, and the task settles as `cancelled`. Cancelling a finished task
+  is accepted and keeps its status.
+
+A task belongs to the user and org that created it. `tasks/get` and
+`tasks/cancel` for another identity's task fail with an invalid-params error,
+`unknown task: <id>`, the same as for an unknown ID.
+
+Over HTTP, one task store serves the whole `/mcp` endpoint, so you can poll a
+task from a later request. Over stdio, tasks live in the `assistant mcp`
+process.
+
+Limits:
+
+- A task has a TTL of 30 minutes. A task still running then is marked `failed`
+  and its turn is aborted. A finished task stays observable for up to another
+  30 minutes, then is removed.
+- Tasks live in memory. A server restart loses them.
+- There is no `tasks/update` (it returns method-not-found) and no `tasks/list`.
+  The server never asks the client for input, so no task enters
+  `input_required`.
 
 ## Connect external MCP servers
 
