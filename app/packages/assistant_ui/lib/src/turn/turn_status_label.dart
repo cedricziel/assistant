@@ -1,4 +1,4 @@
-import 'chat_provider.dart' show TurnEventKind, TurnStatusSnapshot;
+import '../models/turn_status.dart';
 
 /// Returns a plain-language label describing the active turn's current
 /// activity, derived from the most recent SSE event.

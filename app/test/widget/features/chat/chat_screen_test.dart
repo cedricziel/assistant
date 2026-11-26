@@ -33,6 +33,11 @@ class _FakeChatNotifier extends ChatNotifier {
   @override
   void stopTurn() => stopCalls++;
 
+  int dismissCalls = 0;
+
+  @override
+  void dismissError() => dismissCalls++;
+
   @override
   Future<void> sendMessage(
     String message, {
@@ -664,6 +669,44 @@ void main() {
         findsOneWidget,
         reason: 'Should return to idle state after error dismissal',
       );
+    });
+
+    testWidgets('a stalled turn offers Skip, which calls stopTurn', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          isSending: true,
+          currentTurnStatus: TurnStatusSnapshot(
+            runId: 'run-1',
+            lastEventKind: TurnEventKind.thinking,
+            lastEventAt: DateTime.now().subtract(const Duration(seconds: 45)),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('turn_progress_card_skip_button')));
+      await tester.pump();
+
+      expect(res.notifier.stopCalls, 1);
+    });
+
+    testWidgets('the error banner shows the error and dismiss calls through', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(const ChatState(error: 'Server unreachable'));
+      await tester.pump();
+
+      expect(find.text('Server unreachable'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pump();
+
+      expect(res.notifier.dismissCalls, 1);
     });
 
     testWidgets('tapping stop_button and stop_action each call stopTurn', (

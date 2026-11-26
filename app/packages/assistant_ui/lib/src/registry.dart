@@ -26,10 +26,13 @@ const List<String> kAssistantUiElements = [
   'SuggestionChips',
   'SurfaceFrame',
   'ThreadDensityScope',
+  'ThreadEmptyState',
+  'ThreadErrorBanner',
   'TimelineEntryShell',
   'ToolCallBody',
   'ToolResultRendererScope',
   'ToolStatusIcon',
+  'TurnProgressCard',
   'UnknownInteractionCard',
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
@@ -58,12 +61,9 @@ const List<String> kAssistantUiElements = [
   // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'ThinkingBody', // slot: chat-element-library 7a
-  // 'ThreadEmptyState', // slot: chat-element-library 9
-  // 'ThreadErrorBanner', // slot: chat-element-library 9
   // 'ThreadViewport', // slot: chat-element-library 10
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c
-  // 'TurnProgressCard', // slot: chat-element-library 9
   // 'TypingIndicator', // slot: chat-element-library 8b
   // 'UnknownInteractionCard', // slot: tool-approval-prompts 13b
 ];
