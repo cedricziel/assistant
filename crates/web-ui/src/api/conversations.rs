@@ -28,6 +28,7 @@ use assistant_storage::{
     SqliteConversationStore,
 };
 
+use crate::errors::json_error;
 use crate::space::{Access, SpaceCtx};
 
 use super::attachments::AttachmentMetaResponse;
@@ -57,6 +58,24 @@ pub(crate) async fn owned_conversation(
         Err(e) => {
             warn!("Failed to load conversation {id}: {e}");
             Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
+        }
+    }
+}
+
+/// Like [`owned_conversation`], but every error uses the `{"error"}` envelope.
+pub(crate) async fn owned_conversation_json(
+    store: &SqliteConversationStore,
+    id: Uuid,
+) -> Result<ConversationRecord, Response> {
+    match store.get_conversation(id).await {
+        Ok(Some(conv)) => Ok(conv),
+        Ok(None) => Err(json_error(StatusCode::NOT_FOUND, "Conversation not found")),
+        Err(e) => {
+            warn!("Failed to load conversation {id}: {e}");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error",
+            ))
         }
     }
 }

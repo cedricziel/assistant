@@ -283,6 +283,8 @@ pub struct ApiErrorResponse {
         crate::api::conversations::delete_conversation,
         crate::api::conversations::update_conversation,
         crate::api::messages::send_message,
+        crate::api::feedback::set_message_feedback,
+        crate::api::feedback::delete_message_feedback,
         crate::api::messages::quick_message,
         crate::api::messages::send_voice_message,
         crate::api::messages::stream_run_events,
@@ -573,6 +575,9 @@ pub struct ApiErrorResponse {
             crate::oauth::ClientInfoSchema,
             // Common error response
             ErrorBody,
+            crate::api::feedback::SetMessageFeedbackRequest,
+            crate::api::feedback::MessageFeedbackResponse,
+            crate::api::feedback::FeedbackRating,
             ApiErrorResponse,
             // Organization management types
             OrgSummary,
@@ -849,6 +854,8 @@ mod tests {
         for expected in [
             "get /api/conversations",
             "post /api/conversations/{id}/messages",
+            "put /api/conversations/{id}/messages/{message_id}/feedback",
+            "delete /api/conversations/{id}/messages/{message_id}/feedback",
             "get /api/attachments/{id}",
             "get /api/capabilities",
             "post /api/webhooks",
