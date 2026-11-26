@@ -56,6 +56,10 @@ The chain of messages from the root to the Active Leaf. It is the only part of t
 
 The message that `conversations.active_leaf_id` points to, the tip of the Active Path. New messages append to it, and switching branches moves it.
 
+## Surface
+
+Model-authored interactive UI (a form, card or choice list) shown in the web chat. A Persona builds one with the `render-surface` tool from the assistant catalog, a trimmed A2UI v1.0 component set. The server validates and stores it, and the user answers it directly instead of replying in prose. See [ADR-0019](adr/adr-0019-generative-ui-a2ui.md).
+
 ## Naming Rules
 
 - Prefer explicit terms: `Persona`, `Subagent Process`, `A2A Profile`.
