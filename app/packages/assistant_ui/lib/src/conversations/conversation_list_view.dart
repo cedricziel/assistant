@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// A conversation as the list shows it.
@@ -15,6 +16,32 @@ class ConversationListItem {
 
   /// When the conversation was pinned, or `null` when it is not pinned.
   final DateTime? pinnedAt;
+}
+
+/// A request to show the actions of one conversation row.
+///
+/// The view only reports where and how the request started; the caller picks
+/// the presentation (a menu or a sheet).
+class ConversationActionRequest {
+  const ConversationActionRequest({
+    required this.item,
+    this.kind,
+    this.position,
+    this.anchorRect,
+  });
+
+  /// The row the request is for.
+  final ConversationListItem item;
+
+  /// The pointer that started the gesture, or `null` for keyboard activation.
+  final PointerDeviceKind? kind;
+
+  /// Global pointer position for a long-press or secondary tap, `null` for the
+  /// overflow button.
+  final Offset? position;
+
+  /// Global rect of the overflow button, `null` for row gestures.
+  final Rect? anchorRect;
 }
 
 /// Builds the optional trailing widget of one row.
@@ -36,6 +63,10 @@ typedef ConversationTrailingBuilder = Widget? Function(
 /// [selectedId] is highlighted. When any item has a `pinnedAt`, a "Pinned"
 /// header precedes the first pinned row; the caller supplies [items] already
 /// ordered, pinned rows first.
+///
+/// Row actions are requested through [onRequestActions] on long-press, on
+/// secondary tap and from a trailing overflow button shown while the row is
+/// hovered, focused or selected. The only swipe is end-to-start delete.
 class ConversationListView extends StatelessWidget {
   const ConversationListView({
     super.key,
@@ -46,6 +77,7 @@ class ConversationListView extends StatelessWidget {
     this.emptyState,
     this.trailingBuilder,
     this.selectedId,
+    this.onRequestActions,
     this.now,
   });
 
@@ -56,6 +88,7 @@ class ConversationListView extends StatelessWidget {
   final Widget? emptyState;
   final ConversationTrailingBuilder? trailingBuilder;
   final String? selectedId;
+  final ValueChanged<ConversationActionRequest>? onRequestActions;
   final DateTime? now;
 
   @override
@@ -91,21 +124,13 @@ class ConversationListView extends StatelessWidget {
                         child: Icon(Icons.delete, color: scheme.onError),
                       ),
                       confirmDismiss: (_) => onDelete(item.id),
-                      child: ListTile(
+                      child: _ConversationRow(
+                        item: item,
                         selected: item.id == selectedId,
-                        selectedTileColor: scheme.secondaryContainer,
-                        selectedColor: scheme.onSecondaryContainer,
-                        title: Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(
-                          _formatDate(reference, item.updatedAt),
-                          style: const TextStyle(fontSize: 11),
-                        ),
+                        subtitle: _formatDate(reference, item.updatedAt),
                         trailing: trailingBuilder?.call(context, item),
                         onTap: () => onSelect(item.id),
+                        onRequestActions: onRequestActions,
                       ),
                     );
                   },
@@ -136,6 +161,136 @@ class _PinnedHeader extends StatelessWidget {
         'Pinned',
         style: theme.textTheme.labelMedium?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+const _overflowLabel = 'Conversation actions';
+
+class _ConversationRow extends StatefulWidget {
+  const _ConversationRow({
+    required this.item,
+    required this.selected,
+    required this.subtitle,
+    required this.onTap,
+    this.trailing,
+    this.onRequestActions,
+  });
+
+  final ConversationListItem item;
+  final bool selected;
+  final String subtitle;
+  final Widget? trailing;
+  final VoidCallback onTap;
+  final ValueChanged<ConversationActionRequest>? onRequestActions;
+
+  @override
+  State<_ConversationRow> createState() => _ConversationRowState();
+}
+
+class _ConversationRowState extends State<_ConversationRow> {
+  final _buttonKey = GlobalKey();
+  bool _hovered = false;
+  bool _focused = false;
+
+  /// Pointer kind of the last press on the row and on the overflow button.
+  /// The button's kind is consumed on activation, so a keyboard activation
+  /// (no preceding pointer-down) reports `null`.
+  PointerDeviceKind? _rowKind;
+  PointerDeviceKind? _buttonKind;
+
+  void _request({PointerDeviceKind? kind, Offset? position, Rect? anchorRect}) {
+    widget.onRequestActions?.call(
+      ConversationActionRequest(
+        item: widget.item,
+        kind: kind,
+        position: position,
+        anchorRect: anchorRect,
+      ),
+    );
+  }
+
+  void _onOverflowPressed() {
+    final kind = _buttonKind;
+    _buttonKind = null;
+    final box = _buttonKey.currentContext?.findRenderObject();
+    final rect = box is RenderBox && box.hasSize
+        ? box.localToGlobal(Offset.zero) & box.size
+        : null;
+    _request(kind: kind, anchorRect: rect);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final canRequest = widget.onRequestActions != null;
+    final showOverflow =
+        canRequest && (_hovered || _focused || widget.selected);
+    final trailing = widget.trailing;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onFocusChange: (value) => setState(() => _focused = value),
+        child: Listener(
+          onPointerDown: (event) => _rowKind = event.kind,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onLongPressStart: canRequest
+                ? (details) =>
+                      _request(kind: _rowKind, position: details.globalPosition)
+                : null,
+            onSecondaryTapUp: canRequest
+                ? (details) =>
+                      _request(kind: _rowKind, position: details.globalPosition)
+                : null,
+            child: ListTile(
+              selected: widget.selected,
+              selectedTileColor: scheme.secondaryContainer,
+              selectedColor: scheme.onSecondaryContainer,
+              title: Text(
+                widget.item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                widget.subtitle,
+                style: const TextStyle(fontSize: 11),
+              ),
+              trailing: trailing == null && !showOverflow
+                  ? null
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ?trailing,
+                        if (showOverflow)
+                          Listener(
+                            onPointerDown: (event) => _buttonKind = event.kind,
+                            child: Semantics(
+                              label: _overflowLabel,
+                              button: true,
+                              onTap: _onOverflowPressed,
+                              excludeSemantics: true,
+                              child: Tooltip(
+                                message: _overflowLabel,
+                                child: IconButton(
+                                  key: _buttonKey,
+                                  icon: const Icon(Icons.more_horiz),
+                                  onPressed: _onOverflowPressed,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+              onTap: widget.onTap,
+            ),
+          ),
         ),
       ),
     );

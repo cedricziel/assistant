@@ -118,6 +118,7 @@ mod tests {
             tool_call_id: None,
             reason: "undecided",
             options: ApprovalOptions::once_only(),
+            suggested_rule: None,
             event_sink: None,
         })
         .await

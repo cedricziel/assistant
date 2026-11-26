@@ -248,4 +248,9 @@ void main() {
 
     expect(find.text('fake full v ok'), findsOneWidget);
   });
+
+  test('defaultToolResultRenderers has one renderer per kind', () {
+    final kinds = defaultToolResultRenderers().map((r) => r.kind).toList();
+    expect(kinds.toSet(), hasLength(kinds.length));
+  });
 }

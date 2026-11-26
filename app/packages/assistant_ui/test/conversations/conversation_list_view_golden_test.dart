@@ -2,6 +2,7 @@
 library;
 
 import 'package:assistant_ui/assistant_ui.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -51,6 +52,7 @@ void main() {
     ],
     'conversation_list_view_pinned': _pinnedAndRecent,
     'conversation_list_view_selected': _pinnedAndRecent,
+    'conversation_list_view_hover': _pinnedAndRecent,
   };
 
   for (final entry in cases.entries) {
@@ -67,6 +69,7 @@ void main() {
                   ? '3'
                   : null,
               onSelect: (_) {},
+              onRequestActions: (_) {},
               onDelete: (_) async => false,
               now: kGoldenNow,
               header: const Padding(
@@ -84,6 +87,14 @@ void main() {
           size: const Size(360, 460),
           brightness: brightness,
         );
+        if (entry.key == 'conversation_list_view_hover') {
+          final mouse = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+          );
+          addTearDown(mouse.removePointer);
+          await mouse.addPointer(location: Offset.zero);
+          await mouse.moveTo(tester.getCenter(find.text('Debug flaky CI job')));
+        }
         await tester.pump(const Duration(milliseconds: 50));
 
         await expectLater(
