@@ -1,6 +1,8 @@
 import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
+import 'components/feedback_buttons.dart';
+import 'components/feedback_comment_field.dart';
 import 'components/message_action_button.dart';
 import 'components/message_actions.dart';
 import 'components/message_timing_indicator.dart';
@@ -12,6 +14,8 @@ import 'components/thread_density_scope.dart';
 /// sorted by name. Element PRs insert their own component in sorted position.
 final List<WidgetbookComponent> kComponents = [
   approvalCardComponent,
+  feedbackButtonsComponent,
+  feedbackCommentFieldComponent,
   messageActionButtonComponent,
   messageActionsComponent,
   messageTimingIndicatorComponent,
