@@ -1,34 +1,33 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_ui/material_ui.dart';
 
-import '../../shared/platform/widgets.dart';
-import 'chat_provider.dart';
+import '../models/chat_message.dart';
 
-/// Visible representation of a [PendingMessage] sitting in
-/// [ChatState.pendingQueue].
+/// Visible representation of a [PendingMessage] sitting in the send queue.
 ///
-/// Rendered as a ghosted user bubble — muted text colour, no avatar,
-/// a "Queued" badge — so the user can see exactly what's queued and
-/// in what order. Long-press (mobile) / right-click (desktop) opens
-/// an [AdaptiveActionSheet] with a "Remove from queue" action.
+/// Rendered as a ghosted user bubble — muted text colour, no avatar, a
+/// "Queued" badge — so the user can see exactly what is queued and in what
+/// order. Long-press (mobile) and right-click (desktop) call [onLongPress];
+/// the element opens nothing itself, so the app decides what removing a
+/// queued message looks like.
 ///
 /// Specified by `openspec/changes/chat-stream-progress-ux/specs/.../
-/// chat-message-queue/spec.md` — "Queued messages render as visible
-/// ghost bubbles" and "Queued messages are removable before they send".
-class QueuedMessageBubble extends ConsumerWidget {
+/// chat-message-queue/spec.md` — "Queued messages render as visible ghost
+/// bubbles" and "Queued messages are removable before they send".
+class QueuedMessageBubble extends StatelessWidget {
   const QueuedMessageBubble({
     super.key,
     required this.message,
-    required this.index,
+    required this.onLongPress,
   });
 
   /// The queued message to render.
   final PendingMessage message;
 
-  /// Position of [message] in `pendingQueue`. Used by the remove action.
-  final int index;
+  /// Called on long-press and on secondary tap.
+  final VoidCallback onLongPress;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final mutedFg = colorScheme.onSurfaceVariant;
 
@@ -36,8 +35,8 @@ class QueuedMessageBubble extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onLongPress: () => _showRemoveSheet(context, ref),
-        onSecondaryTap: () => _showRemoveSheet(context, ref),
+        onLongPress: onLongPress,
+        onSecondaryTap: onLongPress,
         child: Align(
           alignment: AlignmentDirectional.centerEnd,
           child: ConstrainedBox(
@@ -94,24 +93,6 @@ class QueuedMessageBubble extends ConsumerWidget {
           ),
         ),
       ),
-    );
-  }
-
-  Future<void> _showRemoveSheet(BuildContext context, WidgetRef ref) async {
-    await showAdaptiveActionSheet<void>(
-      context: context,
-      title: 'Queued message',
-      message: message.text,
-      actions: [
-        AdaptiveActionSheetAction(
-          label: 'Remove from queue',
-          isDestructive: true,
-          onPressed: (ctx) {
-            ref.read(chatProvider.notifier).removeFromQueue(index);
-            Navigator.of(ctx).pop();
-          },
-        ),
-      ],
     );
   }
 }
