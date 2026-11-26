@@ -532,10 +532,19 @@ pub struct SseToolResultEvent {
     pub tool_name: String,
     /// Whether the tool call succeeded or failed.
     pub status: String,
-    /// The arguments passed to the tool (JSON string).
-    pub arguments: Option<String>,
+    /// The arguments passed to the tool, as a JSON object.
+    #[schema(value_type = Option<Object>)]
+    pub arguments: Option<serde_json::Value>,
     /// The tool's output or error message.
     pub result: Option<String>,
+    /// Identifier of the tool call this result answers, when the provider
+    /// supplied one.
+    pub tool_call_id: Option<String>,
+    /// Structured output of the tool, a JSON object with a `kind` tag. Absent
+    /// when the tool returned text only or the data exceeded the size limit.
+    /// Each `kind` is defined by a JSON Schema in `schemas/tool-results/`.
+    #[schema(value_type = Option<Object>)]
+    pub data: Option<serde_json::Value>,
 }
 
 /// SSE `subagent_started` event — a subagent has been spawned.
@@ -1124,7 +1133,8 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
     use uuid::Uuid;
-    use wiremock::MockServer;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use assistant_storage::{
         ConversationEventStore, ConversationStore, SqliteConversationStore, StorageLayer,
@@ -1497,6 +1507,131 @@ mod tests {
     }
 
     // -- GET /audio/{id} -------------------------------------------------------
+
+    // -- tool data replay ------------------------------------------------------
+
+    /// A tool that returns structured `data` next to its text content.
+    struct DataTool;
+
+    #[async_trait::async_trait]
+    impl assistant_core::ToolHandler for DataTool {
+        fn name(&self) -> &str {
+            "data-stub"
+        }
+        fn description(&self) -> &str {
+            "Returns structured data."
+        }
+        fn params_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}, "required": []})
+        }
+        async fn run(
+            &self,
+            _params: HashMap<String, serde_json::Value>,
+            _ctx: &assistant_core::types::conversation::ExecutionContext,
+        ) -> anyhow::Result<assistant_core::ToolOutput> {
+            Ok(assistant_core::ToolOutput::success("plain text")
+                .with_data(serde_json::json!({"kind": "terminal", "exit_code": 0})))
+        }
+    }
+
+    /// The `tool_result` frames in an SSE body, parsed from their `data:` lines.
+    fn tool_result_frames(sse: &str) -> Vec<serde_json::Value> {
+        sse.split("\n\n")
+            .filter(|frame| frame.lines().any(|l| l.trim() == "event: tool_result"))
+            .filter_map(|frame| {
+                let data: Vec<&str> = frame
+                    .lines()
+                    .filter_map(|l| l.strip_prefix("data:"))
+                    .map(str::trim_start)
+                    .collect();
+                serde_json::from_str(&data.join("\n")).ok()
+            })
+            .collect()
+    }
+
+    /// A turn whose tool returns `data` streams it live, and replaying the
+    /// persisted run log yields the identical `tool_result` frame.
+    #[tokio::test]
+    async fn replayed_tool_result_frame_carries_the_same_data() {
+        let server = MockServer::start().await;
+        // First LLM call asks for the tool; every later call answers in text.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "model": "test",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "data-stub", "arguments": {}}}]
+                },
+                "done": true
+            })))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        mount_llm_reply(&server, "all done").await;
+
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let mut config = assistant_core::types::agent::OrgConfig::default();
+        config.memory.enabled = false;
+        // The stub is not a built-in, so no rule would allow it otherwise.
+        config.permissions.allow = vec!["*".parse().unwrap()];
+        let (state, _) = state_over_config(
+            std::path::Path::new("/nonexistent/assistant-test-root"),
+            &server.uri(),
+            &[default_space(&storage)],
+            true,
+            config,
+        )
+        .await;
+        state.runtimes.register_ambient_tool(Arc::new(DataTool));
+        let conv_id = seed_conversation(&storage).await;
+
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"run the stub"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let run_id = resp
+            .headers()
+            .get("X-Run-Id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+            .expect("send_message sets X-Run-Id");
+        let live = String::from_utf8_lossy(&body_bytes(resp.into_body()).await).into_owned();
+
+        let replay = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/conversations/{conv_id}/runs/{run_id}/events/stream?since=0"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay.status(), StatusCode::OK);
+        let replayed = String::from_utf8_lossy(&body_bytes(replay.into_body()).await).into_owned();
+
+        let expected = serde_json::json!({"kind": "terminal", "exit_code": 0});
+        let live_frames = tool_result_frames(&live);
+        let replayed_frames = tool_result_frames(&replayed);
+        assert_eq!(live_frames.len(), 1, "one live tool_result: {live}");
+        assert_eq!(live_frames[0]["data"], expected, "live frame data");
+        assert_eq!(
+            replayed_frames, live_frames,
+            "replayed tool_result must equal the live frame; replay: {replayed}"
+        );
+    }
 
     // -- stream_run_events tests -----------------------------------------------
 
