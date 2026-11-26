@@ -115,6 +115,21 @@ impl ToolExecutor {
             .insert(handler.name().to_string(), handler);
     }
 
+    /// Register the `image-generate` tool, which resolves reference images
+    /// through `attachments`.
+    pub fn register_image_generate(
+        &self,
+        provider: Arc<dyn assistant_core::ImageGenerationProvider>,
+        attachments: Arc<dyn assistant_storage::AttachmentStore>,
+    ) {
+        use crate::builtins::ImageGenerateHandler;
+        let handler = Arc::new(ImageGenerateHandler::new(provider, attachments));
+        self.tool_handlers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(handler.name().to_string(), handler);
+    }
+
     /// Inject the subagent runner and register subagent tools.
     ///
     /// Registers `agent-spawn` and `agent-terminate`.  This must be called

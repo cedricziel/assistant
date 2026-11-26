@@ -575,6 +575,7 @@ dependencies = [
  "assistant-storage",
  "assistant-transcription",
  "async-trait",
+ "bytes",
  "chrono",
  "cron",
  "glob",
