@@ -8,15 +8,15 @@ import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_input_row.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/conversation_list.dart';
-import 'package:assistant_app/features/chat/empty_chat.dart';
-import 'package:assistant_app/features/chat/turn_progress_card.dart';
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../support/golden.dart';
 
 // Before-image of ChatInputRow, TurnProgressCard, ConversationList and
-// EmptyChat (chat-element-library PR 1b).
+// EmptyChat (chat-element-library PR 1b; re-pointed at the package
+// elements in PR 9).
 
 // -- ChatInputRow ----------------------------------------------------------
 
@@ -84,28 +84,12 @@ const _commands = [
 
 // -- TurnProgressCard ------------------------------------------------------
 
-class _FixedChatNotifier extends ChatNotifier {
-  _FixedChatNotifier(this._state);
-
-  final ChatState _state;
-
-  @override
-  Future<ChatState> build() async => _state;
-}
-
 Future<void> _pumpCard(WidgetTester tester, TurnStatusSnapshot snapshot) async {
   await pumpGolden(
     tester,
-    const TurnProgressCard(),
+    TurnProgressCard(status: snapshot, onSkip: () {}),
     size: const Size(420, 90),
-    overrides: [
-      chatProvider.overrideWith(
-        () => _FixedChatNotifier(ChatState(currentTurnStatus: snapshot)),
-      ),
-    ],
   );
-  // Let the AsyncNotifier build resolve, then render the card.
-  await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
 }
 
@@ -263,7 +247,11 @@ void main() {
 
   group('EmptyChat', () {
     testWidgets('light', (tester) async {
-      await pumpGolden(tester, const EmptyChat(), size: const Size(420, 300));
+      await pumpGolden(
+        tester,
+        const ThreadEmptyState(),
+        size: const Size(420, 300),
+      );
       await tester.pump(const Duration(milliseconds: 100));
       await expectGolden('empty_chat');
     });
@@ -271,7 +259,7 @@ void main() {
     testWidgets('dark', (tester) async {
       await pumpGolden(
         tester,
-        const EmptyChat(),
+        const ThreadEmptyState(),
         size: const Size(420, 300),
         brightness: Brightness.dark,
       );

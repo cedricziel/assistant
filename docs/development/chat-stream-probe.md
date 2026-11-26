@@ -111,7 +111,7 @@ contract, state machine, and observability hooks.
   `ChatNotifier — stall probe routing` — pins every state's
   behaviour (running keeps sink open, others recover, no-run-id
   bypasses).
-- `app/test/widget/features/chat/turn_progress_card_test.dart` —
+- `app/packages/assistant_ui/test/turn/turn_progress_card_test.dart` —
   Skip button visibility and tap-invokes-cancel.
 - `crates/web-ui/src/api/turns.rs::tests` — server-side state
   derivation, cancel idempotency, cross-conversation guard.

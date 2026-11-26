@@ -26,13 +26,22 @@ import 'chat_input_row.dart';
 import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
-import 'empty_chat.dart';
 import 'message_bubble.dart';
 import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
 import 'reconnect_banner.dart';
 import 'streaming_timeline_entry.dart';
-import 'turn_progress_card.dart';
+
+/// Feature flag for the stall-state "Skip" button that triggers
+/// `POST /api/conversations/{c}/turns/{t}/cancel`.
+///
+/// Default `true` — the cancel endpoint is live (PR #853). Flip to
+/// `false` as a kill switch if the cancel path misbehaves in the wild;
+/// the visual stall card remains regardless, only the affordance to
+/// cancel from the UI is gated. Per
+/// `openspec/changes/turn-status-endpoint/design.md` open question 1
+/// (gate "for one release while we measure cancel reliability").
+const bool kSkipButtonEnabled = true;
 
 /// Main chat screen.
 ///
@@ -439,44 +448,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       children: [
                         // Error banner.
                         if (chatState.error != null)
-                          Material(
-                            color: Theme.of(context).colorScheme.errorContainer,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.warning_amber_outlined,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onErrorContainer,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      chatState.error!,
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onErrorContainer,
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.close, size: 18),
-                                    onPressed: () {
-                                      ref
-                                          .read(chatProvider.notifier)
-                                          .dismissError();
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
+                          ThreadErrorBanner(
+                            message: chatState.error!,
+                            onDismiss: ref
+                                .read(chatProvider.notifier)
+                                .dismissError,
                           ),
 
                         // Loading indicator when fetching history.
@@ -491,7 +467,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               children: [
                                 chatState.messages.isEmpty &&
                                         chatState.pendingQueue.isEmpty
-                                    ? const EmptyChat()
+                                    ? const ThreadEmptyState()
                                     : ListView.builder(
                                         controller: _scrollController,
                                         padding: const EdgeInsets.symmetric(
@@ -628,7 +604,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         // In-flight turn progress card — renders nothing when no
                         // turn is active, an activity label otherwise, a stall
                         // label after 30s of silence.
-                        const TurnProgressCard(),
+                        TurnProgressCard(
+                          status: chatState.currentTurnStatus,
+                          showSkip: kSkipButtonEnabled,
+                          // The SSE stream surfaces the server-side
+                          // cancellation as `agent_error`, which the notifier
+                          // reconciles.
+                          onSkip: ref.read(chatProvider.notifier).stopTurn,
+                        ),
 
                         // Input row.
                         ChatInputRow(

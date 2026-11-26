@@ -11,12 +11,11 @@ import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/thread_density_scope.dart';
+import 'components/thread_empty_state.dart';
+import 'components/thread_error_banner.dart';
 import 'components/timeline_entry_shell.dart';
+import 'components/turn_progress_card.dart';
 import 'components/unknown_interaction_card.dart';
-
-// import 'components/thread_empty_state.dart'; // slot: chat-element-library 9
-
-// import 'components/thread_error_banner.dart'; // slot: chat-element-library 9
 
 // import 'components/thread_viewport.dart'; // slot: chat-element-library 10
 
@@ -27,8 +26,6 @@ import 'components/unknown_interaction_card.dart';
 // import 'components/tool_call_body.dart'; // slot: chat-element-library 6
 
 // import 'components/tool_status_icon.dart'; // slot: chat-element-library 6
-
-// import 'components/turn_progress_card.dart'; // slot: chat-element-library 9
 
 // import 'components/typing_indicator.dart'; // slot: chat-element-library 8b
 
@@ -72,14 +69,11 @@ final List<WidgetbookComponent> kComponents = [
   // surfaceFrameComponent, // slot: generative-ui-a2ui 13
   // terminalResultViewComponent, // slot: tool-result-renderers C4
   // thinkingBodyComponent, // slot: chat-element-library 7a
-  // threadEmptyStateComponent, // slot: chat-element-library 9
-  // threadErrorBannerComponent, // slot: chat-element-library 9
   // threadViewportComponent, // slot: chat-element-library 10
   // timelineEntryShellComponent, // slot: chat-element-library 5b
   // timelineEntryViewComponent, // slot: chat-element-library 7c
   // toolCallBodyComponent, // slot: chat-element-library 6
   // toolStatusIconComponent, // slot: chat-element-library 6
-  // turnProgressCardComponent, // slot: chat-element-library 9
   // typingIndicatorComponent, // slot: chat-element-library 8b
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
@@ -93,6 +87,9 @@ final List<WidgetbookComponent> kComponents = [
   starterPromptsComponent,
   suggestionChipsComponent,
   threadDensityScopeComponent,
+  threadEmptyStateComponent,
+  threadErrorBannerComponent,
   timelineEntryShellComponent,
+  turnProgressCardComponent,
   unknownInteractionCardComponent,
 ];
