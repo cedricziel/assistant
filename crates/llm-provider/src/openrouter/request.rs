@@ -8,6 +8,7 @@ use assistant_core::{
     ChatHistoryMessage, ChatOptions, ContentBlock, ResponseFormat, ToolChoice, ToolSpec,
 };
 
+use super::reasoning::attach_details;
 use super::wire::ChatRequest;
 use crate::chat_completions::build_raw_messages;
 
@@ -51,7 +52,11 @@ pub fn build_chat_request(
     };
     ChatRequest {
         model: settings.model.clone(),
-        messages: build_raw_messages(system_prompt, history),
+        messages: {
+            let mut messages = build_raw_messages(system_prompt, history);
+            attach_details(&mut messages, history, &settings.model);
+            messages
+        },
         tools: tools
             .iter()
             .map(|t| {

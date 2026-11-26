@@ -46,7 +46,7 @@ impl OpenRouterClient {
             .map_err(|e| anyhow::anyhow!("Failed to read OpenRouter response: {e}"))?;
         let response: ChatResponse = serde_json::from_str(&body)
             .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter response: {e}"))?;
-        response.into_llm_response(shows_reasoning(request))
+        response.into_llm_response(&request.model, shows_reasoning(request))
     }
 
     /// Streams `request`, forwarding text deltas to `sink`.
@@ -57,7 +57,7 @@ impl OpenRouterClient {
     ) -> anyhow::Result<LlmResponse> {
         let mut bytes = self.send(request).await?.bytes_stream();
         let mut lines = LineBuffer::default();
-        let mut acc = StreamAccumulator::new(shows_reasoning(request));
+        let mut acc = StreamAccumulator::new(&request.model, shows_reasoning(request));
         while let Some(chunk) = bytes.next().await {
             let chunk = chunk.map_err(|e| anyhow::anyhow!("OpenRouter stream failed: {e}"))?;
             for line in lines.push(&chunk) {

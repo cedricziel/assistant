@@ -6,7 +6,7 @@ use serde_json::Value;
 use assistant_core::{LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse};
 
 use super::errors::{ErrorBody, body_error};
-use super::reasoning::{budget_exhausted, visible_text};
+use super::reasoning::{budget_exhausted, merge_detail, provider_state, visible_text};
 use super::wire::Usage;
 
 /// Splits a byte stream into lines, decoding each line only once it is
@@ -97,13 +97,17 @@ pub struct StreamAccumulator {
     done: bool,
     show_reasoning: bool,
     reasoned: bool,
+    model: String,
+    reasoning_details: Vec<Value>,
 }
 
 impl StreamAccumulator {
-    /// With `show_reasoning` off, reasoning produces no chunks.
-    pub fn new(show_reasoning: bool) -> Self {
+    /// With `show_reasoning` off, reasoning produces no chunks. `model` is
+    /// the requested model, which stored reasoning is keyed by.
+    pub fn new(model: &str, show_reasoning: bool) -> Self {
         Self {
             show_reasoning,
+            model: model.to_owned(),
             ..Self::default()
         }
     }
@@ -150,6 +154,9 @@ impl StreamAccumulator {
             if !reasoning.is_empty() {
                 self.reasoned = true;
                 thinking.push_str(&reasoning);
+            }
+            for detail in choice.delta.reasoning_details {
+                merge_detail(&mut self.reasoning_details, detail);
             }
             if let Some(reason) = choice.finish_reason {
                 if reason == "error" {
@@ -222,7 +229,7 @@ impl StreamAccumulator {
                 items,
                 meta: self.meta,
                 thinking: None,
-                provider_state: None,
+                provider_state: provider_state(&self.model, self.reasoning_details),
             }));
         }
         Ok(LlmResponse::FinalAnswer(self.text, self.meta))
