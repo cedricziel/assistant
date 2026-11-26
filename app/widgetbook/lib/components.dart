@@ -2,14 +2,19 @@ import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
+import 'components/feedback_buttons.dart';
+import 'components/feedback_comment_field.dart';
 import 'components/message_action_button.dart';
 import 'components/message_actions.dart';
 import 'components/message_editor.dart';
 import 'components/message_timing_indicator.dart';
+import 'components/permission_rule_tile.dart';
+import 'components/question_card.dart';
 import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/thread_density_scope.dart';
+import 'components/timeline_entry_shell.dart';
 import 'components/unknown_interaction_card.dart';
 
 // import 'components/thread_empty_state.dart'; // slot: chat-element-library 9
@@ -62,7 +67,6 @@ final List<WidgetbookComponent> kComponents = [
   // messageEditorComponent, // slot: message-branching 9
   // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
   // planResultViewComponent, // slot: tool-result-renderers C5
-  // questionCardComponent, // slot: tool-approval-prompts 14a
   // regenerateMenuButtonComponent, // slot: message-branching 10
   // slashCommandMenuComponent, // slot: chat-element-library 11a
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
@@ -82,13 +86,18 @@ final List<WidgetbookComponent> kComponents = [
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   branchPickerComponent,
+  feedbackButtonsComponent,
+  feedbackCommentFieldComponent,
   messageActionButtonComponent,
   messageActionsComponent,
   messageEditorComponent,
   messageTimingIndicatorComponent,
+  permissionRuleTileComponent,
+  questionCardComponent,
   queuedMessageBubbleComponent,
   starterPromptsComponent,
   suggestionChipsComponent,
   threadDensityScopeComponent,
+  timelineEntryShellComponent,
   unknownInteractionCardComponent,
 ];

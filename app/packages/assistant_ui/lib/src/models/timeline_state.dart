@@ -1,3 +1,13 @@
+/// Widths below this resolve [TimelineDensity.compact].
+///
+/// Density thresholds describe content density, not layout; layout switches
+/// use `Breakpoints.wide` in the app.
+const double kTimelineCompactMaxWidth = 400;
+
+/// Widths above this resolve [TimelineDensity.expanded]. A width of exactly
+/// this value is still [TimelineDensity.normal].
+const double kTimelineExpandedMinWidth = 700;
+
 /// Display density for timeline entries, derived from viewport width.
 enum TimelineDensity {
   /// < 400px: minimal detail, icon + name only for most entries.
@@ -11,8 +21,8 @@ enum TimelineDensity {
 
   /// Derive density from the current viewport width.
   static TimelineDensity fromWidth(double width) {
-    if (width < 400) return TimelineDensity.compact;
-    if (width <= 700) return TimelineDensity.normal;
+    if (width < kTimelineCompactMaxWidth) return TimelineDensity.compact;
+    if (width <= kTimelineExpandedMinWidth) return TimelineDensity.normal;
     return TimelineDensity.expanded;
   }
 }
@@ -27,4 +37,8 @@ enum EntryState {
 
   /// A newer entry superseded this one — stays collapsed, reduced opacity.
   stale,
+
+  /// Paused until the user answers (a tool approval or a question). The entry
+  /// stays expanded, never auto-collapses and shows an attention accent.
+  awaitingInput,
 }

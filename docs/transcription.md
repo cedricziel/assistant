@@ -98,13 +98,13 @@ Any other recognized format is converted to 16 kHz mono WAV with ffmpeg before i
 
 ## How it works
 
-1. An interface (Slack, Signal, ...) receives a message with audio file attachments.
+1. An interface (web, Slack, Signal, Matrix, Mattermost, Nextcloud) receives a message with audio file attachments.
 2. The audio bytes are downloaded and passed to the configured `TranscriptionProvider`.
 3. The provider returns the transcript text.
-4. The transcript is prepended to the user's message (Slack uses `[Voice transcription]: <text>`; Signal uses `[Voice message]: <text>`).
-5. The agent processes the combined text normally.
+4. The transcript becomes the message text, before any text the user typed (Slack uses `[Voice transcription]: <text>`; the other messengers use `[Voice message]: <text>`; the web UI uses the plain transcript).
+5. The turn also carries the first recording. Models that hear audio receive it for that turn only; for every other model, and in later turns, the text stands in.
 
-If transcription fails, the Slack interface inserts a `[Voice message: transcription failed]` placeholder instead — the message is never silently dropped.
+Without `[transcription]`, or when transcription fails or returns no text, the message text is `[Voice message]`. The message is never dropped.
 
 ## Interface support
 

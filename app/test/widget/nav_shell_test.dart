@@ -311,4 +311,29 @@ void main() {
       );
     });
   });
+  group('NavShell — Breakpoints.wide boundary', () {
+    testWidgets('767 px shows the bottom navigation bar', (tester) async {
+      tester.view.physicalSize = const Size(767, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.byTooltip('Collapse sidebar'), findsNothing);
+    });
+
+    testWidgets('768 px shows the sidebar', (tester) async {
+      tester.view.physicalSize = const Size(768, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.byTooltip('Collapse sidebar'), findsOneWidget);
+    });
+  });
 }

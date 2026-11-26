@@ -13,7 +13,7 @@ use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, ToolHandler,
     types::conversation::ChannelType,
 };
-use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
+use assistant_transcription::{TranscriptionProvider, is_audio_mime};
 use async_trait::async_trait;
 use futures::SinkExt;
 use futures::stream::Stream;
@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use crate::mattermost::client::MattermostClient;
 
-use crate::common::{Reconnect, pending_cache};
+use crate::common::{Reconnect, VoiceCapture, pending_cache};
 
 /// Maximum audio download size (25 MB).
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
@@ -193,27 +193,20 @@ impl ChannelAdapter for MattermostAdapter {
                                         &allowed_channels,
                                         &allowed_users,
                                     ) {
-                                        // Check for audio file attachments requiring transcription.
-                                        if let Some(transcript) = transcribe_mattermost_files(
+                                        let typed = match &msg.content {
+                                            ChannelContent::Text(t) => t.as_str(),
+                                            _ => "",
+                                        };
+                                        if let Some(voice) = voice_from_files(
                                             &payload,
                                             &client,
-                                            &transcription,
-                                            &transcription_language,
+                                            transcription.as_deref(),
+                                            transcription_language.as_deref(),
+                                            typed,
                                         )
                                         .await
                                         {
-                                            // Prepend transcript to message text.
-                                            let existing = match &msg.content {
-                                                ChannelContent::Text(t) if !t.is_empty() => {
-                                                    Some(t.clone())
-                                                }
-                                                _ => None,
-                                            };
-                                            let text = match existing {
-                                                Some(t) => format!("{transcript}\n{t}"),
-                                                None => transcript,
-                                            };
-                                            msg.content = ChannelContent::Text(text);
+                                            msg.content = voice;
                                         }
                                         if tx.send(msg).await.is_err() {
                                             break; // receiver dropped
@@ -522,31 +515,19 @@ fn extract_file_ids(payload: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Check for audio file attachments in a posted event and transcribe them.
+/// Build the voice message for the audio files of a posted event.
 ///
-/// Returns a formatted `[Voice message]: ...` string if any audio was
-/// successfully transcribed, or `None` otherwise.
-async fn transcribe_mattermost_files(
+/// Returns `None` when the post has no usable audio file. `typed` is the
+/// post's own text, which follows the voice text.
+async fn voice_from_files(
     payload: &serde_json::Value,
     client: &MattermostClient,
-    transcription: &Option<Arc<dyn TranscriptionProvider>>,
-    language: &Option<String>,
-) -> Option<String> {
-    let file_ids = extract_file_ids(payload);
-    if file_ids.is_empty() {
-        return None;
-    }
-
-    let provider = match transcription {
-        Some(p) => p,
-        None => {
-            debug!("mattermost: post has file_ids but no transcription provider configured");
-            return None;
-        }
-    };
-
-    let mut transcripts = Vec::new();
-    for file_id in &file_ids {
+    transcription: Option<&dyn TranscriptionProvider>,
+    language: Option<&str>,
+    typed: &str,
+) -> Option<ChannelContent> {
+    let mut capture = VoiceCapture::new(transcription, language, "mattermost");
+    for file_id in &extract_file_ids(payload) {
         // Fetch file metadata to check MIME type.
         let info = match client.get_file_info(file_id).await {
             Ok(i) => i,
@@ -584,30 +565,17 @@ async fn transcribe_mattermost_files(
             continue;
         }
 
-        let request = TranscriptionRequest {
-            audio_data: data,
-            mime_type: info.mime_type.clone(),
-            filename: Some(info.name.clone()),
-            language: language.clone(),
-        };
-        match provider.transcribe(request).await {
-            Ok(result) => transcripts.push(result.text),
-            Err(e) => {
-                warn!(error = %e, file_id, "mattermost: audio transcription failed");
-            }
-        }
+        capture
+            .add(data, &info.mime_type, Some(info.name.as_str()))
+            .await;
     }
-
-    if transcripts.is_empty() {
-        return None;
-    }
-
-    Some(format!("[Voice message]: {}", transcripts.join(" ")))
+    capture.into_content(typed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::test_support::StubTranscriber;
 
     #[test]
     fn with_transcription_sets_provider() {
@@ -772,24 +740,80 @@ mod tests {
         assert!(ids.is_empty());
     }
 
-    #[tokio::test]
-    async fn transcribe_mattermost_files_no_provider_returns_none() {
-        let payload = serde_json::json!({
+    fn voice_post_payload() -> serde_json::Value {
+        serde_json::json!({
             "data": {
                 "post": serde_json::json!({
                     "id": "p1",
                     "file_ids": ["f1"]
                 }).to_string()
             }
-        });
-        let client =
-            crate::mattermost::client::MattermostClient::new("http://localhost", "tok").unwrap();
-        let result = transcribe_mattermost_files(&payload, &client, &None, &None).await;
-        assert!(result.is_none());
+        })
+    }
+
+    /// A Mattermost server that serves one `audio/ogg` file, `f1`.
+    async fn server_with_voice_file() -> (wiremock::MockServer, MattermostClient) {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/files/f1/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "f1",
+                "mime_type": "audio/ogg",
+                "name": "voice.ogg",
+                "size": 4
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/files/f1"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"OggS".as_ref()))
+            .mount(&server)
+            .await;
+        let client = MattermostClient::new(server.uri(), "tok").unwrap();
+        (server, client)
     }
 
     #[tokio::test]
-    async fn transcribe_mattermost_files_no_file_ids_returns_none() {
+    async fn voice_with_provider_carries_transcript_and_recording() {
+        let (_server, client) = server_with_voice_file().await;
+        let provider = StubTranscriber::saying("hello");
+        let content = voice_from_files(&voice_post_payload(), &client, Some(&provider), None, "")
+            .await
+            .expect("audio file yields voice content");
+        match content {
+            ChannelContent::Voice {
+                data,
+                mime_type,
+                text,
+            } => {
+                assert_eq!(data, b"OggS");
+                assert_eq!(mime_type, "audio/ogg");
+                assert_eq!(text, "[Voice message]: hello");
+            }
+            other => panic!("expected Voice, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_without_provider_is_kept_with_placeholder_text() {
+        let (_server, client) = server_with_voice_file().await;
+        let content = voice_from_files(&voice_post_payload(), &client, None, None, "see this")
+            .await
+            .expect("a voice message is kept without a provider");
+        match content {
+            ChannelContent::Voice { data, text, .. } => {
+                assert_eq!(data, b"OggS");
+                assert_eq!(text, "[Voice message]\nsee this");
+            }
+            other => panic!("expected Voice, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_from_files_without_file_ids_returns_none() {
         let payload = serde_json::json!({
             "data": {
                 "post": serde_json::json!({
@@ -798,10 +822,12 @@ mod tests {
                 }).to_string()
             }
         });
-        let client =
-            crate::mattermost::client::MattermostClient::new("http://localhost", "tok").unwrap();
-        let result = transcribe_mattermost_files(&payload, &client, &None, &None).await;
-        assert!(result.is_none());
+        let client = MattermostClient::new("http://localhost", "tok").unwrap();
+        assert!(
+            voice_from_files(&payload, &client, None, None, "text only")
+                .await
+                .is_none()
+        );
     }
 
     // ── parse_platform_id ──────────────────────────────────────────────────

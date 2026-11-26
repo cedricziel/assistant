@@ -20,7 +20,6 @@ mod ollama;
 mod openai_tts;
 mod openrouter;
 pub mod openrouter_tts;
-pub mod pipeline;
 mod provider;
 mod whisper;
 
@@ -31,8 +30,8 @@ use assistant_core::types::transcription::{
     TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsFormat, TtsProviderKind,
 };
 
+use assistant_audio::{AudioPipeline, essence};
 pub use audio_store::AudioStore;
-pub use converter::AudioFormat;
 pub use converting::ConvertingTranscriber;
 pub use deepgram::DeepgramProvider;
 pub use deepgram_tts::DeepgramTtsProvider;
@@ -40,7 +39,6 @@ pub use ollama::OllamaTranscriptionProvider;
 pub use openai_tts::OpenAITtsProvider;
 pub use openrouter::OpenRouterTranscriber;
 pub use openrouter_tts::{OpenRouterTts, OpenRouterTtsSettings};
-use pipeline::AudioPipeline;
 pub use provider::{
     TranscriptionProvider, TranscriptionRequest, TranscriptionResult, TtsProvider, TtsRequest,
     TtsResult,
@@ -75,15 +73,6 @@ pub const AUDIO_MIME_TYPES: &[&str] = &[
     "video/webm",
     "video/quicktime",
 ];
-
-/// `mime` lowercased, without parameters such as `; codecs=opus`.
-pub fn essence(mime: &str) -> String {
-    mime.split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_lowercase()
-}
 
 /// Returns `true` if `mime` is an audio (or video) type to transcribe.
 pub fn is_audio_mime(mime: &str) -> bool {

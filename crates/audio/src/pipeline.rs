@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::Context;
 use tokio::process::Command;
 
-use crate::converter::AudioFormat;
+use crate::format::AudioFormat;
 
 /// Audio handed to [`AudioPipeline::transcode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,7 +300,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{AudioInput, AudioPipeline};
-    use crate::converter::AudioFormat;
+    use crate::format::AudioFormat;
 
     /// Media made by ffmpeg's lavfi sources, or `None` without ffmpeg.
     fn generate(args: &[&str], format: &str) -> Option<Vec<u8>> {
