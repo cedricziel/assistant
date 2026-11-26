@@ -142,7 +142,7 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 20. Voice-native chat (audio input and replies)
 
-- [ ] 20.1 Write failing tests: the web-ui voice send path and the Signal, Matrix, Mattermost and Nextcloud voice handlers attach the recording as `ContentBlock::Audio`, with the transcript as text, or `[Voice message]` when `[transcription]` is absent (no longer dropped). Confirm red. Add the `Audio` variant, implement, then verify.
+- [x] 20.1 Write failing tests: the web-ui voice send path and the Signal, Matrix, Mattermost and Nextcloud voice handlers attach the recording as `ContentBlock::Audio`, with the transcript as text, or `[Voice message]` when `[transcription]` is absent (no longer dropped). Confirm red. Add the `Audio` variant, implement, then verify.
 - [x] 20.1a Write failing tests: the orchestrator keeps audio only for the current turn and only for providers with audio input support; `history.rs` drops `Audio` from past messages; the Anthropic, OpenAI, Moonshot and Ollama builders drop `Audio`. Confirm red. Implement, then verify.
 - [ ] 20.1b Write failing tests for OpenRouter audio input: `audio_input` config parsing; an `input_audio` part with conversion to WAV for formats outside `formats`; the transcript part prefixed "Transcript (may contain errors):"; `max_secs` cutoff; a 400 on `input_audio` leads to one repeat without audio, then disabled. Confirm red. Implement, then verify.
 - [ ] 20.2 Write failing tests: a voice turn with audio-capable provider support requests audio options; a non-voice turn does not. Confirm red. Implement in the orchestrator, then verify.
