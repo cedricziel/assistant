@@ -35,6 +35,7 @@ use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::attachments::AttachmentMetaResponse;
+use super::branches::{BranchInfo, project_branches};
 use super::surfaces::{SurfaceSummary, surface_summaries};
 use super::{ApiState, sse_response};
 
@@ -276,6 +277,19 @@ pub struct MessageSummary {
     /// Omitted for every other message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+    /// The message this one follows in the conversation tree. Omitted for a
+    /// root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
+    /// This message's place among its versions, present only when it has
+    /// siblings. On a user message: the edited versions. On an assistant
+    /// message: the versions of the reply it ends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<BranchInfo>,
+    /// On a user message whose reply has no visible assistant row: the
+    /// versions of that reply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_branch: Option<BranchInfo>,
     /// The calling user's verdict on this message. Omitted when the caller has
     /// not rated it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -599,6 +613,17 @@ pub async fn get_conversation(
         Err(response) => return response,
     };
 
+    Json(conversation_detail(&ctx, &state, &store, &conv).await).into_response()
+}
+
+/// The conversation `conv` with its active path, as `GET` returns it.
+pub(crate) async fn conversation_detail(
+    ctx: &SpaceCtx,
+    state: &ApiState,
+    store: &SqliteConversationStore,
+    conv: &ConversationRecord,
+) -> ConversationDetail {
+    let conv_id = conv.id;
     let history = store.load_history(conv_id).await.unwrap_or_default();
     let tts_configured = state.tts_provider.is_some();
 
@@ -657,6 +682,11 @@ pub async fn get_conversation(
             .collect(),
     );
 
+    let mut branches = project_branches(store, conv_id, &history, |m| {
+        !m.content.is_empty() || attachments_by_msg.contains_key(&m.id)
+    })
+    .await;
+
     let messages = history
         .into_iter()
         .filter(|m| !matches!(m.role, MessageRole::System | MessageRole::Tool))
@@ -682,20 +712,22 @@ pub async fn get_conversation(
                 tts_available,
                 attachments,
                 finish_reason: m.finish_reason.map(|r| r.as_str().to_string()),
+                parent_id: m.parent_id,
+                branch: branches.branch.remove(&m.id),
+                reply_branch: branches.reply_branch.remove(&m.id),
                 feedback,
             }
         })
         .collect();
 
-    Json(ConversationDetail {
+    ConversationDetail {
         id: conv.id,
-        title: display_title(&conv),
+        title: display_title(conv),
         created_at: conv.created_at,
         updated_at: conv.updated_at,
         messages,
         surfaces,
-    })
-    .into_response()
+    }
 }
 
 /// `DELETE /api/conversations/{id}` — delete a conversation and all its messages.
