@@ -518,14 +518,6 @@ impl Orchestrator {
         Arc::clone(&self.conversation_configs)
     }
 
-    /// Options for agent-loop calls.
-    fn chat_options(&self) -> assistant_core::ChatOptions {
-        assistant_core::ChatOptions {
-            parallel_tool_calls: self.llm_config.parallel_tool_calls,
-            ..Default::default()
-        }
-    }
-
     /// `config` with its context window capped at what `llm` reports now.
     /// Read per turn, so a window the provider learns after startup (or a
     /// `/model` override) applies on the next turn.
@@ -943,27 +935,14 @@ impl Orchestrator {
                     }
                 });
                 let result = llm
-                    .chat_with(
-                        &system_prompt,
-                        &history,
-                        &all_specs,
-                        &self.chat_options(),
-                        Some(chunk_tx),
-                    )
+                    .chat_streaming(&system_prompt, &history, &all_specs, Some(chunk_tx))
                     .await;
                 // Wait for the forwarding task to drain any buffered tokens before
                 // continuing — ensures callers see all Token events after this await.
                 forward_handle.await.ok();
                 result
             } else {
-                llm.chat_with(
-                    &system_prompt,
-                    &history,
-                    &all_specs,
-                    &self.chat_options(),
-                    None,
-                )
-                .await
+                llm.chat(&system_prompt, &history, &all_specs).await
             };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
@@ -1352,13 +1331,7 @@ impl Orchestrator {
                     }
                 });
                 let result = llm
-                    .chat_with(
-                        &system_prompt,
-                        &history,
-                        &tool_specs,
-                        &self.chat_options(),
-                        Some(chunk_tx),
-                    )
+                    .chat_streaming(&system_prompt, &history, &tool_specs, Some(chunk_tx))
                     .instrument(iteration_span.clone())
                     .await;
                 // Wait for the forwarding task to drain any buffered tokens before
@@ -1366,15 +1339,9 @@ impl Orchestrator {
                 forward_handle.await.ok();
                 result
             } else {
-                llm.chat_with(
-                    &system_prompt,
-                    &history,
-                    &tool_specs,
-                    &self.chat_options(),
-                    None,
-                )
-                .instrument(iteration_span.clone())
-                .await
+                llm.chat(&system_prompt, &history, &tool_specs)
+                    .instrument(iteration_span.clone())
+                    .await
             };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {

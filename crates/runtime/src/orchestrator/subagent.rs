@@ -254,26 +254,14 @@ impl SubagentRunner for Orchestrator {
                     });
                     let result = self
                         .llm
-                        .chat_with(
-                            &system_prompt,
-                            &history,
-                            &tool_specs,
-                            &self.chat_options(),
-                            Some(chunk_tx),
-                        )
+                        .chat_streaming(&system_prompt, &history, &tool_specs, Some(chunk_tx))
                         .instrument(iteration_span.clone())
                         .await;
                     forward_handle.await.ok();
                     result
                 } else {
                     self.llm
-                        .chat_with(
-                            &system_prompt,
-                            &history,
-                            &tool_specs,
-                            &self.chat_options(),
-                            None,
-                        )
+                        .chat(&system_prompt, &history, &tool_specs)
                         .instrument(iteration_span.clone())
                         .await
                 };

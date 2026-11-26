@@ -81,8 +81,8 @@ Layer: server
 Depends on: PR 2
 Parallel with: 3, 4, 5
 
-- [x] 6.1 RED: projector tests in `crates/runtime/src/projection/mod.rs`. `SseProjector` maps `SurfaceUpdate` to `surface_update` with the exact snake_case payload (`surface_id`, `tool_call_id?`, `anchor_message_id`, `anchor_call_index`, `title`, `fallback_text`, `status`, `messages`). `CliProjector` prints `fallback_text`. `A2aProjector` (`crates/web-ui/src/a2a/projection.rs:67`) emits a text part.
-- [x] 6.2 Add `OrchestratorEvent::SurfaceUpdate` (`stream_event.rs`). Project it in all three projectors and every other exhaustive `match` over `OrchestratorEvent` (no `_` arm). Comment that the CLI/A2A arms exist for totality only. Nothing emits it yet. GREEN.
+- [ ] 6.1 RED: projector tests in `crates/runtime/src/projection/mod.rs`. `SseProjector` maps `SurfaceUpdate` to `surface_update` with the exact snake_case payload (`surface_id`, `tool_call_id?`, `anchor_message_id`, `anchor_call_index`, `title`, `fallback_text`, `status`, `messages`). `CliProjector` prints `fallback_text`. `A2aProjector` (`crates/web-ui/src/a2a/projection.rs:67`) emits a text part.
+- [ ] 6.2 Add `OrchestratorEvent::SurfaceUpdate` (`stream_event.rs`). Project it in all three projectors and every other exhaustive `match` over `OrchestratorEvent` (no `_` arm). Comment that the CLI/A2A arms exist for totality only. Nothing emits it yet. GREEN.
 
 ## PR 7 — feat(tool-executor): render-surface handler and [ui] org settings
 

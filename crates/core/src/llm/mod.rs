@@ -7,7 +7,6 @@
 
 pub mod call_context;
 pub mod embedding;
-pub mod options;
 pub mod provider;
 pub mod stream_chunk;
 pub mod tool_spec;

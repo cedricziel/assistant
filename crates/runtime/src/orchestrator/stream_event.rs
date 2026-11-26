@@ -115,30 +115,6 @@ pub enum OrchestratorEvent {
         /// Retrieve via `GET /api/audio/{audio_id}`.
         audio_id: String,
     },
-
-    /// A generative-UI surface was created, or its status changed.
-    ///
-    /// Carries A2UI v1.0 messages untouched in `messages`. A status change
-    /// (`active` to `submitted`) re-emits the event with an empty `messages`
-    /// list. The CLI and A2A projectors render only `fallback_text`.
-    SurfaceUpdate {
-        /// UUID of the surface.
-        surface_id: String,
-        /// Provider-assigned tool-call ID, when the surface came from a tool call.
-        tool_call_id: Option<String>,
-        /// Id of the tool-call message the surface is anchored to.
-        anchor_message_id: String,
-        /// Index of the call within the anchor message.
-        anchor_call_index: u32,
-        /// Human-readable surface title.
-        title: String,
-        /// Plain-text rendering for clients that cannot render the surface.
-        fallback_text: String,
-        /// Surface status: `"active"` or `"submitted"`.
-        status: String,
-        /// A2UI v1.0 messages; empty for a status-only update.
-        messages: Vec<serde_json::Value>,
-    },
 }
 
 #[cfg(test)]
