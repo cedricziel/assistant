@@ -158,6 +158,9 @@ class _FakeConversationsApi extends ConversationsApi {
   /// (the default) the request fails, like an unreachable server.
   List<(String, String, String)>? serverMessages;
 
+  /// `finish_reason` per message id; ids not listed have none.
+  final Map<String, String> finishReasons = {};
+
   /// When set, `getConversation` waits for it before answering.
   Completer<void>? gate;
 
@@ -201,7 +204,8 @@ class _FakeConversationsApi extends ConversationsApi {
                   ..content = content
                   ..createdAt = DateTime(2024, 1, 1)
                   ..turn = 0
-                  ..ttsAvailable = false,
+                  ..ttsAvailable = false
+                  ..finishReason = finishReasons[mid],
               ),
           ]),
       ),
@@ -3503,6 +3507,29 @@ void main() {
     });
   });
 
+  group('loadConversation', () {
+    testWidgets('shows a cancelled reply as stopped', (tester) async {
+      final fakeApi = _FakeApiClient();
+      fakeApi.conversationsFake.serverMessages = [
+        ('u1', 'user', 'go'),
+        ('a1', 'assistant', 'The capital'),
+        ('a2', 'assistant', 'Done'),
+      ];
+      fakeApi.conversationsFake.finishReasons['a1'] = 'cancelled';
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      await notifier.loadConversation('conv-1');
+      await tester.pump();
+
+      final messages = notifier.state.value!.messages;
+      expect(messages.map((m) => m.status), [
+        MessageStatus.ok,
+        MessageStatus.stopped,
+        MessageStatus.ok,
+      ]);
+    });
+  });
+
   group('stopTurn', () {
     const cancelledFrame = AgentErrorEvent(
       reason: AgentErrorReason.cancelled,
@@ -3829,6 +3856,28 @@ void main() {
       expect(s.isStopping, isFalse);
       expect(s.messages.map((m) => m.content), ['go', 'server reply']);
     });
+
+    testWidgets(
+      'the stall-recovery refresh maps a cancelled reply to stopped',
+      (tester) async {
+        final r = await start(tester, queued: 0);
+        r.api.cancelResults.add(TurnState.unknown);
+        r.api.conversationsFake.serverMessages = [
+          ('u1', 'user', 'go'),
+          ('a1', 'assistant', 'The capital'),
+        ];
+        r.api.conversationsFake.finishReasons['a1'] = 'cancelled';
+        await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+        r.notifier.stopTurn();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump();
+
+        final reply = r.notifier.state.value!.messages.last;
+        expect(reply.content, 'The capital');
+        expect(reply.status, MessageStatus.stopped);
+      },
+    );
 
     testWidgets('grace expiry with a running probe detaches with the '
         'unconfirmed-stop error', (tester) async {
