@@ -18,6 +18,8 @@ export 'src/branch_picker.dart';
 export 'src/code/code_block.dart';
 export 'src/composer/queued_message_bubble.dart';
 export 'src/conversations/conversation_list_view.dart';
+export 'src/conversations/conversation_search_results_view.dart';
+export 'src/conversations/highlighted_segments.dart';
 export 'src/feedback/feedback_buttons.dart';
 export 'src/feedback/feedback_comment_field.dart';
 export 'src/highlight/code_token.dart';
@@ -28,6 +30,7 @@ export 'src/interactions/question_card.dart';
 export 'src/interactions/unknown_interaction_card.dart';
 export 'src/message_actions.dart';
 export 'src/message_editor.dart';
+export 'src/regenerate_menu_button.dart';
 export 'src/registry.dart';
 export 'src/scopes/thread_density_scope.dart';
 export 'src/scopes/tool_result_renderer_scope.dart';
@@ -37,9 +40,13 @@ export 'src/surface_frame.dart';
 export 'src/theme/assistant_ui_colors.dart';
 export 'src/theme/assistant_ui_spacing.dart';
 export 'src/theme/code_theme.dart';
+export 'src/thread/thread_empty_state.dart';
+export 'src/thread/thread_error_banner.dart';
 export 'src/timeline/timeline_entry_shell.dart';
 export 'src/timing/message_timing_indicator.dart';
 export 'src/tool_results/generic_tool_result_view.dart';
+export 'src/turn/turn_progress_card.dart';
+export 'src/turn/turn_status_label.dart';
 
 // export 'src/tool_results/code_diff_result_view.dart'; // slot: tool-result-renderers C7
 
@@ -58,5 +65,3 @@ export 'src/tool_results/generic_tool_result_view.dart';
 // export 'src/tool_results/sources_result_view.dart'; // slot: tool-result-renderers C4
 
 // export 'src/tool_results/terminal_result_view.dart'; // slot: tool-result-renderers C4
-
-// export 'src/turn/turn_progress_card.dart'; // slot: chat-element-library 9
