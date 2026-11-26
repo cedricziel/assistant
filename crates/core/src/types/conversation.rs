@@ -207,8 +207,8 @@ impl ExecutionContext {
 }
 
 /// Lightweight bundle of optional identity fields threaded through the
-/// orchestrator turn pipeline, plus the two per-turn flags the worker takes
-/// from the bus request (`interactive`, `run_id`).
+/// orchestrator turn pipeline, plus the per-turn settings the worker takes
+/// from the bus request (`interactive`, `run_id`, `anchor`, `user_message_id`).
 ///
 /// Callers that have an authenticated user populate this from
 /// [`AuthContext`](crate::auth::AuthContext); legacy / system turns use
@@ -222,6 +222,10 @@ pub struct TurnIdentity {
     pub interactive: bool,
     /// The run id (see [`ExecutionContext::run_id`]).
     pub run_id: Option<Uuid>,
+    /// Where the turn's rows attach in the message tree.
+    pub anchor: crate::bus_messages::TurnAnchor,
+    /// The id the turn persists its user row under. `None` lets the store pick.
+    pub user_message_id: Option<Uuid>,
     /// Model for this turn only. Beats the conversation's `/model` override
     /// and the default, and is never stored on the conversation.
     pub model_override: Option<String>,

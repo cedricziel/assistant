@@ -165,7 +165,10 @@ pub async fn send_message(
                     SubmitTurn::new(content, conv_id, Interface::Web)
                         .with_auth(&auth)
                         .with_request_id(submit_request_id)
-                        .with_attachments(user_attachment_ids),
+                        .with_attachments(user_attachment_ids)
+                        // The turn may run in another process, which has no
+                        // access to the sink registered above.
+                        .with_relay_events(true),
                 )
                 .await;
             let _ = tx.send(result);
@@ -207,7 +210,7 @@ pub(crate) async fn stream_turn_to_sse(
     run_id: Uuid,
     conv_id: Uuid,
     opts: RunOptions,
-    mut event_rx: mpsc::Receiver<OrchestratorEvent>,
+    event_rx: mpsc::Receiver<OrchestratorEvent>,
     turn_result_rx: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
 ) -> Response {
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
@@ -217,6 +220,16 @@ pub(crate) async fn stream_turn_to_sse(
         std::sync::Arc::new(ctx.storage.push_subscription_store());
     let event_store = ctx.storage.conversation_event_store();
     let run_broadcaster = state.run_broadcaster.clone();
+    // Events of a turn another process runs arrive over the bus; the stream
+    // ends with the turn either way.
+    let relay = match state.runtime(ctx).await {
+        Ok(runtime) => Some(runtime.orchestrator.run_event_relay(conv_id, run_id)),
+        Err(_) => {
+            warn!("No runtime to relay events for run {run_id}; streaming local events only");
+            None
+        }
+    };
+    let mut run_events = RunEvents::new(event_rx, relay, turn_result_rx);
 
     // Emit run_started event (sequence 0) to the durable log.
     let run_id_str = run_id.to_string();
@@ -259,11 +272,11 @@ pub(crate) async fn stream_turn_to_sse(
         const THINKING_BATCH_SIZE: usize = 20;
 
         // A closed SSE channel only stops forwarding. The loop keeps draining
-        // `event_rx` so the durable log and live tail see the whole turn, and
+        // `run_events` so the durable log and live tail see the whole turn, and
         // a reconnecting client can resume from `events/stream?since=N`.
         let mut client_gone = false;
 
-        while let Some(orch_event) = event_rx.recv().await {
+        while let Some(orch_event) = run_events.next().await {
             // Serialization is owned by the shared projection layer; this loop
             // keeps only transport concerns (batching, persistence, push, seq).
             // A single OrchestratorEvent yields exactly one SSE frame today.
@@ -431,7 +444,7 @@ pub(crate) async fn stream_turn_to_sse(
             Errored(String),
         }
         let (reply_text, reply_message_id, reply_attachment_ids, terminal) =
-            match turn_result_rx.await {
+            match run_events.into_turn_result().await {
                 Ok(Ok(result)) => (
                     result.answer,
                     result.message_id,
@@ -535,6 +548,90 @@ pub(crate) async fn stream_turn_to_sse(
         response.headers_mut().insert("X-Run-Id", hv);
     }
     response
+}
+
+/// How often the runner looks for relayed events while the turn is quiet.
+/// Events that arrive back to back are read without waiting.
+const RELAY_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+type TurnOutcome =
+    Result<anyhow::Result<assistant_runtime::TurnResult>, tokio::sync::oneshot::error::RecvError>;
+
+/// The events of one turn, from whichever side delivers them: the local sink
+/// when a worker in this process runs the turn, the bus relay when a worker in
+/// another process does. It ends with the turn's outcome, not with the sink,
+/// because a sink nobody consumes never closes.
+struct RunEvents {
+    local: mpsc::Receiver<OrchestratorEvent>,
+    local_open: bool,
+    relay: Option<assistant_runtime::RunEventRelay>,
+    /// The last poll of the relay returned an event, so the next one goes
+    /// straight back without waiting.
+    relay_busy: bool,
+    turn_result: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+    outcome: Option<TurnOutcome>,
+}
+
+impl RunEvents {
+    fn new(
+        local: mpsc::Receiver<OrchestratorEvent>,
+        relay: Option<assistant_runtime::RunEventRelay>,
+        turn_result: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+    ) -> Self {
+        Self {
+            local,
+            local_open: true,
+            relay,
+            relay_busy: false,
+            turn_result,
+            outcome: None,
+        }
+    }
+
+    /// The next event, or `None` once the turn has ended and every event it
+    /// emitted has been handed out.
+    async fn next(&mut self) -> Option<OrchestratorEvent> {
+        while self.outcome.is_none() {
+            if self.relay_busy {
+                match self.poll_relay().await {
+                    Some(event) => return Some(event),
+                    None => self.relay_busy = false,
+                }
+            }
+            tokio::select! {
+                event = self.local.recv(), if self.local_open => match event {
+                    Some(event) => return Some(event),
+                    None => self.local_open = false,
+                },
+                outcome = &mut self.turn_result => self.outcome = Some(outcome),
+                _ = tokio::time::sleep(RELAY_POLL_INTERVAL), if self.relay.is_some() => {
+                    if let Some(event) = self.poll_relay().await {
+                        return Some(event);
+                    }
+                }
+            }
+        }
+        // The turn is over. Everything it emitted was queued before its
+        // outcome was sent, so draining both sides now loses nothing.
+        if let Ok(event) = self.local.try_recv() {
+            return Some(event);
+        }
+        self.poll_relay().await
+    }
+
+    async fn poll_relay(&mut self) -> Option<OrchestratorEvent> {
+        let event = self.relay.as_ref()?.next().await;
+        self.relay_busy = event.is_some();
+        event
+    }
+
+    /// The turn's outcome, waiting for it if the events ended first.
+    async fn into_turn_result(self) -> TurnOutcome {
+        match self.outcome {
+            Some(outcome) => outcome,
+            None => self.turn_result.await,
+        }
+    }
 }
 
 // -- Run event replay / tail -------------------------------------------------
@@ -2272,6 +2369,83 @@ mod tests {
             replayed_frames, live_frames,
             "replayed tool_result must equal the live frame; replay: {replayed}"
         );
+    }
+
+    // -- split topology: the worker runs in another runtime ---------------------
+
+    /// Two runtimes over one `space.db` and one bus: the first serves HTTP and
+    /// runs no worker, the second runs the turn worker, as in the packaged
+    /// install where the web process and the orchestrator are separate.
+    async fn split_topology(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let mut config = assistant_core::types::agent::OrgConfig::default();
+        config.memory.enabled = false;
+        config.permissions.allow = vec!["*".parse().unwrap()];
+        let root = std::path::Path::new("/nonexistent/assistant-test-root");
+        let (web, _) = state_over_config(
+            root,
+            llm_url,
+            &[default_space(&storage)],
+            false,
+            config.clone(),
+        )
+        .await;
+        let (worker, _) =
+            state_over_config(root, llm_url, &[default_space(&storage)], true, config).await;
+        worker.runtimes.register_ambient_tool(Arc::new(DataTool));
+        // Keep the worker's runtimes alive for as long as the test runs.
+        std::mem::forget(worker);
+        (web, storage)
+    }
+
+    #[tokio::test]
+    async fn a_turn_run_by_another_runtime_streams_to_the_sse_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "model": "test",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "data-stub", "arguments": {}}}]
+                },
+                "done": true
+            })))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        mount_llm_reply(&server, "all done").await;
+        let (state, storage) = split_topology(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+
+        let resp = post_message(state, conv_id, "run the stub").await;
+        let frames = tokio::time::timeout(std::time::Duration::from_secs(15), sse_frames(resp))
+            .await
+            .expect("the stream ends with the turn");
+
+        let events: Vec<&str> = frames.iter().map(|(event, _, _)| event.as_str()).collect();
+        assert!(
+            events.contains(&"tool_result"),
+            "tool result relayed: {events:?}"
+        );
+        let tokens: String = frames
+            .iter()
+            .filter(|(event, _, _)| event == "token")
+            .map(|(_, data, _)| data.as_str())
+            .collect();
+        assert_eq!(tokens, "all done", "tokens relayed: {events:?}");
+        let (last, data, _) = frames.last().unwrap();
+        assert_eq!(
+            last, "done",
+            "the turn's own terminal frame closes the stream"
+        );
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["content"], "all done");
+        let sequences: Vec<_> = frames.iter().filter_map(|(_, _, id)| *id).collect();
+        let expected: Vec<i64> = (0..frames.len() as i64).collect();
+        assert_eq!(sequences, expected, "one writer numbers the frames");
     }
 
     /// A persisted `surface_update` frame replays with the exact `data:` bytes

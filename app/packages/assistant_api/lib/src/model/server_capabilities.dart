@@ -3,6 +3,7 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:assistant_api/src/model/ui_capabilities.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -11,11 +12,16 @@ part 'server_capabilities.g.dart';
 /// Server capability flags.
 ///
 /// Properties:
+/// * [ui] - Generative-UI settings of the selected space's org.
 /// * [voiceReceive] - Whether the server can serve TTS audio for messages (TTS configured).
 /// * [voiceSend] - Whether the server can accept voice messages (STT configured).
 @BuiltValue()
 abstract class ServerCapabilities
     implements Built<ServerCapabilities, ServerCapabilitiesBuilder> {
+  /// Generative-UI settings of the selected space's org.
+  @BuiltValueField(wireName: r'ui')
+  UiCapabilities get ui;
+
   /// Whether the server can serve TTS audio for messages (TTS configured).
   @BuiltValueField(wireName: r'voice_receive')
   bool get voiceReceive;
@@ -50,6 +56,11 @@ class _$ServerCapabilitiesSerializer
     ServerCapabilities object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
+    yield r'ui';
+    yield serializers.serialize(
+      object.ui,
+      specifiedType: const FullType(UiCapabilities),
+    );
     yield r'voice_receive';
     yield serializers.serialize(
       object.voiceReceive,
@@ -85,6 +96,13 @@ class _$ServerCapabilitiesSerializer
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'ui':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType(UiCapabilities),
+          ) as UiCapabilities;
+          result.ui.replace(valueDes);
+          break;
         case r'voice_receive':
           final valueDes = serializers.deserialize(
             value,

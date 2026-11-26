@@ -76,10 +76,10 @@ Each numbered group is one PR in the stack, in order.
 
 ## 12. MCP Apps rendering in Flutter (PR 12)
 
-- [ ] 12.1 Add failing unit tests for `McpAppBridge` over a fake port: `ui/initialize` reply, tool input then result after `initialized`, size-change handling, teardown, open-link confirmation, rejection of cross-server calls; confirm red
-- [ ] 12.2 Implement `McpAppBridge` and a CSP builder (with unit tests for declared domains and the default policy) and verify the tests pass
-- [ ] 12.3 Add `McpAppFrame` in its own file with a widget test using a fake platform view: renders below the chip, labelled with the server name, asks confirmation for non-read-only tool calls; web uses a sandboxed `srcdoc` iframe, iOS and macOS use `webview_flutter`
-- [ ] 12.4 Render `McpAppFrame` from `tool_call_chip.dart` for records with an app, extending its widget tests for live and history-reloaded conversations
+- [x] 12.1 Add failing unit tests for `McpAppBridge` over a fake port: `ui/initialize` reply, tool input then result after `initialized`, size-change handling, teardown, open-link confirmation, rejection of cross-server calls; confirm red
+- [x] 12.2 Implement `McpAppBridge` and a CSP builder (with unit tests for declared domains and the default policy) and verify the tests pass
+- [x] 12.3 Add `McpAppFrame` in its own file with a widget test using a fake platform view: renders below the chip, labelled with the server name, asks confirmation for non-read-only tool calls; web uses a sandboxed `srcdoc` iframe, iOS and macOS use `webview_flutter`
+- [x] 12.4 Render `McpAppFrame` from `tool_call_chip.dart` for records with an app, extending its widget tests for live and history-reloaded conversations
 - [ ] 12.5 Add a Playwright scenario with a fixture app, update screenshot baselines, and document the visual diff in the PR
 
 ## 13. Docs and ADR (PR 13)

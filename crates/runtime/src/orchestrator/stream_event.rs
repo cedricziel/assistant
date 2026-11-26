@@ -6,6 +6,7 @@
 //! live tool-call indicators, status messages, and completion badges.
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::interaction::InteractionOutcome;
 
@@ -15,7 +16,12 @@ use crate::interaction::InteractionOutcome;
 /// [`Orchestrator::register_token_sink`].  The sender is consumed (removed)
 /// by the worker once the turn is complete; callers should drain their
 /// receiver until it is closed to know the turn is finished.
-#[derive(Debug, Clone)]
+///
+/// The serde form (`{"type": "token", "data": "…"}`) is the wire format of the
+/// run event relay (`turn.event`), so renaming a variant breaks a worker and a
+/// streaming process of different versions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum OrchestratorEvent {
     /// An incremental text token produced by the LLM.
     Token(String),

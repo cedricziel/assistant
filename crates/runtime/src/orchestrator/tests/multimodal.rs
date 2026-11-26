@@ -66,7 +66,14 @@ async fn prepare_history_with_attachments_emits_multimodal_user() {
     }];
 
     let (_conv_store, history, _turn) = orch
-        .prepare_history("look at this", conv_id, attachments, &[], &orch.agent_id)
+        .prepare_history(
+            "look at this",
+            conv_id,
+            attachments,
+            &[],
+            &orch.agent_id,
+            &TurnIdentity::default(),
+        )
         .await
         .unwrap();
 
@@ -96,7 +103,14 @@ async fn prepare_history_without_attachments_emits_plain_text() {
 
     let conv_id = Uuid::new_v4();
     let (_conv_store, history, _turn) = orch
-        .prepare_history("hello", conv_id, Vec::new(), &[], &orch.agent_id)
+        .prepare_history(
+            "hello",
+            conv_id,
+            Vec::new(),
+            &[],
+            &orch.agent_id,
+            &TurnIdentity::default(),
+        )
         .await
         .unwrap();
 
