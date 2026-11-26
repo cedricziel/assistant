@@ -11,12 +11,17 @@ part 'update_conversation_request.g.dart';
 /// Body for `PATCH /api/conversations/{id}`. At least one field is required.
 ///
 /// Properties:
+/// * [archived] - `true` archives the conversation (clearing its pin), `false` unarchives it. Pinning an archived conversation also unarchives it. Combining `pinned: true` with `archived: true` is rejected.
 /// * [pinned] - `true` pins the conversation, `false` unpins it.
 /// * [title] - New title. Trimmed; must be 1 to 200 characters after trimming.
 @BuiltValue()
 abstract class UpdateConversationRequest
     implements
         Built<UpdateConversationRequest, UpdateConversationRequestBuilder> {
+  /// `true` archives the conversation (clearing its pin), `false` unarchives it. Pinning an archived conversation also unarchives it. Combining `pinned: true` with `archived: true` is rejected.
+  @BuiltValueField(wireName: r'archived')
+  bool? get archived;
+
   /// `true` pins the conversation, `false` unpins it.
   @BuiltValueField(wireName: r'pinned')
   bool? get pinned;
@@ -55,6 +60,13 @@ class _$UpdateConversationRequestSerializer
     UpdateConversationRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
+    if (object.archived != null) {
+      yield r'archived';
+      yield serializers.serialize(
+        object.archived,
+        specifiedType: const FullType.nullable(bool),
+      );
+    }
     if (object.pinned != null) {
       yield r'pinned';
       yield serializers.serialize(
@@ -94,6 +106,14 @@ class _$UpdateConversationRequestSerializer
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'archived':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(bool),
+          ) as bool?;
+          if (valueDes == null) continue;
+          result.archived = valueDes;
+          break;
         case r'pinned':
           final valueDes = serializers.deserialize(
             value,

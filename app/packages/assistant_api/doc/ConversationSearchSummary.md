@@ -8,6 +8,7 @@ import 'package:assistant_api/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**archivedAt** | [**DateTime**](DateTime.md) | When the conversation was archived; absent when it is not archived. | [optional] 
 **createdAt** | [**DateTime**](DateTime.md) |  | 
 **id** | **String** |  | 
 **matches** | [**BuiltList&lt;MessageSearchMatch&gt;**](MessageSearchMatch.md) | Up to 3 matching messages, best first; empty when only the title matched. | 

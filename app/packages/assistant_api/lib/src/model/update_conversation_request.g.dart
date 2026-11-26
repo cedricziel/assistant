@@ -8,6 +8,8 @@ part of 'update_conversation_request.dart';
 
 class _$UpdateConversationRequest extends UpdateConversationRequest {
   @override
+  final bool? archived;
+  @override
   final bool? pinned;
   @override
   final String? title;
@@ -16,7 +18,8 @@ class _$UpdateConversationRequest extends UpdateConversationRequest {
           [void Function(UpdateConversationRequestBuilder)? updates]) =>
       (UpdateConversationRequestBuilder()..update(updates))._build();
 
-  _$UpdateConversationRequest._({this.pinned, this.title}) : super._();
+  _$UpdateConversationRequest._({this.archived, this.pinned, this.title})
+      : super._();
   @override
   UpdateConversationRequest rebuild(
           void Function(UpdateConversationRequestBuilder) updates) =>
@@ -30,6 +33,7 @@ class _$UpdateConversationRequest extends UpdateConversationRequest {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is UpdateConversationRequest &&
+        archived == other.archived &&
         pinned == other.pinned &&
         title == other.title;
   }
@@ -37,6 +41,7 @@ class _$UpdateConversationRequest extends UpdateConversationRequest {
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, archived.hashCode);
     _$hash = $jc(_$hash, pinned.hashCode);
     _$hash = $jc(_$hash, title.hashCode);
     _$hash = $jf(_$hash);
@@ -46,6 +51,7 @@ class _$UpdateConversationRequest extends UpdateConversationRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'UpdateConversationRequest')
+          ..add('archived', archived)
           ..add('pinned', pinned)
           ..add('title', title))
         .toString();
@@ -56,6 +62,10 @@ class UpdateConversationRequestBuilder
     implements
         Builder<UpdateConversationRequest, UpdateConversationRequestBuilder> {
   _$UpdateConversationRequest? _$v;
+
+  bool? _archived;
+  bool? get archived => _$this._archived;
+  set archived(bool? archived) => _$this._archived = archived;
 
   bool? _pinned;
   bool? get pinned => _$this._pinned;
@@ -72,6 +82,7 @@ class UpdateConversationRequestBuilder
   UpdateConversationRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _archived = $v.archived;
       _pinned = $v.pinned;
       _title = $v.title;
       _$v = null;
@@ -95,6 +106,7 @@ class UpdateConversationRequestBuilder
   _$UpdateConversationRequest _build() {
     final _$result = _$v ??
         _$UpdateConversationRequest._(
+          archived: archived,
           pinned: pinned,
           title: title,
         );
