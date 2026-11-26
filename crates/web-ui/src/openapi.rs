@@ -40,7 +40,7 @@ use utoipa::{
 
 use crate::a2a::handlers;
 use crate::api::attachments::AttachmentMetaResponse;
-use crate::api::capabilities::ServerCapabilities;
+use crate::api::capabilities::{ServerCapabilities, UiCapabilities};
 use crate::api::conversations::{
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageFeedbackSummary,
     MessageSummary, ToolCallSummary, UpdateConversationRequest,
@@ -52,6 +52,7 @@ use crate::api::messages::{
     SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
 };
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
+use crate::api::surfaces::SurfaceSummary;
 use crate::api::{
     account::{ChangePasswordRequest, UpdateCurrentUserRequest, UpdateCurrentUserResponse},
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
@@ -497,6 +498,7 @@ pub struct ApiErrorResponse {
             DeviceCodeOAuthFlow,
             // Capabilities
             ServerCapabilities,
+            UiCapabilities,
             // Conversation API types
             AttachmentMetaResponse,
             ConversationSummary,
@@ -507,6 +509,7 @@ pub struct ApiErrorResponse {
             crate::api::branches::SwitchBranchRequest,
             MessageFeedbackSummary,
             ToolCallSummary,
+            SurfaceSummary,
             CreateConversationRequest,
             UpdateConversationRequest,
             ApiSendMessageRequest,

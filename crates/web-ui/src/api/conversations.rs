@@ -27,7 +27,7 @@ use assistant_core::types::conversation::MessageRole;
 use assistant_storage::{
     AttachmentStore as _, ConversationEvent, ConversationPatch, ConversationRecord,
     ConversationStore, MessageFeedbackRow, MessageFeedbackStore as _, MetadataUpdate,
-    SqliteConversationStore,
+    SqliteConversationStore, SurfaceStore as _,
 };
 
 use crate::errors::json_error;
@@ -36,6 +36,7 @@ use crate::space::{Access, SpaceCtx};
 
 use super::attachments::AttachmentMetaResponse;
 use super::branches::{BranchInfo, project_branches};
+use super::surfaces::{SurfaceSummary, surface_summaries};
 use super::{ApiState, sse_response};
 
 // -- Caller scoping ----------------------------------------------------------
@@ -109,6 +110,8 @@ pub struct ConversationDetail {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub messages: Vec<MessageSummary>,
+    /// Generative UI surfaces anchored on the returned messages.
+    pub surfaces: Vec<SurfaceSummary>,
 }
 
 /// Summary of a single tool invocation within an assistant message.
@@ -642,6 +645,20 @@ pub(crate) async fn conversation_detail(
         }
     }
 
+    // Surfaces whose anchor is on the returned (active) path.
+    let surfaces = match ctx
+        .storage
+        .surface_store()
+        .list_for_conversation(conv_id)
+        .await
+    {
+        Ok(rows) => surface_summaries(&history, rows),
+        Err(e) => {
+            warn!(error = %e, "Failed to load surfaces for conversation");
+            Vec::new()
+        }
+    };
+
     // The caller's feedback for the whole conversation, in one query.
     let mut feedback_by_msg: HashMap<Uuid, MessageFeedbackSummary> = ctx
         .storage
@@ -709,6 +726,7 @@ pub(crate) async fn conversation_detail(
         created_at: conv.created_at,
         updated_at: conv.updated_at,
         messages,
+        surfaces,
     }
 }
 
@@ -1067,6 +1085,93 @@ mod tests {
         m
     }
 
+    /// Seed `user, assistant(tool call)` plus a surface anchored on the
+    /// assistant row, optionally followed by more user messages, and return
+    /// the loaded conversation JSON.
+    async fn conversation_with_surface(follow_up: bool) -> (serde_json::Value, Uuid) {
+        use assistant_core::types::conversation::Message;
+        use assistant_storage::{NewSurface, SurfaceStore as _};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Surfaces")).await.unwrap();
+        let mut user = Message::user(conv.id, "plan a trip");
+        user.turn = 1;
+        store.save_message(&user).await.unwrap();
+        let mut assistant = Message::assistant(conv.id, "");
+        assistant.turn = 1;
+        assistant.tool_calls_json =
+            Some(serde_json::json!([{"name": "render-surface", "params": {}}]).to_string());
+        store.save_message(&assistant).await.unwrap();
+        let surface = storage
+            .surface_store()
+            .create(&NewSurface {
+                id: Uuid::new_v4(),
+                conversation_id: conv.id,
+                turn: 1,
+                anchor_message_id: assistant.id,
+                anchor_call_index: 0,
+                tool_call_id: Some("call_1".into()),
+                title: "Trip".into(),
+                fallback_text: "Pick a date".into(),
+                catalog_id: "cat".into(),
+                protocol_version: "1.0".into(),
+                components: serde_json::json!([{"id": "root", "component": "Text", "text": "hi"}]),
+                data_model: serde_json::json!({"when": "soon"}),
+                send_data_model: true,
+            })
+            .await
+            .unwrap();
+        if follow_up {
+            let mut next = Message::user(conv.id, "never mind");
+            next.turn = 2;
+            store.save_message(&next).await.unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        (body_json(resp.into_body()).await, surface.id)
+    }
+
+    #[tokio::test]
+    async fn get_conversation_includes_surfaces_with_anchor_and_answerable() {
+        let (json, surface_id) = conversation_with_surface(false).await;
+        let surfaces = json["surfaces"].as_array().expect("surfaces preload");
+        assert_eq!(surfaces.len(), 1);
+        let s = &surfaces[0];
+        assert_eq!(s["surface_id"], surface_id.to_string());
+        assert_eq!(s["tool_call_id"], "call_1");
+        assert_eq!(s["status"], "active");
+        assert_eq!(s["answerable"], true);
+        assert_eq!(s["anchor_call_index"], 0);
+        assert_eq!(
+            s["anchor_message_id"], json["messages"][1]["id"],
+            "anchored on the assistant tool-call message"
+        );
+        assert_eq!(
+            s["messages"][0]["createSurface"]["surfaceId"],
+            surface_id.to_string()
+        );
+        assert!(s.get("submitted_action").is_none());
+    }
+
+    #[tokio::test]
+    async fn get_conversation_surface_closes_after_a_later_user_message() {
+        let (json, _) = conversation_with_surface(true).await;
+        assert_eq!(json["surfaces"][0]["answerable"], false);
+        assert_eq!(json["surfaces"][0]["status"], "active");
+    }
+
     #[tokio::test]
     async fn history_joins_same_named_calls_by_ordinal_without_ids() {
         let calls = serde_json::json!([
@@ -1203,6 +1308,70 @@ mod tests {
         let rows = vec![tool_row("bash", "ok", Some("call_7"), Some("ok"), None)];
         let tc = history_tool_calls(calls, rows).await;
         assert_eq!(tc[0]["tool_call_id"], "call_7");
+    }
+
+    /// The rows a compaction leaves behind: a summary row below the kept
+    /// turn, and the kept rows with their original turn and tool metadata.
+    #[tokio::test]
+    async fn history_after_compaction_joins_kept_calls_with_their_own_data() {
+        use assistant_core::types::conversation::{Message, MessageRole};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Compacted")).await.unwrap();
+
+        let mut summary = Message::assistant(conv.id, "[Conversation summary]");
+        summary.turn = 4;
+        let mut user = Message::user(conv.id, "run both");
+        user.turn = 5;
+        let mut assistant = Message::assistant(conv.id, "");
+        assistant.turn = 6;
+        assistant.tool_calls_json = Some(
+            serde_json::json!([
+                {"name": "bash", "params": {}, "id": "c1"},
+                {"name": "bash", "params": {}, "id": "c2"},
+            ])
+            .to_string(),
+        );
+        let mut rows = vec![summary, user, assistant];
+        for (id, out) in [("c1", "A"), ("c2", "B")] {
+            let mut m = Message::new(conv.id, MessageRole::Tool, out);
+            m.turn = 6;
+            m.skill_name = Some("bash".into());
+            m.tool_call_id = Some(id.into());
+            m.tool_status = Some("ok".into());
+            m.tool_data_json =
+                Some(serde_json::json!({"kind": "terminal", "stdout": out}).to_string());
+            rows.push(m);
+        }
+        for m in &rows {
+            store.save_message(m).await.unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let tc = json["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|m| m["tool_calls"].as_array().cloned())
+            .expect("kept assistant message carries tool_calls");
+        for (call, (id, out)) in tc.iter().zip([("c1", "A"), ("c2", "B")]) {
+            assert_eq!(call["tool_call_id"], id);
+            assert_eq!(call["result"], out);
+            assert_eq!(call["data"]["stdout"], out);
+        }
     }
 
     #[tokio::test]

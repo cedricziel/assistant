@@ -31,6 +31,7 @@ pub mod personas;
 pub mod push;
 pub mod skills;
 pub mod spaces;
+pub mod surfaces;
 pub mod templates;
 pub mod tool_permission_rules;
 pub mod turns;

@@ -288,12 +288,19 @@ impl Orchestrator {
 
                     // Extract identity from the bus message so tools see who
                     // initiated this turn.
+                    // The run's identity is fixed here, before the first run, so
+                    // a redelivery (same `batch_id` / bus id) rebuilds the same
+                    // rows: the run id stamps every row, and the user row keeps
+                    // one id unless the producer pre-assigned another.
+                    let run_id = msg.batch_id.unwrap_or(msg.id);
                     let identity = TurnIdentity {
                         user_id: turn_req.user_id.map(UserId::from),
                         org_id: turn_req.org_id.map(OrgId::from),
                         space_id: turn_req.space_id.map(SpaceId::from),
                         interactive: turn_req.interactive,
-                        run_id: msg.batch_id,
+                        run_id: Some(run_id),
+                        anchor: turn_req.anchor.clone(),
+                        user_message_id: turn_req.user_message_id.or(Some(run_id)),
                         model_override: turn_req.model_override.clone(),
                     };
 
