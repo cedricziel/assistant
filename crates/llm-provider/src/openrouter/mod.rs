@@ -228,6 +228,7 @@ impl LlmProvider for OpenRouterProvider {
                 tool_choice: info.tool_choice,
                 parallel_tool_calls: info.parallel_tool_calls,
                 json_schema: info.json_schema,
+                audio_input: false,
             })
     }
 
@@ -1290,6 +1291,7 @@ mod tests {
                     tool_choice: true,
                     parallel_tool_calls: true,
                     json_schema: true,
+                    audio_input: false,
                 },
             ),
             (
