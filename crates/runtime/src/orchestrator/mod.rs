@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
-use crate::history::{FinalAnswerMeta, persist_final_answer};
+use crate::history::{FinalAnswerMeta, TurnHistory, persist_final_answer};
 use turn_timing::{CallMarks, TurnTimer};
 
 // ── Submodules ────────────────────────────────────────────────────────────────
@@ -41,6 +41,7 @@ mod prompt;
 pub mod stream_event;
 mod turn_cancellations;
 mod turn_control;
+mod turn_registry;
 mod turn_timing;
 
 mod subagent;
@@ -52,6 +53,7 @@ mod tests;
 
 pub use stream_event::OrchestratorEvent;
 pub use submit::SubmitTurn;
+pub use turn_registry::{TurnLease, TurnMode, TurnRegistry};
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -155,6 +157,12 @@ pub const TURN_CANCELLED_BEFORE_START_MARKER: &str = "cancelled_before_start";
 /// 60 second heartbeat keeps a long tool run or a turn waiting on a human
 /// from being redelivered to a second worker.
 pub const DEFAULT_BUS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How long a worker defers a turn whose conversation is held by an exclusive
+/// turn. Each deferral is a redelivery, and the bus gives up after
+/// `MAX_TURN_REDELIVERIES`, so this must stay long enough for one branching
+/// turn to finish.
+pub const DEFAULT_TURN_DEFER_DELAY: Duration = Duration::from_secs(15);
 
 /// The result of a single orchestrator turn.
 pub struct TurnResult {
@@ -314,6 +322,11 @@ pub struct Orchestrator {
     /// Also remembers requests cancelled before a worker claimed them, so the
     /// worker skips them.
     pub(crate) turn_cancellations: tokio::sync::RwLock<turn_cancellations::TurnCancellations>,
+    /// The turns running in this process, per conversation.
+    pub(crate) turn_registry: TurnRegistry,
+    /// How long the worker defers a turn that claims a conversation held by an
+    /// exclusive (branching) turn. Tests shorten it with `with_turn_defer_delay`.
+    pub(crate) turn_defer_delay: Duration,
     /// OTel metric instruments for GenAI and operational metrics.
     pub(crate) metrics: crate::MetricsRecorder,
     /// Active assistant agent ID for memory/workspace conversation scoping.
@@ -396,6 +409,8 @@ impl Orchestrator {
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             turn_cancellations: tokio::sync::RwLock::new(Default::default()),
+            turn_registry: TurnRegistry::default(),
+            turn_defer_delay: DEFAULT_TURN_DEFER_DELAY,
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
             compaction_config,
@@ -458,6 +473,12 @@ impl Orchestrator {
         self
     }
 
+    /// Override how long the worker defers a turn held back by an exclusive lease.
+    pub fn with_turn_defer_delay(mut self, delay: Duration) -> Self {
+        self.turn_defer_delay = delay;
+        self
+    }
+
     /// Inject a [`Clock`](assistant_core::clock::Clock) implementation.
     ///
     /// Production binaries leave this as the default `SystemClock`. Tests
@@ -499,6 +520,18 @@ impl Orchestrator {
     /// i.e. a turn is in flight under this id. Exposed primarily for tests.
     pub async fn is_turn_in_flight(&self, request_id: Uuid) -> bool {
         self.turn_cancellations.read().await.contains(request_id)
+    }
+
+    /// The registry of turns running in this process. It is per process: a
+    /// turn another service runs against the same database is not visible
+    /// here.
+    pub fn turn_registry(&self) -> &TurnRegistry {
+        &self.turn_registry
+    }
+
+    /// True while any turn runs in `conversation_id` on this orchestrator.
+    pub fn conversation_turn_in_flight(&self, conversation_id: Uuid) -> bool {
+        self.turn_registry.in_flight(conversation_id)
     }
 
     /// Attach an [`AudioStore`] so that audio produced by the `voice-response`
@@ -1254,10 +1287,13 @@ impl Orchestrator {
                     if let Err(e) = conv_store.save_message(&thinking_msg).await {
                         warn!("Failed to persist thinking step: {e}");
                     }
-                    history.push(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: text,
-                    });
+                    history.push(
+                        ChatHistoryMessage::Text {
+                            role: ChatRole::Assistant,
+                            content: text,
+                        },
+                        Some(thinking_msg.id),
+                    );
                 }
             }
         }
@@ -1538,7 +1574,7 @@ impl Orchestrator {
                                 tool_count: turn_tool_count,
                                 had_errors: turn_had_errors,
                                 active_skill: active_skill.clone(),
-                                history: history.clone(),
+                                history: history.to_vec(),
                             },
                             self.learning_config.clone(),
                             Arc::clone(&self.storage),
@@ -1642,10 +1678,13 @@ impl Orchestrator {
                     if let Err(e) = conv_store.save_message(&thinking_msg).await {
                         warn!("Failed to persist thinking step: {e}");
                     }
-                    history.push(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: text,
-                    });
+                    history.push(
+                        ChatHistoryMessage::Text {
+                            role: ChatRole::Assistant,
+                            content: text,
+                        },
+                        Some(thinking_msg.id),
+                    );
                 }
             }
         }
@@ -1722,7 +1761,7 @@ impl Orchestrator {
         attachments: Vec<ContentBlock>,
         attachment_ids: &[Uuid],
         agent_id: &str,
-    ) -> Result<(SqliteConversationStore, Vec<ChatHistoryMessage>, i64)> {
+    ) -> Result<(SqliteConversationStore, TurnHistory, i64)> {
         // Note: returns the concrete SqliteConversationStore because the
         // function is an internal helper called only from this impl. External
         // consumer signatures (helper fns in dispatch.rs, turn_control.rs,
@@ -1771,7 +1810,10 @@ impl Orchestrator {
             .await
             .unwrap_or_default();
 
-        let mut history = crate::history::messages_to_chat_history(prior, &att_map);
+        let summaries = self.storage.conversation_summary_store();
+        let mut history =
+            crate::history::build_turn_history(prior, conversation_id, &summaries, &att_map)
+                .await?;
         crate::history::sanitize_history(&mut history);
 
         // Load stored attachments by ID and convert to the appropriate ContentBlock.
@@ -1806,14 +1848,20 @@ impl Orchestrator {
         }
 
         if all_attachments.is_empty() {
-            history.push(ChatHistoryMessage::Text {
-                role: ChatRole::User,
-                content: user_message.to_string(),
-            });
+            history.push(
+                ChatHistoryMessage::Text {
+                    role: ChatRole::User,
+                    content: user_message.to_string(),
+                },
+                Some(user_msg.id),
+            );
         } else {
             let mut blocks = vec![ContentBlock::Text(user_message.to_string())];
             blocks.extend(all_attachments);
-            history.push(ChatHistoryMessage::MultimodalUser { content: blocks });
+            history.push(
+                ChatHistoryMessage::MultimodalUser { content: blocks },
+                Some(user_msg.id),
+            );
         }
 
         Ok((conv_store, history, base_turn))

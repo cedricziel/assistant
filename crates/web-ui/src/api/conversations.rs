@@ -46,7 +46,8 @@ pub(crate) async fn caller_store(ctx: &SpaceCtx, state: &ApiState) -> SqliteConv
         .with_user_id(ctx.auth.user_id.0.clone())
 }
 
-/// Load a conversation the caller owns, or the `404` response to return.
+/// Load a conversation the caller owns, or the enveloped `404`/`500` response
+/// to return.
 ///
 /// A conversation owned by someone else is reported as missing, so the
 /// response does not confirm that the id exists.
