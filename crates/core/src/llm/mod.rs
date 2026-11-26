@@ -10,5 +10,6 @@ pub mod embedding;
 pub mod options;
 pub mod provider;
 pub mod stream_chunk;
+pub mod structured;
 pub mod tool_spec;
 pub mod types;
