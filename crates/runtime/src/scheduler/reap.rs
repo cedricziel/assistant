@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
+use assistant_core::clock::{Clock as _, SystemClock};
 use assistant_core::{MessageBus, topic};
 use assistant_storage::{
     ConversationEventStore, InteractionStatus, InteractionStore, StorageLayer,
@@ -45,7 +46,7 @@ pub(crate) async fn reap_stale_and_recover(storage: &StorageLayer, bus: &dyn Mes
 
     let interactions = storage.interaction_store();
     let dead_since =
-        chrono::Utc::now() - chrono::Duration::from_std(WAITER_STALE_AFTER).unwrap_or_default();
+        SystemClock.now() - chrono::Duration::from_std(WAITER_STALE_AFTER).unwrap_or_default();
     match interactions.expire_dead(dead_since).await {
         Ok(ids) if !ids.is_empty() => info!(count = ids.len(), "Expired dead interaction(s)"),
         Ok(_) => {}

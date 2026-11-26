@@ -346,7 +346,7 @@ pub fn resolved_event(row: &InteractionRow) -> Option<OrchestratorEvent> {
     Some(OrchestratorEvent::InteractionResolved {
         interaction_id: row.id.clone(),
         kind: row.kind.clone(),
-        resolved_at: row.resolved_at.unwrap_or_else(Utc::now),
+        resolved_at: row.resolved_at.unwrap_or_else(|| SystemClock.now()),
         outcome: InteractionOutcome::from_row(row)?,
     })
 }
