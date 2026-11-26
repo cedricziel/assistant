@@ -23,7 +23,7 @@ use assistant_storage::{
     conversations::ConversationStore,
 };
 use assistant_tool_executor::{ToolExecutor, ToolOverlay};
-use assistant_transcription::AudioStore;
+use assistant_transcription::{AudioStore, TtsProvider};
 use async_trait::async_trait;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,
@@ -363,6 +363,10 @@ pub struct Orchestrator {
     /// `voice-response` tool.  When present, synthesised audio is appended
     /// to `TurnResult::attachments` so channel adapters can deliver it.
     pub(crate) audio_store: Option<Arc<AudioStore>>,
+    /// Speaks the answer of a voice turn that came back without audio.
+    tts: Option<Arc<dyn TtsProvider>>,
+    /// The format spoken replies are delivered in (`[tts] format`).
+    reply_format: assistant_core::types::transcription::TtsFormat,
     /// Per-conversation settings from slash commands (`/model`). Shared with
     /// the command contexts of every interface.
     pub(crate) conversation_configs:
@@ -438,6 +442,12 @@ impl Orchestrator {
             bus_heartbeat_interval: DEFAULT_BUS_HEARTBEAT_INTERVAL,
             adapter_registry: crate::AdapterRegistry::new(),
             audio_store: None,
+            tts: None,
+            reply_format: config
+                .tts
+                .as_ref()
+                .and_then(|t| t.format)
+                .unwrap_or_default(),
             conversation_configs: Arc::default(),
             model_providers: std::sync::Mutex::default(),
             llm_config: config.llm.clone(),
@@ -584,6 +594,13 @@ impl Orchestrator {
         self
     }
 
+    /// Speak the answer of a voice turn with `tts` when the model replied in
+    /// text only.
+    pub fn with_tts(mut self, tts: Arc<dyn TtsProvider>) -> Self {
+        self.tts = Some(tts);
+        self
+    }
+
     /// Static rules from config, plus the decision model when it is enabled.
     /// A decision model that cannot be built (e.g. missing API key) is
     /// reported and left out: undecided calls then fall back to a human or a
@@ -623,6 +640,20 @@ impl Orchestrator {
     }
 
     /// Options for agent-loop calls.
+    /// [`chat_options`](Self::chat_options), asking `llm` for a spoken
+    /// answer on a voice turn when it can give one.
+    fn turn_chat_options(
+        &self,
+        voice_turn: bool,
+        llm: &dyn LlmProvider,
+    ) -> assistant_core::ChatOptions {
+        assistant_core::ChatOptions {
+            audio_reply: (voice_turn && llm.chat_options_support().audio_output)
+                .then_some(self.reply_format),
+            ..self.chat_options()
+        }
+    }
+
     fn chat_options(&self) -> assistant_core::ChatOptions {
         assistant_core::ChatOptions {
             parallel_tool_calls: self.llm_config.parallel_tool_calls,
@@ -971,9 +1002,11 @@ impl Orchestrator {
         let llm = self
             .llm_for(conversation_id, identity.model_override.as_deref())
             .await?;
+        let voice_turn = history.has_audio();
         if !llm.chat_options_support().audio_input {
             history.drop_audio();
         }
+        let chat_options = self.turn_chat_options(voice_turn, llm.as_ref());
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
@@ -1078,7 +1111,7 @@ impl Orchestrator {
                         &system_prompt,
                         &history,
                         &all_specs,
-                        &self.chat_options(),
+                        &chat_options,
                         Some(chunk_tx),
                     )
                     .await;
@@ -1087,14 +1120,8 @@ impl Orchestrator {
                 forward_handle.await.ok();
                 result
             } else {
-                llm.chat_with(
-                    &system_prompt,
-                    &history,
-                    &all_specs,
-                    &self.chat_options(),
-                    None,
-                )
-                .await
+                llm.chat_with(&system_prompt, &history, &all_specs, &chat_options, None)
+                    .await
             };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
@@ -1160,10 +1187,11 @@ impl Orchestrator {
                     .await?;
                     match outcome {
                         FinalAnswerOutcome::Done(mut result) => {
+                            let media = self.reply_media(voice_turn, &text, meta.media).await;
                             self.persist_response_media(
                                 conversation_id,
                                 result.message_id,
-                                meta.media,
+                                media,
                                 &mut turn_attachments,
                                 &mut turn_attachment_ids,
                             )
@@ -1428,9 +1456,11 @@ impl Orchestrator {
         let llm = self
             .llm_for(conversation_id, identity.model_override.as_deref())
             .await?;
+        let voice_turn = history.has_audio();
         if !llm.chat_options_support().audio_input {
             history.drop_audio();
         }
+        let chat_options = self.turn_chat_options(voice_turn, llm.as_ref());
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
@@ -1540,7 +1570,7 @@ impl Orchestrator {
                         &system_prompt,
                         &history,
                         &tool_specs,
-                        &self.chat_options(),
+                        &chat_options,
                         Some(chunk_tx),
                     )
                     .instrument(iteration_span.clone())
@@ -1553,13 +1583,7 @@ impl Orchestrator {
                 (result, call_end, marks)
             } else {
                 let result = llm
-                    .chat_with(
-                        &system_prompt,
-                        &history,
-                        &tool_specs,
-                        &self.chat_options(),
-                        None,
-                    )
+                    .chat_with(&system_prompt, &history, &tool_specs, &chat_options, None)
                     .instrument(iteration_span.clone())
                     .await;
                 (result, self.clock.now_instant(), CallMarks::default())
@@ -1665,10 +1689,11 @@ impl Orchestrator {
                         );
                     }
 
+                    let media = self.reply_media(voice_turn, &text, meta.media).await;
                     self.persist_response_media(
                         conversation_id,
                         saved_message_id,
-                        meta.media,
+                        media,
                         &mut turn_attachments,
                         &mut turn_attachment_ids,
                     )
@@ -1806,6 +1831,40 @@ impl Orchestrator {
     }
 
     // ── Attachment helpers ─────────────────────────────────────────────────────
+
+    /// `media` plus, for a voice turn whose answer has no audio, the answer
+    /// spoken by the TTS provider. A failed synthesis leaves the text only.
+    async fn reply_media(
+        &self,
+        voice_turn: bool,
+        answer: &str,
+        mut media: Vec<assistant_core::GeneratedMedia>,
+    ) -> Vec<assistant_core::GeneratedMedia> {
+        let has_audio = media
+            .iter()
+            .any(|m| m.kind == assistant_core::MediaKind::Audio);
+        let Some(tts) = self.tts.as_ref().filter(|_| voice_turn && !has_audio) else {
+            return media;
+        };
+        if answer.trim().is_empty() {
+            return media;
+        }
+        let request = assistant_transcription::TtsRequest {
+            text: answer.to_owned(),
+            voice: None,
+            format: None,
+            speed: None,
+        };
+        match tts.synthesize(request).await {
+            Ok(spoken) => media.push(assistant_core::GeneratedMedia {
+                kind: assistant_core::MediaKind::Audio,
+                mime: spoken.mime_type,
+                data: spoken.audio_data.into(),
+            }),
+            Err(e) => warn!(error = %e, "Failed to speak the voice turn's answer"),
+        }
+        media
+    }
 
     /// Stores media generated with a final answer as attachments of
     /// `message_id`, the saved assistant message, and adds them to the

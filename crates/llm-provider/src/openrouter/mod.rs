@@ -285,6 +285,7 @@ impl LlmProvider for OpenRouterProvider {
                 parallel_tool_calls: info.parallel_tool_calls,
                 json_schema: info.json_schema,
                 audio_input: self.audio_input.enabled(info.audio_input),
+                audio_output: false,
             })
     }
 
@@ -315,6 +316,7 @@ impl LlmProvider for OpenRouterProvider {
             } else {
                 ResponseFormat::Text
             },
+            audio_reply: options.audio_reply.filter(|_| support.audio_output),
         };
         let stream = chunk_sink.is_some();
         self.send(system_prompt, history, tools, &native, stream, chunk_sink)
@@ -1348,6 +1350,7 @@ mod tests {
                     parallel_tool_calls: true,
                     json_schema: true,
                     audio_input: false,
+                    audio_output: false,
                 },
             ),
             (
