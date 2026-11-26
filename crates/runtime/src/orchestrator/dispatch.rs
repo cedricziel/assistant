@@ -3,6 +3,7 @@
 //! Contains the permission gate, tool execution through the global executor,
 //! result recording (metrics, OTel, persistence), and tool-call history helpers.
 
+use assistant_core::mcp_app::McpApp;
 use assistant_core::{
     Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ProviderState,
     ToolCallItem, ToolSpec,
@@ -39,6 +40,8 @@ pub(crate) struct ToolResultMeta<'a> {
     pub status: &'a str,
     /// Capped structured render data; client-only.
     pub data: Option<&'a serde_json::Value>,
+    /// The MCP App the tool declared; client-only.
+    pub app: Option<&'a McpApp>,
 }
 
 impl ToolResultMeta<'_> {
@@ -48,6 +51,7 @@ impl ToolResultMeta<'_> {
             tool_call_id: None,
             status: "ok",
             data: None,
+            app: None,
         }
     }
 }
@@ -128,6 +132,7 @@ impl Orchestrator {
         m.tool_call_id = meta.tool_call_id.map(str::to_string);
         m.tool_status = Some(meta.status.to_string());
         m.tool_data_json = meta.data.and_then(|data| serde_json::to_string(data).ok());
+        m.tool_app_json = meta.app.and_then(|app| serde_json::to_string(app).ok());
         m
     }
 
@@ -251,13 +256,16 @@ impl Orchestrator {
 
         let mut had_error = false;
         let mut data = None;
+        let mut app = None;
         let observation = match exec_result {
             Ok(mut output) => {
                 debug!(tool = %tool_name, duration_ms, "Tool execution completed");
                 // Structured render data goes to the event only: take it before
                 // anything else sees the output so it cannot leak into the LLM
                 // history, the persisted observation or the webhook payload.
-                data = Self::cap_tool_data(tool_name, output.data.take());
+                let mut raw = output.data.take();
+                app = McpApp::take_from(&mut raw);
+                data = Self::cap_tool_data(tool_name, raw);
                 // A tool-level failure (`ToolOutput::error`, non-zero bash
                 // exit) is an error even though the call itself returned `Ok`.
                 if !output.success {
@@ -338,6 +346,7 @@ impl Orchestrator {
                 tool_call_id,
                 status: tool_status,
                 data: data.as_ref(),
+                app: app.as_ref(),
             },
         );
         crate::history::append_tool_result(history, tool_name, &observation, Some(tr_msg.id));
@@ -380,6 +389,7 @@ impl Orchestrator {
                     result: truncated_result,
                     tool_call_id: tool_call_id.map(|s| s.to_string()),
                     data,
+                    app,
                 })
                 .await;
 
@@ -588,6 +598,7 @@ impl Orchestrator {
                     tool_call_id,
                     status: "denied",
                     data: None,
+                    app: None,
                 },
             );
             crate::history::append_tool_result(history, name, &observation, Some(tr_msg.id));
@@ -608,6 +619,7 @@ impl Orchestrator {
                         result: Some(observation.clone()),
                         tool_call_id: tool_call_id.map(|s| s.to_string()),
                         data: None,
+                        app: None,
                     })
                     .await;
             }
