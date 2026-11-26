@@ -1297,6 +1297,7 @@ mod tests {
             }),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         };
         let v = tool_spec_to_anthropic_json(&spec);
         assert_eq!(v["name"], "file-read");
@@ -1857,6 +1858,7 @@ mod tests {
                 params_schema: json!({"type": "object"}),
                 is_mutating: false,
                 requires_confirmation: false,
+                requires_rich_client: false,
             }
         }
 
@@ -1946,6 +1948,47 @@ mod tests {
                 body.get("tool_choice").is_none(),
                 "tool_choice needs tools: {body}"
             );
+        }
+
+        #[tokio::test]
+        async fn chat_structured_forces_the_respond_tool() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1/messages"))
+                .and(body_partial_json(json!({
+                    "tools": [{"name": "respond", "input_schema": {"required": ["verdict"]}}],
+                    "tool_choice": {"type": "tool", "name": "respond"},
+                })))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "id": "msg_1",
+                    "model": "claude",
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "respond",
+                        "input": {"verdict": "keep"},
+                    }],
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let schema = json!({
+                "type": "object",
+                "properties": {"verdict": {"type": "string"}},
+                "required": ["verdict"],
+            });
+            let value = assistant_core::chat_structured(
+                &provider(&server.uri()),
+                "sys",
+                &history(),
+                "decision",
+                &schema,
+            )
+            .await
+            .unwrap();
+            assert_eq!(value, json!({"verdict": "keep"}));
         }
 
         #[tokio::test]

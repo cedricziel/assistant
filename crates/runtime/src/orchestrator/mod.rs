@@ -236,6 +236,7 @@ fn end_turn_spec() -> ToolSpec {
         }),
         is_mutating: false,
         requires_confirmation: false,
+        requires_rich_client: false,
     }
 }
 
@@ -849,6 +850,7 @@ impl Orchestrator {
                 params_schema: h.params_schema(),
                 is_mutating: h.is_mutating(),
                 requires_confirmation: h.requires_confirmation(),
+                requires_rich_client: h.requires_rich_client(),
             })
             .collect();
 
@@ -874,8 +876,12 @@ impl Orchestrator {
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
-        let global_specs =
-            Self::filter_tool_specs(self.executor.to_specs_with(&overlay), &provider_caps);
+        let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
+        let global_specs = Self::filter_tool_specs(
+            self.executor.to_specs_with(&overlay),
+            &provider_caps,
+            rich_client,
+        );
         let all_specs: Vec<ToolSpec> = ext_specs
             .iter()
             .cloned()
@@ -1293,8 +1299,12 @@ impl Orchestrator {
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
-        let tool_specs =
-            Self::filter_tool_specs(self.executor.to_specs_with(&overlay), &provider_caps);
+        let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
+        let tool_specs = Self::filter_tool_specs(
+            self.executor.to_specs_with(&overlay),
+            &provider_caps,
+            rich_client,
+        );
 
         // 5. Build the system prompt fresh from disk.
         let system_prompt = self.compose_system_prompt(&interface).await;
