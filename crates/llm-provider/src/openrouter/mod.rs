@@ -59,7 +59,8 @@ impl OpenRouterProvider {
     ) -> anyhow::Result<LlmResponse> {
         self.catalog.wait_ready().await;
         self.catalog.check_model()?;
-        let mut request = build_chat_request(&self.settings, system_prompt, history, tools);
+        let vision = self.capabilities().vision;
+        let mut request = build_chat_request(&self.settings, system_prompt, history, tools, vision);
         request.stream = stream;
         apply_options(&mut request, options);
         if stream {
@@ -1427,6 +1428,59 @@ mod tests {
         assert!(body.get("provider").is_none(), "{body}");
         let system = body["messages"][0]["content"].as_str().unwrap();
         assert!(system.contains("`submit`"), "{system}");
+    }
+
+    fn photo_message() -> Vec<ChatHistoryMessage> {
+        vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                assistant_core::ContentBlock::Text("what is this?".into()),
+                assistant_core::ContentBlock::Image {
+                    media_type: "image/png".into(),
+                    data: "aGk=".into(),
+                },
+            ],
+        }]
+    }
+
+    #[tokio::test]
+    async fn text_only_model_gets_a_note_instead_of_the_image() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = provider_for(&server, &["tools"], OpenRouterOptions::default()).await;
+
+        provider.chat("sys", &photo_message(), &[]).await.unwrap();
+
+        let body = sent_body(&server).await;
+        let parts = body["messages"][1]["content"].as_array().unwrap();
+        assert!(
+            parts.iter().all(|p| p["type"] == "text"),
+            "no image parts: {parts:?}"
+        );
+        assert!(
+            parts
+                .iter()
+                .any(|p| p["text"].as_str().unwrap().contains("image")),
+            "the model is told an image was left out: {parts:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn vision_model_gets_the_image() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text", "image"], &["tools"]),
+            json!([endpoint("Anthropic", "anthropic", 200_000)]),
+        )
+        .await;
+        let provider = provider_with(&server.uri(), OpenRouterOptions::default());
+
+        provider.chat("sys", &photo_message(), &[]).await.unwrap();
+
+        let body = sent_body(&server).await;
+        let parts = body["messages"][1]["content"].as_array().unwrap();
+        assert!(parts.iter().any(|p| p["type"] == "image_url"), "{parts:?}");
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────
