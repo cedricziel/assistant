@@ -33,10 +33,10 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 5. Chat options (all providers)
 
-- [ ] 5.1 Write failing tests for `ChatOptions` defaults: `chat_with` with default options produces the same request as today for every provider (wiremock or scripted). Confirm red. Add `ChatOptions`, `ChatOptionsSupport`, the default `chat_with`, and `chat`/`chat_streaming` as wrappers. Verify.
-- [ ] 5.2 Write failing wiremock tests for native `tool_choice` and `parallel_tool_calls` mapping on Anthropic (`any`/`tool`, `disable_parallel_tool_use`), OpenAI and Moonshot. Confirm red. Implement, then verify.
-- [ ] 5.3 Write failing tests for the prompt fallback on Ollama: a forced tool not called leads to one retry and then an error naming the tool; `none` sends no tools. Confirm red. Implement, then verify.
-- [ ] 5.4 Write failing tests: `[llm] parallel_tool_calls` parses, and the orchestrator passes it on agent-loop calls. Confirm red. Implement, then verify. Document in `docs/operations/configuration.md`.
+- [x] 5.1 Write failing tests for `ChatOptions` defaults: `chat_with` with default options produces the same request as today for every provider (wiremock or scripted). Confirm red. Add `ChatOptions`, `ChatOptionsSupport`, the default `chat_with`, and `chat`/`chat_streaming` as wrappers. Verify.
+- [x] 5.2 Write failing tests for native `tool_choice` and `parallel_tool_calls` mapping on Anthropic (`any`/`tool`, `disable_parallel_tool_use`) and OpenAI. Confirm red. Implement, then verify. Moonshot keeps the prompt fallback (see D13).
+- [x] 5.3 Write failing tests for the prompt fallback on Ollama: a forced tool not called leads to one retry and then an error naming the tool; `none` sends no tools. Confirm red. Implement, then verify.
+- [x] 5.4 Write failing tests: `[llm] parallel_tool_calls` parses, and the orchestrator passes it on agent-loop calls. Confirm red. Implement, then verify. Document in `docs/operations/configuration.md`.
 
 ## 6. Structured output (all providers)
 

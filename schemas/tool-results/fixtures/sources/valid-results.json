@@ -1,0 +1,17 @@
+{
+  "kind": "sources",
+  "query": "rust async traits",
+  "results": [
+    {
+      "title": "Async functions in traits",
+      "url": "https://blog.rust-lang.org/2023/12/21/async-fn-rpit-in-traits.html",
+      "domain": "blog.rust-lang.org",
+      "snippet": "Async fn in traits is stable in Rust 1.75."
+    },
+    {
+      "title": "The async-trait crate",
+      "url": "https://docs.rs/async-trait",
+      "domain": "docs.rs"
+    }
+  ]
+}
