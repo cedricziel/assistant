@@ -9,19 +9,24 @@
 /// `golden` test for each entry.
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
+  'AttachmentTray',
   'BranchPicker',
   'ChatMarkdownScope',
+  'ChatThreadLayout',
   'CodeBlock',
   'CodeDiffResultView',
   'CodeFileResultView',
   'CompactExpandable',
   'Composer',
+  'ComposerVoiceButton',
   'ConversationListView',
   'ConversationSearchResultsView',
+  'DataTableResultView',
   'FeedbackButtons',
   'FeedbackCommentField',
   'GenericToolResultView',
   'HighlightedSegments',
+  'JsonTreeView',
   'MessageActionButton',
   'MessageActions',
   'MessageBody',
@@ -40,6 +45,7 @@ const List<String> kAssistantUiElements = [
   'ThreadDensityScope',
   'ThreadEmptyState',
   'ThreadErrorBanner',
+  'ThreadViewport',
   'TimelineEntryShell',
   'ToolCallBody',
   'ToolResultRendererScope',
@@ -47,15 +53,10 @@ const List<String> kAssistantUiElements = [
   'TurnProgressCard',
   'TypingIndicator',
   'UnknownInteractionCard',
-  // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
-  // 'ChatThreadLayout', // slot: chat-element-library 10
   // 'CommandBody', // slot: chat-element-library 7b
-  // 'ComposerVoiceButton', // slot: chat-element-library 11b
-  // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
-  // 'JsonTreeView', // slot: tool-result-renderers C2b
   // 'LinkPreviewResultView', // slot: tool-result-renderers C5
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
@@ -63,7 +64,6 @@ const List<String> kAssistantUiElements = [
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
-  // 'ThreadViewport', // slot: chat-element-library 10
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c
   // 'UnknownInteractionCard', // slot: tool-approval-prompts 13b

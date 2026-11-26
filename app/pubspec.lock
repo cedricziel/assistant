@@ -1005,7 +1005,7 @@ packages:
     source: hosted
     version: "2.1.0"
   one_of:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: one_of
       sha256: "25fe0fcf181e761c6fcd604caf9d5fdf952321be17584ba81c72c06bdaa511f0"

@@ -59,16 +59,18 @@ class ChatScreen extends ConsumerStatefulWidget {
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
-const double _kBottomThreshold = 80.0;
-
 /// Width of the inline conversation list, border included.
 const double _kConversationListWidth = 240.0;
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _inputController = TextEditingController();
-  final _scrollController = ScrollController();
+  final _threadController = ThreadViewportController();
   final _inputFocus = FocusNode();
-  bool _atBottom = true;
+
+  /// Bumped on every `chatProvider` emission so [ThreadViewport] follows
+  /// in-place mutations (thinking tokens, tool status flips) that change no
+  /// item count.
+  int _revision = 0;
   StreamSubscription<ChatLifecycleEvent>? _lifecycleSub;
 
   @override
@@ -81,7 +83,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         .lifecycle
         .listen(ref.read(chatAnnouncerProvider).handle);
     _inputFocus.addListener(_onInputFocusChange);
-    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadConversation();
     });
@@ -95,23 +96,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (!_inputFocus.hasFocus) return;
     // Delay past the iOS keyboard animation (~300 ms) before measuring/scrolling.
     Future.delayed(const Duration(milliseconds: 350), () {
-      if (!mounted || !_scrollController.hasClients) return;
-      final pos = _scrollController.position;
-      if (pos.maxScrollExtent - pos.pixels < 200) {
-        _scrollController.animateTo(
-          pos.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
+      if (mounted) _threadController.scrollToBottomIfNear();
     });
-  }
-
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
-    final pos = _scrollController.position;
-    final nearBottom = pos.pixels >= pos.maxScrollExtent - _kBottomThreshold;
-    if (_atBottom != nearBottom) setState(() => _atBottom = nearBottom);
   }
 
   @override
@@ -131,7 +117,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } else {
       ref.read(chatProvider.notifier).clearConversation();
     }
-    _scrollToBottom();
+    _threadController.scrollToBottom();
     if (focusInput) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _inputFocus.requestFocus();
@@ -161,23 +147,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void dispose() {
     unawaited(_lifecycleSub?.cancel());
     _inputFocus.removeListener(_onInputFocusChange);
-    _scrollController.removeListener(_onScroll);
     _inputController.dispose();
-    _scrollController.dispose();
     _inputFocus.dispose();
     super.dispose();
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
   }
 
   Future<void> _sendMessage() async {
@@ -248,12 +220,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           attachmentIds: attachmentIds,
           attachments: attachments,
         );
-    _scrollToBottom();
+    _threadController.scrollToBottom();
   }
 
   Future<void> _sendVoiceMessage(Uint8List bytes, String mimeType) async {
     await ref.read(chatProvider.notifier).sendVoiceMessage(bytes, mimeType);
-    _scrollToBottom();
+    _threadController.scrollToBottom();
   }
 
   Future<void> _pickImages() async {
@@ -324,12 +296,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     final chatAsync = ref.watch(chatProvider);
     final chatState = chatAsync.value ?? const ChatState();
-    // Scroll to bottom when messages change, but only if already at bottom.
-    ref.listen(chatProvider, (_, next) {
-      if (_atBottom && next.value?.messages.isNotEmpty == true) {
-        _scrollToBottom();
-      }
-    });
+    // Tell the thread viewport that something changed; it follows only if the
+    // user is at the bottom.
+    ref.listen(chatProvider, (_, _) => _revision++);
 
     final personasAsync = ref.watch(personasProvider);
     final activePersona = personasAsync.value?.activePersona;
@@ -449,9 +418,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         });
                       }
                     },
-                    child: Column(
-                      children: [
-                        // Error banner.
+                    child: ChatThreadLayout(
+                      banners: [
                         if (chatState.error != null)
                           ThreadErrorBanner(
                             message: chatState.error!,
@@ -459,153 +427,113 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 .read(chatProvider.notifier)
                                 .dismissError,
                           ),
-
-                        // Loading indicator when fetching history.
                         if (chatState.isLoadingHistory)
                           const LinearProgressIndicator(),
+                      ],
+                      thread: ThreadDensityScope.fromWidth(
+                        width: threadWidth,
+                        child:
+                            chatState.messages.isEmpty &&
+                                chatState.pendingQueue.isEmpty
+                            ? const ChatEmptyStarters()
+                            : ThreadViewport(
+                                controller: _threadController,
+                                revision: _revision,
+                                itemCount:
+                                    chatState.messages.length +
+                                    chatState.pendingQueue.length,
+                                itemBuilder: (context, index) {
+                                  // Render queued ghost bubbles after the
+                                  // committed messages, in send order. The
+                                  // actively-streaming message is already in
+                                  // `messages` (it was popped from the queue
+                                  // when its stream started), so ghost
+                                  // bubbles represent only the truly-waiting
+                                  // items.
+                                  if (index >= chatState.messages.length) {
+                                    final queueIdx =
+                                        index - chatState.messages.length;
+                                    final pending =
+                                        chatState.pendingQueue[queueIdx];
+                                    return QueuedMessageBubble(
+                                      message: pending,
+                                      onLongPress: () =>
+                                          showQueuedMessageRemoveSheet(
+                                            context,
+                                            ref,
+                                            pending,
+                                            queueIdx,
+                                          ),
+                                    );
+                                  }
 
-                        // Message list.
-                        Expanded(
-                          child: ThreadDensityScope.fromWidth(
-                            width: threadWidth,
-                            child: Stack(
-                              children: [
-                                chatState.messages.isEmpty &&
-                                        chatState.pendingQueue.isEmpty
-                                    ? const ChatEmptyStarters()
-                                    : ListView.builder(
-                                        controller: _scrollController,
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 16,
-                                          horizontal: 12,
-                                        ),
-                                        itemCount:
-                                            chatState.messages.length +
-                                            chatState.pendingQueue.length,
-                                        itemBuilder: (context, index) {
-                                          // Render queued ghost bubbles after the
-                                          // committed messages, in send order. The
-                                          // actively-streaming message is already in
-                                          // `messages` (it was popped from the queue
-                                          // when its stream started), so ghost
-                                          // bubbles represent only the truly-waiting
-                                          // items.
-                                          if (index >=
-                                              chatState.messages.length) {
-                                            final queueIdx =
-                                                index -
-                                                chatState.messages.length;
-                                            final pending = chatState
-                                                .pendingQueue[queueIdx];
-                                            return QueuedMessageBubble(
-                                              message: pending,
-                                              onLongPress: () =>
-                                                  showQueuedMessageRemoveSheet(
-                                                    context,
-                                                    ref,
-                                                    pending,
-                                                    queueIdx,
-                                                  ),
-                                            );
-                                          }
+                                  final msg = chatState.messages[index];
 
-                                          final msg = chatState.messages[index];
+                                  // Render command events as compact
+                                  // system-event tiles.
+                                  if (msg.timelineType ==
+                                      TimelineEntryType.command) {
+                                    return CommandEventTile(message: msg);
+                                  }
 
-                                          // Render command events as compact
-                                          // system-event tiles.
-                                          if (msg.timelineType ==
-                                              TimelineEntryType.command) {
-                                            return CommandEventTile(
-                                              message: msg,
-                                            );
-                                          }
+                                  // Render non-message timeline entries
+                                  // (thinking, tool call, subagent) as
+                                  // streaming-aware adaptive sections.
+                                  if (msg.timelineType !=
+                                      TimelineEntryType.message) {
+                                    return StreamingTimelineEntry(
+                                      message: msg,
+                                      conversationId: chatState.conversationId,
+                                      entryState: msg.isStale
+                                          ? EntryState.stale
+                                          : msg.isStreaming
+                                          ? EntryState.active
+                                          : EntryState.complete,
+                                    );
+                                  }
 
-                                          // Render non-message timeline entries
-                                          // (thinking, tool call, subagent) as
-                                          // streaming-aware adaptive sections.
-                                          if (msg.timelineType !=
-                                              TimelineEntryType.message) {
-                                            return StreamingTimelineEntry(
-                                              message: msg,
-                                              conversationId:
-                                                  chatState.conversationId,
-                                              entryState: msg.isStale
-                                                  ? EntryState.stale
-                                                  : msg.isStreaming
-                                                  ? EntryState.active
-                                                  : EntryState.complete,
-                                            );
-                                          }
-
-                                          final prevMsg = index > 0
-                                              ? chatState.messages[index - 1]
-                                              : null;
-                                          final isGrouped =
-                                              prevMsg != null &&
-                                              prevMsg.role == msg.role &&
-                                              !prevMsg.isStreaming;
-                                          return ChatMessageBubbleAdapter(
-                                            message: msg,
-                                            isGrouped: isGrouped,
-                                            capabilities: capabilities,
-                                            onRetry:
-                                                msg.status ==
-                                                    MessageStatus.failed
-                                                ? () => ref
-                                                      .read(
-                                                        chatProvider.notifier,
-                                                      )
-                                                      .retryMessage(msg)
-                                                : null,
-                                            isStopping: chatState.isStopping,
-                                            onStop: () => ref
-                                                .read(chatProvider.notifier)
-                                                .stopTurn(),
-                                            fetchMessageAudio: () {
-                                              final api = ref.read(
-                                                apiClientProvider,
-                                              );
-                                              final audioId = msg.audioId;
-                                              if (audioId != null) {
-                                                return api?.fetchAudio(
-                                                      audioId,
-                                                    ) ??
-                                                    Future.value(null);
-                                              }
-                                              // On-demand TTS synthesis.
-                                              return api?.fetchMessageAudio(
-                                                    msg.id,
-                                                  ) ??
-                                                  Future.value(null);
-                                            },
-                                            imageBaseUrl: imageBaseUrl,
-                                            imageAuthToken: imageAuthToken,
-                                          );
-                                        },
-                                      ),
-                                if (!_atBottom)
-                                  Positioned(
-                                    bottom: 8,
-                                    right: 8,
-                                    child: FloatingActionButton.small(
-                                      key: const Key('scroll_to_bottom_button'),
-                                      onPressed: _scrollToBottom,
-                                      tooltip: 'Scroll to bottom',
-                                      child: const Icon(
-                                        Icons.keyboard_arrow_down,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-
+                                  final prevMsg = index > 0
+                                      ? chatState.messages[index - 1]
+                                      : null;
+                                  final isGrouped =
+                                      prevMsg != null &&
+                                      prevMsg.role == msg.role &&
+                                      !prevMsg.isStreaming;
+                                  return ChatMessageBubbleAdapter(
+                                    message: msg,
+                                    isGrouped: isGrouped,
+                                    capabilities: capabilities,
+                                    onRetry: msg.status == MessageStatus.failed
+                                        ? () => ref
+                                              .read(chatProvider.notifier)
+                                              .retryMessage(msg)
+                                        : null,
+                                    isStopping: chatState.isStopping,
+                                    onStop: () => ref
+                                        .read(chatProvider.notifier)
+                                        .stopTurn(),
+                                    fetchMessageAudio: () {
+                                      final api = ref.read(apiClientProvider);
+                                      final audioId = msg.audioId;
+                                      if (audioId != null) {
+                                        return api?.fetchAudio(audioId) ??
+                                            Future.value(null);
+                                      }
+                                      // On-demand TTS synthesis.
+                                      return api?.fetchMessageAudio(msg.id) ??
+                                          Future.value(null);
+                                    },
+                                    imageBaseUrl: imageBaseUrl,
+                                    imageAuthToken: imageAuthToken,
+                                  );
+                                },
+                              ),
+                      ),
+                      aboveComposer: [
                         // Brief banner shown while attemptReconnect is
                         // recovering an interrupted stream after a resume.
                         // Renders nothing on routine foreground transitions.
                         const ReconnectBanner(),
-
                         // In-flight turn progress card — renders nothing when no
                         // turn is active, an activity label otherwise, a stall
                         // label after 30s of silence.
@@ -617,57 +545,55 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           // reconciles.
                           onSkip: ref.read(chatProvider.notifier).stopTurn,
                         ),
-
-                        // Input row.
-                        Composer(
-                          controller: _inputController,
-                          focusNode: _inputFocus,
-                          isSending: chatState.isSending,
-                          isStopping: chatState.isStopping,
-                          pendingQueueCount: chatState.pendingQueue.length,
-                          pendingAttachments: pendingAttachments,
-                          commands: commands,
-                          showVoice: capabilities.voiceSend,
-                          voiceButton: VoiceRecorderButton(
-                            onRecordingComplete: _sendVoiceMessage,
-                            onError: (err) {
-                              ScaffoldMessenger.of(context)
-                                  .showSnackBar(SnackBar(content: Text(err)));
-                            },
-                          ),
-                          inputBuilder:
-                              (
-                                context,
-                                controller,
-                                focusNode,
-                                placeholder,
-                                onSubmit,
-                              ) => AdaptiveTextField(
-                                key: const Key('message_input'),
-                                controller: controller,
-                                focusNode: focusNode,
-                                placeholder: placeholder,
-                                cursorColor: Theme.of(context)
-                                    .colorScheme
-                                    .primary,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                                minLines: 1,
-                                maxLines: 6,
-                                textInputAction: TextInputAction.send,
-                                onSubmitted: (_) => onSubmit(),
-                              ),
-                          onSend: _sendMessage,
-                          onStop: () =>
-                              ref.read(chatProvider.notifier).stopTurn(),
-                          onPickImage: _pickImages,
-                          onRemoveAttachment: (i) => ref
-                              .read(pendingAttachmentsProvider.notifier)
-                              .removeAt(i),
-                        ),
                       ],
+                      composer: Composer(
+                        controller: _inputController,
+                        focusNode: _inputFocus,
+                        isSending: chatState.isSending,
+                        isStopping: chatState.isStopping,
+                        pendingQueueCount: chatState.pendingQueue.length,
+                        pendingAttachments: pendingAttachments,
+                        commands: commands,
+                        showVoice: capabilities.voiceSend,
+                        voiceButton: VoiceRecorderButton(
+                          onRecordingComplete: _sendVoiceMessage,
+                          onError: (err) {
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(SnackBar(content: Text(err)));
+                          },
+                        ),
+                        inputBuilder:
+                            (
+                              context,
+                              controller,
+                              focusNode,
+                              placeholder,
+                              onSubmit,
+                            ) => AdaptiveTextField(
+                              key: const Key('message_input'),
+                              controller: controller,
+                              focusNode: focusNode,
+                              placeholder: placeholder,
+                              cursorColor: Theme.of(context)
+                                  .colorScheme
+                                  .primary,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              minLines: 1,
+                              maxLines: 6,
+                              textInputAction: TextInputAction.send,
+                              onSubmitted: (_) => onSubmit(),
+                            ),
+                        onSend: _sendMessage,
+                        onStop: () =>
+                            ref.read(chatProvider.notifier).stopTurn(),
+                        onPickImage: _pickImages,
+                        onRemoveAttachment: (i) => ref
+                            .read(pendingAttachmentsProvider.notifier)
+                            .removeAt(i),
+                      ),
                     ),
                   ),
                 ),
