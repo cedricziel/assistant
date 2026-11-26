@@ -15,7 +15,7 @@ use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{ExecutionContext, Interface, TurnIdentity};
 use assistant_core::{ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, MessageBus};
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
-use assistant_storage::{StorageLayer, registry::SkillRegistry};
+use assistant_storage::{AttachmentStore, StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 
 use super::super::{Orchestrator, max_image_bytes_for_provider, resize_and_encode};
@@ -507,5 +507,144 @@ async fn audio_store_none_by_default() {
     assert!(
         orch.audio_store.is_none(),
         "audio_store should be None by default"
+    );
+}
+
+// -- Voice turns: audio blocks -------------------------------------------------
+
+fn voice_note() -> ContentBlock {
+    ContentBlock::Audio {
+        media_type: "audio/ogg".to_string(),
+        data: "b2dn".to_string(),
+    }
+}
+
+/// A scripted provider that answers `answers` and reports `audio_input`.
+fn hearing_provider(
+    audio_input: bool,
+    answers: &[&str],
+) -> Arc<assistant_llm_provider::scripted::ScriptedLlmProvider> {
+    Arc::new(
+        assistant_llm_provider::scripted::ScriptedLlmProvider::new()
+            .with_canned_responses(
+                answers
+                    .iter()
+                    .map(|a| {
+                        assistant_core::LlmResponse::FinalAnswer(a.to_string(), Default::default())
+                    })
+                    .collect(),
+            )
+            .with_chat_options_support(assistant_core::ChatOptionsSupport {
+                audio_input,
+                ..Default::default()
+            }),
+    )
+}
+
+fn has_audio(message: &ChatHistoryMessage) -> bool {
+    matches!(message, ChatHistoryMessage::MultimodalUser { content }
+        if content.iter().any(|b| matches!(b, ContentBlock::Audio { .. })))
+}
+
+#[tokio::test]
+async fn audio_is_stripped_for_providers_without_audio_input() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "ok").await;
+    let (orch, _) = build(&server.uri()).await;
+
+    let (_store, history, _turn) = orch
+        .prepare_history(
+            "[Voice message]: hello",
+            Uuid::new_v4(),
+            vec![voice_note()],
+            &[],
+            &orch.agent_id,
+            &TurnIdentity::default(),
+        )
+        .await
+        .unwrap();
+
+    match history.last().expect("history non-empty") {
+        ChatHistoryMessage::Text { role, content } => {
+            assert_eq!(*role, ChatRole::User);
+            assert_eq!(content, "[Voice message]: hello", "the text stays");
+        }
+        other => panic!("expected the text only, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn audio_is_kept_for_providers_with_audio_input() {
+    let llm = hearing_provider(true, &["ok"]);
+    let (orch, _) = super::build_with_llm(llm, OrgConfig::default(), |o| o).await;
+
+    let (_store, history, _turn) = orch
+        .prepare_history(
+            "hello",
+            Uuid::new_v4(),
+            vec![voice_note()],
+            &[],
+            &orch.agent_id,
+            &TurnIdentity::default(),
+        )
+        .await
+        .unwrap();
+
+    let last = history.last().expect("history non-empty");
+    assert!(has_audio(last), "the recording reaches the model: {last:?}");
+}
+
+#[tokio::test]
+async fn stored_voice_note_is_heard_once_and_replayed_as_text() {
+    let llm = hearing_provider(true, &["first", "second"]);
+    let (orch, storage) = super::build_with_llm(llm.clone(), OrgConfig::default(), |o| o).await;
+    let conv_id = Uuid::new_v4();
+    let meta = assistant_core::AttachmentMeta {
+        id: Uuid::new_v4(),
+        message_id: None,
+        conversation_id: conv_id,
+        agent_id: orch.agent_id.clone(),
+        filename: "voice.ogg".into(),
+        mime_type: "audio/ogg".into(),
+        size_bytes: 3,
+        created_at: chrono::Utc::now(),
+    };
+    storage
+        .attachment_store()
+        .store(&meta, b"ogg")
+        .await
+        .unwrap();
+
+    for (prompt, ids) in [("hello", vec![meta.id]), ("typed follow-up", vec![])] {
+        orch.run_turn_with_tools(
+            prompt,
+            conv_id,
+            Interface::Signal,
+            vec![],
+            None,
+            vec![],
+            ids,
+            TurnIdentity::default(),
+        )
+        .await
+        .unwrap();
+    }
+
+    let calls = llm.recorded_calls();
+    assert_eq!(calls.len(), 2);
+    let heard = calls[0].history.last().expect("first turn's message");
+    match heard {
+        ChatHistoryMessage::MultimodalUser { content } => assert!(
+            content.iter().any(|b| matches!(b,
+                ContentBlock::Audio { media_type, data }
+                    if media_type == "audio/ogg" && data == "b2dn")),
+            "the stored recording is sent as audio: {content:?}"
+        ),
+        other => panic!("expected the recording, got {other:?}"),
+    }
+    assert!(
+        !calls[1].history.iter().any(has_audio),
+        "a past voice message is not replayed: {:?}",
+        calls[1].history
     );
 }

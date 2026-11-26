@@ -85,10 +85,10 @@ Each numbered group is one PR in the stack, in order.
 ## 13. Docs and ADR (PR 13)
 
 - [x] 13.1 Add `docs/adr/adr-0022-mcp-on-rmcp.md` (0017 was taken) covering the rmcp migration, audience-bound tokens and the opaque-origin app sandbox
-- [ ] 13.2 Write `docs/mcp.md` (stdio and HTTP setup, OAuth/DCR and API keys, tasks, remote skills, MCP Apps and their limitation) and update `docs/tool-permissions.md`, `docs/authentication.md` and `docs/operations/configuration.md`; check every claim against the code
+- [x] 13.2 Write `docs/mcp.md` (stdio and HTTP setup, OAuth/DCR and API keys, tasks, remote skills, MCP Apps and their limitation) and update `docs/tool-permissions.md`, `docs/authentication.md` and `docs/operations/configuration.md`; check every claim against the code
 
 ## 14. Verification
 
 - [x] 14.1 Run `make lint && make format && make test && make lint-flutter && make test-flutter` and verify all pass
 - [x] 14.2 Create `.claude/skills/verify/SKILL.md` describing how to start an isolated instance (temp `HOME`, free ports, test credentials) and clean it up, and verify it by running it once
-- [ ] 14.3 Run the project `verify` skill against an isolated instance: connect an MCP client over stdio and over `/mcp` with a DCR-registered client, call a tool, poll a `run-prompt` task, and render a fixture MCP App
+- [x] 14.3 Run the project `verify` skill against an isolated instance: connect an MCP client over stdio and over `/mcp` with a DCR-registered client, call a tool, poll a `run-prompt` task, and render a fixture MCP App

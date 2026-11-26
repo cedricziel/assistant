@@ -76,6 +76,10 @@ It prints a `PASS`/`FAIL` line per check and exits non-zero on a failure:
   `resource=<URL>/mcp`, then lists tools on `/mcp` and calls
   `mcp__demo__get-forecast`. Pass another tool and JSON arguments as the third
   and fourth arguments.
+- a client declaring the Tasks extension calls `run-prompt`, gets a `working`
+  task and polls `tasks/get` until it is `completed`; a second `run-prompt`
+  saying "Hold this turn", which the scripted model never answers in time, is
+  cancelled with `tasks/cancel` and settles as `cancelled`.
 
 ## 5. Clean up, even on failure
 
@@ -92,13 +96,12 @@ It stops the web UI, the orchestrator and the scripted model, and deletes
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Web sign-in (password org)    | `URL/` → **Sign in** → email `admin@localhost` → Continue → password → Sign In                                                                                                   | `/oauth/register` 201, server email page, 303 to `/login/callback?code=…&state=…`, `/oauth/token` 200, lands on `/chat`                         |
 | Native redirect (server side) | `POST /oauth/register` with redirect `com.cedricziel.assistant:/oauth/callback`, then `POST /oauth/authorize` (`org`, `email`, `password`, PKCE `S256`, `Origin: URL`) with curl | `303` with `location: com.cedricziel.assistant:/oauth/callback?code=…&state=…`                                                                  |
-| MCP over stdio and HTTP       | `start-instance.sh --mcp-demo`, then `mcp-smoke.py <URL> <HOME>`                                                                                                                 | four `PASS` lines; the call returns "Sunny with a light breeze, 21°C in Berlin"                                                                 |
+| MCP over stdio and HTTP       | `start-instance.sh --mcp-demo`, then `mcp-smoke.py <URL> <HOME>`                                                                                                                 | six `PASS` lines; the call returns "Sunny with a light breeze, 21°C in Berlin", the task completes with "It is sunny and 21°C in Berlin."       |
 | MCP App rendering             | `cd crates/web-ui/e2e && ASSISTANT_BIN=$PWD/../../../target/debug/assistant npx playwright test -g "MCP Apps"` (starts its own server with the demo under `[mcp]`)               | 2 passed: the demo app renders below the `mcp__demo__get-forecast` chip, and **Save as favorite** gets `409`, a confirmation dialog, then `200` |
 
 Not covered yet: OIDC orgs (needs a local identity provider), the native
 sign-in sheet itself (needs simulator access: Settings → Integrations →
-Devices), `assistant login` device approval, `run-prompt` as an MCP task (server
-Tasks are not merged yet). A turn sent with `POST .../messages` while a
+Devices), `assistant login` device approval. A turn sent with `POST .../messages` while a
 separate orchestrator runs it never sends its `done` SSE frame; wait on
 `GET /api/conversations/{id}` instead. Add a row when you verify a new
 flow.
