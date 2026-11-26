@@ -68,6 +68,51 @@ void main() {
   setUp(FakeMcpAppSurface.created.clear);
 
   group('McpAppFrame', () {
+    testWidgets('rebinds to a different tool call at the same position', (
+      tester,
+    ) async {
+      await _pump(tester);
+      const other = McpApp(
+        server: 'weather',
+        resourceUri: 'ui://weather/radar',
+        html: '<p>Radar</p>',
+      );
+      await _pump(
+        tester,
+        child: McpAppFrame(
+          toolCall: ToolCallRecord(
+            toolName: 'mcp__weather__radar',
+            toolCallId: 'call-2',
+            status: ToolCallStatus.ok,
+            app: other,
+          ),
+          conversationId: 'conv-1',
+        ),
+      );
+
+      // The old surface is disposed once its teardown wait runs out.
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(FakeMcpAppSurface.created, hasLength(2));
+      expect(FakeMcpAppSurface.created.first.disposed, isTrue);
+      expect(FakeMcpAppSurface.created.last.app.resourceUri, other.resourceUri);
+
+      await _unmount(tester);
+    });
+
+    testWidgets('sends app calls to the backend current at call time', (
+      tester,
+    ) async {
+      await _pump(tester);
+      final reconnected = await _pump(tester);
+
+      await _appRequest(tester, 5, 'tools/call', {'name': 'forecast'});
+
+      expect(reconnected.calls.map((c) => c.$1), ['forecast']);
+
+      await _unmount(tester);
+    });
+
     testWidgets('renders the app labelled as third-party from its server', (
       tester,
     ) async {

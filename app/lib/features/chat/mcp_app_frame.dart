@@ -33,6 +33,9 @@ class McpAppFrame extends StatelessWidget {
     final app = toolCall.app;
     if (app == null) return const SizedBox.shrink();
     return _McpAppFrameBody(
+      // A different call at the same position needs its own surface and
+      // bridge, not this one's.
+      key: ValueKey((toolCall.toolCallId, app.resourceUri)),
       app: app,
       toolCall: toolCall,
       conversationId: conversationId,
@@ -42,6 +45,7 @@ class McpAppFrame extends StatelessWidget {
 
 class _McpAppFrameBody extends ConsumerStatefulWidget {
   const _McpAppFrameBody({
+    super.key,
     required this.app,
     required this.toolCall,
     required this.conversationId,
@@ -71,7 +75,7 @@ class _McpAppFrameState extends ConsumerState<_McpAppFrameBody> {
     super.didChangeDependencies();
     _bridge ??= McpAppBridge(
       port: _surface.port,
-      backend: _backend(),
+      backend: _CurrentBackend(_backend),
       toolCall: widget.toolCall,
       hostContext: _hostContext(context),
       confirmToolCall: _confirmToolCall,
@@ -95,6 +99,7 @@ class _McpAppFrameState extends ConsumerState<_McpAppFrameBody> {
   }
 
   McpAppBackend _backend() {
+    if (!mounted) return const _UnavailableBackend();
     final conversationId = widget.conversationId;
     final toolCallId = widget.toolCall.toolCallId;
     final backend = conversationId == null || toolCallId == null
@@ -231,4 +236,23 @@ class _UnavailableBackend implements McpAppBackend {
   @override
   Future<Map<String, Object?>> readResource(String uri) =>
       Future.error(_refusal);
+}
+
+/// Looks the backend up on every call, so a reconnect or a new API client
+/// reaches an app that was rendered earlier.
+class _CurrentBackend implements McpAppBackend {
+  const _CurrentBackend(this._resolve);
+
+  final McpAppBackend Function() _resolve;
+
+  @override
+  Future<Map<String, Object?>> callTool(
+    String name,
+    Map<String, Object?> arguments, {
+    required bool confirmed,
+  }) => _resolve().callTool(name, arguments, confirmed: confirmed);
+
+  @override
+  Future<Map<String, Object?>> readResource(String uri) =>
+      _resolve().readResource(uri);
 }
