@@ -52,6 +52,7 @@ import 'package:assistant_api/src/model/command_def_response.dart';
 import 'package:assistant_api/src/model/command_event_response.dart';
 import 'package:assistant_api/src/model/complete_response.dart';
 import 'package:assistant_api/src/model/conversation_detail.dart';
+import 'package:assistant_api/src/model/conversation_search_summary.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
 import 'package:assistant_api/src/model/create_api_key_request.dart';
 import 'package:assistant_api/src/model/create_api_key_response.dart';
@@ -98,6 +99,7 @@ import 'package:assistant_api/src/model/member_entry.dart';
 import 'package:assistant_api/src/model/message.dart';
 import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/message_feedback_summary.dart';
+import 'package:assistant_api/src/model/message_search_match.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
@@ -132,6 +134,7 @@ import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.d
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
 import 'package:assistant_api/src/model/rule_scope.dart';
+import 'package:assistant_api/src/model/search_segment.dart';
 import 'package:assistant_api/src/model/security_requirement.dart';
 import 'package:assistant_api/src/model/security_scheme.dart';
 import 'package:assistant_api/src/model/send_message_configuration.dart';
@@ -159,6 +162,8 @@ import 'package:assistant_api/src/model/sse_subagent_status_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_thinking_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_token_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_tool_result_event.dart';
+import 'package:assistant_api/src/model/sse_suggestion.dart';
+import 'package:assistant_api/src/model/sse_suggestions_event.dart';
 import 'package:assistant_api/src/model/sse_thinking_event.dart';
 import 'package:assistant_api/src/model/sse_token_event.dart';
 import 'package:assistant_api/src/model/sse_tool_result_event.dart';
@@ -255,6 +260,7 @@ part 'serializers.g.dart';
   CommandEventResponse,
   CompleteResponse,
   ConversationDetail,
+  ConversationSearchSummary,
   ConversationSummary,
   CreateApiKeyRequest,
   CreateApiKeyResponse,
@@ -301,6 +307,7 @@ part 'serializers.g.dart';
   Message,
   MessageFeedbackResponse,
   MessageFeedbackSummary,
+  MessageSearchMatch,
   MessageSummary,
   ModelPart,
   MutualTlsSecurityScheme,
@@ -335,6 +342,7 @@ part 'serializers.g.dart';
   Role,
   RotateSecretResponse,
   RuleScope,
+  SearchSegment,
   SecurityRequirement,
   SecurityScheme,
   SendMessageConfiguration,
@@ -362,6 +370,8 @@ part 'serializers.g.dart';
   SseSubagentThinkingEvent,
   SseSubagentTokenEvent,
   SseSubagentToolResultEvent,
+  SseSuggestion,
+  SseSuggestionsEvent,
   SseThinkingEvent,
   SseTokenEvent,
   SseToolResultEvent,
@@ -429,6 +439,10 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(ApiKeySummary)]),
         () => ListBuilder<ApiKeySummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(ConversationSearchSummary)]),
+        () => ListBuilder<ConversationSearchSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(OrgSummary)]),

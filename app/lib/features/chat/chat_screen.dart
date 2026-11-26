@@ -36,7 +36,7 @@ import 'voice_recorder_button.dart';
 
 /// Main chat screen.
 ///
-/// - Left panel: [ConversationList] (shown as drawer on narrow screens).
+/// - Left panel: [ConversationListPane] (shown as drawer on narrow screens).
 /// - Right panel: message list + input row.
 /// - App bar: active persona name + persona picker button.
 class ChatScreen extends ConsumerStatefulWidget {
@@ -386,7 +386,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ? null
               : Drawer(
                   child: SafeArea(
-                    child: ConversationList(
+                    child: ConversationListPane(
                       onConversationSelected: () => Navigator.of(context).pop(),
                     ),
                   ),
@@ -408,7 +408,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           ),
                         ),
                       ),
-                      child: const ConversationList(),
+                      child: const ConversationListPane(),
                     ),
                   ),
 

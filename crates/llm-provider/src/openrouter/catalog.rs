@@ -34,6 +34,8 @@ pub struct ModelInfo {
     pub vision: bool,
     /// The model reads PDFs itself (`file` input).
     pub file_input: bool,
+    pub audio_input: bool,
+    pub audio_output: bool,
     pub tools: bool,
     pub tool_choice: bool,
     pub parallel_tool_calls: bool,
@@ -299,10 +301,14 @@ struct Architecture {
 
 impl ModelEntry {
     fn outputs_images(&self) -> bool {
+        self.outputs("image")
+    }
+
+    fn outputs(&self, modality: &str) -> bool {
         self.architecture
             .as_ref()
             .and_then(|a| a.output_modalities.as_deref())
-            .is_some_and(|m| m.iter().any(|m| m == "image"))
+            .is_some_and(|m| m.iter().any(|m| m == modality))
     }
 }
 
@@ -360,6 +366,8 @@ fn model_info(
         context_window_tokens,
         vision: inputs.iter().any(|m| m == "image"),
         file_input: inputs.iter().any(|m| m == "file"),
+        audio_input: inputs.iter().any(|m| m == "audio"),
+        audio_output: entry.outputs("audio"),
         tools: has("tools"),
         tool_choice: has("tool_choice"),
         parallel_tool_calls: has("parallel_tool_calls"),
