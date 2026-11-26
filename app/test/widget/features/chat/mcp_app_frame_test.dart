@@ -100,6 +100,34 @@ void main() {
       await _unmount(tester);
     });
 
+    testWidgets('rebinds when the app or conversation changes under the '
+        'same tool call', (tester) async {
+      ToolCallRecord untracked(McpApp app) => ToolCallRecord(
+        toolName: 'mcp__${app.server}__forecast',
+        status: ToolCallStatus.ok,
+        app: app,
+      );
+      await _pump(tester, child: McpAppFrame(toolCall: untracked(_app)));
+      const otherServer = McpApp(
+        server: 'climate',
+        resourceUri: 'ui://weather/forecast',
+        html: '<p>Cloudy</p>',
+      );
+      await _pump(tester, child: McpAppFrame(toolCall: untracked(otherServer)));
+      await _pump(
+        tester,
+        child: McpAppFrame(
+          toolCall: untracked(otherServer),
+          conversationId: 'conv-2',
+        ),
+      );
+
+      expect(FakeMcpAppSurface.created, hasLength(3));
+      expect(FakeMcpAppSurface.created[1].app.server, 'climate');
+
+      await _unmount(tester);
+    });
+
     testWidgets('sends app calls to the backend current at call time', (
       tester,
     ) async {

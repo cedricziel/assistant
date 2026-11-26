@@ -33,9 +33,15 @@ class McpAppFrame extends StatelessWidget {
     final app = toolCall.app;
     if (app == null) return const SizedBox.shrink();
     return _McpAppFrameBody(
-      // A different call at the same position needs its own surface and
-      // bridge, not this one's.
-      key: ValueKey((toolCall.toolCallId, app.resourceUri)),
+      // A different call, app or conversation at the same position needs its
+      // own surface and bridge, not this one's.
+      key: ValueKey((
+        toolCall.toolCallId,
+        conversationId,
+        app.server,
+        app.resourceUri,
+        app.html,
+      )),
       app: app,
       toolCall: toolCall,
       conversationId: conversationId,
