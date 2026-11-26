@@ -429,6 +429,24 @@ pub struct OpenRouterOptions {
     /// Parser for PDF attachments. Unset: models with native file input read
     /// PDFs themselves, others use `cloudflare-ai`.
     pub pdf_engine: Option<OpenRouterPdfEngine>,
+    /// Ask the model for images in its replies (`modalities`). The model must
+    /// list image output in the catalog.
+    #[serde(default)]
+    pub image_output: bool,
+    /// Sent as `image_config` when `image_output` is on.
+    pub image_config: Option<OpenRouterImageConfig>,
+}
+
+/// `[llm.openrouter.image_config]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterImageConfig {
+    /// For example `16:9`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<String>,
+    /// For example `1K`, `2K` or `4K`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_size: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -809,6 +827,32 @@ mod tests {
                 Some(OpenRouterPdfEngine::MistralOcr)
             );
             assert!(parse("pdf_engine = \"tesseract\"").is_err());
+        }
+
+        #[test]
+        fn image_output_is_off_by_default_and_takes_an_image_config() {
+            use super::super::OpenRouterImageConfig;
+
+            let unset = parse("").unwrap();
+            assert!(!unset.image_output);
+            assert_eq!(unset.image_config, None);
+
+            let set = parse(
+                "image_output = true\n[image_config]\naspect_ratio = \"16:9\"\nimage_size = \"4K\"",
+            )
+            .unwrap();
+            assert!(set.image_output);
+            assert_eq!(
+                set.image_config,
+                Some(OpenRouterImageConfig {
+                    aspect_ratio: Some("16:9".into()),
+                    image_size: Some("4K".into()),
+                })
+            );
+            assert!(
+                parse("[image_config]\nsize = \"4K\"").is_err(),
+                "unknown key"
+            );
         }
 
         #[test]

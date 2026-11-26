@@ -204,6 +204,14 @@ impl LlmResponse {
             LlmResponse::Thinking(_, m) => m,
         }
     }
+
+    pub fn meta_mut(&mut self) -> &mut LlmResponseMeta {
+        match self {
+            LlmResponse::ToolCalls(resp) => &mut resp.meta,
+            LlmResponse::FinalAnswer(_, m) => m,
+            LlmResponse::Thinking(_, m) => m,
+        }
+    }
 }
 
 #[cfg(test)]

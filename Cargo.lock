@@ -571,6 +571,7 @@ dependencies = [
  "anyhow",
  "assistant-a2ui",
  "assistant-core",
+ "assistant-llm-provider",
  "assistant-skills",
  "assistant-storage",
  "assistant-transcription",
