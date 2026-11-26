@@ -17,6 +17,7 @@ mod deepgram;
 mod deepgram_tts;
 mod ollama;
 mod openai_tts;
+pub mod pipeline;
 mod provider;
 mod whisper;
 
