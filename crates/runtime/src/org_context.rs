@@ -11,13 +11,16 @@ use std::sync::{Arc, Mutex, PoisonError};
 use anyhow::{Context, Result};
 
 use assistant_core::types::agent::OrgConfig;
-use assistant_core::types::llm::{EmbeddingConfig, EmbeddingProviderKind, LlmConfig};
+use assistant_core::types::llm::{
+    EmbeddingConfig, EmbeddingProviderKind, LlmConfig, OPENROUTER_API_KEY_ENV,
+    resolve_openrouter_key,
+};
 use assistant_core::{
     EmbeddingProvider, LlmEmbedder, LlmProvider, Secret, WithEmbeddingOverride, load_org_config,
 };
 use assistant_llm_provider::{
-    OllamaConfig, OllamaProvider, OpenAIProvider, OpenAIProviderConfig, VoyageConfig,
-    VoyageEmbedder,
+    OllamaConfig, OllamaProvider, OpenAIProvider, OpenAIProviderConfig, OpenRouterEmbedder,
+    VoyageConfig, VoyageEmbedder,
 };
 
 /// Adjusts a freshly loaded [`OrgConfig`], e.g. to apply command-line overrides.
@@ -151,10 +154,9 @@ fn build_embedding_provider(
                     .clone()
                     .unwrap_or_else(|| main_cfg.base_url.clone()),
                 timeout_secs: main_cfg.timeout_secs,
-                embedding_model: emb_cfg
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| "nomic-embed-text".to_string()),
+                embedding_model: emb_cfg.model.clone().unwrap_or_else(|| {
+                    assistant_llm_provider::ollama::DEFAULT_EMBEDDING_MODEL.to_string()
+                }),
             };
             let provider = OllamaProvider::new(ollama_cfg)
                 .context("Failed to create Ollama embedding provider")?;
@@ -179,15 +181,41 @@ fn build_embedding_provider(
                     .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
                 timeout_secs: main_cfg.timeout_secs,
                 max_tokens: 8192,
-                embedding_model: emb_cfg
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| "text-embedding-3-small".to_string()),
+                embedding_model: emb_cfg.model.clone().unwrap_or_else(|| {
+                    assistant_llm_provider::openai::DEFAULT_EMBEDDING_MODEL.to_string()
+                }),
                 web_search: None,
             };
             let provider = OpenAIProvider::new(provider_cfg, api_key.expose())
                 .context("Failed to create OpenAI embedding provider")?;
             Ok(Arc::new(LlmEmbedder(Arc::new(provider))))
+        }
+        EmbeddingProviderKind::OpenRouter => {
+            let api_key = resolve_openrouter_key(
+                emb_cfg.api_key.as_ref(),
+                main_cfg,
+                OPENROUTER_API_KEY_ENV,
+                |name| std::env::var(name).ok(),
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "OpenRouter embedding provider requires an API key. Set api_key in \
+                     [llm.embeddings] or [llm], or the OPENROUTER_API_KEY env var."
+                )
+            })?;
+            let embedder = OpenRouterEmbedder::new(
+                emb_cfg.base_url.clone().unwrap_or_else(|| {
+                    assistant_llm_provider::openrouter::DEFAULT_BASE_URL.to_string()
+                }),
+                api_key,
+                main_cfg.timeout_secs,
+                emb_cfg.model.clone().unwrap_or_else(|| {
+                    assistant_llm_provider::openrouter::DEFAULT_EMBEDDING_MODEL.to_string()
+                }),
+                emb_cfg.openrouter.provider.clone(),
+            )
+            .context("Failed to create OpenRouter embedding provider")?;
+            Ok(Arc::new(embedder))
         }
         EmbeddingProviderKind::Voyage => {
             let api_key = emb_cfg
@@ -307,6 +335,96 @@ mod tests {
         cfg
     }
 
+    mod openrouter_embeddings {
+        use serde_json::{Value, json};
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use assistant_core::Secret;
+        use assistant_core::types::llm::{
+            EmbeddingConfig, EmbeddingOpenRouterOptions, EmbeddingProviderKind, LlmConfig,
+            LlmProviderKind, OpenRouterDataCollection, OpenRouterRouting,
+        };
+
+        use super::super::build_embedding_provider;
+
+        fn openrouter_embeddings(base_url: &str, api_key: Option<&str>) -> EmbeddingConfig {
+            EmbeddingConfig {
+                provider: EmbeddingProviderKind::OpenRouter,
+                model: None,
+                base_url: Some(base_url.to_string()),
+                api_key: api_key.map(Secret::new),
+                openrouter: EmbeddingOpenRouterOptions {
+                    provider: Some(OpenRouterRouting {
+                        data_collection: Some(OpenRouterDataCollection::Deny),
+                        ..OpenRouterRouting::default()
+                    }),
+                },
+            }
+        }
+
+        #[tokio::test]
+        async fn reuses_the_chat_key_and_sends_default_model_and_routing() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/embeddings"))
+                .and(header("authorization", "Bearer sk-or-chat"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                    {"index": 0, "embedding": [0.5]}
+                ]})))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let main = LlmConfig {
+                provider: LlmProviderKind::OpenRouter,
+                api_key: Some(Secret::new("sk-or-chat")),
+                ..LlmConfig::default()
+            };
+
+            let embedder =
+                build_embedding_provider(&openrouter_embeddings(&server.uri(), None), &main)
+                    .unwrap();
+            assert_eq!(embedder.embed("hi").await.unwrap(), [0.5]);
+
+            let requests = server.received_requests().await.unwrap();
+            let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+            assert_eq!(body["model"], "openai/text-embedding-3-small");
+            assert_eq!(body["provider"], json!({"data_collection": "deny"}));
+        }
+
+        #[test]
+        fn fails_without_any_openrouter_key() {
+            // SAFETY: test-only env mutation.
+            let prev = std::env::var("OPENROUTER_API_KEY").ok();
+            unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
+            let main = LlmConfig {
+                provider: LlmProviderKind::Anthropic,
+                ..LlmConfig::default()
+            };
+            let err =
+                build_embedding_provider(&openrouter_embeddings("http://unused", None), &main)
+                    .err()
+                    .expect("must error");
+            assert!(err.to_string().contains("OpenRouter"), "{err}");
+            if let Some(v) = prev {
+                unsafe { std::env::set_var("OPENROUTER_API_KEY", v) };
+            }
+        }
+
+        #[test]
+        fn own_key_works_with_another_chat_provider() {
+            let main = LlmConfig {
+                provider: LlmProviderKind::Anthropic,
+                ..LlmConfig::default()
+            };
+            build_embedding_provider(
+                &openrouter_embeddings("http://unused", Some("sk-or-emb")),
+                &main,
+            )
+            .expect("a dedicated key is enough");
+        }
+    }
+
     #[test]
     fn ollama_embedding_provider_builds_without_keys() {
         let emb = EmbeddingConfig {
@@ -314,6 +432,7 @@ mod tests {
             model: Some("nomic-embed-text".to_string()),
             base_url: None,
             api_key: None,
+            openrouter: Default::default(),
         };
         let main = base_llm_cfg();
         build_embedding_provider(&emb, &main).expect("ollama doesn't need a key");
@@ -326,6 +445,7 @@ mod tests {
             model: None,
             base_url: Some("http://elsewhere:11434".to_string()),
             api_key: None,
+            openrouter: Default::default(),
         };
         let main = base_llm_cfg();
         build_embedding_provider(&emb, &main).expect("ollama config accepted");
@@ -338,6 +458,7 @@ mod tests {
             model: None,
             base_url: None,
             api_key: None,
+            openrouter: Default::default(),
         };
         let main = base_llm_cfg();
         // Make sure the env var isn't bleeding in from the host shell.
@@ -364,6 +485,7 @@ mod tests {
             model: Some("text-embedding-3-small".to_string()),
             base_url: Some("https://api.openai.com/v1".to_string()),
             api_key: Some("sk-test".into()),
+            openrouter: Default::default(),
         };
         let main = base_llm_cfg();
         build_embedding_provider(&emb, &main).expect("explicit api_key is enough");
@@ -376,6 +498,7 @@ mod tests {
             model: None,
             base_url: None,
             api_key: None,
+            openrouter: Default::default(),
         };
         let main = base_llm_cfg();
         // SAFETY: test-only.
@@ -401,6 +524,7 @@ mod tests {
             model: Some("voyage-large-2".to_string()),
             base_url: None,
             api_key: Some("voyage-key".into()),
+            openrouter: Default::default(),
         };
         let main = base_llm_cfg();
         build_embedding_provider(&emb, &main).expect("explicit voyage key is enough");

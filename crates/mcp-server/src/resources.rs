@@ -15,6 +15,7 @@ use assistant_storage::SkillCatalog;
 
 const URI_PREFIX: &str = "skills://";
 const LIST_URI: &str = "skills://list";
+pub const SKILL_TEMPLATE: &str = "skills://{name}/{category}/{+path}";
 const CATEGORIES: [AuxFileCategory; 3] = [
     AuxFileCategory::Scripts,
     AuxFileCategory::References,
@@ -60,7 +61,7 @@ pub async fn list(catalog: &dyn SkillCatalog) -> ListResourcesResult {
 
 pub fn templates() -> ListResourceTemplatesResult {
     ListResourceTemplatesResult::with_all_items(vec![
-        ResourceTemplate::new("skills://{name}/{category}/{+path}", "Skill file").with_description(
+        ResourceTemplate::new(SKILL_TEMPLATE, "Skill file").with_description(
             "A file bundled with a skill; category is scripts, references or assets",
         ),
     ])

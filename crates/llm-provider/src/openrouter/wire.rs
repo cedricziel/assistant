@@ -204,3 +204,49 @@ fn tool_call_items(calls: Vec<ToolCall>) -> Vec<ToolCallItem> {
         })
         .collect()
 }
+
+/// `POST /embeddings`.
+#[derive(Debug, Serialize)]
+pub struct EmbeddingRequest<'a> {
+    pub model: &'a str,
+    pub input: &'a [&'a str],
+    pub encoding_format: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<&'a OpenRouterRouting>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmbeddingResponse {
+    #[serde(default)]
+    data: Vec<EmbeddingData>,
+    #[serde(default)]
+    error: Option<ErrorBody>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EmbeddingData {
+    #[serde(default)]
+    index: usize,
+    embedding: Vec<f32>,
+}
+
+impl EmbeddingResponse {
+    /// The vectors in input order, which `data[].index` gives. Fails unless
+    /// there is exactly one vector per input.
+    pub fn into_vectors(self, inputs: usize) -> anyhow::Result<Vec<Vec<f32>>> {
+        if let Some(error) = &self.error
+            && self.data.is_empty()
+        {
+            return Err(body_error(error));
+        }
+        if self.data.len() != inputs {
+            anyhow::bail!(
+                "OpenRouter returned {} embeddings for {inputs} inputs",
+                self.data.len()
+            );
+        }
+        let mut data = self.data;
+        data.sort_by_key(|d| d.index);
+        Ok(data.into_iter().map(|d| d.embedding).collect())
+    }
+}

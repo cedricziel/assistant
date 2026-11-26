@@ -7,6 +7,7 @@ mod cors;
 pub(crate) mod errors;
 mod flutter_assets;
 pub mod install;
+mod mcp;
 mod oauth;
 mod openapi;
 pub(crate) mod push;
@@ -29,6 +30,7 @@ use assistant_core::{
     MessageBus, apply_agent_context, default_workspace_dir, load_server_config, server_config_path,
     set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
+use assistant_mcp_server::ListChangeListeners;
 use assistant_runtime::{OrgContexts, SpaceRuntimes, SpaceSupervisor, init_tracing};
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use axum::{Extension, Router, http::StatusCode, routing::get};
@@ -623,6 +625,14 @@ async fn run_with_args(args: Args) -> Result<()> {
         secure_cookie,
     };
 
+    let mcp_state = mcp::McpState {
+        auth: auth_config.auth_state.clone(),
+        spaces: space_resolver.clone(),
+        runtimes: runtimes.clone(),
+        issuer: base_url.clone(),
+        listeners: ListChangeListeners::default(),
+    };
+
     // -- Management API states (orgs, users, spaces, members, API keys) ------
     let orgs_api_state = api::orgs::OrgsApiState {
         org_storage: org_storage.clone(),
@@ -670,7 +680,9 @@ async fn run_with_args(args: Args) -> Result<()> {
         // A2A agent card is public per spec — callers need it to discover auth.
         .merge(a2a::public_router().with_state(a2a_state.clone()))
         // OAuth2 endpoints (public — clients need these for auth flows).
-        .merge(oauth::oauth_router().with_state(oauth_state));
+        .merge(oauth::oauth_router().with_state(oauth_state))
+        // MCP over Streamable HTTP; authenticates on its own (resource server).
+        .merge(mcp::mcp_router(mcp_state));
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()

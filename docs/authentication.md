@@ -231,6 +231,8 @@ To reach the MCP endpoint without OAuth, create an API key with the scopes
 `["mcp:execute"]`. `/.well-known/oauth-authorization-server` lists
 `scopes_supported: ["mcp:execute"]`.
 
+For connecting an MCP client end to end, see [MCP](mcp.md#connect-an-mcp-client-over-http).
+
 `POST /oauth/register` accepts loopback redirect URIs (`http://127.0.0.1:<port>/...`,
 `http://localhost`, `http://[::1]`) and private-use scheme URIs such as
 `com.example.app:/callback`. It rejects the schemes `javascript`, `data`,
@@ -334,6 +336,7 @@ Scopes follow the `resource:action` format:
 | `org`           | `read`, `manage`                     |
 | `api_keys`      | `read`, `write`                      |
 | `spaces`        | `read`, `write`, `manage`            |
+| `mcp`           | `execute`                            |
 
 API keys can optionally restrict scopes to specific resource IDs
 (e.g., only a specific persona or space).
@@ -486,12 +489,14 @@ assistant_session=<JWT>; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600
 
 ## Route protection
 
-| Route                                     | Auth required              |
-| ----------------------------------------- | -------------------------- |
-| `/login` (GET, POST)                      | No                         |
-| `/logout` (POST)                          | No                         |
-| `/oauth/*`                                | No (OAuth2 flow endpoints) |
-| `/workflow-hooks/{id}/{token}`            | No (HMAC token in URL)     |
-| `/.well-known/agent.json`                 | No (A2A discovery)         |
-| `/.well-known/oauth-authorization-server` | No (RFC 8414)              |
-| Everything else                           | Yes                        |
+| Route                                       | Auth required                                             |
+| ------------------------------------------- | --------------------------------------------------------- |
+| `/login` (GET, POST)                        | No                                                        |
+| `/logout` (POST)                            | No                                                        |
+| `/oauth/*`                                  | No (OAuth2 flow endpoints)                                |
+| `/workflow-hooks/{id}/{token}`              | No (HMAC token in URL)                                    |
+| `/.well-known/agent.json`                   | No (A2A discovery)                                        |
+| `/.well-known/oauth-authorization-server`   | No (RFC 8414)                                             |
+| `/.well-known/oauth-protected-resource/mcp` | No (RFC 9728)                                             |
+| `/mcp`                                      | Yes: an MCP-audience JWT or an API key with `mcp:execute` |
+| Everything else                             | Yes                                                       |

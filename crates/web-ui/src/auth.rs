@@ -18,8 +18,8 @@ use axum::Form;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::header::{COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::header::{AUTHORIZATION, COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
+use axum::http::{HeaderMap, HeaderName, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -132,12 +132,7 @@ pub async fn require_auth(
 
     // Extract bearer token and session cookie JWT before any async work,
     // so we hold only owned values across .await points.
-    let bearer_token: Option<String> = request
-        .headers()
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|t| t.trim().to_string());
+    let bearer_token: Option<String> = bearer_token(request.headers()).map(str::to_owned);
 
     let cookie_jwt: Option<String> = request
         .headers()
@@ -207,32 +202,38 @@ pub async fn require_same_origin_mutation(request: Request, next: Next) -> Respo
         return next.run(request).await;
     }
 
-    let Some(host) = request.headers().get(HOST).and_then(|h| h.to_str().ok()) else {
-        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
-    };
-
-    let origin_host = request
-        .headers()
-        .get(ORIGIN)
-        .and_then(|value| value.to_str().ok())
-        .and_then(parse_host_from_url)
-        .or_else(|| {
-            request
-                .headers()
-                .get(REFERER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(parse_host_from_url)
-        });
-
-    let Some(origin_host) = origin_host else {
-        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
-    };
-
-    if !origin_host.eq_ignore_ascii_case(host) {
+    if !is_same_origin(request.headers(), &[ORIGIN, REFERER]) {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
 
     next.run(request).await
+}
+
+/// The token of an `Authorization: Bearer` header.
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+}
+
+/// Whether the host named by the first parseable header of `sources` equals
+/// the request's `Host`. A request without `Host` or without any parseable
+/// source is not same-origin.
+pub(crate) fn is_same_origin(headers: &HeaderMap, sources: &[HeaderName]) -> bool {
+    let Some(host) = headers.get(HOST).and_then(|h| h.to_str().ok()) else {
+        return false;
+    };
+    sources
+        .iter()
+        .find_map(|name| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .and_then(parse_host_from_url)
+        })
+        .is_some_and(|source| source.eq_ignore_ascii_case(host))
 }
 
 // -- Login page -------------------------------------------------------------

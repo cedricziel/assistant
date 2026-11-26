@@ -65,6 +65,30 @@
         ]
       }
     },
+    "/.well-known/oauth-protected-resource/mcp": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "GET /.well-known/oauth-protected-resource/mcp",
+        "operationId": "protected_resource_metadata",
+        "responses": {
+          "200": {
+            "description": "Protected resource metadata for the MCP endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedResourceMetadata"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/agent/authenticatedExtendedCard": {
       "get": {
         "tags": [
@@ -12891,6 +12915,41 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "ProtectedResourceMetadata": {
+        "type": "object",
+        "description": "OAuth 2.0 protected resource metadata for `/mcp` (RFC 9728).",
+        "required": [
+          "resource",
+          "authorization_servers",
+          "scopes_supported",
+          "bearer_methods_supported"
+        ],
+        "properties": {
+          "authorization_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Authorization servers that issue tokens for this resource."
+          },
+          "bearer_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resource": {
+            "type": "string",
+            "description": "Canonical URL of the MCP endpoint; tokens must be issued for it."
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

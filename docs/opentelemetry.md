@@ -225,6 +225,33 @@ records via `OpenTelemetryTracingBridge`. Each log record carries:
 filtered out of the bridge so that exporting a record does not generate
 records that are exported in turn.
 
+### `gen_ai.evaluation.result` event (user feedback)
+
+When a user rates an assistant reply (thumbs up or down) or withdraws the
+rating, the server exports one log record with event name
+`gen_ai.evaluation.result`. When the reply has a stored traceparent, the
+record carries that trace id and span id, so it appears in the trace of the
+`chat {model}` span that produced the reply. Replies from before the column
+existed, or produced with telemetry off, are exported without trace context.
+
+| Attribute                        | Type   | Notes                                                            |
+| -------------------------------- | ------ | ---------------------------------------------------------------- |
+| `gen_ai.evaluation.name`         | string | Always `user_feedback`                                           |
+| `gen_ai.evaluation.score.label`  | string | `positive`, `negative` or `cleared`                              |
+| `gen_ai.evaluation.score.value`  | double | `1.0` for `positive`, `-1.0` for `negative`; absent on `cleared` |
+| `gen_ai.conversation.id`         | string | Conversation UUID                                                |
+| `gen_ai.agent.id`                | string | Persona that owns the conversation                               |
+| `assistant.message.id`           | string | Rated message UUID                                               |
+| `assistant.feedback.has_comment` | bool   | Whether the vote has a comment                                   |
+
+`cleared` is emitted only when a vote was actually removed, and has no score
+value so that averaging backends do not count a withdrawal as a neutral vote.
+The current state of a message is its latest event.
+
+The comment text is never exported, in any signal, including when
+`[observability] trace_content` is on. The event never carries
+`gen_ai.evaluation.explanation`; the comment stays in the space database.
+
 ## Metrics
 
 Meter name: `assistant-runtime`
@@ -249,6 +276,10 @@ Meter name: `assistant-runtime`
 | `assistant.error.count`        | Counter   | `{error}`        | `error.type`, `source` |
 | `assistant.conversation.count` | Counter   | `{conversation}` | _(none)_               |
 | `assistant.agent.spawn.count`  | Counter   | `{agent}`        | _(none)_               |
+| `assistant.feedback.count`     | Counter   | `{event}`        | `rating`, `agent_id`   |
+
+`assistant.feedback.count` counts feedback **events**, not current votes.
+`rating` is `positive`, `negative` or `cleared`.
 
 Metrics are exported every 60 seconds via `PeriodicReader`. Override with
 `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds).

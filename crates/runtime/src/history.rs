@@ -91,8 +91,8 @@ fn message_to_chat(m: Message, attachment_map: &AttachmentMap) -> Option<ChatHis
 /// `row_ids[i]` is the id of the stored message that produced `messages[i]`,
 /// or `None` for entries with no row of their own (the summary, synthetic
 /// repairs). The two vectors only change together, through [`push`], [`insert`]
-/// and [`remove`], so they cannot drift apart. A later change uses the ids to say
-/// which stored message a summary runs through.
+/// and [`remove`], so they cannot drift apart. Compaction uses the ids to say which
+/// stored message a summary runs through.
 ///
 /// [`push`]: TurnHistory::push
 /// [`insert`]: TurnHistory::insert
@@ -120,6 +120,11 @@ impl TurnHistory {
     #[cfg(test)]
     pub(crate) fn row_ids(&self) -> Vec<Option<Uuid>> {
         self.row_ids.clone()
+    }
+
+    /// The persisted row behind entry `index`, if it has one.
+    pub(crate) fn row_id(&self, index: usize) -> Option<Uuid> {
+        self.row_ids.get(index).copied().flatten()
     }
 
     /// Append `message`, which was persisted as `row_id` when it has a row.
@@ -341,6 +346,8 @@ pub(crate) struct FinalAnswerMeta {
     /// How long the turn took; stored under the saved message's id. `None`
     /// for paths that do not measure it.
     pub timing: Option<TurnTiming>,
+    /// The model that produced the answer: the provider's `model_name()`.
+    pub model: Option<String>,
 }
 
 /// Save a final assistant answer, stamping it with `meta`.
@@ -354,6 +361,7 @@ pub(crate) async fn persist_final_answer(
     meta: FinalAnswerMeta,
 ) -> anyhow::Result<()> {
     msg.traceparent = meta.traceparent;
+    msg.model = meta.model;
     conv_store.save_message(&msg).await?;
     if let Some(timing) = meta.timing
         && let Err(e) = timing_store.put(msg.conversation_id, msg.id, &timing).await
@@ -424,6 +432,7 @@ mod tests {
             tool_status: None,
             tool_data_json: None,
             traceparent: None,
+            model: None,
             finish_reason: None,
         }
     }
@@ -446,6 +455,7 @@ mod tests {
             tool_status: None,
             tool_data_json: None,
             traceparent: None,
+            model: None,
             finish_reason: None,
         }
     }

@@ -32,7 +32,7 @@ All runtime data lives under `~/.assistant/`. The multi-org layout:
 - `org.db` — org-level database at the install root (users, spaces, memberships, API keys, OAuth clients, integration credentials)
 - `secrets.key`, `jwt_secret` — keys for integration credentials and issued JWTs; `assistant backup` includes them
 - `agents/{id}/`, `skills/` — install-root persona workspaces and user skills
-- `cache/` — regenerable downloads (integrations catalog); not backed up
+- `cache/` — regenerable downloads (integrations catalog, verified MCP server skills under `cache/mcp-skills/`); not backed up
 - `orgs/{slug}/spaces/{space}/space.db` — space-level database (conversations, messages, personas, scheduled tasks)
 - `orgs/{slug}/spaces/{space}/agents/{id}/` — per-persona agent workspace
 - `orgs/{slug}/spaces/{space}/skills/` — space-local skills
