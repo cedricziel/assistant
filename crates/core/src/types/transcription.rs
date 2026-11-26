@@ -48,6 +48,27 @@ pub struct TranscriptionConfig {
     pub api_key: Option<Secret>,
     /// Optional BCP-47 language hint (e.g. `"en"`, `"de"`).
     pub language: Option<String>,
+    /// Vocabulary or style hint sent with each request (OpenRouter).
+    #[serde(default)]
+    pub prompt: Option<String>,
+    /// Longest chunk sent in one request, in seconds (OpenRouter; default
+    /// 50, at most 55 because upstreams time out after 60 seconds).
+    #[serde(default)]
+    pub max_chunk_secs: Option<u32>,
+}
+
+/// Default for [`TranscriptionConfig::max_chunk_secs`].
+pub const DEFAULT_MAX_CHUNK_SECS: u32 = 50;
+/// Upper bound for [`TranscriptionConfig::max_chunk_secs`].
+pub const MAX_CHUNK_SECS_LIMIT: u32 = 55;
+
+impl TranscriptionConfig {
+    /// `max_chunk_secs`, defaulted and capped at [`MAX_CHUNK_SECS_LIMIT`].
+    pub fn effective_max_chunk_secs(&self) -> u32 {
+        self.max_chunk_secs
+            .unwrap_or(DEFAULT_MAX_CHUNK_SECS)
+            .clamp(1, MAX_CHUNK_SECS_LIMIT)
+    }
 }
 
 // ── Text-to-speech ────────────────────────────────────────────────────────────
@@ -94,4 +115,28 @@ pub struct TtsConfig {
     /// ```
     #[serde(default)]
     pub voices: HashMap<String, String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TranscriptionConfig, TranscriptionProviderKind};
+
+    fn with_chunk(max_chunk_secs: Option<u32>) -> TranscriptionConfig {
+        TranscriptionConfig {
+            provider: TranscriptionProviderKind::Whisper,
+            model: None,
+            base_url: None,
+            api_key: None,
+            language: None,
+            prompt: None,
+            max_chunk_secs,
+        }
+    }
+
+    #[test]
+    fn max_chunk_secs_defaults_to_50_and_is_capped_at_55() {
+        assert_eq!(with_chunk(None).effective_max_chunk_secs(), 50);
+        assert_eq!(with_chunk(Some(30)).effective_max_chunk_secs(), 30);
+        assert_eq!(with_chunk(Some(120)).effective_max_chunk_secs(), 55);
+    }
 }

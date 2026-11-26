@@ -13,8 +13,8 @@ import 'chat_provider.dart';
 import '../../shared/theme/legacy_theme.dart';
 import 'markdown_link_handler.dart';
 import 'message_attachments.dart';
+import 'message_actions_builder.dart';
 import 'message_audio_actions.dart';
-import 'message_meta_actions.dart';
 import 'typing_dots.dart';
 import 'voice_message_player.dart';
 import 'theme_aware_mermaid.dart';
@@ -187,7 +187,7 @@ class MessageBubble extends StatelessWidget {
                   ),
           ),
           // Meta action row below the bubble.
-          MetaActionRow(
+          buildMessageActions(
             message: message,
             capabilities: capabilities,
             fetchMessageAudio: fetchMessageAudio,

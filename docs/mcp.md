@@ -192,20 +192,21 @@ url = "https://db.example.com/mcp"
 Authorization = "Bearer ${DB_TOKEN}"
 ```
 
-| Key       | Default     | Meaning                                                                                              |
-| --------- | ----------- | ---------------------------------------------------------------------------------------------------- |
-| `name`    | (required)  | Lowercase letters, digits and `-`. Must not start with `org_`, `space_` or `user_`.                  |
-| `command` |             | Program and arguments for a stdio server. If both `command` and `url` are set, `command` wins.       |
-| `url`     |             | Endpoint of an HTTP server.                                                                          |
-| `headers` | `{}`        | HTTP headers sent with every request to an HTTP server.                                              |
-| `env`     | `{}`        | Environment variables for a stdio server. Not sent to HTTP servers.                                  |
-| `enabled` | `true`      | Set to `false` to skip the server.                                                                   |
-| `trust`   | `"confirm"` | `"confirm"` makes every tool of the server require confirmation. `"trust"` lets them run without it. |
+| Key                 | Default     | Meaning                                                                                              |
+| ------------------- | ----------- | ---------------------------------------------------------------------------------------------------- |
+| `name`              | (required)  | Lowercase letters, digits and `-`. Must not start with `org_`, `space_` or `user_`.                  |
+| `command`           |             | Program and arguments for a stdio server. If both `command` and `url` are set, `command` wins.       |
+| `url`               |             | Endpoint of an HTTP server.                                                                          |
+| `headers`           | `{}`        | HTTP headers sent with every request to an HTTP server.                                              |
+| `env`               | `{}`        | Environment variables for a stdio server. Not sent to HTTP servers.                                  |
+| `enabled`           | `true`      | Set to `false` to skip the server.                                                                   |
+| `trust`             | `"confirm"` | `"confirm"` makes every tool of the server require confirmation. `"trust"` lets them run without it. |
+| `tool_timeout_secs` | `120`       | Longest a tool call to the server may take, in seconds, task polling included. Must be at least 1.   |
 
 Values in `env` and `headers` can reference environment variables as
-`${VAR}`. A name that starts with a reserved prefix makes `server.toml` fail
-to load. A name with other invalid characters is logged and skipped.
-`assistant doctor` lists the configured servers.
+`${VAR}`. A name that starts with a reserved prefix, or a `tool_timeout_secs`
+of 0, makes `server.toml` fail to load. A name with other invalid characters
+is logged and skipped. `assistant doctor` lists the configured servers.
 
 ### Tools from external servers
 
@@ -242,12 +243,12 @@ assistant then polls the task until it ends:
 - A completed task returns its result like a normal call.
 - A failed or cancelled task, or one that needs input, returns an error
   result. The assistant cannot provide input.
-- The whole call, polling included, has a 120-second timeout. When the
-  timeout expires, or the turn is cancelled, the assistant sends
+- The whole call, polling included, is bounded by the server's tool timeout.
+  When the timeout expires, or the turn is cancelled, the assistant sends
   `tasks/cancel`.
 
-The 120-second timeout applies to every external tool call. It cannot be
-configured.
+The tool timeout applies to every external tool call. It is 120 seconds
+unless the server's `tool_timeout_secs` sets another value.
 
 ### Skills from external servers
 
@@ -282,7 +283,8 @@ Integrations connect to MCP servers over Streamable HTTP through a separate
 connection pool, one connection per integration and user. Their tools are
 named `mcp__{layer}_{slug}__{tool}`, where `layer` is `org`, `space` or `user`.
 That is why `[mcp]` server names cannot start with those prefixes. These connections handle list-change
-announcements, tasks and content the same way as `[mcp]` servers.
+announcements, tasks and content the same way as `[mcp]` servers. Their tool
+timeout is always 120 seconds.
 
 ## Known limits
 

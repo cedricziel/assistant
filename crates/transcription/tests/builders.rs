@@ -108,6 +108,8 @@ fn build_transcription_whisper_uses_api_key_from_config() {
         base_url: None,
         model: None,
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
     let provider = build_provider(&config).ok();
     assert!(provider.is_some());
@@ -124,6 +126,8 @@ fn build_transcription_ollama_constructs_without_api_key() {
         base_url: Some("http://localhost:11434".into()),
         model: Some("whisper".into()),
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
     let provider = build_provider(&config).ok();
     assert!(provider.is_some());
@@ -138,6 +142,8 @@ fn build_transcription_deepgram_uses_api_key_from_config() {
         base_url: None,
         model: None,
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
     let provider = build_provider(&config).ok();
     assert!(provider.is_some());

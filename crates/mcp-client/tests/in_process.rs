@@ -19,7 +19,7 @@ use rmcp::handler::server::router::tool::{ToolRoute, ToolRouter};
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+    PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::{MaybeSendFuture, RequestContext};
 use rmcp::{RoleServer, ServerHandler, ServiceExt};
@@ -99,12 +99,12 @@ impl TestServer {
 }
 
 impl ServerHandler for TestServer {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let mut builder = ServerCapabilities::builder().enable_tools();
         if self.list_changed {
             builder = builder.enable_tool_list_changed();
         }
-        ServerInfo::new(builder.build())
+        ServerConfig::new(builder.build())
     }
 
     fn list_tools(
