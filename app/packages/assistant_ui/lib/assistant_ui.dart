@@ -3,6 +3,8 @@
 /// See `README.md` for the purity, injection and composition rules.
 library;
 
+export 'src/branch_picker.dart';
+export 'src/message_editor.dart';
 export 'src/registry.dart';
 export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
