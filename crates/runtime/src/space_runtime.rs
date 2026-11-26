@@ -618,7 +618,13 @@ mod tests {
             }
             tokio::task::yield_now().await;
         };
-        assert_eq!((row.expires_at - row.created_at).num_seconds(), 120);
+        // `created_at` and `expires_at` come from separate clock reads, so the
+        // gap can land on either side of a second boundary.
+        let timeout_secs = (row.expires_at - row.created_at).num_seconds();
+        assert!(
+            (119..=120).contains(&timeout_secs),
+            "the configured 120 s timeout, give or take a second: {timeout_secs}"
+        );
         assert!(
             other
                 .storage

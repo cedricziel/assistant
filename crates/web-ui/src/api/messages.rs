@@ -2025,7 +2025,10 @@ mod tests {
         let (_, frames) = run_runner(
             &state,
             &storage,
-            RunOptions { push: false },
+            RunOptions {
+                push: false,
+                suggestions: false,
+            },
             tokens,
             Some(Ok(turn_result("done text"))),
         )
