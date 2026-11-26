@@ -13,7 +13,7 @@ use assistant_tool_executor::builtins::file_write::FileWriteHandler;
 use assistant_tool_executor::builtins::plan_update::PlanUpdateHandler;
 use assistant_tool_executor::builtins::web_fetch::WebFetchHandler;
 use assistant_tool_executor::builtins::web_search::WebSearchHandler;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -348,9 +348,10 @@ async fn file_read_over_limit_is_truncated() {
     assert_eq!(data["truncated"], true);
     assert_eq!(data["content"].as_str().unwrap().chars().count(), 100);
     assert_eq!(data["total_chars"], 500);
-    assert!(out
-        .content
-        .contains("[Content truncated at 100 characters]"));
+    assert!(
+        out.content
+            .contains("[Content truncated at 100 characters]")
+    );
 }
 
 #[tokio::test]
@@ -687,8 +688,8 @@ async fn plan_update_is_registered_by_the_executor() {
 
     use assistant_core::types::agent::OrgConfig;
     use assistant_llm_provider::ScriptedLlmProvider;
-    use assistant_storage::registry::SkillRegistry;
     use assistant_storage::StorageLayer;
+    use assistant_storage::registry::SkillRegistry;
     use assistant_tool_executor::ToolExecutor;
 
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
