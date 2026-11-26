@@ -1,3 +1,5 @@
+import * as http from "node:http";
+
 import { test, expect, Page } from "@playwright/test";
 
 import { enableAccessibility } from "./support/flutter";
@@ -483,10 +485,11 @@ test.describe("Authenticated pages", () => {
   });
 
   test("chat page with a pending tool approval", async ({ page }) => {
-    // Approvals stay dormant on the server until PR 20a, so fixture the
-    // frames instead: a tool call is requested, then its `tool_approval`
-    // interaction arrives and the turn waits for the owner. The POST stream
-    // deliberately never sends `done`, so the card stays pending.
+    // Approvals stay dormant on the server until PR 20a, so fixture the turn:
+    // the POST message stream carries a tool call and its `tool_approval`
+    // request. The app ends the turn as soon as the body closes, so a real
+    // never-ending stream serves it; the card and the waiting label only stay
+    // up while the connection is open.
     const runId = "00000000-0000-4000-8000-0000000000b1";
     const toolCallId = "call-approval-1";
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
@@ -522,36 +525,70 @@ test.describe("Authenticated pages", () => {
         },
       ],
     ];
-    await page.route(/\/api\/conversations\/[^/]+\/messages$/, (route) => {
-      if (route.request().method() !== "POST") return route.fallback();
-      return route.fulfill({
-        contentType: "text/event-stream",
-        body: sse(frames),
-      });
-    });
-    // A replay tail would repeat the frames; the reducers ignore duplicates.
-    await page.route(
-      new RegExp(`/api/conversations/[^/]+/runs/${runId}/events/stream`),
-      (route) =>
-        route.fulfill({ contentType: "text/event-stream", body: sse(frames) }),
-    );
 
-    await navigateAndSettle(page, "/chat");
-    await enableAccessibility(page);
-    const input = page.getByRole("textbox").last();
-    await input.fill("Status of the repo?");
-    await input.press("Enter");
-    await expect(page.getByText("Waiting for your approval")).toBeVisible({
-      timeout: 20_000,
+    const sockets = new Set<import("node:net").Socket>();
+    const stream = http.createServer((_request, response) => {
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+      response.write(sse(frames));
+      const heartbeat = setInterval(() => response.write(":\n\n"), 5_000);
+      response.on("close", () => clearInterval(heartbeat));
     });
-    await expect(
-      page.getByRole("button", { name: "Allow bash once" }),
-    ).toBeVisible();
-    await page.waitForTimeout(CSS_SETTLE_MS);
-    await expect(page).toHaveScreenshot("chat-tool-approval.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    stream.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
     });
+    await new Promise<void>((resolve) =>
+      stream.listen(0, "127.0.0.1", () => resolve()),
+    );
+    const { port } = stream.address() as import("node:net").AddressInfo;
+
+    try {
+      // A conversation that already exists keeps the first frame immediate:
+      // creating one delays the optimistic message past the assertion timeout.
+      const created = await apiPost(page, "/api/conversations", {
+        title: "Approval fixture",
+      });
+      const conversationId = (created.body as Record<string, unknown>).id;
+
+      await page.route(/\/api\/conversations\/[^/]+\/messages$/, (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        return route.continue({ url: `http://127.0.0.1:${port}/messages` });
+      });
+      // A replay tail would repeat the frames (the reducers ignore duplicates);
+      // serve it from the same open stream so a replay cannot end the turn.
+      await page.route(
+        new RegExp(`/api/conversations/[^/]+/runs/${runId}/events/stream`),
+        (route) =>
+          route.continue({ url: `http://127.0.0.1:${port}/events` }),
+      );
+
+      await navigateAndSettle(page, `/chat/${conversationId}`);
+      await enableAccessibility(page);
+      const input = page
+        .getByRole("textbox", { name: "Type a message..." })
+        .last();
+      await input.fill("Status of the repo?");
+      await input.press("Enter");
+      await expect(page.getByText("Waiting for your approval")).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(
+        page.getByRole("button", { name: "Allow bash once" }),
+      ).toBeVisible();
+      await page.waitForTimeout(CSS_SETTLE_MS);
+      await expect(page).toHaveScreenshot("chat-tool-approval.png", {
+        fullPage: true,
+        maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+      });
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => stream.close(() => resolve()));
+    }
   });
 
   test("skills list page (empty state)", async ({ page }) => {

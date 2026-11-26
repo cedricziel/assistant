@@ -16,7 +16,7 @@ work.
 
 ### Requirement: GET /api/conversations/{id}/turns/{turnId}/status returns the authoritative turn state
 
-The server SHALL expose `GET /api/conversations/{conversationId}/turns/{turnId}/status` returning a JSON body describing the current state of the named turn. The response uses the standard `*Response` shape conventions.
+The server SHALL expose `GET /api/conversations/{conversationId}/turns/{turnId}/status` returning a JSON body describing the current state of the named turn. The response uses the standard `*Response` shape conventions. `state` SHALL depend on whether a terminal row is present in the turn's event log, not on the kind of the last row: `errored` if any `agent_error` row exists, otherwise `completed` if any `done` row exists, otherwise `running`. Terminal rows always take precedence over non-terminal ones: a later change that adds a non-terminal state (tool-approval-prompts' `awaiting_input`, derived from an `interaction_requested` row with no matching `interaction_resolved`) SHALL rank it below `completed` and above `running`, giving the combined order `errored` > `completed` > `awaiting_input` > `running`. `last_event_at` and `last_event_kind` SHALL describe the most recent row, which MAY be an event persisted after `done` (for example `suggestions`). `last_event_kind` SHALL be the stored event type of that row, whatever kind it is.
 
 Response body:
 
@@ -26,7 +26,7 @@ Response body:
   "conversation_id": "uuid",
   "state": "running" | "completed" | "errored" | "unknown",
   "last_event_at": "RFC 3339 timestamp",
-  "last_event_kind": "run_started" | "token" | "status" | "thinking" | "tool_result" | "skill_complete" | "agent_error" | "subagent_started" | "subagent_completed" | "audio_ready" | "done" | null
+  "last_event_kind": "run_started" | "token" | "status" | "thinking" | "tool_result" | "skill_complete" | "agent_error" | "subagent_started" | "subagent_completed" | "audio_ready" | "done" | "suggestions" | "interaction_requested" | "interaction_resolved" | "surface_update" | null
 }
 ```
 
@@ -42,6 +42,18 @@ Response body:
 - **WHEN** a turn finished cleanly (the runtime emitted `done`)
 - **AND** a client issues the status request
 - **THEN** the response SHALL be `200 OK` with `state: "completed"`
+
+#### Scenario: A completed turn with trailing suggestions stays completed
+
+- **GIVEN** a turn whose log ends with `done` followed by `suggestions`
+- **WHEN** a client issues the status request
+- **THEN** the response SHALL be `200 OK` with `state: "completed"` and `last_event_kind: "suggestions"`
+
+#### Scenario: An errored turn with a later row stays errored
+
+- **GIVEN** a turn whose log holds `agent_error` followed by another row
+- **WHEN** a client issues the status request
+- **THEN** the response SHALL be `200 OK` with `state: "errored"`
 
 #### Scenario: An errored turn returns state=errored
 

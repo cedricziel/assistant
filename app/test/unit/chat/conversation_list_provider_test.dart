@@ -7,6 +7,7 @@ import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/conversation_list_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/spaces/space_provider.dart';
+import 'package:built_collection/built_collection.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -51,6 +52,40 @@ class _FakeConversationsApi extends ConversationsApi {
 
   /// When set, [updateConversation] throws it.
   Object? updateError;
+
+  /// `archived` argument of every [listConversations] call, in order.
+  final List<bool?> listCalls = [];
+
+  /// Body returned by [listConversations].
+  List<ConversationSummary> listResponse = [];
+
+  /// When set, [listConversations] throws it.
+  Object? listError;
+
+  /// When set, [listConversations] waits for it before answering.
+  Completer<void>? listGate;
+
+  @override
+  Future<Response<BuiltList<ConversationSummary>>> listConversations({
+    bool? archived,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    listCalls.add(archived);
+    await listGate?.future;
+    final error = listError;
+    if (error != null) throw error;
+    return Response(
+      requestOptions: RequestOptions(path: '/api/conversations'),
+      statusCode: 200,
+      data: BuiltList<ConversationSummary>(listResponse),
+    );
+  }
 
   @override
   Future<Response<ConversationSummary>> createConversation({
@@ -133,6 +168,7 @@ ConversationListEntry _makeEntry({
   String title = 'Test',
   DateTime? updatedAt,
   DateTime? pinnedAt,
+  DateTime? archivedAt,
 }) {
   return ConversationListEntry(
     id: id,
@@ -140,6 +176,19 @@ ConversationListEntry _makeEntry({
     createdAt: DateTime(2024, 1, 1),
     updatedAt: updatedAt ?? DateTime(2024, 1, 1),
     pinnedAt: pinnedAt,
+    archivedAt: archivedAt,
+  );
+}
+
+/// Build an archived [ConversationSummary] as `?archived=true` returns it.
+ConversationSummary _makeArchivedSummary(String id, DateTime archivedAt) {
+  return ConversationSummary(
+    (b) => b
+      ..id = id
+      ..title = 'Archived $id'
+      ..createdAt = DateTime(2024, 1, 1)
+      ..updatedAt = DateTime(2024, 1, 1)
+      ..archivedAt = archivedAt,
   );
 }
 
@@ -214,6 +263,18 @@ void main() {
 
     test('pinned_at is null when absent', () {
       expect(ConversationListEntry.fromJson(json()).pinnedAt, isNull);
+    });
+
+    test('parses archived_at', () {
+      final entry = ConversationListEntry.fromJson({
+        ...json(),
+        'archived_at': '2024-04-01T00:00:00Z',
+      });
+      expect(entry.archivedAt, DateTime.utc(2024, 4, 1));
+    });
+
+    test('archived_at is null when absent', () {
+      expect(ConversationListEntry.fromJson(json()).archivedAt, isNull);
     });
   });
 
@@ -1154,6 +1215,257 @@ void main() {
           .setPinned('c1', true);
 
       expect(error, isNotNull);
+    });
+  });
+
+  group('archive', () {
+    Future<
+      ({
+        ProviderContainer container,
+        _FakeConversationsApi api,
+        StreamController<ConversationListEvent> stream,
+        ConversationListNotifier notifier,
+      })
+    >
+    setUp({List<ConversationListEntry>? snapshot}) async {
+      final api = _FakeConversationsApi();
+      final stream = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(
+        streamController: stream,
+        conversationsApi: api,
+      );
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(stream.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+      await container.read(conversationListProvider.future);
+      stream.add(
+        ConversationSnapshotEvent(
+          snapshot ??
+              [
+                _makeEntry(id: 'c1', updatedAt: DateTime(2024, 3, 1)),
+                _makeEntry(id: 'c2', updatedAt: DateTime(2024, 2, 1)),
+              ],
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      return (
+        container: container,
+        api: api,
+        stream: stream,
+        notifier: container.read(conversationListProvider.notifier),
+      );
+    }
+
+    ConversationListState read(ProviderContainer c) =>
+        c.read(conversationListProvider).value!;
+
+    List<String> archivedIds(ProviderContainer c) =>
+        read(c).archived.conversations.map((e) => e.id).toList();
+
+    List<String> mainIds(ProviderContainer c) =>
+        read(c).conversations.map((e) => e.id).toList();
+
+    test('setArchived PATCHes only the archived flag', () async {
+      final t = await setUp();
+
+      expect(await t.notifier.setArchived('c1', true), isNull);
+      expect(await t.notifier.setArchived('c1', false), isNull);
+
+      expect(t.api.updates.map((u) => u.$2.archived), [true, false]);
+      expect(t.api.updates.every((u) => u.$2.title == null), isTrue);
+      expect(t.api.updates.every((u) => u.$2.pinned == null), isTrue);
+    });
+
+    test('setArchived returns the error and leaves state', () async {
+      final t = await setUp();
+      t.api.updateError = StateError('boom');
+
+      final error = await t.notifier.setArchived('c1', true);
+
+      expect(error, isNotNull);
+      expect(mainIds(t.container), ['c1', 'c2']);
+    });
+
+    test('setPinned on an archived entry sends only pinned and the upsert '
+        'moves it to the Pinned group', () async {
+      final t = await setUp();
+      t.api.listResponse = [_makeArchivedSummary('a1', DateTime(2024, 5, 1))];
+      await t.notifier.setArchivedExpanded(true);
+      expect(archivedIds(t.container), ['a1']);
+
+      expect(await t.notifier.setPinned('a1', true), isNull);
+      expect(t.api.updates.single.$2.pinned, isTrue);
+      expect(t.api.updates.single.$2.archived, isNull);
+
+      t.stream.add(
+        ConversationUpsertedEvent(
+          _makeEntry(id: 'a1', pinnedAt: DateTime(2024, 6, 1)),
+        ),
+      );
+      await _waitForDebounce();
+
+      expect(archivedIds(t.container), isEmpty);
+      expect(mainIds(t.container), ['a1', 'c1', 'c2']);
+      expect(read(t.container).conversations.first.pinnedAt, isNotNull);
+    });
+
+    test('an upsert with archived_at leaves the main list and joins the '
+        'loaded archived list', () async {
+      final t = await setUp();
+      t.api.listResponse = [_makeArchivedSummary('a1', DateTime(2024, 5, 1))];
+      await t.notifier.setArchivedExpanded(true);
+
+      t.stream.add(
+        ConversationUpsertedEvent(
+          _makeEntry(
+            id: 'c1',
+            updatedAt: DateTime(2024, 3, 1),
+            archivedAt: DateTime(2024, 6, 1),
+          ),
+        ),
+      );
+      await _waitForDebounce();
+
+      expect(mainIds(t.container), ['c2']);
+      expect(archivedIds(t.container), ['c1', 'a1'], reason: 'newest first');
+    });
+
+    test('an upsert with archived_at before the section loads only removes '
+        'the row from the main list', () async {
+      final t = await setUp();
+
+      t.stream.add(
+        ConversationUpsertedEvent(
+          _makeEntry(id: 'c1', archivedAt: DateTime(2024, 6, 1)),
+        ),
+      );
+      await _waitForDebounce();
+
+      expect(mainIds(t.container), ['c2']);
+      expect(read(t.container).archived.conversations, isEmpty);
+      expect(t.api.listCalls, isEmpty, reason: 'no fetch until expanded');
+    });
+
+    test('an upsert without archived_at moves an archived row back in '
+        'server order', () async {
+      final t = await setUp();
+      t.api.listResponse = [_makeArchivedSummary('a1', DateTime(2024, 5, 1))];
+      await t.notifier.setArchivedExpanded(true);
+
+      t.stream.add(
+        ConversationUpsertedEvent(
+          _makeEntry(id: 'a1', updatedAt: DateTime(2024, 2, 15)),
+        ),
+      );
+      await _waitForDebounce();
+
+      expect(archivedIds(t.container), isEmpty);
+      expect(mainIds(t.container), ['c1', 'a1', 'c2']);
+    });
+
+    test('a deleted event removes the entry from the archived list', () async {
+      final t = await setUp();
+      t.api.listResponse = [
+        _makeArchivedSummary('a1', DateTime(2024, 5, 1)),
+        _makeArchivedSummary('a2', DateTime(2024, 4, 1)),
+      ];
+      await t.notifier.setArchivedExpanded(true);
+
+      t.stream.add(const ConversationDeletedEvent('a1'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(archivedIds(t.container), ['a2']);
+    });
+
+    test('a snapshot while expanded refetches and replaces the archived '
+        'list', () async {
+      final t = await setUp();
+      t.api.listResponse = [_makeArchivedSummary('a1', DateTime(2024, 5, 1))];
+      await t.notifier.setArchivedExpanded(true);
+      expect(t.api.listCalls, [true]);
+
+      t.api.listResponse = [_makeArchivedSummary('a2', DateTime(2024, 6, 1))];
+      t.stream.add(ConversationSnapshotEvent([_makeEntry(id: 'c1')]));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(t.api.listCalls, [true, true]);
+      expect(archivedIds(t.container), ['a2']);
+      expect(read(t.container).archived.expanded, isTrue);
+      expect(mainIds(t.container), ['c1']);
+    });
+
+    test('a snapshot while collapsed does not fetch', () async {
+      final t = await setUp();
+      t.api.listResponse = [_makeArchivedSummary('a1', DateTime(2024, 5, 1))];
+      await t.notifier.setArchivedExpanded(true);
+      await t.notifier.setArchivedExpanded(false);
+      t.api.listCalls.clear();
+
+      t.stream.add(ConversationSnapshotEvent([_makeEntry(id: 'c1')]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(t.api.listCalls, isEmpty);
+      expect(read(t.container).archived.expanded, isFalse);
+    });
+
+    test('loadArchived fetches only on demand, with archived=true', () async {
+      final t = await setUp();
+      expect(t.api.listCalls, isEmpty);
+      expect(read(t.container).archived.loaded, isFalse);
+
+      t.api.listResponse = [_makeArchivedSummary('a1', DateTime(2024, 5, 1))];
+      await t.notifier.loadArchived();
+
+      expect(t.api.listCalls, [true]);
+      expect(read(t.container).archived.loaded, isTrue);
+      expect(archivedIds(t.container), ['a1']);
+      expect(read(t.container).archived.error, isNull);
+    });
+
+    test('loadArchived reports loading, then success', () async {
+      final t = await setUp();
+      t.api.listGate = Completer<void>();
+      t.api.listResponse = [_makeArchivedSummary('a1', DateTime(2024, 5, 1))];
+
+      final pending = t.notifier.loadArchived();
+      await Future<void>.delayed(Duration.zero);
+      expect(read(t.container).archived.loading, isTrue);
+
+      t.api.listGate!.complete();
+      await pending;
+      expect(read(t.container).archived.loading, isFalse);
+      expect(archivedIds(t.container), ['a1']);
+    });
+
+    test('loadArchived reports an error and keeps the main list', () async {
+      final t = await setUp();
+      t.api.listError = StateError('boom');
+
+      await t.notifier.loadArchived();
+
+      final archived = read(t.container).archived;
+      expect(archived.loading, isFalse);
+      expect(archived.error, isNotNull);
+      expect(archived.loaded, isFalse);
+      expect(mainIds(t.container), ['c1', 'c2']);
+      expect(read(t.container).error, isNull);
+    });
+
+    test('expanding again after an error retries', () async {
+      final t = await setUp();
+      t.api.listError = StateError('boom');
+      await t.notifier.setArchivedExpanded(true);
+      expect(read(t.container).archived.error, isNotNull);
+
+      t.api.listError = null;
+      t.api.listResponse = [_makeArchivedSummary('a1', DateTime(2024, 5, 1))];
+      await t.notifier.loadArchived();
+
+      expect(read(t.container).archived.error, isNull);
+      expect(archivedIds(t.container), ['a1']);
     });
   });
 
