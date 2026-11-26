@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
     hide ToolCallStatus;
@@ -12,18 +13,16 @@ import 'markdown_link_handler.dart';
 /// A streaming-aware timeline entry for one thinking, tool call or subagent
 /// step in the chat timeline.
 ///
-/// Adapts its presentation based on [density], [entryState], and whether
-/// the user has manually pinned it open.
+/// Adapts its presentation based on the [ThreadDensityScope] density,
+/// [entryState], and whether the user has manually pinned it open.
 class StreamingTimelineEntry extends StatefulWidget {
   const StreamingTimelineEntry({
     super.key,
     required this.message,
-    required this.density,
     this.entryState = EntryState.complete,
   });
 
   final ChatMessage message;
-  final TimelineDensity density;
   final EntryState entryState;
 
   @override
@@ -38,9 +37,13 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
   @override
   void initState() {
     super.initState();
-    // Auto-expand if starting in active state (non-compact).
+    // Auto-expand if starting in active state (non-compact). `initState`
+    // cannot subscribe to the scope, so it reads the density once here.
+    final density =
+        context.getInheritedWidgetOfExactType<ThreadDensityScope>()?.density ??
+        TimelineDensity.normal;
     if (widget.entryState == EntryState.active &&
-        widget.density != TimelineDensity.compact) {
+        density != TimelineDensity.compact) {
       _expanded = true;
     }
   }
@@ -52,7 +55,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     // Auto-expand when entry becomes active.
     if (widget.entryState == EntryState.active &&
         oldWidget.entryState != EntryState.active) {
-      if (!_userPinned && widget.density != TimelineDensity.compact) {
+      if (!_userPinned && _density != TimelineDensity.compact) {
         setState(() => _expanded = true);
       }
     }
@@ -89,6 +92,8 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     });
   }
 
+  TimelineDensity get _density => ThreadDensityScope.of(context);
+
   @override
   void dispose() {
     _collapseTimer?.cancel();
@@ -104,13 +109,13 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
 
   double _maxHeight(bool isSubagent) {
     if (isSubagent) {
-      return switch (widget.density) {
+      return switch (_density) {
         TimelineDensity.compact => 100,
         TimelineDensity.normal => 120,
         TimelineDensity.expanded => 150,
       };
     }
-    return switch (widget.density) {
+    return switch (_density) {
       TimelineDensity.compact => 120,
       TimelineDensity.normal => 150,
       TimelineDensity.expanded => 200,
@@ -210,7 +215,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     // compact: icon + name only (no args preview)
     // normal: icon + name + status
     // expanded: icon + name + args preview + status
-    final showArgs = widget.density == TimelineDensity.expanded && hasDetails;
+    final showArgs = _density == TimelineDensity.expanded && hasDetails;
 
     // Duration badge for completed tool calls.
     final durationLabel = record.duration != null
@@ -245,7 +250,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     final colorScheme = Theme.of(context).colorScheme;
     final icon = _toolStatusIcon(context, record.status);
 
-    if (durationLabel == null || widget.density == TimelineDensity.compact) {
+    if (durationLabel == null || _density == TimelineDensity.compact) {
       return icon;
     }
 
@@ -447,7 +452,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     // Show subagent tool calls.
     // Density adaptation: normal shows last 2 entries, expanded shows all.
     var toolCalls = msg.subagentToolCalls;
-    if (widget.density == TimelineDensity.normal && toolCalls.length > 2) {
+    if (_density == TimelineDensity.normal && toolCalls.length > 2) {
       toolCalls = toolCalls.sublist(toolCalls.length - 2);
     }
 
@@ -543,7 +548,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
 
     // In compact density, only show icon + name.
     final showStatus =
-        widget.density != TimelineDensity.compact || statusWidget is! SizedBox;
+        _density != TimelineDensity.compact || statusWidget is! SizedBox;
 
     return Semantics(
       label: label,
