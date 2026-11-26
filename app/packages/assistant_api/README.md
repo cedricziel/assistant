@@ -380,6 +380,7 @@ Class | Method | HTTP request | Description
  - [ToolDecision](doc/ToolDecision.md)
  - [TurnState](doc/TurnState.md)
  - [TurnStatusResponse](doc/TurnStatusResponse.md)
+ - [UiCapabilities](doc/UiCapabilities.md)
  - [UnsubscribeRequest](doc/UnsubscribeRequest.md)
  - [UpdateAgentRequest](doc/UpdateAgentRequest.md)
  - [UpdateConversationRequest](doc/UpdateConversationRequest.md)

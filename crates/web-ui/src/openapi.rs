@@ -40,7 +40,7 @@ use utoipa::{
 
 use crate::a2a::handlers;
 use crate::api::attachments::AttachmentMetaResponse;
-use crate::api::capabilities::ServerCapabilities;
+use crate::api::capabilities::{ServerCapabilities, UiCapabilities};
 use crate::api::conversations::{
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
     ToolCallSummary, UpdateConversationRequest,
@@ -491,6 +491,7 @@ pub struct ApiErrorResponse {
             DeviceCodeOAuthFlow,
             // Capabilities
             ServerCapabilities,
+            UiCapabilities,
             // Conversation API types
             AttachmentMetaResponse,
             ConversationSummary,
