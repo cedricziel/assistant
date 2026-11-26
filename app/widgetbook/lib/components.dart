@@ -16,6 +16,7 @@ import 'components/message_timing_indicator.dart';
 import 'components/permission_rule_tile.dart';
 import 'components/question_card.dart';
 import 'components/queued_message_bubble.dart';
+import 'components/regenerate_menu_button.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/surface_frame.dart';
@@ -64,7 +65,6 @@ final List<WidgetbookComponent> kComponents = [
   // messageEditorComponent, // slot: message-branching 9
   // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
   // planResultViewComponent, // slot: tool-result-renderers C5
-  // regenerateMenuButtonComponent, // slot: message-branching 10
   // slashCommandMenuComponent, // slot: chat-element-library 11a
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
   // subagentBodyComponent, // slot: chat-element-library 7b
@@ -91,6 +91,7 @@ final List<WidgetbookComponent> kComponents = [
   permissionRuleTileComponent,
   questionCardComponent,
   queuedMessageBubbleComponent,
+  regenerateMenuButtonComponent,
   starterPromptsComponent,
   suggestionChipsComponent,
   surfaceFrameComponent,
