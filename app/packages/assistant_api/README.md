@@ -101,6 +101,7 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**createConversation**](doc/ConversationsApi.md#createconversation) | **POST** /api/conversations | &#x60;POST /api/conversations&#x60; — create a new conversation.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**createQuickMessage**](doc/ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**deleteConversation**](doc/ConversationsApi.md#deleteconversation) | **DELETE** /api/conversations/{id} | &#x60;DELETE /api/conversations/{id}&#x60; — delete a conversation and all its messages.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**deleteMessageFeedback**](doc/ConversationsApi.md#deletemessagefeedback) | **DELETE** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;DELETE /api/conversations/{id}/messages/{message_id}/feedback&#x60; — clear feedback.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getAudio**](doc/ConversationsApi.md#getaudio) | **GET** /api/audio/{id} | &#x60;GET /api/audio/{id}&#x60; — serve a synthesized audio blob from the in-memory store.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getConversation**](doc/ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getMessageAudio**](doc/ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it as &#x60;audio/mpeg&#x60;.
@@ -108,6 +109,7 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**listConversations**](doc/ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendMessage**](doc/ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**setMessageFeedback**](doc/ConversationsApi.md#setmessagefeedback) | **PUT** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;PUT /api/conversations/{id}/messages/{message_id}/feedback&#x60; — rate a reply.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
@@ -275,6 +277,7 @@ Class | Method | HTTP request | Description
  - [DeviceCodeResponseSchema](doc/DeviceCodeResponseSchema.md)
  - [ErrorBody](doc/ErrorBody.md)
  - [ExecuteCommandRequest](doc/ExecuteCommandRequest.md)
+ - [FeedbackRating](doc/FeedbackRating.md)
  - [HttpAuthSecurityScheme](doc/HttpAuthSecurityScheme.md)
  - [ImplicitOAuthFlow](doc/ImplicitOAuthFlow.md)
  - [IntegrationAuthKind](doc/IntegrationAuthKind.md)
@@ -290,6 +293,7 @@ Class | Method | HTTP request | Description
  - [ListTasksResponse](doc/ListTasksResponse.md)
  - [MemberEntry](doc/MemberEntry.md)
  - [Message](doc/Message.md)
+ - [MessageFeedbackResponse](doc/MessageFeedbackResponse.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
  - [MutualTlsSecurityScheme](doc/MutualTlsSecurityScheme.md)
@@ -325,6 +329,7 @@ Class | Method | HTTP request | Description
  - [ServerMetadata](doc/ServerMetadata.md)
  - [SetActivePersonaRequest](doc/SetActivePersonaRequest.md)
  - [SetCredentialRequest](doc/SetCredentialRequest.md)
+ - [SetMessageFeedbackRequest](doc/SetMessageFeedbackRequest.md)
  - [SetSkillAccessModeRequest](doc/SetSkillAccessModeRequest.md)
  - [SetSpaceAccessRequest](doc/SetSpaceAccessRequest.md)
  - [SkillDetail](doc/SkillDetail.md)
