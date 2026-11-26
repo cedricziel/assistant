@@ -10,6 +10,7 @@ import 'components/permission_rule_tile.dart';
 import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
+import 'components/surface_frame.dart';
 import 'components/thread_density_scope.dart';
 import 'components/timeline_entry_shell.dart';
 import 'components/unknown_interaction_card.dart';
@@ -69,7 +70,6 @@ final List<WidgetbookComponent> kComponents = [
   // slashCommandMenuComponent, // slot: chat-element-library 11a
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
   // subagentBodyComponent, // slot: chat-element-library 7b
-  // surfaceFrameComponent, // slot: generative-ui-a2ui 13
   // terminalResultViewComponent, // slot: tool-result-renderers C4
   // thinkingBodyComponent, // slot: chat-element-library 7a
   // threadEmptyStateComponent, // slot: chat-element-library 9
@@ -92,6 +92,7 @@ final List<WidgetbookComponent> kComponents = [
   queuedMessageBubbleComponent,
   starterPromptsComponent,
   suggestionChipsComponent,
+  surfaceFrameComponent,
   threadDensityScopeComponent,
   timelineEntryShellComponent,
   unknownInteractionCardComponent,

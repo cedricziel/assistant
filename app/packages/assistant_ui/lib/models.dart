@@ -7,5 +7,6 @@ export 'src/models/interaction_record.dart';
 export 'src/models/mcp_app.dart';
 export 'src/models/message_timing.dart';
 export 'src/models/pending_attachment.dart';
+export 'src/models/surface_record.dart';
 export 'src/models/timeline_state.dart';
 export 'src/models/turn_status.dart';
