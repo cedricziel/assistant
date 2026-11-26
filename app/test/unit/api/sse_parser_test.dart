@@ -241,6 +241,136 @@ void main() {
     });
 
     // -----------------------------------------------------------------------
+    // Turn interactions
+    // -----------------------------------------------------------------------
+
+    group('interaction events', () {
+      Future<List<StreamEvent>> parse(String raw) =>
+          parseSseByteStream(_uint8Stream(raw)).toList();
+
+      const approval =
+          'id: 7\n'
+          'event: interaction_requested\n'
+          'data: {"interaction_id":"i-1","kind":"tool_approval",'
+          '"created_at":"2026-01-02T03:04:05Z",'
+          '"expires_at":"2026-01-02T03:09:05Z","renders_card":true,'
+          '"tool_call_id":"toolu_1","tool_name":"bash",'
+          '"arguments":{"command":"git status"},"arguments_truncated":false,'
+          '"reason":"no rule allows bash",'
+          '"options":["allow_once","reject_once"]}\n\n';
+
+      test('parses an approval request with its sequence id', () async {
+        final event =
+            (await parse(approval)).single as InteractionRequestedEvent;
+        expect(event.interactionId, 'i-1');
+        expect(event.kind, 'tool_approval');
+        expect(event.createdAt, DateTime.utc(2026, 1, 2, 3, 4, 5));
+        expect(event.expiresAt, DateTime.utc(2026, 1, 2, 3, 9, 5));
+        expect(event.toolCallId, 'toolu_1');
+        expect(event.rendersCard, isTrue);
+        expect(event.request['tool_name'], 'bash');
+        expect(event.request['arguments'], {'command': 'git status'});
+        expect(event.request['options'], ['allow_once', 'reject_once']);
+        expect(event.sequenceId, 7);
+      });
+
+      test('keeps the question list in the request fields', () async {
+        const raw =
+            'event: interaction_requested\n'
+            'data: {"interaction_id":"i-2","kind":"question",'
+            '"created_at":"2026-01-02T03:04:05Z",'
+            '"expires_at":"2026-01-02T03:09:05Z",'
+            '"questions":[{"id":"q1","prompt":"Which branch?"}]}\n\n';
+        final event = (await parse(raw)).single as InteractionRequestedEvent;
+        expect(event.kind, 'question');
+        expect(event.toolCallId, isNull);
+        expect((event.request['questions']! as List).single, {
+          'id': 'q1',
+          'prompt': 'Which branch?',
+        });
+      });
+
+      test('keeps an unknown kind with its fields', () async {
+        const raw =
+            'event: interaction_requested\n'
+            'data: {"interaction_id":"i-3","kind":"future_thing",'
+            '"created_at":"2026-01-02T03:04:05Z",'
+            '"expires_at":"2026-01-02T03:09:05Z","surface":"s1"}\n\n';
+        final event = (await parse(raw)).single as InteractionRequestedEvent;
+        expect(event.kind, 'future_thing');
+        expect(event.request['surface'], 's1');
+      });
+
+      test('reads renders_card: false and defaults to true', () async {
+        const hidden =
+            'event: interaction_requested\n'
+            'data: {"interaction_id":"i-4","kind":"surface_action",'
+            '"created_at":"2026-01-02T03:04:05Z",'
+            '"expires_at":"2026-01-02T03:09:05Z","renders_card":false}\n\n';
+        const bare =
+            'event: interaction_requested\n'
+            'data: {"interaction_id":"i-5","kind":"question",'
+            '"created_at":"2026-01-02T03:04:05Z",'
+            '"expires_at":"2026-01-02T03:09:05Z"}\n\n';
+        final events = await parse('$hidden$bare');
+        expect((events[0] as InteractionRequestedEvent).rendersCard, isFalse);
+        expect((events[1] as InteractionRequestedEvent).rendersCard, isTrue);
+      });
+
+      test('parses a resolved interaction with its response', () async {
+        const raw =
+            'id: 9\n'
+            'event: interaction_resolved\n'
+            'data: {"interaction_id":"i-1","kind":"tool_approval",'
+            '"outcome":"resolved","resolved_at":"2026-01-02T03:05:00Z",'
+            '"response":{"decision":"allow_always"},"rule_id":"r-1"}\n\n';
+        final event = (await parse(raw)).single as InteractionResolvedEvent;
+        expect(event.interactionId, 'i-1');
+        expect(event.kind, 'tool_approval');
+        expect(event.outcome, InteractionOutcome.resolved);
+        expect(event.resolvedAt, DateTime.utc(2026, 1, 2, 3, 5));
+        expect(event.response, {'decision': 'allow_always'});
+        expect(event.ruleId, 'r-1');
+        expect(event.sequenceId, 9);
+      });
+
+      test('parses cancelled and expired without a response', () async {
+        String frame(String outcome) =>
+            'event: interaction_resolved\n'
+            'data: {"interaction_id":"i-1","kind":"question",'
+            '"outcome":"$outcome","resolved_at":"2026-01-02T03:05:00Z"}\n\n';
+        final events = await parse('${frame('cancelled')}${frame('expired')}');
+        expect(events.cast<InteractionResolvedEvent>().map((e) => e.outcome), [
+          InteractionOutcome.cancelled,
+          InteractionOutcome.expired,
+        ]);
+        expect(
+          events.cast<InteractionResolvedEvent>().every(
+            (e) => e.response == null && e.ruleId == null,
+          ),
+          isTrue,
+        );
+      });
+
+      test('drops malformed JSON and frames missing required fields', () async {
+        const raw =
+            'event: interaction_requested\ndata: {not json\n\n'
+            'event: interaction_requested\ndata: {"kind":"question"}\n\n'
+            'event: interaction_resolved\ndata: {not json\n\n'
+            'event: interaction_resolved\n'
+            'data: {"interaction_id":"i-1","kind":"question",'
+            '"outcome":"sideways","resolved_at":"2026-01-02T03:05:00Z"}\n\n'
+            'event: token\ndata: still here\n\n';
+        final events = await parse(raw);
+        expect(events.single, isA<TokenEvent>());
+      });
+
+      test('still ignores unknown event names', () async {
+        expect(await parse('event: future_event\ndata: {}\n\n'), isEmpty);
+      });
+    });
+
+    // -----------------------------------------------------------------------
     // Empty stream
     // -----------------------------------------------------------------------
 
