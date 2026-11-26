@@ -113,7 +113,7 @@ pub struct ExecutionContext {
     /// The interface this turn originated from (cli, signal, mcp)
     pub interface: Interface,
     /// Whether a human is waiting on this turn and can answer prompts. Set by
-    /// the submitter (`SubmitOptions`), never derived from `interface`.
+    /// the submitter (`SubmitTurn`), never derived from `interface`.
     pub interactive: bool,
     /// The run this turn belongs to: the bus `batch_id` of its request, which
     /// is also the SSE `run_id` for streaming web turns. `None` for tool
