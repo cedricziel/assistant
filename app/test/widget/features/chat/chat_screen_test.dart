@@ -28,6 +28,12 @@ class _FakeChatNotifier extends ChatNotifier {
 
   void push(ChatState s) => state = AsyncData(s);
 
+  final loadedConversations = <String>[];
+
+  @override
+  Future<void> loadConversation(String conversationId) async =>
+      loadedConversations.add(conversationId);
+
   int stopCalls = 0;
 
   @override
@@ -70,6 +76,7 @@ class _FakeConversationListNotifier extends ConversationListNotifier {
 Future<({_FakeChatNotifier notifier})> pumpChatScreen(
   WidgetTester tester, {
   ServerCapabilities? capabilities,
+  ValueNotifier<String?>? conversationId,
 }) async {
   final chatNotifier = _FakeChatNotifier();
 
@@ -99,7 +106,10 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
         ],
       ],
       child: MaterialApp(
-        home: const ChatScreen(),
+        home: ValueListenableBuilder<String?>(
+          valueListenable: conversationId ?? ValueNotifier<String?>(null),
+          builder: (_, id, _) => ChatScreen(conversationId: id),
+        ),
         builder: (_, child) => LegacyDesignBridge(child: child!),
       ),
     ),
@@ -355,6 +365,272 @@ void main() {
         findsNothing,
         reason: 'FAB should disappear after scrolling back to bottom',
       );
+    });
+  });
+
+  group('Chat screen — auto-scroll follows the thread', () {
+    List<ChatMessage> manyMessages(int count) => List.generate(
+      count,
+      (i) => ChatMessage(
+        id: 'msg-$i',
+        role: i.isEven ? 'user' : 'assistant',
+        content: 'Message number $i with enough text to take up space.',
+      ),
+    );
+
+    ScrollPosition position(WidgetTester tester) =>
+        tester.widget<ListView>(find.byType(ListView)).controller!.position;
+
+    /// Estimated extents of a lazy list settle only once the end is laid out,
+    /// so "at the bottom" allows a pixel of slack either way.
+    bool atBottom(ScrollPosition p) => p.pixels >= p.maxScrollExtent - 1;
+
+    /// Streaming entries animate forever, so `pumpAndSettle` never returns;
+    /// this runs past the 200 ms scroll animation instead (the ticker only
+    /// starts on the frame after the one that created it).
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    /// Pushes [before], nudges the thread 40 dp off the end (still inside the
+    /// 80 dp "at the bottom" threshold), pushes [after] and asserts the thread
+    /// scrolled back to where the end was. Expanding entries animate their
+    /// height after the scroll is requested, so the new end is not asserted.
+    Future<void> expectFollows(
+      WidgetTester tester,
+      ChatState before,
+      ChatState Function() after, {
+      bool grows = false,
+    }) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(before);
+      await settle(tester);
+      expect(atBottom(position(tester)), isTrue, reason: 'starts at bottom');
+      final end = position(tester).maxScrollExtent;
+      position(tester).jumpTo(end - 40);
+      await tester.pump();
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsNothing);
+
+      res.notifier.push(after());
+      await settle(tester);
+
+      final pos = position(tester);
+      if (grows) expect(pos.maxScrollExtent, greaterThan(end));
+      expect(pos.pixels, greaterThanOrEqualTo(end - 1), reason: 'followed');
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsNothing);
+    }
+
+    testWidgets('thinking tokens growing only thinkingContent', (tester) async {
+      final filler = manyMessages(30);
+      ChatMessage thinking(String text) => ChatMessage(
+        id: 'thinking-1',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        timelineType: TimelineEntryType.thinking,
+        thinkingContent: text,
+      );
+
+      await expectFollows(
+        tester,
+        ChatState(
+          conversationId: 'c1',
+          messages: [...filler, thinking('Considering the question.')],
+        ),
+        () => ChatState(
+          conversationId: 'c1',
+          messages: [
+            ...filler,
+            thinking(
+              List.filled(40, 'Considering the question at length.').join('\n'),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('a subagent tool call appended in place', (tester) async {
+      final filler = manyMessages(30);
+      final subagent = ChatMessage(
+        id: 'subagent-1',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        timelineType: TimelineEntryType.subagent,
+        subagentId: 'sub-1',
+        subagentTask: 'Research the topic',
+      );
+
+      await expectFollows(
+        tester,
+        ChatState(conversationId: 'c1', messages: [...filler, subagent]),
+        () {
+          subagent.subagentToolCalls.add(
+            ToolCallRecord(
+              toolName: 'web-search',
+              status: ToolCallStatus.pending,
+            ),
+          );
+          return ChatState(
+            conversationId: 'c1',
+            messages: [...filler, subagent],
+          );
+        },
+      );
+    });
+
+    testWidgets('a tool status flip', (tester) async {
+      final filler = manyMessages(30);
+      final call = ToolCallRecord(
+        toolName: 'web-search',
+        status: ToolCallStatus.pending,
+      );
+      final entry = ChatMessage(
+        id: 'toolcall-1',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        timelineType: TimelineEntryType.toolCall,
+        toolCalls: [call],
+      );
+
+      await expectFollows(
+        tester,
+        ChatState(conversationId: 'c1', messages: [...filler, entry]),
+        () {
+          call.status = ToolCallStatus.ok;
+          return ChatState(conversationId: 'c1', messages: [...filler, entry]);
+        },
+      );
+    });
+
+    testWidgets('a queued message added', (tester) async {
+      final filler = manyMessages(30);
+
+      await expectFollows(
+        tester,
+        ChatState(conversationId: 'c1', messages: filler),
+        () => ChatState(
+          conversationId: 'c1',
+          messages: filler,
+          pendingQueue: const [
+            PendingMessage(text: 'Next question', conversationId: 'c1'),
+          ],
+        ),
+        grows: true,
+      );
+      expect(find.text('Next question'), findsOneWidget);
+    });
+
+    testWidgets('opening a different conversation', (tester) async {
+      final id = ValueNotifier<String?>('c1');
+      final res = await pumpChatScreen(tester, conversationId: id);
+      res.notifier.push(
+        ChatState(conversationId: 'c1', messages: manyMessages(30)),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, 600));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsOneWidget);
+
+      id.value = 'c2';
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(res.notifier.loadedConversations, contains('c2'));
+      expect(atBottom(position(tester)), isTrue);
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsNothing);
+    });
+
+    testWidgets('scrolled away, new content leaves the position alone', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+      final filler = manyMessages(30);
+      res.notifier.push(ChatState(conversationId: 'c1', messages: filler));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, 600));
+      await tester.pumpAndSettle();
+      final before = position(tester).pixels;
+
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [...filler, ...manyMessages(2)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(position(tester).pixels, before);
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsOneWidget);
+    });
+  });
+
+  group('Chat screen — vertical order', () {
+    double top(WidgetTester tester, Finder finder) =>
+        tester.getTopLeft(finder).dy;
+
+    testWidgets('error banner, history progress, thread, reconnect banner, '
+        'turn progress card, composer', (tester) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          error: 'Server unreachable',
+          isLoadingHistory: true,
+          isReconnecting: true,
+          isSending: true,
+          messages: [ChatMessage(id: 'm1', role: 'user', content: 'Hello')],
+          currentTurnStatus: TurnStatusSnapshot(
+            runId: 'run-1',
+            lastEventKind: TurnEventKind.thinking,
+            lastEventAt: DateTime.now(),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final order = <Finder>[
+        find.text('Server unreachable'),
+        find.byType(LinearProgressIndicator),
+        find.byType(ListView),
+        find.byKey(const Key('reconnect_banner')),
+        find.byKey(const Key('turn_progress_card_label')),
+        find.byKey(const Key('message_input')),
+      ];
+      for (final finder in order) {
+        expect(finder, findsOneWidget, reason: '$finder');
+      }
+      final tops = [for (final f in order) top(tester, f)];
+      expect(tops, [...tops]..sort(), reason: 'top to bottom');
+      expect(tops.toSet(), hasLength(order.length));
+    });
+
+    testWidgets('a reconnect without an active turn sits directly above the '
+        'composer', (tester) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          isReconnecting: true,
+          messages: [ChatMessage(id: 'm1', role: 'user', content: 'Hello')],
+        ),
+      );
+      await tester.pump();
+
+      final banner = find.byKey(const Key('reconnect_banner'));
+      final thread = find.byType(ListView);
+      final composer = find.byKey(const Key('message_input'));
+      expect(banner, findsOneWidget);
+      expect(find.byKey(const Key('turn_progress_card_label')), findsNothing);
+      expect(
+        top(tester, banner),
+        greaterThanOrEqualTo(tester.getBottomLeft(thread).dy),
+        reason: 'banner is below the thread',
+      );
+      expect(top(tester, banner), lessThan(top(tester, composer)));
     });
   });
 

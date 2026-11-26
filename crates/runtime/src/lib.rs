@@ -25,6 +25,7 @@ pub mod space_runtime;
 pub mod space_supervisor;
 pub mod telemetry;
 pub mod title_generator;
+pub mod user_rules;
 pub mod webhook_dispatch;
 pub mod worker_plan;
 

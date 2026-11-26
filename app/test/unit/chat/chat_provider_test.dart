@@ -1919,6 +1919,48 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    testWidgets('probe=awaitingInput keeps the placeholder like running', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      fakeApi.nextTurnStatus = TurnState.awaitingInput;
+      final ctrl = fakeApi.enqueueStream();
+      addTearDown(() async {
+        if (!ctrl.isClosed) await ctrl.close();
+      });
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+      ctrl.add(const RunStartedEvent('run-1'));
+      await tester.pump();
+
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+
+      final after = notifier.state.value!;
+      expect(fakeApi.turnStatusCalls, isNotEmpty, reason: 'probe must run');
+      expect(
+        after.messages.any(
+          (m) =>
+              m.id == 'assistant-streaming' &&
+              m.isStreaming &&
+              m.content.isEmpty,
+        ),
+        isTrue,
+        reason:
+            'a turn waiting for the owner is alive: recovery would drop the '
+            'placeholder and lose the pending approval',
+      );
+      expect(after.error, isNull);
+      expect(after.isSending, isTrue);
+
+      ctrl.add(const DoneEvent(role: 'assistant', content: ''));
+      await ctrl.close();
+      await tester.pumpAndSettle();
+    });
+
     testWidgets(
       'probe=completed triggers recovery and clears the placeholder',
       (tester) async {
@@ -3909,6 +3951,24 @@ void main() {
         'Hello',
       );
       expect(r.api.sentMessages, ['go', 'queued-0']);
+      await finishNext(tester, next);
+    });
+
+    testWidgets('grace expiry with an awaiting-input probe detaches with the '
+        'unconfirmed-stop error', (tester) async {
+      final r = await start(tester, queued: 1);
+      final next = r.api.enqueueStream();
+      r.api.nextTurnStatus = TurnState.awaitingInput;
+      await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+      await emit(tester, const TokenEvent('Hello'), r.ctrl);
+      r.notifier.stopTurn();
+      await tester.pump();
+      await tester.pump(ChatStreamSession.stopGrace);
+      await tester.pump();
+
+      final s = r.notifier.state.value!;
+      expect(s.error, unconfirmed);
+      expect(s.isStopping, isFalse);
       await finishNext(tester, next);
     });
 
