@@ -58,3 +58,10 @@ Every HTTP request SHALL execute as the authenticated user in the org and space 
 #### Scenario: Space-restricted user
 - **WHEN** a user without access to space B calls a tool through `/mcp`
 - **THEN** the tool cannot read or change data in space B
+
+### Requirement: Skill installation over HTTP
+`/mcp` SHALL list `install-skill` like the stdio server, but SHALL NOT install skills: the HTTP server has no skill registry to install into. A call that the permission policy allows SHALL fail with an error, and skills SHALL be installed over stdio instead.
+
+#### Scenario: install-skill over HTTP
+- **WHEN** an authorized client calls `install-skill` through `/mcp`
+- **THEN** the call fails and no skill is installed
