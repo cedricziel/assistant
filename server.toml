@@ -42,6 +42,7 @@
 # [[mcp.servers]]
 # name = "remote-db"
 # url = "https://db.example.com/mcp"
+# tool_timeout_secs = 600      # longest a tool call may take (default 120)
 # [mcp.servers.headers]
 # Authorization = "Bearer ${DB_TOKEN}"
 
