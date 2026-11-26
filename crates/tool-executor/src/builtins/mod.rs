@@ -16,6 +16,7 @@ pub mod memory_append;
 pub mod memory_get;
 pub mod memory_search;
 pub mod process;
+pub(crate) mod render_diff;
 pub(crate) mod render_lang;
 pub mod render_surface;
 pub mod schedule_task;

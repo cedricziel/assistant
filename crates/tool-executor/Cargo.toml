@@ -28,6 +28,7 @@ glob = { workspace = true }
 chrono = { workspace = true }
 cron = { workspace = true }
 uuid = { workspace = true }
+similar = { workspace = true }
 whatlang = { workspace = true }
 stop-words = { workspace = true }
 
