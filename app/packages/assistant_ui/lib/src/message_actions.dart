@@ -50,15 +50,23 @@ class MessageActionButton extends StatelessWidget {
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(4),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 14, color: color),
-              const SizedBox(width: 4),
-              Text(label, style: TextStyle(fontSize: 12, color: color)),
-            ],
+        // At least 24x24 (WCAG 2.2 SC 2.5.8), however small the label.
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+          child: Center(
+            widthFactor: 1,
+            heightFactor: 1,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 14, color: color),
+                  const SizedBox(width: 4),
+                  Text(label, style: TextStyle(fontSize: 12, color: color)),
+                ],
+              ),
+            ),
           ),
         ),
       ),

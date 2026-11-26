@@ -3,6 +3,12 @@ import 'package:material_ui/material_ui.dart';
 import '../models/pending_attachment.dart';
 import '../theme/assistant_ui_spacing.dart';
 
+/// Edge of an attachment tile.
+const double _kTileSize = 64;
+
+/// Hit box of the remove control (WCAG 2.2 SC 2.5.8 minimum).
+const double _kRemoveSize = 24;
+
 bool _isImageMimeType(String mime) => mime.startsWith('image/');
 
 IconData _iconForMime(String mime) {
@@ -61,13 +67,13 @@ class AttachmentTray extends StatelessWidget {
                   child: _isImageMimeType(attachment.mimeType)
                       ? Image.memory(
                           attachment.bytes,
-                          width: 64,
-                          height: 64,
+                          width: _kTileSize,
+                          height: _kTileSize,
                           fit: BoxFit.cover,
                         )
                       : Container(
-                          width: 64,
-                          height: 64,
+                          width: _kTileSize,
+                          height: _kTileSize,
                           color: colorScheme.surfaceContainerHighest,
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -92,16 +98,25 @@ class AttachmentTray extends StatelessWidget {
                           ),
                         ),
                 ),
+                // Inside the tile's top-right corner, so every point of the
+                // 24 dp hit box receives taps (a part outside the tile would
+                // be clipped by the list).
                 Positioned(
-                  top: -4,
-                  right: -4,
+                  top: 0,
+                  right: 0,
                   child: IconButton(
                     key: Key('remove_attachment_$index'),
                     icon: const Icon(Icons.cancel, size: 18),
+                    tooltip: 'Remove ${attachment.filename}',
                     onPressed: () => onRemove(index),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
                     color: colorScheme.error,
+                    // Without shrinkWrap Material pads the hit box to 48 dp,
+                    // which would reach outside the tile.
+                    style: IconButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size.square(_kRemoveSize),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
                 ),
               ],

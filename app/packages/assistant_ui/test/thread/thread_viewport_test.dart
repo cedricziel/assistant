@@ -65,6 +65,19 @@ void main() {
       );
     });
 
+    testWidgets('the scroll-to-bottom button is labelled "Scroll to bottom"', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_harness(count: 40, revision: 0));
+      final position = _position(tester);
+      position.jumpTo(position.maxScrollExtent - 200);
+      await tester.pump();
+
+      expect(tester.getSemantics(find.byKey(_fab)).tooltip, 'Scroll to bottom');
+      handle.dispose();
+    });
+
     testWidgets('a higher revision at the bottom animates to the bottom', (
       tester,
     ) async {
