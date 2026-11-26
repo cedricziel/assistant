@@ -1,4 +1,4 @@
-# ADR 0023: Conversation Search Runs on a Contentful FTS5 Index of Messages
+# ADR 0025: Conversation Search Runs on a Contentful FTS5 Index of Messages
 
 **Status**: Accepted
 **Date**: 2026-11-26
@@ -16,7 +16,7 @@ The runtime already has a search index of conversations: `conversation_indexer` 
 
 ## Decision
 
-**Add `messages_fts`, a contentful FTS5 table maintained by triggers on `messages`, and match titles in Rust.** Migration `065_messages_fts` creates it. The index is part of the space database, so a space's search follows the space through backup, restore and delete.
+**Add `messages_fts`, a contentful FTS5 table maintained by triggers on `messages`, and match titles in Rust.** Migration `066_messages_fts` creates it. The index is part of the space database, so a space's search follows the space through backup, restore and delete.
 
 ### Contentful, not external-content
 
@@ -34,7 +34,7 @@ A message is indexed when `role IN ('user', 'assistant')`, `trim(content) <> ''`
 - Tool results can be large web pages and are truncated on save anyway. System rows are not user-visible. Empty assistant rows are tool-call stubs.
 - Every branch of the message tree is indexed. Inactive branches stay searchable, and a hit on one is a hit in the same conversation.
 
-The predicate appears three times: the insert trigger's `WHEN`, the re-insert in the update trigger, and the backfill. Migration `065` is the only place it is spelled out.
+The predicate appears three times: the insert trigger's `WHEN`, the re-insert in the update trigger, and the backfill. Migration `066` is the only place it is spelled out.
 
 ### Triggers
 

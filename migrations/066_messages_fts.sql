@@ -1,4 +1,4 @@
--- Migration 065: full-text index over user and assistant messages.
+-- Migration 066: full-text index over user and assistant messages.
 --
 -- `messages_fts` is a contentful FTS5 table, not an external-content table
 -- keyed on `messages.rowid`: `messages.id` is TEXT, so its implicit rowid may

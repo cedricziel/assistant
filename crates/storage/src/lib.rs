@@ -774,7 +774,7 @@ mod tests {
         std::env::temp_dir().join(format!("assistant-storage-migration-{}.db", Uuid::new_v4()))
     }
 
-    /// Migration 065 backfills `messages_fts` with the indexing predicate:
+    /// Migration 066 backfills `messages_fts` with the indexing predicate:
     /// user and assistant prose only, never thinking, tool, system or blank
     /// rows, with the snippet sentinels blanked in the indexed copy.
     #[tokio::test]
@@ -787,11 +787,11 @@ mod tests {
             .execute(&pool)
             .await?;
         let (before, from) = SPACE_MIGRATIONS
-            .split_at(SPACE_MIGRATIONS.partition_point(|(name, _)| *name < "065_messages_fts"));
+            .split_at(SPACE_MIGRATIONS.partition_point(|(name, _)| *name < "066_messages_fts"));
         assert_eq!(
             from.first().map(|(name, _)| *name),
-            Some("065_messages_fts"),
-            "migration 065 is registered"
+            Some("066_messages_fts"),
+            "migration 066 is registered"
         );
         for &(_, sql) in before {
             sqlx::raw_sql(sql).execute(&pool).await?;
@@ -967,7 +967,7 @@ mod tests {
         sqlx::raw_sql("PRAGMA foreign_keys=ON;")
             .execute(&pool)
             .await?;
-        let split = SPACE_MIGRATIONS.partition_point(|(name, _)| *name < "065_messages_fts");
+        let split = SPACE_MIGRATIONS.partition_point(|(name, _)| *name < "066_messages_fts");
         for &(_, sql) in &SPACE_MIGRATIONS[..split] {
             sqlx::raw_sql(sql).execute(&pool).await?;
         }
