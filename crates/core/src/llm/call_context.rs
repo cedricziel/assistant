@@ -70,7 +70,7 @@ mod tests {
         TurnIdentity {
             user_id: Some(UserId::from(user)),
             org_id: Some(OrgId(org.to_string())),
-            space_id: None,
+            ..TurnIdentity::default()
         }
     }
 

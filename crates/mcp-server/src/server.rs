@@ -226,6 +226,7 @@ impl ServerHandler for AssistantMcpServer {
             turn: 0,
             interface: Interface::Mcp,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,

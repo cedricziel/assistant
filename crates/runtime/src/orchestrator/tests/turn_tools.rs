@@ -166,19 +166,26 @@ fn identity(user: Option<&str>) -> TurnIdentity {
         user_id: user.map(UserId::from),
         org_id: None,
         space_id: None,
+        ..TurnIdentity::default()
     }
 }
 
 async fn run(rig: &Rig, interface: Interface, user: Option<&str>) -> String {
+    run_as(rig, interface, identity(user)).await
+}
+
+/// A turn whose submitter said a human is waiting on it.
+async fn run_interactive(rig: &Rig, interface: Interface, user: Option<&str>) -> String {
+    let identity = TurnIdentity {
+        interactive: true,
+        ..identity(user)
+    };
+    run_as(rig, interface, identity).await
+}
+
+async fn run_as(rig: &Rig, interface: Interface, identity: TurnIdentity) -> String {
     rig.orch
-        .run_turn(
-            "go",
-            Uuid::new_v4(),
-            interface,
-            None,
-            vec![],
-            identity(user),
-        )
+        .run_turn("go", Uuid::new_v4(), interface, None, vec![], identity)
         .await
         .unwrap()
         .answer
@@ -284,7 +291,7 @@ async fn a_confirm_tool_asks_the_user_and_runs_only_when_they_agree() {
         )
         .await;
 
-        run(&rig, Interface::Cli, Some("u")).await;
+        run_interactive(&rig, Interface::Web, Some("u")).await;
 
         assert_eq!(asked.load(Ordering::SeqCst), 1, "agree={agree}");
         assert_eq!(runs.load(Ordering::SeqCst), expected_runs, "agree={agree}");

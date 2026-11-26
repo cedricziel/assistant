@@ -242,4 +242,5 @@ mod skill_executions;
 mod streaming;
 mod subagent;
 mod tool_data;
+mod turn_options;
 mod turn_tools;

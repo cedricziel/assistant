@@ -462,6 +462,7 @@ impl SubagentRunner for Orchestrator {
                                 turn: iteration as i64,
                                 interface: Interface::Scheduler,
                                 interactive: false,
+                                run_id: None,
                                 allowed_tools: allowed_tools.clone(),
                                 depth: new_depth,
                                 user_id: None,

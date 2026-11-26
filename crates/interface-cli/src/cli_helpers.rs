@@ -104,6 +104,7 @@ mod tests {
             turn: 0,
             interface: Interface::Cli,
             interactive: true,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,

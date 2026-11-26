@@ -401,6 +401,7 @@ mod tests {
             turn: 0,
             interface: Interface::Scheduler,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,

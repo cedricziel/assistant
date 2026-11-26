@@ -265,6 +265,7 @@ mod tests {
             turn: 0,
             interface: Interface::Mattermost,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,
