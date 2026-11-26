@@ -30,6 +30,7 @@ class MessageBubble extends StatelessWidget {
     this.isGrouped = false,
     this.onRetry,
     this.onStop,
+    this.isStopping = false,
     this.imageBaseUrl,
     this.imageAuthToken,
   });
@@ -38,6 +39,7 @@ class MessageBubble extends StatelessWidget {
   final bool isGrouped;
   final VoidCallback? onRetry;
   final VoidCallback? onStop;
+  final bool isStopping;
   final ServerCapabilities capabilities;
   final Future<({Uint8List bytes, String mimeType})?> Function()
   fetchMessageAudio;
@@ -191,6 +193,7 @@ class MessageBubble extends StatelessWidget {
             fetchMessageAudio: fetchMessageAudio,
             onRetry: onRetry,
             onStop: onStop,
+            isStopping: isStopping,
           ),
         ],
       ),

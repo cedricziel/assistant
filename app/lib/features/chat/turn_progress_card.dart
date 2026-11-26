@@ -125,16 +125,9 @@ class _TurnProgressCardState extends ConsumerState<TurnProgressCard> {
                 padding: const EdgeInsets.only(left: 8),
                 child: TextButton(
                   key: const Key('turn_progress_card_skip_button'),
-                  onPressed: () {
-                    // Fire-and-forget: the SSE stream will surface the
-                    // server-side cancellation as `agent_error`, which the
-                    // chat notifier translates into normal post-turn
-                    // cleanup. We deliberately do NOT await — the user
-                    // wants the button to feel instantaneous.
-                    unawaited(
-                      ref.read(chatProvider.notifier).requestCancelTurn(),
-                    );
-                  },
+                  // The SSE stream surfaces the server-side cancellation as
+                  // `agent_error`, which the notifier reconciles.
+                  onPressed: ref.read(chatProvider.notifier).stopTurn,
                   style: TextButton.styleFrom(
                     foregroundColor: colorScheme.onErrorContainer,
                     padding: const EdgeInsets.symmetric(

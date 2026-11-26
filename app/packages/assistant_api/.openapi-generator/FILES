@@ -69,6 +69,7 @@ doc/DeviceCodeOAuthFlow.md
 doc/DeviceCodeResponseSchema.md
 doc/ErrorBody.md
 doc/ExecuteCommandRequest.md
+doc/FeedbackRating.md
 doc/HttpAuthSecurityScheme.md
 doc/ImplicitOAuthFlow.md
 doc/IntegrationAuthKind.md
@@ -87,6 +88,7 @@ doc/ListTasksResponse.md
 doc/MemberEntry.md
 doc/MembersApi.md
 doc/Message.md
+doc/MessageFeedbackResponse.md
 doc/MessageSummary.md
 doc/MessagesApi.md
 doc/ModelPart.md
@@ -127,6 +129,7 @@ doc/ServerCapabilities.md
 doc/ServerMetadata.md
 doc/SetActivePersonaRequest.md
 doc/SetCredentialRequest.md
+doc/SetMessageFeedbackRequest.md
 doc/SetSkillAccessModeRequest.md
 doc/SetSpaceAccessRequest.md
 doc/SkillDetail.md
@@ -293,6 +296,7 @@ lib/src/model/device_code_o_auth_flow.dart
 lib/src/model/device_code_response_schema.dart
 lib/src/model/error_body.dart
 lib/src/model/execute_command_request.dart
+lib/src/model/feedback_rating.dart
 lib/src/model/http_auth_security_scheme.dart
 lib/src/model/implicit_o_auth_flow.dart
 lib/src/model/integration_auth_kind.dart
@@ -308,6 +312,7 @@ lib/src/model/list_task_push_notification_configs_response.dart
 lib/src/model/list_tasks_response.dart
 lib/src/model/member_entry.dart
 lib/src/model/message.dart
+lib/src/model/message_feedback_response.dart
 lib/src/model/message_summary.dart
 lib/src/model/model_part.dart
 lib/src/model/mutual_tls_security_scheme.dart
@@ -343,6 +348,7 @@ lib/src/model/server_capabilities.dart
 lib/src/model/server_metadata.dart
 lib/src/model/set_active_persona_request.dart
 lib/src/model/set_credential_request.dart
+lib/src/model/set_message_feedback_request.dart
 lib/src/model/set_skill_access_mode_request.dart
 lib/src/model/set_space_access_request.dart
 lib/src/model/skill_detail.dart

@@ -283,6 +283,8 @@ pub struct ApiErrorResponse {
         crate::api::conversations::delete_conversation,
         crate::api::conversations::update_conversation,
         crate::api::messages::send_message,
+        crate::api::feedback::set_message_feedback,
+        crate::api::feedback::delete_message_feedback,
         crate::api::messages::quick_message,
         crate::api::messages::send_voice_message,
         crate::api::messages::stream_run_events,
@@ -575,6 +577,9 @@ pub struct ApiErrorResponse {
             crate::oauth::ClientInfoSchema,
             // Common error response
             ErrorBody,
+            crate::api::feedback::SetMessageFeedbackRequest,
+            crate::api::feedback::MessageFeedbackResponse,
+            crate::api::feedback::FeedbackRating,
             ApiErrorResponse,
             // Organization management types
             OrgSummary,
@@ -851,6 +856,8 @@ mod tests {
         for expected in [
             "get /api/conversations",
             "post /api/conversations/{id}/messages",
+            "put /api/conversations/{id}/messages/{message_id}/feedback",
+            "delete /api/conversations/{id}/messages/{message_id}/feedback",
             "get /api/attachments/{id}",
             "get /api/capabilities",
             "post /api/webhooks",
@@ -905,6 +912,28 @@ mod tests {
             data_doc.contains("schemas/tool-results/"),
             "data must point at schemas/tool-results/: {data_doc}"
         );
+    }
+
+    /// History summaries expose tool data as an object and the call id.
+    #[test]
+    fn tool_call_summary_documents_object_data_and_call_id() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let schema = &spec["components"]["schemas"]["ToolCallSummary"];
+        let props = &schema["properties"];
+        let ty = &props["data"]["type"];
+        assert!(
+            ty == "object" || ty.as_array().is_some_and(|t| t.contains(&"object".into())),
+            "data must be type object, got {}",
+            props["data"]
+        );
+        assert!(props["tool_call_id"].is_object(), "tool_call_id documented");
+        let required = schema["required"].as_array().expect("required list");
+        assert!(
+            !required.iter().any(|r| r == "tool_call_id" || r == "data"),
+            "tool_call_id and data stay optional: {required:?}"
+        );
+        let doc = props["data"]["description"].as_str().unwrap_or_default();
+        assert!(doc.contains("schemas/tool-results/"), "data doc: {doc}");
     }
 
     /// Telemetry is emitted over OTLP only; the REST API must not expose
