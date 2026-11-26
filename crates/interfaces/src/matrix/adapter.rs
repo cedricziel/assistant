@@ -793,12 +793,21 @@ mod tests {
             .expect("timeout")
             .expect("stream ended");
 
+        // The token of the response that carried the message is written after
+        // the message is dispatched, so wait for it.
         let token = state.path().join("matrix-next-batch-_bot_example_com.txt");
-        let persisted = tokio::fs::read_to_string(&token).await.unwrap();
-        assert_eq!(
-            persisted, "s0",
-            "bootstrap token persisted under the state dir"
-        );
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(t) = tokio::fs::read_to_string(&token).await
+                    && t == "s1"
+                {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the s1 token never reached the state dir");
     }
 
     #[tokio::test]
