@@ -48,11 +48,17 @@ pub(crate) fn messages_to_chat_history(
 fn message_to_chat(m: Message, attachment_map: &AttachmentMap) -> Option<ChatHistoryMessage> {
     match m.role {
         MessageRole::User => {
-            if let Some(atts) = attachment_map.get(&m.id)
-                && !atts.is_empty()
-            {
+            // Audio is heard only in its own turn; the text stands in later.
+            let replayed: Vec<ContentBlock> = attachment_map
+                .get(&m.id)
+                .into_iter()
+                .flatten()
+                .filter(|b| !matches!(b, ContentBlock::Audio { .. }))
+                .cloned()
+                .collect();
+            if !replayed.is_empty() {
                 let mut blocks = vec![ContentBlock::Text(m.content)];
-                blocks.extend(atts.iter().cloned());
+                blocks.extend(replayed);
                 return Some(ChatHistoryMessage::MultimodalUser { content: blocks });
             }
             Some(ChatHistoryMessage::Text {
@@ -706,6 +712,26 @@ mod tests {
                 ));
             }
             other => panic!("expected MultimodalUser, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn past_voice_messages_replay_as_text_only() {
+        let msg_id = Uuid::new_v4();
+        let mut map = AttachmentMap::new();
+        map.insert(
+            msg_id,
+            vec![ContentBlock::Audio {
+                media_type: "audio/ogg".to_string(),
+                data: "T2dnUw==".to_string(),
+            }],
+        );
+
+        let history = messages_to_chat_history(vec![make_user_msg(msg_id, "hello")], &map);
+
+        match &history[0] {
+            ChatHistoryMessage::Text { content, .. } => assert_eq!(content, "hello"),
+            other => panic!("expected the text only, got {other:?}"),
         }
     }
 

@@ -2029,6 +2029,10 @@ impl Orchestrator {
             }
         }
 
+        if !self.llm.chat_options_support().audio_input {
+            all_attachments.retain(|b| !matches!(b, ContentBlock::Audio { .. }));
+        }
+
         let user_row_id = user.as_ref().or(regenerated.as_ref()).map(|m| m.id);
         if all_attachments.is_empty() {
             history.push(
@@ -2171,6 +2175,7 @@ fn resize_and_encode(raw: &[u8], mime_type: &str, provider: &str) -> String {
 ///
 /// - **Images** → `ContentBlock::Image` (resized + base64 encoded)
 /// - **PDF** → `ContentBlock::Document` (base64 encoded, no resize)
+/// - **Audio** → `ContentBlock::Audio` (base64 encoded)
 /// - **Text files** (plain, markdown, CSV, JSON) → `ContentBlock::Text`
 ///   (UTF-8 decoded, wrapped with filename delimiters)
 fn attachment_to_content_block(
@@ -2210,6 +2215,13 @@ fn attachment_to_content_block(
             "--- file: {} ---\n{}{}\n--- end file ---",
             meta.filename, text, suffix
         ));
+    }
+
+    if meta.mime_type.starts_with("audio/") {
+        return ContentBlock::Audio {
+            media_type: meta.mime_type.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        };
     }
 
     if meta.mime_type == "application/pdf" {
