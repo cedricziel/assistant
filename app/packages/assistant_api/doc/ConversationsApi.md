@@ -18,6 +18,7 @@ Method | HTTP request | Description
 [**getMessageAudio**](ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it as &#x60;audio/mpeg&#x60;.
 [**getTurnStatus**](ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
 [**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
+[**respondToInteraction**](ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
 [**sendMessage**](ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [**sendVoiceMessage**](ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
 [**streamConversations**](ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
@@ -413,6 +414,57 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **respondToInteraction**
+> InteractionDetail respondToInteraction(conversationId, turnId, interactionId, respondToInteractionRequest, xSpaceId)
+
+`POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond`
+
+The turn's owner answers a pending interaction. The answer is validated by the interaction kind's handler. Answering is a compare-and-set on `pending`: repeating the same answer returns `200` with the stored resolution, a different answer after resolution returns `409`, and an expired or cancelled interaction (or one whose turn process stopped waiting) returns `410`.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String conversationId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation UUID
+final String turnId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Turn (run) UUID — matches the SSE run_id
+final String interactionId = interactionId_example; // String | Interaction id from `interaction_requested`
+final RespondToInteractionRequest respondToInteractionRequest = ; // RespondToInteractionRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.respondToInteraction(conversationId, turnId, interactionId, respondToInteractionRequest, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->respondToInteraction: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **conversationId** | **String**| Conversation UUID | 
+ **turnId** | **String**| Turn (run) UUID — matches the SSE run_id | 
+ **interactionId** | **String**| Interaction id from `interaction_requested` | 
+ **respondToInteractionRequest** | [**RespondToInteractionRequest**](RespondToInteractionRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**InteractionDetail**](InteractionDetail.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

@@ -106,6 +106,7 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getMessageAudio**](doc/ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it as &#x60;audio/mpeg&#x60;.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getTurnStatus**](doc/ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**listConversations**](doc/ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**respondToInteraction**](doc/ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendMessage**](doc/ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
@@ -285,6 +286,9 @@ Class | Method | HTTP request | Description
  - [IntegrationStatus](doc/IntegrationStatus.md)
  - [IntegrationSummary](doc/IntegrationSummary.md)
  - [IntegrationTrust](doc/IntegrationTrust.md)
+ - [InteractionDetail](doc/InteractionDetail.md)
+ - [InteractionOutcomeView](doc/InteractionOutcomeView.md)
+ - [InteractionStatusView](doc/InteractionStatusView.md)
  - [InterfaceInstanceResponse](doc/InterfaceInstanceResponse.md)
  - [ListTaskPushNotificationConfigsResponse](doc/ListTaskPushNotificationConfigsResponse.md)
  - [ListTasksResponse](doc/ListTasksResponse.md)
@@ -311,9 +315,14 @@ Class | Method | HTTP request | Description
  - [PublishCatalogItemRequest](doc/PublishCatalogItemRequest.md)
  - [PushNotificationConfig](doc/PushNotificationConfig.md)
  - [PutOrgOidcConfigRequest](doc/PutOrgOidcConfigRequest.md)
+ - [QuestionAnswer](doc/QuestionAnswer.md)
  - [QuickMessageRequest](doc/QuickMessageRequest.md)
  - [QuickMessageResponse](doc/QuickMessageResponse.md)
  - [RegisterAgentRequest](doc/RegisterAgentRequest.md)
+ - [RespondToInteractionRequest](doc/RespondToInteractionRequest.md)
+ - [RespondToInteractionRequestOneOf](doc/RespondToInteractionRequestOneOf.md)
+ - [RespondToInteractionRequestOneOf1](doc/RespondToInteractionRequestOneOf1.md)
+ - [RespondToInteractionRequestOneOf2](doc/RespondToInteractionRequestOneOf2.md)
  - [Role](doc/Role.md)
  - [RotateSecretResponse](doc/RotateSecretResponse.md)
  - [SecurityRequirement](doc/SecurityRequirement.md)
@@ -333,6 +342,8 @@ Class | Method | HTTP request | Description
  - [SpaceAccessMode](doc/SpaceAccessMode.md)
  - [SpaceDetail](doc/SpaceDetail.md)
  - [SpaceSummary](doc/SpaceSummary.md)
+ - [SseInteractionRequestedEvent](doc/SseInteractionRequestedEvent.md)
+ - [SseInteractionResolvedEvent](doc/SseInteractionResolvedEvent.md)
  - [SseStatusEvent](doc/SseStatusEvent.md)
  - [SseSubagentCompletedEvent](doc/SseSubagentCompletedEvent.md)
  - [SseSubagentStartedEvent](doc/SseSubagentStartedEvent.md)
@@ -358,6 +369,7 @@ Class | Method | HTTP request | Description
  - [TestIntegrationResponse](doc/TestIntegrationResponse.md)
  - [TokenResponse](doc/TokenResponse.md)
  - [ToolCallSummary](doc/ToolCallSummary.md)
+ - [ToolDecision](doc/ToolDecision.md)
  - [TurnState](doc/TurnState.md)
  - [TurnStatusResponse](doc/TurnStatusResponse.md)
  - [UnsubscribeRequest](doc/UnsubscribeRequest.md)
