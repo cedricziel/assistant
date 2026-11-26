@@ -5,9 +5,10 @@
 //! observable divergence between impls fails CI.
 
 use assistant_core::types::conversation::{Message, MessageFinishReason, MessageRole};
+use assistant_storage::conversation_search::SearchSegment;
 use assistant_storage::{
-    ConversationPatch, ConversationStore, InMemoryConversationStore, MetadataUpdate,
-    SqliteConversationStore, StorageLayer,
+    ConversationPatch, ConversationSearchHit, ConversationStore, InMemoryConversationStore,
+    MetadataUpdate, SqliteConversationStore, StorageLayer,
 };
 use uuid::Uuid;
 
@@ -781,6 +782,302 @@ async fn model_round_trips(store: Box<dyn ConversationStore>) {
     assert_eq!(single.model.as_deref(), Some("claude-opus-4"));
 }
 
+// -- search_conversations --
+
+async fn search(store: &dyn ConversationStore, query: &str) -> Vec<ConversationSearchHit> {
+    store.search_conversations(query, 20).await.unwrap()
+}
+
+fn hit_ids(hits: &[ConversationSearchHit]) -> Vec<Uuid> {
+    hits.iter().map(|h| h.record.id).collect()
+}
+
+fn text_of(segments: &[SearchSegment]) -> String {
+    segments.iter().map(|s| s.text.as_str()).collect()
+}
+
+fn highlighted_of(segments: &[SearchSegment]) -> Vec<&str> {
+    segments
+        .iter()
+        .filter(|s| s.highlighted)
+        .map(|s| s.text.as_str())
+        .collect()
+}
+
+async fn search_matches_a_message_prefix(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Trip")).await.unwrap();
+    let msg = assistant_msg(conv.id, "The Lisbon itinerary is ready", 1);
+    store.save_message(&msg).await.unwrap();
+
+    let hits = search(&*store, "lisb").await;
+    assert_eq!(hit_ids(&hits), vec![conv.id]);
+    let hit = &hits[0];
+    assert!(hit.title_segments.iter().all(|s| !s.highlighted));
+    assert_eq!(hit.matches.len(), 1);
+    let m = &hit.matches[0];
+    assert_eq!(m.message_id, msg.id);
+    assert_eq!(m.role, MessageRole::Assistant);
+    assert_eq!(
+        m.segments,
+        vec![
+            SearchSegment {
+                text: "The ".into(),
+                highlighted: false
+            },
+            SearchSegment {
+                text: "Lisbon".into(),
+                highlighted: true
+            },
+            SearchSegment {
+                text: " itinerary is ready".into(),
+                highlighted: false
+            },
+        ]
+    );
+}
+
+async fn search_needs_every_token_across_different_messages(store: Box<dyn ConversationStore>) {
+    let both = store.create_conversation(Some("A")).await.unwrap();
+    store
+        .save_message(&user_msg(both.id, "Find me a flight to Lisbon", 1))
+        .await
+        .unwrap();
+    store
+        .save_message(&assistant_msg(both.id, "Which hotel do you prefer?", 2))
+        .await
+        .unwrap();
+    let only_one = store.create_conversation(Some("B")).await.unwrap();
+    store
+        .save_message(&user_msg(only_one.id, "Lisbon in May", 1))
+        .await
+        .unwrap();
+
+    let hits = search(&*store, "lisbon hotel").await;
+    assert_eq!(hit_ids(&hits), vec![both.id], "B lacks the hotel token");
+    let highlighted: Vec<String> = hits[0]
+        .matches
+        .iter()
+        .flat_map(|m| highlighted_of(&m.segments))
+        .map(str::to_lowercase)
+        .collect();
+    assert!(highlighted.contains(&"lisbon".to_string()));
+    assert!(highlighted.contains(&"hotel".to_string()));
+}
+
+async fn search_splits_tokens_between_title_and_message(store: Box<dyn ConversationStore>) {
+    let conv = store
+        .create_conversation(Some("Lisbon trip"))
+        .await
+        .unwrap();
+    let msg = user_msg(conv.id, "Any hotel near the river?", 1);
+    store.save_message(&msg).await.unwrap();
+    let other = store
+        .create_conversation(Some("Lisbon notes"))
+        .await
+        .unwrap();
+    store
+        .save_message(&user_msg(other.id, "Pack light", 1))
+        .await
+        .unwrap();
+
+    let hits = search(&*store, "lisbon hotel").await;
+    assert_eq!(hit_ids(&hits), vec![conv.id]);
+    assert_eq!(highlighted_of(&hits[0].title_segments), vec!["Lisbon"]);
+    assert_eq!(hits[0].matches.len(), 1);
+    assert_eq!(hits[0].matches[0].message_id, msg.id);
+}
+
+async fn search_never_matches_thinking_rows(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Plans")).await.unwrap();
+    store
+        .save_message(&assistant_msg(
+            conv.id,
+            "<think>Lisbon is cheaper in May</think>",
+            1,
+        ))
+        .await
+        .unwrap();
+    assert!(search(&*store, "lisbon").await.is_empty());
+}
+
+async fn search_never_matches_tool_rows(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Plans")).await.unwrap();
+    let mut tool = Message::user(conv.id, "Lisbon weather: sunny");
+    tool.role = MessageRole::Tool;
+    store.save_message(&tool).await.unwrap();
+    assert!(search(&*store, "lisbon").await.is_empty());
+}
+
+async fn search_ranks_title_hits_before_message_only_hits(store: Box<dyn ConversationStore>) {
+    let message_only = store.create_conversation(Some("Notes")).await.unwrap();
+    store
+        .save_message(&user_msg(message_only.id, "lisbon lisbon lisbon lisbon", 1))
+        .await
+        .unwrap();
+    let titled = store
+        .create_conversation(Some("Lisbon trip"))
+        .await
+        .unwrap();
+    store
+        .save_message(&user_msg(
+            titled.id,
+            "A long message that mentions Lisbon once",
+            1,
+        ))
+        .await
+        .unwrap();
+
+    let hits = search(&*store, "lisbon").await;
+    assert_eq!(hit_ids(&hits), vec![titled.id, message_only.id]);
+}
+
+async fn search_folds_non_ascii_titles(store: Box<dyn ConversationStore>) {
+    let doctor = store
+        .create_conversation(Some("Ärztetermin"))
+        .await
+        .unwrap();
+    let lisbon = store.create_conversation(Some("Lisbôa")).await.unwrap();
+
+    let hits = search(&*store, "ärzte").await;
+    assert_eq!(hit_ids(&hits), vec![doctor.id]);
+    assert_eq!(highlighted_of(&hits[0].title_segments), vec!["Ärzte"]);
+
+    let hits = search(&*store, "lisboa").await;
+    assert_eq!(hit_ids(&hits), vec![lisbon.id]);
+    assert_eq!(highlighted_of(&hits[0].title_segments), vec!["Lisbôa"]);
+    assert_eq!(text_of(&hits[0].title_segments), "Lisbôa");
+}
+
+async fn search_one_character_query_returns_title_hits_only(store: Box<dyn ConversationStore>) {
+    let titled = store.create_conversation(Some("Trip")).await.unwrap();
+    let message_only = store.create_conversation(Some("Memo")).await.unwrap();
+    store
+        .save_message(&user_msg(message_only.id, "a message with the letter t", 1))
+        .await
+        .unwrap();
+    store
+        .save_message(&user_msg(titled.id, "tea time", 1))
+        .await
+        .unwrap();
+
+    let hits = search(&*store, "t").await;
+    assert_eq!(hit_ids(&hits), vec![titled.id]);
+    assert!(
+        hits[0].matches.is_empty(),
+        "one character never scans messages"
+    );
+}
+
+async fn search_ignores_a_one_character_token_beside_a_longer_one(
+    store: Box<dyn ConversationStore>,
+) {
+    let conv = store.create_conversation(Some("Holiday")).await.unwrap();
+    store
+        .save_message(&user_msg(conv.id, "Lisbon flights", 1))
+        .await
+        .unwrap();
+
+    let hits = search(&*store, "lisbon q").await;
+    assert_eq!(hit_ids(&hits), vec![conv.id]);
+}
+
+async fn search_returns_one_hit_per_conversation_with_at_most_three_matches(
+    store: Box<dyn ConversationStore>,
+) {
+    let conv = store.create_conversation(Some("Plans")).await.unwrap();
+    for turn in 1..=5 {
+        store
+            .save_message(&user_msg(conv.id, &format!("Lisbon plan {turn}"), turn))
+            .await
+            .unwrap();
+    }
+    let hits = search(&*store, "lisbon").await;
+    assert_eq!(hit_ids(&hits), vec![conv.id]);
+    assert_eq!(hits[0].matches.len(), 3);
+}
+
+async fn search_respects_the_limit(store: Box<dyn ConversationStore>) {
+    for n in 0..5 {
+        store
+            .create_conversation(Some(&format!("Lisbon {n}")))
+            .await
+            .unwrap();
+    }
+    let hits = store.search_conversations("lisbon", 3).await.unwrap();
+    assert_eq!(hits.len(), 3);
+    let none = store.search_conversations("lisbon", 0).await.unwrap();
+    assert!(none.is_empty());
+}
+
+async fn search_blank_query_returns_nothing_and_too_many_tokens_fail(
+    store: Box<dyn ConversationStore>,
+) {
+    store.create_conversation(Some("Lisbon")).await.unwrap();
+    assert!(search(&*store, "   ").await.is_empty());
+    assert!(
+        store
+            .search_conversations("a b c d e f g h i", 20)
+            .await
+            .is_err()
+    );
+}
+
+async fn search_treats_query_syntax_as_literal_text(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Lisbon")).await.unwrap();
+    store
+        .save_message(&user_msg(conv.id, "foo and bar", 1))
+        .await
+        .unwrap();
+    for q in [r#""foo" OR bar*"#, "** ((", "NEAR(", r#"""""#, "foo-bar"] {
+        store
+            .search_conversations(q, 20)
+            .await
+            .unwrap_or_else(|e| panic!("query {q:?} failed: {e}"));
+    }
+    assert!(search(&*store, r#""foo" OR bar*"#).await.is_empty());
+}
+
+async fn search_stored_sentinels_do_not_split_snippets(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Plans")).await.unwrap();
+    store
+        .save_message(&user_msg(conv.id, "Lisbon\u{E000}plan for May", 1))
+        .await
+        .unwrap();
+
+    let hits = search(&*store, "lisbon").await;
+    assert_eq!(hits.len(), 1);
+    let segments = &hits[0].matches[0].segments;
+    assert_eq!(highlighted_of(segments), vec!["Lisbon"]);
+    assert!(
+        segments
+            .iter()
+            .all(|s| !s.text.contains('\u{E000}') && !s.text.contains('\u{E001}')),
+        "no sentinel in any segment: {segments:?}"
+    );
+}
+
+async fn search_finds_messages_on_every_branch(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Plans")).await.unwrap();
+    let root = user_msg(conv.id, "Question", 1);
+    store.save_message(&root).await.unwrap();
+    let a = assistant_msg(conv.id, "First lisbon answer", 2);
+    let b = assistant_msg(conv.id, "Second lisbon answer", 2);
+    store.branch_message(&a, Some(root.id)).await.unwrap();
+    store.branch_message(&b, Some(root.id)).await.unwrap();
+
+    let hits = search(&*store, "lisbon").await;
+    assert_eq!(hits[0].matches.len(), 2);
+}
+
+async fn search_without_a_match_returns_nothing(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Plans")).await.unwrap();
+    store
+        .save_message(&user_msg(conv.id, "Paris", 1))
+        .await
+        .unwrap();
+    assert!(search(&*store, "lisbon").await.is_empty());
+}
+
 macro_rules! contract_tests {
     ($store_name:ident, $constructor:expr) => {
         mod $store_name {
@@ -995,6 +1292,87 @@ macro_rules! contract_tests {
             async fn t_delete_run_rows_fails_when_another_row_hangs_under_a_deleted_one() {
                 delete_run_rows_fails_when_another_row_hangs_under_a_deleted_one($constructor)
                     .await;
+            }
+
+            #[tokio::test]
+            async fn t_search_matches_a_message_prefix() {
+                search_matches_a_message_prefix($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_needs_every_token_across_different_messages() {
+                search_needs_every_token_across_different_messages($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_splits_tokens_between_title_and_message() {
+                search_splits_tokens_between_title_and_message($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_never_matches_thinking_rows() {
+                search_never_matches_thinking_rows($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_never_matches_tool_rows() {
+                search_never_matches_tool_rows($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_ranks_title_hits_before_message_only_hits() {
+                search_ranks_title_hits_before_message_only_hits($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_folds_non_ascii_titles() {
+                search_folds_non_ascii_titles($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_one_character_query_returns_title_hits_only() {
+                search_one_character_query_returns_title_hits_only($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_ignores_a_one_character_token_beside_a_longer_one() {
+                search_ignores_a_one_character_token_beside_a_longer_one($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_returns_one_hit_per_conversation_with_at_most_three_matches() {
+                search_returns_one_hit_per_conversation_with_at_most_three_matches($constructor)
+                    .await;
+            }
+
+            #[tokio::test]
+            async fn t_search_respects_the_limit() {
+                search_respects_the_limit($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_blank_query_returns_nothing_and_too_many_tokens_fail() {
+                search_blank_query_returns_nothing_and_too_many_tokens_fail($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_treats_query_syntax_as_literal_text() {
+                search_treats_query_syntax_as_literal_text($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_stored_sentinels_do_not_split_snippets() {
+                search_stored_sentinels_do_not_split_snippets($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_finds_messages_on_every_branch() {
+                search_finds_messages_on_every_branch($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_without_a_match_returns_nothing() {
+                search_without_a_match_returns_nothing($constructor).await;
             }
         }
     };
