@@ -136,9 +136,9 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 19. Chat image output
 
-- [ ] 19.1 Write failing tests: `image_output` with a catalog-capable model sends `modalities` and `image_config`; a model without image output fails each call and logs the error at startup. Confirm red. Implement, then verify.
-- [ ] 19.2 Write failing tests: `message.images` data URIs are decoded, HTTPS URLs are downloaded, and images from deltas and the final message are collected without duplicates into `GeneratedMedia`. Confirm red. Implement, then verify.
-- [ ] 19.3 Document chat image output in `docs/openrouter.md`.
+- [x] 19.1 Write failing tests: `image_output` with a catalog-capable model sends `modalities` and `image_config`; a model without image output fails each call and logs the error at startup. Confirm red. Implement, then verify.
+- [x] 19.2 Write failing tests: `message.images` data URIs are decoded, HTTPS URLs are downloaded, and images from deltas and the final message are collected without duplicates into `GeneratedMedia`. Confirm red. Implement, then verify.
+- [x] 19.3 Document chat image output in `docs/openrouter.md`.
 
 ## 20. Voice-native chat (audio input and replies)
 
