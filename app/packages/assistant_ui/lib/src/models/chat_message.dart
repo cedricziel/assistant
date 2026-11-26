@@ -66,7 +66,18 @@ class ToolCallRecord {
 }
 
 /// The kind of entry shown in the chat timeline.
-enum TimelineEntryType { message, thinking, toolCall, subagent, command }
+enum TimelineEntryType {
+  message,
+  thinking,
+  toolCall,
+  subagent,
+  command,
+
+  /// An interaction request that has no tool call to attach to. Only the
+  /// fallback: a request with a `tool_call_id` renders in that tool call's
+  /// footer.
+  interaction,
+}
 
 /// Metadata for an image attachment on a message.
 class ChatAttachment {
