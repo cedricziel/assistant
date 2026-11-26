@@ -27,8 +27,8 @@ impl MemoryGetHandler {
     /// Map a target name to an absolute path within the default agent memory root.
     fn resolve_target(&self, target: &str) -> Option<PathBuf> {
         let mem = &self.config.memory;
-        let base = base_dir()?;
-        let root = Some(base.as_path());
+        let base = base_dir();
+        let root = base.as_deref();
 
         let path = match target {
             "soul" => resolve(&mem.soul_path, root, "SOUL.md")?,
@@ -47,17 +47,19 @@ impl MemoryGetHandler {
             _ => return None,
         };
 
-        // Security: verify the resolved path stays within the configured memory root.
-        let canonical_base = base.canonicalize().unwrap_or(base.clone());
-        let canonical_path = if path.exists() {
-            path.canonicalize().ok()?
-        } else if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
-            parent.canonicalize().ok()?.join(name)
-        } else {
-            return None;
-        };
-        if !canonical_path.starts_with(&canonical_base) {
-            return None;
+        // Security: verify the resolved path stays within the runtime memory root.
+        if let Some(base) = &base {
+            let canonical_base = base.canonicalize().unwrap_or(base.clone());
+            let canonical_path = if path.exists() {
+                path.canonicalize().ok()?
+            } else if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+                parent.canonicalize().ok()?.join(name)
+            } else {
+                return None;
+            };
+            if !canonical_path.starts_with(&canonical_base) {
+                return None;
+            }
         }
 
         Some(path)

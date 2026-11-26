@@ -56,8 +56,8 @@ impl MemoryAppendHandler {
     /// Map a target name to an absolute path within the default agent memory root.
     fn resolve_target(&self, target: &str) -> Option<PathBuf> {
         let mem = &self.config.memory;
-        let base = base_dir()?;
-        let root = Some(base.as_path());
+        let base = base_dir();
+        let root = base.as_deref();
 
         let path = match target {
             "soul" => resolve(&mem.soul_path, root, "SOUL.md")?,
@@ -76,10 +76,10 @@ impl MemoryAppendHandler {
             _ => return None,
         };
 
-        // Security: verify the resolved path stays within the configured memory root.
-        let canonical_base = canonicalize_prefix(&base);
-        let canonical_path = canonicalize_prefix(&path);
-        if !canonical_path.starts_with(&canonical_base) {
+        // Security: verify the resolved path stays within the runtime memory root.
+        if let Some(base) = &base
+            && !canonicalize_prefix(&path).starts_with(canonicalize_prefix(base))
+        {
             return None;
         }
 
@@ -248,6 +248,19 @@ mod tests {
         assert!(
             is_iso_date("2026-02-26"),
             "valid ISO date should be accepted"
+        );
+    }
+
+    #[test]
+    fn configured_paths_resolve_without_a_runtime_agent_root() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = OrgConfig::default();
+        assistant_core::apply_agent_context(&mut config, root.path(), "default");
+        let handler = MemoryAppendHandler::new(Arc::new(config));
+
+        assert_eq!(
+            handler.resolve_target("user"),
+            Some(root.path().join("agents/default/USER.md"))
         );
     }
 
