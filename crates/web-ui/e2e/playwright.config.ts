@@ -7,6 +7,10 @@ const runTag = process.env.GITHUB_RUN_ID || `${process.pid}`;
 // isolates each run.
 const homeDir = path.join(os.tmpdir(), `assistant-e2e-home-${runTag}`);
 
+// The iPad-landscape project exists only for the sidebar-collapse regression
+// (#620); it has no screenshot baselines.
+const IPAD_ONLY_SPEC = /sidebar-collapse-ipad\.spec\.ts/;
+
 /**
  * Playwright configuration for visual regression tests.
  *
@@ -14,6 +18,8 @@ const homeDir = path.join(os.tmpdir(), `assistant-e2e-home-${runTag}`);
  *   - Desktop (1280px) — full icon rail + top bar
  *   - Tablet  (768px)  — hamburger menu, no icon rail  (breakpoint: 900px)
  *   - Mobile  (375px)  — bottom tab bar, no top bar    (breakpoint: 640px)
+ *
+ * A fourth project, iPad landscape (1180px), runs only the sidebar-collapse spec.
  *
  * The assistant webui server must be running at BASE_URL before tests start.
  * Set E2E_BASE_URL to override the default address.
@@ -51,6 +57,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chrome",
+      testIgnore: IPAD_ONLY_SPEC,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 900 },
@@ -58,6 +65,7 @@ export default defineConfig({
     },
     {
       name: "tablet-chrome",
+      testIgnore: IPAD_ONLY_SPEC,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 768, height: 1024 },
@@ -65,6 +73,7 @@ export default defineConfig({
     },
     {
       name: "ipad-landscape-chrome",
+      testMatch: IPAD_ONLY_SPEC,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1180, height: 820 },
@@ -72,6 +81,7 @@ export default defineConfig({
     },
     {
       name: "mobile-chrome",
+      testIgnore: IPAD_ONLY_SPEC,
       use: {
         ...devices["Pixel 7"],
       },
