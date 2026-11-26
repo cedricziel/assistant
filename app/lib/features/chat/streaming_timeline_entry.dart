@@ -238,6 +238,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
       forceExpand: record.status == ToolCallStatus.error,
       showInline: showArgs,
     );
+    if (record.app == null) return chip;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
