@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:go_router/go_router.dart';
 
+import '../../shared/layout/breakpoints.dart';
 import '../../shared/platform/widgets.dart';
 import '../../api/api_client.dart';
 import '../../api/attachment_service.dart';
@@ -47,6 +48,9 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 const double _kBottomThreshold = 80.0;
+
+/// Width of the inline conversation list, border included.
+const double _kConversationListWidth = 240.0;
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _inputController = TextEditingController();
@@ -300,8 +304,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     final chatAsync = ref.watch(chatProvider);
     final chatState = chatAsync.value ?? const ChatState();
-    final isWide = MediaQuery.of(context).size.width > 700;
-
     // Scroll to bottom when messages change, but only if already at bottom.
     ref.listen(chatProvider, (_, next) {
       if (_atBottom && next.value?.messages.isNotEmpty == true) {
@@ -340,289 +342,316 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     ];
 
-    return Scaffold(
-      appBar: AdaptiveNavBar(
-        title: activePersonaName,
-        leading: isWide
-            ? null
-            : Builder(
-                builder: (ctx) => IconButton(
-                  icon: const AdaptiveIcon(
-                    cupertino: CupertinoIcons.line_horizontal_3,
-                    material: Icons.menu,
-                  ),
-                  onPressed: () => Scaffold.of(ctx).openDrawer(),
-                ),
-              ),
-        actions: chatActions,
-      ),
+    // Hoisted: `ref.watch` is only valid while building, not inside the
+    // LayoutBuilder callback below.
+    final pendingAttachments = ref.watch(pendingAttachmentsProvider);
+    final commands = ref.watch(commandsProvider).value ?? [];
 
-      // Drawer on narrow screens.
-      drawer: isWide
-          ? null
-          : Drawer(
-              child: SafeArea(
-                child: ConversationList(
-                  onConversationSelected: () => Navigator.of(context).pop(),
-                ),
-              ),
-            ),
-
-      body: GestureDetector(
-        onTap: () => FocusScope.of(context).unfocus(),
-        child: Row(
-          children: [
-            // Conversation list sidebar (wide screens only).
-            if (isWide)
-              SizedBox(
-                width: 240,
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      right: BorderSide(
-                        color: Theme.of(context).colorScheme.outlineVariant,
+    // The inline list / drawer decision compares the chat pane's own width
+    // (the window minus the nav sidebar), so it sits above the Scaffold,
+    // which it drives (body, app bar leading, drawer).
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= Breakpoints.wide;
+        final threadWidth =
+            constraints.maxWidth - (isWide ? _kConversationListWidth : 0);
+        return Scaffold(
+          appBar: AdaptiveNavBar(
+            title: activePersonaName,
+            leading: isWide
+                ? null
+                : Builder(
+                    builder: (ctx) => IconButton(
+                      icon: const AdaptiveIcon(
+                        cupertino: CupertinoIcons.line_horizontal_3,
+                        material: Icons.menu,
                       ),
+                      onPressed: () => Scaffold.of(ctx).openDrawer(),
                     ),
                   ),
-                  child: const ConversationList(),
-                ),
-              ),
+            actions: chatActions,
+          ),
 
-            // Chat area with drop target for file attachments.
-            Expanded(
-              child: DropTarget(
-                onDragDone: (details) {
-                  final notifier = ref.read(
-                    pendingAttachmentsProvider.notifier,
-                  );
-                  for (final file in details.files) {
-                    file.readAsBytes().then((bytes) {
-                      final ext = file.name.split('.').last;
-                      final mime = mimeFromExtension(ext);
-                      if (isSupportedMimeType(mime)) {
-                        notifier.add(
-                          PendingAttachment(
-                            bytes: bytes,
-                            filename: file.name,
-                            mimeType: mime,
+          // Drawer on narrow screens.
+          drawer: isWide
+              ? null
+              : Drawer(
+                  child: SafeArea(
+                    child: ConversationList(
+                      onConversationSelected: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                ),
+
+          body: GestureDetector(
+            onTap: () => FocusScope.of(context).unfocus(),
+            child: Row(
+              children: [
+                // Conversation list sidebar (wide screens only).
+                if (isWide)
+                  SizedBox(
+                    width: _kConversationListWidth,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          right: BorderSide(
+                            color: Theme.of(context).colorScheme.outlineVariant,
                           ),
-                        );
-                      }
-                    });
-                  }
-                },
-                child: Column(
-                  children: [
-                    // Error banner.
-                    if (chatState.error != null)
-                      Material(
-                        color: Theme.of(context).colorScheme.errorContainer,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.warning_amber_outlined,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onErrorContainer,
-                                size: 18,
+                        ),
+                      ),
+                      child: const ConversationList(),
+                    ),
+                  ),
+
+                // Chat area with drop target for file attachments.
+                Expanded(
+                  child: DropTarget(
+                    onDragDone: (details) {
+                      final notifier = ref.read(
+                        pendingAttachmentsProvider.notifier,
+                      );
+                      for (final file in details.files) {
+                        file.readAsBytes().then((bytes) {
+                          final ext = file.name.split('.').last;
+                          final mime = mimeFromExtension(ext);
+                          if (isSupportedMimeType(mime)) {
+                            notifier.add(
+                              PendingAttachment(
+                                bytes: bytes,
+                                filename: file.name,
+                                mimeType: mime,
                               ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  chatState.error!,
-                                  style: TextStyle(
+                            );
+                          }
+                        });
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        // Error banner.
+                        if (chatState.error != null)
+                          Material(
+                            color: Theme.of(context).colorScheme.errorContainer,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.warning_amber_outlined,
                                     color: Theme.of(context)
                                         .colorScheme
                                         .onErrorContainer,
+                                    size: 18,
                                   ),
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.close, size: 18),
-                                onPressed: () {
-                                  ref
-                                      .read(chatProvider.notifier)
-                                      .dismissError();
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                    // Loading indicator when fetching history.
-                    if (chatState.isLoadingHistory)
-                      const LinearProgressIndicator(),
-
-                    // Message list.
-                    Expanded(
-                      child: ThreadDensityScope.fromWidth(
-                        width: MediaQuery.sizeOf(context).width,
-                        child: Stack(
-                          children: [
-                            chatState.messages.isEmpty &&
-                                    chatState.pendingQueue.isEmpty
-                                ? const EmptyChat()
-                                : ListView.builder(
-                                    controller: _scrollController,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                      horizontal: 12,
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      chatState.error!,
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onErrorContainer,
+                                      ),
                                     ),
-                                    itemCount:
-                                        chatState.messages.length +
-                                        chatState.pendingQueue.length,
-                                    itemBuilder: (context, index) {
-                                      // Render queued ghost bubbles after the
-                                      // committed messages, in send order. The
-                                      // actively-streaming message is already in
-                                      // `messages` (it was popped from the queue
-                                      // when its stream started), so ghost
-                                      // bubbles represent only the truly-waiting
-                                      // items.
-                                      if (index >= chatState.messages.length) {
-                                        final queueIdx =
-                                            index - chatState.messages.length;
-                                        final pending =
-                                            chatState.pendingQueue[queueIdx];
-                                        return QueuedMessageBubble(
-                                          message: pending,
-                                          index: queueIdx,
-                                        );
-                                      }
-
-                                      final msg = chatState.messages[index];
-
-                                      // Render command events as compact
-                                      // system-event tiles.
-                                      if (msg.timelineType ==
-                                          TimelineEntryType.command) {
-                                        return CommandEventTile(message: msg);
-                                      }
-
-                                      // Render non-message timeline entries
-                                      // (thinking, tool call, subagent) as
-                                      // streaming-aware adaptive sections.
-                                      if (msg.timelineType !=
-                                          TimelineEntryType.message) {
-                                        return StreamingTimelineEntry(
-                                          message: msg,
-                                          entryState: msg.isStale
-                                              ? EntryState.stale
-                                              : msg.isStreaming
-                                              ? EntryState.active
-                                              : EntryState.complete,
-                                        );
-                                      }
-
-                                      final prevMsg = index > 0
-                                          ? chatState.messages[index - 1]
-                                          : null;
-                                      final isGrouped =
-                                          prevMsg != null &&
-                                          prevMsg.role == msg.role &&
-                                          !prevMsg.isStreaming;
-                                      return MessageBubble(
-                                        message: msg,
-                                        isGrouped: isGrouped,
-                                        capabilities: capabilities,
-                                        onRetry:
-                                            msg.status == MessageStatus.failed
-                                            ? () => ref
-                                                  .read(chatProvider.notifier)
-                                                  .retryMessage(msg)
-                                            : null,
-                                        isStopping: chatState.isStopping,
-                                        onStop: () => ref
-                                            .read(chatProvider.notifier)
-                                            .stopTurn(),
-                                        fetchMessageAudio: () {
-                                          final api = ref.read(
-                                            apiClientProvider,
-                                          );
-                                          final audioId = msg.audioId;
-                                          if (audioId != null) {
-                                            return api?.fetchAudio(audioId) ??
-                                                Future.value(null);
-                                          }
-                                          // On-demand TTS synthesis.
-                                          return api?.fetchMessageAudio(
-                                                msg.id,
-                                              ) ??
-                                              Future.value(null);
-                                        },
-                                        imageBaseUrl: imageBaseUrl,
-                                        imageAuthToken: imageAuthToken,
-                                      );
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.close, size: 18),
+                                    onPressed: () {
+                                      ref
+                                          .read(chatProvider.notifier)
+                                          .dismissError();
                                     },
                                   ),
-                            if (!_atBottom)
-                              Positioned(
-                                bottom: 8,
-                                right: 8,
-                                child: FloatingActionButton.small(
-                                  key: const Key('scroll_to_bottom_button'),
-                                  onPressed: _scrollToBottom,
-                                  tooltip: 'Scroll to bottom',
-                                  child: const Icon(Icons.keyboard_arrow_down),
-                                ),
+                                ],
                               ),
-                          ],
+                            ),
+                          ),
+
+                        // Loading indicator when fetching history.
+                        if (chatState.isLoadingHistory)
+                          const LinearProgressIndicator(),
+
+                        // Message list.
+                        Expanded(
+                          child: ThreadDensityScope.fromWidth(
+                            width: threadWidth,
+                            child: Stack(
+                              children: [
+                                chatState.messages.isEmpty &&
+                                        chatState.pendingQueue.isEmpty
+                                    ? const EmptyChat()
+                                    : ListView.builder(
+                                        controller: _scrollController,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                          horizontal: 12,
+                                        ),
+                                        itemCount:
+                                            chatState.messages.length +
+                                            chatState.pendingQueue.length,
+                                        itemBuilder: (context, index) {
+                                          // Render queued ghost bubbles after the
+                                          // committed messages, in send order. The
+                                          // actively-streaming message is already in
+                                          // `messages` (it was popped from the queue
+                                          // when its stream started), so ghost
+                                          // bubbles represent only the truly-waiting
+                                          // items.
+                                          if (index >=
+                                              chatState.messages.length) {
+                                            final queueIdx =
+                                                index -
+                                                chatState.messages.length;
+                                            final pending = chatState
+                                                .pendingQueue[queueIdx];
+                                            return QueuedMessageBubble(
+                                              message: pending,
+                                              index: queueIdx,
+                                            );
+                                          }
+
+                                          final msg = chatState.messages[index];
+
+                                          // Render command events as compact
+                                          // system-event tiles.
+                                          if (msg.timelineType ==
+                                              TimelineEntryType.command) {
+                                            return CommandEventTile(
+                                              message: msg,
+                                            );
+                                          }
+
+                                          // Render non-message timeline entries
+                                          // (thinking, tool call, subagent) as
+                                          // streaming-aware adaptive sections.
+                                          if (msg.timelineType !=
+                                              TimelineEntryType.message) {
+                                            return StreamingTimelineEntry(
+                                              message: msg,
+                                              entryState: msg.isStale
+                                                  ? EntryState.stale
+                                                  : msg.isStreaming
+                                                  ? EntryState.active
+                                                  : EntryState.complete,
+                                            );
+                                          }
+
+                                          final prevMsg = index > 0
+                                              ? chatState.messages[index - 1]
+                                              : null;
+                                          final isGrouped =
+                                              prevMsg != null &&
+                                              prevMsg.role == msg.role &&
+                                              !prevMsg.isStreaming;
+                                          return MessageBubble(
+                                            message: msg,
+                                            isGrouped: isGrouped,
+                                            capabilities: capabilities,
+                                            onRetry:
+                                                msg.status ==
+                                                    MessageStatus.failed
+                                                ? () => ref
+                                                      .read(
+                                                        chatProvider.notifier,
+                                                      )
+                                                      .retryMessage(msg)
+                                                : null,
+                                            isStopping: chatState.isStopping,
+                                            onStop: () => ref
+                                                .read(chatProvider.notifier)
+                                                .stopTurn(),
+                                            fetchMessageAudio: () {
+                                              final api = ref.read(
+                                                apiClientProvider,
+                                              );
+                                              final audioId = msg.audioId;
+                                              if (audioId != null) {
+                                                return api?.fetchAudio(
+                                                      audioId,
+                                                    ) ??
+                                                    Future.value(null);
+                                              }
+                                              // On-demand TTS synthesis.
+                                              return api?.fetchMessageAudio(
+                                                    msg.id,
+                                                  ) ??
+                                                  Future.value(null);
+                                            },
+                                            imageBaseUrl: imageBaseUrl,
+                                            imageAuthToken: imageAuthToken,
+                                          );
+                                        },
+                                      ),
+                                if (!_atBottom)
+                                  Positioned(
+                                    bottom: 8,
+                                    right: 8,
+                                    child: FloatingActionButton.small(
+                                      key: const Key('scroll_to_bottom_button'),
+                                      onPressed: _scrollToBottom,
+                                      tooltip: 'Scroll to bottom',
+                                      child: const Icon(
+                                        Icons.keyboard_arrow_down,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+
+                        // Brief banner shown while attemptReconnect is
+                        // recovering an interrupted stream after a resume.
+                        // Renders nothing on routine foreground transitions.
+                        const ReconnectBanner(),
+
+                        // In-flight turn progress card — renders nothing when no
+                        // turn is active, an activity label otherwise, a stall
+                        // label after 30s of silence.
+                        const TurnProgressCard(),
+
+                        // Input row.
+                        ChatInputRow(
+                          controller: _inputController,
+                          focusNode: _inputFocus,
+                          isSending: chatState.isSending,
+                          isStopping: chatState.isStopping,
+                          pendingQueueCount: chatState.pendingQueue.length,
+                          pendingAttachments: pendingAttachments,
+                          capabilities: capabilities,
+                          commands: commands,
+                          onSend: _sendMessage,
+                          onStop: () =>
+                              ref.read(chatProvider.notifier).stopTurn(),
+                          onVoiceRecorded: _sendVoiceMessage,
+                          onPickImage: _pickImages,
+                          onRemoveAttachment: (i) => ref
+                              .read(pendingAttachmentsProvider.notifier)
+                              .removeAt(i),
+                          onPasteImage: (bytes) {
+                            ref
+                                .read(pendingAttachmentsProvider.notifier)
+                                .add(
+                                  PendingAttachment(
+                                    bytes: bytes,
+                                    filename: 'pasted_image.png',
+                                    mimeType: 'image/png',
+                                  ),
+                                );
+                          },
+                        ),
+                      ],
                     ),
-
-                    // Brief banner shown while attemptReconnect is
-                    // recovering an interrupted stream after a resume.
-                    // Renders nothing on routine foreground transitions.
-                    const ReconnectBanner(),
-
-                    // In-flight turn progress card — renders nothing when no
-                    // turn is active, an activity label otherwise, a stall
-                    // label after 30s of silence.
-                    const TurnProgressCard(),
-
-                    // Input row.
-                    ChatInputRow(
-                      controller: _inputController,
-                      focusNode: _inputFocus,
-                      isSending: chatState.isSending,
-                      isStopping: chatState.isStopping,
-                      pendingQueueCount: chatState.pendingQueue.length,
-                      pendingAttachments: ref.watch(pendingAttachmentsProvider),
-                      capabilities: capabilities,
-                      commands: ref.watch(commandsProvider).value ?? [],
-                      onSend: _sendMessage,
-                      onStop: () => ref.read(chatProvider.notifier).stopTurn(),
-                      onVoiceRecorded: _sendVoiceMessage,
-                      onPickImage: _pickImages,
-                      onRemoveAttachment: (i) => ref
-                          .read(pendingAttachmentsProvider.notifier)
-                          .removeAt(i),
-                      onPasteImage: (bytes) {
-                        ref
-                            .read(pendingAttachmentsProvider.notifier)
-                            .add(
-                              PendingAttachment(
-                                bytes: bytes,
-                                filename: 'pasted_image.png',
-                                mimeType: 'image/png',
-                              ),
-                            );
-                      },
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ), // GestureDetector
+          ), // GestureDetector
+        );
+      },
     );
   }
 }
