@@ -4,6 +4,7 @@ import '../models/command_entry.dart';
 import '../models/pending_attachment.dart';
 import '../theme/assistant_ui_colors.dart';
 import '../theme/assistant_ui_spacing.dart';
+import 'attachment_tray.dart';
 import 'slash_command_menu.dart';
 
 /// Builds the composer's text input.
@@ -215,7 +216,7 @@ class _ComposerState extends State<Composer> {
             ),
           ),
         if (widget.pendingAttachments.isNotEmpty)
-          _AttachmentTray(
+          AttachmentTray(
             attachments: widget.pendingAttachments,
             onRemove: widget.onRemoveAttachment,
           ),
@@ -263,107 +264,6 @@ class _ComposerState extends State<Composer> {
           ),
         ),
       ],
-    );
-  }
-}
-
-// -- Attachment tray ----------------------------------------------------------
-// Private until chat-element-library PR 11b extracts `AttachmentTray`.
-
-bool _isImageMimeType(String mime) => mime.startsWith('image/');
-
-IconData _iconForMime(String mime) {
-  return switch (mime) {
-    'application/pdf' => Icons.picture_as_pdf,
-    'text/markdown' => Icons.description,
-    'text/csv' => Icons.table_chart,
-    'application/json' => Icons.data_object,
-    'text/plain' => Icons.text_snippet,
-    _ => Icons.insert_drive_file,
-  };
-}
-
-class _AttachmentTray extends StatelessWidget {
-  const _AttachmentTray({required this.attachments, required this.onRemove});
-
-  final List<PendingAttachment> attachments;
-  final void Function(int index) onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(
-        AssistantUiSpacing.md,
-        AssistantUiSpacing.sm,
-        AssistantUiSpacing.md,
-        0,
-      ),
-      child: SizedBox(
-        height: 72,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: attachments.length,
-          separatorBuilder: (_, _) =>
-              const SizedBox(width: AssistantUiSpacing.sm),
-          itemBuilder: (context, index) {
-            final attachment = attachments[index];
-            return Stack(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _isImageMimeType(attachment.mimeType)
-                      ? Image.memory(
-                          attachment.bytes,
-                          width: 64,
-                          height: 64,
-                          fit: BoxFit.cover,
-                        )
-                      : Container(
-                          width: 64,
-                          height: 64,
-                          color: colorScheme.surfaceContainerHighest,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _iconForMime(attachment.mimeType),
-                                size: 28,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                attachment.filename.length > 8
-                                    ? '${attachment.filename.substring(0, 8)}…'
-                                    : attachment.filename,
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(
-                                      color: colorScheme.onSurfaceVariant,
-                                    ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                ),
-                Positioned(
-                  top: -4,
-                  right: -4,
-                  child: IconButton(
-                    key: Key('remove_attachment_$index'),
-                    icon: const Icon(Icons.cancel, size: 18),
-                    onPressed: () => onRemove(index),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    color: colorScheme.error,
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
     );
   }
 }
