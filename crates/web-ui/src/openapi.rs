@@ -926,6 +926,25 @@ mod tests {
         );
     }
 
+    /// History summaries and `tool_result` frames expose the MCP App as a
+    /// typed model, so generated clients get its HTML, CSP and permissions.
+    #[test]
+    fn tool_results_document_the_mcp_app() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let schemas = &spec["components"]["schemas"];
+        for owner in ["ToolCallSummary", "SseToolResultEvent"] {
+            let app = serde_json::to_string(&schemas[owner]["properties"]["app"]).unwrap();
+            assert!(
+                app.contains("#/components/schemas/McpAppView"),
+                "{owner}.app must reference McpAppView: {app}"
+            );
+        }
+        let props = &schemas["McpAppView"]["properties"];
+        for field in ["server", "resource_uri", "html", "csp", "permissions"] {
+            assert!(props[field].is_object(), "McpAppView.{field} is documented");
+        }
+    }
+
     /// History summaries expose tool data as an object and the call id.
     #[test]
     fn tool_call_summary_documents_object_data_and_call_id() {

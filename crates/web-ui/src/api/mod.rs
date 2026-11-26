@@ -21,6 +21,7 @@ pub mod feedback;
 pub mod integrations;
 pub mod interactions;
 pub mod interfaces;
+pub mod mcp_apps;
 pub mod members;
 pub mod messages;
 pub mod org_oidc;
