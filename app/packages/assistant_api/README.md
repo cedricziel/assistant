@@ -103,12 +103,14 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**createQuickMessage**](doc/ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**deleteConversation**](doc/ConversationsApi.md#deleteconversation) | **DELETE** /api/conversations/{id} | &#x60;DELETE /api/conversations/{id}&#x60; — delete a conversation and all its messages.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**deleteMessageFeedback**](doc/ConversationsApi.md#deletemessagefeedback) | **DELETE** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;DELETE /api/conversations/{id}/messages/{message_id}/feedback&#x60; — clear feedback.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**editMessage**](doc/ConversationsApi.md#editmessage) | **POST** /api/conversations/{id}/messages/{message_id}/edit | &#x60;POST /api/conversations/{id}/messages/{message_id}/edit&#x60; — replace a user message and stream the new reply.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getAudio**](doc/ConversationsApi.md#getaudio) | **GET** /api/audio/{id} | &#x60;GET /api/audio/{id}&#x60; — serve a synthesized audio blob from the in-memory store.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getConversation**](doc/ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getMessageAudio**](doc/ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it in the configured &#x60;[tts] format&#x60;.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getTurnStatus**](doc/ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**listConversations**](doc/ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**readMcpAppResource**](doc/ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
+[*ConversationsApi*](doc/ConversationsApi.md) | [**regenerateMessage**](doc/ConversationsApi.md#regeneratemessage) | **POST** /api/conversations/{id}/messages/{message_id}/regenerate | &#x60;POST /api/conversations/{id}/messages/{message_id}/regenerate&#x60; — answer a user message again and stream the new reply.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**respondToInteraction**](doc/ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**searchConversations**](doc/ConversationsApi.md#searchconversations) | **GET** /api/conversations/search | Search conversations by title and message text.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendMessage**](doc/ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
@@ -287,6 +289,7 @@ Class | Method | HTTP request | Description
  - [CredentialResponse](doc/CredentialResponse.md)
  - [DeviceCodeOAuthFlow](doc/DeviceCodeOAuthFlow.md)
  - [DeviceCodeResponseSchema](doc/DeviceCodeResponseSchema.md)
+ - [EditMessageRequest](doc/EditMessageRequest.md)
  - [ErrorBody](doc/ErrorBody.md)
  - [ExecuteCommandRequest](doc/ExecuteCommandRequest.md)
  - [FeedbackRating](doc/FeedbackRating.md)

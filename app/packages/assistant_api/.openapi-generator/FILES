@@ -70,6 +70,7 @@ doc/CredentialMode.md
 doc/CredentialResponse.md
 doc/DeviceCodeOAuthFlow.md
 doc/DeviceCodeResponseSchema.md
+doc/EditMessageRequest.md
 doc/ErrorBody.md
 doc/ExecuteCommandRequest.md
 doc/FeedbackRating.md
@@ -328,6 +329,7 @@ lib/src/model/credential_response.dart
 lib/src/model/date.dart
 lib/src/model/device_code_o_auth_flow.dart
 lib/src/model/device_code_response_schema.dart
+lib/src/model/edit_message_request.dart
 lib/src/model/error_body.dart
 lib/src/model/execute_command_request.dart
 lib/src/model/feedback_rating.dart

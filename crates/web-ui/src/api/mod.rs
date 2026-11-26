@@ -13,6 +13,7 @@ pub mod api_keys;
 pub mod attachments;
 pub mod audio;
 pub mod bindings;
+pub mod branch_turns;
 pub mod branches;
 pub mod capabilities;
 pub mod catalog;
@@ -275,6 +276,14 @@ pub fn api_router() -> Router<ApiState> {
             patch(conversations::update_conversation),
         )
         .route("/conversations/{id}/messages", post(messages::send_message))
+        .route(
+            "/conversations/{id}/messages/{message_id}/edit",
+            post(branch_turns::edit_message),
+        )
+        .route(
+            "/conversations/{id}/messages/{message_id}/regenerate",
+            post(branch_turns::regenerate_message),
+        )
         .route(
             "/conversations/{id}/switch-branch",
             post(branches::switch_conversation_branch),
