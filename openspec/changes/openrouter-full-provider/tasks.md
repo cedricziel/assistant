@@ -60,8 +60,8 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 8. Model catalog and capabilities
 
-- [ ] 8.1 Write failing wiremock tests: context window is the minimum over selectable endpoints and respects `only` or `order` without fallbacks; `vision`, tools, reasoning and file input are derived from the catalog. Confirm red.
-- [ ] 8.2 Implement `catalog.rs` with an `ArcSwap` snapshot, a background fetch, and a 5-second first-call wait. Add `arc-swap` to the workspace dependencies. Verify 6.1.
+- [x] 8.1 Write failing wiremock tests: context window is the minimum over selectable endpoints and respects `only` or `order` without fallbacks; `vision`, tools, reasoning and file input are derived from the catalog. Confirm red.
+- [x] 8.2 Implement `catalog.rs` with an `ArcSwap` snapshot, a background fetch, and a 5-second first-call wait. Add `arc-swap` to the workspace dependencies. Verify 6.1.
 - [ ] 8.3 Write failing tests: an unknown model fails each call without an upstream request; a catalog outage yields conservative capabilities and refreshes after the backoff (driven by a test clock). Confirm red. Implement, then verify.
 - [ ] 8.4 Document capability detection in `docs/openrouter.md`.
 - [ ] 8.5 Write a failing test that chat-option support (`tool_choice`, `parallel_tool_calls`, `structured_outputs`/`response_format`, image and audio output) comes from the catalog. Confirm red. Implement, then verify.
