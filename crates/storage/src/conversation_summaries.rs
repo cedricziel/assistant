@@ -6,6 +6,7 @@
 //! before the summarised range never sees it.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -13,6 +14,8 @@ use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
+use assistant_core::clock::{Clock, SystemClock};
 
 /// A summary of every message on a path up to `through_message_id`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,11 +51,21 @@ pub trait ConversationSummaryStore: Send + Sync {
 /// SQLite-backed [`ConversationSummaryStore`].
 pub struct SqliteConversationSummaryStore {
     pool: SqlitePool,
+    clock: Arc<dyn Clock>,
 }
 
 impl SqliteConversationSummaryStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            clock: Arc::new(SystemClock),
+        }
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -89,7 +102,7 @@ impl ConversationSummaryStore for SqliteConversationSummaryStore {
             conversation_id,
             through_message_id,
             content: content.to_string(),
-            created_at: Utc::now(),
+            created_at: self.clock.now(),
         };
         sqlx::query(
             "INSERT INTO conversation_summaries \
@@ -139,14 +152,29 @@ impl ConversationSummaryStore for SqliteConversationSummaryStore {
 }
 
 /// In-memory [`ConversationSummaryStore`] for tests.
-#[derive(Default)]
 pub struct InMemoryConversationSummaryStore {
     rows: RwLock<Vec<ConversationSummary>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl Default for InMemoryConversationSummaryStore {
+    fn default() -> Self {
+        Self {
+            rows: RwLock::default(),
+            clock: Arc::new(SystemClock),
+        }
+    }
 }
 
 impl InMemoryConversationSummaryStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Inject a [`Clock`] implementation.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -163,7 +191,7 @@ impl ConversationSummaryStore for InMemoryConversationSummaryStore {
             conversation_id,
             through_message_id,
             content: content.to_string(),
-            created_at: Utc::now(),
+            created_at: self.clock.now(),
         };
         self.rows.write().await.push(summary.clone());
         Ok(summary)
