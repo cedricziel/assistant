@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use assistant_core::types::conversation::{ExecutionContext, Interface};
 use assistant_core::{ToolHandler, ToolOutput};
 use assistant_tool_executor::builtins::bash::BashHandler;
+use assistant_tool_executor::builtins::plan_update::PlanUpdateHandler;
 use assistant_tool_executor::builtins::web_search::WebSearchHandler;
 use serde_json::{Value, json};
 use wiremock::matchers::method;
@@ -193,4 +194,149 @@ async fn web_search_empty_results_publish_an_empty_list() {
     assert!(out.success);
     assert_eq!(data["results"], json!([]));
     assert_eq!(data["query"], "nothing");
+}
+
+// -- plan-update -------------------------------------------------------------
+
+async fn run_plan(args: &[(&str, Value)]) -> (PlanUpdateHandler, ToolOutput) {
+    let handler = PlanUpdateHandler::new();
+    let out = handler.run(params(args), &ctx()).await.unwrap();
+    (handler, out)
+}
+
+fn steps(statuses: &[&str]) -> Value {
+    Value::Array(
+        statuses
+            .iter()
+            .enumerate()
+            .map(|(i, s)| json!({"title": format!("Step {i}"), "status": s}))
+            .collect(),
+    )
+}
+
+#[tokio::test]
+async fn plan_update_publishes_plan_data() {
+    let (handler, out) = run_plan(&[
+        ("title", json!("Ship it")),
+        (
+            "steps",
+            steps(&[
+                "completed",
+                "completed",
+                "completed",
+                "in_progress",
+                "pending",
+            ]),
+        ),
+    ])
+    .await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(out.content, "Plan updated: 3/5 steps completed");
+    assert_eq!(data["kind"], "plan");
+    assert_eq!(data["title"], "Ship it");
+    assert_eq!(data["steps"].as_array().unwrap().len(), 5);
+    assert_eq!(data["steps"][3]["status"], "in_progress");
+}
+
+#[tokio::test]
+async fn plan_update_without_title_omits_it() {
+    let (handler, out) = run_plan(&[("steps", steps(&["pending"]))]).await;
+    let data = validated_data(&handler, &out);
+    assert!(data.get("title").is_none());
+}
+
+#[tokio::test]
+async fn plan_update_accepts_an_empty_plan() {
+    let (handler, out) = run_plan(&[("steps", json!([]))]).await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(out.content, "Plan updated: 0/0 steps completed");
+    assert_eq!(data["steps"], json!([]));
+}
+
+#[tokio::test]
+async fn plan_update_rejects_an_unknown_status() {
+    let (_, out) = run_plan(&[("steps", steps(&["done"]))]).await;
+    assert!(!out.success);
+    assert!(out.data.is_none());
+    assert!(
+        out.content.contains("status"),
+        "error should name the field: {}",
+        out.content
+    );
+}
+
+#[tokio::test]
+async fn plan_update_rejects_missing_or_malformed_steps() {
+    for args in [
+        vec![],
+        vec![("steps", json!("nope"))],
+        vec![("steps", json!([{"title": "no status"}]))],
+        vec![("steps", json!([{"status": "pending"}]))],
+        vec![("title", json!(5)), ("steps", json!([]))],
+    ] {
+        let (_, out) = run_plan(&args).await;
+        assert!(!out.success, "{args:?} should be rejected");
+        assert!(out.data.is_none());
+    }
+}
+
+#[tokio::test]
+async fn plan_update_enforces_the_size_budgets() {
+    let too_many = steps(&vec!["pending"; 51]);
+    let long_step = json!([{"title": "x".repeat(201), "status": "pending"}]);
+    for (args, field) in [
+        (vec![("steps", too_many)], "steps"),
+        (vec![("steps", long_step)], "title"),
+        (
+            vec![("title", json!("y".repeat(121))), ("steps", json!([]))],
+            "title",
+        ),
+    ] {
+        let (_, out) = run_plan(&args).await;
+        assert!(!out.success, "{field} budget violation must be rejected");
+        assert!(out.data.is_none());
+        assert!(out.content.contains(field), "{}", out.content);
+    }
+}
+
+#[tokio::test]
+async fn plan_update_accepts_the_budget_limits() {
+    let max_steps: Vec<Value> = (0..50)
+        .map(|_| json!({"title": "x".repeat(200), "status": "skipped"}))
+        .collect();
+    let (handler, out) = run_plan(&[
+        ("title", json!("y".repeat(120))),
+        ("steps", Value::Array(max_steps)),
+    ])
+    .await;
+    let data = validated_data(&handler, &out);
+    let size = serde_json::to_vec(&data).unwrap().len();
+    assert!(size < 32 * 1024, "plan data is {size} bytes");
+}
+
+#[tokio::test]
+async fn plan_update_is_registered_by_the_executor() {
+    use std::sync::Arc;
+
+    use assistant_core::types::agent::OrgConfig;
+    use assistant_llm_provider::ScriptedLlmProvider;
+    use assistant_storage::StorageLayer;
+    use assistant_storage::registry::SkillRegistry;
+    use assistant_tool_executor::ToolExecutor;
+
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let executor = ToolExecutor::new(
+        storage,
+        Arc::new(ScriptedLlmProvider::new()),
+        registry,
+        Arc::new(OrgConfig::default()),
+    );
+    assert!(executor.handler("plan-update").is_some());
+    assert!(
+        executor.to_specs().iter().any(|s| s.name == "plan-update"),
+        "plan-update missing from tool definitions"
+    );
 }

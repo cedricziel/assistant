@@ -77,6 +77,7 @@ impl ToolExecutor {
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
             Arc::new(CancelTaskHandler::new(storage.clone())),
             Arc::new(ListTasksHandler::new(storage.clone())),
+            Arc::new(PlanUpdateHandler::new()),
             // Subagent lifecycle
             Arc::new(AgentStatusHandler::new(storage.clone())),
         ];

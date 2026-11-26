@@ -369,6 +369,7 @@ fn builtin_allow() -> Vec<Rule> {
         ("list-skills", None),
         ("load-skill", None),
         ("list-tasks", None),
+        ("plan-update", None),
         ("schedule-task", None),
         ("cancel-task", None),
         ("agent-spawn", None),
@@ -603,6 +604,7 @@ mod tests {
             "list-skills",
             "load-skill",
             "list-tasks",
+            "plan-update",
             "agent-status",
         ] {
             assert_eq!(verdict(&rules, tool, json!({})), Verdict::Allow, "{tool}");
