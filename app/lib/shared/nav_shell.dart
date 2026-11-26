@@ -5,13 +5,11 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../features/chat/chat_provider.dart';
+import 'layout/breakpoints.dart';
 import 'nav/apple_layouts.dart';
 import 'nav/material_compact_layout.dart';
 import 'nav/material_wide_layout.dart';
 import 'platform/platform.dart';
-
-/// Breakpoint above which the sidebar is shown instead of bottom nav.
-const double _kNavRailBreakpoint = 768;
 
 /// Shell widget that wraps all main screens with persistent navigation.
 ///
@@ -56,7 +54,7 @@ class _NavShellState extends ConsumerState<NavShell> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width >= _kNavRailBreakpoint;
+    final isWide = MediaQuery.sizeOf(context).width >= Breakpoints.wide;
 
     // Platform-aware Cmd+N / Ctrl+N shortcut for creating a new chat.
     final useMeta =

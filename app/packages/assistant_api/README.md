@@ -111,10 +111,11 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**readMcpAppResource**](doc/ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**respondToInteraction**](doc/ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendMessage**](doc/ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
-[*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, keep it as the user message&#39;s attachment, transcribe it, run through the orchestrator, and stream the response as SSE.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**setMessageFeedback**](doc/ConversationsApi.md#setmessagefeedback) | **PUT** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;PUT /api/conversations/{id}/messages/{message_id}/feedback&#x60; — rate a reply.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
+[*ConversationsApi*](doc/ConversationsApi.md) | [**switchConversationBranch**](doc/ConversationsApi.md#switchconversationbranch) | **POST** /api/conversations/{id}/switch-branch | &#x60;POST /api/conversations/{id}/switch-branch&#x60; — make another version of a message the active one.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**clearCredential**](doc/IntegrationsApi.md#clearcredential) | **DELETE** /api/integrations/{id}/credential | &#x60;DELETE /api/integrations/{id}/credential&#x60; — remove the header credential.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**createIntegration**](doc/IntegrationsApi.md#createintegration) | **POST** /api/integrations | &#x60;POST /api/integrations&#x60; — install an integration.
@@ -246,6 +247,7 @@ Class | Method | HTTP request | Description
  - [AuthenticationInfo](doc/AuthenticationInfo.md)
  - [AuthorizationCodeOAuthFlow](doc/AuthorizationCodeOAuthFlow.md)
  - [BindingResponse](doc/BindingResponse.md)
+ - [BranchInfo](doc/BranchInfo.md)
  - [CallMcpAppToolRequest](doc/CallMcpAppToolRequest.md)
  - [CancelTaskRequest](doc/CancelTaskRequest.md)
  - [CatalogAuthKindResponse](doc/CatalogAuthKindResponse.md)
@@ -379,6 +381,7 @@ Class | Method | HTTP request | Description
  - [SubscribeRequest](doc/SubscribeRequest.md)
  - [SubscriptionResponse](doc/SubscriptionResponse.md)
  - [SurfaceSummary](doc/SurfaceSummary.md)
+ - [SwitchBranchRequest](doc/SwitchBranchRequest.md)
  - [Task](doc/Task.md)
  - [TaskArtifactUpdateEvent](doc/TaskArtifactUpdateEvent.md)
  - [TaskPushNotificationConfig](doc/TaskPushNotificationConfig.md)

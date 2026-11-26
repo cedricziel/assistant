@@ -436,6 +436,7 @@ impl LlmProvider for OpenAIProvider {
             tool_choice: true,
             parallel_tool_calls: true,
             json_schema: true,
+            audio_input: false,
         }
     }
 
@@ -554,6 +555,7 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                             // The orchestrator should have converted these to Text.
                             None
                         }
+                        ContentBlock::Audio { .. } => None,
                     })
                     .collect();
 
@@ -1117,6 +1119,22 @@ mod tests {
             }
             _ => panic!("Expected EasyMessage with content list"),
         }
+    }
+
+    #[test]
+    fn audio_blocks_are_dropped() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("[Voice message]: hi".into()),
+                ContentBlock::Audio {
+                    media_type: "audio/ogg".into(),
+                    data: "T2dnUw==".into(),
+                },
+            ],
+        }];
+        let items = serde_json::to_string(&build_input_items(&history)).unwrap();
+        assert!(!items.contains("T2dnUw=="), "{items}");
+        assert!(items.contains("[Voice message]: hi"), "{items}");
     }
 
     #[test]

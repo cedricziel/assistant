@@ -12,6 +12,7 @@ use serde_json::Value;
 use super::path::{WorkspaceRoots, glob_literal_dir, resolve_real_path};
 use super::rule::wildcard_match;
 use super::{Decision, PermissionRequest, Rule, Verdict};
+use crate::home::expand_tilde;
 use crate::types::permissions::PermissionsConfig;
 
 const DECIDER: &str = "static-rules";
@@ -265,9 +266,9 @@ fn str_param<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
 
 /// Expand `<workspace>` (once per root) and a leading `~/`.
 fn expand_pattern(pattern: &str, roots: &LazyRoots<'_>) -> Vec<String> {
-    let home_expanded = match (pattern.strip_prefix("~/"), dirs::home_dir()) {
-        (Some(rest), Some(home)) => format!("{}/{rest}", escape(&home)),
-        _ => pattern.to_string(),
+    let home_expanded = match pattern.strip_prefix("~/") {
+        Some(rest) => format!("{}/{rest}", escape(&expand_tilde("~"))),
+        None => pattern.to_string(),
     };
     if !home_expanded.contains(WORKSPACE_TOKEN) {
         return vec![home_expanded];
@@ -369,6 +370,7 @@ fn builtin_allow() -> Vec<Rule> {
         ("list-skills", None),
         ("load-skill", None),
         ("list-tasks", None),
+        ("plan-update", None),
         ("schedule-task", None),
         ("cancel-task", None),
         ("agent-spawn", None),
@@ -376,6 +378,7 @@ fn builtin_allow() -> Vec<Rule> {
         ("agent-terminate", None),
         ("self-analyze", None),
         ("voice-response", None),
+        ("image-generate", None),
         ("web-search", None),
     ]);
     for tool in FILE_TOOLS {
@@ -602,8 +605,19 @@ mod tests {
             "list-skills",
             "load-skill",
             "list-tasks",
+            "plan-update",
             "agent-status",
         ] {
+            assert_eq!(verdict(&rules, tool, json!({})), Verdict::Allow, "{tool}");
+        }
+    }
+
+    /// Media tools exist only when the operator configured them, so they
+    /// need no further confirmation.
+    #[test]
+    fn configured_media_tools_are_allowed_by_default() {
+        let rules = StaticRules::builtin();
+        for tool in ["voice-response", "image-generate"] {
             assert_eq!(verdict(&rules, tool, json!({})), Verdict::Allow, "{tool}");
         }
     }

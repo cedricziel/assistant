@@ -493,6 +493,13 @@ pub(crate) fn serialize_history_for_span(history: &[ChatHistoryMessage]) -> Stri
                                 "size_base64_chars": data.len(),
                             })
                         }
+                        ContentBlock::Audio { media_type, data } => {
+                            serde_json::json!({
+                                "type": "audio",
+                                "media_type": media_type,
+                                "size_base64_chars": data.len(),
+                            })
+                        }
                     })
                     .collect();
                 serde_json::json!({"role": "user", "content": blocks})

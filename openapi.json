@@ -2085,12 +2085,124 @@
         ]
       }
     },
+    "/api/conversations/{id}/switch-branch": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{id}/switch-branch` — make another version of a\nmessage the active one.",
+        "description": "Lands on the most recently created leaf below `message_id`. Does not\nchange `updated_at`. While a turn is working it returns `409`; while a turn\nonly waits for an approval or an answer, that wait is cancelled first.",
+        "operationId": "switch_conversation_branch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchBranchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation on its new active path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid conversation or message ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Read-only access, or missing conversations:write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is still working in this conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/{id}/voice": {
       "post": {
         "tags": [
           "conversations"
         ],
-        "summary": "`POST /api/conversations/{id}/voice` — upload audio, transcribe it, run\nthrough the orchestrator, and stream the response as SSE.",
+        "summary": "`POST /api/conversations/{id}/voice` — upload audio, keep it as the user\nmessage's attachment, transcribe it, run through the orchestrator, and\nstream the response as SSE.",
+        "description": "The message text is the transcript, or `[Voice message]` when no\ntranscription provider is configured or transcription fails.",
         "operationId": "send_voice_message",
         "parameters": [
           {
@@ -2164,9 +2276,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "Voice not configured"
           }
         },
         "security": [
@@ -11040,6 +11149,35 @@
           }
         }
       },
+      "BranchInfo": {
+        "type": "object",
+        "description": "Where a message sits among its siblings.",
+        "required": [
+          "index",
+          "count",
+          "sibling_ids"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "How many versions there are (always at least 2).",
+            "minimum": 0
+          },
+          "index": {
+            "type": "integer",
+            "description": "Zero-based position of the active version, in creation order.",
+            "minimum": 0
+          },
+          "sibling_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The first message of every version, in creation order. Switching to\nany of them selects that version."
+          }
+        }
+      },
       "CallMcpAppToolRequest": {
         "type": "object",
         "description": "Body of `POST .../app/tools-call`: a call the app makes to one of its\nserver's tools.",
@@ -12986,6 +13124,17 @@
             },
             "description": "Attachments linked to this message."
           },
+          "branch": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BranchInfo",
+                "description": "This message's place among its versions, present only when it has\nsiblings. On a user message: the edited versions. On an assistant\nmessage: the versions of the reply it ends."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "content": {
             "type": "string"
           },
@@ -13014,6 +13163,25 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The message this one follows in the conversation tree. Omitted for a\nroot."
+          },
+          "reply_branch": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BranchInfo",
+                "description": "On a user message whose reply has no visible assistant row: the\nversions of that reply."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "role": {
             "type": "string"
@@ -14851,6 +15019,19 @@
           "turn": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "SwitchBranchRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/conversations/{id}/switch-branch`.",
+        "required": [
+          "message_id"
+        ],
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "description": "Any message of the version to switch to. The active path continues\nfrom it through the most recently created child at each fork."
           }
         }
       },

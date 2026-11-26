@@ -17,7 +17,7 @@ use assistant_core::{
     Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, Secret, ToolHandler,
     types::conversation::ChannelType,
 };
-use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
+use assistant_transcription::{TranscriptionProvider, is_audio_mime};
 use async_trait::async_trait;
 use axum::Router;
 use axum::body::Bytes;
@@ -30,7 +30,7 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::common::pending_cache;
+use crate::common::{VoiceCapture, pending_cache};
 
 use super::config::NextcloudConfigExt;
 use super::replay::{REPLAY_CAPACITY, REPLAY_WINDOW, ReplayGuard};
@@ -455,21 +455,20 @@ async fn webhook_handler(
         return StatusCode::OK;
     }
 
-    // Check for voice-message / audio file shares that need transcription.
-    let audio_transcript = transcribe_webhook_audio(
+    let typed = event.extract_message_text().unwrap_or_default();
+    let content = match voice_from_webhook(
         &event,
         &state.server_url,
         state.secret.expose(),
-        &state.transcription,
-        &state.transcription_language,
+        state.transcription.as_deref(),
+        state.transcription_language.as_deref(),
+        &typed,
     )
-    .await;
-
-    let text = match (event.extract_message_text(), audio_transcript) {
-        (Some(t), Some(transcript)) if !t.is_empty() => format!("{transcript}\n{t}"),
-        (_, Some(transcript)) => transcript,
-        (Some(t), None) if !t.is_empty() => t,
-        _ => return StatusCode::OK,
+    .await
+    {
+        Some(voice) => voice,
+        None if typed.is_empty() => return StatusCode::OK,
+        None => ChannelContent::Text(typed),
     };
 
     let conversation_token = event.conversation_token().to_string();
@@ -506,7 +505,7 @@ async fn webhook_handler(
             platform_id: conversation_token.clone(),
             display_name: Some(user_id),
         },
-        content: ChannelContent::Text(text),
+        content,
         thread_id: Some(message_id),
         timestamp: SystemClock.now(),
         metadata,
@@ -688,18 +687,21 @@ pub(crate) async fn http_remove_reaction(
     Ok(())
 }
 
-// ── Audio transcription ──────────────────────────────────────────────────────
+// ── Voice messages ───────────────────────────────────────────────────────────
 
 /// Inspect a Nextcloud Talk webhook event for voice-message or audio file share
-/// parameters.  If an audio attachment is detected and a transcription provider
-/// is configured, download the file and return the transcript.
-async fn transcribe_webhook_audio(
+/// parameters and download the recordings.
+///
+/// Returns `None` when the event has no usable audio file. `typed` is the
+/// message's own text, which follows the voice text.
+async fn voice_from_webhook(
     event: &WebhookEvent,
     server_url: &str,
     secret: &str,
-    transcription: &Option<Arc<dyn TranscriptionProvider>>,
-    language: &Option<String>,
-) -> Option<String> {
+    transcription: Option<&dyn TranscriptionProvider>,
+    language: Option<&str>,
+    typed: &str,
+) -> Option<ChannelContent> {
     // Nextcloud Talk encodes rich-object parameters inside the JSON `content`
     // field.  Voice messages appear as a parameter with type "file" and
     // mimetype starting with "audio/".
@@ -722,17 +724,7 @@ async fn transcribe_webhook_audio(
         return None;
     }
 
-    let provider = match transcription {
-        Some(p) => p,
-        None => {
-            warn!(
-                "nextcloud: received audio file share but no transcription provider configured; dropping"
-            );
-            return None;
-        }
-    };
-
-    let mut transcripts = Vec::new();
+    let mut capture = VoiceCapture::new(transcription, language, "nextcloud");
     for file_param in audio_files {
         let file_id = match file_param.get("id").and_then(|v| v.as_str()) {
             Some(id) => id,
@@ -741,12 +733,8 @@ async fn transcribe_webhook_audio(
         let mimetype = file_param
             .get("mimetype")
             .and_then(|m| m.as_str())
-            .unwrap_or("audio/ogg")
-            .to_string();
-        let filename = file_param
-            .get("name")
-            .and_then(|n| n.as_str())
-            .map(|s| s.to_string());
+            .unwrap_or("audio/ogg");
+        let filename = file_param.get("name").and_then(|n| n.as_str());
 
         // Download via the Nextcloud Bot API download endpoint.
         let download_url = format!(
@@ -810,25 +798,10 @@ async fn transcribe_webhook_audio(
             continue;
         }
 
-        let request = TranscriptionRequest {
-            audio_data,
-            mime_type: mimetype,
-            filename,
-            language: language.clone(),
-        };
-        match provider.transcribe(request).await {
-            Ok(result) => transcripts.push(result.text),
-            Err(e) => {
-                warn!(error = %e, "nextcloud: audio transcription failed");
-            }
-        }
+        capture.add(audio_data, mimetype, filename).await;
     }
 
-    if transcripts.is_empty() {
-        return None;
-    }
-
-    Some(format!("[Voice message]: {}", transcripts.join(" ")))
+    capture.into_content(typed)
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -839,6 +812,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+    use crate::common::test_support::StubTranscriber;
     use crate::nextcloud::types::{Actor, EventObject};
 
     const SECRET: &str = "test-secret";
@@ -1136,9 +1110,8 @@ mod tests {
         assert_eq!(adapter.transcription_language.as_deref(), Some("en"));
     }
 
-    #[tokio::test]
-    async fn transcribe_webhook_audio_no_provider_returns_none() {
-        let event = WebhookEvent {
+    fn voice_event() -> WebhookEvent {
+        WebhookEvent {
             event_type: "Create".to_string(),
             actor: Actor {
                 actor_type: "Person".to_string(),
@@ -1167,15 +1140,71 @@ mod tests {
             },
             target: None,
             content: None,
-        };
+        }
+    }
 
-        let result =
-            transcribe_webhook_audio(&event, "http://localhost", "secret", &None, &None).await;
-        assert!(result.is_none(), "should return None without a provider");
+    async fn server_with_voice_file() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ocs/v2.php/apps/spreed/api/v1/bot/media/999"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"OggS".as_ref()))
+            .mount(&server)
+            .await;
+        server
     }
 
     #[tokio::test]
-    async fn transcribe_webhook_audio_no_audio_params_returns_none() {
+    async fn voice_with_provider_carries_transcript_and_recording() {
+        let server = server_with_voice_file().await;
+        let provider = StubTranscriber::saying("hello");
+        let content = voice_from_webhook(
+            &voice_event(),
+            &server.uri(),
+            SECRET,
+            Some(&provider),
+            None,
+            "",
+        )
+        .await
+        .expect("audio share yields voice content");
+        match content {
+            ChannelContent::Voice {
+                data,
+                mime_type,
+                text,
+            } => {
+                assert_eq!(data, b"OggS");
+                assert_eq!(mime_type, "audio/ogg");
+                assert_eq!(text, "[Voice message]: hello");
+            }
+            other => panic!("expected Voice, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_without_provider_is_kept_with_placeholder_text() {
+        let server = server_with_voice_file().await;
+        let content = voice_from_webhook(
+            &voice_event(),
+            &server.uri(),
+            SECRET,
+            None,
+            None,
+            "voice.ogg",
+        )
+        .await
+        .expect("a voice message is kept without a provider");
+        match content {
+            ChannelContent::Voice { data, text, .. } => {
+                assert_eq!(data, b"OggS");
+                assert_eq!(text, "[Voice message]\nvoice.ogg");
+            }
+            other => panic!("expected Voice, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_from_webhook_without_audio_params_returns_none() {
         let event = WebhookEvent {
             event_type: "Create".to_string(),
             actor: Actor {
@@ -1200,8 +1229,15 @@ mod tests {
             content: None,
         };
 
-        let result =
-            transcribe_webhook_audio(&event, "http://localhost", "secret", &None, &None).await;
+        let result = voice_from_webhook(
+            &event,
+            "http://localhost",
+            "secret",
+            None,
+            None,
+            "Hello world",
+        )
+        .await;
         assert!(
             result.is_none(),
             "should return None when no audio parameters exist"

@@ -77,6 +77,7 @@ impl ToolExecutor {
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
             Arc::new(CancelTaskHandler::new(storage.clone())),
             Arc::new(ListTasksHandler::new(storage.clone())),
+            Arc::new(PlanUpdateHandler::new()),
             // Subagent lifecycle
             Arc::new(AgentStatusHandler::new(storage.clone())),
         ];
@@ -109,6 +110,21 @@ impl ToolExecutor {
     ) {
         use crate::builtins::VoiceResponseHandler;
         let handler = Arc::new(VoiceResponseHandler::new(tts, store));
+        self.tool_handlers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(handler.name().to_string(), handler);
+    }
+
+    /// Register the `image-generate` tool, which resolves reference images
+    /// through `attachments`.
+    pub fn register_image_generate(
+        &self,
+        provider: Arc<dyn assistant_core::ImageGenerationProvider>,
+        attachments: Arc<dyn assistant_storage::AttachmentStore>,
+    ) {
+        use crate::builtins::ImageGenerateHandler;
+        let handler = Arc::new(ImageGenerateHandler::new(provider, attachments));
         self.tool_handlers
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

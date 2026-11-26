@@ -57,7 +57,9 @@ pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore, InMemoryAgentStore, SqliteAgentStore};
 pub use api_key_store::SqliteApiKeyStore;
-pub use attachments::{AttachmentStore, InMemoryAttachmentStore, SqliteAttachmentStore};
+pub use attachments::{
+    AttachmentBlobs, AttachmentStore, InMemoryAttachmentStore, SqliteAttachmentStore,
+};
 pub use auth_state_store::{
     SqliteAuthCodeStore, SqliteClientStore, SqliteDeviceCodeStore, SqliteRefreshTokenStore,
 };
@@ -78,8 +80,9 @@ pub use conversation_summaries::{
     SqliteConversationSummaryStore,
 };
 pub use conversations::{
-    ConversationPatch, ConversationRecord, ConversationStore, InMemoryConversationStore,
-    MetadataUpdate, SqliteConversationStore,
+    ConversationPatch, ConversationRecord, ConversationSearchHit, ConversationStore,
+    InMemoryConversationStore, MAX_MATCHES_PER_CONVERSATION, MessageHit, MetadataUpdate,
+    SqliteConversationStore,
 };
 pub use integration_store::{
     SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
@@ -149,7 +152,7 @@ pub use workflows::{
     WorkflowWebhookEndpoint,
 };
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
@@ -159,6 +162,7 @@ use tracing::info;
 /// The top-level storage layer — owns the SQLite connection pool and runs migrations.
 pub struct StorageLayer {
     pub pool: SqlitePool,
+    attachment_blobs: AttachmentBlobs,
 }
 
 impl StorageLayer {
@@ -175,7 +179,16 @@ impl StorageLayer {
         let pool = SqlitePool::connect(&url).await?;
         run_migrations(&pool).await?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            attachment_blobs: AttachmentBlobs::Unconfigured,
+        })
+    }
+
+    /// Keep attachment bytes under `install_root`.
+    pub fn with_install_root(mut self, install_root: PathBuf) -> Self {
+        self.attachment_blobs = AttachmentBlobs::InstallRoot(install_root);
+        self
     }
 
     /// Create an in-memory SQLite database (useful for tests).
@@ -186,6 +199,8 @@ impl StorageLayer {
     /// so that multiple pool connections see the same in-memory database.
     /// This avoids data loss when a connection is invalidated (e.g. after a
     /// `tokio::task::abort`) and the pool opens a replacement.
+    ///
+    /// Attachment bytes are kept in memory too.
     pub async fn new_in_memory() -> Result<Self> {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -195,7 +210,10 @@ impl StorageLayer {
             .connect(&uri)
             .await?;
         run_migrations(&pool).await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            attachment_blobs: AttachmentBlobs::in_memory(),
+        })
     }
 
     /// Convenience: build a [`ConversationEventStore`] backed by this pool.
@@ -305,7 +323,7 @@ impl StorageLayer {
 
     /// Convenience: build a [`SqliteAttachmentStore`] backed by this pool.
     pub fn attachment_store(&self) -> SqliteAttachmentStore {
-        SqliteAttachmentStore::new(self.pool.clone())
+        SqliteAttachmentStore::new(self.pool.clone(), self.attachment_blobs.clone())
     }
 
     /// Convenience: build a [`MessageFeedbackStore`] backed by this pool.
@@ -317,11 +335,6 @@ impl StorageLayer {
     pub fn webhook_store_for_agent(&self, agent_id: &str) -> SqliteWebhookStore {
         SqliteWebhookStore::for_agent(self.pool.clone(), agent_id)
     }
-}
-
-/// Returns the default database path: `~/.assistant/assistant.db`.
-pub fn default_db_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| h.join(".assistant").join("assistant.db"))
 }
 
 /// Every space.db migration as `(name, sql)`, sorted by file name.

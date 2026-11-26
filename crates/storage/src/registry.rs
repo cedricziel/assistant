@@ -72,8 +72,8 @@ pub struct SkillRegistry {
     skills: Arc<RwLock<HashMap<String, SkillDef>>>,
     /// Clock for row timestamps. Default `Arc::new(SystemClock)`.
     clock: Arc<dyn Clock>,
-    /// Directory new user skills are created under. `None` means
-    /// `~/.assistant/skills`.
+    /// Directory new user skills are created under. Without one,
+    /// [`Self::create_user_skill`] fails.
     user_skills_dir: Option<PathBuf>,
 }
 
@@ -96,7 +96,7 @@ impl SkillRegistry {
         self
     }
 
-    /// Create new user skills under `dir` instead of `~/.assistant/skills`.
+    /// Create new user skills under `dir`, normally `<install root>/skills`.
     pub fn with_user_skills_dir(mut self, dir: PathBuf) -> Self {
         self.user_skills_dir = Some(dir);
         self
@@ -223,7 +223,7 @@ impl SkillRegistry {
 
     /// Create a new user skill on disk and register it in the registry.
     ///
-    /// Writes `~/.assistant/skills/<name>/SKILL.md` with the given frontmatter
+    /// Writes `<user skills dir>/<name>/SKILL.md` with the given frontmatter
     /// and body, then upserts to the in-memory cache and SQLite.
     ///
     /// The write is atomic from the caller's perspective: the SKILL.md file is
@@ -243,13 +243,10 @@ impl SkillRegistry {
             anyhow::bail!("Skill '{}' already exists", name);
         }
 
-        let skills_root = match &self.user_skills_dir {
-            Some(dir) => dir.clone(),
-            None => dirs::home_dir()
-                .context("Cannot determine home directory")?
-                .join(".assistant")
-                .join("skills"),
-        };
+        let skills_root = self
+            .user_skills_dir
+            .as_ref()
+            .context("This registry has no user skills directory to create skills in")?;
         let skill_dir = skills_root.join(name);
 
         tokio::fs::create_dir_all(&skill_dir)
@@ -838,9 +835,7 @@ mod tests {
         let registry = SkillRegistry::new(storage.pool.clone()).await.unwrap();
         let tmp = tempfile::tempdir().unwrap();
 
-        // Override home via a registry that uses the tmpdir as its skill root.
-        // Since create_user_skill uses dirs::home_dir(), we register a pre-built
-        // skill directly to test the register + upsert path without real home I/O.
+        // Register a pre-built skill directly to test the register + upsert path.
         let skill = make_user_skill("my-skill", &tmp.path().join("my-skill"));
         tokio::fs::create_dir_all(tmp.path().join("my-skill"))
             .await
@@ -905,6 +900,23 @@ mod tests {
 
         assert_eq!(def.dir, tmp.path().join("cfg-skill"));
         assert!(tmp.path().join("cfg-skill").join("SKILL.md").exists());
+    }
+
+    #[tokio::test]
+    async fn create_user_skill_fails_without_a_configured_dir() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let registry = SkillRegistry::new(storage.pool.clone()).await.unwrap();
+
+        let err = registry
+            .create_user_skill("no-dir-skill", "desc", "body")
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("user skills directory"),
+            "unexpected error: {err}"
+        );
+        assert!(registry.get("no-dir-skill").await.is_none());
     }
 
     // -- update_user_skill / delete_user_skill tests --------------------------

@@ -438,7 +438,13 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let skills_dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(
+            SkillRegistry::new(storage.pool.clone())
+                .await
+                .unwrap()
+                .with_user_skills_dir(skills_dir.path().to_path_buf()),
+        );
         let llm: Arc<dyn LlmProvider> = Arc::new(MockJudgeLlm);
 
         // Simulate a subagent turn with rich tool-call history.

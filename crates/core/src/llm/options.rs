@@ -46,4 +46,6 @@ pub struct ChatOptionsSupport {
     pub tool_choice: bool,
     pub parallel_tool_calls: bool,
     pub json_schema: bool,
+    /// The model hears [`ContentBlock::Audio`](crate::ContentBlock::Audio).
+    pub audio_input: bool,
 }

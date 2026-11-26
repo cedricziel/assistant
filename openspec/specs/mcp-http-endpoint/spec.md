@@ -1,9 +1,9 @@
-# Spec Delta
+# mcp-http-endpoint Specification
 
 ## Purpose
 Define the Streamable HTTP MCP endpoint served by the web server and how it is protected as an OAuth 2.0 resource server.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Streamable HTTP endpoint
 The web server SHALL serve the MCP server at `/mcp` using the Streamable HTTP transport of each supported revision. It SHALL reject requests whose `Origin` header is present and does not match the server's own host with 403, and SHALL return 405 for methods the revision does not define.
@@ -58,3 +58,10 @@ Every HTTP request SHALL execute as the authenticated user in the org and space 
 #### Scenario: Space-restricted user
 - **WHEN** a user without access to space B calls a tool through `/mcp`
 - **THEN** the tool cannot read or change data in space B
+
+### Requirement: Skill installation over HTTP
+`/mcp` SHALL list `install-skill` like the stdio server, but SHALL NOT install skills: the HTTP server has no skill registry to install into. A call that the permission policy allows SHALL fail with an error, and skills SHALL be installed over stdio instead.
+
+#### Scenario: install-skill over HTTP
+- **WHEN** an authorized client calls `install-skill` through `/mcp`
+- **THEN** the call fails and no skill is installed

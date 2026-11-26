@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assistant.invalid/schemas/tool-results/data_table.schema.json",
+  "title": "data_table",
+  "description": "A table of rows keyed by column.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["kind", "columns", "rows", "truncated", "total_rows"],
+  "properties": {
+    "kind": { "const": "data_table" },
+    "columns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["key", "label"],
+        "properties": {
+          "key": { "type": "string" },
+          "label": { "type": "string" },
+          "type": { "type": "string" }
+        }
+      }
+    },
+    "rows": { "type": "array", "items": { "type": "object" } },
+    "truncated": { "type": "boolean" },
+    "total_rows": { "type": "integer", "minimum": 0 }
+  }
+}

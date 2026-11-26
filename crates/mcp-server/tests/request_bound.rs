@@ -7,8 +7,9 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use assistant_core::auth::AuthContext;
+use assistant_core::identity::{Role, SpaceId};
 use assistant_mcp_server::{
-    AssistantMcpServer, ListChangeListeners, RequestBoundServer, TaskStore,
+    AssistantMcpServer, Caller, ListChangeListeners, RequestBoundServer, TaskStore,
 };
 use assistant_runtime::StubOrchestrationEngine;
 use common::*;
@@ -64,11 +65,15 @@ impl<T: Transport<RoleServer>> Transport<RoleServer> for BindingTransport<T> {
 }
 
 /// Serves [`RequestBoundServer`] with `server` bound to every message, as the
-/// local system identity.
+/// local system identity in its space.
 fn spawn_bound(server: AssistantMcpServer) -> DuplexStream {
     let (mut parts, ()) = http::Request::new(()).into_parts();
     parts.extensions.insert(Arc::new(server));
-    parts.extensions.insert(AuthContext::system());
+    parts.extensions.insert(Caller {
+        auth: AuthContext::system(),
+        space_id: SpaceId::from("default"),
+        role: Role::OrgAdmin,
+    });
     let (server_io, client_io) = tokio::io::duplex(64 * 1024);
     let transport = BindingTransport {
         inner: IntoTransport::<RoleServer, _, _>::into_transport(server_io),
