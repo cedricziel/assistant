@@ -1646,6 +1646,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_message_unarchives_an_archived_conversation() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Hello again").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let id = store
+            .create_conversation(Some("Old chat"))
+            .await
+            .unwrap()
+            .id;
+        store
+            .update_metadata(
+                id,
+                assistant_storage::ConversationPatch {
+                    title: None,
+                    pinned: None,
+                    archived: Some(true),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .get_conversation(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .archived_at
+                .is_some(),
+            "precondition: archived"
+        );
+
+        let resp = post_message(state, id, "Are you still there?").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let _ = body_bytes(resp.into_body()).await;
+
+        let loaded = store.get_conversation(id).await.unwrap().unwrap();
+        assert!(
+            loaded.archived_at.is_none(),
+            "a new user message must unarchive the conversation"
+        );
+        let listed = store.list_conversations().await.unwrap();
+        assert!(listed.iter().any(|c| c.id == id), "back in the main list");
+    }
+
+    #[tokio::test]
     async fn send_message_unknown_conversation_returns_404() {
         let server = MockServer::start().await;
         let (state, _) = test_state(&server.uri()).await;
