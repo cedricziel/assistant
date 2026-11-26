@@ -327,6 +327,10 @@ More than 2048 texts are split across requests. Vectors come back in
 input order, and a response with the wrong number of vectors is an
 error. Errors and retries work as for chat, and errors name the model.
 
+## Transcription
+
+`[transcription] provider = "openrouter"` transcribes voice messages through OpenRouter's `/audio/transcriptions` endpoint, by default with `openai/whisper-1`. The key is `[transcription] api_key`, else the `[llm]` key when `[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`. See [Voice Transcription](transcription.md#openrouter).
+
 ## Models
 
 OpenRouter provides access to 300+ models. Use the `provider/model`

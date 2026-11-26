@@ -7,6 +7,8 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'CodeBlock',
+  'MessageActionButton',
+  'MessageActions',
   'MessageTimingIndicator',
   'StarterPrompts',
   'SuggestionChips',

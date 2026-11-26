@@ -285,16 +285,14 @@ async fn main() -> Result<()> {
         .transcription
         .as_ref()
         .and_then(|tc| tc.language.clone());
-    let transcription_provider = bs
-        .config
-        .transcription
-        .as_ref()
-        .map(|tc| {
-            let provider = assistant_transcription::build_provider(tc)?;
+    let transcription_provider = match bs.config.transcription.as_ref() {
+        Some(tc) => {
+            let provider = assistant_transcription::build_provider(tc, &bs.config.llm).await?;
             info!(provider = provider.name(), "Audio transcription enabled");
-            Ok::<_, anyhow::Error>(provider)
-        })
-        .transpose()?;
+            Some(provider)
+        }
+        None => None,
+    };
 
     let messenger_deps = messengers::MessengerDeps {
         transcription: transcription_provider,

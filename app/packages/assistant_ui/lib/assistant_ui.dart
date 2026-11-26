@@ -7,6 +7,7 @@ export 'src/code/code_block.dart';
 export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
 export 'src/interactions/approval_card.dart';
+export 'src/message_actions.dart';
 export 'src/registry.dart';
 export 'src/scopes/thread_density_scope.dart';
 export 'src/suggestions/starter_prompts.dart';
