@@ -5,6 +5,7 @@ use base64::Engine as _;
 use reqwest_middleware::ClientWithMiddleware;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tracing::warn;
 
 use assistant_core::llm::call_context::LlmCallContext;
 use assistant_core::types::images::{ImageOutputFormat, ImagesConfig};
@@ -25,25 +26,42 @@ pub struct OpenRouterImages {
     output_format: ImageOutputFormat,
     quality: Option<String>,
     routing: Option<OpenRouterRouting>,
+    /// The model's catalog entry; `None` when the catalog was unreachable.
+    catalog: Option<ImageModel>,
     pub(crate) retry: RetryConfig,
 }
 
 impl OpenRouterImages {
+    /// Builds the provider and reads the model from `/images/models`. An
+    /// unknown model fails; when the catalog can't be reached, requests are
+    /// sent unchecked.
     pub async fn connect(config: &ImagesConfig, api_key: Secret) -> anyhow::Result<Self> {
+        let base_url = config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| crate::openrouter::DEFAULT_BASE_URL.to_string());
+        let model = config
+            .model
+            .clone()
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        let catalog_http = crate::http::build_http_client(10, &RetryConfig::disabled())?;
+        let catalog = match fetch_model(&catalog_http, &base_url, &api_key, &model).await {
+            Ok(Some(entry)) => Some(entry),
+            Ok(None) => anyhow::bail!("OpenRouter has no image model `{model}`"),
+            Err(e) => {
+                warn!(%model, error = %e, "OpenRouter image catalog unavailable; requests are not checked");
+                None
+            }
+        };
         Ok(Self {
             http: crate::http::build_http_client(120, &RetryConfig::disabled())?,
-            base_url: config
-                .base_url
-                .clone()
-                .unwrap_or_else(|| crate::openrouter::DEFAULT_BASE_URL.to_string()),
+            base_url,
             api_key,
-            model: config
-                .model
-                .clone()
-                .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            model,
             output_format: config.output_format,
             quality: config.quality.clone(),
             routing: config.openrouter.provider.clone(),
+            catalog,
             retry: RetryConfig::default(),
         })
     }
@@ -56,10 +74,13 @@ impl ImageGenerationProvider for OpenRouterImages {
     }
 
     fn accepts_references(&self) -> bool {
-        true
+        self.catalog.as_ref().is_none_or(|c| c.image_input)
     }
 
     async fn generate(&self, request: ImageRequest) -> anyhow::Result<ImageResult> {
+        if let Some(catalog) = &self.catalog {
+            catalog.check(&self.model, &request, self.quality.as_deref())?;
+        }
         let body = self.body(&request);
         let url = format!("{}/images", self.base_url.trim_end_matches('/'));
         let response: ImagesResponse = with_retry_hinted(
@@ -181,6 +202,150 @@ impl OpenRouterImages {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to read a generated image: {e}"))
     }
+}
+
+/// A parameter's accepted values, as `/images/models` describes them.
+#[derive(Debug, Clone)]
+enum Capability {
+    Enum(Vec<String>),
+    Range {
+        min: f64,
+        max: f64,
+    },
+    /// Accepted with any value.
+    Any,
+}
+
+/// What the image catalog says about the configured model.
+#[derive(Debug, Clone)]
+struct ImageModel {
+    params: std::collections::HashMap<String, Capability>,
+    image_input: bool,
+}
+
+impl ImageModel {
+    fn parse(entry: &Value) -> Self {
+        let params = entry["supported_parameters"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(name, descriptor)| {
+                let capability = match descriptor["type"].as_str() {
+                    Some("enum") => Capability::Enum(
+                        descriptor["values"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|v| v.as_str().map(str::to_owned))
+                            .collect(),
+                    ),
+                    Some("range") => Capability::Range {
+                        min: descriptor["min"].as_f64().unwrap_or(f64::MIN),
+                        max: descriptor["max"].as_f64().unwrap_or(f64::MAX),
+                    },
+                    _ => Capability::Any,
+                };
+                (name.clone(), capability)
+            })
+            .collect();
+        let image_input = entry["architecture"]["input_modalities"]
+            .as_array()
+            .is_some_and(|m| m.iter().any(|v| v == "image"));
+        Self {
+            params,
+            image_input,
+        }
+    }
+
+    /// Fails when `request` asks for something the model doesn't offer.
+    fn check(
+        &self,
+        model: &str,
+        request: &ImageRequest,
+        default_quality: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if !request.references.is_empty() && !self.image_input {
+            anyhow::bail!("OpenRouter image model `{model}` does not take reference images");
+        }
+        let quality = request.quality.as_deref().or(default_quality);
+        let text = [
+            ("aspect_ratio", request.aspect_ratio.as_deref()),
+            ("resolution", request.resolution.as_deref()),
+            ("quality", quality),
+            ("background", request.background.as_deref()),
+        ];
+        for (name, value) in text {
+            if let Some(value) = value {
+                self.check_value(model, name, Value::from(value))?;
+            }
+        }
+        if let Some(n) = request.n {
+            self.check_value(model, "n", Value::from(n))?;
+        }
+        if let Some(seed) = request.seed {
+            self.check_value(model, "seed", Value::from(seed))?;
+        }
+        Ok(())
+    }
+
+    fn check_value(&self, model: &str, name: &str, value: Value) -> anyhow::Result<()> {
+        let Some(capability) = self.params.get(name) else {
+            anyhow::bail!("OpenRouter image model `{model}` does not take `{name}`");
+        };
+        match capability {
+            Capability::Enum(values) => {
+                let given = value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string());
+                if !values.contains(&given) {
+                    anyhow::bail!(
+                        "OpenRouter image model `{model}` does not take {name} `{given}`; it takes {}",
+                        values.join(", ")
+                    );
+                }
+            }
+            Capability::Range { min, max } => {
+                let number = value.as_f64().unwrap_or(f64::NAN);
+                if !(*min..=*max).contains(&number) {
+                    anyhow::bail!(
+                        "{name} {value} is outside OpenRouter image model `{model}`'s range of {min} to {max}"
+                    );
+                }
+            }
+            Capability::Any => {}
+        }
+        Ok(())
+    }
+}
+
+/// The model's entry from `/images/models`, or `None` when it isn't listed.
+async fn fetch_model(
+    http: &ClientWithMiddleware,
+    base_url: &str,
+    api_key: &Secret,
+    model: &str,
+) -> anyhow::Result<Option<ImageModel>> {
+    let url = format!("{}/images/models", base_url.trim_end_matches('/'));
+    let resp = http
+        .get(&url)
+        .bearer_auth(api_key.expose())
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("OpenRouter image catalog request failed: {e}"))?;
+    if !resp.status().is_success() {
+        anyhow::bail!("OpenRouter image catalog returned {}", resp.status());
+    }
+    let list: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to parse the OpenRouter image catalog: {e}"))?;
+    Ok(list["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|m| m["id"] == model)
+        .map(ImageModel::parse))
 }
 
 #[derive(Debug, Deserialize)]
@@ -418,6 +583,176 @@ mod tests {
             .await
             .unwrap();
         assert!(started.elapsed() >= std::time::Duration::from_secs(1));
+    }
+
+    /// Serves the image catalog with one model taking `params`.
+    async fn mount_catalog(server: &MockServer, model: &str, params: Value, image_input: bool) {
+        let inputs = if image_input {
+            json!(["text", "image"])
+        } else {
+            json!(["text"])
+        };
+        Mock::given(method("GET"))
+            .and(path("/images/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                {"id": "other/model", "architecture": {"input_modalities": ["text"]}, "supported_parameters": {}},
+                {"id": model, "architecture": {"input_modalities": inputs}, "supported_parameters": params},
+            ]})))
+            .mount(server)
+            .await;
+    }
+
+    const SEEDREAM: &str = "bytedance-seed/seedream-4.5";
+
+    async fn seedream(server: &MockServer, image_input: bool) -> OpenRouterImages {
+        mount_catalog(
+            server,
+            SEEDREAM,
+            json!({
+                "resolution": {"type": "enum", "values": ["1K", "2K", "4K"]},
+                "aspect_ratio": {"type": "enum", "values": ["1:1", "16:9"]},
+                "seed": {"type": "range", "min": 0, "max": 1000},
+            }),
+            image_input,
+        )
+        .await;
+        let config = ImagesConfig {
+            model: Some(SEEDREAM.into()),
+            ..config(server)
+        };
+        OpenRouterImages::connect(&config, Secret::new("sk-or"))
+            .await
+            .unwrap()
+    }
+
+    async fn generations(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/images")
+            .count()
+    }
+
+    #[tokio::test]
+    async fn unknown_model_fails_the_build() {
+        let server = MockServer::start().await;
+        mount_catalog(&server, SEEDREAM, json!({}), false).await;
+        let config = ImagesConfig {
+            model: Some("acme/no-such-model".into()),
+            ..config(&server)
+        };
+
+        let err = OpenRouterImages::connect(&config, Secret::new("sk-or"))
+            .await
+            .err()
+            .expect("must fail")
+            .to_string();
+        assert!(err.contains("acme/no-such-model"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn enum_value_outside_the_list_fails_without_a_call() {
+        let server = MockServer::start().await;
+        let provider = seedream(&server, false).await;
+
+        let err = provider
+            .generate(ImageRequest {
+                resolution: Some("8K".into()),
+                ..lighthouse()
+            })
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("8K") && err.contains("1K, 2K, 4K"), "{err}");
+        assert_eq!(generations(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn range_value_outside_the_bounds_fails() {
+        let server = MockServer::start().await;
+        let provider = seedream(&server, false).await;
+
+        let err = provider
+            .generate(ImageRequest {
+                seed: Some(5000),
+                ..lighthouse()
+            })
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("seed") && err.contains("0") && err.contains("1000"),
+            "{err}"
+        );
+        assert_eq!(generations(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn unlisted_parameter_fails() {
+        let server = MockServer::start().await;
+        let provider = seedream(&server, false).await;
+
+        let err = provider
+            .generate(ImageRequest {
+                background: Some("transparent".into()),
+                ..lighthouse()
+            })
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("background"), "{err}");
+        assert_eq!(generations(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn references_need_image_input() {
+        let server = MockServer::start().await;
+        let provider = seedream(&server, false).await;
+        assert!(!provider.accepts_references());
+
+        let err = provider
+            .generate(ImageRequest {
+                references: vec![assistant_core::ReferenceImage {
+                    mime: "image/png".into(),
+                    data: bytes::Bytes::from_static(b"png"),
+                }],
+                ..lighthouse()
+            })
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("reference"), "{err}");
+        assert_eq!(generations(&server).await, 0);
+
+        let server = MockServer::start().await;
+        assert!(seedream(&server, true).await.accepts_references());
+    }
+
+    #[tokio::test]
+    async fn valid_request_is_sent() {
+        let server = MockServer::start().await;
+        mount_images(
+            &server,
+            json!({"created": 1, "data": [{"b64_json": b64(PNG)}]}),
+        )
+        .await;
+        let provider = seedream(&server, false).await;
+
+        provider
+            .generate(ImageRequest {
+                resolution: Some("2K".into()),
+                seed: Some(42),
+                ..lighthouse()
+            })
+            .await
+            .unwrap();
+        assert_eq!(generations(&server).await, 1);
     }
 
     #[tokio::test]
