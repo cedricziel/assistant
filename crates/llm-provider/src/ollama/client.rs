@@ -853,6 +853,7 @@ mod tests {
             }),
             is_mutating: true,
             requires_confirmation: true,
+            requires_rich_client: false,
         };
         let v = tool_spec_to_ollama_json(&spec);
         assert_eq!(v["type"], "function");

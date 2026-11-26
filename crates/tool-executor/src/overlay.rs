@@ -49,5 +49,6 @@ pub(crate) fn spec_of(handler: &Arc<dyn ToolHandler>) -> ToolSpec {
         params_schema: handler.params_schema(),
         is_mutating: handler.is_mutating(),
         requires_confirmation: handler.requires_confirmation(),
+        requires_rich_client: handler.requires_rich_client(),
     }
 }

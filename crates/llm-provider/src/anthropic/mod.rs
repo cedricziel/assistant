@@ -1297,6 +1297,7 @@ mod tests {
             }),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         };
         let v = tool_spec_to_anthropic_json(&spec);
         assert_eq!(v["name"], "file-read");
@@ -1857,6 +1858,7 @@ mod tests {
                 params_schema: json!({"type": "object"}),
                 is_mutating: false,
                 requires_confirmation: false,
+                requires_rich_client: false,
             }
         }
 

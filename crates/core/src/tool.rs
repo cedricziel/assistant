@@ -140,6 +140,14 @@ pub trait ToolHandler: Send + Sync {
         false
     }
 
+    /// Whether this tool only makes sense when the client can render rich UI
+    /// (an interactive web turn). The orchestrator drops such tools from the
+    /// tool list of every other turn, and the MCP server omits them from
+    /// `tools/list`.
+    fn requires_rich_client(&self) -> bool {
+        false
+    }
+
     /// Optional JSON Schema describing the structure of `ToolOutput.data`.
     ///
     /// Return `Some(schema)` if this tool populates `ToolOutput.data` with

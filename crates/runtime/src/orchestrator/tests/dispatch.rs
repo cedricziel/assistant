@@ -1,7 +1,7 @@
 //! Coverage for pure helpers on `Orchestrator` in `dispatch.rs`:
 //! `filter_tool_specs`, `make_tool_call_message`, `make_tool_result_message`.
 
-use assistant_core::types::conversation::MessageRole;
+use assistant_core::types::conversation::{Interface, MessageRole};
 use assistant_core::{
     Capabilities, ChatHistoryMessage, HostedTool, ProviderState, ToolCallItem, ToolSpec,
     ToolSupport,
@@ -19,6 +19,14 @@ fn make_spec(name: &str) -> ToolSpec {
         params_schema: serde_json::json!({}),
         is_mutating: false,
         requires_confirmation: false,
+        requires_rich_client: false,
+    }
+}
+
+fn rich_spec(name: &str) -> ToolSpec {
+    ToolSpec {
+        requires_rich_client: true,
+        ..make_spec(name)
     }
 }
 
@@ -32,6 +40,52 @@ fn caps(hosted: Vec<HostedTool>) -> Capabilities {
     }
 }
 
+fn kept(interface: Interface, interactive: bool, depth: u32) -> bool {
+    let rich_client = Orchestrator::rich_client_turn(&interface, interactive, depth);
+    let filtered = Orchestrator::filter_tool_specs(
+        vec![rich_spec("render-surface"), make_spec("bash")],
+        &caps(vec![]),
+        rich_client,
+    );
+    assert!(
+        filtered.iter().any(|s| s.name == "bash"),
+        "ordinary tools always survive"
+    );
+    filtered.iter().any(|s| s.name == "render-surface")
+}
+
+#[test]
+fn rich_client_tools_are_kept_for_an_interactive_web_turn_at_depth_zero() {
+    assert!(kept(Interface::Web, true, 0));
+}
+
+#[test]
+fn rich_client_tools_are_dropped_for_slack() {
+    assert!(!kept(Interface::Slack, true, 0));
+}
+
+#[test]
+fn rich_client_tools_are_dropped_for_a_non_interactive_web_turn() {
+    // quick-message and voice are Interface::Web but cannot show a surface.
+    assert!(!kept(Interface::Web, false, 0));
+}
+
+#[test]
+fn rich_client_tools_are_dropped_for_an_interactive_cli_turn() {
+    assert!(!kept(Interface::Cli, true, 0));
+}
+
+#[test]
+fn rich_client_tools_are_dropped_for_web_subagents() {
+    assert!(!kept(Interface::Web, true, 1));
+}
+
+#[test]
+fn rich_client_tools_are_dropped_for_the_scheduler() {
+    assert!(!kept(Interface::Scheduler, true, 0));
+    assert!(!kept(Interface::Scheduler, false, 0));
+}
+
 #[test]
 fn filter_tool_specs_passes_specs_through_when_no_hosted_tools() {
     let specs = vec![
@@ -39,14 +93,14 @@ fn filter_tool_specs_passes_specs_through_when_no_hosted_tools() {
         make_spec("web-fetch"),
         make_spec("bash"),
     ];
-    let filtered = Orchestrator::filter_tool_specs(specs.clone(), &caps(vec![]));
+    let filtered = Orchestrator::filter_tool_specs(specs.clone(), &caps(vec![]), true);
     assert_eq!(filtered.len(), 3);
 }
 
 #[test]
 fn filter_tool_specs_suppresses_web_search_when_provider_has_native_web_search() {
     let specs = vec![make_spec("web-search"), make_spec("bash")];
-    let filtered = Orchestrator::filter_tool_specs(specs, &caps(vec![HostedTool::WebSearch]));
+    let filtered = Orchestrator::filter_tool_specs(specs, &caps(vec![HostedTool::WebSearch]), true);
     let names: Vec<&str> = filtered.iter().map(|s| s.name.as_str()).collect();
     assert!(
         !names.contains(&"web-search"),
@@ -58,7 +112,7 @@ fn filter_tool_specs_suppresses_web_search_when_provider_has_native_web_search()
 #[test]
 fn filter_tool_specs_suppresses_web_fetch_when_provider_has_native_web_fetch() {
     let specs = vec![make_spec("web-fetch"), make_spec("bash")];
-    let filtered = Orchestrator::filter_tool_specs(specs, &caps(vec![HostedTool::WebFetch]));
+    let filtered = Orchestrator::filter_tool_specs(specs, &caps(vec![HostedTool::WebFetch]), true);
     let names: Vec<&str> = filtered.iter().map(|s| s.name.as_str()).collect();
     assert!(!names.contains(&"web-fetch"));
     assert!(names.contains(&"bash"));
@@ -74,6 +128,7 @@ fn filter_tool_specs_suppresses_both_when_both_hosted_tools_present() {
     let filtered = Orchestrator::filter_tool_specs(
         specs,
         &caps(vec![HostedTool::WebSearch, HostedTool::WebFetch]),
+        true,
     );
     let names: Vec<&str> = filtered.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, vec!["bash"]);
@@ -88,7 +143,7 @@ fn filter_tool_specs_keeps_other_tools_with_similar_names_intact() {
         make_spec("web-search"),
         make_spec("internal-search"),
     ];
-    let filtered = Orchestrator::filter_tool_specs(specs, &caps(vec![HostedTool::WebSearch]));
+    let filtered = Orchestrator::filter_tool_specs(specs, &caps(vec![HostedTool::WebSearch]), true);
     let names: Vec<&str> = filtered.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, vec!["search-conversations", "internal-search"]);
 }
