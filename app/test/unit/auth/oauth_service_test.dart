@@ -82,6 +82,20 @@ void main() {
   });
 
   group('OAuthService', () {
+    test('default client waits for a slow server', () {
+      final service = OAuthService(serverUrl: 'https://example.com');
+
+      expect(
+        service.dio.options.receiveTimeout,
+        greaterThanOrEqualTo(const Duration(seconds: 30)),
+        reason: 'a 3s timeout fails sign-in whenever the server stalls briefly',
+      );
+      expect(
+        service.dio.options.connectTimeout,
+        greaterThanOrEqualTo(const Duration(seconds: 15)),
+      );
+    });
+
     group('registerClient', () {
       test('posts registration and returns client_id', () async {
         mock.when(

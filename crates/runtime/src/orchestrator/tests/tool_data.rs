@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use assistant_core::mcp_app::McpApp;
 use assistant_core::tool::{ToolHandler, ToolOutput};
 use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{ExecutionContext, Interface, MessageRole, TurnIdentity};
@@ -439,6 +440,95 @@ async fn data_over_the_cap_is_not_persisted() {
     let meta = run.persisted_tool_meta().await;
     assert_eq!(meta[0].1.as_deref(), Some("ok"));
     assert_eq!(meta[0].2, None, "oversized data is dropped, not persisted");
+}
+
+// ── MCP apps ──────────────────────────────────────────────────────────────
+
+fn weather_app(html: String) -> McpApp {
+    McpApp {
+        server: "weather".into(),
+        resource_uri: "ui://weather/forecast".into(),
+        html,
+        csp: Default::default(),
+        permissions: Default::default(),
+        prefers_border: None,
+    }
+}
+
+fn app_output(html: String) -> OutputFn {
+    Box::new(move || {
+        let mut output = ToolOutput::success("21 degrees");
+        output.data = weather_app(html.clone()).attach_to(Some(json!({"temp": 21})));
+        output
+    })
+}
+
+impl Run {
+    fn tool_result_apps(&self) -> Vec<Option<McpApp>> {
+        self.events
+            .iter()
+            .filter_map(|e| match e {
+                OrchestratorEvent::ToolResult { app, .. } => Some(app.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    async fn persisted_tool_apps(&self) -> Vec<Option<McpApp>> {
+        self.storage
+            .conversation_store()
+            .load_history(self.conversation_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|m| matches!(m.role, MessageRole::Tool))
+            .map(|m| {
+                m.tool_app_json
+                    .map(|raw| serde_json::from_str(&raw).unwrap())
+            })
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn mcp_app_rides_on_the_event_apart_from_the_data() {
+    let run = run("probe", app_output("<p>sunny</p>".into())).await;
+    assert_eq!(
+        run.tool_result_apps(),
+        vec![Some(weather_app("<p>sunny</p>".into()))]
+    );
+    assert_eq!(
+        run.tool_results()[0].2,
+        Some(json!({"temp": 21})),
+        "the app is taken out of the data"
+    );
+}
+
+#[tokio::test]
+async fn mcp_app_is_persisted_with_the_tool_row() {
+    let run = run("probe", app_output("<p>sunny</p>".into())).await;
+    assert_eq!(
+        run.persisted_tool_apps().await,
+        vec![Some(weather_app("<p>sunny</p>".into()))]
+    );
+    assert_eq!(
+        run.persisted_tool_meta().await[0].2,
+        Some(json!({"temp": 21})),
+        "the persisted data does not repeat the app"
+    );
+}
+
+#[tokio::test]
+async fn mcp_app_larger_than_the_data_cap_is_kept() {
+    let html = "x".repeat(40 * 1024);
+    let run = run("probe", app_output(html.clone())).await;
+    assert_eq!(run.tool_result_apps(), vec![Some(weather_app(html))]);
+}
+
+#[tokio::test]
+async fn denied_call_has_no_app() {
+    let run = run_with(vec![], "probe", app_output("<p>sunny</p>".into()), true).await;
+    assert_eq!(run.tool_result_apps(), vec![None]);
 }
 
 #[tokio::test]

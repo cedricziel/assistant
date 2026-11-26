@@ -9,6 +9,7 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**callMcpAppTool**](ConversationsApi.md#callmcpapptool) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call&#x60;
 [**cancelTurn**](ConversationsApi.md#cancelturn) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/cancel | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel&#x60;
 [**createConversation**](ConversationsApi.md#createconversation) | **POST** /api/conversations | &#x60;POST /api/conversations&#x60; — create a new conversation.
 [**createQuickMessage**](ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
@@ -19,6 +20,7 @@ Method | HTTP request | Description
 [**getMessageAudio**](ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it as &#x60;audio/mpeg&#x60;.
 [**getTurnStatus**](ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
 [**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
+[**readMcpAppResource**](ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
 [**respondToInteraction**](ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
 [**sendMessage**](ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [**sendVoiceMessage**](ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
@@ -27,6 +29,55 @@ Method | HTTP request | Description
 [**streamRunEvents**](ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [**updateConversation**](ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
 
+
+# **callMcpAppTool**
+> JsonObject callMcpAppTool(conversationId, toolCallId, callMcpAppToolRequest, xSpaceId)
+
+`POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call`
+
+Call a tool on the server of the app this tool call rendered, as the caller. The tool must be on that server and visible to apps; the call is checked against the permission policy, and one that needs a human (any tool not marked read-only, an untrusted server, or a policy `ask`) runs only with `confirmed: true`. Returns the MCP `CallToolResult`.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String conversationId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation UUID
+final String toolCallId = toolCallId_example; // String | Id of the tool call that carries the app
+final CallMcpAppToolRequest callMcpAppToolRequest = ; // CallMcpAppToolRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.callMcpAppTool(conversationId, toolCallId, callMcpAppToolRequest, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->callMcpAppTool: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **conversationId** | **String**| Conversation UUID | 
+ **toolCallId** | **String**| Id of the tool call that carries the app | 
+ **callMcpAppToolRequest** | [**CallMcpAppToolRequest**](CallMcpAppToolRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**JsonObject**](JsonObject.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **cancelTurn**
 > TurnStatusResponse cancelTurn(conversationId, turnId, xSpaceId)
@@ -462,6 +513,55 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **readMcpAppResource**
+> JsonObject readMcpAppResource(conversationId, toolCallId, readMcpAppResourceRequest, xSpaceId)
+
+`POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read`
+
+Read a resource from the server of the app this tool call rendered, as the caller. Returns the MCP `ReadResourceResult`.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String conversationId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation UUID
+final String toolCallId = toolCallId_example; // String | Id of the tool call that carries the app
+final ReadMcpAppResourceRequest readMcpAppResourceRequest = ; // ReadMcpAppResourceRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.readMcpAppResource(conversationId, toolCallId, readMcpAppResourceRequest, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->readMcpAppResource: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **conversationId** | **String**| Conversation UUID | 
+ **toolCallId** | **String**| Id of the tool call that carries the app | 
+ **readMcpAppResourceRequest** | [**ReadMcpAppResourceRequest**](ReadMcpAppResourceRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**JsonObject**](JsonObject.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

@@ -24,6 +24,13 @@ enforce `cargo fmt --check`, `cargo clippy -D warnings`, `cargo machete --with-m
 `dart_pre_commit` (format, analyze, deps, OSV), and `flutter test`.
 Install hooks after cloning: `make install-hooks`.
 
+**Build cache:** use [sccache](https://github.com/mozilla/sccache) as the rustc wrapper
+(`rustc-wrapper = "sccache"` in `~/.cargo/config.toml` or `RUSTC_WRAPPER=sccache`).
+`.cargo/config.toml` turns incremental compilation off because sccache cannot cache
+incremental builds. Keep it off: with it on, every worktree recompiles the workspace
+and grows a `target/debug/incremental` cache that is never cleaned. Run `cargo clean`
+in a worktree once its branch has merged.
+
 **Note:** `cargo check --all-features` may require `protoc` (protobuf compiler) for certain features.
 
 Integration tests (`make test-integration`) require Ollama; CI runs them with `continue-on-error: true`.
