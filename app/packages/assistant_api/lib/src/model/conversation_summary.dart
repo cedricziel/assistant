@@ -11,6 +11,7 @@ part 'conversation_summary.g.dart';
 /// A conversation summary (no messages).
 ///
 /// Properties:
+/// * [archivedAt] - When the conversation was archived; absent when it is not archived.
 /// * [createdAt]
 /// * [id]
 /// * [pinnedAt] - When the conversation was pinned; absent when it is not pinned.
@@ -19,6 +20,10 @@ part 'conversation_summary.g.dart';
 @BuiltValue()
 abstract class ConversationSummary
     implements Built<ConversationSummary, ConversationSummaryBuilder> {
+  /// When the conversation was archived; absent when it is not archived.
+  @BuiltValueField(wireName: r'archived_at')
+  DateTime? get archivedAt;
+
   @BuiltValueField(wireName: r'created_at')
   DateTime get createdAt;
 
@@ -64,6 +69,13 @@ class _$ConversationSummarySerializer
     ConversationSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
+    if (object.archivedAt != null) {
+      yield r'archived_at';
+      yield serializers.serialize(
+        object.archivedAt,
+        specifiedType: const FullType.nullable(DateTime),
+      );
+    }
     yield r'created_at';
     yield serializers.serialize(
       object.createdAt,
@@ -116,6 +128,14 @@ class _$ConversationSummarySerializer
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'archived_at':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(DateTime),
+          ) as DateTime?;
+          if (valueDes == null) continue;
+          result.archivedAt = valueDes;
+          break;
         case r'created_at':
           final valueDes = serializers.deserialize(
             value,

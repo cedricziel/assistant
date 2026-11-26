@@ -473,8 +473,10 @@ pub struct ListConversationsQuery {
     pub archived: Option<bool>,
 }
 
-/// `GET /api/conversations` — list conversations: the unarchived ones by
-/// default, the archived ones with `?archived=true`.
+/// `GET /api/conversations` — list conversations, newest first.
+///
+/// Returns the unarchived conversations, pinned first. With `?archived=true`
+/// it returns the archived ones instead, most recently archived first.
 #[utoipa::path(
     get,
     path = "/api/conversations",

@@ -890,10 +890,11 @@ class ConversationsApi {
     );
   }
 
-  /// &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
-  ///
+  /// &#x60;GET /api/conversations&#x60; — list conversations, newest first.
+  /// Returns the unarchived conversations, pinned first. With &#x60;?archived&#x3D;true&#x60; it returns the archived ones instead, most recently archived first.
   ///
   /// Parameters:
+  /// * [archived] - `true` lists only archived conversations, newest archive first. Absent or `false` lists the unarchived ones, pinned first.
   /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
@@ -905,6 +906,7 @@ class ConversationsApi {
   /// Returns a [Future] containing a [Response] with a [BuiltList<ConversationSummary>] as data
   /// Throws [DioException] if API call or serialization fails
   Future<Response<BuiltList<ConversationSummary>>> listConversations({
+    bool? archived,
     String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -933,9 +935,15 @@ class ConversationsApi {
       validateStatus: validateStatus,
     );
 
+    final _queryParameters = <String, dynamic>{
+      r'archived':
+          encodeQueryParameter(_serializers, archived, const FullType(bool)),
+    };
+
     final _response = await _dio.request<Object>(
       _path,
       options: _options,
+      queryParameters: _queryParameters,
       cancelToken: cancelToken,
       onSendProgress: onSendProgress,
       onReceiveProgress: onReceiveProgress,
@@ -1845,8 +1853,8 @@ class ConversationsApi {
     );
   }
 
-  /// &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
-  /// Neither change moves the conversation in the list: only new messages bump &#x60;updated_at&#x60;.
+  /// &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title, pin and/or archive state.
+  /// None of these changes moves the conversation in the list: only new messages bump &#x60;updated_at&#x60;. Archiving clears the pin; pinning an archived conversation unarchives it.
   ///
   /// Parameters:
   /// * [id] - Conversation ID
