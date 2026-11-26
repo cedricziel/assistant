@@ -3,12 +3,20 @@ import { test, expect, Page } from "@playwright/test";
 /**
  * Sidebar-collapse persistence regression for iPad-landscape viewport (#620).
  *
- * Only runs on the `ipad-landscape-chrome` project so we don't bloat the
- * other viewport suites.
+ * playwright.config.ts runs this file only on the `ipad-landscape-chrome`
+ * project.
  */
 
 const AUTH_TOKEN = "test-token";
 const FLUTTER_SETTLE_MS = 3000;
+
+// Flutter builds its semantics tree, which holds the tooltip labels the
+// tests query, only after its off-screen accessibility placeholder is clicked.
+async function enableSemantics(page: Page) {
+  await page
+    .getByRole("button", { name: "Enable accessibility" })
+    .evaluate((el) => (el as HTMLElement).click());
+}
 
 async function loginFlutter(page: Page) {
   await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "load" });
@@ -16,14 +24,16 @@ async function loginFlutter(page: Page) {
     timeout: 20_000,
   });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
+  await enableSemantics(page);
+}
+
+async function reloadFlutter(page: Page) {
+  await page.reload({ waitUntil: "load" });
+  await page.waitForTimeout(FLUTTER_SETTLE_MS);
+  await enableSemantics(page);
 }
 
 test.describe("iPad-landscape sidebar collapse (#620)", () => {
-  test.skip(
-    ({}, testInfo) => testInfo.project.name !== "ipad-landscape-chrome",
-    "Only runs on ipad-landscape viewport",
-  );
-
   test("top-leading toggle is visible and toggles the sidebar", async ({
     page,
   }) => {
@@ -51,8 +61,7 @@ test.describe("iPad-landscape sidebar collapse (#620)", () => {
 
     // Reload — Flutter rebuilds, sidebar provider rehydrates from
     // SharedPreferences (localStorage on web).
-    await page.reload({ waitUntil: "load" });
-    await page.waitForTimeout(FLUTTER_SETTLE_MS);
+    await reloadFlutter(page);
 
     // After reload the collapsed state should be preserved.
     await expect(
@@ -71,8 +80,7 @@ test.describe("iPad-landscape sidebar collapse (#620)", () => {
     await page.getByRole("button", { name: "Show navigation" }).click();
     await page.waitForTimeout(400);
 
-    await page.reload({ waitUntil: "load" });
-    await page.waitForTimeout(FLUTTER_SETTLE_MS);
+    await reloadFlutter(page);
 
     await expect(
       page.getByRole("button", { name: "Hide navigation" }),

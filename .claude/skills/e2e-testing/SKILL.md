@@ -148,6 +148,11 @@ Three projects in `playwright.config.ts` match the app's responsive breakpoints:
 | `tablet-chrome`  | 768x1024 | Hamburger + drawer            |
 | `mobile-chrome`  | Pixel 7  | Bottom tabs + stacked content |
 
+A fourth project, `ipad-landscape-chrome` (1180x820), runs only
+`sidebar-collapse-ipad.spec.ts`, which takes no screenshots. Route a spec to
+specific projects with `testMatch`/`testIgnore` in `playwright.config.ts`. A
+describe-level `test.skip(callback)` receives only fixtures, not `testInfo`.
+
 ## CI Workflow
 
 The `visual-regression` job in `.github/workflows/ci.yml`:
