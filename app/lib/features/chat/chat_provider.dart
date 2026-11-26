@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/api_client.dart';
 import '../../api/models/stream_event.dart';
 import '../connection/connection_provider.dart';
+import 'chat_announcer.dart';
 import 'chat_history_mapping.dart';
 import 'chat_models.dart';
 import 'chat_stream_errors.dart';
@@ -17,6 +18,7 @@ import 'chat_timeline_reducers.dart';
 import 'chat_turn_transitions.dart';
 import 'conversation_list_provider.dart';
 import 'message_feedback_provider.dart';
+import 'turn_progress_card.dart' show kTurnStallThreshold;
 
 export 'package:assistant_ui/models.dart';
 
@@ -27,6 +29,45 @@ export 'conversation_list_provider.dart';
 /// Manages the active chat conversation.
 class ChatNotifier extends AsyncNotifier<ChatState> {
   final _session = ChatStreamSession();
+
+  final _lifecycle = StreamController<ChatLifecycleEvent>.broadcast(sync: true);
+  Timer? _stallTimer;
+
+  /// Whether a turn the user is waiting on is in flight. Gates every terminal
+  /// lifecycle event, so loading history never announces anything.
+  bool _turnInFlight = false;
+
+  /// Turn lifecycle events for screen-reader announcements. Token frames are
+  /// not events, and loading a conversation's history emits none.
+  Stream<ChatLifecycleEvent> get lifecycle => _lifecycle.stream;
+
+  void _emit(ChatLifecycleEvent Function(DateTime at) build) {
+    if (!_lifecycle.isClosed) _lifecycle.add(build(DateTime.now()));
+  }
+
+  void _beginLifecycle() {
+    _turnInFlight = true;
+    _emit((at) => TurnStarted(at: at));
+  }
+
+  /// Ends the in-flight turn, emitting [terminal] when one was tracked.
+  void _endLifecycle([ChatLifecycleEvent Function(DateTime at)? terminal]) {
+    _stallTimer?.cancel();
+    _stallTimer = null;
+    final wasInFlight = _turnInFlight;
+    _turnInFlight = false;
+    if (wasInFlight && terminal != null) _emit(terminal);
+  }
+
+  /// Restarts the stall countdown; called on every status update.
+  void _armStallTimer() {
+    if (!_turnInFlight) return;
+    _stallTimer?.cancel();
+    _stallTimer = Timer(kTurnStallThreshold, () {
+      _stallTimer = null;
+      if (_turnInFlight && ref.mounted) _emit((at) => TurnStalled(at: at));
+    });
+  }
 
   /// Update the in-flight turn-status snapshot to reflect a newly-received
   /// SSE event of [kind]. No-op when no turn is in flight (snapshot null).
@@ -49,6 +90,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       ),
     );
+    _armStallTimer();
   }
 
   /// Create a tool-call timeline entry and insert it before the streaming
@@ -190,6 +232,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       ),
     );
+    _armStallTimer();
   }
 
   /// Replace the streaming placeholder with the final assistant message and
@@ -199,6 +242,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     DoneEvent event, {
     required String conversationId,
     required String userMsgId,
+    required TurnSource source,
   }) {
     _session.closeThinking();
     state = AsyncData(
@@ -211,6 +255,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             'assistant-${DateTime.now().millisecondsSinceEpoch}',
         content: event.content,
       ),
+    );
+    _endLifecycle(
+      (at) => TurnCompleted(content: event.content, source: source, at: at),
     );
   }
 
@@ -229,6 +276,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         error: _stoppedBeforeRunId ? null : event.message,
         clearTurnStatus: true,
       ),
+    );
+    _endLifecycle(
+      _stoppedBeforeRunId
+          ? (at) => TurnStopped(at: at)
+          : (at) => TurnFailed(message: event.message, at: at),
     );
   }
 
@@ -262,6 +314,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         clearTurnStatus: true,
       ),
     });
+    _endLifecycle(switch (event.reason) {
+      AgentErrorReason.cancelled => (at) => TurnStopped(at: at),
+      AgentErrorReason.error => (at) => TurnFailed(
+        message: event.message,
+        at: at,
+      ),
+    });
   }
 
   /// Remember the run id for replay and Stop, and deliver a Stop that was
@@ -291,7 +350,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   @override
   Future<ChatState> build() async {
-    ref.onDispose(_session.cancelStopTimer);
+    ref.onDispose(() {
+      _session.cancelStopTimer();
+      _stallTimer?.cancel();
+      unawaited(_lifecycle.close());
+    });
     return const ChatState();
   }
 
@@ -384,6 +447,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       partialContent: '',
     );
     state = AsyncData(error == null ? stopped : stopped.copyWith(error: error));
+    _endLifecycle((at) => TurnStopped(at: at));
     if (refresh && conversationId != null) {
       await _refreshFromServer(conversationId);
     }
@@ -748,6 +812,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             event,
             conversationId: conversationId,
             userMsgId: userMsgId,
+            source: TurnSource.replay,
           );
           return true;
         } else if (event is AgentErrorEvent) {
@@ -851,6 +916,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         streamingContent: '',
       ),
     );
+    _beginLifecycle();
 
     // Arm the same initial-stall watchdog used by the text path. The voice
     // SSE response carries TranscriptEvent + token/status events; any event
@@ -908,6 +974,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             event,
             conversationId: conversationId,
             userMsgId: userMsgId,
+            source: TurnSource.live,
           );
           return;
         } else if (event is ErrorEvent) {
@@ -973,6 +1040,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         streamingContent: '',
       ),
     );
+    _beginLifecycle();
 
     // Arm the initial-stall watchdog as a per-event timeout on the SSE
     // stream. Until we see a UI-visible event (anything other than
@@ -1024,6 +1092,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               ),
             ),
           );
+          _armStallTimer();
           continue;
         }
         // Any non-RunStartedEvent counts as progress — the initial-stall
@@ -1039,6 +1108,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             event,
             conversationId: conversationId,
             userMsgId: userMsgId,
+            source: TurnSource.live,
           );
           return;
         } else if (event is ErrorEvent) {
@@ -1058,6 +1128,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // accumulated buffer as final.
       unawaited(tokenController.close());
       if (!ref.mounted) return;
+      _endLifecycle();
       final finalState = state.value ?? const ChatState();
       if (finalState.isSending) {
         final msgs = List<ChatMessage>.from(finalState.messages);
@@ -1124,6 +1195,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               partialContent: '',
             ),
           );
+          _endLifecycle((at) => TurnStopped(at: at));
           return;
         }
 
@@ -1137,7 +1209,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (replayed || _session.terminalFrameSeen) return;
       }
 
-      // All retries exhausted — defer to app resume.
+      // All retries exhausted — defer to app resume. The turn stays tracked,
+      // so a replay on resume is announced, but it is not stalled.
+      _stallTimer?.cancel();
       _session.markDisconnected(
         userMsgId: userMsgId,
         conversationId: conversationId,
@@ -1160,6 +1234,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         error: _stoppedBeforeRunId ? null : friendlyStreamErrorMessage(error),
         clearTurnStatus: true,
       ),
+    );
+    _endLifecycle(
+      _stoppedBeforeRunId
+          ? (at) => TurnStopped(at: at)
+          : (at) =>
+                TurnFailed(message: friendlyStreamErrorMessage(error), at: at),
     );
   }
 
@@ -1219,6 +1299,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   ) async {
     if (_session.detached || !ref.mounted) return;
     _session.detach(); // end the stream loop at once
+    _endLifecycle();
 
     // Step 1: clear the placeholder synchronously so the user immediately
     // sees that the stream stalled and gets out of the dots state.
