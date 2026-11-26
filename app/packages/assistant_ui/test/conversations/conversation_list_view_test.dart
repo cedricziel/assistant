@@ -4,8 +4,17 @@ import 'package:material_ui/material_ui.dart';
 
 final _now = DateTime.utc(2026, 1, 15, 12);
 
-ConversationListItem _item(String id, String title, Duration ago) =>
-    ConversationListItem(id: id, title: title, updatedAt: _now.subtract(ago));
+ConversationListItem _item(
+  String id,
+  String title,
+  Duration ago, {
+  DateTime? pinnedAt,
+}) => ConversationListItem(
+  id: id,
+  title: title,
+  updatedAt: _now.subtract(ago),
+  pinnedAt: pinnedAt,
+);
 
 Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
@@ -24,6 +33,7 @@ void main() {
     Widget? header,
     Widget? emptyState,
     ConversationTrailingBuilder? trailingBuilder,
+    String? selectedId,
   }) => _host(
     ConversationListView(
       items: list ?? items,
@@ -32,6 +42,7 @@ void main() {
       header: header,
       emptyState: emptyState,
       trailingBuilder: trailingBuilder,
+      selectedId: selectedId,
       now: _now,
     ),
   );
@@ -46,6 +57,57 @@ void main() {
     expect(find.text('5m ago'), findsOneWidget);
     expect(find.text('2h ago'), findsOneWidget);
     expect(find.text('3d ago'), findsOneWidget);
+  });
+
+  testWidgets('a Pinned header precedes the pinned rows', (tester) async {
+    await tester.pumpWidget(
+      view(
+        list: [
+          _item(
+            'p',
+            'Pinned one',
+            const Duration(days: 9),
+            pinnedAt: _now.subtract(const Duration(days: 1)),
+          ),
+          _item('1', 'Plan the launch', const Duration(seconds: 20)),
+          _item('2', 'Debug flaky CI job', const Duration(minutes: 5)),
+        ],
+      ),
+    );
+
+    expect(find.text('Pinned'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Pinned')).dy,
+      lessThan(tester.getTopLeft(find.text('Pinned one')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('Pinned one')).dy,
+      lessThan(tester.getTopLeft(find.text('Plan the launch')).dy),
+    );
+  });
+
+  testWidgets('no Pinned header when nothing is pinned', (tester) async {
+    await tester.pumpWidget(view());
+
+    expect(find.text('Pinned'), findsNothing);
+  });
+
+  testWidgets('only the row whose id equals selectedId is highlighted', (
+    tester,
+  ) async {
+    await tester.pumpWidget(view(selectedId: '2'));
+
+    final tiles = tester.widgetList<ListTile>(find.byType(ListTile)).toList();
+    expect(tiles.map((t) => t.selected), [false, true, false, false]);
+  });
+
+  testWidgets('no row is highlighted without a selectedId', (tester) async {
+    await tester.pumpWidget(view());
+
+    expect(
+      tester.widgetList<ListTile>(find.byType(ListTile)).any((t) => t.selected),
+      isFalse,
+    );
   });
 
   testWidgets('a tap fires onSelect with the id and navigates nowhere', (
@@ -152,15 +214,5 @@ void main() {
 
     expect(find.byKey(const Key('trailing_1')), findsOneWidget);
     expect(find.byKey(const Key('trailing_4')), findsOneWidget);
-  });
-
-  testWidgets('no row is highlighted as selected', (tester) async {
-    await tester.pumpWidget(view());
-
-    for (final tile in tester.widgetList<ListTile>(find.byType(ListTile))) {
-      expect(tile.selected, isFalse);
-      expect(tile.tileColor, isNull);
-      expect(tile.selectedTileColor, isNull);
-    }
   });
 }
