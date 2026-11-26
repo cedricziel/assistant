@@ -25,12 +25,16 @@ pub async fn run_one_shot(
 ) -> Option<Result<()>> {
     let result = match cli.command.as_ref()? {
         Command::Reset { yes } => cmd_reset::cmd_reset(db_path, config, *yes),
-        Command::Persona { command } => cmd_persona::cmd_persona(db_path, command).await,
+        Command::Persona { command } => {
+            cmd_persona::cmd_persona(assistant_dir, db_path, command).await
+        }
         // Generate needs the full Orchestrator, so it is handled after bootstrap.
         Command::Skill {
             command: SkillCommand::Generate { .. },
         } => return None,
-        Command::Skill { command } => cmd_skill::cmd_skill(db_path, config, command).await,
+        Command::Skill { command } => {
+            cmd_skill::cmd_skill(assistant_dir, db_path, config, command).await
+        }
         Command::Backup(args) => cmd_backup::cmd_backup(args).await,
         Command::Restore(args) => cmd_backup::cmd_restore(args).await,
         Command::Webui { command } => cmd_webui::cmd_webui(command).await,
@@ -63,7 +67,7 @@ pub async fn run_one_shot(
         },
         Command::Admin { command } => match command {
             AdminCommand::ResetPassword { email, org } => {
-                cmd_admin::cmd_admin_reset_password(email, org).await
+                cmd_admin::cmd_admin_reset_password(assistant_dir, email, org).await
             }
         },
         _ => return None,

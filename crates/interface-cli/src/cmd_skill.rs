@@ -11,9 +11,16 @@ use assistant_storage::{StorageLayer, registry::SkillRegistry};
 
 use crate::args::SkillCommand;
 
-pub async fn cmd_skill(db_path: &Path, config: &OrgConfig, command: &SkillCommand) -> Result<()> {
+pub async fn cmd_skill(
+    install_root: &Path,
+    db_path: &Path,
+    config: &OrgConfig,
+    command: &SkillCommand,
+) -> Result<()> {
     let storage = StorageLayer::new(db_path).await?;
-    let registry = SkillRegistry::new(storage.pool.clone()).await?;
+    let registry = SkillRegistry::new(storage.pool.clone())
+        .await?
+        .with_user_skills_dir(install_root.join("skills"));
 
     // Load builtin and on-disk skills so commands like `list`, `show`, and
     // `create` (duplicate check) see the full registry — not just SQLite rows.
@@ -22,7 +29,8 @@ pub async fn cmd_skill(db_path: &Path, config: &OrgConfig, command: &SkillComman
         .await
         .context("Failed to load embedded skills")?;
     let project_root = std::env::current_dir().ok();
-    let dirs_to_scan = assistant_runtime::bootstrap::skill_dirs(config, project_root.as_deref());
+    let dirs_to_scan =
+        assistant_runtime::bootstrap::skill_dirs(install_root, config, project_root.as_deref());
     let dirs_ref: Vec<(&Path, SkillSource)> = dirs_to_scan
         .iter()
         .map(|(p, s)| (p.as_path(), s.clone()))
@@ -136,7 +144,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cfg = cfg_under(dir.path());
         let db = db_under(dir.path());
-        cmd_skill(&db, &cfg, &SkillCommand::List { persona: None })
+        cmd_skill(dir.path(), &db, &cfg, &SkillCommand::List { persona: None })
             .await
             .unwrap();
     }
@@ -147,6 +155,7 @@ mod tests {
         let cfg = cfg_under(dir.path());
         let db = db_under(dir.path());
         let res = cmd_skill(
+            dir.path(),
             &db,
             &cfg,
             &SkillCommand::Show {
@@ -172,6 +181,7 @@ mod tests {
         .unwrap();
 
         cmd_skill(
+            dir.path(),
             &db,
             &cfg,
             &SkillCommand::Create {
@@ -182,9 +192,14 @@ mod tests {
         )
         .await
         .unwrap();
+        assert!(
+            dir.path().join("skills/cli-create-skill/SKILL.md").exists(),
+            "the skill is created under the install root"
+        );
 
         // `Delete` with `yes: true` skips stdin and removes the skill.
         cmd_skill(
+            dir.path(),
             &db,
             &cfg,
             &SkillCommand::Delete {
@@ -202,6 +217,7 @@ mod tests {
         let cfg = cfg_under(dir.path());
         let db = db_under(dir.path());
         let res = cmd_skill(
+            dir.path(),
             &db,
             &cfg,
             &SkillCommand::Create {
@@ -220,6 +236,7 @@ mod tests {
         let cfg = cfg_under(dir.path());
         let db = db_under(dir.path());
         let res = cmd_skill(
+            dir.path(),
             &db,
             &cfg,
             &SkillCommand::Generate {

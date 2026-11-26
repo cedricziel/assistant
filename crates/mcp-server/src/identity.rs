@@ -2,9 +2,9 @@
 //!
 //! Over HTTP, rmcp copies each request's `http::request::Parts` into the
 //! request extensions, and the `/mcp` auth middleware puts the resolved
-//! [`AuthContext`] into the `Parts` extensions. Over stdio there is no HTTP
-//! layer, so [`with_identity`] stamps every inbound request with the identity
-//! the process runs as.
+//! [`Caller`] into the `Parts` extensions. Over stdio
+//! there is no HTTP layer, so [`with_identity`] stamps every inbound request
+//! with the identity the process runs as.
 
 use std::borrow::Cow;
 
@@ -17,14 +17,10 @@ use rmcp::{ErrorData, RoleServer};
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::{Role, SpaceId};
 
-/// Header that selects the space when the caller holds roles in several.
-///
-/// Matches the web API's selector header.
-const SPACE_HEADER: &str = "x-space-id";
-
-/// The identity a request runs as, bound to one space.
-#[derive(Debug)]
-pub(crate) struct Caller {
+/// The identity a request runs as, bound to one space, with the caller's
+/// effective role there.
+#[derive(Clone, Debug)]
+pub struct Caller {
     pub auth: AuthContext,
     pub space_id: SpaceId,
     pub role: Role,
@@ -40,49 +36,41 @@ impl Caller {
     }
 }
 
-/// Resolves the identity a request carries and binds it to a space.
+/// Resolves the identity a request carries and the space it is bound to.
 ///
-/// Reads the [`AuthContext`] from the request extensions directly or, over
-/// HTTP, from the `Parts` extensions. A request with no identity is rejected:
-/// it is never treated as the system caller. The space is the one named by
-/// the `x-space-id` header, or the caller's only space; the caller must hold
-/// a role there, or be an org admin.
+/// Over HTTP the `/mcp` middleware put the whole [`Caller`] into the `Parts`
+/// extensions. Over stdio the [`AuthContext`] is a direct extension and must hold
+/// a role in exactly one space. A request with no identity is rejected: it is
+/// never treated as the system caller.
 pub(crate) fn resolve_caller(extensions: &Extensions) -> Result<Caller, ErrorData> {
-    let parts = extensions.get::<Parts>();
-    let auth = extensions
-        .get::<AuthContext>()
-        .or_else(|| parts.and_then(|parts| parts.extensions.get::<AuthContext>()))
-        .ok_or_else(|| ErrorData::invalid_request("request carries no caller identity", None))?;
+    if let Some(parts) = extensions.get::<Parts>() {
+        return parts
+            .extensions
+            .get::<Caller>()
+            .cloned()
+            .ok_or_else(no_identity);
+    }
 
-    let selector = parts
-        .and_then(|parts| parts.headers.get(SPACE_HEADER))
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.is_empty());
-    let space_id = match selector {
-        Some(id) => SpaceId::from(id),
-        None => single_space(auth)?,
-    };
-    let role = match auth.role_in(&space_id) {
-        Some(role) => role.clone(),
-        None if auth.is_org_admin() => Role::OrgAdmin,
-        None => return Err(ErrorData::invalid_request("access denied", None)),
+    let auth = extensions.get::<AuthContext>().ok_or_else(no_identity)?;
+    let mut spaces = auth.space_roles.iter();
+    let (space_id, role) = match (spaces.next(), spaces.next()) {
+        (Some(only), None) => only,
+        _ => {
+            return Err(ErrorData::invalid_request(
+                "the caller must hold a role in exactly one space",
+                None,
+            ));
+        }
     };
     Ok(Caller {
         auth: auth.clone(),
-        space_id,
-        role,
+        space_id: space_id.clone(),
+        role: role.clone(),
     })
 }
 
-fn single_space(auth: &AuthContext) -> Result<SpaceId, ErrorData> {
-    let mut spaces = auth.space_roles.keys();
-    match (spaces.next(), spaces.next()) {
-        (Some(only), None) => Ok(only.clone()),
-        _ => Err(ErrorData::invalid_request(
-            format!("space selector required: send the {SPACE_HEADER} header"),
-            None,
-        )),
-    }
+fn no_identity() -> ErrorData {
+    ErrorData::invalid_request("request carries no caller identity", None)
 }
 
 /// Wraps `transport` so every request and notification it delivers carries
@@ -171,14 +159,14 @@ mod tests {
 
     /// What rmcp's HTTP service delivers: the request `Parts`, carrying
     /// whatever the auth middleware inserted into the HTTP extensions.
-    fn http_extensions(auth: Option<AuthContext>, space_header: Option<&str>) -> Extensions {
-        let mut builder = http::Request::builder().uri("/mcp");
-        if let Some(space) = space_header {
-            builder = builder.header(SPACE_HEADER, space);
-        }
-        let (mut parts, ()) = builder.body(()).expect("request").into_parts();
-        if let Some(auth) = auth {
-            parts.extensions.insert(auth);
+    fn http_extensions(caller: Option<Caller>) -> Extensions {
+        let (mut parts, ()) = http::Request::builder()
+            .uri("/mcp")
+            .body(())
+            .expect("request")
+            .into_parts();
+        if let Some(caller) = caller {
+            parts.extensions.insert(caller);
         }
         let mut extensions = Extensions::new();
         extensions.insert(parts);
@@ -200,46 +188,30 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_identity_the_http_middleware_put_into_the_parts() {
-        let extensions = http_extensions(Some(auth(&[("s1", Role::SpaceAdmin)])), None);
-        let caller = resolve_caller(&extensions).expect("resolves");
-        assert_eq!(caller.auth.user_id, UserId::from("user-1"));
-        assert_eq!(caller.role, Role::SpaceAdmin);
+    fn a_direct_identity_with_several_spaces_is_rejected() {
+        let identity = auth(&[("s1", Role::Member), ("s2", Role::Viewer)]);
+        let error = resolve_caller(&direct_extensions(identity)).expect_err("ambiguous");
+        assert_eq!(error.code, ErrorCode::INVALID_REQUEST);
+    }
+
+    #[test]
+    fn uses_the_caller_the_http_middleware_bound() {
+        let caller = Caller {
+            auth: auth(&[("s1", Role::Member), ("s2", Role::Viewer)]),
+            space_id: SpaceId::from("s2"),
+            role: Role::Viewer,
+        };
+        let resolved = resolve_caller(&http_extensions(Some(caller))).expect("resolves");
+        assert_eq!(resolved.auth.user_id, UserId::from("user-1"));
+        assert_eq!(resolved.space_id, SpaceId::from("s2"));
+        assert_eq!(resolved.role, Role::Viewer);
     }
 
     #[test]
     fn rejects_a_request_without_identity() {
         let error = resolve_caller(&Extensions::new()).expect_err("rejected");
         assert_eq!(error.code, ErrorCode::INVALID_REQUEST);
-        let error = resolve_caller(&http_extensions(None, None)).expect_err("rejected");
+        let error = resolve_caller(&http_extensions(None)).expect_err("rejected");
         assert_eq!(error.code, ErrorCode::INVALID_REQUEST);
-    }
-
-    #[test]
-    fn several_spaces_need_a_selector_header() {
-        let identity = auth(&[("s1", Role::Member), ("s2", Role::Viewer)]);
-
-        let error = resolve_caller(&http_extensions(Some(identity.clone()), None))
-            .expect_err("selector required");
-        assert!(error.message.contains(SPACE_HEADER), "{}", error.message);
-
-        let caller = resolve_caller(&http_extensions(Some(identity), Some("s2"))).expect("s2");
-        assert_eq!(caller.space_id, SpaceId::from("s2"));
-        assert_eq!(caller.role, Role::Viewer);
-    }
-
-    #[test]
-    fn a_space_without_a_role_is_denied() {
-        let extensions = http_extensions(Some(auth(&[("s1", Role::Member)])), Some("other"));
-        let error = resolve_caller(&extensions).expect_err("denied");
-        assert_eq!(error.code, ErrorCode::INVALID_REQUEST);
-    }
-
-    #[test]
-    fn org_admins_may_select_any_space() {
-        let extensions = http_extensions(Some(auth(&[("s1", Role::OrgAdmin)])), Some("other"));
-        let caller = resolve_caller(&extensions).expect("org admin");
-        assert_eq!(caller.space_id, SpaceId::from("other"));
-        assert_eq!(caller.role, Role::OrgAdmin);
     }
 }

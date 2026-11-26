@@ -156,8 +156,8 @@ Layer: server
 Depends on: S1b (and S6 for `render_lang.rs`; if S6 has not merged, S7 adds the file and S6 rebases)
 Parallel with: S2a–S6, S8–S10
 
-- [ ] S7.1 Add failing tests: one-line `file-edit` (`edit`, `added: 1`, `removed: 1`, one hunk); `file-write` to a new path (`create`); overwrite (`overwrite`); a diff over 400 lines (`truncated`, ≤ 400 lines); a single 100,000-char changed line (each `text` ≤ 512 chars, `truncated`); overwriting a non-UTF-8 file (`data: None`). Each validates against `output_schema()`. Confirm RED.
-- [ ] S7.2 Add `similar = { workspace = true }` to `assistant-tool-executor`. Implement `unified_hunks(old, new, max_lines, max_line_chars)` over `similar::TextDiff::from_lines(..)`. In `file-write`, read the prior content (≤ 256 KiB) first. Attach data in `file_edit.rs:97-101` and `file_write.rs:86-90`. Confirm GREEN.
+- [x] S7.1 Add failing tests: one-line `file-edit` (`edit`, `added: 1`, `removed: 1`, one hunk); `file-write` to a new path (`create`); overwrite (`overwrite`); a diff over 400 lines (`truncated`, ≤ 400 lines); a single 100,000-char changed line (each `text` ≤ 512 chars, `truncated`); overwriting a non-UTF-8 file (`data: None`). Each validates against `output_schema()`. Confirm RED.
+- [x] S7.2 Add `similar = { workspace = true }` to `assistant-tool-executor`. Implement `unified_hunks(old, new, max_lines, max_line_chars)` over `similar::TextDiff::from_lines(..)`. In `file-write`, read the prior content (≤ 256 KiB) first. Attach data in `file_edit.rs:97-101` and `file_write.rs:86-90`. Confirm GREEN.
 
 ## PR S8 — feat(tool-executor): data table render data for list-tasks and process list
 

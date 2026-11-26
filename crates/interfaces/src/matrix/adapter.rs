@@ -95,17 +95,16 @@ impl PendingReactions {
 }
 
 impl MatrixAdapter {
+    /// `state_dir` holds the persisted `next_batch` token.
     pub fn new(
         client: Arc<MatrixClient>,
         allowed_rooms: Vec<String>,
         allowed_users: Vec<String>,
+        state_dir: PathBuf,
     ) -> Self {
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         let safe_user = client.user_id.replace([':', '@', '.'], "_");
-        let next_batch_path = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".assistant")
-            .join(format!("matrix-next-batch-{safe_user}.txt"));
+        let next_batch_path = state_dir.join(format!("matrix-next-batch-{safe_user}.txt"));
         Self {
             client,
             allowed_rooms,
@@ -632,8 +631,8 @@ mod tests {
         )
     }
 
-    fn make_adapter(client: Arc<MatrixClient>) -> MatrixAdapter {
-        MatrixAdapter::new(client, vec![], vec![])
+    fn make_adapter(client: Arc<MatrixClient>, state: &tempfile::TempDir) -> MatrixAdapter {
+        MatrixAdapter::new(client, vec![], vec![], state.path().to_path_buf())
     }
 
     /// Build a minimal sync JSON with one message event in room "!room:example.com".
@@ -731,7 +730,8 @@ mod tests {
 
         let client = make_client(&server);
         let provider = Arc::new(FakeTranscriber("hello world".to_string()));
-        let adapter = make_adapter(client).with_transcription(provider, None);
+        let state = tempfile::tempdir().unwrap();
+        let adapter = make_adapter(client, &state).with_transcription(provider, None);
 
         let mut stream = adapter.start().await.unwrap();
         let msg = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
@@ -762,7 +762,8 @@ mod tests {
         );
         mount_two_syncs(&server, event_sync).await;
 
-        let adapter = make_adapter(make_client(&server));
+        let state = tempfile::tempdir().unwrap();
+        let adapter = make_adapter(make_client(&server), &state);
         let mut stream = adapter.start().await.unwrap();
 
         // The first sync fails; the retry waits BACKOFF_MIN (about 1 s), far
@@ -772,6 +773,41 @@ mod tests {
             .expect("sync was not retried within the backoff window")
             .expect("stream ended");
         assert!(matches!(&msg.content, ChannelContent::Text(t) if t == "after the outage"));
+    }
+
+    #[tokio::test]
+    async fn next_batch_is_persisted_in_the_state_dir() {
+        let server = MockServer::start().await;
+        let event_sync = sync_with_event(
+            "m.text",
+            "@user:example.com",
+            serde_json::json!({ "body": "hi" }),
+        );
+        mount_two_syncs(&server, event_sync).await;
+        let state = tempfile::tempdir().unwrap();
+        let adapter = make_adapter(make_client(&server), &state);
+
+        let mut stream = adapter.start().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+            .await
+            .expect("timeout")
+            .expect("stream ended");
+
+        // The token of the response that carried the message is written after
+        // the message is dispatched, so wait for it.
+        let token = state.path().join("matrix-next-batch-_bot_example_com.txt");
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(t) = tokio::fs::read_to_string(&token).await
+                    && t == "s1"
+                {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the s1 token never reached the state dir");
     }
 
     #[tokio::test]
@@ -794,7 +830,8 @@ mod tests {
         mount_two_syncs(&server, event_sync).await;
 
         let client = make_client(&server);
-        let adapter = make_adapter(client); // no transcription provider
+        let state = tempfile::tempdir().unwrap();
+        let adapter = make_adapter(client, &state); // no transcription provider
 
         let mut stream = adapter.start().await.unwrap();
         // Expect NO message within a short window.
@@ -826,7 +863,8 @@ mod tests {
 
         let client = make_client(&server);
         let provider = Arc::new(FakeTranscriber("ignored".to_string()));
-        let adapter = make_adapter(client).with_transcription(provider, None);
+        let state = tempfile::tempdir().unwrap();
+        let adapter = make_adapter(client, &state).with_transcription(provider, None);
 
         let mut stream = adapter.start().await.unwrap();
         let result =
@@ -855,8 +893,13 @@ mod tests {
         let client = make_client(&server);
         let provider = Arc::new(FakeTranscriber("ignored".to_string()));
         // Only allow "@allowed:example.com"
-        let mut adapter =
-            MatrixAdapter::new(client, vec![], vec!["@allowed:example.com".to_string()]);
+        let state = tempfile::tempdir().unwrap();
+        let mut adapter = MatrixAdapter::new(
+            client,
+            vec![],
+            vec!["@allowed:example.com".to_string()],
+            state.path().to_path_buf(),
+        );
         adapter = adapter.with_transcription(provider, None);
 
         let mut stream = adapter.start().await.unwrap();
@@ -890,7 +933,8 @@ mod tests {
         mount_two_syncs(&server, event_sync).await;
 
         let client = make_client(&server);
-        let adapter = make_adapter(client);
+        let state = tempfile::tempdir().unwrap();
+        let adapter = make_adapter(client, &state);
 
         let mut stream = adapter.start().await.unwrap();
         let msg = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
@@ -931,7 +975,8 @@ mod tests {
         mount_two_syncs(&server, event_sync).await;
 
         let client = make_client(&server);
-        let adapter = make_adapter(client);
+        let state = tempfile::tempdir().unwrap();
+        let adapter = make_adapter(client, &state);
 
         let mut stream = adapter.start().await.unwrap();
         let result =
@@ -958,7 +1003,13 @@ mod tests {
         mount_two_syncs(&server, event_sync).await;
 
         let client = make_client(&server);
-        let adapter = MatrixAdapter::new(client, vec![], vec!["@allowed:example.com".to_string()]);
+        let state = tempfile::tempdir().unwrap();
+        let adapter = MatrixAdapter::new(
+            client,
+            vec![],
+            vec!["@allowed:example.com".to_string()],
+            state.path().to_path_buf(),
+        );
 
         let mut stream = adapter.start().await.unwrap();
         let result =
@@ -996,7 +1047,8 @@ mod tests {
             .await;
 
         let client = make_client(&server);
-        let adapter = make_adapter(client);
+        let state = tempfile::tempdir().unwrap();
+        let adapter = make_adapter(client, &state);
         let user = assistant_core::ChannelUser {
             platform_id: "!room:example.com".into(),
             display_name: None,

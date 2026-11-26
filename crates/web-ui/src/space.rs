@@ -144,6 +144,7 @@ impl SpaceResolver {
 
         Ok(SpaceCtx {
             auth: auth.clone(),
+            space_id,
             org_slug: org.slug,
             space_slug: space.slug,
             role,
@@ -201,6 +202,7 @@ fn internal(err: anyhow::Error) -> SpaceError {
 /// The space a data-plane request is bound to.
 pub struct SpaceCtx {
     pub auth: AuthContext,
+    pub space_id: SpaceId,
     pub org_slug: String,
     pub space_slug: String,
     /// The caller's effective role in this space.

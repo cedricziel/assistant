@@ -341,23 +341,9 @@ async fn rows_of_run(rig: &Rig, run_id: Uuid) -> i64 {
         .unwrap()
 }
 
-/// Removes the attachment bytes a test wrote under the Persona's directory.
-struct AttachmentFiles(Vec<AttachmentMeta>);
-
-impl Drop for AttachmentFiles {
-    fn drop(&mut self) {
-        for meta in &self.0 {
-            let path = assistant_storage::attachments::attachment_path(meta);
-            let _ = std::fs::remove_file(&path);
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::remove_dir(dir);
-            }
-        }
-    }
-}
-
-/// Stores a text attachment bound to `message_id`.
-async fn attach(rig: &Rig, message_id: Uuid, text: &str) -> (AttachmentMeta, AttachmentFiles) {
+/// Stores a text attachment bound to `message_id`. In-memory storage keeps
+/// the bytes in memory, so nothing reaches the disk.
+async fn attach(rig: &Rig, message_id: Uuid, text: &str) -> AttachmentMeta {
     let meta = AttachmentMeta {
         id: Uuid::new_v4(),
         message_id: None,
@@ -371,7 +357,7 @@ async fn attach(rig: &Rig, message_id: Uuid, text: &str) -> (AttachmentMeta, Att
     let store = rig.storage.attachment_store();
     store.store(&meta, text.as_bytes()).await.unwrap();
     store.link_to_message(meta.id, message_id).await.unwrap();
-    (meta.clone(), AttachmentFiles(vec![meta]))
+    meta
 }
 
 // -- Edit ---------------------------------------------------------------------
@@ -487,7 +473,7 @@ async fn editing_a_message_on_an_inactive_branch_uses_its_ancestor_chain() {
 async fn edit_carries_the_attachments_forward_into_the_turn() {
     let rig = rig(vec![answer("seen")], None, "").await;
     let tree = seed(&rig).await;
-    let (meta, _files) = attach(&rig, tree.u2, "attached notes").await;
+    let meta = attach(&rig, tree.u2, "attached notes").await;
     let new_id = Uuid::new_v4();
 
     submit(
@@ -551,7 +537,7 @@ async fn regenerate_saves_no_user_row_and_branches_the_reply_under_the_user() {
 async fn regenerate_sends_the_attachments_of_the_user_message() {
     let rig = rig(vec![answer("again")], None, "").await;
     let tree = seed(&rig).await;
-    let (_meta, _files) = attach(&rig, tree.u2, "attached notes").await;
+    attach(&rig, tree.u2, "attached notes").await;
 
     submit(
         &rig,
@@ -705,7 +691,7 @@ async fn a_redelivered_regenerate_leaves_exactly_one_new_reply() {
 async fn a_redelivered_edit_leaves_one_new_user_row_and_one_link_per_attachment() {
     let rig = rig(flaky_script(), Some(1), TRANSIENT).await;
     let tree = seed(&rig).await;
-    let (meta, _files) = attach(&rig, tree.u2, "attached notes").await;
+    let meta = attach(&rig, tree.u2, "attached notes").await;
     let (new_id, run_id) = (Uuid::new_v4(), Uuid::new_v4());
 
     submit(

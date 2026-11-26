@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assistant.invalid/schemas/tool-results/code_file.schema.json",
+  "title": "code_file",
+  "description": "Contents of a file that was read, possibly cut.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["kind", "path", "content", "truncated", "total_chars"],
+  "properties": {
+    "kind": { "const": "code_file" },
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "content": { "type": "string" },
+    "truncated": { "type": "boolean" },
+    "total_chars": { "type": "integer", "minimum": 0 }
+  }
+}

@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        margin: 0;
+        font: 14px system-ui, sans-serif;
+        background: #10223a;
+        color: #e8f0ff;
+      }
+      main {
+        padding: 16px;
+      }
+      .temp {
+        font-size: 32px;
+        font-weight: 600;
+        margin: 4px 0;
+      }
+      button {
+        margin-top: 12px;
+        padding: 6px 12px;
+        font: inherit;
+        color: inherit;
+        background: #24456e;
+        border: 1px solid #3d6699;
+        border-radius: 6px;
+      }
+      button:disabled {
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div id="city">Loading…</div>
+      <div class="temp" id="temp"></div>
+      <div id="summary"></div>
+      <button id="save" type="button" disabled>Save as favorite</button>
+      <div id="status" role="status"></div>
+    </main>
+    <script>
+      /* APP_SCRIPT */
+    </script>
+  </body>
+</html>

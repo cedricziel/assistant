@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{LlmProvider, base_dir, resolve_dir, resolve_path, types::agent::OrgConfig};
+use assistant_core::{LlmProvider, base_dir, resolve, types::agent::OrgConfig};
 use assistant_storage::{MemoryChunkStore, StorageLayer};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
@@ -62,21 +62,27 @@ impl MemoryIndexer {
     async fn memory_files(&self) -> Vec<PathBuf> {
         let mem = self.config.memory.clone();
         let base = base_dir();
+        let base = base.as_deref();
 
-        let core_files = vec![
-            resolve_path(&mem.soul_path, &base, "SOUL.md"),
-            resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
-            resolve_path(&mem.user_path, &base, "USER.md"),
-            resolve_path(&mem.memory_path, &base, "MEMORY.md"),
-        ];
+        let core_files: Vec<PathBuf> = [
+            (&mem.soul_path, "SOUL.md"),
+            (&mem.identity_path, "IDENTITY.md"),
+            (&mem.user_path, "USER.md"),
+            (&mem.memory_path, "MEMORY.md"),
+        ]
+        .into_iter()
+        .filter_map(|(configured, name)| resolve(configured, base, name))
+        .collect();
 
         // Scan the notes directory and filter all paths in the blocking context
         // so that no synchronous filesystem calls (read_dir, exists) run on the
         // async thread.
-        let notes_dir = resolve_dir(&mem.notes_dir, &base, "memory");
+        let notes_dir = resolve(&mem.notes_dir, base, "memory");
         tokio::task::spawn_blocking(move || {
             let mut notes = Vec::new();
-            if let Ok(entries) = std::fs::read_dir(&notes_dir) {
+            if let Some(notes_dir) = &notes_dir
+                && let Ok(entries) = std::fs::read_dir(notes_dir)
+            {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().map(|e| e == "md").unwrap_or(false) {

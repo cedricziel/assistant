@@ -10,10 +10,11 @@ use std::sync::Arc;
 
 use http::request::Parts;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, Extensions,
-    GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
-    ReadResourceRequestParams, ReadResourceResponse, ServerConfig, SubscriptionFilter,
+    CallToolRequestParams, CallToolResponse, CancelTaskParams, CompleteRequestParams,
+    CompleteResult, Extensions, GetPromptRequestParams, GetPromptResponse, GetTaskParams,
+    GetTaskResult, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult,
+    ListToolsResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
+    ReadResourceResponse, ServerConfig, SubscriptionFilter,
 };
 use rmcp::service::{NotificationContext, RequestContext, SubscriptionContext};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -139,6 +140,24 @@ impl ServerHandler for RequestBoundServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
         bound(&context.extensions)?.complete(request, context).await
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        bound(&context.extensions)?.get_task(request, context).await
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        bound(&context.extensions)?
+            .cancel_task(request, context)
+            .await
     }
 
     fn accepted_subscription_filter(

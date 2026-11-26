@@ -5,6 +5,7 @@
 // ignore_for_file: unused_element
 import 'package:built_collection/built_collection.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
+import 'package:assistant_api/src/model/branch_info.dart';
 import 'package:assistant_api/src/model/message_feedback_summary.dart';
 import 'package:assistant_api/src/model/attachment_meta_response.dart';
 import 'package:built_value/built_value.dart';
@@ -16,11 +17,14 @@ part 'message_summary.g.dart';
 ///
 /// Properties:
 /// * [attachments] - Attachments linked to this message.
+/// * [branch] - This message's place among its versions, present only when it has siblings. On a user message: the edited versions. On an assistant message: the versions of the reply it ends.
 /// * [content]
 /// * [createdAt]
 /// * [feedback] - The calling user's verdict on this message. Omitted when the caller has not rated it.
 /// * [finishReason] - Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message.
 /// * [id]
+/// * [parentId] - The message this one follows in the conversation tree. Omitted for a root.
+/// * [replyBranch] - On a user message whose reply has no visible assistant row: the versions of that reply.
 /// * [role]
 /// * [skillName] - Name of the tool or skill that produced this result (present when `role == \"tool\"`).
 /// * [toolCalls] - Tool calls made in this message (present when `role == \"assistant\"` and the message contains tool invocations).
@@ -32,6 +36,10 @@ abstract class MessageSummary
   /// Attachments linked to this message.
   @BuiltValueField(wireName: r'attachments')
   BuiltList<AttachmentMetaResponse>? get attachments;
+
+  /// This message's place among its versions, present only when it has siblings. On a user message: the edited versions. On an assistant message: the versions of the reply it ends.
+  @BuiltValueField(wireName: r'branch')
+  BranchInfo? get branch;
 
   @BuiltValueField(wireName: r'content')
   String get content;
@@ -49,6 +57,14 @@ abstract class MessageSummary
 
   @BuiltValueField(wireName: r'id')
   String get id;
+
+  /// The message this one follows in the conversation tree. Omitted for a root.
+  @BuiltValueField(wireName: r'parent_id')
+  String? get parentId;
+
+  /// On a user message whose reply has no visible assistant row: the versions of that reply.
+  @BuiltValueField(wireName: r'reply_branch')
+  BranchInfo? get replyBranch;
 
   @BuiltValueField(wireName: r'role')
   String get role;
@@ -102,6 +118,13 @@ class _$MessageSummarySerializer
             const FullType(BuiltList, [FullType(AttachmentMetaResponse)]),
       );
     }
+    if (object.branch != null) {
+      yield r'branch';
+      yield serializers.serialize(
+        object.branch,
+        specifiedType: const FullType.nullable(BranchInfo),
+      );
+    }
     yield r'content';
     yield serializers.serialize(
       object.content,
@@ -131,6 +154,20 @@ class _$MessageSummarySerializer
       object.id,
       specifiedType: const FullType(String),
     );
+    if (object.parentId != null) {
+      yield r'parent_id';
+      yield serializers.serialize(
+        object.parentId,
+        specifiedType: const FullType.nullable(String),
+      );
+    }
+    if (object.replyBranch != null) {
+      yield r'reply_branch';
+      yield serializers.serialize(
+        object.replyBranch,
+        specifiedType: const FullType.nullable(BranchInfo),
+      );
+    }
     yield r'role';
     yield serializers.serialize(
       object.role,
@@ -194,6 +231,14 @@ class _$MessageSummarySerializer
           ) as BuiltList<AttachmentMetaResponse>;
           result.attachments.replace(valueDes);
           break;
+        case r'branch':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(BranchInfo),
+          ) as BranchInfo?;
+          if (valueDes == null) continue;
+          result.branch.replace(valueDes);
+          break;
         case r'content':
           final valueDes = serializers.deserialize(
             value,
@@ -230,6 +275,22 @@ class _$MessageSummarySerializer
             specifiedType: const FullType(String),
           ) as String;
           result.id = valueDes;
+          break;
+        case r'parent_id':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(String),
+          ) as String?;
+          if (valueDes == null) continue;
+          result.parentId = valueDes;
+          break;
+        case r'reply_branch':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(BranchInfo),
+          ) as BranchInfo?;
+          if (valueDes == null) continue;
+          result.replyBranch.replace(valueDes);
           break;
         case r'role':
           final valueDes = serializers.deserialize(

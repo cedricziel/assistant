@@ -12,24 +12,12 @@ use assistant_core::types::agent::{OrgConfig, ServerConfig};
 use assistant_core::types::llm::LlmProviderKind;
 use assistant_core::types::skills_mcp::McpTransportConfig;
 use assistant_core::types::storage::BusKind;
-use assistant_core::{load_org_config, load_server_config, org_config_path, server_config_path};
+use assistant_core::{
+    expand_tilde, load_org_config, load_server_config, org_config_path, server_config_path,
+};
 use assistant_storage::DEFAULT_ORG_SLUG;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Expand a leading `~` to the user's home directory.
-fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    } else if path == "~"
-        && let Some(home) = dirs::home_dir()
-    {
-        return home;
-    }
-    PathBuf::from(path)
-}
 
 // ── Check result types ───────────────────────────────────────────────────────
 
