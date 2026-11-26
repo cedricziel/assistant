@@ -10,8 +10,10 @@
 //! Phase 0 of the `protocol-adapter-platform` epic ships one projector per
 //! existing wire: [`SseProjector`] (`/api` SSE) and `CliProjector` (the REPL).
 
+use chrono::SecondsFormat;
 use serde_json::{Value, json};
 
+use crate::interaction::InteractionOutcome;
 use crate::orchestrator::OrchestratorEvent;
 
 /// Projects an [`OrchestratorEvent`] into a wire-specific frame type.
@@ -176,10 +178,61 @@ impl StreamProjector for SseProjector {
                     log_payload: p,
                 }
             }
-            // Projected onto the wire by the stream-events PR (7c); until then
-            // interactions are dormant and nothing reaches the stream.
-            OrchestratorEvent::InteractionRequested { .. }
-            | OrchestratorEvent::InteractionResolved { .. } => return Vec::new(),
+            OrchestratorEvent::InteractionRequested {
+                interaction_id,
+                kind,
+                tool_call_id,
+                created_at,
+                expires_at,
+                renders_card,
+                request,
+            } => {
+                let mut p = json!({
+                    "interaction_id": interaction_id,
+                    "kind": kind,
+                    "created_at": created_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+                    "expires_at": expires_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+                    "renders_card": renders_card,
+                });
+                if let Some(id) = tool_call_id {
+                    p["tool_call_id"] = Value::String(id.clone());
+                }
+                // The kind-specific fields sit beside the common ones.
+                if let (Some(fields), Some(out)) = (request.as_object(), p.as_object_mut()) {
+                    for (key, value) in fields {
+                        out.entry(key.clone()).or_insert_with(|| value.clone());
+                    }
+                }
+                SseFrame {
+                    event: "interaction_requested".to_string(),
+                    sse_data: p.to_string(),
+                    log_payload: p,
+                }
+            }
+            OrchestratorEvent::InteractionResolved {
+                interaction_id,
+                kind,
+                resolved_at,
+                outcome,
+            } => {
+                let mut p = json!({
+                    "interaction_id": interaction_id,
+                    "kind": kind,
+                    "outcome": outcome.name(),
+                    "resolved_at": resolved_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+                });
+                if let InteractionOutcome::Resolved { response, rule_id } = outcome {
+                    p["response"] = response.clone();
+                    if let Some(id) = rule_id {
+                        p["rule_id"] = Value::String(id.clone());
+                    }
+                }
+                SseFrame {
+                    event: "interaction_resolved".to_string(),
+                    sse_data: p.to_string(),
+                    log_payload: p,
+                }
+            }
             OrchestratorEvent::SurfaceUpdate {
                 surface_id,
                 tool_call_id,
@@ -281,8 +334,16 @@ impl StreamProjector for CliProjector {
             | OrchestratorEvent::SubagentCompleted { .. }
             | OrchestratorEvent::SubagentEvent { .. }
             | OrchestratorEvent::AudioReady { .. }
-            | OrchestratorEvent::InteractionRequested { .. }
             | OrchestratorEvent::InteractionResolved { .. } => Vec::new(),
+            // The REPL cannot answer; it says what the turn is waiting for.
+            OrchestratorEvent::InteractionRequested { kind, request, .. } => {
+                let tool = request
+                    .get("tool_name")
+                    .and_then(Value::as_str)
+                    .map(|name| format!(" ({name})"))
+                    .unwrap_or_default();
+                vec![format!("\n[waiting for your answer: {kind}{tool}]\n")]
+            }
             // Totality only: surfaces are gated to interactive web turns, so
             // this arm is unreachable in practice.
             OrchestratorEvent::SurfaceUpdate { fallback_text, .. } => {
@@ -340,7 +401,42 @@ mod tests {
                 audio_id: "audio-1".into(),
             },
             surface_update_sample(),
+            interaction_requested_sample(),
+            interaction_resolved_sample(),
         ]
+    }
+
+    fn at(secs: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(secs, 0).expect("valid timestamp")
+    }
+
+    fn interaction_requested_sample() -> OrchestratorEvent {
+        OrchestratorEvent::InteractionRequested {
+            interaction_id: "i-1".into(),
+            kind: "tool_approval".into(),
+            tool_call_id: Some("toolu_1".into()),
+            created_at: at(1_700_000_000),
+            expires_at: at(1_700_000_600),
+            renders_card: true,
+            request: json!({
+                "tool_name": "bash",
+                "arguments": {"command": "git status"},
+                "arguments_truncated": false,
+                "options": ["allow_once", "reject_once"],
+            }),
+        }
+    }
+
+    fn interaction_resolved_sample() -> OrchestratorEvent {
+        OrchestratorEvent::InteractionResolved {
+            interaction_id: "i-1".into(),
+            kind: "tool_approval".into(),
+            resolved_at: at(1_700_000_030),
+            outcome: InteractionOutcome::Resolved {
+                response: json!({"decision": "allow_always"}),
+                rule_id: Some("rule-1".into()),
+            },
+        }
     }
 
     fn surface_update_sample() -> OrchestratorEvent {
@@ -712,6 +808,134 @@ mod tests {
         assert_eq!(
             CliProjector.project(&surface_update_sample()),
             vec!["Trip form: choose a date".to_string()]
+        );
+    }
+
+    #[test]
+    fn interaction_requested_projects_the_wire_shape_with_the_request_flattened() {
+        let frame = only(interaction_requested_sample());
+        assert_eq!(frame.event, "interaction_requested");
+        assert_eq!(
+            frame.log_payload,
+            json!({
+                "interaction_id": "i-1",
+                "kind": "tool_approval",
+                "created_at": "2023-11-14T22:13:20Z",
+                "expires_at": "2023-11-14T22:23:20Z",
+                "renders_card": true,
+                "tool_call_id": "toolu_1",
+                "tool_name": "bash",
+                "arguments": {"command": "git status"},
+                "arguments_truncated": false,
+                "options": ["allow_once", "reject_once"],
+            })
+        );
+        assert_eq!(frame.sse_data, frame.log_payload.to_string());
+    }
+
+    #[test]
+    fn interaction_requested_omits_an_absent_tool_call_id() {
+        let OrchestratorEvent::InteractionRequested {
+            interaction_id,
+            kind,
+            created_at,
+            expires_at,
+            renders_card,
+            request,
+            ..
+        } = interaction_requested_sample()
+        else {
+            unreachable!("sample is a request");
+        };
+        let frame = only(OrchestratorEvent::InteractionRequested {
+            interaction_id,
+            kind,
+            tool_call_id: None,
+            created_at,
+            expires_at,
+            renders_card,
+            request,
+        });
+        assert!(frame.log_payload.get("tool_call_id").is_none());
+    }
+
+    #[test]
+    fn interaction_resolved_carries_the_response_and_rule_only_when_resolved() {
+        let frame = only(interaction_resolved_sample());
+        assert_eq!(frame.event, "interaction_resolved");
+        assert_eq!(
+            frame.log_payload,
+            json!({
+                "interaction_id": "i-1",
+                "kind": "tool_approval",
+                "outcome": "resolved",
+                "resolved_at": "2023-11-14T22:13:50Z",
+                "response": {"decision": "allow_always"},
+                "rule_id": "rule-1",
+            })
+        );
+        assert_eq!(frame.sse_data, frame.log_payload.to_string());
+
+        for (outcome, name) in [
+            (InteractionOutcome::Cancelled, "cancelled"),
+            (InteractionOutcome::Expired, "expired"),
+        ] {
+            let frame = only(OrchestratorEvent::InteractionResolved {
+                interaction_id: "i-2".into(),
+                kind: "question".into(),
+                resolved_at: at(1_700_000_030),
+                outcome,
+            });
+            assert_eq!(
+                frame.log_payload,
+                json!({
+                    "interaction_id": "i-2",
+                    "kind": "question",
+                    "outcome": name,
+                    "resolved_at": "2023-11-14T22:13:50Z",
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn interaction_resolved_without_a_rule_omits_rule_id() {
+        let frame = only(OrchestratorEvent::InteractionResolved {
+            interaction_id: "i-3".into(),
+            kind: "tool_approval".into(),
+            resolved_at: at(1_700_000_030),
+            outcome: InteractionOutcome::Resolved {
+                response: json!({"decision": "allow_once"}),
+                rule_id: None,
+            },
+        });
+        assert!(frame.log_payload.get("rule_id").is_none());
+    }
+
+    #[test]
+    fn cli_renders_a_one_line_notice_for_an_interaction_request() {
+        assert_eq!(
+            CliProjector.project(&interaction_requested_sample()),
+            vec!["\n[waiting for your answer: tool_approval (bash)]\n".to_string()]
+        );
+        let question = OrchestratorEvent::InteractionRequested {
+            interaction_id: "i-4".into(),
+            kind: "question".into(),
+            tool_call_id: None,
+            created_at: at(1_700_000_000),
+            expires_at: at(1_700_000_600),
+            renders_card: true,
+            request: json!({"questions": []}),
+        };
+        assert_eq!(
+            CliProjector.project(&question),
+            vec!["\n[waiting for your answer: question]\n".to_string()]
+        );
+        assert!(
+            CliProjector
+                .project(&interaction_resolved_sample())
+                .is_empty(),
+            "a resolution prints nothing"
         );
     }
 }
