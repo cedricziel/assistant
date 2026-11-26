@@ -11027,7 +11027,8 @@
           "title",
           "created_at",
           "updated_at",
-          "messages"
+          "messages",
+          "surfaces"
         ],
         "properties": {
           "created_at": {
@@ -11043,6 +11044,13 @@
             "items": {
               "$ref": "#/components/schemas/MessageSummary"
             }
+          },
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SurfaceSummary"
+            },
+            "description": "Generative UI surfaces anchored on the returned messages."
           },
           "title": {
             "type": "string"
@@ -14121,6 +14129,90 @@
           },
           "id": {
             "type": "string"
+          }
+        }
+      },
+      "SurfaceSummary": {
+        "type": "object",
+        "description": "One surface of a conversation, as the client needs to render it again.",
+        "required": [
+          "surface_id",
+          "turn",
+          "anchor_message_id",
+          "anchor_call_index",
+          "title",
+          "fallback_text",
+          "status",
+          "answerable",
+          "created_at",
+          "messages"
+        ],
+        "properties": {
+          "action_message_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The user message that carried the submitting action."
+          },
+          "anchor_call_index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Index of the creating call inside that message's tool calls.",
+            "minimum": 0
+          },
+          "anchor_message_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tool-call message the surface hangs off."
+          },
+          "answerable": {
+            "type": "boolean",
+            "description": "Whether the user can still answer the surface: it is `active` and no\nuser message follows its anchor on the returned path."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fallback_text": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "A single synthesized A2UI `createSurface` holding the current\ncomponents and data model."
+          },
+          "status": {
+            "type": "string",
+            "description": "`\"active\"` or `\"submitted\"`."
+          },
+          "submitted_action": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The action that submitted the surface."
+          },
+          "surface_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider id of the creating tool call, when the provider supplied one."
+          },
+          "turn": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },

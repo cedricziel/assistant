@@ -5,6 +5,7 @@
 // ignore_for_file: unused_element
 import 'package:built_collection/built_collection.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
+import 'package:assistant_api/src/model/surface_summary.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -16,6 +17,7 @@ part 'conversation_detail.g.dart';
 /// * [createdAt]
 /// * [id]
 /// * [messages]
+/// * [surfaces] - Generative UI surfaces anchored on the returned messages.
 /// * [title]
 /// * [updatedAt]
 @BuiltValue()
@@ -29,6 +31,10 @@ abstract class ConversationDetail
 
   @BuiltValueField(wireName: r'messages')
   BuiltList<MessageSummary> get messages;
+
+  /// Generative UI surfaces anchored on the returned messages.
+  @BuiltValueField(wireName: r'surfaces')
+  BuiltList<SurfaceSummary> get surfaces;
 
   @BuiltValueField(wireName: r'title')
   String get title;
@@ -76,6 +82,11 @@ class _$ConversationDetailSerializer
     yield serializers.serialize(
       object.messages,
       specifiedType: const FullType(BuiltList, [FullType(MessageSummary)]),
+    );
+    yield r'surfaces';
+    yield serializers.serialize(
+      object.surfaces,
+      specifiedType: const FullType(BuiltList, [FullType(SurfaceSummary)]),
     );
     yield r'title';
     yield serializers.serialize(
@@ -133,6 +144,14 @@ class _$ConversationDetailSerializer
                 const FullType(BuiltList, [FullType(MessageSummary)]),
           ) as BuiltList<MessageSummary>;
           result.messages.replace(valueDes);
+          break;
+        case r'surfaces':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType:
+                const FullType(BuiltList, [FullType(SurfaceSummary)]),
+          ) as BuiltList<SurfaceSummary>;
+          result.surfaces.replace(valueDes);
           break;
         case r'title':
           final valueDes = serializers.deserialize(

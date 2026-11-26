@@ -52,6 +52,7 @@ use crate::api::messages::{
     SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
 };
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
+use crate::api::surfaces::SurfaceSummary;
 use crate::api::{
     account::{ChangePasswordRequest, UpdateCurrentUserRequest, UpdateCurrentUserResponse},
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
@@ -498,6 +499,7 @@ pub struct ApiErrorResponse {
             ConversationDetail,
             MessageSummary,
             ToolCallSummary,
+            SurfaceSummary,
             CreateConversationRequest,
             UpdateConversationRequest,
             ApiSendMessageRequest,
