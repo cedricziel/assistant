@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Pluggable audio transcription providers (Whisper, Ollama, Deepgram)"
 
 [dependencies]
+assistant-audio = { path = "../audio" }
 assistant-core = { path = "../core" }
 assistant-llm-provider = { path = "../llm-provider" }
 async-trait    = { workspace = true }

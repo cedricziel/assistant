@@ -290,6 +290,14 @@ impl RunBroadcaster {
         self.senders.write().await.remove(run_id);
     }
 
+    /// Whether `run_id` is registered, i.e. started and not yet finished.
+    ///
+    /// Unlike [`subscribe`](Self::subscribe) this creates no receiver, so it
+    /// does not count as a listener.
+    pub async fn is_active(&self, run_id: &Uuid) -> bool {
+        self.senders.read().await.contains_key(run_id)
+    }
+
     /// Subscribe to live events for `run_id`.
     ///
     /// Returns `None` if the run is not currently active (already completed or
@@ -678,6 +686,20 @@ mod tests {
             e2.sequence, e1.sequence,
             "both subscribers see the same sequence"
         );
+    }
+
+    #[tokio::test]
+    async fn broadcaster_is_active_between_start_and_finish_without_a_receiver() {
+        let broadcaster = RunBroadcaster::new();
+        let run_id = Uuid::new_v4();
+        assert!(!broadcaster.is_active(&run_id).await);
+
+        let tx = broadcaster.start_run(run_id).await;
+        assert!(broadcaster.is_active(&run_id).await);
+        assert_eq!(tx.receiver_count(), 0, "is_active creates no receiver");
+
+        broadcaster.finish_run(&run_id).await;
+        assert!(!broadcaster.is_active(&run_id).await);
     }
 
     #[tokio::test]

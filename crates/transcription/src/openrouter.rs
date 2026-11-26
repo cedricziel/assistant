@@ -16,9 +16,9 @@ use assistant_llm_provider::retry::{
     ProviderHttpError, RetryConfig, classify_provider_error, parse_retry_after, with_retry_hinted,
 };
 
-use crate::converter::AudioFormat;
-use crate::pipeline::AudioPipeline;
 use crate::provider::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
+use assistant_audio::AudioFormat;
+use assistant_audio::AudioPipeline;
 
 /// OpenRouter's default speech-to-text model.
 pub const DEFAULT_MODEL: &str = "openai/whisper-1";

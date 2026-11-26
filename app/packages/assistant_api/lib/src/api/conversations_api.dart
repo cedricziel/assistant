@@ -12,6 +12,7 @@ import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/api_send_message_request.dart';
 import 'package:assistant_api/src/model/call_mcp_app_tool_request.dart';
 import 'package:assistant_api/src/model/conversation_detail.dart';
+import 'package:assistant_api/src/model/conversation_search_summary.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
 import 'package:assistant_api/src/model/create_conversation_request.dart';
 import 'package:assistant_api/src/model/error_body.dart';
@@ -1220,6 +1221,101 @@ class ConversationsApi {
     );
   }
 
+  /// Search conversations by title and message text.
+  ///
+  ///
+  /// Parameters:
+  /// * [q] - Search text, split on whitespace into at most 8 tokens (at most 200 characters). Each token is a prefix of a message word or a substring of the title.
+  /// * [limit] - Maximum results (default 20, capped at 50).
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [BuiltList<ConversationSearchSummary>] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<BuiltList<ConversationSearchSummary>>> searchConversations({
+    String? q,
+    int? limit,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/api/conversations/search';
+    final _options = Options(
+      method: r'GET',
+      headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      validateStatus: validateStatus,
+    );
+
+    final _queryParameters = <String, dynamic>{
+      if (q != null)
+        r'q': encodeQueryParameter(_serializers, q, const FullType(String)),
+      r'limit': encodeQueryParameter(_serializers, limit, const FullType(int)),
+    };
+
+    final _response = await _dio.request<Object>(
+      _path,
+      options: _options,
+      queryParameters: _queryParameters,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    BuiltList<ConversationSearchSummary>? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(
+                  BuiltList, [FullType(ConversationSearchSummary)]),
+            ) as BuiltList<ConversationSearchSummary>;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<BuiltList<ConversationSearchSummary>>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
+  }
+
   /// &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
   /// The response is a &#x60;text/event-stream&#x60; (SSE) with two event types: - &#x60;event: token&#x60; — incremental assistant token (data is plain text) - &#x60;event: done&#x60;  — final JSON object: &#x60;{\&quot;role\&quot;:\&quot;assistant\&quot;,\&quot;content\&quot;:\&quot;...\&quot;}&#x60;
   ///
@@ -1565,7 +1661,7 @@ class ConversationsApi {
   }
 
   /// &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
-  /// Replays stored events from &#x60;?since&#x60; (default 0), then tails live events if the run is still active. Closes when the run finishes, not at the &#x60;done&#x60; or &#x60;agent_error&#x60; frame: events such as &#x60;suggestions&#x60; follow &#x60;done&#x60;. A client that disconnects stops the tail at once.  Returns &#x60;404&#x60; if no events exist for &#x60;run_id&#x60; and the run is not active (never started, unknown, or pruned after the TTL elapsed).
+  /// Replays stored events from &#x60;?since&#x60; (default 0), then tails live events if the run is still active. Closes when the run finishes, not at the &#x60;done&#x60; or &#x60;agent_error&#x60; frame: events such as &#x60;suggestions&#x60; follow &#x60;done&#x60;. A client that disconnects stops the tail at once.  Returns &#x60;404&#x60; if no events exist for &#x60;run_id&#x60; and the run is not active (never started, unknown, or pruned after the TTL elapsed).  After &#x60;done&#x60; the stream may carry one &#x60;suggestions&#x60; frame (&#x60;SseSuggestionsEvent&#x60;) with follow-up prompts for the finished turn; it then closes when the run finishes.
   ///
   /// Parameters:
   /// * [id] - Conversation UUID
