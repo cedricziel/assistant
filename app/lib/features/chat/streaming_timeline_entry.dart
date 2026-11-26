@@ -128,6 +128,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
         TimelineEntryType.thinking => _buildThinking(context),
         TimelineEntryType.subagent => _buildSubagent(context),
         TimelineEntryType.command => const SizedBox.shrink(),
+        TimelineEntryType.interaction => const SizedBox.shrink(),
         TimelineEntryType.message => const SizedBox.shrink(),
       },
     );

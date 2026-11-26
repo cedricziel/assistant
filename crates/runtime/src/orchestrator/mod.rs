@@ -601,23 +601,35 @@ impl Orchestrator {
         config
     }
 
-    /// The provider a turn of `conversation_id` runs on: the default, or one
-    /// for the model its `/model` override names.
+    /// The provider a turn of `conversation_id` runs on: the model the turn
+    /// itself asks for, else the one its `/model` override names, else the
+    /// default.
     /// The provider is [`ready`](LlmProvider::ready), so the capabilities a
     /// turn reads are final.
-    async fn llm_for(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
-        let llm = self.select_llm(conversation_id).await?;
+    async fn llm_for(
+        &self,
+        conversation_id: Uuid,
+        turn_model: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>> {
+        let llm = self.select_llm(conversation_id, turn_model).await?;
         llm.ready().await;
         Ok(llm)
     }
 
-    async fn select_llm(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
-        let model = self
-            .conversation_configs
-            .read()
-            .await
-            .get(&conversation_id)
-            .and_then(|config| config.model_override.clone());
+    async fn select_llm(
+        &self,
+        conversation_id: Uuid,
+        turn_model: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>> {
+        let model = match turn_model {
+            Some(model) => Some(model.to_string()),
+            None => self
+                .conversation_configs
+                .read()
+                .await
+                .get(&conversation_id)
+                .and_then(|config| config.model_override.clone()),
+        };
         let Some(model) = model.filter(|m| m != self.llm.model_name()) else {
             return Ok(Arc::clone(&self.llm));
         };
@@ -917,7 +929,9 @@ impl Orchestrator {
 
         // 4. Load global tool specs and merge with extensions.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
-        let llm = self.llm_for(conversation_id).await?;
+        let llm = self
+            .llm_for(conversation_id, identity.model_override.as_deref())
+            .await?;
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
@@ -1097,6 +1111,7 @@ impl Orchestrator {
                         FinalAnswerMeta {
                             traceparent: llm_traceparent,
                             timing: None,
+                            model: Some(llm.model_name().to_string()),
                         },
                     )
                     .await?;
@@ -1352,7 +1367,9 @@ impl Orchestrator {
         let summary_store = self.storage.conversation_summary_store();
 
         // 4. Load all registered tool specs.
-        let llm = self.llm_for(conversation_id).await?;
+        let llm = self
+            .llm_for(conversation_id, identity.model_override.as_deref())
+            .await?;
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
@@ -1551,6 +1568,7 @@ impl Orchestrator {
                             FinalAnswerMeta {
                                 traceparent: llm_traceparent,
                                 timing: Some(timing.clone()),
+                                model: Some(llm.model_name().to_string()),
                             },
                         )
                         .instrument(iteration_span.clone())

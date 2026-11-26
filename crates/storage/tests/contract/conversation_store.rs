@@ -749,10 +749,40 @@ async fn finish_reason_round_trips(store: Box<dyn ConversationStore>) {
     assert_eq!(single.finish_reason, Some(MessageFinishReason::Cancelled));
 }
 
+async fn model_round_trips(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("t")).await.unwrap();
+    let user = user_msg(conv.id, "hi", 0);
+    let mut answered = assistant_msg(conv.id, "full", 1);
+    answered.model = Some("claude-opus-4".to_string());
+    let plain = assistant_msg(conv.id, "other", 2);
+    for m in [&user, &answered, &plain] {
+        store.save_message(m).await.unwrap();
+    }
+
+    let history = store.load_history(conv.id).await.unwrap();
+    assert_eq!(history[0].model, None, "user message has none");
+    assert_eq!(
+        history[1].model.as_deref(),
+        Some("claude-opus-4"),
+        "load_history keeps the model"
+    );
+    assert_eq!(history[2].model, None, "unmarked message has none");
+
+    let tail = store.last_messages(conv.id, 2).await.unwrap();
+    assert_eq!(tail[0].model.as_deref(), Some("claude-opus-4"));
+    let single = store.get_message(answered.id).await.unwrap().unwrap();
+    assert_eq!(single.model.as_deref(), Some("claude-opus-4"));
+}
+
 macro_rules! contract_tests {
     ($store_name:ident, $constructor:expr) => {
         mod $store_name {
             use super::*;
+
+            #[tokio::test]
+            async fn t_model_round_trips() {
+                model_round_trips($constructor).await;
+            }
 
             #[tokio::test]
             async fn t_finish_reason_round_trips() {

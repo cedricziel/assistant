@@ -110,6 +110,7 @@ import 'package:assistant_api/src/model/persona_file_slot.dart';
 import 'package:assistant_api/src/model/persona_from_template_response.dart';
 import 'package:assistant_api/src/model/persona_skill_access.dart';
 import 'package:assistant_api/src/model/persona_summary.dart';
+import 'package:assistant_api/src/model/protected_resource_metadata.dart';
 import 'package:assistant_api/src/model/publish_catalog_item_request.dart';
 import 'package:assistant_api/src/model/push_notification_config.dart';
 import 'package:assistant_api/src/model/put_org_oidc_config_request.dart';
@@ -300,6 +301,7 @@ part 'serializers.g.dart';
   PersonaFromTemplateResponse,
   PersonaSkillAccess,
   PersonaSummary,
+  ProtectedResourceMetadata,
   PublishCatalogItemRequest,
   PushNotificationConfig,
   PutOrgOidcConfigRequest,

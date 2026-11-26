@@ -62,7 +62,7 @@ impl OAuthState {
     /// Canonical URL of the MCP endpoint (`<public base URL>/mcp`), the only
     /// RFC 8707 `resource` this server issues tokens for besides its own API.
     pub fn mcp_resource(&self) -> String {
-        format!("{}/mcp", self.issuer.trim_end_matches('/'))
+        mcp_resource(&self.issuer)
     }
 
     /// Check a `resource` request parameter (RFC 8707). `None` is the server's
@@ -75,6 +75,11 @@ impl OAuthState {
             _ => Ok(()),
         }
     }
+}
+
+/// Canonical URL of the MCP endpoint served under `issuer`.
+pub(crate) fn mcp_resource(issuer: &str) -> String {
+    format!("{}/mcp", issuer.trim_end_matches('/'))
 }
 
 /// Build the public OAuth2 router (no auth required on these endpoints).
