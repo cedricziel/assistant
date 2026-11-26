@@ -419,8 +419,8 @@ impl ConversationStore for SqliteConversationStore {
 
         sqlx::query(
             "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, provider_state_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -432,6 +432,7 @@ impl ConversationStore for SqliteConversationStore {
         .bind(msg.turn)
         .bind(msg.created_at)
         .bind(&msg.sender_user_id)
+        .bind(&msg.provider_state_json)
         .execute(&self.pool)
         .await?;
 
@@ -458,7 +459,7 @@ impl ConversationStore for SqliteConversationStore {
         let conv_id_str = conversation_id.to_string();
 
         let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.provider_state_json \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
@@ -481,6 +482,7 @@ impl ConversationStore for SqliteConversationStore {
                     content: r.get("content"),
                     skill_name: r.get("skill_name"),
                     tool_calls_json: r.get("tool_calls_json"),
+                    provider_state_json: r.get("provider_state_json"),
                     turn: r.get("turn"),
                     created_at: r.get("created_at"),
                     sender_user_id: r.get("sender_user_id"),
@@ -493,7 +495,7 @@ impl ConversationStore for SqliteConversationStore {
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let id_str = message_id.to_string();
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.provider_state_json \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
@@ -514,6 +516,7 @@ impl ConversationStore for SqliteConversationStore {
                 content: r.get("content"),
                 skill_name: r.get("skill_name"),
                 tool_calls_json: r.get("tool_calls_json"),
+                provider_state_json: r.get("provider_state_json"),
                 turn: r.get("turn"),
                 created_at: r.get("created_at"),
                 sender_user_id: r.get("sender_user_id"),
@@ -528,7 +531,7 @@ impl ConversationStore for SqliteConversationStore {
 
         // Fetch the newest rows first, then reverse to restore chronological order.
         let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.provider_state_json \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
@@ -554,6 +557,7 @@ impl ConversationStore for SqliteConversationStore {
                     content: r.get("content"),
                     skill_name: r.get("skill_name"),
                     tool_calls_json: r.get("tool_calls_json"),
+                    provider_state_json: r.get("provider_state_json"),
                     turn: r.get("turn"),
                     created_at: r.get("created_at"),
                     sender_user_id: r.get("sender_user_id"),
@@ -1277,6 +1281,34 @@ mod tests {
             history[0].sender_user_id.as_deref(),
             Some("alice"),
             "sender_user_id should round-trip"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_message_provider_state_round_trips() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut with_state = Message::assistant(conv.id, "");
+        with_state.turn = 1;
+        with_state.tool_calls_json = Some(r#"[{"name":"bash","params":{}}]"#.into());
+        with_state.provider_state_json =
+            Some(r#"{"provider":"openrouter","model":"m","data":{"reasoning_details":[]}}"#.into());
+        store.save_message(&with_state).await.unwrap();
+
+        let mut without = Message::assistant(conv.id, "done");
+        without.turn = 2;
+        store.save_message(&without).await.unwrap();
+
+        let history = store.load_history(conv.id).await.unwrap();
+        assert_eq!(
+            history[0].provider_state_json, with_state.provider_state_json,
+            "provider state should round-trip unchanged"
+        );
+        assert!(
+            history[1].provider_state_json.is_none(),
+            "messages without provider state read back as None"
         );
     }
 

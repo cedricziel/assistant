@@ -113,7 +113,8 @@ fn build_title_prompt_history(history: &[ChatHistoryMessage]) -> Vec<ChatHistory
                 joined.push_str("\n\n");
                 continue;
             }
-            ChatHistoryMessage::AssistantToolCalls(_) | ChatHistoryMessage::ToolResult { .. } => {
+            ChatHistoryMessage::AssistantToolCalls { .. }
+            | ChatHistoryMessage::ToolResult { .. } => {
                 continue;
             }
         };

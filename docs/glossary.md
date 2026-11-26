@@ -44,6 +44,18 @@ Position-based access level within the multi-user model. Four predefined roles: 
 
 Fine-grained permission in `resource:action` format (e.g. `conversations:write`, `personas:read`). Used by API keys to restrict access beyond what the user's role grants.
 
+## Branch
+
+One version of a conversation from a fork onward. Editing a user message or regenerating a reply adds a sibling message under the same parent, and everything after the new sibling is a new branch. All branches stay in the conversation's message tree and the user switches between them.
+
+## Active Path
+
+The chain of messages from the root to the Active Leaf. It is the only part of the message tree that history readers (LLM context, `/status`, titling, indexing) and the chat view follow.
+
+## Active Leaf
+
+The message that `conversations.active_leaf_id` points to, the tip of the Active Path. New messages append to it, and switching branches moves it.
+
 ## Naming Rules
 
 - Prefer explicit terms: `Persona`, `Subagent Process`, `A2A Profile`.
