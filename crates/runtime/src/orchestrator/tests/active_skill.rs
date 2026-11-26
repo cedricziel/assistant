@@ -50,7 +50,7 @@ impl TaggedLlm {
                 .unwrap_or("unknown");
             self.judged.lock().unwrap().push(tag.to_string());
             return LlmResponse::FinalAnswer(
-                json!({"create": false, "reason": "test"}).to_string(),
+                json!({"create": false, "reason": "test", "name": "", "description": "", "body": ""}).to_string(),
                 LlmResponseMeta::default(),
             );
         }

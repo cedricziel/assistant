@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::types::features::LearningConfig;
-use assistant_core::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
+use assistant_core::{ChatHistoryMessage, ChatRole, LlmProvider, chat_structured};
 use assistant_storage::{SkillRegistry, StorageLayer};
+use serde_json::json;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -82,16 +83,48 @@ A good skill candidate:
 - Would benefit from documented steps and context
 - Is general enough to be useful across different inputs
 
-Respond with EXACTLY one JSON object (no markdown fences, no extra text):
-- If the turn should become a skill:
-  {"create": true, "name": "<kebab-case-name>", "description": "<one-line description>", "body": "<markdown body with steps and guidance>"}
-- If the turn should NOT become a skill:
-  {"create": false, "reason": "<brief explanation>"}
+Answer with a decision object:
+- create: whether the turn should become a skill
+- reason: a brief explanation of the decision
+- name, description, body: the skill, when create is true; empty strings otherwise
 
 Rules for the skill:
 - name: kebab-case, 2-5 words, descriptive (e.g., "code-review", "debug-test-failure")
 - description: one sentence explaining what the skill does
 - body: markdown instructions that guide the assistant through the task pattern, including which tools to use and in what order"#;
+
+/// Ask the judge whether the turn in `history_text` should become a skill.
+async fn judge_turn(llm: &dyn LlmProvider, history_text: &str) -> Result<serde_json::Value> {
+    let judge_history = vec![ChatHistoryMessage::Text {
+        role: ChatRole::User,
+        content: format!("Here is the conversation turn to evaluate:\n\n{history_text}"),
+    }];
+    chat_structured(
+        llm,
+        JUDGE_SYSTEM_PROMPT,
+        &judge_history,
+        "skill_decision",
+        &judge_schema(),
+    )
+    .await
+}
+
+/// The judge's decision. Strict-mode ready: every property is required.
+fn judge_schema() -> serde_json::Value {
+    let text = json!({"type": "string"});
+    json!({
+        "type": "object",
+        "properties": {
+            "create": {"type": "boolean"},
+            "reason": text,
+            "name": text,
+            "description": text,
+            "body": text,
+        },
+        "required": ["create", "reason", "name", "description", "body"],
+        "additionalProperties": false,
+    })
+}
 
 /// Core logic: gate check, LLM judge call, skill registration.
 async fn evaluate_and_create(
@@ -111,20 +144,7 @@ async fn evaluate_and_create(
         return Ok(());
     }
 
-    // Call the LLM as judge.
-    let judge_history = vec![ChatHistoryMessage::Text {
-        role: ChatRole::User,
-        content: format!("Here is the conversation turn to evaluate:\n\n{history_text}"),
-    }];
-    let response = llm.chat(JUDGE_SYSTEM_PROMPT, &judge_history, &[]).await?;
-
-    let text = match &response {
-        LlmResponse::FinalAnswer(t, _) => t.trim(),
-        LlmResponse::Thinking(t, _) => t.trim(),
-        _ => return Ok(()), // ToolCalls response is unexpected here
-    };
-    let decision: serde_json::Value = serde_json::from_str(text)
-        .map_err(|e| anyhow::anyhow!("LLM judge returned invalid JSON: {e}\nRaw: {text}"))?;
+    let decision = judge_turn(llm.as_ref(), &history_text).await?;
 
     let should_create = decision
         .get("create")
@@ -244,6 +264,47 @@ fn format_history_for_judge(history: &[ChatHistoryMessage]) -> String {
 mod tests {
     use super::*;
 
+    mod judge {
+        use assistant_core::{LlmResponse, LlmResponseMeta};
+        use assistant_llm_provider::scripted::ScriptedLlmProvider;
+
+        use super::super::judge_turn;
+
+        fn answering(text: &str) -> ScriptedLlmProvider {
+            ScriptedLlmProvider::new().with_canned_responses(vec![LlmResponse::FinalAnswer(
+                text.into(),
+                LlmResponseMeta::default(),
+            )])
+        }
+
+        const PROPOSAL: &str = r#"{"create": true, "reason": "repeatable", "name": "triage-logs", "description": "Triage logs", "body": "1. Read the logs"}"#;
+
+        #[tokio::test]
+        async fn accepts_fenced_json() {
+            let llm = answering(&format!("```json\n{PROPOSAL}\n```"));
+            let decision = judge_turn(&llm, "USER: hi").await.unwrap();
+            assert_eq!(decision["name"], "triage-logs");
+        }
+
+        #[tokio::test]
+        async fn accepts_chatty_json() {
+            let llm = answering(&format!("Here is my decision:\n{PROPOSAL}\nThanks!"));
+            let decision = judge_turn(&llm, "USER: hi").await.unwrap();
+            assert_eq!(decision["create"], true);
+        }
+
+        #[tokio::test]
+        async fn sends_its_schema() {
+            let llm = answering(PROPOSAL);
+            judge_turn(&llm, "USER: hi").await.unwrap();
+            let system = &llm.recorded_calls()[0].system_prompt;
+            assert!(
+                system.contains(r#""required":["create","reason","name","description","body"]"#),
+                "{system}"
+            );
+        }
+    }
+
     #[test]
     fn test_heuristic_gate_rejects_low_tool_count() {
         let config = LearningConfig::default();
@@ -357,7 +418,7 @@ mod tests {
                 _tools: &[ToolSpec],
             ) -> anyhow::Result<LlmResponse> {
                 Ok(LlmResponse::FinalAnswer(
-                    "{\"create\": true, \"name\": \"codebase-search\", \"description\": \"Search and summarize codebase patterns\", \"body\": \"# Codebase Search\\n\\n1. Glob for files\\n2. Grep for patterns\\n3. Summarize\"}".to_string(),
+                    "{\"create\": true, \"reason\": \"repeatable\", \"name\": \"codebase-search\", \"description\": \"Search and summarize codebase patterns\", \"body\": \"# Codebase Search\\n\\n1. Glob for files\\n2. Grep for patterns\\n3. Summarize\"}".to_string(),
                     LlmResponseMeta::default(),
                 ))
             }
