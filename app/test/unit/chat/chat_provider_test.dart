@@ -98,6 +98,7 @@ class _FakeApiClient extends ApiClient {
     String conversationId,
     String runId, {
     int since = 0,
+    CancelToken? cancelToken,
   }) async* {
     replayCallCount++;
     if (_replayQueue.isNotEmpty) {

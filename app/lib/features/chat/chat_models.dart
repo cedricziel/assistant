@@ -23,6 +23,7 @@ class ChatState {
     this.isSending = false,
     this.isStopping = false,
     this.isLoadingHistory = false,
+    this.isSwitchingBranch = false,
     this.isReconnecting = false,
     this.streamingContent = '',
     this.statusMessage,
@@ -30,6 +31,7 @@ class ChatState {
     this.error,
     this.pendingQueue = const [],
     this.currentTurnStatus,
+    this.suggestions = const [],
   });
 
   final String? conversationId;
@@ -40,6 +42,10 @@ class ChatState {
   /// Further Stop requests are ignored while set.
   final bool isStopping;
   final bool isLoadingHistory;
+
+  /// True while a switch-branch request is pending; the branch pickers are
+  /// busy meanwhile.
+  final bool isSwitchingBranch;
 
   /// True while [ChatNotifier.attemptReconnect] is actively recovering an
   /// interrupted stream — drives the "Reconnecting…" banner.
@@ -68,6 +74,11 @@ class ChatState {
   /// turn is in flight (between `done` and the next `run_started`).
   final TurnStatusSnapshot? currentTurnStatus;
 
+  /// Follow-up prompts offered for the last assistant message. Only live and
+  /// reconnected runs fill it; loading a conversation from history leaves it
+  /// empty.
+  final List<String> suggestions;
+
   bool get isStreaming => isSending && streamingContent.isNotEmpty;
 
   ChatState copyWith({
@@ -76,6 +87,7 @@ class ChatState {
     bool? isSending,
     bool? isStopping,
     bool? isLoadingHistory,
+    bool? isSwitchingBranch,
     bool? isReconnecting,
     String? streamingContent,
     String? statusMessage,
@@ -87,6 +99,8 @@ class ChatState {
     List<PendingMessage>? pendingQueue,
     TurnStatusSnapshot? currentTurnStatus,
     bool clearCurrentTurnStatus = false,
+    List<String>? suggestions,
+    bool clearSuggestions = false,
   }) {
     return ChatState(
       conversationId: clearConversation
@@ -96,6 +110,7 @@ class ChatState {
       isSending: isSending ?? this.isSending,
       isStopping: isStopping ?? this.isStopping,
       isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
+      isSwitchingBranch: isSwitchingBranch ?? this.isSwitchingBranch,
       isReconnecting: isReconnecting ?? this.isReconnecting,
       streamingContent: streamingContent ?? this.streamingContent,
       statusMessage: clearStatusMessage
@@ -107,6 +122,9 @@ class ChatState {
       currentTurnStatus: clearCurrentTurnStatus
           ? null
           : (currentTurnStatus ?? this.currentTurnStatus),
+      suggestions: clearSuggestions
+          ? const []
+          : (suggestions ?? this.suggestions),
     );
   }
 }

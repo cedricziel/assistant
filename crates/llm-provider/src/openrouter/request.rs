@@ -125,6 +125,7 @@ pub fn build_chat_request(
             .image_config
             .clone()
             .filter(|_| settings.image_output),
+        audio: None,
     }
 }
 
@@ -158,7 +159,11 @@ fn user_parts(content: &[ContentBlock], vision: bool) -> Vec<Value> {
                     "file_data": format!("data:{PDF};base64,{data}"),
                 },
             })),
-            ContentBlock::Document { .. } | ContentBlock::Audio { .. } => None,
+            ContentBlock::Audio { media_type, data } => Some(json!({
+                "type": "input_audio",
+                "input_audio": {"data": data, "format": super::audio_input::wire_format(media_type)},
+            })),
+            ContentBlock::Document { .. } => None,
         })
         .collect()
 }
@@ -285,7 +290,7 @@ mod tests {
     use super::apply_cache_breakpoints;
 
     #[test]
-    fn audio_blocks_are_dropped_until_audio_input_exists() {
+    fn audio_blocks_become_input_audio_parts() {
         use assistant_core::ContentBlock;
         let parts = super::user_parts(
             &[
@@ -299,7 +304,10 @@ mod tests {
         );
         assert_eq!(
             parts,
-            [json!({"type": "text", "text": "[Voice message]: hi"})]
+            [
+                json!({"type": "text", "text": "[Voice message]: hi"}),
+                json!({"type": "input_audio", "input_audio": {"data": "T2dnUw==", "format": "ogg"}}),
+            ]
         );
     }
 

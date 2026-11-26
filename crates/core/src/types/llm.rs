@@ -202,11 +202,37 @@ pub fn resolve_openrouter_key(
     env_var: &str,
     env: impl Fn(&str) -> Option<String>,
 ) -> Option<Secret> {
-    section
+    openrouter_key_with_source(section, llm, env_var, env).map(|(key, _)| key)
+}
+
+/// Where a resolved OpenRouter key came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeySource {
+    /// The feature's own section.
+    Section,
+    /// The `[llm]` OpenRouter key.
+    Llm,
+    /// The named environment variable.
+    Env(String),
+}
+
+/// Like [`resolve_openrouter_key`], also saying where the key came from.
+pub fn openrouter_key_with_source(
+    section: Option<&Secret>,
+    llm: &LlmConfig,
+    env_var: &str,
+    env: impl Fn(&str) -> Option<String>,
+) -> Option<(Secret, KeySource)> {
+    if let Some(key) = section.filter(|s| !s.is_blank()) {
+        return Some((key.clone(), KeySource::Section));
+    }
+    if let Some(key) = llm.openrouter_api_key().filter(|s| !s.is_blank()) {
+        return Some((key.clone(), KeySource::Llm));
+    }
+    env(env_var)
+        .map(Secret::from)
         .filter(|s| !s.is_blank())
-        .or_else(|| llm.openrouter_api_key().filter(|s| !s.is_blank()))
-        .cloned()
-        .or_else(|| env(env_var).map(Secret::from).filter(|s| !s.is_blank()))
+        .map(|key| (key, KeySource::Env(env_var.to_owned())))
 }
 
 // ── Anthropic-specific options ────────────────────────────────────────────────
@@ -435,6 +461,55 @@ pub struct OpenRouterOptions {
     pub image_output: bool,
     /// Sent as `image_config` when `image_output` is on.
     pub image_config: Option<OpenRouterImageConfig>,
+    /// Voice notes sent to the model as audio (`[llm.openrouter.audio_input]`).
+    #[serde(default)]
+    pub audio_input: OpenRouterAudioInput,
+    /// Spoken replies to voice turns (`[llm.openrouter.audio_output]`).
+    #[serde(default)]
+    pub audio_output: OpenRouterAudioOutput,
+}
+
+/// `[llm.openrouter.audio_output]`. The model must list audio output in the
+/// catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OpenRouterAudioOutput {
+    pub enabled: bool,
+    pub voice: String,
+    /// Sample rate of the model's PCM16 audio.
+    pub pcm_sample_rate: u32,
+}
+
+impl Default for OpenRouterAudioOutput {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            voice: "alloy".into(),
+            pcm_sample_rate: 24_000,
+        }
+    }
+}
+
+/// `[llm.openrouter.audio_input]`. The model must list audio input in the
+/// catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OpenRouterAudioInput {
+    pub enabled: bool,
+    /// Formats sent unchanged; others are converted to WAV.
+    pub formats: Vec<String>,
+    /// Longer recordings are sent as text only.
+    pub max_secs: u32,
+}
+
+impl Default for OpenRouterAudioInput {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            formats: vec!["wav".into(), "mp3".into()],
+            max_secs: 600,
+        }
+    }
 }
 
 /// `[llm.openrouter.image_config]`.
@@ -703,8 +778,8 @@ pub struct OpenRouterMaxPrice {
 #[cfg(test)]
 mod tests {
     use super::{
-        EmbeddingConfig, EmbeddingProviderKind, LlmConfig, LlmProviderKind, OPENROUTER_API_KEY_ENV,
-        resolve_openrouter_key,
+        EmbeddingConfig, EmbeddingProviderKind, KeySource, LlmConfig, LlmProviderKind,
+        OPENROUTER_API_KEY_ENV, openrouter_key_with_source, resolve_openrouter_key,
     };
     use crate::secret::Secret;
 
@@ -830,6 +905,45 @@ mod tests {
         }
 
         #[test]
+        fn audio_output_defaults_and_overrides() {
+            let unset = parse("").unwrap().audio_output;
+            assert!(!unset.enabled);
+            assert_eq!(unset.voice, "alloy");
+            assert_eq!(unset.pcm_sample_rate, 24_000);
+
+            let set =
+                parse("[audio_output]\nenabled = true\nvoice = \"nova\"\npcm_sample_rate = 16000")
+                    .unwrap()
+                    .audio_output;
+            assert!(set.enabled);
+            assert_eq!(set.voice, "nova");
+            assert_eq!(set.pcm_sample_rate, 16_000);
+            assert!(
+                parse("[audio_output]\nformat = \"mp3\"").is_err(),
+                "unknown key"
+            );
+        }
+
+        #[test]
+        fn audio_input_defaults_and_overrides() {
+            let unset = parse("").unwrap().audio_input;
+            assert!(!unset.enabled);
+            assert_eq!(unset.formats, ["wav", "mp3"]);
+            assert_eq!(unset.max_secs, 600);
+
+            let set = parse("[audio_input]\nenabled = true\nformats = [\"wav\"]\nmax_secs = 30")
+                .unwrap()
+                .audio_input;
+            assert!(set.enabled);
+            assert_eq!(set.formats, ["wav"]);
+            assert_eq!(set.max_secs, 30);
+            assert!(
+                parse("[audio_input]\nmax_seconds = 30").is_err(),
+                "unknown key"
+            );
+        }
+
+        #[test]
         fn image_output_is_off_by_default_and_takes_an_image_config() {
             use super::super::OpenRouterImageConfig;
 
@@ -935,6 +1049,31 @@ mod tests {
         );
         let off: LlmConfig = toml::from_str("parallel_tool_calls = false").unwrap();
         assert_eq!(off.parallel_tool_calls, Some(false));
+    }
+
+    #[test]
+    fn key_source_names_where_the_key_came_from() {
+        let or = llm(LlmProviderKind::OpenRouter, Some("llm-key"));
+        let none = llm(LlmProviderKind::Anthropic, Some("sk-ant"));
+        let section = Secret::new("own");
+        let source = |section: Option<&Secret>, llm: &LlmConfig, env: Option<&'static str>| {
+            openrouter_key_with_source(section, llm, OPENROUTER_API_KEY_ENV, env_with(env))
+                .map(|(key, source)| (key.expose().to_string(), source))
+        };
+
+        assert_eq!(
+            source(Some(&section), &or, None),
+            Some(("own".into(), KeySource::Section))
+        );
+        assert_eq!(
+            source(None, &or, Some("env")),
+            Some(("llm-key".into(), KeySource::Llm))
+        );
+        assert_eq!(
+            source(None, &none, Some("env")),
+            Some(("env".into(), KeySource::Env(OPENROUTER_API_KEY_ENV.into())))
+        );
+        assert_eq!(source(None, &none, None), None);
     }
 
     #[test]

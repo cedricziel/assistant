@@ -106,6 +106,8 @@ Any other recognized format is converted to 16 kHz mono WAV with ffmpeg before i
 
 Without `[transcription]`, or when transcription fails or returns no text, the message text is `[Voice message]`. The message is never dropped.
 
+A voice turn also gets a spoken reply. See [Spoken replies](#spoken-replies-to-voice-turns).
+
 ## Interface support
 
 | Interface  | Status                                           |
@@ -177,3 +179,9 @@ A voice given in a single request that isn't in the list fails that request with
 The provider requests the configured format when the model supports it. Otherwise it requests the first of wav, mp3 and pcm the model supports and transcodes with ffmpeg. OpenRouter never returns Ogg, so `format = "ogg"` always needs ffmpeg. Raw PCM is read at `pcm_sample_rate`, else 44100 Hz for `heygen/*` models and 24000 Hz for the rest. If a transcode is needed and ffmpeg can't run, startup fails and names ffmpeg.
 
 If the model entry can't be fetched, startup logs a warning and continues without validation, requesting formats directly (Ogg through WAV).
+
+### Spoken replies to voice turns
+
+When `[tts]` is configured, a voice turn that produced no audio gets its final answer spoken by the TTS provider, in the configured `format`, and the clip is attached to the reply. A tool such as `voice-response` that already spoke counts as audio. A failed synthesis leaves the reply as text. Typed turns never get a clip, and without `[tts]` voice turns reply in text.
+
+OpenRouter models that can speak skip this step by answering with audio themselves. See [Voice](openrouter.md#voice).

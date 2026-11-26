@@ -110,7 +110,7 @@ Future<void> _pumpList(
 ) async {
   await pumpGolden(
     tester,
-    const SizedBox(width: 320, height: 420, child: ConversationList()),
+    const SizedBox(width: 320, height: 420, child: ConversationListPane()),
     size: const Size(360, 460),
     overrides: [
       conversationListProvider.overrideWith(

@@ -427,6 +427,7 @@ impl LlmProvider for AnthropicProvider {
             parallel_tool_calls: true,
             json_schema: false,
             audio_input: false,
+            audio_output: false,
         }
     }
 
