@@ -67,11 +67,11 @@ impl OpenRouterClient {
                     }
                 }
                 if acc.is_done() {
-                    return acc.finish();
+                    return finish(acc, sink.as_ref()).await;
                 }
             }
         }
-        acc.finish()
+        finish(acc, sink.as_ref()).await
     }
 
     /// Posts `request`, retrying transient failures.
@@ -124,4 +124,15 @@ fn shows_reasoning(request: &ChatRequest) -> bool {
         .as_ref()
         .and_then(|r| r.exclude)
         .unwrap_or(false)
+}
+
+/// Streams the Sources block, if any, then returns the final response.
+async fn finish(
+    acc: StreamAccumulator,
+    sink: Option<&mpsc::Sender<StreamChunk>>,
+) -> anyhow::Result<LlmResponse> {
+    if let (Some(block), Some(sink)) = (acc.sources_block(), sink) {
+        let _ = sink.send(StreamChunk::Text(block)).await;
+    }
+    acc.finish()
 }

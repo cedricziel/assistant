@@ -99,6 +99,42 @@ Prompt caching settings. An unknown key fails config load. See
 | `enabled` | `true`  | Send `cache_control` breakpoints. `false` sends none                      |
 | `ttl`     | `"5m"`  | Cache lifetime, `"5m"` or `"1h"`. `"1h"` applies to Anthropic models only |
 
+### `[llm.openrouter.web_search]` section
+
+OpenRouter's `web` plugin. Only set keys are sent. An unknown key fails
+config load. See [Web search](#web-search).
+
+| Key                   | Default | Description                                                                                      |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `enabled`             | `false` | Send the `web` plugin                                                                            |
+| `engine`              | unset   | `"native"`, `"exa"`, `"firecrawl"`, `"parallel"` or `"perplexity"`. Unset lets OpenRouter choose |
+| `max_results`         | unset   | Maximum search results                                                                           |
+| `search_prompt`       | unset   | Prompt that introduces the results to the model                                                  |
+| `include_domains`     | unset   | Domains to search                                                                                |
+| `exclude_domains`     | unset   | Domains to skip                                                                                  |
+| `search_context_size` | unset   | `"low"`, `"medium"` or `"high"`. Needs `engine = "native"` or no `engine`                        |
+
+Which domain filters each engine honours is up to OpenRouter; see
+[OpenRouter's web search docs](https://openrouter.ai/docs/features/web-search).
+
+## Web search
+
+With `enabled = true`, every request carries
+`plugins: [{"id": "web", ...}]` with the options you set.
+`search_context_size` goes in the top-level
+`web_search_options: {"search_context_size": ...}` instead. The provider
+reports web search as a hosted tool, so the model is not offered the
+local `web-search` tool. With `enabled = false`, no plugin is sent and
+the local tool stays available.
+
+When a final answer carries `url_citation` annotations, it ends with a
+`Sources:` list. Each cited URL appears once, in order of first
+citation, as a markdown link labelled with its title, or the URL when
+there is no title. Brackets in titles are escaped. URLs the answer
+already links inline are not listed again. Responses that call tools
+get no list. When streaming, the list is the last text chunk, so the
+saved answer matches what was streamed.
+
 ## Request identity
 
 During a conversation turn, each request carries:
@@ -346,6 +382,16 @@ fallback_models = ["openai/gpt-4o"]
 effort = "high"
 ```
 
+### Web search
+
+```toml
+[llm.openrouter.web_search]
+enabled         = true
+engine          = "exa"
+max_results     = 5
+exclude_domains = ["example.com"]
+```
+
 ### Using a free model for testing
 
 ```toml
@@ -419,6 +465,12 @@ without that moderation. The call is not retried.
 
 `[llm.openrouter] categories` has more than two entries. Remove the extra
 ones.
+
+### "`search_context_size` works only with `engine = "native"`"
+
+`[llm.openrouter.web_search]` sets `search_context_size` with an `engine`
+other than `"native"`, so config load fails. Set `engine = "native"`,
+remove `engine`, or remove `search_context_size`.
 
 ### "OpenRouter stream ended before the response was complete"
 
