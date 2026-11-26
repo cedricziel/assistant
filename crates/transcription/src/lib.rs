@@ -19,6 +19,7 @@ mod deepgram_tts;
 mod ollama;
 mod openai_tts;
 mod openrouter;
+pub mod openrouter_tts;
 pub mod pipeline;
 mod provider;
 mod whisper;
@@ -38,6 +39,7 @@ pub use deepgram_tts::DeepgramTtsProvider;
 pub use ollama::OllamaTranscriptionProvider;
 pub use openai_tts::OpenAITtsProvider;
 pub use openrouter::OpenRouterTranscriber;
+pub use openrouter_tts::{OpenRouterTts, OpenRouterTtsSettings};
 pub use provider::{
     TranscriptionProvider, TranscriptionRequest, TranscriptionResult, TtsProvider, TtsRequest,
     TtsResult,

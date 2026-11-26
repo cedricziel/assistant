@@ -3,6 +3,7 @@
 /// See `README.md` for the purity, injection and composition rules.
 library;
 
+export 'src/composer/queued_message_bubble.dart';
 export 'src/conversations/conversation_list_view.dart';
 export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
