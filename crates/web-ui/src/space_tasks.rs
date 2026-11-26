@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::Interface;
-use assistant_runtime::{Orchestrator, SpaceRef, SpaceTaskSpawner};
+use assistant_runtime::{Orchestrator, SpaceRef, SpaceTaskSpawner, SubmitOptions};
 use assistant_workflow::{
     AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
     spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
@@ -37,6 +37,7 @@ impl AssistantTurnClient for OrchestratorTurnClient {
                 conversation_id,
                 Interface::Scheduler,
                 None,
+                SubmitOptions::default(),
             )
             .await?;
         Ok(result.answer)

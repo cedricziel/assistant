@@ -82,6 +82,7 @@ async fn turn_llm_calls_see_the_conversation_and_user() {
         user_id: Some(UserId::from("usr_abc")),
         org_id: Some(OrgId("org_1".into())),
         space_id: None,
+        ..TurnIdentity::default()
     };
 
     orch.run_turn_with_tools(

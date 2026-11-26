@@ -26,6 +26,7 @@ use assistant_core::auth::AuthContext;
 use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::types::conversation::Interface;
 use assistant_runtime::OrchestratorEvent;
+use assistant_runtime::SubmitOptions;
 use assistant_runtime::projection::{SseProjector, StreamProjector};
 use assistant_storage::{
     ConversationEventStore as _, ConversationStore, PushSubscriptionStore, SqliteConversationStore,
@@ -168,6 +169,7 @@ pub async fn send_message(
                     Interface::Web,
                     None,
                     user_attachment_ids,
+                    SubmitOptions::default(),
                 )
                 .await;
             let _ = tx.send(result);
@@ -857,7 +859,14 @@ pub async fn quick_message(
 
     // Submit the turn and await the full result (synchronous).
     let result = orchestrator
-        .submit_turn(&auth, &prompt, conv.id, Interface::Web, None)
+        .submit_turn(
+            &auth,
+            &prompt,
+            conv.id,
+            Interface::Web,
+            None,
+            SubmitOptions::default(),
+        )
         .await;
 
     match result {
@@ -1029,7 +1038,14 @@ pub async fn send_voice_message(
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
             let result = orchestrator
-                .submit_turn(&auth, &content, conv_id, Interface::Web, None)
+                .submit_turn(
+                    &auth,
+                    &content,
+                    conv_id,
+                    Interface::Web,
+                    None,
+                    SubmitOptions::default(),
+                )
                 .await;
             let _ = tx.send(result);
         });

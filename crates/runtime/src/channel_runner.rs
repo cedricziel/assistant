@@ -168,6 +168,7 @@ impl ChannelRunner {
                 // routing is implemented.
                 org_id: None,
                 space_id: None,
+                ..TurnIdentity::default()
             },
             Ok(None) => {
                 tracing::debug!(

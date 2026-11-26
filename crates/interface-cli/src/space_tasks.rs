@@ -72,7 +72,7 @@ mod tests {
     use assistant_core::types::conversation::Interface;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
     use assistant_runtime::{
-        BinaryRole, OrgContexts, SpaceRuntimes, SpaceSupervisor, core_worker_plan,
+        BinaryRole, OrgContexts, SpaceRuntimes, SpaceSupervisor, SubmitOptions, core_worker_plan,
     };
     use assistant_storage::{ConversationStore as _, OrgPoolFactory, SqliteConversationStore};
 
@@ -145,6 +145,7 @@ mod tests {
                 conversation,
                 Interface::Web,
                 None,
+                SubmitOptions::default(),
             ),
         )
         .await
