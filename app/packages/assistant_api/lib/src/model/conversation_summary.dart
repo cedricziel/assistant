@@ -13,6 +13,7 @@ part 'conversation_summary.g.dart';
 /// Properties:
 /// * [createdAt]
 /// * [id]
+/// * [pinnedAt] - When the conversation was pinned; absent when it is not pinned.
 /// * [title]
 /// * [updatedAt]
 @BuiltValue()
@@ -23,6 +24,10 @@ abstract class ConversationSummary
 
   @BuiltValueField(wireName: r'id')
   String get id;
+
+  /// When the conversation was pinned; absent when it is not pinned.
+  @BuiltValueField(wireName: r'pinned_at')
+  DateTime? get pinnedAt;
 
   @BuiltValueField(wireName: r'title')
   String get title;
@@ -69,6 +74,13 @@ class _$ConversationSummarySerializer
       object.id,
       specifiedType: const FullType(String),
     );
+    if (object.pinnedAt != null) {
+      yield r'pinned_at';
+      yield serializers.serialize(
+        object.pinnedAt,
+        specifiedType: const FullType.nullable(DateTime),
+      );
+    }
     yield r'title';
     yield serializers.serialize(
       object.title,
@@ -117,6 +129,14 @@ class _$ConversationSummarySerializer
             specifiedType: const FullType(String),
           ) as String;
           result.id = valueDes;
+          break;
+        case r'pinned_at':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(DateTime),
+          ) as DateTime?;
+          if (valueDes == null) continue;
+          result.pinnedAt = valueDes;
           break;
         case r'title':
           final valueDes = serializers.deserialize(
