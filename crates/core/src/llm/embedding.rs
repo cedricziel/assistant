@@ -114,6 +114,10 @@ impl LlmProvider for WithEmbeddingOverride {
         self.inner.chat_options_support()
     }
 
+    async fn ready(&self) {
+        self.inner.ready().await;
+    }
+
     async fn chat_with(
         &self,
         system_prompt: &str,
@@ -392,6 +396,57 @@ mod tests {
             matches!(response, LlmResponse::FinalAnswer(ref t, _) if t == "native"),
             "the inner provider's chat_with must not be replaced by the default: {response:?}"
         );
+    }
+
+    /// Records whether `ready()` was awaited.
+    #[derive(Default)]
+    struct ReadyTracker {
+        ready: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait]
+    impl LlmProvider for ReadyTracker {
+        fn capabilities(&self) -> Capabilities {
+            StubChat.capabilities()
+        }
+
+        async fn chat(
+            &self,
+            _: &str,
+            _: &[ChatHistoryMessage],
+            _: &[ToolSpec],
+        ) -> anyhow::Result<LlmResponse> {
+            Ok(LlmResponse::FinalAnswer(
+                String::new(),
+                LlmResponseMeta::default(),
+            ))
+        }
+
+        async fn chat_streaming(
+            &self,
+            _: &str,
+            _: &[ChatHistoryMessage],
+            _: &[ToolSpec],
+            _: Option<mpsc::Sender<StreamChunk>>,
+        ) -> anyhow::Result<LlmResponse> {
+            Ok(LlmResponse::FinalAnswer(
+                String::new(),
+                LlmResponseMeta::default(),
+            ))
+        }
+
+        async fn ready(&self) {
+            self.ready.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn override_forwards_ready() {
+        let inner = Arc::new(ReadyTracker::default());
+        let wrapped = WithEmbeddingOverride::new(inner.clone(), Arc::new(StubEmbedder));
+
+        wrapped.ready().await;
+        assert!(inner.ready.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[tokio::test]

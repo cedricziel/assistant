@@ -33,6 +33,10 @@ pub struct ModelInfo {
     pub context_window_tokens: Option<u64>,
     pub vision: bool,
     pub tools: bool,
+    pub tool_choice: bool,
+    pub parallel_tool_calls: bool,
+    /// `structured_outputs` or `response_format` is supported.
+    pub json_schema: bool,
 }
 
 pub struct OpenRouterCatalog {
@@ -269,10 +273,14 @@ fn model_info(
         .and_then(|a| a.input_modalities.as_deref())
         .unwrap_or_default();
     let params = entry.supported_parameters.as_deref().unwrap_or_default();
+    let has = |name: &str| params.iter().any(|p| p == name);
     ModelInfo {
         context_window_tokens,
         vision: inputs.iter().any(|m| m == "image"),
-        tools: params.iter().any(|p| p == "tools"),
+        tools: has("tools"),
+        tool_choice: has("tool_choice"),
+        parallel_tool_calls: has("parallel_tool_calls"),
+        json_schema: has("structured_outputs") || has("response_format"),
     }
 }
 
