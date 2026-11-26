@@ -455,6 +455,10 @@ Serializers serializers = (_$serializers.toBuilder()
         () => ListBuilder<WorkflowSummary>(),
       )
       ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(InteractionDetail)]),
+        () => ListBuilder<InteractionDetail>(),
+      )
+      ..addBuilderFactory(
         const FullType(BuiltList, [FullType(CatalogItemResponse)]),
         () => ListBuilder<CatalogItemResponse>(),
       )

@@ -824,6 +824,106 @@
         ]
       }
     },
+    "/api/conversations/{conversation_id}/interactions": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`GET /api/conversations/{conversation_id}/interactions`",
+        "description": "The interactions of one of the caller's conversations, oldest first, as a\nbare array. `?status=pending` narrows it to those still waiting, which is\nhow a client that opens a conversation finds a run to attach to.",
+        "operationId": "list_conversation_interactions",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only interactions in this state, such as `pending`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/InteractionStatusView"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Interactions in creation order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InteractionDetail"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid conversation ID or status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation not found, or not the caller's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read": {
       "post": {
         "tags": [
@@ -11967,7 +12067,8 @@
           "created_at",
           "updated_at",
           "messages",
-          "surfaces"
+          "surfaces",
+          "interactions"
         ],
         "properties": {
           "created_at": {
@@ -11977,6 +12078,13 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "interactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InteractionDetail"
+            },
+            "description": "Every interaction of the conversation (tool approvals, questions), in\ncreation order. Includes those of runs on inactive branches; the client\ndecides what to show."
           },
           "messages": {
             "type": "array",
@@ -15973,9 +16081,10 @@
       },
       "TurnState": {
         "type": "string",
-        "description": "Closed enum of turn states surfaced by the status endpoint.\n\nAnything not in this set must round-trip to one of these four when\nserialised — the client's switch is exhaustive.",
+        "description": "Closed enum of turn states surfaced by the status endpoint.\n\nAnything not in this set must round-trip to one of these five when\nserialised — the client's switch is exhaustive.",
         "enum": [
           "running",
+          "awaiting_input",
           "completed",
           "errored",
           "unknown"

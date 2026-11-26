@@ -298,6 +298,7 @@ pub struct ApiErrorResponse {
         crate::api::turns::get_turn_status,
         crate::api::turns::cancel_turn,
         crate::api::interactions::respond_to_interaction,
+        crate::api::interactions::list_conversation_interactions,
         crate::api::mcp_apps::call_mcp_app_tool,
         crate::api::mcp_apps::read_mcp_app_resource,
         crate::api::audio::get_message_audio,
