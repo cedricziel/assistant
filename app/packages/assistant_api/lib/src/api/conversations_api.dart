@@ -1301,8 +1301,8 @@ class ConversationsApi {
     return _response;
   }
 
-  /// &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
-  ///
+  /// &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, keep it as the user message&#39;s attachment, transcribe it, run through the orchestrator, and stream the response as SSE.
+  /// The message text is the transcript, or &#x60;[Voice message]&#x60; when no transcription provider is configured or transcription fails.
   ///
   /// Parameters:
   /// * [id] - Conversation ID

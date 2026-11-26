@@ -4,8 +4,8 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use assistant_core::ChannelContent;
 use assistant_core::clock::{Clock, SystemClock};
+use assistant_core::{ChannelContent, VOICE_PLACEHOLDER};
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest};
 use lru::LruCache;
 use tokio::sync::watch;
@@ -30,9 +30,6 @@ const PENDING_CAPACITY_NZ: NonZeroUsize = match NonZeroUsize::new(PENDING_CAPACI
 pub fn pending_cache<V>() -> LruCache<String, V> {
     LruCache::new(PENDING_CAPACITY_NZ)
 }
-
-/// Text that stands for a voice message when it has no transcript.
-pub(crate) const VOICE_PLACEHOLDER: &str = "[Voice message]";
 
 /// Collects the recordings of one inbound message and the text that stands
 /// for them.

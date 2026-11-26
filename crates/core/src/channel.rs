@@ -19,6 +19,9 @@ use crate::types::conversation::{ChannelType, Interface};
 
 // -- Types --
 
+/// Text that stands for a voice message that has no transcript.
+pub const VOICE_PLACEHOLDER: &str = "[Voice message]";
+
 /// A user on a messaging platform.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelUser {

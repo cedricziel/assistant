@@ -8,7 +8,7 @@
 //! - `POST /api/quick-message`                       — synchronous send
 //! - `GET  /api/conversations/{id}/runs/{run_id}/events/stream` — run replay
 
-use assistant_storage::PersonaStore as _;
+use assistant_storage::{AttachmentStore as _, PersonaStore as _};
 use std::convert::Infallible;
 
 use axum::Extension;
@@ -22,7 +22,9 @@ use tokio::sync::mpsc;
 use tracing::warn;
 use uuid::Uuid;
 
+use assistant_core::VOICE_PLACEHOLDER;
 use assistant_core::auth::AuthContext;
+use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::types::conversation::Interface;
 use assistant_runtime::OrchestratorEvent;
@@ -1052,8 +1054,12 @@ struct VoiceUploadForm {
     audio: Vec<u8>,
 }
 
-/// `POST /api/conversations/{id}/voice` — upload audio, transcribe it, run
-/// through the orchestrator, and stream the response as SSE.
+/// `POST /api/conversations/{id}/voice` — upload audio, keep it as the user
+/// message's attachment, transcribe it, run through the orchestrator, and
+/// stream the response as SSE.
+///
+/// The message text is the transcript, or `[Voice message]` when no
+/// transcription provider is configured or transcription fails.
 #[utoipa::path(
     post,
     path = "/api/conversations/{id}/voice",
@@ -1069,7 +1075,6 @@ struct VoiceUploadForm {
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
         (status = 404, description = "Conversation not found", body = ErrorBody),
-        (status = 503, description = "Voice not configured"),
     ),
     security(("bearer_token" = []))
 )]
@@ -1089,17 +1094,6 @@ pub async fn send_voice_message(
     let conv_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
-    };
-
-    let transcription_provider = match &state.transcription_provider {
-        Some(p) => p.clone(),
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Voice transcription not configured",
-            )
-                .into_response();
-        }
     };
 
     // Parse the multipart body — expect a single "audio" field.
@@ -1147,26 +1141,55 @@ pub async fn send_voice_message(
         return response;
     }
 
-    // Transcribe.
-    let transcript = match transcription_provider
-        .transcribe(TranscriptionRequest {
-            audio_data: audio_bytes,
-            mime_type: mime_type.clone(),
-            filename: None,
-            language: None,
-        })
+    // Keep the recording as an attachment so the turn can carry the audio.
+    let meta = assistant_core::AttachmentMeta {
+        id: Uuid::new_v4(),
+        message_id: None,
+        conversation_id: conv_id,
+        agent_id: state.agent_id.read().await.clone(),
+        filename: "voice".to_string(),
+        mime_type: mime_type.clone(),
+        size_bytes: audio_bytes.len() as u64,
+        created_at: SystemClock.now(),
+    };
+    if let Err(e) = ctx
+        .storage
+        .attachment_store()
+        .store(&meta, &audio_bytes)
         .await
     {
-        Ok(r) => r.text,
-        Err(e) => {
-            warn!("Transcription failed: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Transcription failed").into_response();
-        }
-    };
-
-    if transcript.trim().is_empty() {
-        return (StatusCode::BAD_REQUEST, "Transcription returned empty text").into_response();
+        warn!("Failed to store voice recording: {e}");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to store voice recording",
+        )
+            .into_response();
     }
+
+    // The transcript stands in for the recording; without one the turn still
+    // runs on the recording alone.
+    let transcript = match &state.transcription_provider {
+        Some(provider) => match provider
+            .transcribe(TranscriptionRequest {
+                audio_data: audio_bytes,
+                mime_type,
+                filename: None,
+                language: None,
+            })
+            .await
+        {
+            Ok(r) if !r.text.trim().is_empty() => r.text,
+            Ok(_) => {
+                warn!("Transcription returned empty text");
+                VOICE_PLACEHOLDER.to_string()
+            }
+            Err(e) => {
+                warn!("Transcription failed: {e}");
+                VOICE_PLACEHOLDER.to_string()
+            }
+        },
+        None => VOICE_PLACEHOLDER.to_string(),
+    };
 
     // Run through orchestrator (same flow as send_message).
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
@@ -1177,13 +1200,16 @@ pub async fn send_voice_message(
         Err(response) => return response,
     };
     let content = transcript.clone();
+    let recording_id = meta.id;
     let turn_result_rx = {
         let (tx, rx) =
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
             let result = orchestrator
                 .submit_streaming(
-                    SubmitTurn::new(content, conv_id, Interface::Web).with_auth(&auth),
+                    SubmitTurn::new(content, conv_id, Interface::Web)
+                        .with_auth(&auth)
+                        .with_attachments(vec![recording_id]),
                     event_tx,
                 )
                 .await;
@@ -2254,37 +2280,109 @@ mod tests {
 
     // -- POST /conversations/{id}/voice — MIME validation & size limit ---------
 
-    #[tokio::test]
-    async fn voice_upload_without_transcription_provider_returns_503() {
-        let server = MockServer::start().await;
-        let (state, storage) = test_state(&server.uri()).await;
-        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
-            .with_user_id("system");
-        let conv = store.create_conversation(Some("test")).await.unwrap();
-
-        // Build a minimal multipart body
+    /// Post a `fakeaudio` webm recording to the voice endpoint and return the
+    /// SSE body.
+    async fn post_voice(state: ApiState, conv_id: uuid::Uuid) -> String {
         let boundary = "testboundary";
-        let body_bytes = format!(
+        let body = format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.webm\"\r\nContent-Type: audio/webm\r\n\r\nfakeaudio\r\n--{boundary}--\r\n",
-            boundary = boundary
         );
-
         let resp = app(state)
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri(format!("/conversations/{}/voice", conv.id))
+                    .uri(format!("/conversations/{conv_id}/voice"))
                     .header(
                         "content-type",
                         format!("multipart/form-data; boundary={boundary}"),
                     )
-                    .body(Body::from(body_bytes))
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
             .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        String::from_utf8_lossy(&body_bytes(resp.into_body()).await).into_owned()
+    }
 
-        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    /// The text of the SSE `transcript` event.
+    fn transcript_text(sse: &str) -> String {
+        let payloads = frame_payloads(sse, "transcript");
+        assert_eq!(payloads.len(), 1, "one transcript event: {sse}");
+        let json: serde_json::Value = serde_json::from_str(&payloads[0]).unwrap();
+        json["content"].as_str().unwrap().to_string()
+    }
+
+    /// The conversation's only attachment must be the recording, linked to
+    /// the user message so the orchestrator turned it into an audio block.
+    async fn assert_recording_attached(storage: &StorageLayer, conv_id: uuid::Uuid) {
+        use assistant_storage::AttachmentStore as _;
+        let store = storage.attachment_store();
+        let attachments = store.list_for_conversation(conv_id).await.unwrap();
+        assert_eq!(attachments.len(), 1, "one stored recording");
+        let meta = &attachments[0];
+        assert_eq!(meta.mime_type, "audio/webm");
+        assert!(meta.message_id.is_some(), "linked to the user message");
+        assert_eq!(store.load_bytes(meta.id).await.unwrap(), b"fakeaudio");
+    }
+
+    #[tokio::test]
+    async fn voice_with_transcription_stores_the_recording() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Voice reply").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+        let state = ApiState {
+            transcription_provider: Some(Arc::new(StubTranscriptionProvider {
+                transcript: "hello from voice".to_string(),
+            })),
+            ..state
+        };
+
+        let sse = post_voice(state, conv_id).await;
+
+        assert_eq!(transcript_text(&sse), "hello from voice");
+        assert_recording_attached(&storage, conv_id).await;
+    }
+
+    #[tokio::test]
+    async fn voice_upload_without_transcription_provider_runs_turn_with_placeholder() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Voice reply").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+        assert!(state.transcription_provider.is_none());
+
+        let sse = post_voice(state, conv_id).await;
+
+        assert_eq!(transcript_text(&sse), "[Voice message]");
+        assert!(sse.contains("Voice reply"), "the turn ran: {sse}");
+        assert_recording_attached(&storage, conv_id).await;
+    }
+
+    #[tokio::test]
+    async fn voice_upload_keeps_the_turn_when_transcription_fails_or_is_empty() {
+        let providers: [Arc<dyn assistant_transcription::TranscriptionProvider>; 2] = [
+            Arc::new(FailingTranscriptionProvider),
+            Arc::new(StubTranscriptionProvider {
+                transcript: "  ".to_string(),
+            }),
+        ];
+        for provider in providers {
+            let server = MockServer::start().await;
+            mount_llm_reply(&server, "Voice reply").await;
+            let (state, storage) = test_state(&server.uri()).await;
+            let conv_id = seed_conversation(&storage).await;
+            let state = ApiState {
+                transcription_provider: Some(provider),
+                ..state
+            };
+
+            let sse = post_voice(state, conv_id).await;
+
+            assert_eq!(transcript_text(&sse), "[Voice message]");
+            assert_recording_attached(&storage, conv_id).await;
+        }
     }
 
     #[tokio::test]
