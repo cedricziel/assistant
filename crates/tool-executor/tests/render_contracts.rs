@@ -7,7 +7,9 @@ use assistant_core::types::conversation::{ExecutionContext, Interface};
 use assistant_core::{ToolHandler, ToolOutput};
 use assistant_tool_executor::builtins::bash::BashHandler;
 use assistant_tool_executor::builtins::file_read::FileReadHandler;
+use assistant_tool_executor::builtins::list_tasks::ListTasksHandler;
 use assistant_tool_executor::builtins::plan_update::PlanUpdateHandler;
+use assistant_tool_executor::builtins::process::ProcessHandler;
 use assistant_tool_executor::builtins::web_fetch::WebFetchHandler;
 use assistant_tool_executor::builtins::web_search::WebSearchHandler;
 use serde_json::{Value, json};
@@ -513,4 +515,190 @@ async fn plan_update_is_registered_by_the_executor() {
         executor.to_specs().iter().any(|s| s.name == "plan-update"),
         "plan-update missing from tool definitions"
     );
+}
+
+// -- data_table: list-tasks and process list ---------------------------------
+
+/// The `data` of `out`, validated against the `data_table` schema. `process`
+/// has no single output schema (poll and log data carry no `kind`), so its
+/// list rows are checked against the contract directly.
+fn validated_table(out: &ToolOutput) -> Value {
+    let data = out.data.clone().expect("tool output carries render data");
+    let schema = assistant_core::tool_render::ToolRenderData::schema("data_table")
+        .expect("data_table schema exists");
+    let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+    let errors: Vec<String> = validator
+        .iter_errors(&data)
+        .map(|e| e.to_string())
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "data fails data_table schema: {errors:?}"
+    );
+    assert_eq!(data["kind"], "data_table");
+    data
+}
+
+async fn tasks_handler() -> (
+    std::sync::Arc<assistant_storage::StorageLayer>,
+    ListTasksHandler,
+) {
+    let storage = std::sync::Arc::new(
+        assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap(),
+    );
+    let handler = ListTasksHandler::new(storage.clone());
+    (storage, handler)
+}
+
+#[tokio::test]
+async fn list_tasks_publishes_a_data_table() {
+    use assistant_storage::ScheduledTaskStore as _;
+
+    let (storage, handler) = tasks_handler().await;
+    let next = chrono::Utc::now() + chrono::Duration::hours(1);
+    let store = storage.scheduled_task_store();
+    store
+        .insert("task-a", "0 * * * *", "prompt-a", false, Some(next))
+        .await
+        .unwrap();
+    store
+        .insert("task-b", "", "prompt-b", true, Some(next))
+        .await
+        .unwrap();
+
+    let out = handler.run(params(&[]), &ctx()).await.unwrap();
+    assert_eq!(
+        handler.output_schema(),
+        assistant_core::tool_render::ToolRenderData::schema("data_table")
+    );
+    let data = validated_table(&out);
+    let keys: Vec<&str> = data["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        keys,
+        ["name", "status", "mode", "schedule", "next_run", "last_run"]
+    );
+    assert_eq!(data["total_rows"], 2);
+    assert_eq!(data["truncated"], false);
+    let rows = data["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let a = rows.iter().find(|r| r["name"] == "task-a").unwrap();
+    assert_eq!(a["status"], "enabled");
+    assert_eq!(a["mode"], "recurring");
+    assert_eq!(a["schedule"], "cron: 0 * * * *");
+    assert_eq!(a["last_run"], "never");
+    let b = rows.iter().find(|r| r["name"] == "task-b").unwrap();
+    assert_eq!(b["mode"], "once");
+    assert_eq!(b["schedule"], "one-shot (run_at)");
+}
+
+#[tokio::test]
+async fn list_tasks_with_no_tasks_publishes_an_empty_table() {
+    let (_storage, handler) = tasks_handler().await;
+    let out = handler.run(params(&[]), &ctx()).await.unwrap();
+    assert_eq!(out.content, "No scheduled tasks found.");
+    let data = validated_table(&out);
+    assert_eq!(data["rows"], json!([]));
+    assert_eq!(data["total_rows"], 0);
+    assert_eq!(data["truncated"], false);
+    assert_eq!(data["columns"].as_array().unwrap().len(), 6);
+}
+
+#[tokio::test]
+async fn list_tasks_over_200_rows_is_truncated_with_full_total() {
+    use assistant_storage::ScheduledTaskStore as _;
+
+    let (storage, handler) = tasks_handler().await;
+    let store = storage.scheduled_task_store();
+    for i in 0..205 {
+        store
+            .insert(&format!("task-{i}"), "0 * * * *", "p", false, None)
+            .await
+            .unwrap();
+    }
+    let out = handler.run(params(&[]), &ctx()).await.unwrap();
+    let data = validated_table(&out);
+    assert_eq!(data["rows"].as_array().unwrap().len(), 200);
+    assert_eq!(data["total_rows"], 205);
+    assert_eq!(data["truncated"], true);
+    let size = serde_json::to_vec(&data).unwrap().len();
+    assert!(size < 32 * 1024, "data_table is {size} bytes");
+}
+
+#[tokio::test]
+async fn list_tasks_cuts_long_cells_on_a_char_boundary() {
+    use assistant_storage::ScheduledTaskStore as _;
+
+    let (storage, handler) = tasks_handler().await;
+    storage
+        .scheduled_task_store()
+        .insert(&"é".repeat(1000), "0 * * * *", "p", false, None)
+        .await
+        .unwrap();
+    let out = handler.run(params(&[]), &ctx()).await.unwrap();
+    let data = validated_table(&out);
+    let name = data["rows"][0]["name"].as_str().unwrap();
+    assert!(
+        name.chars().count() <= 256,
+        "cell has {} chars",
+        name.chars().count()
+    );
+    assert!(name.ends_with('…'));
+    assert_eq!(data["truncated"], true);
+}
+
+#[tokio::test]
+async fn process_list_publishes_a_data_table() {
+    let handler = ProcessHandler::new();
+    let list = || params(&[("action", json!("list"))]);
+
+    let out = handler.run(list(), &ctx()).await.unwrap();
+    let data = validated_table(&out);
+    assert_eq!(data["rows"], json!([]));
+    assert_eq!(data["total_rows"], 0);
+
+    let start = handler
+        .run(
+            params(&[("action", json!("start")), ("command", json!("sleep 10"))]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
+    let session_id = start.data.unwrap()["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let out = handler.run(list(), &ctx()).await.unwrap();
+    let data = validated_table(&out);
+    assert_eq!(data["total_rows"], 1);
+    let keys: Vec<&str> = data["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        keys,
+        ["session_id", "pid", "command", "started_at", "running"]
+    );
+    let row = &data["rows"][0];
+    assert_eq!(row["session_id"], session_id.as_str());
+    assert_eq!(row["command"], "sleep 10");
+    assert_eq!(row["running"], true);
+    assert!(row["pid"].is_number());
+
+    handler
+        .run(
+            params(&[("action", json!("kill")), ("session_id", json!(session_id))]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
 }
