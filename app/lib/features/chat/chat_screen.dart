@@ -500,7 +500,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                       prevMsg != null &&
                                       prevMsg.role == msg.role &&
                                       !prevMsg.isStreaming;
-                                  return MessageBubble(
+                                  return ChatMessageBubbleAdapter(
                                     message: msg,
                                     isGrouped: isGrouped,
                                     capabilities: capabilities,
