@@ -46,6 +46,7 @@ pub mod skill_stats;
 pub mod slack_threads;
 pub mod space_store;
 pub mod surfaces;
+pub mod tool_permission_rules;
 pub mod user_store;
 pub mod webhooks;
 pub mod workflows;
@@ -114,6 +115,10 @@ pub use space_store::{SqliteMembershipStore, SqliteSpaceStore};
 pub use surfaces::{
     InMemorySurfaceStore, NewSurface, SqliteSurfaceStore, Surface, SurfaceChanges, SurfaceStatus,
     SurfaceStore, Transition,
+};
+pub use tool_permission_rules::{
+    InMemoryToolPermissionRuleStore, RuleEffect, SqliteToolPermissionRuleStore, ToolPermissionRule,
+    ToolPermissionRuleStore,
 };
 pub use user_store::SqliteUserStore;
 pub use webhooks::{InMemoryWebhookStore, SqliteWebhookStore, WebhookRecord, WebhookStore};
@@ -206,6 +211,11 @@ impl StorageLayer {
     /// Convenience: build a `SkillExecutionStore` backed by this pool.
     pub fn skill_execution_store(&self) -> SqliteSkillExecutionStore {
         SqliteSkillExecutionStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `ToolPermissionRuleStore` backed by this pool.
+    pub fn tool_permission_rule_store(&self) -> SqliteToolPermissionRuleStore {
+        SqliteToolPermissionRuleStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `ScheduledTaskStore` backed by this pool.
