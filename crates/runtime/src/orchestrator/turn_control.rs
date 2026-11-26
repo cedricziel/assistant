@@ -17,6 +17,7 @@ use opentelemetry::trace::Span as _;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use super::dispatch::ToolResultMeta;
 use super::{EndTurnOutcome, FinalAnswerOutcome, Orchestrator, TurnResult};
 
 impl Orchestrator {
@@ -56,6 +57,7 @@ impl Orchestrator {
                 attachment_ids: Vec::new(),
                 message_id: None,
                 had_errors: turn_had_errors,
+                timing: None,
             }));
         }
 
@@ -149,6 +151,7 @@ impl Orchestrator {
             attachment_ids: Vec::new(),
             message_id: None,
             had_errors: turn_had_errors,
+            timing: None,
         }))
     }
 
@@ -183,7 +186,13 @@ impl Orchestrator {
             otel_span.set_attribute(KeyValue::new("tool_status", "deferred"));
             otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
             crate::history::append_tool_result(history, "end_turn", msg);
-            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
+            let tr = Self::make_tool_result_message(
+                conversation_id,
+                turn_index,
+                "end_turn",
+                msg,
+                ToolResultMeta::ok(),
+            );
             if let Err(e) = conv_store.save_message(&tr).await {
                 warn!("Failed to persist deferred end_turn tool-result: {e}");
             }
@@ -210,7 +219,13 @@ impl Orchestrator {
             otel_span.set_attribute(KeyValue::new("tool_status", "rejected"));
             otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
             crate::history::append_tool_result(history, "end_turn", msg);
-            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
+            let tr = Self::make_tool_result_message(
+                conversation_id,
+                turn_index,
+                "end_turn",
+                msg,
+                ToolResultMeta::ok(),
+            );
             if let Err(e) = conv_store.save_message(&tr).await {
                 warn!("Failed to persist rejected end_turn tool-result: {e}");
             }
@@ -223,8 +238,13 @@ impl Orchestrator {
         otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
         otel_span.set_attribute(KeyValue::new("tool_observation", result_text.clone()));
         crate::history::append_tool_result(history, "end_turn", &result_text);
-        let tr =
-            Self::make_tool_result_message(conversation_id, turn_index, "end_turn", &result_text);
+        let tr = Self::make_tool_result_message(
+            conversation_id,
+            turn_index,
+            "end_turn",
+            &result_text,
+            ToolResultMeta::ok(),
+        );
         if let Err(e) = conv_store.save_message(&tr).await {
             warn!("Failed to persist end_turn tool-result: {e}");
         }

@@ -32,6 +32,7 @@ pub mod interface_instance_store;
 pub mod memory_chunks;
 pub mod message_bus;
 pub mod message_feedback;
+pub mod message_timings;
 pub mod org_oidc_config_store;
 pub mod org_storage;
 pub mod org_store;
@@ -90,6 +91,9 @@ pub use message_bus::{InMemoryMessageBus, SqliteMessageBus};
 pub use message_feedback::{
     InMemoryMessageFeedbackStore, MessageFeedbackRating, MessageFeedbackRow, MessageFeedbackStore,
     SqliteMessageFeedbackStore,
+};
+pub use message_timings::{
+    InMemoryMessageTimingStore, MessageTimingStore, SqliteMessageTimingStore,
 };
 pub use org_oidc_config_store::SqliteOrgOidcConfigStore;
 pub use org_storage::OrgStorageLayer;
@@ -227,6 +231,11 @@ impl StorageLayer {
     /// Convenience: build an `InteractionStore` backed by this pool.
     pub fn interaction_store(&self) -> SqliteInteractionStore {
         SqliteInteractionStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `MessageTimingStore` backed by this pool.
+    pub fn message_timing_store(&self) -> SqliteMessageTimingStore {
+        SqliteMessageTimingStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `ToolPermissionRuleStore` backed by this pool.

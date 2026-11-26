@@ -89,6 +89,18 @@ pub struct TurnRequest {
     /// submitter decides; the worker copies it to `ExecutionContext`.
     #[serde(default)]
     pub interactive: bool,
+    /// Where in the conversation tree the turn's rows attach. Carried, not yet
+    /// acted on by the worker.
+    #[serde(default)]
+    pub anchor: TurnAnchor,
+    /// The id the run will persist its user row under, when the producer
+    /// pre-assigns one. Carried, not yet acted on by the worker.
+    #[serde(default)]
+    pub user_message_id: Option<Uuid>,
+    /// Model for this turn only, overriding the conversation and org defaults.
+    /// Carried, not yet acted on by the worker.
+    #[serde(default)]
+    pub model_override: Option<String>,
 
     // -- Identity (multi-user) ------------------------------------------------
     /// The authenticated user who initiated this turn.
@@ -100,6 +112,20 @@ pub struct TurnRequest {
     /// The space context for this turn.
     #[serde(default)]
     pub space_id: Option<String>,
+}
+
+/// Where a turn attaches in the conversation's message tree.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnAnchor {
+    /// Append the prompt after the conversation's current leaf.
+    #[default]
+    Append,
+    /// Replace an earlier user message: the prompt becomes a sibling branch
+    /// under `parent_message_id` (`None` for a first message).
+    Edit { parent_message_id: Option<Uuid> },
+    /// Re-run the reply to an existing user message without a new user row.
+    Regenerate { user_message_id: Uuid },
 }
 
 /// The final result of a completed turn.
@@ -129,6 +155,9 @@ pub struct TurnResult {
     /// Gates downstream signals like skill-learner evaluation.
     #[serde(default)]
     pub had_errors: bool,
+    /// How long the turn took. `None` when the turn was not measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<crate::TurnTiming>,
 }
 
 /// A status update emitted during turn processing.
@@ -282,6 +311,9 @@ mod tests {
             ),
             attachment_ids: vec![],
             interactive: true,
+            anchor: TurnAnchor::Append,
+            user_message_id: None,
+            model_override: None,
             user_id: None,
             org_id: None,
             space_id: None,
@@ -293,6 +325,54 @@ mod tests {
         assert_eq!(back.conversation_id, req.conversation_id);
         assert_eq!(back.extension_tools, req.extension_tools);
         assert_eq!(back.traceparent, req.traceparent);
+    }
+
+    fn bus_turn_result(timing: Option<crate::TurnTiming>) -> TurnResult {
+        TurnResult {
+            conversation_id: Uuid::new_v4(),
+            content: "done".into(),
+            turn: 0,
+            attachment_ids: vec![],
+            message_id: None,
+            had_errors: false,
+            timing,
+        }
+    }
+
+    #[test]
+    fn turn_result_without_timing_omits_the_key() {
+        let json = serde_json::to_value(bus_turn_result(None)).unwrap();
+        assert!(
+            json.get("timing").is_none(),
+            "timing: None must not serialise a key"
+        );
+    }
+
+    #[test]
+    fn turn_result_payload_without_timing_deserialises() {
+        let json = serde_json::json!({
+            "conversation_id": Uuid::new_v4(),
+            "content": "done",
+            "turn": 0,
+        });
+        let back: TurnResult = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            back.timing, None,
+            "a payload without timing defaults to None"
+        );
+    }
+
+    #[test]
+    fn turn_result_timing_roundtrips_json() {
+        let timing = crate::TurnTiming {
+            time_to_first_token_ms: Some(800),
+            total_ms: 3000,
+            output_tokens: Some(120),
+            decode_ms: Some(2200),
+        };
+        let json = serde_json::to_value(bus_turn_result(Some(timing.clone()))).unwrap();
+        let back: TurnResult = serde_json::from_value(json).unwrap();
+        assert_eq!(back.timing, Some(timing));
     }
 
     #[test]
@@ -310,6 +390,57 @@ mod tests {
     }
 
     #[test]
+    fn turn_request_without_branch_fields_appends() {
+        let json = serde_json::json!({
+            "prompt": "hi",
+            "conversation_id": Uuid::new_v4().to_string(),
+        });
+        let req: TurnRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.anchor, TurnAnchor::Append, "default anchor appends");
+        assert_eq!(req.user_message_id, None);
+        assert_eq!(req.model_override, None);
+    }
+
+    #[test]
+    fn turn_request_branch_fields_roundtrip_json() {
+        let parent = Uuid::new_v4();
+        let user_message_id = Uuid::new_v4();
+        for anchor in [
+            TurnAnchor::Append,
+            TurnAnchor::Edit {
+                parent_message_id: Some(parent),
+            },
+            TurnAnchor::Edit {
+                parent_message_id: None,
+            },
+            TurnAnchor::Regenerate {
+                user_message_id: parent,
+            },
+        ] {
+            let req = TurnRequest {
+                prompt: "hi".into(),
+                conversation_id: Uuid::new_v4(),
+                extension_tools: vec![],
+                timestamp: None,
+                traceparent: None,
+                attachment_ids: vec![],
+                interactive: false,
+                anchor: anchor.clone(),
+                user_message_id: Some(user_message_id),
+                model_override: Some("gpt-x".into()),
+                user_id: None,
+                org_id: None,
+                space_id: None,
+            };
+            let back: TurnRequest =
+                serde_json::from_value(serde_json::to_value(&req).unwrap()).unwrap();
+            assert_eq!(back.anchor, anchor);
+            assert_eq!(back.user_message_id, Some(user_message_id));
+            assert_eq!(back.model_override.as_deref(), Some("gpt-x"));
+        }
+    }
+
+    #[test]
     fn turn_result_roundtrips_json() {
         let res = TurnResult {
             conversation_id: Uuid::new_v4(),
@@ -318,6 +449,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: None,
             had_errors: false,
+            timing: None,
         };
         let json = serde_json::to_value(&res).unwrap();
         let back: TurnResult = serde_json::from_value(json).unwrap();
@@ -336,6 +468,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: Some(mid),
             had_errors: false,
+            timing: None,
         };
         let json = serde_json::to_value(&res).unwrap();
         // message_id should be present in the serialised form.

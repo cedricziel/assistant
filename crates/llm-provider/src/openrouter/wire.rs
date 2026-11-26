@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use assistant_core::types::llm::OpenRouterRouting;
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
+
+use super::errors::{ErrorBody, body_error};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatRequest {
@@ -12,6 +15,17 @@ pub struct ChatRequest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Value>,
     pub max_completion_tokens: u32,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stream: bool,
+    /// The primary model followed by fallbacks; empty when none are set.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<OpenRouterRouting>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +38,8 @@ pub struct ChatResponse {
     pub choices: Vec<Choice>,
     #[serde(default)]
     pub usage: Option<Usage>,
+    #[serde(default)]
+    pub error: Option<ErrorBody>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,6 +118,11 @@ impl Usage {
 
 impl ChatResponse {
     pub fn into_llm_response(self) -> anyhow::Result<LlmResponse> {
+        if let Some(error) = &self.error
+            && self.choices.is_empty()
+        {
+            return Err(body_error(error));
+        }
         let mut meta = LlmResponseMeta {
             model: self.model,
             response_id: self.id,

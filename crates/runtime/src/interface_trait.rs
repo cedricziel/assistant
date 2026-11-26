@@ -10,13 +10,12 @@
 //! coerced to `Arc<dyn AssistantInterface>` at construction sites.
 
 use anyhow::Result;
-use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::Interface;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::orchestrator::{Orchestrator, SubmitOptions, TurnResult};
+use crate::orchestrator::{Orchestrator, SubmitTurn, TurnResult};
 
 /// Minimal interface required to drive a conversation turn.
 ///
@@ -35,66 +34,11 @@ pub trait AssistantInterface: Send + Sync {
         sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
     );
 
-    /// Submit a user turn and wait for the assistant's reply.
-    async fn submit_turn(
-        &self,
-        auth: &AuthContext,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<TurnResult> {
-        self.submit_turn_with_attachments(
-            auth,
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            vec![],
-        )
-        .await
-    }
-
-    /// Submit a user turn with image attachment IDs.
-    async fn submit_turn_with_attachments(
-        &self,
-        auth: &AuthContext,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<chrono::DateTime<chrono::Utc>>,
-        attachment_ids: Vec<Uuid>,
-    ) -> Result<TurnResult>;
-
-    /// Submit a user turn using a caller-supplied `request_id`, so the SSE
-    /// `run_id` can double as the orchestrator's request identifier (enabling
-    /// external cancellation by run_id).
+    /// Submit a turn and wait for the assistant's reply.
     ///
-    /// Default implementation ignores the `request_id` and delegates to
-    /// [`submit_turn_with_attachments`] — sufficient for test mocks that
-    /// don't exercise cancellation.
-    #[allow(clippy::too_many_arguments)]
-    async fn submit_turn_with_request_id(
-        &self,
-        auth: &AuthContext,
-        _request_id: Uuid,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<chrono::DateTime<chrono::Utc>>,
-        attachment_ids: Vec<Uuid>,
-        _options: SubmitOptions,
-    ) -> Result<TurnResult> {
-        self.submit_turn_with_attachments(
-            auth,
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            attachment_ids,
-        )
-        .await
-    }
+    /// Set [`SubmitTurn::request_id`] to let the SSE `run_id` double as the
+    /// orchestrator's request id, enabling external cancellation by `run_id`.
+    async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult>;
 
     /// Cancel an in-flight turn by `request_id`. Returns whether a token was
     /// found and triggered.
@@ -122,49 +66,8 @@ impl AssistantInterface for Orchestrator {
         self.register_token_sink(conversation_id, sink).await;
     }
 
-    async fn submit_turn_with_attachments(
-        &self,
-        auth: &AuthContext,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<chrono::DateTime<chrono::Utc>>,
-        attachment_ids: Vec<Uuid>,
-    ) -> Result<TurnResult> {
-        self.submit_turn_with_attachments(
-            auth,
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            attachment_ids,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn submit_turn_with_request_id(
-        &self,
-        auth: &AuthContext,
-        request_id: Uuid,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<chrono::DateTime<chrono::Utc>>,
-        attachment_ids: Vec<Uuid>,
-        options: SubmitOptions,
-    ) -> Result<TurnResult> {
-        self.submit_turn_with_request_id(
-            auth,
-            request_id,
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            attachment_ids,
-            options,
-        )
-        .await
+    async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult> {
+        self.submit(turn).await
     }
 
     async fn cancel_turn(&self, request_id: Uuid) -> bool {
@@ -185,7 +88,7 @@ mod tests {
     use std::sync::Arc;
 
     /// Minimal mock that only implements the two required trait methods
-    /// (`submit_turn_with_attachments` + `run_boot`). The other trait
+    /// (`submit` + `run_boot`). The other trait
     /// methods fall back to the trait's default implementations, which is
     /// what these tests exercise.
     struct MinimalMock {
@@ -201,22 +104,15 @@ mod tests {
         ) {
         }
 
-        async fn submit_turn_with_attachments(
-            &self,
-            _auth: &AuthContext,
-            prompt: &str,
-            _conversation_id: Uuid,
-            _interface: Interface,
-            _timestamp: Option<chrono::DateTime<chrono::Utc>>,
-            _attachment_ids: Vec<Uuid>,
-        ) -> Result<TurnResult> {
-            *self.recorded_prompt.lock().await = Some(prompt.to_string());
+        async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult> {
+            *self.recorded_prompt.lock().await = Some(turn.prompt.clone());
             Ok(TurnResult {
-                answer: format!("echo: {prompt}"),
+                answer: format!("echo: {}", turn.prompt),
                 attachments: vec![],
                 attachment_ids: vec![],
                 message_id: None,
                 had_errors: false,
+                timing: None,
             })
         }
 
@@ -226,44 +122,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_submit_turn_delegates_to_submit_turn_with_attachments() {
-        let mock = MinimalMock {
+    async fn submit_reaches_the_implementation() {
+        let mock = Arc::new(MinimalMock {
             recorded_prompt: tokio::sync::Mutex::new(None),
-        };
-        let iface: Arc<dyn AssistantInterface> = Arc::new(mock);
+        });
+        let iface: Arc<dyn AssistantInterface> = mock.clone();
         let result = iface
-            .submit_turn(
-                &AuthContext::system(),
-                "hello",
-                Uuid::new_v4(),
-                Interface::Cli,
-                None,
-            )
+            .submit(SubmitTurn::new("hello", Uuid::new_v4(), Interface::Cli))
             .await
             .unwrap();
         assert_eq!(result.answer, "echo: hello");
-    }
-
-    #[tokio::test]
-    async fn default_submit_turn_with_request_id_delegates() {
-        let mock = MinimalMock {
-            recorded_prompt: tokio::sync::Mutex::new(None),
-        };
-        let iface: Arc<dyn AssistantInterface> = Arc::new(mock);
-        let result = iface
-            .submit_turn_with_request_id(
-                &AuthContext::system(),
-                Uuid::new_v4(),
-                "world",
-                Uuid::new_v4(),
-                Interface::Cli,
-                None,
-                vec![],
-                SubmitOptions::default(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(result.answer, "echo: world");
+        assert_eq!(mock.recorded_prompt.lock().await.as_deref(), Some("hello"));
     }
 
     #[tokio::test]

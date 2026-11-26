@@ -432,6 +432,7 @@ mod tests {
     use assistant_storage::{ConversationStore as _, OrgPoolFactory, SqliteConversationStore};
 
     use super::*;
+    use crate::orchestrator::SubmitTurn;
 
     fn runtimes(base: &std::path::Path) -> Arc<SpaceRuntimes> {
         let mut config = OrgConfig::default();
@@ -622,13 +623,8 @@ mod tests {
             tokio::spawn(async move { worker.run_worker("worker").await });
             tokio::time::timeout(
                 Duration::from_secs(10),
-                runtime.orchestrator.submit_turn(
-                    &auth,
-                    "hello",
-                    Uuid::new_v4(),
-                    Interface::Web,
-                    None,
-                    crate::orchestrator::SubmitOptions::default(),
+                runtime.orchestrator.submit(
+                    SubmitTurn::new("hello", Uuid::new_v4(), Interface::Web).with_auth(&auth),
                 ),
             )
             .await
@@ -668,13 +664,9 @@ mod tests {
         let conversation = Uuid::new_v4();
         tokio::time::timeout(
             Duration::from_secs(10),
-            beta.orchestrator.submit_turn(
-                &AuthContext::system(),
-                "hello",
-                conversation,
-                Interface::Web,
-                None,
-                crate::orchestrator::SubmitOptions::default(),
+            beta.orchestrator.submit(
+                SubmitTurn::new("hello", conversation, Interface::Web)
+                    .with_auth(&AuthContext::system()),
             ),
         )
         .await

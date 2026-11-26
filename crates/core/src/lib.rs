@@ -40,8 +40,8 @@ pub use bus::{
     BusMessage, ClaimFilter, MAX_TURN_REDELIVERIES, MessageBus, MessageStatus, PublishRequest,
 };
 pub use bus_messages::{
-    AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase, TurnRequest,
-    TurnResult, TurnStatus, topic,
+    AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnAnchor, TurnPhase,
+    TurnRequest, TurnResult, TurnStatus, topic,
 };
 pub use catalog::{CatalogEntry, CatalogResolver, CatalogResourceType};
 pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
@@ -73,7 +73,7 @@ pub use llm::structured::chat_structured;
 pub use llm::tool_spec::ToolSpec;
 pub use llm::types::{
     ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ProviderState,
-    ToolCallItem, ToolCallResponse,
+    ToolCallItem, ToolCallResponse, TurnTiming,
 };
 pub use memory::{
     MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,

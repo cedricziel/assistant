@@ -11,6 +11,7 @@ assistant-core       = { path = "../core" }
 async-trait          = { workspace = true }
 anyhow               = { workspace = true }
 tokio                = { workspace = true }
+arc-swap             = { workspace = true }
 reqwest              = { workspace = true }
 reqwest-middleware    = { workspace = true }
 reqwest-retry        = { workspace = true }
