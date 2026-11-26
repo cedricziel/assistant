@@ -4,4 +4,8 @@
 /// `test/registry_test.dart` keeps it in step with the barrel and
 /// `ELEMENTS.md`; the gallery's `coverage_test.dart` requires a use-case and a
 /// `golden` test for each entry.
-const List<String> kAssistantUiElements = ['StarterPrompts', 'SuggestionChips'];
+const List<String> kAssistantUiElements = [
+  'CodeBlock',
+  'StarterPrompts',
+  'SuggestionChips',
+];
