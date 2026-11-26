@@ -27,10 +27,12 @@ pub mod conversation_events;
 pub mod conversation_search;
 pub mod conversations;
 pub mod integration_store;
+pub mod interactions;
 pub mod interface_instance_store;
 pub mod memory_chunks;
 pub mod message_bus;
 pub mod message_feedback;
+pub mod message_timings;
 pub mod org_oidc_config_store;
 pub mod org_storage;
 pub mod org_store;
@@ -77,6 +79,10 @@ pub use conversations::{
 pub use integration_store::{
     SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
 };
+pub use interactions::{
+    InMemoryInteractionStore, InteractionRow, InteractionStatus, InteractionStore, NewInteraction,
+    ResolveOutcome, SqliteInteractionStore,
+};
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use memory_chunks::{
     FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,
@@ -85,6 +91,9 @@ pub use message_bus::{InMemoryMessageBus, SqliteMessageBus};
 pub use message_feedback::{
     InMemoryMessageFeedbackStore, MessageFeedbackRating, MessageFeedbackRow, MessageFeedbackStore,
     SqliteMessageFeedbackStore,
+};
+pub use message_timings::{
+    InMemoryMessageTimingStore, MessageTimingStore, SqliteMessageTimingStore,
 };
 pub use org_oidc_config_store::SqliteOrgOidcConfigStore;
 pub use org_storage::OrgStorageLayer;
@@ -217,6 +226,11 @@ impl StorageLayer {
     /// Convenience: build a `SkillExecutionStore` backed by this pool.
     pub fn skill_execution_store(&self) -> SqliteSkillExecutionStore {
         SqliteSkillExecutionStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `MessageTimingStore` backed by this pool.
+    pub fn message_timing_store(&self) -> SqliteMessageTimingStore {
+        SqliteMessageTimingStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `ToolPermissionRuleStore` backed by this pool.

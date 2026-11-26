@@ -140,9 +140,19 @@ timeout_secs = 120
 # timeout_secs    = 120
 #
 # [llm.openrouter]
-# referer    = "https://my-app.example.com"  # HTTP-Referer header (OpenRouter TOS)
-# title      = "My App"                       # X-Title header (dashboard display)
-# max_tokens = 8192                            # max completion tokens per response
+# referer         = "https://my-app.example.com"  # HTTP-Referer header (app attribution)
+# title           = "My App"                       # X-OpenRouter-Title header (dashboard display)
+# categories      = ["cli-agent"]                  # X-OpenRouter-Categories header, at most two
+# max_tokens      = 8192                           # sent as max_completion_tokens
+# fallback_models = ["openai/gpt-4o"]              # tried in order after `model`
+#
+# # Provider routing, sent as the request's `provider` object. Only set keys
+# # are sent; unknown keys fail config load. See docs/openrouter.md.
+# [llm.openrouter.provider]
+# data_collection = "deny"   # "allow" | "deny"
+# zdr             = true     # zero-data-retention endpoints only
+# # sort          = "price"  # "price" | "throughput" | "latency"
+# # order         = ["anthropic", "openai"]
 #
 # Browse models at: https://openrouter.ai/models
 

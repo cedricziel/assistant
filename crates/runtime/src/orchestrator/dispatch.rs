@@ -8,6 +8,7 @@ use assistant_core::{
     ToolCallItem, ToolSpec,
     permission::{Outcome, PermissionRequest},
     types::conversation::ExecutionContext,
+    types::conversation::Interface,
     types::conversation::Message,
     types::conversation::MessageRole,
 };
@@ -27,6 +28,28 @@ use super::{
 };
 use crate::webhook_dispatch;
 
+/// Call metadata persisted on a tool row next to the observation.
+#[derive(Clone, Copy)]
+pub(crate) struct ToolResultMeta<'a> {
+    /// Provider-supplied id of the call this row answers.
+    pub tool_call_id: Option<&'a str>,
+    /// `ok`, `error` or `denied`.
+    pub status: &'a str,
+    /// Capped structured render data; client-only.
+    pub data: Option<&'a serde_json::Value>,
+}
+
+impl ToolResultMeta<'_> {
+    /// Metadata for rows that carry neither an id nor data (`end_turn`).
+    pub(crate) const fn ok() -> Self {
+        Self {
+            tool_call_id: None,
+            status: "ok",
+            data: None,
+        }
+    }
+}
+
 /// Result of [`Orchestrator::finalize_tool_result`].
 ///
 /// Carries a flag indicating whether the tool execution failed, so the
@@ -38,15 +61,32 @@ pub(crate) struct FinalizedTool {
 }
 
 impl Orchestrator {
-    /// Filter tool specs based on provider capabilities.
+    /// Whether a turn's client can render rich UI such as an A2UI surface.
+    ///
+    /// Only an interactive web turn at depth 0 can: `quick-message` and voice
+    /// are `Interface::Web` but not interactive, a CLI turn is interactive but
+    /// has no renderer, and subagents have no user attached.
+    pub(crate) fn rich_client_turn(interface: &Interface, interactive: bool, depth: u32) -> bool {
+        interactive && *interface == Interface::Web && depth == 0
+    }
+
+    /// Filter tool specs based on provider capabilities and the turn's client.
     ///
     /// Suppresses builtin tools when the provider offers an equivalent
     /// hosted tool (e.g. suppress `web-search` when the provider has
-    /// native web search).
-    pub(crate) fn filter_tool_specs(specs: Vec<ToolSpec>, caps: &Capabilities) -> Vec<ToolSpec> {
+    /// native web search), and drops `requires_rich_client` tools unless
+    /// `rich_client` is set (see [`Self::rich_client_turn`]).
+    pub(crate) fn filter_tool_specs(
+        specs: Vec<ToolSpec>,
+        caps: &Capabilities,
+        rich_client: bool,
+    ) -> Vec<ToolSpec> {
         specs
             .into_iter()
-            .filter(|spec| !Self::tool_suppressed_by_caps(spec, caps))
+            .filter(|spec| {
+                (rich_client || !spec.requires_rich_client)
+                    && !Self::tool_suppressed_by_caps(spec, caps)
+            })
             .collect()
     }
 
@@ -78,10 +118,14 @@ impl Orchestrator {
         turn: i64,
         tool_name: &str,
         observation: &str,
+        meta: ToolResultMeta<'_>,
     ) -> Message {
         let mut m = Message::new(conversation_id, MessageRole::Tool, observation);
         m.turn = turn;
         m.skill_name = Some(tool_name.to_string());
+        m.tool_call_id = meta.tool_call_id.map(str::to_string);
+        m.tool_status = Some(meta.status.to_string());
+        m.tool_data_json = meta.data.and_then(|data| serde_json::to_string(data).ok());
         m
     }
 
@@ -269,8 +313,17 @@ impl Orchestrator {
         }
 
         crate::history::append_tool_result(history, tool_name, &observation);
-        let tr_msg =
-            Self::make_tool_result_message(conversation_id, turn_index, tool_name, &observation);
+        let tr_msg = Self::make_tool_result_message(
+            conversation_id,
+            turn_index,
+            tool_name,
+            &observation,
+            ToolResultMeta {
+                tool_call_id,
+                status: tool_status,
+                data: data.as_ref(),
+            },
+        );
         if let Err(e) = conv_store.save_message(&tr_msg).await {
             warn!("Failed to persist tool-result message: {e}");
         }
@@ -509,8 +562,17 @@ impl Orchestrator {
             otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
             otel_span.set_attribute(KeyValue::new("tool_error", observation.clone()));
             crate::history::append_tool_result(history, name, &observation);
-            let tr_msg =
-                Self::make_tool_result_message(conversation_id, turn_index, name, &observation);
+            let tr_msg = Self::make_tool_result_message(
+                conversation_id,
+                turn_index,
+                name,
+                &observation,
+                ToolResultMeta {
+                    tool_call_id,
+                    status: "denied",
+                    data: None,
+                },
+            );
             if let Err(e) = conv_store
                 .save_message(&tr_msg)
                 .instrument(instrument_span.clone())

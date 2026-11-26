@@ -12,7 +12,10 @@ const _allowedDependencies = {
   'flutter',
   'flutter_smooth_markdown',
   'material_ui',
+  'highlight',
 };
+const _highlightDir = 'lib/src/highlight/';
+const _clipboardAndAnnounce = ['Clipboard.', 'SemanticsService.'];
 const _forbiddenImports = [
   'flutter_riverpod',
   'assistant_api',
@@ -76,10 +79,19 @@ List<String> boundaryViolations(Map<String, String> sources) {
       if (uri == _forbiddenMaterial && path != _legacyTheme) {
         violations.add('$path: $uri outside $_legacyTheme');
       }
+      if (uri.startsWith('package:highlight/') &&
+          !path.startsWith(_highlightDir)) {
+        violations.add('$path: $uri outside $_highlightDir');
+      }
     }
     for (final token in _platformBranching) {
       if (source.contains(token)) {
         violations.add('$path: platform branching via $token');
+      }
+    }
+    for (final token in _clipboardAndAnnounce) {
+      if (source.contains(token)) {
+        violations.add('$path: $token is the app\'s job, not the package\'s');
       }
     }
   }
@@ -138,6 +150,22 @@ void main() {
 
       expect(violations, hasLength(3));
       expect(violations.any((v) => v.startsWith('lib/c.dart')), isFalse);
+    });
+
+    test('allows package:highlight only under lib/src/highlight/', () {
+      const import = "import 'package:highlight/highlight.dart';";
+
+      expect(boundaryViolations({'lib/src/highlight/h.dart': import}), isEmpty);
+      expect(boundaryViolations({'lib/src/x.dart': import}), hasLength(1));
+    });
+
+    test('flags clipboard and semantics announcements', () {
+      final violations = boundaryViolations({
+        'lib/a.dart': 'Clipboard.setData(x);',
+        'lib/b.dart': 'SemanticsService.sendAnnouncement(v, m, d);',
+      });
+
+      expect(violations, hasLength(2));
     });
 
     test('does not confuse similarly named packages', () {

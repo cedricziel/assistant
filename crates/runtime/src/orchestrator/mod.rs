@@ -40,13 +40,14 @@ mod turn_cancellations;
 mod turn_control;
 
 mod subagent;
+mod submit;
 mod worker;
 
 #[cfg(test)]
 mod tests;
 
 pub use stream_event::OrchestratorEvent;
-pub use worker::SubmitOptions;
+pub use submit::SubmitTurn;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -126,7 +127,7 @@ pub trait ConfirmationCallback: Send + Sync {
 pub enum CancelOutcome {
     /// A cancellation token was registered for this `request_id` and has been
     /// triggered. The turn worker will abort on its next yield point and
-    /// `submit_turn` will return an error containing the cancellation marker.
+    /// `submit` will return an error containing the cancellation marker.
     Cancelled,
     /// No matching turn was registered — either the turn already finished
     /// (success or error), was never started, or used a different request_id.
@@ -236,6 +237,7 @@ fn end_turn_spec() -> ToolSpec {
         }),
         is_mutating: false,
         requires_confirmation: false,
+        requires_rich_client: false,
     }
 }
 
@@ -300,8 +302,8 @@ pub struct Orchestrator {
     /// Cancellation tokens for running subagents, keyed by agent ID.
     pub(crate) agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
     /// Cancellation tokens for in-flight bus turns, keyed by request ID
-    /// (the `batch_id` / `correlation_id` set by `submit_turn`).
-    /// When `submit_turn` times out it cancels the token so the worker
+    /// (the `batch_id` / `correlation_id` set by `submit`).
+    /// When `submit` times out it cancels the token so the worker
     /// drops the in-progress turn future rather than running to completion.
     /// Also remembers requests cancelled before a worker claimed them, so the
     /// worker skips them.
@@ -315,7 +317,7 @@ pub struct Orchestrator {
     pub adapter_registry: crate::AdapterRegistry,
     /// Context compaction configuration.
     pub(crate) compaction_config: assistant_core::types::features::CompactionConfig,
-    /// How long `submit_turn` waits for the worker to return a result before
+    /// How long `submit` waits for the worker to return a result before
     /// timing out. Defaults to 10 800 s (3 h). Configurable per persona via
     /// `with_submit_timeout`.
     pub(crate) submit_timeout_secs: u64,
@@ -435,7 +437,7 @@ impl Orchestrator {
         ToolOverlay::new(binding.source.tools_for_turn(&scope).await)
     }
 
-    /// Override the `submit_turn` timeout for this orchestrator instance.
+    /// Override the `submit` timeout for this orchestrator instance.
     ///
     /// Call this after [`Orchestrator::new`] to apply a per-persona timeout
     /// loaded from the database.  The value must be > 0.
@@ -465,14 +467,14 @@ impl Orchestrator {
         &self.bus
     }
 
-    /// Cancel an in-flight turn by `request_id` (the same UUID `submit_turn`
+    /// Cancel an in-flight turn by `request_id` (the same UUID `submit`
     /// assigned, also used as the SSE `run_id` when callers pass it through
-    /// [`Self::submit_turn_with_request_id`]).
+    /// [`Self::submit`]).
     ///
     /// Cancellation is propagated via the existing per-turn `CancellationToken`
     /// stored in [`Self::turn_cancellations`]; the worker's `tokio::select!`
     /// aborts the in-flight LLM/tool work on the next yield point, and
-    /// `submit_turn` returns an error containing the cancellation marker.
+    /// `submit` returns an error containing the cancellation marker.
     ///
     /// Returns [`CancelOutcome::Cancelled`] if a matching token was found,
     /// [`CancelOutcome::NotFound`] if the turn has already finished or was
@@ -656,13 +658,9 @@ impl Orchestrator {
 
         info!(path = %boot_path.display(), "Running BOOT.md startup hook");
         match self
-            .submit_turn(
-                &assistant_core::auth::AuthContext::system(),
-                &stripped,
-                conversation_id,
-                interface,
-                None,
-                SubmitOptions::default(),
+            .submit(
+                SubmitTurn::new(stripped.as_str(), conversation_id, interface)
+                    .with_auth(&assistant_core::auth::AuthContext::system()),
             )
             .await
         {
@@ -849,6 +847,7 @@ impl Orchestrator {
                 params_schema: h.params_schema(),
                 is_mutating: h.is_mutating(),
                 requires_confirmation: h.requires_confirmation(),
+                requires_rich_client: h.requires_rich_client(),
             })
             .collect();
 
@@ -874,8 +873,12 @@ impl Orchestrator {
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
-        let global_specs =
-            Self::filter_tool_specs(self.executor.to_specs_with(&overlay), &provider_caps);
+        let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
+        let global_specs = Self::filter_tool_specs(
+            self.executor.to_specs_with(&overlay),
+            &provider_caps,
+            rich_client,
+        );
         let all_specs: Vec<ToolSpec> = ext_specs
             .iter()
             .cloned()
@@ -1293,8 +1296,12 @@ impl Orchestrator {
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
-        let tool_specs =
-            Self::filter_tool_specs(self.executor.to_specs_with(&overlay), &provider_caps);
+        let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
+        let tool_specs = Self::filter_tool_specs(
+            self.executor.to_specs_with(&overlay),
+            &provider_caps,
+            rich_client,
+        );
 
         // 5. Build the system prompt fresh from disk.
         let system_prompt = self.compose_system_prompt(&interface).await;

@@ -15,7 +15,7 @@ assistant-llm-provider          Concrete implementations
     │   ├── messages.rs         build_chat_messages(), build_raw_messages()
     │   └── tools.rs            tool_spec_to_chat(), parse_tool_calls()
     ├── moonshot/               Moonshot AI (wraps ChatCompletionsProvider)
-    ├── openrouter/             OpenRouter (wraps ChatCompletionsProvider)
+    ├── openrouter/             OpenRouter (own wire client: wire, request, stream, client)
     ├── anthropic/              Anthropic (native Messages API)
     ├── openai/                 OpenAI (Responses API)
     ├── ollama/                 Ollama (local, custom format)
@@ -69,7 +69,4 @@ If the provider has its own wire format (like Anthropic or a future Gemini):
 - `provider_name()` returns a lowercase slug matching the `LlmProviderKind` serde name.
 - `embed()` returns `Err(...)` if the provider doesn't support embeddings.
   Users configure `[llm.embeddings]` separately.
-- Extra headers use `ChatCompletionsConfig::extra_headers: Vec<(String, String)>`.
-  The `ChatCompletionsProvider` converts them to `HeaderName`/`HeaderValue` and
-  injects via `async-openai`'s `with_header()`.
 - API key resolution: check `config.api_key` first, then env var fallback.

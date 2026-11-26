@@ -57,6 +57,17 @@ pub struct Message {
     /// otherwise the bus message id. `None` for legacy rows.
     #[serde(default)]
     pub run_id: Option<Uuid>,
+    /// For tool messages: the provider-supplied id of the call this row
+    /// answers, used to join it to its `tool_calls_json` entry.
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
+    /// For tool messages: `ok`, `error` or `denied`. `None` for legacy rows.
+    #[serde(default)]
+    pub tool_status: Option<String>,
+    /// For tool messages: the serialised structured render data (capped by
+    /// dispatch). Client-only; never sent to the model.
+    #[serde(default)]
+    pub tool_data_json: Option<String>,
 }
 
 impl Message {
@@ -74,6 +85,9 @@ impl Message {
             sender_user_id: None,
             parent_id: None,
             run_id: None,
+            tool_call_id: None,
+            tool_status: None,
+            tool_data_json: None,
         }
     }
 
@@ -99,7 +113,7 @@ pub struct ExecutionContext {
     /// The interface this turn originated from (cli, signal, mcp)
     pub interface: Interface,
     /// Whether a human is waiting on this turn and can answer prompts. Set by
-    /// the submitter (`SubmitOptions`), never derived from `interface`.
+    /// the submitter (`SubmitTurn`), never derived from `interface`.
     pub interactive: bool,
     /// The run this turn belongs to: the bus `batch_id` of its request, which
     /// is also the SSE `run_id` for streaming web turns. `None` for tool

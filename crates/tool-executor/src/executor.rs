@@ -655,6 +655,44 @@ mod tests {
         assert!(v.1 && !v.2, "V runs its own tool and not U's");
     }
 
+    #[tokio::test]
+    async fn a_rich_client_handler_yields_a_rich_client_spec() {
+        struct Rich;
+        #[async_trait]
+        impl ToolHandler for Rich {
+            fn name(&self) -> &str {
+                "rich"
+            }
+            fn description(&self) -> &str {
+                "needs a renderer"
+            }
+            fn params_schema(&self) -> serde_json::Value {
+                json!({"type": "object", "properties": {}, "required": []})
+            }
+            fn requires_rich_client(&self) -> bool {
+                true
+            }
+            async fn run(
+                &self,
+                _params: HashMap<String, serde_json::Value>,
+                _ctx: &ExecutionContext,
+            ) -> Result<ToolOutput> {
+                Ok(ToolOutput::success("rendered"))
+            }
+        }
+        let executor = make_executor_with_stubs().await;
+        executor.register_ambient_tool(Arc::new(Rich));
+
+        let flagged: Vec<String> = executor
+            .to_specs()
+            .into_iter()
+            .filter(|s| s.requires_rich_client)
+            .map(|s| s.name)
+            .collect();
+
+        assert_eq!(flagged, ["rich"], "only the rich-client handler is flagged");
+    }
+
     // -- to_specs_filtered ---------------------------------------------------
 
     #[tokio::test]
