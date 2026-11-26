@@ -10,8 +10,8 @@ use anyhow::{Context, Result};
 use rmcp::ClientServiceExt;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams, ContentBlock,
-    GetTaskParams, ProtocolVersion, ReadResourceRequestParams, ResourceContents, ServerPeerInfo,
-    Skill, SubscriptionFilter, Task, TaskPayload, Tool,
+    GetTaskParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResult, Resource,
+    ResourceContents, ServerPeerInfo, Skill, SubscriptionFilter, Task, TaskPayload, Tool,
 };
 use rmcp::service::{ClientLifecycleMode, Peer, RoleClient, RunningService, ServiceError};
 use rmcp::transport::IntoTransport;
@@ -193,11 +193,7 @@ impl McpClient {
     /// The bytes of the resource at `uri`: a text resource's UTF-8 or a
     /// binary one's decoded content.
     pub async fn read_resource_bytes(&self, uri: &str) -> Result<Vec<u8>> {
-        let result = self
-            .peer
-            .read_resource(ReadResourceRequestParams::new(uri))
-            .await
-            .with_context(|| format!("resources/read '{uri}' request failed"))?;
+        let result = self.read_resource(uri).await?;
         match result.contents.into_iter().next() {
             Some(ResourceContents::TextResourceContents { text, .. }) => Ok(text.into_bytes()),
             Some(ResourceContents::BlobResourceContents { blob, .. }) => {
@@ -206,6 +202,22 @@ impl McpClient {
             }
             _ => anyhow::bail!("resources/read '{uri}' returned no content"),
         }
+    }
+
+    /// Read the resource at `uri`.
+    pub async fn read_resource(&self, uri: &str) -> Result<ReadResourceResult> {
+        self.peer
+            .read_resource(ReadResourceRequestParams::new(uri))
+            .await
+            .with_context(|| format!("resources/read '{uri}' request failed"))
+    }
+
+    /// Every resource the server lists (handles pagination).
+    pub async fn list_resources(&self) -> Result<Vec<Resource>> {
+        self.peer
+            .list_all_resources()
+            .await
+            .context("resources/list request failed")
     }
 
     /// The user-assigned name for this server.

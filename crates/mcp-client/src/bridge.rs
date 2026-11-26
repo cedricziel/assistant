@@ -14,6 +14,7 @@ use tracing::{debug, warn};
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{Attachment, ToolHandler, ToolOutput};
 
+use crate::apps::{resolve_app, ui_field, ui_resource_uri};
 use crate::client::McpClient;
 
 /// Format a namespaced tool name: `mcp__{server}__{tool}`.
@@ -33,6 +34,8 @@ pub struct McpToolHandler {
     input_schema: serde_json::Value,
     /// Whether this tool requires user confirmation.
     requires_confirmation: bool,
+    /// The `ui://` resource of the tool's MCP App, if it declares one.
+    app_resource_uri: Option<String>,
     /// Shared client session for the remote server.
     client: Arc<McpClient>,
 }
@@ -62,6 +65,7 @@ impl McpToolHandler {
             description,
             input_schema,
             requires_confirmation,
+            app_resource_uri: ui_resource_uri(remote),
             client,
         }
     }
@@ -120,7 +124,15 @@ impl ToolHandler for McpToolHandler {
         };
 
         match self.client.call_tool(&self.remote_name, arguments).await {
-            Ok(result) => Ok(output_from_result(result)),
+            Ok(result) => {
+                let mut output = output_from_result(result);
+                if let Some(uri) = &self.app_resource_uri
+                    && let Some(app) = resolve_app(&self.client, self.server_name(), uri).await
+                {
+                    output.data = app.attach_to(output.data.take());
+                }
+                Ok(output)
+            }
             Err(e) => Ok(ToolOutput::error(format!(
                 "MCP tool call to '{}' failed: {e:#}",
                 self.remote_name
@@ -265,12 +277,7 @@ fn is_model_visible(tool: &Tool) -> bool {
     let Some(meta) = &tool.meta else {
         return true;
     };
-    let visibility = meta
-        .0
-        .get("ui")
-        .and_then(|ui| ui.get("visibility"))
-        .or_else(|| meta.0.get("ui/visibility"));
-    match visibility.and_then(serde_json::Value::as_array) {
+    match ui_field(meta, "visibility").and_then(serde_json::Value::as_array) {
         Some(audiences) => audiences.iter().any(|a| a.as_str() == Some("model")),
         None => true,
     }
