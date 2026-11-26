@@ -6,12 +6,12 @@ library;
 // export 'src/bodies/command_body.dart'; // slot: chat-element-library 7b
 
 // export 'src/bodies/subagent_body.dart'; // slot: chat-element-library 7b
-// export 'src/bodies/thinking_body.dart'; // slot: chat-element-library 7a
 // export 'src/branch_picker.dart'; // slot: message-branching 9
 // export 'src/code/code_block.dart'; // slot: chat-a11y-and-code-blocks C4
 // export 'src/composer/attachment_tray.dart'; // slot: chat-element-library 11b
 // export 'src/composer/composer.dart'; // slot: chat-element-library 11a
 // export 'src/composer/composer_voice_button.dart'; // slot: chat-element-library 11b
+export 'src/bodies/thinking_body.dart';
 export 'src/bodies/tool_call_body.dart';
 export 'src/bodies/tool_status_icon.dart';
 export 'src/branch_picker.dart';
@@ -29,6 +29,7 @@ export 'src/interactions/unknown_interaction_card.dart';
 export 'src/message_actions.dart';
 export 'src/message_editor.dart';
 export 'src/registry.dart';
+export 'src/scopes/chat_markdown_scope.dart';
 export 'src/scopes/thread_density_scope.dart';
 export 'src/scopes/tool_result_renderer_scope.dart';
 export 'src/suggestions/starter_prompts.dart';

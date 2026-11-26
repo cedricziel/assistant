@@ -1,11 +1,7 @@
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
-    hide ToolCallStatus;
 
 import 'chat_provider.dart';
-import '../../shared/theme/legacy_theme.dart';
-import 'markdown_link_handler.dart';
 import 'mcp_app_frame.dart';
 
 /// A streaming-aware timeline entry for one thinking, tool call or subagent
@@ -58,66 +54,11 @@ class StreamingTimelineEntry extends StatelessWidget {
 
   // -- Thinking ---------------------------------------------------------------
 
-  Widget _buildThinking(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final content = message.thinkingContent;
-    final isActive = entryState == EntryState.active;
-    final stream = message.thinkingTokenStream;
-    final hasContent = content != null && content.isNotEmpty;
-
-    // Build the expanded content based on state.
-    Widget? expandedContent;
-    if (isActive && stream != null) {
-      // Live streaming thinking — render with StreamMarkdown.
-      expandedContent = TimelineEntryShell.fadeContainer(
-        maxHeight: _maxHeight(context, false),
-        isActive: true,
-        child: StreamMarkdown(
-          stream: stream,
-          styleSheet: MarkdownStyleSheet.fromTheme(legacyThemeOf(context))
-              .copyWith(
-                paragraphStyle: TextStyle(
-                  fontSize: 12,
-                  color: colorScheme.onSurfaceVariant,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-          onTapLink: (url) => MarkdownLinkHandler(context: context).onTap(url),
-        ),
-      );
-    } else if (hasContent) {
-      // Accumulated thinking content (complete or active without stream).
-      expandedContent = TimelineEntryShell.fadeContainer(
-        maxHeight: _maxHeight(context, false),
-        isActive: isActive,
-        child: SelectableText(
-          content,
-          style: TextStyle(
-            fontSize: 12,
-            color: colorScheme.onSurfaceVariant,
-            fontStyle: FontStyle.italic,
-          ),
-        ),
-      );
-    }
-
-    final expandable = hasContent || (isActive && stream != null);
-
-    return _buildSection(
-      context,
-      icon: Icons.psychology_outlined,
-      label: isActive ? 'Thinking...' : 'Thought',
-      statusWidget: isActive
-          ? const SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator.adaptive(strokeWidth: 1.5),
-            )
-          : null,
-      expandable: expandable,
-      expandedContent: expandedContent,
-    );
-  }
+  Widget _buildThinking(BuildContext context) => ThinkingBody(
+    content: message.thinkingContent,
+    tokenStream: message.thinkingTokenStream,
+    entryState: entryState,
+  );
 
   // -- Tool call --------------------------------------------------------------
 

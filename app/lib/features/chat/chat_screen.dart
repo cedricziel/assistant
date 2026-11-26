@@ -23,6 +23,7 @@ import 'attachment_provider.dart';
 import 'chat_announcer.dart';
 import 'chat_provider.dart';
 import 'chat_input_row.dart';
+import 'chat_markdown_config.dart';
 import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
@@ -359,7 +360,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // The inline list / drawer decision compares the chat pane's own width
     // (the window minus the nav sidebar), so it sits above the Scaffold,
     // which it drives (body, app bar leading, drawer).
-    return LayoutBuilder(
+    final thread = LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= Breakpoints.wide;
         final threadWidth =
@@ -670,5 +671,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         );
       },
     );
+    return ChatMarkdownConfig(child: thread);
   }
 }

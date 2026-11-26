@@ -2,6 +2,7 @@ import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
+import 'components/chat_markdown_scope.dart';
 import 'components/code_block.dart';
 import 'components/conversation_list_view.dart';
 import 'components/feedback_buttons.dart';
@@ -16,6 +17,7 @@ import 'components/question_card.dart';
 import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
+import 'components/thinking_body.dart';
 import 'components/thread_density_scope.dart';
 import 'components/timeline_entry_shell.dart';
 import 'components/tool_call_body.dart';
@@ -72,7 +74,6 @@ final List<WidgetbookComponent> kComponents = [
   // subagentBodyComponent, // slot: chat-element-library 7b
   // surfaceFrameComponent, // slot: generative-ui-a2ui 13
   // terminalResultViewComponent, // slot: tool-result-renderers C4
-  // thinkingBodyComponent, // slot: chat-element-library 7a
   // threadEmptyStateComponent, // slot: chat-element-library 9
   // threadErrorBannerComponent, // slot: chat-element-library 9
   // threadViewportComponent, // slot: chat-element-library 10
@@ -83,6 +84,7 @@ final List<WidgetbookComponent> kComponents = [
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   branchPickerComponent,
+  chatMarkdownScopeComponent,
   codeBlockComponent,
   conversationListViewComponent,
   feedbackButtonsComponent,
@@ -97,6 +99,7 @@ final List<WidgetbookComponent> kComponents = [
   queuedMessageBubbleComponent,
   starterPromptsComponent,
   suggestionChipsComponent,
+  thinkingBodyComponent,
   threadDensityScopeComponent,
   timelineEntryShellComponent,
   toolCallBodyComponent,

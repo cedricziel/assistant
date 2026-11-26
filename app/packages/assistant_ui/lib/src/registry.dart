@@ -10,6 +10,7 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
+  'ChatMarkdownScope',
   'CodeBlock',
   'ConversationListView',
   'FeedbackButtons',
@@ -24,6 +25,7 @@ const List<String> kAssistantUiElements = [
   'QueuedMessageBubble',
   'StarterPrompts',
   'SuggestionChips',
+  'ThinkingBody',
   'ThreadDensityScope',
   'TimelineEntryShell',
   'ToolCallBody',
@@ -57,7 +59,6 @@ const List<String> kAssistantUiElements = [
   // 'SubagentBody', // slot: chat-element-library 7b
   // 'SurfaceFrame', // slot: generative-ui-a2ui 13
   // 'TerminalResultView', // slot: tool-result-renderers C4
-  // 'ThinkingBody', // slot: chat-element-library 7a
   // 'ThreadEmptyState', // slot: chat-element-library 9
   // 'ThreadErrorBanner', // slot: chat-element-library 9
   // 'ThreadViewport', // slot: chat-element-library 10
