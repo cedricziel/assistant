@@ -85,6 +85,15 @@ impl ToolOutput {
         self
     }
 
+    /// Attach render data for a rich client view.
+    ///
+    /// Serialization of the contract types cannot realistically fail; if it
+    /// does, the output carries no data and clients show their generic view.
+    pub fn with_render(mut self, render: crate::tool_render::ToolRenderData) -> Self {
+        self.data = serde_json::to_value(render).ok();
+        self
+    }
+
     /// Attach a single file to this output.
     pub fn with_attachment(mut self, attachment: Attachment) -> Self {
         self.attachments.push(attachment);

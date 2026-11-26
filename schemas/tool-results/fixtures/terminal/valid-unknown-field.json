@@ -1,0 +1,12 @@
+{
+  "kind": "terminal",
+  "command": "ls",
+  "exit_code": 0,
+  "stdout": "a\n",
+  "stderr": "",
+  "stdout_truncated": true,
+  "stderr_truncated": false,
+  "duration_ms": 3,
+  "timed_out": false,
+  "added_by_a_newer_server": { "ignored": true }
+}

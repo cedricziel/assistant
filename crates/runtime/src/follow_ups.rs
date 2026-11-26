@@ -298,6 +298,7 @@ mod tests {
                 items: Vec::new(),
                 meta: LlmResponseMeta::default(),
                 thinking: None,
+                provider_state: None,
             },
         )]);
         let out = generate("q", "a", 3, &llm).await.unwrap();
