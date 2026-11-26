@@ -57,14 +57,9 @@ Future<Map<String, Object?>> _appRequest(
   Map<String, Object?> params,
 ) async {
   final port = FakeMcpAppSurface.created.last.port;
-  port.fromApp({
-    'jsonrpc': '2.0',
-    'id': id,
-    'method': method,
-    'params': params,
-  });
+  port.request(id, method, params);
   await tester.pumpAndSettle();
-  return port.sent.lastWhere((m) => m['id'] == id);
+  return port.replyTo(id);
 }
 
 /// Removes the frame and lets its teardown wait run out.
@@ -90,11 +85,10 @@ void main() {
 
     testWidgets('grows to the height the app reports', (tester) async {
       await _pump(tester);
-      FakeMcpAppSurface.created.last.port.fromApp({
-        'jsonrpc': '2.0',
-        'method': 'ui/notifications/size-changed',
-        'params': {'height': 320},
-      });
+      FakeMcpAppSurface.created.last.port.notify(
+        'ui/notifications/size-changed',
+        {'height': 320},
+      );
       await tester.pump();
 
       expect(tester.getSize(find.byKey(fakeMcpAppViewKey)).height, 320);
@@ -107,12 +101,7 @@ void main() {
       final backend = await _pump(tester);
       backend.refuseUnconfirmed = true;
       final port = FakeMcpAppSurface.created.last.port;
-      port.fromApp({
-        'jsonrpc': '2.0',
-        'id': 3,
-        'method': 'tools/call',
-        'params': {'name': 'book'},
-      });
+      port.request(3, 'tools/call', {'name': 'book'});
       await tester.pumpAndSettle();
 
       expect(find.text('Allow weather to run "book"?'), findsOneWidget);
@@ -122,7 +111,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(backend.calls.map((c) => c.$3), [false, true]);
-      expect(port.sent.lastWhere((m) => m['id'] == 3)['result'], isNotNull);
+      expect(port.replyTo(3)['result'], isNotNull);
 
       await _unmount(tester);
     });
@@ -131,18 +120,13 @@ void main() {
       final backend = await _pump(tester);
       backend.refuseUnconfirmed = true;
       final port = FakeMcpAppSurface.created.last.port;
-      port.fromApp({
-        'jsonrpc': '2.0',
-        'id': 3,
-        'method': 'tools/call',
-        'params': {'name': 'book'},
-      });
+      port.request(3, 'tools/call', {'name': 'book'});
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
       expect(backend.calls.map((c) => c.$3), [false]);
-      final error = port.sent.lastWhere((m) => m['id'] == 3)['error']! as Map;
+      final error = port.replyTo(3)['error']! as Map;
       expect(error['code'], -32000);
 
       await _unmount(tester);
@@ -169,11 +153,8 @@ void main() {
 
     testWidgets('asks before opening a link the app requests', (tester) async {
       await _pump(tester);
-      FakeMcpAppSurface.created.last.port.fromApp({
-        'jsonrpc': '2.0',
-        'id': 5,
-        'method': 'ui/open-link',
-        'params': {'url': 'https://example.com/docs'},
+      FakeMcpAppSurface.created.last.port.request(5, 'ui/open-link', {
+        'url': 'https://example.com/docs',
       });
       await tester.pumpAndSettle();
 

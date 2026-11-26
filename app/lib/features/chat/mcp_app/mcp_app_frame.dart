@@ -60,8 +60,9 @@ class _McpAppFrameState extends ConsumerState<McpAppFrame> {
       confirmOpenLink: _confirmOpenLink,
       openLink: (url) => launchUrl(url, mode: LaunchMode.externalApplication),
       onSizeChanged: (height) {
-        if (!mounted) return;
-        setState(() => _height = height.clamp(_minHeight, _maxHeight));
+        final clamped = height.clamp(_minHeight, _maxHeight);
+        if (!mounted || clamped == _height) return;
+        setState(() => _height = clamped);
       },
     );
   }
@@ -89,29 +90,34 @@ class _McpAppFrameState extends ConsumerState<McpAppFrame> {
     return backend ?? const _UnavailableBackend();
   }
 
-  Future<bool> _confirmToolCall(
-    String name,
-    Map<String, Object?> arguments,
-  ) async {
-    if (!mounted) return false;
+  Future<bool> _confirmToolCall(String name, Map<String, Object?> arguments) {
     final details = arguments.isEmpty
         ? ''
         : '\n\n${const JsonEncoder.withIndent('  ').convert(arguments)}';
-    return showAdaptiveConfirmDialog(
-      context: context,
+    return _confirm(
       title: 'Allow ${widget.app.server} to run "$name"?',
       content: 'The app asks to run a tool that may change data.$details',
       confirmLabel: 'Run',
     );
   }
 
-  Future<bool> _confirmOpenLink(Uri url) async {
+  Future<bool> _confirmOpenLink(Uri url) => _confirm(
+    title: 'Open link?',
+    content: '${widget.app.server} wants to open $url',
+    confirmLabel: 'Open',
+  );
+
+  Future<bool> _confirm({
+    required String title,
+    required String content,
+    required String confirmLabel,
+  }) async {
     if (!mounted) return false;
     return showAdaptiveConfirmDialog(
       context: context,
-      title: 'Open link?',
-      content: '${widget.app.server} wants to open $url',
-      confirmLabel: 'Open',
+      title: title,
+      content: content,
+      confirmLabel: confirmLabel,
     );
   }
 

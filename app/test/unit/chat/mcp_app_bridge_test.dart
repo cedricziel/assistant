@@ -33,7 +33,6 @@ class _Harness {
       backend: backend,
       toolCall: record ?? _record(),
       hostContext: _context,
-      hostVersion: '1.2.3',
       confirmToolCall: (name, args) async {
         confirmedCalls.add(name);
         return confirmCalls;
@@ -58,18 +57,13 @@ class _Harness {
   final heights = <double>[];
 
   Future<void> initialize() async {
-    port.fromApp({
-      'jsonrpc': '2.0',
-      'id': 1,
-      'method': 'ui/initialize',
-      'params': {
-        'protocolVersion': '2026-01-26',
-        'appInfo': {'name': 'weather', 'version': '1'},
-        'appCapabilities': <String, Object?>{},
-      },
+    port.request(1, 'ui/initialize', {
+      'protocolVersion': '2026-01-26',
+      'appInfo': {'name': 'weather', 'version': '1'},
+      'appCapabilities': <String, Object?>{},
     });
     await pumpEventQueue();
-    port.fromApp({'jsonrpc': '2.0', 'method': 'ui/notifications/initialized'});
+    port.notify('ui/notifications/initialized');
     await pumpEventQueue();
   }
 
@@ -78,14 +72,9 @@ class _Harness {
     String method,
     Map<String, Object?> params,
   ) async {
-    port.fromApp({
-      'jsonrpc': '2.0',
-      'id': id,
-      'method': method,
-      'params': params,
-    });
+    port.request(id, method, params);
     await pumpEventQueue();
-    return port.sent.lastWhere((m) => m['id'] == id);
+    return port.replyTo(id);
   }
 
   List<String?> get sentMethods =>
@@ -103,7 +92,7 @@ void main() {
       final result = reply['result']! as Map<String, Object?>;
       expect(reply['jsonrpc'], '2.0');
       expect(result['protocolVersion'], '2026-01-26');
-      expect(result['hostInfo'], {'name': 'assistant', 'version': '1.2.3'});
+      expect(result['hostInfo'], {'name': 'assistant', 'version': 'unknown'});
       expect(result['hostCapabilities'], isA<Map<String, Object?>>());
       expect(result['hostContext'], {
         'theme': 'dark',
@@ -127,10 +116,7 @@ void main() {
       () async {
         final h = _Harness();
         await h.initialize();
-        h.port.fromApp({
-          'jsonrpc': '2.0',
-          'method': 'ui/notifications/initialized',
-        });
+        h.port.notify('ui/notifications/initialized');
         await pumpEventQueue();
 
         final notifications = h.port.sent
@@ -177,10 +163,9 @@ void main() {
 
     test('resizes the frame on size-changed', () async {
       final h = _Harness();
-      h.port.fromApp({
-        'jsonrpc': '2.0',
-        'method': 'ui/notifications/size-changed',
-        'params': {'width': 300, 'height': 240},
+      h.port.notify('ui/notifications/size-changed', {
+        'width': 300,
+        'height': 240,
       });
       await pumpEventQueue();
 
@@ -301,7 +286,7 @@ void main() {
       final h = _Harness();
       await h.bridge.close(timeout: Duration.zero);
       final before = h.port.sent.length;
-      h.port.fromApp({'jsonrpc': '2.0', 'id': 9, 'method': 'ping'});
+      h.port.request(9, 'ping');
       await pumpEventQueue();
 
       expect(h.port.sent.length, before);

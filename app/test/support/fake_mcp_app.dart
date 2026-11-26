@@ -14,6 +14,22 @@ class FakeMcpAppPort implements McpAppPort {
   /// Delivers [message] as if the app had posted it.
   void fromApp(Map<String, Object?> message) => _incoming.add(message);
 
+  /// Delivers a JSON-RPC request from the app.
+  void request(
+    Object id,
+    String method, [
+    Map<String, Object?> params = const {},
+  ]) =>
+      fromApp({'jsonrpc': '2.0', 'id': id, 'method': method, 'params': params});
+
+  /// Delivers a JSON-RPC notification from the app.
+  void notify(String method, [Map<String, Object?> params = const {}]) =>
+      fromApp({'jsonrpc': '2.0', 'method': method, 'params': params});
+
+  /// The host's reply to the request with [id].
+  Map<String, Object?> replyTo(Object id) =>
+      sent.lastWhere((m) => m['id'] == id && m['method'] == null);
+
   @override
   Stream<Object?> get messages => _incoming.stream;
 

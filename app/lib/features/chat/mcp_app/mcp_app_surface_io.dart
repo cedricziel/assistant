@@ -26,43 +26,35 @@ McpAppSurface createPlatformMcpAppSurface(McpApp app) =>
       _ => const _UnsupportedSurface(),
     };
 
-class _WebViewSurface implements McpAppSurface {
-  _WebViewSurface(McpApp app) {
-    final permissions = app.permissions;
-    _controller =
-        WebViewController(
-            onPermissionRequest: (request) {
-              final allowed = request.types.every(
-                (type) => switch (type) {
-                  WebViewPermissionResourceType.camera => permissions.camera,
-                  WebViewPermissionResourceType.microphone =>
-                    permissions.microphone,
-                  _ => false,
-                },
-              );
-              unawaited(allowed ? request.grant() : request.deny());
-            },
-          )
-          ..setJavaScriptMode(JavaScriptMode.unrestricted)
-          ..setNavigationDelegate(
-            NavigationDelegate(
-              onNavigationRequest: (request) =>
-                  request.isMainFrame && !request.url.startsWith('about:')
-                  ? NavigationDecision.prevent
-                  : NavigationDecision.navigate,
-            ),
-          )
-          ..addJavaScriptChannel(
-            _channel,
-            onMessageReceived: (message) {
-              try {
-                _port._incoming.add(jsonDecode(message.message));
-              } on FormatException {
-                // Not a JSON-RPC message.
-              }
-            },
-          );
-    _port = _WebViewPort(_controller);
+class _WebViewSurface implements McpAppSurface, McpAppPort {
+  _WebViewSurface(McpApp app) : this._(app, app.permissions);
+
+  // Takes the permissions apart from the app so the permission callback does
+  // not keep the app's HTML alive.
+  _WebViewSurface._(McpApp app, McpAppPermissions permissions)
+    : _controller = WebViewController(
+        onPermissionRequest: (request) => _answer(request, permissions),
+      ) {
+    _controller
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onNavigationRequest: (request) =>
+              request.isMainFrame && !request.url.startsWith('about:')
+              ? NavigationDecision.prevent
+              : NavigationDecision.navigate,
+        ),
+      )
+      ..addJavaScriptChannel(
+        _channel,
+        onMessageReceived: (message) {
+          try {
+            _incoming.add(jsonDecode(message.message));
+          } on FormatException {
+            // Not a JSON-RPC message.
+          }
+        },
+      );
     unawaited(
       _controller.loadHtmlString(
         mcpAppDocument(app, bootstrapScript: _bootstrap),
@@ -70,24 +62,11 @@ class _WebViewSurface implements McpAppSurface {
     );
   }
 
-  late final WebViewController _controller;
-  late final _WebViewPort _port;
-
-  @override
-  McpAppPort get port => _port;
-
-  @override
-  Widget build(BuildContext context) => WebViewWidget(controller: _controller);
-
-  @override
-  void dispose() => unawaited(_port._incoming.close());
-}
-
-class _WebViewPort implements McpAppPort {
-  _WebViewPort(this._controller);
-
   final WebViewController _controller;
   final _incoming = StreamController<Object?>.broadcast();
+
+  @override
+  McpAppPort get port => this;
 
   @override
   Stream<Object?> get messages => _incoming.stream;
@@ -99,13 +78,40 @@ class _WebViewPort implements McpAppPort {
       '{data: ${jsonEncode(message)}, source: window}));',
     ),
   );
+
+  @override
+  Widget build(BuildContext context) => WebViewWidget(controller: _controller);
+
+  @override
+  void dispose() => unawaited(_incoming.close());
+
+  /// Grants only the device access the app declared.
+  static void _answer(
+    WebViewPermissionRequest request,
+    McpAppPermissions permissions,
+  ) {
+    final allowed = request.types.every(
+      (type) => switch (type) {
+        WebViewPermissionResourceType.camera => permissions.camera,
+        WebViewPermissionResourceType.microphone => permissions.microphone,
+        _ => false,
+      },
+    );
+    unawaited(allowed ? request.grant() : request.deny());
+  }
 }
 
-class _UnsupportedSurface implements McpAppSurface {
+class _UnsupportedSurface implements McpAppSurface, McpAppPort {
   const _UnsupportedSurface();
 
   @override
-  McpAppPort get port => const _ClosedPort();
+  McpAppPort get port => this;
+
+  @override
+  Stream<Object?> get messages => const Stream.empty();
+
+  @override
+  void send(Map<String, Object?> message) {}
 
   @override
   Widget build(BuildContext context) =>
@@ -113,14 +119,4 @@ class _UnsupportedSurface implements McpAppSurface {
 
   @override
   void dispose() {}
-}
-
-class _ClosedPort implements McpAppPort {
-  const _ClosedPort();
-
-  @override
-  Stream<Object?> get messages => const Stream.empty();
-
-  @override
-  void send(Map<String, Object?> message) {}
 }

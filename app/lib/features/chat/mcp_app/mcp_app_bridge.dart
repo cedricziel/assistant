@@ -71,7 +71,6 @@ class McpAppBridge {
     required this.confirmOpenLink,
     required this.openLink,
     required this.onSizeChanged,
-    this.hostVersion = 'unknown',
   }) {
     _subscription = port.messages.listen(_receive);
   }
@@ -90,7 +89,6 @@ class McpAppBridge {
   final Future<bool> Function(Uri url) confirmOpenLink;
   final Future<void> Function(Uri url) openLink;
   final void Function(double height) onSizeChanged;
-  final String hostVersion;
 
   late final StreamSubscription<Object?> _subscription;
   bool _initialized = false;
@@ -193,10 +191,6 @@ class McpAppBridge {
       _reply(id, {
         'error': {'code': e.code, 'message': e.message},
       });
-    } on McpAppRefused catch (e) {
-      _reply(id, {
-        'error': {'code': _serverError, 'message': e.message},
-      });
     } catch (e) {
       _reply(id, {
         'error': {'code': _serverError, 'message': '$e'},
@@ -211,7 +205,7 @@ class McpAppBridge {
       'serverTools': <String, Object?>{},
       'serverResources': <String, Object?>{},
     },
-    'hostInfo': {'name': 'assistant', 'version': hostVersion},
+    'hostInfo': {'name': 'assistant', 'version': 'unknown'},
     'hostContext': {
       'theme': hostContext.theme,
       'displayMode': 'inline',
