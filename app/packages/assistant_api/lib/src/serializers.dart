@@ -73,6 +73,7 @@ import 'package:assistant_api/src/model/credential_mode.dart';
 import 'package:assistant_api/src/model/credential_response.dart';
 import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/device_code_response_schema.dart';
+import 'package:assistant_api/src/model/edit_message_request.dart';
 import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/execute_command_request.dart';
 import 'package:assistant_api/src/model/feedback_rating.dart';
@@ -281,6 +282,7 @@ part 'serializers.g.dart';
   CredentialResponse,
   DeviceCodeOAuthFlow,
   DeviceCodeResponseSchema,
+  EditMessageRequest,
   ErrorBody,
   ExecuteCommandRequest,
   FeedbackRating,

@@ -248,8 +248,4 @@ void main() {
 
     expect(find.text('fake full v ok'), findsOneWidget);
   });
-
-  test('defaultToolResultRenderers is empty until the views land', () {
-    expect(defaultToolResultRenderers(), isEmpty);
-  });
 }
