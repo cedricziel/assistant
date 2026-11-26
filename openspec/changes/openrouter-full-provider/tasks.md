@@ -93,22 +93,22 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 13. Embeddings
 
-- [ ] 13.1 Write failing tests: `embedding_model` is optional, and Ollama, OpenAI and OpenRouter each resolve their own default. Confirm red. Make the field `Option` and update the providers and `cmd_doctor`, then verify. The Ollama and OpenAI defaults are done; the OpenRouter default lands with 13.2.
-- [ ] 13.2 Write failing wiremock tests for OpenRouter `embed` and `embed_batch`: one request with an `input` array, results reordered by `index`, a count mismatch is an error, batches over 2048 are split, and errors are mapped. Confirm red. Implement, then verify.
-- [ ] 13.3 Write a failing `org_context` test for `EmbeddingProviderKind::OpenRouter`, covering the default model, key reuse and routing keys. Confirm red. Implement, then verify.
-- [ ] 13.4 Document embeddings in `docs/openrouter.md` and `docs/operations/configuration.md`.
+- [x] 13.1 Write failing tests: `embedding_model` is optional, and Ollama, OpenAI and OpenRouter each resolve their own default. Confirm red. Make the field `Option` and update the providers and `cmd_doctor`, then verify.
+- [x] 13.2 Write failing wiremock tests for OpenRouter `embed` and `embed_batch`: one request with an `input` array, results reordered by `index`, a count mismatch is an error, batches over 2048 are split, and errors are mapped. Confirm red. Implement, then verify.
+- [x] 13.3 Write a failing `org_context` test for `EmbeddingProviderKind::OpenRouter`, covering the default model, key reuse and routing keys. Confirm red. Implement, then verify.
+- [x] 13.4 Document embeddings in `docs/openrouter.md` and `docs/operations/configuration.md`.
 
 ## 14. Audio pipeline
 
-- [ ] 14.1 Write failing tests for MIME recognition: the new types, and parameters stripped. Confirm red. Implement, then verify.
-- [ ] 14.2 Write failing tests, skipped when ffmpeg is absent, for `probe_duration`, `to_wav_16k_mono` (including audio extracted from a video container), `split` and `transcode` covering pcm to mp3, wav to ogg/opus, and mp3 to wav. Confirm red. Implement `AudioPipeline`, then verify.
-- [ ] 14.3 Write failing tests for `ConvertingTranscriber`: it passes through accepted formats, converts the others, and gives a clear error when ffmpeg is missing (injected through the ffmpeg path). Confirm red. Implement, move Deepgram onto it, delete the ad-hoc conversion, then verify.
+- [x] 14.1 Write failing tests for MIME recognition: the new types, and parameters stripped. Confirm red. Implement, then verify.
+- [x] 14.2 Write failing tests, skipped when ffmpeg is absent, for `probe_duration`, `to_wav_16k_mono` (including audio extracted from a video container), `split` and `transcode` covering pcm to mp3, wav to ogg/opus, and mp3 to wav. Confirm red. Implement `AudioPipeline`, then verify.
+- [x] 14.3 Write failing tests for `ConvertingTranscriber`: it passes through accepted formats, converts the others, and gives a clear error when ffmpeg is missing (injected through the ffmpeg path). Confirm red. Implement, move Deepgram onto it, delete the ad-hoc conversion, then verify.
 
 ## 15. OpenRouter transcription
 
-- [ ] 15.1 Write failing wiremock tests: JSON body with `input_audio`, `language`, `prompt` and `verbose_json`; language normalized to BCP-47; duration reported. Confirm red. Implement `openrouter.rs`, then verify.
-- [ ] 15.2 Write failing tests: a 400 for `verbose_json` falls back once to `json` and is remembered; 413 gives the size error; 429 honors `Retry-After`. Confirm red. Implement, then verify.
-- [ ] 15.3 Write failing tests for chunking: a 180-second recording becomes 4 ordered requests whose texts are joined; one failed chunk fails the whole transcription; unknown duration is sent whole; config caps `max_chunk_secs` at 55. Confirm red. Implement, then verify.
+- [x] 15.1 Write failing wiremock tests: JSON body with `input_audio`, `language`, `prompt` and `verbose_json`; language normalized to BCP-47; duration reported. Confirm red. Implement `openrouter.rs`, then verify.
+- [x] 15.2 Write failing tests: a 400 for `verbose_json` falls back once to `json` and is remembered; 413 gives the size error; 429 honors `Retry-After`. Confirm red. Implement, then verify.
+- [x] 15.3 Write failing tests for chunking: a 180-second recording becomes 4 ordered requests whose texts are joined; one failed chunk fails the whole transcription; unknown duration is sent whole; config caps `max_chunk_secs` at 55. Confirm red. Implement, then verify.
 - [ ] 15.4 Write failing tests for `build_provider(cfg, llm).await` with the OpenRouter variant, key reuse and the missing-key error. Confirm red. Add the variant, make the builder async, and update the `web-ui` and `interface-cli` call sites. Verify with `cargo test -p assistant-transcription`.
 - [ ] 15.5 Update `docs/transcription.md` and `docs/openrouter.md`.
 

@@ -588,6 +588,9 @@ pub struct SseToolResultEvent {
     /// Each `kind` is defined by a JSON Schema in `schemas/tool-results/`.
     #[schema(value_type = Option<Object>)]
     pub data: Option<serde_json::Value>,
+    /// The MCP App the tool declared for its result. Absent for tools
+    /// without one, and on subagent tool results.
+    pub app: Option<super::mcp_apps::McpAppView>,
 }
 
 /// SSE `subagent_started` event — a subagent has been spawned.

@@ -2,11 +2,11 @@
 
 **Status**: Accepted
 **Date**: 2026-11-25
-**Builds on**: [ADR-0011](adr-0011-tool-permission-decision-model.md) (tool permissions; not to be confused with `adr-0011-message-bus-delivery-tracking-and-nack-delay.md`), [ADR-0013](adr-0013-per-space-runtimes.md)
+**Builds on**: [ADR-0023](adr-0023-tool-permission-decision-model.md) (tool permissions), [ADR-0013](adr-0013-per-space-runtimes.md)
 
 ## Context
 
-[ADR-0011](adr-0011-tool-permission-decision-model.md) ends in a human: a tool
+[ADR-0023](adr-0023-tool-permission-decision-model.md) ends in a human: a tool
 call that no rule and no decision model settles resolves to `Outcome::Ask`.
 `Orchestrator::authorize_tool_call` (`crates/runtime/src/orchestrator/dispatch.rs`)
 hands that to a `ConfirmationCallback` only when `ctx.interactive` is set and a
@@ -183,7 +183,7 @@ scanning JSON.
 ### Saved rules are one more stage, never stronger than config (D4, D4a)
 
 A space.db table `tool_permission_rules` holds a user's saved allow and deny
-rules in the grammar of ADR-0011. Core gets a `UserRuleSource` trait and
+rules in the grammar of ADR-0023. Core gets a `UserRuleSource` trait and
 `PermissionPolicy::with_user_rules`. `StaticRules::evaluate`, one function
 today, splits so the policy can interleave the user stages:
 

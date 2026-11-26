@@ -178,6 +178,7 @@ dependencies = [
 name = "assistant"
 version = "0.3.1"
 dependencies = [
+ "tempfile",
  "toml",
 ]
 
@@ -594,10 +595,12 @@ dependencies = [
  "assistant-core",
  "assistant-llm-provider",
  "async-trait",
+ "base64 0.23.1",
  "reqwest",
  "reqwest-middleware",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "url",
@@ -654,6 +657,7 @@ dependencies = [
  "tower",
  "tower-http 0.7.1",
  "tracing",
+ "tracing-subscriber",
  "url",
  "urlencoding",
  "utoipa",
