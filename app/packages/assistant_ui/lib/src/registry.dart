@@ -27,6 +27,7 @@ const List<String> kAssistantUiElements = [
   'FeedbackCommentField',
   'GenericToolResultView',
   'HighlightedSegments',
+  'JsonTreeView',
   'MessageActionButton',
   'MessageActions',
   'MessageEditor',
@@ -54,7 +55,6 @@ const List<String> kAssistantUiElements = [
   // 'CommandBody', // slot: chat-element-library 7b
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
-  // 'JsonTreeView', // slot: tool-result-renderers C2b
   // 'LinkPreviewResultView', // slot: tool-result-renderers C5
   // 'MessageBody', // slot: chat-element-library 8b
   // 'MessageBubble', // slot: chat-element-library 8b
