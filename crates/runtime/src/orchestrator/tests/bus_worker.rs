@@ -792,3 +792,271 @@ async fn cancel_turn_aborts_inflight_submit() {
         "request_id should be deregistered after submit_turn returns"
     );
 }
+
+// -- Cancel before a worker claims the turn --
+
+/// Spawn `submit_turn_with_request_id` in the background (no worker running),
+/// returning once the turn has registered its cancellation entry.
+async fn submit_unclaimed(
+    orch: &Arc<Orchestrator>,
+    request_id: Uuid,
+    conversation_id: Uuid,
+    prompt: &'static str,
+) -> tokio::task::JoinHandle<anyhow::Result<crate::TurnResult>> {
+    let orch_for_submit = orch.clone();
+    let handle = tokio::spawn(async move {
+        orch_for_submit
+            .submit_turn_with_request_id(
+                &AuthContext::system(),
+                request_id,
+                prompt,
+                conversation_id,
+                Interface::Web,
+                None,
+                vec![],
+            )
+            .await
+    });
+    wait_until("turn registration", || async {
+        orch.is_turn_in_flight(request_id).await
+    })
+    .await;
+    handle
+}
+
+/// Poll `condition` every 20 ms for up to 5 s.
+async fn wait_until<F, Fut>(what: &str, mut condition: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !condition().await {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+async fn bus_count(
+    orch: &Orchestrator,
+    topic_name: &str,
+    status: assistant_core::MessageStatus,
+) -> usize {
+    orch.bus()
+        .list(topic_name, Some(status), 100)
+        .await
+        .unwrap()
+        .len()
+}
+
+fn spawn_worker(orch: &Arc<Orchestrator>) {
+    let worker_orch = orch.clone();
+    tokio::spawn(async move {
+        worker_orch.run_worker("test-worker").await;
+    });
+}
+
+async fn llm_request_count(server: &MockServer) -> usize {
+    server.received_requests().await.unwrap_or_default().len()
+}
+
+/// A turn cancelled while no worker has claimed it must never run: the worker
+/// acks the stale request without calling the LLM, and `submit_turn` reports
+/// that the turn never started.
+#[tokio::test]
+async fn cancel_before_claim_skips_the_turn() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "should never be produced").await;
+    let (orch, _storage) = build(&server.uri()).await;
+    let request_id = Uuid::new_v4();
+
+    let submit = submit_unclaimed(&orch, request_id, Uuid::new_v4(), "never runs").await;
+    assert_eq!(
+        orch.cancel_turn(request_id).await,
+        crate::orchestrator::CancelOutcome::Cancelled
+    );
+
+    let err = tokio::time::timeout(Duration::from_secs(10), submit)
+        .await
+        .expect("submit must return promptly after cancel")
+        .expect("join task")
+        .err()
+        .expect("cancelled submit must return Err");
+    let message = err.to_string();
+    assert!(
+        message.contains(crate::orchestrator::TURN_CANCELLED_MARKER),
+        "missing cancel marker; got: {message}"
+    );
+    assert!(
+        message.contains(crate::orchestrator::TURN_CANCELLED_BEFORE_START_MARKER),
+        "missing before-start marker; got: {message}"
+    );
+
+    spawn_worker(&orch);
+    wait_until("the stale request to be acked", || async {
+        bus_count(
+            &orch,
+            topic::TURN_REQUEST,
+            assistant_core::MessageStatus::Done,
+        )
+        .await
+            == 1
+    })
+    .await;
+    assert_eq!(
+        llm_request_count(&server).await,
+        0,
+        "a turn cancelled before claim must not reach the LLM"
+    );
+    assert_eq!(
+        bus_count(
+            &orch,
+            topic::TURN_RESULT,
+            assistant_core::MessageStatus::Pending
+        )
+        .await,
+        0,
+        "a skipped turn must not publish a result"
+    );
+}
+
+/// Skipping a stale cancelled request must leave the conversation's sink alone
+/// so a newer turn of the same conversation still streams.
+#[tokio::test]
+async fn cancel_before_claim_leaves_newer_turn_sink_intact() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "{\"model\":\"test\",\"message\":{\"role\":\"assistant\",\"content\":\"B-tokens\"},\"done\":false}\n\
+             {\"model\":\"test\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"done_reason\":\"stop\"}\n",
+        ))
+        .mount(&server)
+        .await;
+    let (orch, _storage) = build(&server.uri()).await;
+    let conversation_id = Uuid::new_v4();
+
+    let request_a = Uuid::new_v4();
+    let submit_a = submit_unclaimed(&orch, request_a, conversation_id, "turn A").await;
+    orch.cancel_turn(request_a).await;
+    submit_a
+        .await
+        .expect("join task")
+        .err()
+        .expect("A is cancelled");
+
+    let (tx_b, mut rx_b) = tokio::sync::mpsc::channel(64);
+    orch.register_token_sink(conversation_id, tx_b).await;
+    let request_b = Uuid::new_v4();
+    let submit_b = submit_unclaimed(&orch, request_b, conversation_id, "turn B").await;
+    wait_until("both requests to be queued", || async {
+        bus_count(
+            &orch,
+            topic::TURN_REQUEST,
+            assistant_core::MessageStatus::Pending,
+        )
+        .await
+            == 2
+    })
+    .await;
+
+    spawn_worker(&orch);
+    tokio::time::timeout(Duration::from_secs(10), submit_b)
+        .await
+        .expect("turn B must finish")
+        .expect("join task")
+        .expect("turn B must succeed");
+
+    let mut streamed = String::new();
+    while let Ok(event) = rx_b.try_recv() {
+        if let crate::OrchestratorEvent::Token(token) = event {
+            streamed.push_str(&token);
+        }
+    }
+    assert_eq!(streamed, "B-tokens", "turn B must stream to its own sink");
+    assert_eq!(
+        llm_request_count(&server).await,
+        1,
+        "only turn B may reach the LLM"
+    );
+}
+
+/// A claim that races another task holding the cancellation map must still
+/// register the claimed turn's token, so a later cancel aborts it.
+#[tokio::test]
+async fn cancel_reaches_turn_claimed_while_map_is_contended() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(9))
+                .set_body_json(ollama_answer("too late")),
+        )
+        .mount(&server)
+        .await;
+    let (orch, _storage) = build(&server.uri()).await;
+    let request_id = Uuid::new_v4();
+    let _submit = submit_unclaimed(&orch, request_id, Uuid::new_v4(), "slow").await;
+
+    // Hold the map exclusively while the worker claims the request.
+    let guard = orch.turn_cancellations.write().await;
+    spawn_worker(&orch);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    drop(guard);
+
+    wait_until("the turn to reach the LLM", || async {
+        llm_request_count(&server).await == 1
+    })
+    .await;
+    orch.cancel_turn(request_id).await;
+
+    wait_until("the cancelled turn to be acked", || async {
+        bus_count(
+            &orch,
+            topic::TURN_REQUEST,
+            assistant_core::MessageStatus::Done,
+        )
+        .await
+            == 1
+    })
+    .await;
+}
+
+// -- release_token_sink --
+
+#[tokio::test]
+async fn release_token_sink_removes_the_matching_sender() {
+    let (orch, _storage) = build("http://localhost:1").await;
+    let conversation_id = Uuid::new_v4();
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    orch.register_token_sink(conversation_id, tx.clone()).await;
+
+    orch.release_token_sink(conversation_id, &tx).await;
+
+    assert!(
+        !orch.token_sinks.read().await.contains_key(&conversation_id),
+        "the runner's own sink must be released"
+    );
+}
+
+#[tokio::test]
+async fn release_token_sink_keeps_a_newer_turns_sender() {
+    let (orch, _storage) = build("http://localhost:1").await;
+    let conversation_id = Uuid::new_v4();
+    let (stale_tx, _stale_rx) = tokio::sync::mpsc::channel(1);
+    let (newer_tx, _newer_rx) = tokio::sync::mpsc::channel(1);
+    orch.register_token_sink(conversation_id, newer_tx.clone())
+        .await;
+
+    orch.release_token_sink(conversation_id, &stale_tx).await;
+
+    let sinks = orch.token_sinks.read().await;
+    let kept = sinks
+        .get(&conversation_id)
+        .expect("a different turn's sink must stay registered");
+    assert!(kept.same_channel(&newer_tx));
+}

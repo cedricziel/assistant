@@ -4,7 +4,8 @@
 //! result recording (metrics, OTel, persistence), and tool-call history helpers.
 
 use assistant_core::{
-    Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ToolCallItem, ToolSpec,
+    Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ProviderState,
+    ToolCallItem, ToolSpec,
     permission::{Outcome, PermissionRequest},
     types::conversation::ExecutionContext,
     types::conversation::Message,
@@ -91,11 +92,14 @@ impl Orchestrator {
         conversation_id: Uuid,
         turn_index: i64,
         tool_call_items: &[ToolCallItem],
+        provider_state: Option<&ProviderState>,
     ) {
-        history.push(ChatHistoryMessage::AssistantToolCalls(
-            tool_call_items.to_vec(),
-        ));
-        let tc_msg = Self::make_tool_call_message(conversation_id, turn_index, tool_call_items);
+        history.push(ChatHistoryMessage::AssistantToolCalls {
+            items: tool_call_items.to_vec(),
+            provider_state: provider_state.cloned(),
+        });
+        let mut tc_msg = Self::make_tool_call_message(conversation_id, turn_index, tool_call_items);
+        tc_msg.provider_state_json = provider_state.and_then(|s| serde_json::to_string(s).ok());
         if let Err(e) = conv_store.save_message(&tc_msg).await {
             warn!("Failed to persist tool-call message: {e}");
         }

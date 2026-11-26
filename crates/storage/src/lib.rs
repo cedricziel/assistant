@@ -473,8 +473,12 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             include_str!("../../../migrations/045_skill_executions.sql"),
         ),
         (
-            "046_message_tree",
-            include_str!("../../../migrations/046_message_tree.sql"),
+            "046_message_provider_state",
+            include_str!("../../../migrations/046_message_provider_state.sql"),
+        ),
+        (
+            "061_message_tree",
+            include_str!("../../../migrations/061_message_tree.sql"),
         ),
     ];
 
@@ -563,7 +567,7 @@ mod tests {
         Ok(())
     }
 
-    /// Migration 046 turns the flat message list into a chain: every row's
+    /// Migration 061 turns the flat message list into a chain: every row's
     /// parent is its predecessor by `(turn, created_at, rowid)` and each
     /// conversation's active leaf is its last row.
     #[tokio::test]
@@ -608,7 +612,7 @@ mod tests {
             .await?;
         }
 
-        sqlx::raw_sql(include_str!("../../../migrations/046_message_tree.sql"))
+        sqlx::raw_sql(include_str!("../../../migrations/061_message_tree.sql"))
             .execute(&pool)
             .await?;
 

@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use assistant_core::types::conversation::{Message, MessageRole};
-use assistant_core::{ChatHistoryMessage, ChatRole, ContentBlock, ToolCallItem};
+use assistant_core::{ChatHistoryMessage, ChatRole, ContentBlock, ProviderState, ToolCallItem};
 use assistant_storage::conversations::ConversationStore;
 
 /// Pre-loaded attachment content blocks keyed by message ID.
@@ -51,7 +51,15 @@ pub(crate) fn messages_to_chat_history(
                     && let Ok(items) = serde_json::from_str::<Vec<ToolCallItem>>(&tc_json)
                     && !items.is_empty()
                 {
-                    return Some(ChatHistoryMessage::AssistantToolCalls(items));
+                    // A corrupt state is dropped; the tool calls themselves stay.
+                    let provider_state = m
+                        .provider_state_json
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str::<ProviderState>(json).ok());
+                    return Some(ChatHistoryMessage::AssistantToolCalls {
+                        items,
+                        provider_state,
+                    });
                 }
                 Some(ChatHistoryMessage::Text {
                     role: ChatRole::Assistant,
@@ -100,7 +108,7 @@ pub(crate) fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
         let mut remaining_results: usize = 0; // results still expected from current batch
         while i < history.len() {
             match &history[i] {
-                ChatHistoryMessage::AssistantToolCalls(calls) => {
+                ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                     remaining_results = calls.len();
                     i += 1;
                 }
@@ -133,7 +141,7 @@ pub(crate) fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
     // synthetic ones.
     let mut i = 0;
     while i < history.len() {
-        if let ChatHistoryMessage::AssistantToolCalls(calls) = &history[i] {
+        if let ChatHistoryMessage::AssistantToolCalls { items: calls, .. } = &history[i] {
             let expected = calls.len();
             let call_names: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
 
@@ -239,6 +247,7 @@ mod tests {
             content: content.to_string(),
             skill_name: None,
             tool_calls_json: None,
+            provider_state_json: None,
             turn: 0,
             created_at: chrono::Utc::now(),
             sender_user_id: None,
@@ -255,12 +264,55 @@ mod tests {
             content: content.to_string(),
             skill_name: None,
             tool_calls_json: None,
+            provider_state_json: None,
             turn: 1,
             created_at: chrono::Utc::now(),
             sender_user_id: None,
             parent_id: None,
             run_id: None,
         }
+    }
+
+    fn tool_call_msg(provider_state_json: Option<&str>) -> Message {
+        let mut m = make_assistant_msg("");
+        m.tool_calls_json = Some(r#"[{"name":"bash","params":{"command":"ls"},"id":"c1"}]"#.into());
+        m.provider_state_json = provider_state_json.map(str::to_string);
+        m
+    }
+
+    #[test]
+    fn history_restores_provider_state_on_tool_calls() {
+        let history = messages_to_chat_history(
+            vec![tool_call_msg(Some(
+                r#"{"provider":"openrouter","model":"m","data":{"reasoning_details":[{"type":"reasoning.text","text":"x"}]}}"#,
+            ))],
+            &AttachmentMap::new(),
+        );
+        let ChatHistoryMessage::AssistantToolCalls {
+            items,
+            provider_state,
+        } = &history[0]
+        else {
+            panic!("expected tool calls, got {:?}", history[0]);
+        };
+        assert_eq!(items[0].name, "bash");
+        let state = provider_state.as_ref().expect("provider state restored");
+        assert_eq!(state.provider, "openrouter");
+        assert_eq!(state.data["reasoning_details"][0]["text"], "x");
+    }
+
+    #[test]
+    fn history_keeps_tool_calls_when_provider_state_is_unreadable() {
+        let history =
+            messages_to_chat_history(vec![tool_call_msg(Some("not json"))], &AttachmentMap::new());
+        assert!(
+            matches!(
+                &history[0],
+                ChatHistoryMessage::AssistantToolCalls { items, provider_state: None } if items.len() == 1
+            ),
+            "a corrupt provider state is dropped, never the tool calls: {:?}",
+            history[0]
+        );
     }
 
     #[test]

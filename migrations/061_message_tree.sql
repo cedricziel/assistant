@@ -1,4 +1,4 @@
--- Migration 046: persist messages as a tree with an active leaf
+-- Migration 061: persist messages as a tree with an active leaf
 --
 -- `parent_id` links a message to the message it answers (NULL marks a root).
 -- It deliberately has no ON DELETE action: the `conversation_id` cascade
