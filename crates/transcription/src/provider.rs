@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use crate::converter::AudioFormat;
+use assistant_audio::AudioFormat;
 
 /// A request to transcribe audio data.
 #[derive(Debug, Clone)]
