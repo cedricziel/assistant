@@ -1,0 +1,1 @@
+{"kind":"data_table","columns":[{"key":"id","label":"ID"},{"key":"name","label":"Name","type":"text"},{"key":"runs","label":"Runs","type":"number"}],"rows":[{"id":"t1","name":"Backup","runs":3},{"id":"t2","name":"Digest","runs":null}],"truncated":false,"total_rows":2}

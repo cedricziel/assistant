@@ -23,18 +23,41 @@ pub enum ToolRenderData {
     Terminal(TerminalData),
     /// Search results with titles, URLs and snippets.
     Sources(SourcesData),
+    /// Preview of a fetched web page.
+    LinkPreview(LinkPreviewData),
+    /// Contents of a file that was read.
+    CodeFile(CodeFileData),
+    /// Change made to one file.
+    CodeDiff(CodeDiffData),
+    /// Rows keyed by column.
+    DataTable(DataTableData),
+    /// A Persona's working plan.
+    Plan(PlanData),
 }
 
 impl ToolRenderData {
     /// Every `kind` that has a contract. Each one needs a schema file and
     /// fixtures (`crates/core/tests/tool_render_contracts.rs`).
-    pub const KINDS: &'static [&'static str] = &["terminal", "sources"];
+    pub const KINDS: &'static [&'static str] = &[
+        "terminal",
+        "sources",
+        "link_preview",
+        "code_file",
+        "code_diff",
+        "data_table",
+        "plan",
+    ];
 
     /// The wire `kind` of this payload.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Terminal(_) => "terminal",
             Self::Sources(_) => "sources",
+            Self::LinkPreview(_) => "link_preview",
+            Self::CodeFile(_) => "code_file",
+            Self::CodeDiff(_) => "code_diff",
+            Self::DataTable(_) => "data_table",
+            Self::Plan(_) => "plan",
         }
     }
 
@@ -46,6 +69,21 @@ impl ToolRenderData {
             }
             "sources" => {
                 include_str!("../../../schemas/tool-results/sources.schema.json")
+            }
+            "link_preview" => {
+                include_str!("../../../schemas/tool-results/link_preview.schema.json")
+            }
+            "code_file" => {
+                include_str!("../../../schemas/tool-results/code_file.schema.json")
+            }
+            "code_diff" => {
+                include_str!("../../../schemas/tool-results/code_diff.schema.json")
+            }
+            "data_table" => {
+                include_str!("../../../schemas/tool-results/data_table.schema.json")
+            }
+            "plan" => {
+                include_str!("../../../schemas/tool-results/plan.schema.json")
             }
             _ => return None,
         };
@@ -82,6 +120,132 @@ pub struct SourceResult {
     pub domain: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snippet: Option<String>,
+}
+
+/// `link_preview` contract: a fetched web page.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinkPreviewData {
+    pub url: String,
+    /// The URL after redirects.
+    pub final_url: String,
+    /// HTTP status code.
+    pub status: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    /// At most 280 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<String>,
+}
+
+/// `code_file` contract: a file that was read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeFileData {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    pub content: String,
+    pub truncated: bool,
+    /// Length of the whole file in characters, before any cut.
+    pub total_chars: u64,
+}
+
+/// How a file was changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffOperation {
+    Edit,
+    Create,
+    Overwrite,
+}
+
+/// `code_diff` contract: the change made to one file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeDiffData {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    pub operation: DiffOperation,
+    pub hunks: Vec<DiffHunk>,
+    pub added: u64,
+    pub removed: u64,
+    pub truncated: bool,
+}
+
+/// One hunk of [`CodeDiffData::hunks`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiffHunk {
+    pub old_start: u64,
+    pub old_lines: u64,
+    pub new_start: u64,
+    pub new_lines: u64,
+    pub lines: Vec<DiffLine>,
+}
+
+/// Kind of a [`DiffLine`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffOp {
+    Context,
+    Add,
+    Remove,
+}
+
+/// One line of a [`DiffHunk`]; `text` has at most 512 characters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiffLine {
+    pub op: DiffOp,
+    pub text: String,
+}
+
+/// `data_table` contract: rows keyed by column.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DataTableData {
+    pub columns: Vec<TableColumn>,
+    /// One JSON object per row, keyed by [`TableColumn::key`].
+    pub rows: Vec<serde_json::Map<String, Value>>,
+    pub truncated: bool,
+    /// Number of rows before any cut.
+    pub total_rows: u64,
+}
+
+/// One entry of [`DataTableData::columns`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableColumn {
+    pub key: String,
+    pub label: String,
+    /// Display hint such as `text` or `number`; clients ignore unknown values.
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub column_type: Option<String>,
+}
+
+/// `plan` contract: a Persona's working plan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanData {
+    /// At most 120 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// At most 50 steps.
+    pub steps: Vec<PlanStep>,
+}
+
+/// One entry of [`PlanData::steps`]; `title` has at most 200 characters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanStep {
+    pub title: String,
+    pub status: PlanStepStatus,
+}
+
+/// Progress of a [`PlanStep`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanStepStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+    Skipped,
 }
 
 // -- Tests -------------------------------------------------------------------
@@ -121,6 +285,17 @@ mod tests {
 
     #[test]
     fn kinds_match_variant_kinds() {
-        assert_eq!(ToolRenderData::KINDS, &["terminal", "sources"]);
+        assert_eq!(
+            ToolRenderData::KINDS,
+            &[
+                "terminal",
+                "sources",
+                "link_preview",
+                "code_file",
+                "code_diff",
+                "data_table",
+                "plan"
+            ]
+        );
     }
 }

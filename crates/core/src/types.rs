@@ -30,6 +30,9 @@ pub mod channels;
 // `use assistant_core::types::transcription::{TranscriptionConfig, TtsConfig, ...};`
 pub mod transcription;
 
+// ── Image generation configuration ────────────────────────────────────────────
+pub mod images;
+
 // ── LLM / embedding configuration ─────────────────────────────────────────────
 //
 // Moved to the `llm` submodule. Import via

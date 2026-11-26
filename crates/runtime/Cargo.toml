@@ -31,7 +31,6 @@ chrono = { workspace = true }
 # cron expression parsing for scheduler
 cron = { workspace = true }
 # bootstrap helpers
-dirs = { workspace = true }
 sha2 = { workspace = true }
 reqwest = { workspace = true }
 hmac = { workspace = true }

@@ -41,17 +41,26 @@ pub struct ModelInfo {
     pub json_schema: bool,
 }
 
+/// What the configuration needs from the model; a model without it fails
+/// every call.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Requirements {
+    pub effort: Option<OpenRouterEffort>,
+    pub image_output: bool,
+}
+
 pub struct OpenRouterCatalog {
     http: ClientWithMiddleware,
     base_url: String,
     api_key: Secret,
     model: String,
     routing: Option<OpenRouterRouting>,
-    effort: Option<OpenRouterEffort>,
+    requirements: Requirements,
     clock: Arc<dyn Clock>,
     info: ArcSwapOption<ModelInfo>,
     /// Why the configuration can't work with this model, such as an unknown
-    /// model or an unsupported effort; calls then fail with it.
+    /// model, an unsupported effort or missing image output; calls then fail
+    /// with it.
     config_error: ArcSwapOption<String>,
     /// When a failed fetch may be retried.
     retry_at: Mutex<Option<Instant>>,
@@ -71,7 +80,7 @@ impl OpenRouterCatalog {
         timeout_secs: u64,
         model: String,
         routing: Option<OpenRouterRouting>,
-        effort: Option<OpenRouterEffort>,
+        requirements: Requirements,
         clock: Arc<dyn Clock>,
     ) -> anyhow::Result<Arc<Self>> {
         let catalog = Arc::new(Self {
@@ -80,7 +89,7 @@ impl OpenRouterCatalog {
             api_key,
             model,
             routing,
-            effort,
+            requirements,
             clock,
             info: ArcSwapOption::empty(),
             config_error: ArcSwapOption::empty(),
@@ -98,7 +107,7 @@ impl OpenRouterCatalog {
     }
 
     /// Fails when the catalog showed the configuration can't work: the
-    /// model is unknown, or it doesn't support the configured effort.
+    /// model is unknown, or it lacks a required capability.
     pub fn check_model(&self) -> anyhow::Result<()> {
         match self.config_error.load_full() {
             Some(error) => Err(anyhow::anyhow!("{error}")),
@@ -176,8 +185,19 @@ impl OpenRouterCatalog {
         let Some(entry) = models.data.into_iter().find(|m| m.id == self.model) else {
             return Ok(Err(format!("OpenRouter has no model `{}`", self.model)));
         };
-        if let Some(problem) = effort_problem(&self.model, self.effort, entry.reasoning.as_ref()) {
+        if let Some(problem) = effort_problem(
+            &self.model,
+            self.requirements.effort,
+            entry.reasoning.as_ref(),
+        ) {
             return Ok(Err(problem));
+        }
+        if self.requirements.image_output && !entry.outputs_images() {
+            return Ok(Err(format!(
+                "OpenRouter model `{}` does not output images; \
+                 remove `image_output` from [llm.openrouter]",
+                self.model
+            )));
         }
         let endpoints = match self
             .get_json::<EndpointList>(&format!("{base}/models/{}/endpoints", self.model))
@@ -273,6 +293,17 @@ fn effort_problem(
 struct Architecture {
     #[serde(default)]
     input_modalities: Option<Vec<String>>,
+    #[serde(default)]
+    output_modalities: Option<Vec<String>>,
+}
+
+impl ModelEntry {
+    fn outputs_images(&self) -> bool {
+        self.architecture
+            .as_ref()
+            .and_then(|a| a.output_modalities.as_deref())
+            .is_some_and(|m| m.iter().any(|m| m == "image"))
+    }
 }
 
 #[derive(Debug, Deserialize)]

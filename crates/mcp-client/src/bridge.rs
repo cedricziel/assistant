@@ -146,8 +146,9 @@ impl ToolHandler for McpToolHandler {
 /// Text joins the output text; images, audio and embedded binary resources
 /// become attachments; resource links and embedded text resources are
 /// rendered into the text with their URI. `structuredContent` becomes the
-/// output text when no text block describes it, and always rides along as
-/// `data`.
+/// output text when no text block describes it. A JSON-object
+/// `structuredContent` rides along unchanged as `data`, for success and error
+/// results alike; other values and its absence leave `data` empty.
 fn output_from_result(result: CallToolResult) -> ToolOutput {
     let mut converted = Converted::default();
     for block in &result.content {
@@ -175,8 +176,8 @@ fn output_from_result(result: CallToolResult) -> ToolOutput {
     };
     output = output.with_attachments(converted.attachments);
     match result.structured_content {
-        Some(structured) => output.with_data(structured),
-        None => output,
+        Some(structured @ serde_json::Value::Object(_)) => output.with_data(structured),
+        _ => output,
     }
 }
 
@@ -381,6 +382,42 @@ mod tests {
             Some(json!({"temp": 21})),
             "structured content should also ride along as data"
         );
+    }
+
+    #[test]
+    fn object_structured_content_is_forwarded_as_data_on_error() {
+        let mut result = result_with_structured(
+            vec![ContentBlock::text("boom")],
+            json!({"kind": "plan", "steps": []}),
+        );
+        result.is_error = Some(true);
+        let output = output_from_result(result);
+        assert!(!output.success, "is_error should map to a failed output");
+        assert_eq!(
+            output.data,
+            Some(json!({"kind": "plan", "steps": []})),
+            "object structured content should be forwarded unchanged on error"
+        );
+    }
+
+    #[test]
+    fn non_object_structured_content_yields_no_data() {
+        for value in [json!([1, 2]), json!("text"), json!(42), json!(null)] {
+            let output = output_from_result(result_with_structured(
+                vec![ContentBlock::text("ok")],
+                value.clone(),
+            ));
+            assert_eq!(
+                output.data, None,
+                "non-object structured content {value} should not become data"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_structured_content_yields_no_data() {
+        let output = output_from_result(CallToolResult::success(vec![ContentBlock::text("hi")]));
+        assert_eq!(output.data, None, "text-only results should carry no data");
     }
 
     #[test]

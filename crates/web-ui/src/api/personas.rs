@@ -79,6 +79,8 @@ pub struct PersonaApiState {
     pub spaces: SpaceResolver,
     /// Shared live agent ID — updated when the user switches personas.
     pub agent_id: Arc<RwLock<String>>,
+    /// Directory holding each Persona's files, `<install root>/agents`.
+    pub agents_dir: PathBuf,
 }
 
 impl axum::extract::FromRef<PersonaApiState> for SpaceResolver {
@@ -88,10 +90,6 @@ impl axum::extract::FromRef<PersonaApiState> for SpaceResolver {
 }
 
 // -- Helpers -----------------------------------------------------------------
-
-fn persona_agent_dir(id: &str) -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".assistant").join("agents").join(id))
-}
 
 fn is_valid_filename(filename: &str) -> bool {
     PERSONA_FILE_SLOTS.iter().any(|(f, _, _)| *f == filename)
@@ -177,17 +175,13 @@ async fn load_accessible(
     }
 }
 
-async fn build_file_slots(id: &str) -> Vec<PersonaFileSlot> {
+async fn build_file_slots(agents_dir: &std::path::Path, id: &str) -> Vec<PersonaFileSlot> {
     let mut slots = Vec::with_capacity(PERSONA_FILE_SLOTS.len());
-    let base = persona_agent_dir(id);
+    let base = agents_dir.join(id);
     for (filename, display_name, description) in PERSONA_FILE_SLOTS {
-        let exists = if let Some(ref dir) = base {
-            tokio::fs::try_exists(dir.join(filename))
-                .await
-                .unwrap_or(false)
-        } else {
-            false
-        };
+        let exists = tokio::fs::try_exists(base.join(filename))
+            .await
+            .unwrap_or(false);
         slots.push(PersonaFileSlot {
             filename: filename.to_string(),
             display_name: display_name.to_string(),
@@ -490,6 +484,7 @@ pub async fn set_active_persona(
     security(("bearer_token" = []))
 )]
 pub async fn get_persona(
+    State(state): State<PersonaApiState>,
     space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
     Path(id): Path<String>,
@@ -511,7 +506,7 @@ pub async fn get_persona(
         Err(resp) => return resp,
     };
 
-    let files = build_file_slots(&id).await;
+    let files = build_file_slots(&state.agents_dir, &id).await;
     Json(persona_detail(&space, persona, &ctx.user_id.0, files)).into_response()
 }
 
@@ -532,6 +527,7 @@ pub async fn get_persona(
     security(("bearer_token" = []))
 )]
 pub async fn update_persona(
+    State(state): State<PersonaApiState>,
     space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
     Path(id): Path<String>,
@@ -587,7 +583,7 @@ pub async fn update_persona(
         Ok(p) => p,
         Err(resp) => return resp,
     };
-    let files = build_file_slots(&id).await;
+    let files = build_file_slots(&state.agents_dir, &id).await;
     Json(persona_detail(&space, persona, &ctx.user_id.0, files)).into_response()
 }
 
@@ -609,6 +605,7 @@ pub async fn update_persona(
     security(("bearer_token" = []))
 )]
 pub async fn get_persona_file(
+    State(state): State<PersonaApiState>,
     space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
     Path((id, filename)): Path<(String, String)>,
@@ -647,12 +644,8 @@ pub async fn get_persona_file(
         _ => {}
     }
 
-    let content = if let Some(dir) = persona_agent_dir(&id) {
-        let path = dir.join(&filename);
-        tokio::fs::read_to_string(&path).await.unwrap_or_default()
-    } else {
-        String::new()
-    };
+    let path = state.agents_dir.join(&id).join(&filename);
+    let content = tokio::fs::read_to_string(&path).await.unwrap_or_default();
 
     Json(PersonaFileContent { filename, content }).into_response()
 }
@@ -677,6 +670,7 @@ pub async fn get_persona_file(
     security(("bearer_token" = []))
 )]
 pub async fn put_persona_file(
+    State(state): State<PersonaApiState>,
     space: SpaceCtx,
     Extension(ctx): Extension<AuthContext>,
     Path((id, filename)): Path<(String, String)>,
@@ -723,13 +717,7 @@ pub async fn put_persona_file(
         _ => {}
     }
 
-    let Some(dir) = persona_agent_dir(&id) else {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Could not determine home directory",
-        )
-            .into_response();
-    };
+    let dir = state.agents_dir.join(&id);
 
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
         warn!("Failed to create persona dir {}: {e}", dir.display());
@@ -1045,18 +1033,20 @@ mod tests {
         }
     }
 
-    async fn test_state() -> (PersonaApiState, Arc<StorageLayer>) {
+    async fn test_state() -> (PersonaApiState, Arc<StorageLayer>, tempfile::TempDir) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         storage
             .persona_store()
             .ensure_exists("default")
             .await
             .unwrap();
+        let agents = tempfile::tempdir().unwrap();
         let state = PersonaApiState {
             spaces: super::super::test_helpers::default_resolver(&storage).await,
             agent_id: Arc::new(RwLock::new("default".to_string())),
+            agents_dir: agents.path().to_path_buf(),
         };
-        (state, storage)
+        (state, storage, agents)
     }
 
     fn app(state: PersonaApiState) -> axum::Router {
@@ -1074,7 +1064,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_personas_returns_default() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
         let resp = app(state)
             .oneshot(
                 Request::builder()
@@ -1094,7 +1084,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_active_persona_updates_agent_id() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
 
         // Create a second persona.
         storage
@@ -1125,7 +1115,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_active_persona_unknown_id_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1146,7 +1136,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_returns_default_detail() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1171,7 +1161,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_invalid_id_returns_400() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         // "invalid.id" contains a '.' which fails validate_agent_id but is URI-safe.
         let resp = app(state)
@@ -1189,7 +1179,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_unknown_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1206,7 +1196,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_persona_returns_201() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1233,7 +1223,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_persona_invalid_id_returns_400() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1252,7 +1242,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_persona_duplicate_returns_409() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let body = r#"{"id":"default","name":"Duplicate"}"#;
         let resp = app(state)
@@ -1272,7 +1262,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_file_nonexistent_returns_empty_content() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1293,7 +1283,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_file_invalid_filename_returns_400() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1310,7 +1300,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_file_unknown_persona_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1327,7 +1317,7 @@ mod tests {
 
     #[tokio::test]
     async fn put_persona_file_oversized_returns_413() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let big_content = "x".repeat(3 * 1024 * 1024);
         let body = serde_json::json!({"content": big_content}).to_string();
@@ -1349,7 +1339,7 @@ mod tests {
 
     #[tokio::test]
     async fn put_and_get_persona_file_roundtrip() {
-        let (state, storage) = test_state().await;
+        let (state, storage, agents) = test_state().await;
 
         // Create a dedicated test persona to avoid polluting "default".
         storage
@@ -1389,18 +1379,16 @@ mod tests {
         let json = body_json(resp2.into_body()).await;
         assert_eq!(json["content"], "Hello, world!");
 
-        // Cleanup.
-        let dir = dirs::home_dir()
-            .unwrap()
-            .join(".assistant")
-            .join("agents")
-            .join("filetest");
-        let _ = tokio::fs::remove_dir_all(&dir).await;
+        let on_disk = std::fs::read_to_string(agents.path().join("filetest/SOUL.md")).unwrap();
+        assert_eq!(
+            on_disk, "Hello, world!",
+            "written under the injected agents dir"
+        );
     }
 
     #[tokio::test]
     async fn get_skill_access_returns_defaults() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1420,7 +1408,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_skill_access_unknown_persona_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1437,7 +1425,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_skill_access_mode_updates_mode() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1458,7 +1446,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_skill_access_mode_invalid_mode_returns_400() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1477,7 +1465,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_and_delete_skill_access() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
         let state2 = state.clone();
         let state3 = state.clone();
 
@@ -1541,7 +1529,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_skill_access_unknown_persona_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         let resp = app(state)
             .oneshot(
@@ -1559,7 +1547,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_cross_user_denied() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
 
         // Create a persona owned by a different user.
         storage
@@ -1588,7 +1576,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_org_owned_accessible() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
 
         // The "default" persona has no owner_user_id (org-owned) — any user can access it.
         let resp = app(state)
@@ -1665,14 +1653,14 @@ mod tests {
 
     #[tokio::test]
     async fn get_persona_includes_empty_starter_prompts() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
         let json = get_detail(app(state), "default").await;
         assert_eq!(json["starter_prompts"], serde_json::json!([]));
     }
 
     #[tokio::test]
     async fn patch_persona_stores_trimmed_starters() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         let (status, json) = patch_persona(
             app(state),
             "default",
@@ -1692,7 +1680,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_persona_rejects_five_starters() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         let (status, json) = patch_persona(
             app(state),
             "default",
@@ -1706,7 +1694,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_persona_rejects_blank_and_over_long_starters() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         for bad in [
             "   ".to_string(),
             "x".repeat(201),
@@ -1726,7 +1714,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_persona_counts_characters_not_bytes() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         let prompt = "é".repeat(200);
         assert!(prompt.len() > 200);
         let (status, _) = patch_persona(
@@ -1741,7 +1729,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_persona_unknown_id_returns_404() {
-        let (state, _) = test_state().await;
+        let (state, _, _agents) = test_state().await;
         let (status, json) = patch_persona(
             app(state),
             "missing",
@@ -1754,7 +1742,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_persona_read_only_returns_403_and_stores_nothing() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         let (status, _) = patch_persona(
             app_as(state, "test-user", Role::Viewer),
             "default",
@@ -1767,7 +1755,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_persona_empty_body_leaves_starters_unchanged() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         storage
             .persona_store()
             .set_starter_prompts("default", &["Plan my week".to_string()])
@@ -1780,7 +1768,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_persona_empty_list_clears() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         storage
             .persona_store()
             .set_starter_prompts("default", &["Plan my week".to_string()])
@@ -1798,7 +1786,7 @@ mod tests {
 
     #[tokio::test]
     async fn owner_edits_personal_persona() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         storage
             .persona_store()
             .create_owned("mine", "Mine", "alice")
@@ -1822,7 +1810,7 @@ mod tests {
 
     #[tokio::test]
     async fn space_admin_edits_org_owned_persona() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         let detail = get_detail(app_as(state.clone(), "admin", Role::SpaceAdmin), "default").await;
         assert_eq!(detail["can_edit_starter_prompts"], true);
         let (status, _) = patch_persona(
@@ -1840,7 +1828,7 @@ mod tests {
 
     #[tokio::test]
     async fn member_cannot_edit_org_owned_persona() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         let detail = get_detail(app_as(state.clone(), "bob", Role::Member), "default").await;
         assert_eq!(detail["can_edit_starter_prompts"], false);
         let (status, json) = patch_persona(
@@ -1858,7 +1846,7 @@ mod tests {
     async fn space_admin_cannot_edit_another_users_personal_persona() {
         // A personal Persona is invisible to others (404), so admins get no
         // back door through the starters route.
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
         storage
             .persona_store()
             .create_owned("mine", "Mine", "alice")
@@ -1876,7 +1864,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_active_persona_cross_user_denied() {
-        let (state, storage) = test_state().await;
+        let (state, storage, _agents) = test_state().await;
 
         storage
             .persona_store()

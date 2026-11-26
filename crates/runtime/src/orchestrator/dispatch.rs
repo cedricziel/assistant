@@ -263,6 +263,9 @@ impl Orchestrator {
                 // Structured render data goes to the event only: take it before
                 // anything else sees the output so it cannot leak into the LLM
                 // history, the persisted observation or the webhook payload.
+                if let Some(cost) = reported_cost(output.data.as_ref()) {
+                    otel_span.set_attribute(KeyValue::new("assistant.llm.cost_usd", cost));
+                }
                 let mut raw = output.data.take();
                 app = McpApp::take_from(&mut raw);
                 data = Self::cap_tool_data(tool_name, raw);
@@ -688,5 +691,29 @@ fn truncate_chars(s: &str, max: usize) -> &str {
     match s.char_indices().nth(max) {
         Some((i, _)) => &s[..i],
         None => s,
+    }
+}
+
+/// The cost in US dollars a tool reported as `cost_usd` in its data, such as
+/// `image-generate`'s generation cost.
+fn reported_cost(data: Option<&serde_json::Value>) -> Option<f64> {
+    data?.get("cost_usd")?.as_f64()
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use serde_json::json;
+
+    use super::reported_cost;
+
+    #[test]
+    fn reads_cost_usd_from_tool_data() {
+        assert_eq!(
+            reported_cost(Some(&json!({"images": 1, "cost_usd": 0.04}))),
+            Some(0.04)
+        );
+        assert_eq!(reported_cost(Some(&json!({"cost_usd": null}))), None);
+        assert_eq!(reported_cost(Some(&json!({"images": 1}))), None);
+        assert_eq!(reported_cost(None), None);
     }
 }

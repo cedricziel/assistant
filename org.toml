@@ -269,6 +269,22 @@ timeout_secs = 120
 # # prompt = "Names: Acme"             # vocabulary hint
 # # max_chunk_secs = 50                # split longer audio; capped at 55
 
+# ── Image generation ─────────────────────────────────────────────────────────
+# Enables the image-generate tool. Provider: "openrouter". See docs/images.md.
+#
+# [images]
+# provider = "openrouter"
+# # enabled = true                     # false: no provider, no tool
+# # model = "openai/gpt-image-2.6-flare" # default
+# # api_key = "sk-or-..."              # else the [llm] key, else OPENROUTER_API_KEY
+# # base_url = "https://openrouter.ai/api/v1"
+# # output_format = "png"              # "png" | "jpeg" | "webp"
+# # quality = "high"                   # default for requests that set none
+#
+# # Provider routing; same keys as [llm.openrouter.provider].
+# [images.openrouter.provider]
+# data_collection = "deny"
+
 # ── Text-to-speech (TTS) ─────────────────────────────────────────────────────
 # Providers: "openai", "deepgram", "openrouter"
 # API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY, OPENROUTER_API_KEY

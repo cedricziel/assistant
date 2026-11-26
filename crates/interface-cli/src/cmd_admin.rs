@@ -4,6 +4,8 @@
 //! nobody can sign in: a lost admin password, or an install whose generated
 //! credentials file was deleted.
 
+use std::path::Path;
+
 use anyhow::{Context, Result, bail};
 
 use assistant_auth::password::hash_password;
@@ -14,8 +16,12 @@ use assistant_core::store::{OrgStore, UserStore};
 use assistant_storage::OrgPoolFactory;
 
 /// `assistant admin reset-password <email> [--org <slug>]`
-pub async fn cmd_admin_reset_password(email: &str, org_slug: &str) -> Result<()> {
-    let org_storage = OrgPoolFactory::default_base()?
+pub async fn cmd_admin_reset_password(
+    install_root: &Path,
+    email: &str,
+    org_slug: &str,
+) -> Result<()> {
+    let org_storage = OrgPoolFactory::new(install_root)
         .org_storage()
         .await
         .context("failed to open org.db")?;

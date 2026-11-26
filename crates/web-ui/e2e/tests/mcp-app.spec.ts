@@ -1,5 +1,6 @@
 import { test, expect, Page } from "@playwright/test";
 
+import { enableAccessibility } from "./support/flutter";
 import { STAMP } from "./support/integration-mocks";
 
 /**
@@ -105,13 +106,6 @@ async function loginFlutter(page: Page) {
     timeout: 20_000,
   });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
-}
-
-/** Flutter builds its semantics tree only once this placeholder is clicked. */
-async function enableAccessibility(page: Page) {
-  await page
-    .getByRole("button", { name: "Enable accessibility" })
-    .evaluate((el) => (el as HTMLElement).click());
 }
 
 test.describe("MCP Apps", () => {

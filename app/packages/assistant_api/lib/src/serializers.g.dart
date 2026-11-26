@@ -27,6 +27,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(AuthenticationInfo.serializer)
       ..add(AuthorizationCodeOAuthFlow.serializer)
       ..add(BindingResponse.serializer)
+      ..add(BranchInfo.serializer)
       ..add(CallMcpAppToolRequest.serializer)
       ..add(CancelTaskRequest.serializer)
       ..add(CatalogAuthKindResponse.serializer)
@@ -163,6 +164,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SubscribeRequest.serializer)
       ..add(SubscriptionResponse.serializer)
       ..add(SurfaceSummary.serializer)
+      ..add(SwitchBranchRequest.serializer)
       ..add(Task.serializer)
       ..add(TaskArtifactUpdateEvent.serializer)
       ..add(TaskPushNotificationConfig.serializer)
@@ -260,6 +262,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

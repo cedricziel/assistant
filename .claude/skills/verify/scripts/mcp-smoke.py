@@ -7,6 +7,9 @@ Usage: mcp-smoke.py <URL> <HOME> [TOOL [JSON_ARGS]]
 2. HTTP: registers a client (RFC 7591), signs in as the seeded admin with
    PKCE and `resource=<URL>/mcp`, then lists tools on /mcp and calls TOOL
    (default `mcp__demo__get-forecast` with {"city": "Berlin"}).
+3. Tasks: that session declares the Tasks extension, so `run-prompt` returns
+   a task, which is polled with `tasks/get` until it completes; a second `run-prompt` that
+   the scripted model holds is cancelled with `tasks/cancel`.
 
 Prints one PASS/FAIL line per check and exits non-zero on any failure.
 Standard library only.
@@ -20,11 +23,14 @@ import pathlib
 import secrets
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 PROTOCOL = "2025-11-25"
+TASKS = {"extensions": {"io.modelcontextprotocol/tasks": {}}}
+TERMINAL = {"completed", "failed", "cancelled"}
 failed = False
 
 
@@ -129,10 +135,42 @@ def mcp_http(url, token):
         return json.loads(events[-1] if events else body)
 
     rpc({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-        "protocolVersion": PROTOCOL, "capabilities": {},
+        "protocolVersion": PROTOCOL, "capabilities": TASKS,
         "clientInfo": {"name": "verify", "version": "1"}}})
     rpc({"jsonrpc": "2.0", "method": "notifications/initialized"})
     return rpc, rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
+
+
+def start_task(rpc, prompt):
+    reply = rpc({"jsonrpc": "2.0", "id": 10, "method": "tools/call",
+                 "params": {"name": "run-prompt", "arguments": {"prompt": prompt}}})
+    if reply.get("result", {}).get("resultType") != "task":
+        raise RuntimeError(f"run-prompt returned no task: {json.dumps(reply)[:300]}")
+    return reply["result"]
+
+
+def settle(rpc, task_id, timeout=90):
+    deadline = time.monotonic() + timeout
+    while True:
+        task = rpc({"jsonrpc": "2.0", "id": 11, "method": "tasks/get",
+                    "params": {"taskId": task_id}})["result"]
+        if task["status"] in TERMINAL or time.monotonic() > deadline:
+            return task
+        time.sleep(task.get("pollIntervalMs", 500) / 1000)
+
+
+def check_tasks(rpc):
+    task = start_task(rpc, "What is the weather in Berlin?")
+    done = settle(rpc, task["taskId"])
+    text = " ".join(c.get("text", "") for c in done.get("result", {}).get("content", []))
+    report("HTTP run-prompt task", task["status"] == "working" and done["status"] == "completed",
+           f"{task['status']} -> {done['status']}: {text[:120]}")
+
+    task = start_task(rpc, "Hold this turn")
+    rpc({"jsonrpc": "2.0", "id": 12, "method": "tasks/cancel", "params": {"taskId": task["taskId"]}})
+    done = settle(rpc, task["taskId"], timeout=10)
+    report("HTTP tasks/cancel", done["status"] == "cancelled",
+           f"{task['status']} -> {done['status']}")
 
 
 def main():
@@ -162,6 +200,7 @@ def main():
                       "params": {"name": tool, "arguments": args}})["result"]
         text = " ".join(c.get("text", "") for c in result.get("content", []))
         report(f"HTTP tools/call {tool}", not result.get("isError"), text[:120])
+        check_tasks(rpc)
     except Exception as e:  # noqa: BLE001 - report and continue
         report("HTTP /mcp", False, repr(e))
 
