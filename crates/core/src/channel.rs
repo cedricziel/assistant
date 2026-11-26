@@ -45,9 +45,12 @@ pub enum ChannelContent {
         filename: String,
         mime_type: String,
     },
+    /// A voice message: the recording, and the text that stands for it,
+    /// which is the transcript or `[Voice message]` without transcription.
     Voice {
-        url: String,
-        duration_seconds: Option<u32>,
+        data: Vec<u8>,
+        mime_type: String,
+        text: String,
     },
 }
 
