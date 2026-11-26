@@ -863,7 +863,7 @@ void (empty response body)
 
 `POST /api/conversations/{id}/voice` — upload audio, keep it as the user message's attachment, transcribe it, run through the orchestrator, and stream the response as SSE.
 
-The message text is the transcript, or `[Voice message]` when no transcription provider is configured or transcription fails.
+The message text is the transcript, or `[Voice message]` when no transcription provider is configured or transcription fails.  The turn runs like `POST /api/conversations/{id}/messages`: the response carries the run id in `X-Run-Id`, the stream opens with `run_started` and the `transcript` frame, every frame is persisted for replay through `GET .../runs/{run_id}/events/stream`, `POST .../turns/{run_id}/cancel` stops it, and it ends in `done` or `agent_error`.
 
 ### Example
 ```dart
