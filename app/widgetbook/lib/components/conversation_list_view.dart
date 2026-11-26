@@ -24,6 +24,7 @@ Widget _framed(List<ConversationListItem> items, {String? selectedId}) =>
         items: items,
         selectedId: selectedId,
         onSelect: (_) {},
+        onRequestActions: (_) {},
         onDelete: (_) async => false,
         now: _now,
         header: const Padding(
@@ -88,6 +89,12 @@ final conversationListViewComponent = WidgetbookComponent(
     WidgetbookUseCase(
       name: 'selected',
       builder: (context) => _framed(_pinnedAndRecent, selectedId: '3'),
+    ),
+    // Hover a row to reveal its overflow button; the selected row shows it
+    // without hover.
+    WidgetbookUseCase(
+      name: 'hover (move the pointer over a row)',
+      builder: (context) => _framed(_pinnedAndRecent),
     ),
   ],
 );
