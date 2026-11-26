@@ -1,0 +1,513 @@
+//! OpenRouter text-to-speech (`POST {base_url}/audio/speech`).
+
+use async_trait::async_trait;
+use reqwest_middleware::ClientWithMiddleware;
+use serde_json::{Value, json};
+use tracing::warn;
+
+use assistant_core::Secret;
+use assistant_core::types::transcription::TtsFormat;
+use assistant_llm_provider::retry::RetryConfig;
+
+use crate::converter::AudioFormat;
+use crate::pipeline::{AudioInput, AudioPipeline};
+use crate::provider::{TtsProvider, TtsRequest, TtsResult};
+
+/// OpenRouter's default text-to-speech model.
+pub const DEFAULT_MODEL: &str = "openai/gpt-4o-mini-tts";
+/// The voice used when none is configured.
+pub const DEFAULT_VOICE: &str = "alloy";
+
+/// Settings for [`OpenRouterTts::connect`].
+#[derive(Debug, Clone)]
+pub struct OpenRouterTtsSettings {
+    pub base_url: String,
+    pub api_key: Secret,
+    pub model: String,
+    pub voice: String,
+    pub format: TtsFormat,
+    pub speed: Option<f32>,
+    pub instructions: Option<String>,
+    pub pcm_sample_rate: Option<u32>,
+}
+
+pub struct OpenRouterTts {
+    http: ClientWithMiddleware,
+    settings: OpenRouterTtsSettings,
+    /// The model's `response_format` values, when the catalog was reachable.
+    native_formats: Option<Vec<TtsFormat>>,
+    pipeline: AudioPipeline,
+}
+
+impl OpenRouterTts {
+    /// Builds the provider, reading the model's supported formats from the
+    /// speech-model catalog. Fails when the configured format needs a
+    /// transcode and ffmpeg can't be run. When the catalog can't be
+    /// reached, formats are requested directly.
+    pub async fn connect(
+        settings: OpenRouterTtsSettings,
+        pipeline: AudioPipeline,
+    ) -> anyhow::Result<Self> {
+        let http = assistant_llm_provider::http::build_http_client(60, &RetryConfig::default())?;
+        let native_formats = match fetch_formats(&http, &settings).await {
+            Ok(formats) => Some(formats),
+            Err(e) => {
+                warn!(model = %settings.model, error = %e, "OpenRouter speech catalog unavailable; requesting formats directly");
+                None
+            }
+        };
+        let tts = Self {
+            http,
+            settings,
+            native_formats,
+            pipeline,
+        };
+        let plan = tts.plan(tts.settings.format)?;
+        if plan.wire != tts.settings.format {
+            tts.pipeline
+                .require(audio_format(plan.wire))
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "OpenRouter model `{}` can't produce {} directly: {e}",
+                        tts.settings.model,
+                        tts.settings.format.as_str()
+                    )
+                })?;
+        }
+        Ok(tts)
+    }
+
+    /// Which format to request on the wire for delivering `target`.
+    fn plan(&self, target: TtsFormat) -> anyhow::Result<Plan> {
+        let wire = match &self.native_formats {
+            Some(native) if native.contains(&target) => target,
+            Some(native) => *[TtsFormat::Wav, TtsFormat::Mp3, TtsFormat::Pcm]
+                .iter()
+                .find(|f| native.contains(f))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "OpenRouter model `{}` produces none of wav, mp3 or pcm",
+                        self.settings.model
+                    )
+                })?,
+            // Ogg isn't a wire format; ask for WAV and transcode.
+            None if target == TtsFormat::Ogg => TtsFormat::Wav,
+            None => target,
+        };
+        Ok(Plan { wire })
+    }
+
+    /// The sample rate of the model's raw PCM.
+    fn pcm_sample_rate(&self) -> u32 {
+        self.settings.pcm_sample_rate.unwrap_or_else(|| {
+            if self.settings.model.starts_with("heygen/") {
+                44_100
+            } else {
+                24_000
+            }
+        })
+    }
+}
+
+struct Plan {
+    wire: TtsFormat,
+}
+
+#[async_trait]
+impl TtsProvider for OpenRouterTts {
+    fn name(&self) -> &str {
+        "openrouter"
+    }
+
+    async fn synthesize(&self, request: TtsRequest) -> anyhow::Result<TtsResult> {
+        let target = match request.format.as_deref() {
+            Some(name) => TtsFormat::parse(name)?,
+            None => self.settings.format,
+        };
+        let plan = self.plan(target)?;
+        let mut body = json!({
+            "model": self.settings.model,
+            "input": request.text,
+            "voice": request.voice.as_deref().unwrap_or(&self.settings.voice),
+            "response_format": plan.wire.as_str(),
+        });
+        if let Some(speed) = request.speed.or(self.settings.speed) {
+            body["speed"] = json!(decimal(speed));
+        }
+        if let Some(instructions) = &self.settings.instructions {
+            body["instructions"] = json!(instructions);
+        }
+        let url = format!(
+            "{}/audio/speech",
+            self.settings.base_url.trim_end_matches('/')
+        );
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(self.settings.api_key.expose())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("OpenRouter speech request failed: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            let message = serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
+                .unwrap_or(text);
+            anyhow::bail!("OpenRouter speech returned {status}: {message}");
+        }
+        let audio = resp
+            .bytes()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read OpenRouter speech audio: {e}"))?
+            .to_vec();
+
+        let audio_data = if plan.wire == target {
+            audio
+        } else {
+            let input = match plan.wire {
+                TtsFormat::Pcm => AudioInput::Pcm {
+                    sample_rate: self.pcm_sample_rate(),
+                },
+                other => AudioInput::Encoded(audio_format(other)),
+            };
+            self.pipeline
+                .transcode(&audio, input, audio_format(target))
+                .await?
+        };
+        Ok(TtsResult {
+            audio_data,
+            mime_type: target.mime_type().to_owned(),
+        })
+    }
+}
+
+/// `value` as the decimal it was written as, so `1.2` isn't sent as
+/// `1.2000000476837158`.
+fn decimal(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or(f64::from(value))
+}
+
+/// The pipeline's format for a TTS format.
+fn audio_format(format: TtsFormat) -> AudioFormat {
+    match format {
+        TtsFormat::Mp3 => AudioFormat::Mp3,
+        TtsFormat::Wav | TtsFormat::Pcm => AudioFormat::Wav,
+        TtsFormat::Ogg => AudioFormat::Ogg,
+    }
+}
+
+/// The model's `response_format` values from the speech-model catalog.
+async fn fetch_formats(
+    http: &ClientWithMiddleware,
+    settings: &OpenRouterTtsSettings,
+) -> anyhow::Result<Vec<TtsFormat>> {
+    let url = format!(
+        "{}/audio/speech/models/{}",
+        settings.base_url.trim_end_matches('/'),
+        settings.model
+    );
+    let resp = http
+        .get(&url)
+        .bearer_auth(settings.api_key.expose())
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("OpenRouter speech catalog request failed: {e}"))?;
+    if !resp.status().is_success() {
+        anyhow::bail!("OpenRouter speech catalog returned {}", resp.status());
+    }
+    let model: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to parse the OpenRouter speech catalog: {e}"))?;
+    let values = model["output_modalities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["supported_parameters"]["response_format"]["values"].as_array())
+        .flatten()
+        .filter_map(|v| v.as_str().and_then(|name| TtsFormat::parse(name).ok()))
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        anyhow::bail!("the speech catalog lists no response formats");
+    }
+    Ok(values)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use serde_json::{Value, json};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use assistant_core::Secret;
+    use assistant_core::types::transcription::TtsFormat;
+
+    use super::{OpenRouterTts, OpenRouterTtsSettings};
+    use crate::pipeline::AudioPipeline;
+    use crate::provider::{TtsProvider, TtsRequest};
+
+    fn settings(server: &MockServer, model: &str, format: TtsFormat) -> OpenRouterTtsSettings {
+        OpenRouterTtsSettings {
+            base_url: server.uri(),
+            api_key: Secret::new("sk-or"),
+            model: model.into(),
+            voice: "alloy".into(),
+            format,
+            speed: None,
+            instructions: None,
+            pcm_sample_rate: None,
+        }
+    }
+
+    /// Serves `model`'s speech catalog entry with `formats`.
+    async fn mount_model(server: &MockServer, model: &str, formats: &[&str]) {
+        Mock::given(method("GET"))
+            .and(path(format!("/audio/speech/models/{model}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": model,
+                "output_modalities": [{"type": "speech", "supported_parameters": {
+                    "response_format": {"type": "enum", "values": formats},
+                }}],
+            })))
+            .mount(server)
+            .await;
+    }
+
+    async fn mount_speech(server: &MockServer, body: Vec<u8>, content_type: &str) {
+        Mock::given(method("POST"))
+            .and(path("/audio/speech"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, content_type))
+            .mount(server)
+            .await;
+    }
+
+    async fn speech_bodies(server: &MockServer) -> Vec<Value> {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/audio/speech")
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect()
+    }
+
+    fn say(text: &str) -> TtsRequest {
+        TtsRequest {
+            text: text.into(),
+            voice: None,
+            format: None,
+            speed: None,
+        }
+    }
+
+    /// One second of 16-bit mono PCM at `rate`, or `None` without ffmpeg.
+    fn pcm(rate: u32) -> Option<Vec<u8>> {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("tone.pcm");
+        let ok = Command::new("ffmpeg")
+            .args([
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=1",
+            ])
+            .args(["-ar", &rate.to_string(), "-ac", "1", "-f", "s16le"])
+            .arg(&out)
+            .status()
+            .is_ok_and(|s| s.success());
+        ok.then(|| std::fs::read(out).unwrap())
+    }
+
+    fn wav_tone() -> Option<Vec<u8>> {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("tone.wav");
+        let ok = Command::new("ffmpeg")
+            .args([
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=1",
+            ])
+            .arg(&out)
+            .status()
+            .is_ok_and(|s| s.success());
+        ok.then(|| std::fs::read(out).unwrap())
+    }
+
+    #[tokio::test]
+    async fn sends_voice_speed_and_instructions_and_requests_the_native_format() {
+        let server = MockServer::start().await;
+        let model = "openai/gpt-4o-mini-tts";
+        mount_model(&server, model, &["mp3", "pcm"]).await;
+        mount_speech(&server, b"ID3-mp3-bytes".to_vec(), "audio/mpeg").await;
+        let mut settings = settings(&server, model, TtsFormat::Mp3);
+        settings.speed = Some(1.2);
+        settings.instructions = Some("Speak calmly".into());
+        let tts = OpenRouterTts::connect(settings, AudioPipeline::default())
+            .await
+            .unwrap();
+
+        let result = tts
+            .synthesize(TtsRequest {
+                voice: Some("nova".into()),
+                ..say("Hello")
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.audio_data, b"ID3-mp3-bytes");
+        assert_eq!(result.mime_type, "audio/mpeg");
+        let body = &speech_bodies(&server).await[0];
+        assert_eq!(
+            *body,
+            json!({
+                "model": model,
+                "input": "Hello",
+                "voice": "nova",
+                "response_format": "mp3",
+                "speed": 1.2,
+                "instructions": "Speak calmly",
+            }),
+            "the request voice overrides the configured one"
+        );
+    }
+
+    #[tokio::test]
+    async fn pcm_only_heygen_model_is_read_at_44_1_khz_and_returned_as_mp3() {
+        let Some(pcm) = pcm(44_100) else {
+            eprintln!("skipped: ffmpeg is not installed");
+            return;
+        };
+        let server = MockServer::start().await;
+        let model = "heygen/heygen-voice-1";
+        mount_model(&server, model, &["pcm"]).await;
+        mount_speech(&server, pcm, "audio/pcm").await;
+        let tts = OpenRouterTts::connect(
+            settings(&server, model, TtsFormat::Mp3),
+            AudioPipeline::default(),
+        )
+        .await
+        .unwrap();
+
+        let result = tts.synthesize(say("Hi")).await.unwrap();
+
+        assert_eq!(speech_bodies(&server).await[0]["response_format"], "pcm");
+        assert_eq!(result.mime_type, "audio/mpeg");
+        let wav = tts
+            .pipeline
+            .transcode(
+                &result.audio_data,
+                crate::pipeline::AudioInput::Encoded(crate::converter::AudioFormat::Mp3),
+                crate::converter::AudioFormat::Wav,
+            )
+            .await
+            .unwrap();
+        let rate = u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]);
+        assert_eq!(rate, 44_100, "PCM was read at 44.1 kHz");
+    }
+
+    #[tokio::test]
+    async fn gemini_is_asked_for_wav_and_returned_as_ogg() {
+        let Some(wav) = wav_tone() else {
+            eprintln!("skipped: ffmpeg is not installed");
+            return;
+        };
+        let server = MockServer::start().await;
+        let model = "google/gemini-2.5-flash-preview-tts";
+        mount_model(&server, model, &["pcm", "wav"]).await;
+        mount_speech(&server, wav, "audio/wav").await;
+        let tts = OpenRouterTts::connect(
+            settings(&server, model, TtsFormat::Ogg),
+            AudioPipeline::default(),
+        )
+        .await
+        .unwrap();
+
+        let result = tts.synthesize(say("Hi")).await.unwrap();
+
+        assert_eq!(speech_bodies(&server).await[0]["response_format"], "wav");
+        assert_eq!(result.mime_type, "audio/ogg");
+        assert_eq!(&result.audio_data[..4], b"OggS");
+    }
+
+    #[tokio::test]
+    async fn pcm_sample_rate_override_is_used() {
+        let Some(pcm) = pcm(16_000) else {
+            eprintln!("skipped: ffmpeg is not installed");
+            return;
+        };
+        let server = MockServer::start().await;
+        let model = "acme/pcm-tts";
+        mount_model(&server, model, &["pcm"]).await;
+        mount_speech(&server, pcm, "audio/pcm").await;
+        let mut settings = settings(&server, model, TtsFormat::Wav);
+        settings.pcm_sample_rate = Some(16_000);
+        let tts = OpenRouterTts::connect(settings, AudioPipeline::default())
+            .await
+            .unwrap();
+
+        let result = tts.synthesize(say("Hi")).await.unwrap();
+
+        assert_eq!(result.mime_type, "audio/wav");
+        let rate = u32::from_le_bytes([
+            result.audio_data[24],
+            result.audio_data[25],
+            result.audio_data[26],
+            result.audio_data[27],
+        ]);
+        assert_eq!(rate, 16_000);
+    }
+
+    #[tokio::test]
+    async fn missing_ffmpeg_fails_the_build_when_transcoding_is_needed() {
+        let server = MockServer::start().await;
+        let model = "heygen/heygen-voice-1";
+        mount_model(&server, model, &["pcm"]).await;
+        let pipeline = AudioPipeline::default().with_ffmpeg_path("/nonexistent/ffmpeg");
+
+        let err = OpenRouterTts::connect(settings(&server, model, TtsFormat::Mp3), pipeline)
+            .await
+            .err()
+            .expect("must fail")
+            .to_string();
+        assert!(err.contains("ffmpeg"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn request_format_overrides_the_configured_one() {
+        let server = MockServer::start().await;
+        let model = "openai/gpt-4o-mini-tts";
+        mount_model(&server, model, &["mp3", "wav"]).await;
+        mount_speech(&server, b"RIFF....".to_vec(), "audio/wav").await;
+        let tts = OpenRouterTts::connect(
+            settings(&server, model, TtsFormat::Mp3),
+            AudioPipeline::default(),
+        )
+        .await
+        .unwrap();
+
+        let result = tts
+            .synthesize(TtsRequest {
+                format: Some("wav".into()),
+                ..say("Hi")
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(speech_bodies(&server).await[0]["response_format"], "wav");
+        assert_eq!(result.mime_type, "audio/wav");
+    }
+}
