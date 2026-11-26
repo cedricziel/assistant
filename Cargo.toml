@@ -81,6 +81,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 # Encoding
 base64 = "0.23"
+# Cheaply cloned byte buffers (generated media on LLM responses)
+bytes = "1.11"
 # Accent folding for conversation search
 unicode-normalization = "0.1.25"
 # HTTP client

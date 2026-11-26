@@ -8,6 +8,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
 import 'chat_provider.dart';
 import '../../shared/theme/legacy_theme.dart';
 import 'markdown_link_handler.dart';
+import 'mcp_app_frame.dart';
 
 /// A streaming-aware timeline entry for one thinking, tool call or subagent
 /// step in the chat timeline.
@@ -20,10 +21,14 @@ class StreamingTimelineEntry extends StatelessWidget {
     super.key,
     required this.message,
     this.entryState = EntryState.complete,
+    this.conversationId,
   });
 
   final ChatMessage message;
   final EntryState entryState;
+
+  /// The conversation the entry belongs to; an MCP App routes its calls by it.
+  final String? conversationId;
 
   double _maxHeight(BuildContext context, bool isSubagent) {
     final density = ThreadDensityScope.of(context);
@@ -139,6 +144,10 @@ class StreamingTimelineEntry extends StatelessWidget {
       expandable: hasDetails,
       expandedContent: hasDetails ? _toolDetails(context, record) : null,
       forceExpand: record.status == ToolCallStatus.error,
+      // An MCP App renders in the footer slot: visible while collapsed.
+      footer: record.app == null
+          ? null
+          : McpAppFrame(toolCall: record, conversationId: conversationId),
     );
   }
 
@@ -425,6 +434,7 @@ class StreamingTimelineEntry extends StatelessWidget {
     bool expandable = false,
     Widget? expandedContent,
     bool forceExpand = false,
+    Widget? footer,
   }) {
     return TimelineEntryShell(
       icon: icon,
@@ -434,6 +444,7 @@ class StreamingTimelineEntry extends StatelessWidget {
       expandable: expandable,
       forceExpand: forceExpand,
       body: expandedContent,
+      footer: footer,
     );
   }
 

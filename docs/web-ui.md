@@ -44,6 +44,17 @@ default space if it has none. Running runtime workers in both processes simultan
 causes per-second `claim failed` warnings as the two consumers race for
 every bus claim.
 
+**Streaming across the process boundary.** The chat stream (`POST
+/api/conversations/{id}/messages`) works with the orchestrator in a separate
+process. The turn runs in the orchestrator, which publishes each event of the
+run on the bus topic `turn.event` (keyed by the run id); the web process reads
+them and forwards them to the browser, so tokens, tool results and the final
+`done` frame arrive as they do when both run in one process. Streaming text
+(`token` and `thinking`) is batched to at most one bus message per 200 ms per
+run, so the browser sees text in short bursts. Both processes must open the
+same `~/.assistant/` data directory and message bus. Run them from the same
+release: the event format is not versioned.
+
 ## Navigation sidebar
 
 On viewports >= 768 dp wide, the app renders a navigation sidebar with all

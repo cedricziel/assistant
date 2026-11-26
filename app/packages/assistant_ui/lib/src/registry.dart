@@ -14,4 +14,5 @@ const List<String> kAssistantUiElements = [
   'SuggestionChips',
   'ThreadDensityScope',
   'TimelineEntryShell',
+  'UnknownInteractionCard',
 ];

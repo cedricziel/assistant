@@ -331,6 +331,10 @@ error. Errors and retries work as for chat, and errors name the model.
 
 `[transcription] provider = "openrouter"` transcribes voice messages through OpenRouter's `/audio/transcriptions` endpoint, by default with `openai/whisper-1`. The key is `[transcription] api_key`, else the `[llm]` key when `[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`. See [Voice Transcription](transcription.md#openrouter).
 
+## Text-to-speech
+
+`[tts] provider = "openrouter"` speaks replies through OpenRouter's `/audio/speech` endpoint, by default with `openai/gpt-4o-mini-tts` and voice `alloy`. The key resolves as for transcription. At startup the provider checks the voice, `speed` and `instructions` against the model's catalog entry. See [Text-to-speech](transcription.md#openrouter-tts).
+
 ## Models
 
 OpenRouter provides access to 300+ models. Use the `provider/model`
