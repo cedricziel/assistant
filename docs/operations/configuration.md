@@ -38,6 +38,16 @@ Annotated examples are `server.toml` and `org.toml` at the repo root. Release
 archives and packages include them, and Docker images put them at
 `/etc/assistant/server.toml.example` and `/etc/assistant/org.toml.example`.
 
+### Embeddings
+
+`[llm] embedding_model` is optional. Unset, the chat provider's default
+applies: Ollama `nomic-embed-text`, OpenAI `text-embedding-3-small`,
+OpenRouter `openai/text-embedding-3-small`.
+
+`[llm.embeddings]` picks a separate embedding provider: `ollama`,
+`openai`, `openrouter` or `voyage`, with optional `model`, `base_url` and
+`api_key`. See [OpenRouter embeddings](../openrouter.md#embeddings).
+
 ## How files are loaded
 
 - The server reads `server.toml` once at startup.
