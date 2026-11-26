@@ -13,16 +13,22 @@ part 'persona_detail.g.dart';
 /// Full persona detail including file slot inventory.
 ///
 /// Properties:
+/// * [canEditStarterPrompts] - True when the caller may `PATCH` this Persona's starter prompts.
 /// * [createdAt]
 /// * [files]
 /// * [id]
 /// * [name]
 /// * [skillAccessMode]
+/// * [starterPrompts] - Up to 4 prompts shown as suggestions in an empty chat. Always present.
 /// * [turnTimeoutSecs]
 /// * [updatedAt]
 @BuiltValue()
 abstract class PersonaDetail
     implements Built<PersonaDetail, PersonaDetailBuilder> {
+  /// True when the caller may `PATCH` this Persona's starter prompts.
+  @BuiltValueField(wireName: r'can_edit_starter_prompts')
+  bool get canEditStarterPrompts;
+
   @BuiltValueField(wireName: r'created_at')
   String get createdAt;
 
@@ -37,6 +43,10 @@ abstract class PersonaDetail
 
   @BuiltValueField(wireName: r'skill_access_mode')
   String get skillAccessMode;
+
+  /// Up to 4 prompts shown as suggestions in an empty chat. Always present.
+  @BuiltValueField(wireName: r'starter_prompts')
+  BuiltList<String> get starterPrompts;
 
   @BuiltValueField(wireName: r'turn_timeout_secs')
   int? get turnTimeoutSecs;
@@ -69,6 +79,11 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
     PersonaDetail object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
+    yield r'can_edit_starter_prompts';
+    yield serializers.serialize(
+      object.canEditStarterPrompts,
+      specifiedType: const FullType(bool),
+    );
     yield r'created_at';
     yield serializers.serialize(
       object.createdAt,
@@ -93,6 +108,11 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
     yield serializers.serialize(
       object.skillAccessMode,
       specifiedType: const FullType(String),
+    );
+    yield r'starter_prompts';
+    yield serializers.serialize(
+      object.starterPrompts,
+      specifiedType: const FullType(BuiltList, [FullType(String)]),
     );
     if (object.turnTimeoutSecs != null) {
       yield r'turn_timeout_secs';
@@ -131,6 +151,13 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'can_edit_starter_prompts':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType(bool),
+          ) as bool;
+          result.canEditStarterPrompts = valueDes;
+          break;
         case r'created_at':
           final valueDes = serializers.deserialize(
             value,
@@ -166,6 +193,13 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
             specifiedType: const FullType(String),
           ) as String;
           result.skillAccessMode = valueDes;
+          break;
+        case r'starter_prompts':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType(BuiltList, [FullType(String)]),
+          ) as BuiltList<String>;
+          result.starterPrompts.replace(valueDes);
           break;
         case r'turn_timeout_secs':
           final valueDes = serializers.deserialize(

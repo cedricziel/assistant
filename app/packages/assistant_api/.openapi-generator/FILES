@@ -175,6 +175,7 @@ doc/UpdateIntegrationPolicyRequest.md
 doc/UpdateIntegrationRequest.md
 doc/UpdateMemberRequest.md
 doc/UpdateOrgRequest.md
+doc/UpdatePersonaRequest.md
 doc/UpdateSkillRequest.md
 doc/UpdateSpaceRequest.md
 doc/UpdateUserRequest.md
@@ -386,6 +387,7 @@ lib/src/model/update_integration_policy_request.dart
 lib/src/model/update_integration_request.dart
 lib/src/model/update_member_request.dart
 lib/src/model/update_org_request.dart
+lib/src/model/update_persona_request.dart
 lib/src/model/update_skill_request.dart
 lib/src/model/update_space_request.dart
 lib/src/model/update_user_request.dart
@@ -407,3 +409,4 @@ lib/src/model/workflow_webhook_trigger_accepted.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
+test/update_persona_request_test.dart
