@@ -28,7 +28,7 @@ Before this change the two sides had little in common:
 `rmcp` 3.11 implements protocol revisions `2024-11-05` through `2026-07-28`,
 `server/discover`, the Streamable HTTP server as a tower service, the Tasks
 extension and the client side of the Skills extension. It does not implement
-MCP Apps.
+MCP Apps, so the assistant does.
 
 The full proposal is `openspec/changes/mcp-full-spec/`.
 
@@ -76,13 +76,32 @@ code is the handlers, the authentication glue, and the MCP Apps extension.**
   them in memory as `SkillSource::Mcp { server }`, named `{server}__{skill}`.
   A built-in ask rule makes any `bash` or `process` command that names
   `/mcp-skills/` wait for a human.
-- **MCP Apps render in an opaque-origin sandbox (planned).** This part is not
-  implemented. The client already declares the MCP Apps extension and hides
-  tools whose visibility excludes the model, but no app is resolved or
-  rendered. The plan: on web, an `<iframe sandbox="allow-scripts" srcdoc=…>`
-  without `allow-same-origin`, so the frame has an opaque origin and cannot
-  reach the assistant's cookies, storage or API. On iOS and macOS,
-  `webview_flutter` loads the same document.
+- **MCP Apps resolve in the client and render in an opaque-origin sandbox.**
+  After a successful call to an external tool, the bridge reads the tool's
+  `ui://` resource if it declares one in `_meta.ui.resourceUri` or the
+  deprecated flat `_meta["ui/resourceUri"]`. Only a resource served as
+  `text/html;profile=mcp-app`, UTF-8 and at most 1 MiB, attaches an app to the
+  tool result. Any other resource is logged and the tool call has no app. The
+  app's declared CSP domains and permissions come from the read's `_meta.ui`,
+  or from the resource listing when the read has none.
+
+  The Flutter app renders the stored app below its tool call. On web it is an
+  `<iframe sandbox="allow-scripts" srcdoc=…>` without `allow-same-origin`, so
+  the frame has an opaque origin and cannot reach the assistant's cookies,
+  storage or API. It injects a Content-Security-Policy, built only from the
+  domains the app declared, as a `<meta http-equiv>` ahead of the app's markup.
+  On iOS and macOS, `webview_flutter` loads the same document. A bootstrap
+  script routes `window.parent.postMessage` to a JavaScript channel, and the
+  navigation delegate blocks main-frame navigation.
+
+  The app's own `tools/call` and `resources/read` go to
+  `POST /api/conversations/{id}/tool-calls/{tool_call_id}/app/tools-call` and
+  `.../app/resources-read`. Both reach only the server stored with that tool
+  call. A tool call needs a tool whose visibility includes `app`. The permission
+  policy applies, and a call that needs confirmation gets `409` until the
+  request carries `confirmed: true`. A tool needs confirmation unless it is
+  marked `readOnlyHint: true` on a server with `trust = "trust"`, and so does
+  a call the permission policy would send to a human.
 
 ## Alternatives considered
 
@@ -114,6 +133,5 @@ code is the handlers, the authentication glue, and the MCP Apps extension.**
   connection by rmcp's 10-second discovery timeout before the fallback.
 - Remote skills run third-party code. They stay in memory only, are withdrawn
   when their server disconnects, and their scripts always ask first.
-- Server-side Tasks for `run-prompt`, prompts and completions, and MCP Apps
-  rendering are later steps of the same OpenSpec change. Server tasks will
-  live in memory only and will not survive a restart.
+- Server-side Tasks for `run-prompt` are a later step of the same OpenSpec
+  change. Server tasks will live in memory only and will not survive a restart.

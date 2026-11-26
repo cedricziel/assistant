@@ -215,6 +215,50 @@ impl AudioPipeline {
         read_output(&output).await
     }
 
+    /// `data` as raw signed 16-bit little-endian mono PCM at `sample_rate`.
+    pub async fn to_pcm_s16le(
+        &self,
+        data: &[u8],
+        input: AudioInput,
+        sample_rate: u32,
+    ) -> anyhow::Result<Vec<u8>> {
+        let (format, extension) = match input {
+            AudioInput::Encoded(format) => (format, format.extension()),
+            AudioInput::Pcm { .. } => (AudioFormat::Wav, "pcm"),
+        };
+        self.require(format).await?;
+        let dir = tempfile::tempdir().context("Failed to create a temp dir")?;
+        let input_path = write_input(dir.path(), data, extension).await?;
+        let output = dir.path().join("out.pcm");
+        let rate = sample_rate.to_string();
+        let mut args: Vec<&std::ffi::OsStr> = Vec::new();
+        let source_rate;
+        if let AudioInput::Pcm { sample_rate } = input {
+            source_rate = sample_rate.to_string();
+            args.extend(
+                ["-f", "s16le", "-ar", source_rate.as_str(), "-ac", "1"].map(std::ffi::OsStr::new),
+            );
+        }
+        args.extend([std::ffi::OsStr::new("-i"), input_path.as_os_str()]);
+        args.extend(
+            [
+                "-vn",
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-ac",
+                "1",
+                "-ar",
+                rate.as_str(),
+            ]
+            .map(std::ffi::OsStr::new),
+        );
+        args.push(output.as_os_str());
+        self.ffmpeg(&args).await?;
+        read_output(&output).await
+    }
+
     async fn ffmpeg(&self, args: &[&std::ffi::OsStr]) -> anyhow::Result<()> {
         let output = Command::new(&self.ffmpeg)
             .args(["-loglevel", "error", "-y"])

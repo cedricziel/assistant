@@ -1,8 +1,10 @@
 import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
+import 'components/branch_picker.dart';
 import 'components/message_action_button.dart';
 import 'components/message_actions.dart';
+import 'components/message_editor.dart';
 import 'components/message_timing_indicator.dart';
 import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
@@ -79,8 +81,10 @@ final List<WidgetbookComponent> kComponents = [
   // typingIndicatorComponent, // slot: chat-element-library 8b
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
+  branchPickerComponent,
   messageActionButtonComponent,
   messageActionsComponent,
+  messageEditorComponent,
   messageTimingIndicatorComponent,
   queuedMessageBubbleComponent,
   starterPromptsComponent,

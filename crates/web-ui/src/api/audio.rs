@@ -21,14 +21,14 @@ use super::ApiState;
 use super::conversations::{caller_store, owned_conversation};
 
 /// `GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant
-/// message and return it as `audio/mpeg`.
+/// message and return it in the configured `[tts] format`.
 #[utoipa::path(
     get,
     path = "/api/messages/{id}/audio",
     tag = "conversations",
     params(("id" = Uuid, Path, description = "Message ID")),
     responses(
-        (status = 200, description = "MP3 audio bytes", content_type = "audio/mpeg"),
+        (status = 200, description = "Audio in the configured [tts] format: audio/mpeg, audio/wav, audio/ogg or audio/pcm", content_type = "audio/*"),
         (status = 400, description = "Invalid ID or non-assistant message"),
         (status = 401, description = "Unauthorized"),
         (status = 404, description = "Message not found", body = ErrorBody),
@@ -110,7 +110,7 @@ pub async fn get_message_audio(
     tag = "conversations",
     params(("id" = Uuid, Path, description = "Audio blob ID")),
     responses(
-        (status = 200, description = "MP3 audio bytes", content_type = "audio/mpeg"),
+        (status = 200, description = "Audio in the configured [tts] format: audio/mpeg, audio/wav, audio/ogg or audio/pcm", content_type = "audio/*"),
         (status = 400, description = "Invalid ID"),
         (status = 401, description = "Unauthorized"),
         (status = 404, description = "Audio not found or expired"),

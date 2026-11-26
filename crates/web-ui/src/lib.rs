@@ -297,15 +297,14 @@ async fn run_with_args(args: Args) -> Result<()> {
     let audio_store = Arc::new(audio_store::AudioStore::new());
 
     // -- Build TTS provider (for voice message playback) ---------------------
-    let tts_provider = config
-        .tts
-        .as_ref()
-        .map(|tc| {
-            let provider = build_tts_provider(tc)?;
+    let tts_provider = match config.tts.as_ref() {
+        Some(tc) => {
+            let provider = build_tts_provider(tc, &config.llm).await?;
             info!(provider = provider.name(), "TTS enabled (web UI)");
-            Ok::<_, anyhow::Error>(provider)
-        })
-        .transpose()?;
+            Some(provider)
+        }
+        None => None,
+    };
 
     // -- Integration tools: assembled per turn, never registered ambiently ----
     let secrets = Arc::new(
