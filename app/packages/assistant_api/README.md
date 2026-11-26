@@ -192,6 +192,8 @@ Class | Method | HTTP request | Description
 [*TemplatesApi*](doc/TemplatesApi.md) | [**createFromTemplate**](doc/TemplatesApi.md#createfromtemplate) | **POST** /api/orgs/{org_id}/spaces/{space_id}/personas/from-template | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/personas/from-template&#x60; — create a persona from a template.
 [*TemplatesApi*](doc/TemplatesApi.md) | [**listTemplates**](doc/TemplatesApi.md#listtemplates) | **GET** /api/orgs/{org_id}/catalog/templates | &#x60;GET /api/orgs/{org_id}/catalog/templates&#x60; — list available persona templates.
 [*TemplatesApi*](doc/TemplatesApi.md) | [**onboardingStatus**](doc/TemplatesApi.md#onboardingstatus) | **GET** /api/users/me/onboarding-status | &#x60;GET /api/users/me/onboarding-status&#x60; — check if user has created at least one persona.
+[*ToolPermissionRulesApi*](doc/ToolPermissionRulesApi.md) | [**deleteToolPermissionRule**](doc/ToolPermissionRulesApi.md#deletetoolpermissionrule) | **DELETE** /api/tool-permission-rules/{id} | &#x60;DELETE /api/tool-permission-rules/{id}&#x60;
+[*ToolPermissionRulesApi*](doc/ToolPermissionRulesApi.md) | [**listToolPermissionRules**](doc/ToolPermissionRulesApi.md#listtoolpermissionrules) | **GET** /api/tool-permission-rules | &#x60;GET /api/tool-permission-rules&#x60;
 [*UsersApi*](doc/UsersApi.md) | [**createUser**](doc/UsersApi.md#createuser) | **POST** /api/orgs/{org_id}/users | &#x60;POST /api/orgs/{org_id}/users&#x60; — create/invite a user.
 [*UsersApi*](doc/UsersApi.md) | [**deleteUser**](doc/UsersApi.md#deleteuser) | **DELETE** /api/orgs/{org_id}/users/{id} | &#x60;DELETE /api/orgs/{org_id}/users/{id}&#x60; — remove a user (org-admin only).
 [*UsersApi*](doc/UsersApi.md) | [**getUser**](doc/UsersApi.md#getuser) | **GET** /api/orgs/{org_id}/users/{id} | &#x60;GET /api/orgs/{org_id}/users/{id}&#x60; — get user detail.
@@ -340,6 +342,7 @@ Class | Method | HTTP request | Description
  - [RespondToInteractionRequestOneOf2](doc/RespondToInteractionRequestOneOf2.md)
  - [Role](doc/Role.md)
  - [RotateSecretResponse](doc/RotateSecretResponse.md)
+ - [RuleScope](doc/RuleScope.md)
  - [SecurityRequirement](doc/SecurityRequirement.md)
  - [SecurityScheme](doc/SecurityScheme.md)
  - [SendMessageConfiguration](doc/SendMessageConfiguration.md)
@@ -386,6 +389,7 @@ Class | Method | HTTP request | Description
  - [TokenResponse](doc/TokenResponse.md)
  - [ToolCallSummary](doc/ToolCallSummary.md)
  - [ToolDecision](doc/ToolDecision.md)
+ - [ToolPermissionRuleSummary](doc/ToolPermissionRuleSummary.md)
  - [TurnState](doc/TurnState.md)
  - [TurnStatusResponse](doc/TurnStatusResponse.md)
  - [UnsubscribeRequest](doc/UnsubscribeRequest.md)

@@ -90,6 +90,7 @@ use crate::api::{
         CreateFromTemplateRequest, OnboardingStatusResponse, PersonaFromTemplateResponse,
         TemplateResponse,
     },
+    tool_permission_rules::{RuleScope, ToolPermissionRuleSummary},
     users::{CreateUserRequest, UpdateUserRequest, UserDetail, UserSummary},
     webhooks::{
         CreateWebhookRequest, RotateSecretResponse, UpdateWebhookRequest, VerifyWebhookResponse,
@@ -358,6 +359,8 @@ pub struct ApiErrorResponse {
         crate::api::push::vapid_public_key,
         crate::api::push::subscribe,
         crate::api::push::unsubscribe,
+        crate::api::tool_permission_rules::list_tool_permission_rules,
+        crate::api::tool_permission_rules::delete_tool_permission_rule,
         // OAuth2 endpoints
         crate::oauth::authorize::authorize_get,
         crate::oauth::authorize::authorize_post,
@@ -670,6 +673,9 @@ pub struct ApiErrorResponse {
             CreateFromTemplateRequest,
             PersonaFromTemplateResponse,
             OnboardingStatusResponse,
+            // Tool permission rules
+            ToolPermissionRuleSummary,
+            RuleScope,
         )
     ),
     tags(
@@ -725,6 +731,8 @@ pub struct ApiErrorResponse {
          description = "Persona-interface bindings — bind personas to interfaces within a space"),
         (name = "templates",
          description = "Persona templates — list templates, instantiate personas, check onboarding status"),
+        (name = "tool-permission-rules",
+         description = "Saved tool permission rules — list the caller's rules (or the space's, for admins) and revoke them"),
     ),
     servers(
         (url = "/", description = "Local assistant server")

@@ -130,6 +130,7 @@ import 'package:assistant_api/src/model/respond_to_interaction_request_one_of1.d
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.dart';
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
+import 'package:assistant_api/src/model/rule_scope.dart';
 import 'package:assistant_api/src/model/security_requirement.dart';
 import 'package:assistant_api/src/model/security_scheme.dart';
 import 'package:assistant_api/src/model/send_message_configuration.dart';
@@ -176,6 +177,7 @@ import 'package:assistant_api/src/model/test_integration_response.dart';
 import 'package:assistant_api/src/model/token_response.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
 import 'package:assistant_api/src/model/tool_decision.dart';
+import 'package:assistant_api/src/model/tool_permission_rule_summary.dart';
 import 'package:assistant_api/src/model/turn_state.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
 import 'package:assistant_api/src/model/unsubscribe_request.dart';
@@ -327,6 +329,7 @@ part 'serializers.g.dart';
   RespondToInteractionRequestOneOf2,
   Role,
   RotateSecretResponse,
+  RuleScope,
   SecurityRequirement,
   SecurityScheme,
   SendMessageConfiguration,
@@ -373,6 +376,7 @@ part 'serializers.g.dart';
   TokenResponse,
   ToolCallSummary,
   ToolDecision,
+  ToolPermissionRuleSummary,
   TurnState,
   TurnStatusResponse,
   UnsubscribeRequest,
@@ -433,6 +437,10 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(MemberEntry)]),
         () => ListBuilder<MemberEntry>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(ToolPermissionRuleSummary)]),
+        () => ListBuilder<ToolPermissionRuleSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(InterfaceInstanceResponse)]),

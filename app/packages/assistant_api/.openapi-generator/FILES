@@ -135,6 +135,7 @@ doc/RespondToInteractionRequestOneOf1.md
 doc/RespondToInteractionRequestOneOf2.md
 doc/Role.md
 doc/RotateSecretResponse.md
+doc/RuleScope.md
 doc/SecurityRequirement.md
 doc/SecurityScheme.md
 doc/SendMessageConfiguration.md
@@ -185,6 +186,8 @@ doc/TestIntegrationResponse.md
 doc/TokenResponse.md
 doc/ToolCallSummary.md
 doc/ToolDecision.md
+doc/ToolPermissionRuleSummary.md
+doc/ToolPermissionRulesApi.md
 doc/TurnState.md
 doc/TurnStatusResponse.md
 doc/UnsubscribeRequest.md
@@ -244,6 +247,7 @@ lib/src/api/skills_api.dart
 lib/src/api/spaces_api.dart
 lib/src/api/tasks_api.dart
 lib/src/api/templates_api.dart
+lib/src/api/tool_permission_rules_api.dart
 lib/src/api/users_api.dart
 lib/src/api/web_push_api.dart
 lib/src/api/webhooks_api.dart
@@ -372,6 +376,7 @@ lib/src/model/respond_to_interaction_request_one_of1.dart
 lib/src/model/respond_to_interaction_request_one_of2.dart
 lib/src/model/role.dart
 lib/src/model/rotate_secret_response.dart
+lib/src/model/rule_scope.dart
 lib/src/model/security_requirement.dart
 lib/src/model/security_scheme.dart
 lib/src/model/send_message_configuration.dart
@@ -418,6 +423,7 @@ lib/src/model/test_integration_response.dart
 lib/src/model/token_response.dart
 lib/src/model/tool_call_summary.dart
 lib/src/model/tool_decision.dart
+lib/src/model/tool_permission_rule_summary.dart
 lib/src/model/turn_state.dart
 lib/src/model/turn_status_response.dart
 lib/src/model/unsubscribe_request.dart

@@ -7354,6 +7354,172 @@
         ]
       }
     },
+    "/api/tool-permission-rules": {
+      "get": {
+        "tags": [
+          "tool-permission-rules"
+        ],
+        "summary": "`GET /api/tool-permission-rules`",
+        "description": "The caller's saved rules in the selected space, oldest first. With\n`scope=space`, every member's rules (space admins and org admins only).",
+        "operationId": "list_tool_permission_rules",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "`own` (default) or `space` (admins only).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuleScope"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Space to read rules from",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ToolPermissionRuleSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "scope=space without admin access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/tool-permission-rules/{id}": {
+      "delete": {
+        "tags": [
+          "tool-permission-rules"
+        ],
+        "summary": "`DELETE /api/tool-permission-rules/{id}`",
+        "description": "Revoke a saved rule. Members can revoke their own rules; a space admin or\norg admin can revoke any rule in the selected space.",
+        "operationId": "delete_tool_permission_rule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Rule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Space the rule belongs to",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Rule revoked"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot revoke rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such rule visible to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/users/me": {
       "get": {
         "tags": [
@@ -13700,6 +13866,14 @@
           }
         }
       },
+      "RuleScope": {
+        "type": "string",
+        "description": "Whose rules `GET /api/tool-permission-rules` returns.",
+        "enum": [
+          "own",
+          "space"
+        ]
+      },
       "SecurityRequirement": {
         "type": "object",
         "description": "Defines the security requirements for an agent.",
@@ -14991,6 +15165,43 @@
           "reject_always"
         ]
       },
+      "ToolPermissionRuleSummary": {
+        "type": "object",
+        "description": "A saved rule.",
+        "required": [
+          "id",
+          "user_id",
+          "effect",
+          "rule",
+          "tool_name",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339 creation time."
+          },
+          "effect": {
+            "type": "string",
+            "description": "`allow` or `deny`."
+          },
+          "id": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string",
+            "description": "Rule text, for example `bash(git status*)`."
+          },
+          "tool_name": {
+            "type": "string",
+            "description": "The tool part of the rule, for example `bash`."
+          },
+          "user_id": {
+            "type": "string",
+            "description": "The user the rule belongs to."
+          }
+        }
+      },
       "TurnState": {
         "type": "string",
         "description": "Closed enum of turn states surfaced by the status endpoint.\n\nAnything not in this set must round-trip to one of these four when\nserialised — the client's switch is exhaustive.",
@@ -15935,6 +16146,10 @@
     {
       "name": "templates",
       "description": "Persona templates — list templates, instantiate personas, check onboarding status"
+    },
+    {
+      "name": "tool-permission-rules",
+      "description": "Saved tool permission rules — list the caller's rules (or the space's, for admins) and revoke them"
     }
   ]
 }
