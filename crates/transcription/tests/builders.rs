@@ -161,7 +161,11 @@ async fn build_tts_openrouter_reuses_the_llm_key_and_reads_the_catalog() {
 
 #[tokio::test]
 async fn build_tts_openrouter_without_a_key_names_openrouter() {
-    // SAFETY: test-only env mutation.
+    let _env = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // SAFETY: ENV_LOCK keeps the other tests that touch this variable out;
+    // no other test in this binary reads it.
     let prev = std::env::var("OPENROUTER_API_KEY").ok();
     unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
     let err = build_tts_provider(&tts(TtsProviderKind::OpenRouter), &LlmConfig::default())
@@ -172,6 +176,20 @@ async fn build_tts_openrouter_without_a_key_names_openrouter() {
     if let Some(v) = prev {
         unsafe { std::env::set_var("OPENROUTER_API_KEY", v) };
     }
+}
+
+#[tokio::test]
+async fn build_tts_rejects_pcm_as_the_configured_format() {
+    let config = TtsConfig {
+        api_key: Some("sk-test".into()),
+        format: Some(assistant_core::types::transcription::TtsFormat::Pcm),
+        ..tts(TtsProviderKind::OpenAI)
+    };
+    let err = build_tts_provider(&config, &LlmConfig::default())
+        .await
+        .err()
+        .expect("must error");
+    assert!(err.to_string().contains("pcm"), "{err}");
 }
 
 #[tokio::test]
@@ -242,6 +260,10 @@ async fn build_transcription_deepgram_uses_api_key_from_config() {
 
 // Deepgram transcription env-fallback path intentionally not asserted.
 
+/// Serializes the tests that change `OPENROUTER_API_KEY`, which share this
+/// process's environment.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn openrouter_transcription(api_key: Option<&str>) -> TranscriptionConfig {
     TranscriptionConfig {
         provider: TranscriptionProviderKind::OpenRouter,
@@ -284,7 +306,11 @@ async fn build_transcription_openrouter_uses_its_own_key() {
 
 #[tokio::test]
 async fn build_transcription_openrouter_without_a_key_names_openrouter() {
-    // SAFETY: test-only env mutation.
+    let _env = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // SAFETY: ENV_LOCK keeps the other tests that touch this variable out;
+    // no other test in this binary reads it.
     let prev = std::env::var("OPENROUTER_API_KEY").ok();
     unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
     let llm = LlmConfig {

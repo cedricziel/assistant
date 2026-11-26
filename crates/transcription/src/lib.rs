@@ -97,6 +97,11 @@ pub async fn build_tts_provider(
     config: &TtsConfig,
     llm: &LlmConfig,
 ) -> anyhow::Result<Arc<dyn TtsProvider>> {
+    // Configured speech is stored and played by clients, and raw PCM has no
+    // header telling them its sample rate. Requests may still ask for it.
+    if config.format == Some(TtsFormat::Pcm) {
+        anyhow::bail!("[tts] format = \"pcm\" can't be played by clients; use mp3, wav or ogg");
+    }
     match config.provider {
         TtsProviderKind::OpenRouter => {
             let api_key = resolve_openrouter_key(

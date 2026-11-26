@@ -272,7 +272,7 @@ timeout_secs = 120
 # ── Text-to-speech (TTS) ─────────────────────────────────────────────────────
 # Providers: "openai", "deepgram", "openrouter"
 # API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY, OPENROUTER_API_KEY
-# format: mp3 (default), wav, ogg, pcm; Deepgram delivers mp3 only
+# format: mp3 (default), wav or ogg; Deepgram delivers mp3 only
 #
 # [tts]
 # provider = "deepgram"
@@ -295,7 +295,7 @@ timeout_secs = 120
 # provider = "openrouter"
 # model    = "openai/gpt-4o-mini-tts"   # default
 # # voice  = "alloy"                   # default; checked against the model's voices
-# # format = "mp3"                     # mp3, wav, ogg, pcm; ffmpeg transcodes what the model lacks
+# # format = "mp3"                     # mp3, wav or ogg; ffmpeg transcodes what the model lacks
 # # speed  = 1.0                       # checked against the model's range
 # # instructions = "Speak calmly"      # only for models that accept them
 # # pcm_sample_rate = 24000            # default 44100 for heygen/*, else 24000

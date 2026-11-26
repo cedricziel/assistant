@@ -138,14 +138,13 @@ Providers are injected into interfaces via `Arc<dyn TranscriptionProvider>`, fol
 
 `[tts] format` picks the audio the provider delivers:
 
-| `format`        | Audio                  | MIME type    |
-| --------------- | ---------------------- | ------------ |
-| `mp3` (default) | MP3                    | `audio/mpeg` |
-| `wav`           | WAV                    | `audio/wav`  |
-| `ogg`           | Opus in Ogg            | `audio/ogg`  |
-| `pcm`           | Raw 16-bit LE mono PCM | `audio/pcm`  |
+| `format`        | Audio       | MIME type    |
+| --------------- | ----------- | ------------ |
+| `mp3` (default) | MP3         | `audio/mpeg` |
+| `wav`           | WAV         | `audio/wav`  |
+| `ogg`           | Opus in Ogg | `audio/ogg`  |
 
-Any other value fails config load with a message listing these four. The MIME type of the delivered audio always matches the format, and `GET /api/messages/{id}/audio` sends it as `Content-Type`. A request that names a format overrides `[tts] format`; `voice_response` names none, so it uses the configured one.
+Any other value fails config load. `format = "pcm"` fails at startup too: clients play the configured audio, and raw PCM has no header with its sample rate. A request can still ask for `pcm` (raw 16-bit little-endian mono, `audio/pcm`). The MIME type of the delivered audio always matches the format, and `GET /api/messages/{id}/audio` sends it as `Content-Type`. A request that names a format overrides `[tts] format`; `voice_response` names none, so it uses the configured one.
 
 - **OpenAI** honors every format. Ogg is requested from OpenAI as `opus`.
 - **Deepgram** delivers mp3 only. Any other `format` fails startup.
