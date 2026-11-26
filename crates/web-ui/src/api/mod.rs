@@ -28,6 +28,7 @@ pub mod push;
 pub mod skills;
 pub mod spaces;
 pub mod templates;
+pub mod tool_permission_rules;
 pub mod turns;
 pub mod users;
 pub mod webhooks;
@@ -277,6 +278,7 @@ pub fn api_router() -> Router<ApiState> {
             "/conversations/{conversation_id}/turns/{turn_id}/cancel",
             post(turns::cancel_turn),
         )
+        .merge(tool_permission_rules::tool_permission_rules_router())
         .route("/messages/{id}/audio", get(audio::get_message_audio))
         .route("/audio/{id}", get(audio::get_audio))
         .route("/commands", get(commands::list_commands))

@@ -36,6 +36,11 @@ impl Rule {
         &self.text
     }
 
+    /// The tool part, for example `bash` for `bash(git status*)`.
+    pub fn tool(&self) -> &str {
+        &self.tool
+    }
+
     /// The argument pattern, if any.
     pub fn pattern(&self) -> Option<&str> {
         self.pattern.as_deref()
@@ -156,6 +161,14 @@ mod tests {
         let r: Rule = "bash".parse().unwrap();
         assert!(r.matches_tool("bash"));
         assert_eq!(r.pattern(), None);
+    }
+
+    #[test]
+    fn tool_is_the_part_before_the_pattern() {
+        let with_pattern: Rule = "bash(git status*)".parse().unwrap();
+        let bare: Rule = "web-fetch".parse().unwrap();
+        assert_eq!(with_pattern.tool(), "bash");
+        assert_eq!(bare.tool(), "web-fetch");
     }
 
     #[test]
