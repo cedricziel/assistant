@@ -148,7 +148,7 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 - [x] 20.2 Write failing tests: a voice turn with audio-capable provider support requests audio options; a non-voice turn does not. Confirm red. Implement in the orchestrator, then verify.
 - [x] 20.3 Write failing SSE fixture tests for the OpenRouter client: `delta.audio.data` concatenated, transcript used when there is no content, PCM read at `pcm_sample_rate` and transcoded to `[tts] format`, attached as `GeneratedMedia::Audio`. Confirm red. Implement, then verify.
 - [x] 20.4 Write failing tests: a 400 on the audio modality repeats the call once without audio and disables audio for the provider instance; TTS fallback synthesizes the clip; text only when `[tts]` is absent. Confirm red. Implement, then verify.
-- [ ] 20.5 Document voice-native chat (audio input and replies) in `docs/openrouter.md` and `docs/transcription.md`.
+- [x] 20.5 Document voice-native chat (audio input and replies) in `docs/openrouter.md` and `docs/transcription.md`.
 
 ## 21. Doctor and final docs
 
