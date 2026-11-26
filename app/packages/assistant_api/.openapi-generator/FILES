@@ -104,6 +104,8 @@ doc/MessageSearchMatch.md
 doc/MessageSummary.md
 doc/MessagesApi.md
 doc/ModelPart.md
+doc/ModelSummary.md
+doc/ModelsApi.md
 doc/MutualTlsSecurityScheme.md
 doc/OAuth2SecurityScheme.md
 doc/OAuthErrorResponse.md
@@ -132,6 +134,7 @@ doc/QuestionAnswer.md
 doc/QuickMessageRequest.md
 doc/QuickMessageResponse.md
 doc/ReadMcpAppResourceRequest.md
+doc/RegenerateMessageRequest.md
 doc/RegisterAgentRequest.md
 doc/RespondToInteractionRequest.md
 doc/RespondToInteractionRequestOneOf.md
@@ -249,6 +252,7 @@ lib/src/api/integrations_api.dart
 lib/src/api/interfaces_api.dart
 lib/src/api/members_api.dart
 lib/src/api/messages_api.dart
+lib/src/api/models_api.dart
 lib/src/api/oauth_api.dart
 lib/src/api/orgs_api.dart
 lib/src/api/personas_api.dart
@@ -359,6 +363,7 @@ lib/src/model/message_feedback_summary.dart
 lib/src/model/message_search_match.dart
 lib/src/model/message_summary.dart
 lib/src/model/model_part.dart
+lib/src/model/model_summary.dart
 lib/src/model/mutual_tls_security_scheme.dart
 lib/src/model/o_auth2_security_scheme.dart
 lib/src/model/o_auth_error_response.dart
@@ -383,6 +388,7 @@ lib/src/model/question_answer.dart
 lib/src/model/quick_message_request.dart
 lib/src/model/quick_message_response.dart
 lib/src/model/read_mcp_app_resource_request.dart
+lib/src/model/regenerate_message_request.dart
 lib/src/model/register_agent_request.dart
 lib/src/model/respond_to_interaction_request.dart
 lib/src/model/respond_to_interaction_request_one_of.dart

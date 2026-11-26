@@ -144,6 +144,7 @@ Class | Method | HTTP request | Description
 [*MembersApi*](doc/MembersApi.md) | [**updateMember**](doc/MembersApi.md#updatemember) | **PATCH** /api/orgs/{org_id}/spaces/{space_id}/members/{user_id} | &#x60;PATCH /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}&#x60; — change role.
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessage**](doc/MessagesApi.md#a2asendmessage) | **POST** /message/send | &#x60;POST /message/send&#x60; -- Sends a message to the agent (unary).
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessageStreaming**](doc/MessagesApi.md#a2asendmessagestreaming) | **POST** /message/stream | &#x60;POST /message/stream&#x60; -- Sends a message with streaming response (SSE).
+[*ModelsApi*](doc/ModelsApi.md) | [**listModels**](doc/ModelsApi.md#listmodels) | **GET** /api/models | &#x60;GET /api/models&#x60; — list the models a reply may be regenerated with.
 [*OauthApi*](doc/OauthApi.md) | [**authorizeGet**](doc/OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render the email step, the password form, or redirect to the org&#39;s IdP.
 [*OauthApi*](doc/OauthApi.md) | [**authorizePost**](doc/OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate one org&#39;s password credentials, generate an auth code, redirect.
 [*OauthApi*](doc/OauthApi.md) | [**callback**](doc/OauthApi.md#callback) | **GET** /oauth/callback | GET /oauth/callback — handle the IdP redirect.
@@ -320,6 +321,7 @@ Class | Method | HTTP request | Description
  - [MessageSearchMatch](doc/MessageSearchMatch.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
+ - [ModelSummary](doc/ModelSummary.md)
  - [MutualTlsSecurityScheme](doc/MutualTlsSecurityScheme.md)
  - [OAuth2SecurityScheme](doc/OAuth2SecurityScheme.md)
  - [OAuthErrorResponse](doc/OAuthErrorResponse.md)
@@ -344,6 +346,7 @@ Class | Method | HTTP request | Description
  - [QuickMessageRequest](doc/QuickMessageRequest.md)
  - [QuickMessageResponse](doc/QuickMessageResponse.md)
  - [ReadMcpAppResourceRequest](doc/ReadMcpAppResourceRequest.md)
+ - [RegenerateMessageRequest](doc/RegenerateMessageRequest.md)
  - [RegisterAgentRequest](doc/RegisterAgentRequest.md)
  - [RespondToInteractionRequest](doc/RespondToInteractionRequest.md)
  - [RespondToInteractionRequestOneOf](doc/RespondToInteractionRequestOneOf.md)

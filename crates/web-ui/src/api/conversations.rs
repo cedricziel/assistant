@@ -391,6 +391,10 @@ pub struct MessageSummary {
     /// not rated it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback: Option<MessageFeedbackSummary>,
+    /// The model that produced this reply. Present on assistant messages
+    /// saved with it recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// The calling user's feedback on a message, as embedded in history.
@@ -933,6 +937,7 @@ pub(crate) async fn conversation_detail(
                 branch: branches.branch.remove(&m.id),
                 reply_branch: branches.reply_branch.remove(&m.id),
                 feedback,
+                model: m.model,
             }
         })
         .collect();

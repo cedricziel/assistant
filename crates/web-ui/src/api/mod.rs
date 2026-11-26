@@ -26,6 +26,7 @@ pub mod interfaces;
 pub mod mcp_apps;
 pub mod members;
 pub mod messages;
+pub mod models;
 pub mod org_oidc;
 pub mod orgs;
 pub mod personas;
@@ -256,6 +257,7 @@ impl axum::extract::FromRef<ApiState> for SpaceResolver {
 pub fn api_router() -> Router<ApiState> {
     Router::new()
         .route("/capabilities", get(capabilities::get_capabilities))
+        .route("/models", get(models::list_models))
         .route("/conversations", get(conversations::list_conversations))
         .route(
             "/conversations/stream",

@@ -293,6 +293,25 @@ pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
     (state, storage)
 }
 
+/// [`test_state`] over an org whose LLM is the mock at `llm_url`, named
+/// `test`, and which lists `available` for regenerate.
+pub(crate) async fn models_state(
+    llm_url: &str,
+    available: &[&str],
+) -> (ApiState, Arc<StorageLayer>) {
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let mut config = OrgConfig::default();
+    config.memory.enabled = false;
+    config.suggestions.enabled = false;
+    config.llm.model = "test".to_string();
+    config.llm.base_url = llm_url.to_string();
+    config.llm.available_models = available.iter().map(|m| (*m).to_string()).collect();
+    let root = Path::new("/nonexistent/assistant-test-root");
+    let (state, _) =
+        state_over_config(root, llm_url, &[default_space(&storage)], true, config).await;
+    (state, storage)
+}
+
 /// Create a minimal state with a real event store but no turn worker, so the
 /// single in-memory connection is not contended. Use this for tests that only
 /// exercise the event log endpoints.

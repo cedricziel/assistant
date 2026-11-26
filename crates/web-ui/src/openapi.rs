@@ -106,7 +106,7 @@ use crate::api::{
 };
 
 /// Path prefixes of the data-plane routes, which act inside one space.
-const DATA_PLANE_PREFIXES: [&str; 14] = [
+const DATA_PLANE_PREFIXES: [&str; 15] = [
     "/api/conversations",
     "/api/quick-message",
     "/api/attachments",
@@ -114,6 +114,7 @@ const DATA_PLANE_PREFIXES: [&str; 14] = [
     "/api/audio",
     "/api/commands",
     "/api/capabilities",
+    "/api/models",
     "/api/push",
     "/api/webhooks",
     "/api/workflows",
@@ -279,6 +280,7 @@ pub struct ApiErrorResponse {
     modifiers(&SecuritySchemesAddon, &SpaceSelectorAddon),
     paths(
         crate::api::capabilities::get_capabilities,
+        crate::api::models::list_models,
         crate::api::conversations::list_conversations,
         crate::api::conversations::stream_conversations,
         crate::api::conversations::search_conversations,
@@ -516,6 +518,8 @@ pub struct ApiErrorResponse {
             crate::api::branches::BranchInfo,
             crate::api::branches::SwitchBranchRequest,
             crate::api::branch_turns::EditMessageRequest,
+            crate::api::branch_turns::RegenerateMessageRequest,
+            crate::api::models::ModelSummary,
             MessageFeedbackSummary,
             ToolCallSummary,
             SurfaceSummary,
@@ -696,6 +700,8 @@ pub struct ApiErrorResponse {
         )
     ),
     tags(
+        (name = "models",
+         description = "Models a reply may be regenerated with"),
         (name = "capabilities",
          description = "Server capabilities — query which optional features (voice, TTS) are enabled"),
         (name = "commands",
@@ -905,6 +911,7 @@ mod tests {
             "delete /api/conversations/{id}/messages/{message_id}/feedback",
             "get /api/attachments/{id}",
             "get /api/capabilities",
+            "get /api/models",
             "post /api/webhooks",
             "put /api/workflows/{id}",
             "post /api/push/subscribe",

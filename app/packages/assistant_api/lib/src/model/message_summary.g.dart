@@ -22,6 +22,8 @@ class _$MessageSummary extends MessageSummary {
   @override
   final String id;
   @override
+  final String? model;
+  @override
   final String? parentId;
   @override
   final BranchInfo? replyBranch;
@@ -47,6 +49,7 @@ class _$MessageSummary extends MessageSummary {
       this.feedback,
       this.finishReason,
       required this.id,
+      this.model,
       this.parentId,
       this.replyBranch,
       required this.role,
@@ -73,6 +76,7 @@ class _$MessageSummary extends MessageSummary {
         feedback == other.feedback &&
         finishReason == other.finishReason &&
         id == other.id &&
+        model == other.model &&
         parentId == other.parentId &&
         replyBranch == other.replyBranch &&
         role == other.role &&
@@ -92,6 +96,7 @@ class _$MessageSummary extends MessageSummary {
     _$hash = $jc(_$hash, feedback.hashCode);
     _$hash = $jc(_$hash, finishReason.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
+    _$hash = $jc(_$hash, model.hashCode);
     _$hash = $jc(_$hash, parentId.hashCode);
     _$hash = $jc(_$hash, replyBranch.hashCode);
     _$hash = $jc(_$hash, role.hashCode);
@@ -113,6 +118,7 @@ class _$MessageSummary extends MessageSummary {
           ..add('feedback', feedback)
           ..add('finishReason', finishReason)
           ..add('id', id)
+          ..add('model', model)
           ..add('parentId', parentId)
           ..add('replyBranch', replyBranch)
           ..add('role', role)
@@ -160,6 +166,10 @@ class MessageSummaryBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
+  String? _model;
+  String? get model => _$this._model;
+  set model(String? model) => _$this._model = model;
+
   String? _parentId;
   String? get parentId => _$this._parentId;
   set parentId(String? parentId) => _$this._parentId = parentId;
@@ -206,6 +216,7 @@ class MessageSummaryBuilder
       _feedback = $v.feedback?.toBuilder();
       _finishReason = $v.finishReason;
       _id = $v.id;
+      _model = $v.model;
       _parentId = $v.parentId;
       _replyBranch = $v.replyBranch?.toBuilder();
       _role = $v.role;
@@ -246,6 +257,7 @@ class MessageSummaryBuilder
             finishReason: finishReason,
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'MessageSummary', 'id'),
+            model: model,
             parentId: parentId,
             replyBranch: _replyBranch?.build(),
             role: BuiltValueNullFieldError.checkNotNull(

@@ -671,7 +671,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **regenerateMessage**
-> regenerateMessage(id, messageId, xSpaceId)
+> regenerateMessage(id, messageId, xSpaceId, regenerateMessageRequest)
 
 `POST /api/conversations/{id}/messages/{message_id}/regenerate` — answer a user message again and stream the new reply.
 
@@ -685,9 +685,10 @@ final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
 final String messageId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | A user message, or any row of the reply to regenerate
 final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+final RegenerateMessageRequest regenerateMessageRequest = ; // RegenerateMessageRequest | Optional: the model to answer with
 
 try {
-    api.regenerateMessage(id, messageId, xSpaceId);
+    api.regenerateMessage(id, messageId, xSpaceId, regenerateMessageRequest);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->regenerateMessage: $e\n');
 }
@@ -700,6 +701,7 @@ Name | Type | Description  | Notes
  **id** | **String**| Conversation ID | 
  **messageId** | **String**| A user message, or any row of the reply to regenerate | 
  **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+ **regenerateMessageRequest** | [**RegenerateMessageRequest**](RegenerateMessageRequest.md)| Optional: the model to answer with | [optional] 
 
 ### Return type
 
@@ -711,7 +713,7 @@ void (empty response body)
 
 ### HTTP request headers
 
- - **Content-Type**: Not defined
+ - **Content-Type**: application/json
  - **Accept**: text/event-stream, application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

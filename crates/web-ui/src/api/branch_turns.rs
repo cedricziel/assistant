@@ -7,6 +7,7 @@
 //! regenerate or send gets `409`. A turn that only waits for an approval or an
 //! answer is cancelled first (D7a).
 
+use axum::body::Bytes;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -34,6 +35,16 @@ use super::messages::{RunOptions, caller_can_post, start_turn, stream_turn_to_ss
 pub struct EditMessageRequest {
     /// The new text. The edited message's attachments carry forward.
     pub message: String,
+}
+
+/// Body for `POST /api/conversations/{id}/messages/{message_id}/regenerate`.
+/// The body may be omitted, which regenerates on the default model.
+#[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
+pub struct RegenerateMessageRequest {
+    /// The model to answer with: the org's default model or an entry of
+    /// `[llm] available_models`. It applies to this reply only.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// A validated branch request: the conversation and the message it addresses.
@@ -102,6 +113,7 @@ async fn run_branch_turn(
     anchor: TurnAnchor,
     user_message_id: Uuid,
     prompt: String,
+    model: Option<String>,
 ) -> Response {
     let orchestrator = match state.runtime(ctx).await {
         Ok(runtime) => runtime.orchestrator.clone(),
@@ -117,7 +129,8 @@ async fn run_branch_turn(
         Err(conflict) => return json_error(StatusCode::CONFLICT, conflict.to_string()),
     };
     let opts = RunOptions::web_turn(anchor).with_user_message_id(user_message_id);
-    let turn = opts.submit_turn(prompt.clone(), conv_id, auth, run_id, lease);
+    let mut turn = opts.submit_turn(prompt.clone(), conv_id, auth, run_id, lease);
+    turn.model_override = model;
     let (event_rx, turn_result_rx) = start_turn(orchestrator, turn);
     stream_turn_to_sse(
         ctx,
@@ -197,6 +210,7 @@ pub async fn edit_message(
         anchor,
         Uuid::new_v4(),
         text,
+        None,
     )
     .await
 }
@@ -218,10 +232,11 @@ pub async fn edit_message(
         ("id" = Uuid, Path, description = "Conversation ID"),
         ("message_id" = Uuid, Path, description = "A user message, or any row of the reply to regenerate"),
     ),
+    request_body(content = Option<RegenerateMessageRequest>, description = "Optional: the model to answer with"),
     responses(
         (status = 200, description = "SSE stream of assistant tokens and final message",
          content_type = "text/event-stream"),
-        (status = 400, description = "Invalid ID, or no user message to answer", body = ErrorBody),
+        (status = 400, description = "Invalid ID, a model that is not offered, or no user message to answer", body = ErrorBody),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Read-only access, or missing conversations:write scope", body = ErrorBody),
         (status = 404, description = "Conversation or message not found", body = ErrorBody),
@@ -235,9 +250,14 @@ pub async fn regenerate_message(
     State(state): State<ApiState>,
     Extension(auth): Extension<AuthContext>,
     Path((id, message_id)): Path<(String, String)>,
+    body: Bytes,
 ) -> Response {
     let target = match resolve_target(&ctx, &state, &auth, &id, &message_id).await {
         Ok(target) => target,
+        Err(response) => return response,
+    };
+    let model = match requested_model(&ctx, &state, &body).await {
+        Ok(model) => model,
         Err(response) => return response,
     };
     let user = if target.message.role == MessageRole::User {
@@ -262,8 +282,39 @@ pub async fn regenerate_message(
         anchor,
         user.id,
         user.content,
+        model,
     )
     .await
+}
+
+/// The model a regenerate asks for, once it is known to be offered: the org's
+/// default model or a listed one. An empty body asks for no model.
+async fn requested_model(
+    ctx: &SpaceCtx,
+    state: &ApiState,
+    body: &[u8],
+) -> Result<Option<String>, Response> {
+    let request: RegenerateMessageRequest = if body.iter().all(u8::is_ascii_whitespace) {
+        RegenerateMessageRequest::default()
+    } else {
+        serde_json::from_slice(body).map_err(|e| {
+            json_error(
+                StatusCode::BAD_REQUEST,
+                format!("Invalid request body: {e}"),
+            )
+        })?
+    };
+    let Some(model) = request.model else {
+        return Ok(None);
+    };
+    let runtime = state.runtime(ctx).await?;
+    if !super::models::is_offered(&runtime.config.llm, &model) {
+        return Err(json_error(
+            StatusCode::BAD_REQUEST,
+            format!("Model '{model}' is not available"),
+        ));
+    }
+    Ok(Some(model))
 }
 
 /// The closest user message at or above `message_id`.
@@ -735,6 +786,155 @@ mod tests {
         assert_eq!(replies.len(), 2, "old and new reply");
         let users = t.store.children_of(t.conv, Some(t.a1)).await.unwrap();
         assert_eq!(users.len(), 1, "no new user row");
+    }
+
+    /// A regenerate body naming `model`.
+    async fn regenerate_with(
+        state: ApiState,
+        conv: Uuid,
+        message: Uuid,
+        model: &str,
+    ) -> axum::response::Response {
+        let body = serde_json::json!({ "model": model }).to_string();
+        post_as(
+            state,
+            AuthContext::system(),
+            format!("/conversations/{conv}/messages/{message}/regenerate"),
+            &body,
+        )
+        .await
+    }
+
+    /// An Ollama-shaped reply from `model`, matched on the request's model.
+    async fn mount_model_reply(server: &MockServer, model: &str, reply: &str) {
+        let body = serde_json::json!({
+            "model": model,
+            "message": { "role": "assistant", "content": reply },
+            "done": true
+        });
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .and(wiremock::matchers::body_partial_json(
+                serde_json::json!({ "model": model }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    async fn history_models(t: &Tree, state: ApiState) -> Vec<Option<String>> {
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", t.conv))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        body_json(resp.into_body()).await["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "assistant")
+            .map(|m| m["model"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn regenerate_with_a_listed_model_runs_on_it_and_reports_it() {
+        let server = MockServer::start().await;
+        mount_model_reply(&server, "model-b", "from b").await;
+        mount_model_reply(&server, "test", "from default").await;
+        let (state, storage) = models_state(&server.uri(), &["model-b"]).await;
+        let t = seed(&storage).await;
+
+        // A member with write access who is not a space admin.
+        let body = serde_json::json!({ "model": "model-b" }).to_string();
+        let resp = post_as(
+            state.clone(),
+            caller(Role::Member, None),
+            format!("/conversations/{}/messages/{}/regenerate", t.conv, t.u2),
+            &body,
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(frames(resp).await.last().unwrap().0, "done");
+        assert_eq!(t.active_texts().await, ["U1", "A1", "U2", "from b"]);
+        assert_eq!(
+            history_models(&t, state.clone())
+                .await
+                .last()
+                .unwrap()
+                .as_deref(),
+            Some("model-b"),
+            "MessageSummary.model names the model that answered"
+        );
+
+        // The override was for that turn only.
+        let sent = send(state.clone(), t.conv, "next").await;
+        assert_eq!(sent.status(), StatusCode::OK);
+        let _ = frames(sent).await;
+        assert_eq!(
+            t.active_texts().await.last().map(String::as_str),
+            Some("from default"),
+            "the next normal send uses the default model"
+        );
+    }
+
+    #[tokio::test]
+    async fn regenerate_with_the_default_model_is_accepted() {
+        let server = MockServer::start().await;
+        mount_model_reply(&server, "test", "again").await;
+        let (state, storage) = models_state(&server.uri(), &[]).await;
+        let t = seed(&storage).await;
+
+        let resp = regenerate_with(state, t.conv, t.u2, "test").await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let _ = frames(resp).await;
+        assert_eq!(t.active_texts().await, ["U1", "A1", "U2", "again"]);
+    }
+
+    #[tokio::test]
+    async fn regenerate_with_an_unlisted_model_is_400_and_starts_no_turn() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "never").await;
+        let (state, storage) = models_state(&server.uri(), &["model-b"]).await;
+        let t = seed(&storage).await;
+
+        let resp = regenerate_with(state, t.conv, t.u2, "not-listed").await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let json = error_body(resp).await;
+        assert!(
+            json["error"].as_str().unwrap().contains("not-listed"),
+            "names the model: {json}"
+        );
+        assert_eq!(t.active_texts().await, ["U1", "A1", "U2", "A2"]);
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "no turn ran"
+        );
+    }
+
+    #[tokio::test]
+    async fn regenerate_with_a_malformed_body_is_400() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let t = seed(&storage).await;
+
+        let resp = post_as(
+            state,
+            AuthContext::system(),
+            format!("/conversations/{}/messages/{}/regenerate", t.conv, t.u2),
+            "{not json",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        error_body(resp).await;
     }
 
     #[tokio::test]

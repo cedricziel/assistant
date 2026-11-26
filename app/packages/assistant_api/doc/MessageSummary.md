@@ -15,6 +15,7 @@ Name | Type | Description | Notes
 **feedback** | [**MessageFeedbackSummary**](MessageFeedbackSummary.md) | The calling user's verdict on this message. Omitted when the caller has not rated it. | [optional] 
 **finishReason** | **String** | Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message. | [optional] 
 **id** | **String** |  | 
+**model** | **String** | The model that produced this reply. Present on assistant messages saved with it recorded. | [optional] 
 **parentId** | **String** | The message this one follows in the conversation tree. Omitted for a root. | [optional] 
 **replyBranch** | [**BranchInfo**](BranchInfo.md) | On a user message whose reply has no visible assistant row: the versions of that reply. | [optional] 
 **role** | **String** |  | 
