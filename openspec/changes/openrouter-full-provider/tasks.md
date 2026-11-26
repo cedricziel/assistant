@@ -123,8 +123,8 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 17. Generated media on responses
 
-- [ ] 17.1 Write failing tests: `GeneratedMedia` on `LlmResponseMeta` clones cheaply (`Bytes`), and the orchestrator stores final-answer media as attachments of the assistant message, with the IDs included in `TurnResult.attachment_ids`. Confirm red. Implement, then verify.
-- [ ] 17.2 Write a failing adapter-level test that an audio attachment from response media takes the same `channel-audio-outbound` path as `voice_response` audio. Confirm red, or green if this is already covered, and fix any gap.
+- [x] 17.1 Write failing tests: `GeneratedMedia` on `LlmResponseMeta` clones cheaply (`Bytes`), and the orchestrator stores final-answer media as attachments of the assistant message, with the IDs included in `TurnResult.attachment_ids`. Confirm red. Implement, then verify.
+- [x] 17.2 Write a failing adapter-level test that an audio attachment from response media takes the same `channel-audio-outbound` path as `voice_response` audio. Confirm red, or green if this is already covered, and fix any gap.
 
 ## 18. Image generation
 
