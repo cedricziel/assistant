@@ -11,11 +11,14 @@
 //! also records every call so tests can assert what the orchestrator
 //! actually sent.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    ChatHistoryMessage, LlmProvider, LlmResponse, LlmResponseMeta, StreamChunk, ToolSpec,
+    ChatHistoryMessage, FakeClock, LlmProvider, LlmResponse, LlmResponseMeta, StreamChunk,
+    ToolSpec,
     llm::provider::{Capabilities, ToolSupport},
 };
 use async_trait::async_trait;
@@ -31,6 +34,21 @@ pub struct RecordedCall {
     pub streaming: bool,
 }
 
+/// One scripted `chat_streaming` call for
+/// [`ScriptedLlmProvider::with_timed_streaming_calls`].
+///
+/// Each step advances the shared [`FakeClock`] by its duration, then sends
+/// its chunk. After the last step the clock advances by
+/// `advance_before_return` before the call returns, so tests can place the
+/// end of the call at an exact offset from its start.
+#[derive(Debug, Clone, Default)]
+pub struct TimedCall {
+    /// `(advance_before, chunk)` pairs, applied in order.
+    pub steps: Vec<(Duration, StreamChunk)>,
+    /// How far the clock moves after the last chunk, before the call returns.
+    pub advance_before_return: Duration,
+}
+
 /// Internal state — wrapped in `Mutex` so the provider can be shared
 /// across async tasks while still being mutable.
 #[derive(Default)]
@@ -39,6 +57,7 @@ struct ScriptedData {
     stream_chunks: Vec<StreamChunk>,
     embeddings: Vec<Vec<f32>>,
     recorded_calls: Vec<RecordedCall>,
+    timed_calls: VecDeque<TimedCall>,
 }
 
 /// LLM provider that replays a fixed queue of canned responses.
@@ -59,6 +78,7 @@ struct ScriptedData {
 ///   configured" without an explicit error).
 pub struct ScriptedLlmProvider {
     state: Arc<Mutex<ScriptedData>>,
+    clock: Option<FakeClock>,
     capabilities: Capabilities,
     provider_name: String,
     model_name: String,
@@ -69,6 +89,7 @@ impl ScriptedLlmProvider {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(ScriptedData::default())),
+            clock: None,
             capabilities: Capabilities {
                 tools: ToolSupport::Native,
                 streaming: true,
@@ -96,6 +117,28 @@ impl ScriptedLlmProvider {
         if let Ok(mut s) = self.state.lock() {
             s.stream_chunks = chunks;
         }
+        self
+    }
+
+    /// Script `chat_streaming` calls with virtual timing.
+    ///
+    /// Each call consumes one [`TimedCall`] from the front, so successive
+    /// calls play separate scripts. Once the queue is empty, calls fall back
+    /// to [`with_streaming_script`](Self::with_streaming_script) behaviour.
+    /// A timed call sends exactly its scripted chunks; it does not append the
+    /// final answer text. The return value still comes from
+    /// [`with_canned_responses`](Self::with_canned_responses).
+    ///
+    /// After sending each chunk the provider waits until the receiver has
+    /// drained the channel before it advances `clock` again. A consumer that
+    /// reads `clock.now_instant()` right after `recv()` therefore sees the
+    /// scripted offsets exactly, provided the test runs on the current-thread
+    /// runtime (the `#[tokio::test]` default).
+    pub fn with_timed_streaming_calls(mut self, clock: FakeClock, calls: Vec<TimedCall>) -> Self {
+        if let Ok(mut s) = self.state.lock() {
+            s.timed_calls = calls.into();
+        }
+        self.clock = Some(clock);
         self
     }
 
@@ -142,6 +185,16 @@ impl ScriptedLlmProvider {
         }
     }
 
+    /// Pop the next timed script, paired with the clock it runs on.
+    fn next_timed_call(&self) -> Option<(FakeClock, TimedCall)> {
+        let clock = self.clock.clone()?;
+        let mut state = match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        state.timed_calls.pop_front().map(|call| (clock, call))
+    }
+
     fn record_and_pop_response(
         &self,
         system_prompt: &str,
@@ -167,6 +220,26 @@ impl ScriptedLlmProvider {
         }
         state.responses.remove(0)
     }
+}
+
+/// Play one [`TimedCall`]: advance the clock, send the chunk, and wait for
+/// the receiver to drain the channel before the next advance.
+async fn play_timed_call(
+    clock: &FakeClock,
+    call: TimedCall,
+    chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+) {
+    for (advance_before, chunk) in call.steps {
+        clock.advance(advance_before);
+        if let Some(sink) = &chunk_sink
+            && sink.send(chunk).await.is_ok()
+        {
+            while !sink.is_closed() && sink.capacity() != sink.max_capacity() {
+                tokio::task::yield_now().await;
+            }
+        }
+    }
+    clock.advance(call.advance_before_return);
 }
 
 impl Default for ScriptedLlmProvider {
@@ -198,6 +271,11 @@ impl LlmProvider for ScriptedLlmProvider {
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> Result<LlmResponse> {
         let response = self.record_and_pop_response(system_prompt, history, tools, true);
+
+        if let Some((clock, call)) = self.next_timed_call() {
+            play_timed_call(&clock, call, chunk_sink).await;
+            return Ok(response);
+        }
 
         // Drain the streaming script into the sink (best-effort — channel
         // send errors are silently ignored to mirror the production
@@ -249,6 +327,8 @@ impl LlmProvider for ScriptedLlmProvider {
 
 #[cfg(test)]
 mod tests {
+    use assistant_core::Clock;
+
     use super::*;
 
     #[tokio::test]
@@ -325,6 +405,163 @@ mod tests {
             }
         }
         assert_eq!(texts, vec!["a", "b", "done"]);
+    }
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    fn text_step(advance: u64, text: &str) -> (Duration, StreamChunk) {
+        (ms(advance), StreamChunk::Text(text.into()))
+    }
+
+    fn final_answer(text: &str) -> LlmResponse {
+        LlmResponse::FinalAnswer(text.into(), LlmResponseMeta::default())
+    }
+
+    /// Spawns a consumer that stamps `clock.now_instant()` right after each `recv()`.
+    fn spawn_stamping_consumer(
+        clock: FakeClock,
+        mut rx: mpsc::Receiver<StreamChunk>,
+    ) -> tokio::task::JoinHandle<Vec<(std::time::Instant, String)>> {
+        tokio::spawn(async move {
+            let mut seen = Vec::new();
+            while let Some(chunk) = rx.recv().await {
+                let at = clock.now_instant();
+                if let StreamChunk::Text(t) = chunk {
+                    seen.push((at, t));
+                }
+            }
+            seen
+        })
+    }
+
+    #[tokio::test]
+    async fn timed_call_chunks_arrive_at_scripted_offsets() {
+        let clock = FakeClock::new_at_seed();
+        let p = ScriptedLlmProvider::new()
+            .with_canned_responses(vec![final_answer("ab")])
+            .with_timed_streaming_calls(
+                clock.clone(),
+                vec![TimedCall {
+                    steps: vec![text_step(200, "a"), text_step(1300, "b")],
+                    advance_before_return: ms(500),
+                }],
+            );
+        let (tx, rx) = mpsc::channel::<StreamChunk>(64);
+        let consumer = spawn_stamping_consumer(clock.clone(), rx);
+
+        let start = clock.now_instant();
+        let resp = p.chat_streaming("sys", &[], &[], Some(tx)).await.unwrap();
+        let end = clock.now_instant();
+        let seen = consumer.await.unwrap();
+
+        let offsets: Vec<Duration> = seen.iter().map(|(at, _)| *at - start).collect();
+        assert_eq!(
+            offsets,
+            vec![ms(200), ms(1500)],
+            "each chunk is observed at its scripted offset from the call start"
+        );
+        assert_eq!(
+            seen.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b"],
+            "a timed call sends only its scripted chunks"
+        );
+        assert_eq!(
+            end - start,
+            ms(2000),
+            "the call returns after advance_before_return"
+        );
+        assert!(
+            matches!(resp, LlmResponse::FinalAnswer(ref t, _) if t == "ab"),
+            "the return value comes from the canned responses"
+        );
+    }
+
+    #[tokio::test]
+    async fn timed_calls_consume_separate_scripts_in_order() {
+        let clock = FakeClock::new_at_seed();
+        let p = ScriptedLlmProvider::new()
+            .with_canned_responses(vec![final_answer("one"), final_answer("two")])
+            .with_timed_streaming_calls(
+                clock.clone(),
+                vec![
+                    TimedCall {
+                        steps: vec![text_step(100, "first")],
+                        advance_before_return: ms(10),
+                    },
+                    TimedCall {
+                        steps: vec![text_step(300, "second")],
+                        advance_before_return: ms(20),
+                    },
+                ],
+            );
+
+        let mut per_call = Vec::new();
+        for _ in 0..2 {
+            let (tx, rx) = mpsc::channel::<StreamChunk>(64);
+            let consumer = spawn_stamping_consumer(clock.clone(), rx);
+            let start = clock.now_instant();
+            let _ = p.chat_streaming("sys", &[], &[], Some(tx)).await.unwrap();
+            let seen = consumer.await.unwrap();
+            per_call.push((
+                seen[0].0 - start,
+                seen[0].1.clone(),
+                clock.now_instant() - start,
+            ));
+        }
+
+        assert_eq!(
+            per_call,
+            vec![
+                (ms(100), "first".to_string(), ms(110)),
+                (ms(300), "second".to_string(), ms(320)),
+            ],
+            "the second call plays the second script, not the drained first one"
+        );
+    }
+
+    #[tokio::test]
+    async fn timed_call_without_sink_still_advances_the_clock() {
+        let clock = FakeClock::new_at_seed();
+        let p = ScriptedLlmProvider::new().with_timed_streaming_calls(
+            clock.clone(),
+            vec![TimedCall {
+                steps: vec![text_step(250, "x")],
+                advance_before_return: ms(50),
+            }],
+        );
+        let start = clock.now_instant();
+        let _ = p.chat_streaming("sys", &[], &[], None).await.unwrap();
+        assert_eq!(clock.now_instant() - start, ms(300));
+    }
+
+    #[tokio::test]
+    async fn timed_call_survives_a_dropped_receiver() {
+        let clock = FakeClock::new_at_seed();
+        let p = ScriptedLlmProvider::new().with_timed_streaming_calls(
+            clock.clone(),
+            vec![TimedCall {
+                steps: vec![text_step(100, "x"), text_step(100, "y")],
+                advance_before_return: ms(0),
+            }],
+        );
+        let (tx, rx) = mpsc::channel::<StreamChunk>(64);
+        drop(rx);
+        let start = clock.now_instant();
+        let _ = p.chat_streaming("sys", &[], &[], Some(tx)).await.unwrap();
+        assert_eq!(clock.now_instant() - start, ms(200));
+    }
+
+    #[tokio::test]
+    async fn exhausted_timed_calls_fall_back_to_the_untimed_path() {
+        let clock = FakeClock::new_at_seed();
+        let p = ScriptedLlmProvider::new()
+            .with_canned_responses(vec![final_answer("hello")])
+            .with_timed_streaming_calls(clock, Vec::new());
+        let (tx, mut rx) = mpsc::channel::<StreamChunk>(8);
+        let _ = p.chat_streaming("sys", &[], &[], Some(tx)).await.unwrap();
+        assert!(matches!(rx.recv().await, Some(StreamChunk::Text(t)) if t == "hello"));
     }
 
     #[tokio::test]
