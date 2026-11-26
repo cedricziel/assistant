@@ -72,6 +72,22 @@ pub struct ConversationSummary {
     pub updated_at: DateTime<Utc>,
 }
 
+impl From<&ConversationRecord> for ConversationSummary {
+    fn from(record: &ConversationRecord) -> Self {
+        Self {
+            id: record.id,
+            title: display_title(record),
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+        }
+    }
+}
+
+/// The title shown to users: a `NULL` title displays as `"Untitled"`.
+fn display_title(record: &ConversationRecord) -> String {
+    record.title.clone().unwrap_or_else(|| "Untitled".into())
+}
+
 /// A conversation with its full message history.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ConversationDetail {
@@ -161,15 +177,8 @@ pub async fn list_conversations(ctx: SpaceCtx, State(state): State<ApiState>) ->
     let store = caller_store(&ctx, &state).await;
     match store.list_conversations().await {
         Ok(convs) => {
-            let summaries: Vec<ConversationSummary> = convs
-                .into_iter()
-                .map(|c| ConversationSummary {
-                    id: c.id,
-                    title: c.title.unwrap_or_else(|| "Untitled".into()),
-                    created_at: c.created_at,
-                    updated_at: c.updated_at,
-                })
-                .collect();
+            let summaries: Vec<ConversationSummary> =
+                convs.iter().map(ConversationSummary::from).collect();
             Json(summaries).into_response()
         }
         Err(e) => {
@@ -254,15 +263,8 @@ pub async fn stream_conversations(
         // Deleted events carry no owner, so remember which ids belong to the
         // caller and forward only those.
         let mut owned: std::collections::HashSet<Uuid> = snapshot.iter().map(|c| c.id).collect();
-        let snapshot: Vec<ConversationSummary> = snapshot
-            .into_iter()
-            .map(|c| ConversationSummary {
-                id: c.id,
-                title: c.title.unwrap_or_else(|| "Untitled".into()),
-                created_at: c.created_at,
-                updated_at: c.updated_at,
-            })
-            .collect();
+        let snapshot: Vec<ConversationSummary> =
+            snapshot.iter().map(ConversationSummary::from).collect();
 
         // Send snapshot.
         let snapshot_json = serde_json::to_string(&snapshot).unwrap_or_default();
@@ -287,12 +289,7 @@ pub async fn stream_conversations(
                             {
                                 continue;
                             }
-                            let summary = ConversationSummary {
-                                id: record.id,
-                                title: record.title.clone().unwrap_or_else(|| "Untitled".into()),
-                                created_at: record.created_at,
-                                updated_at: record.updated_at,
-                            };
+                            let summary = ConversationSummary::from(record);
                             let json = serde_json::to_string(&summary).unwrap_or_default();
                             Event::default().event("upserted").data(json)
                         }
@@ -363,16 +360,7 @@ pub async fn create_conversation(
     // NULL-titled and the title-generator worker will fill it in once the
     // conversation has enough material. Display layers coerce NULL → "Untitled".
     match store.create_conversation(body.title.as_deref()).await {
-        Ok(c) => (
-            StatusCode::CREATED,
-            Json(ConversationSummary {
-                id: c.id,
-                title: c.title.unwrap_or_else(|| "Untitled".into()),
-                created_at: c.created_at,
-                updated_at: c.updated_at,
-            }),
-        )
-            .into_response(),
+        Ok(c) => (StatusCode::CREATED, Json(ConversationSummary::from(&c))).into_response(),
         Err(e) => {
             warn!("Failed to create conversation: {e}");
             (
@@ -516,7 +504,7 @@ pub async fn get_conversation(
 
     Json(ConversationDetail {
         id: conv.id,
-        title: conv.title.unwrap_or_else(|| "Untitled".into()),
+        title: display_title(&conv),
         created_at: conv.created_at,
         updated_at: conv.updated_at,
         messages,
@@ -626,13 +614,7 @@ pub async fn update_conversation(
     }
 
     match store.get_conversation(conv_id).await {
-        Ok(Some(c)) => Json(ConversationSummary {
-            id: c.id,
-            title: c.title.unwrap_or_else(|| "Untitled".into()),
-            created_at: c.created_at,
-            updated_at: c.updated_at,
-        })
-        .into_response(),
+        Ok(Some(c)) => Json(ConversationSummary::from(&c)).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
         Err(e) => {
             warn!("Failed to fetch updated conversation: {e}");
@@ -1344,6 +1326,54 @@ mod tests {
         assert!(
             text.contains(&conv_id),
             "deleted event should contain the conversation ID"
+        );
+    }
+
+    // -- ConversationSummary projection ----------------------------------------
+
+    fn record_with_title(title: Option<&str>) -> assistant_storage::ConversationRecord {
+        let created_at = Utc::now() - chrono::Duration::hours(2);
+        assistant_storage::ConversationRecord {
+            id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
+            title: title.map(str::to_string),
+            title_locked: false,
+            user_id: Some("system".to_string()),
+            created_at,
+            updated_at: created_at + chrono::Duration::hours(1),
+        }
+    }
+
+    #[test]
+    fn summary_from_record_maps_null_title_to_untitled() {
+        let record = record_with_title(None);
+
+        let summary = super::ConversationSummary::from(&record);
+
+        assert_eq!(
+            summary.title, "Untitled",
+            "NULL title must display as Untitled"
+        );
+        assert_eq!(summary.id, record.id, "id must be copied");
+        assert_eq!(
+            summary.created_at, record.created_at,
+            "created_at must be copied"
+        );
+        assert_eq!(
+            summary.updated_at, record.updated_at,
+            "updated_at must be copied"
+        );
+    }
+
+    #[test]
+    fn summary_from_record_keeps_explicit_title() {
+        let record = record_with_title(Some("Trip planning"));
+
+        let summary = super::ConversationSummary::from(&record);
+
+        assert_eq!(
+            summary.title, "Trip planning",
+            "explicit title must be kept"
         );
     }
 }
