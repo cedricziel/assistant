@@ -1735,7 +1735,7 @@
           "conversations"
         ],
         "summary": "`GET /api/conversations/{id}/runs/{run_id}/events/stream`",
-        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active. Closes when the run finishes, not at the\n`done` or `agent_error` frame: events such as `suggestions` follow `done`.\nA client that disconnects stops the tail at once.\n\nReturns `404` if no events exist for `run_id` and the run is not active\n(never started, unknown, or pruned after the TTL elapsed).",
+        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active. Closes when the run finishes, not at the\n`done` or `agent_error` frame: events such as `suggestions` follow `done`.\nA client that disconnects stops the tail at once.\n\nReturns `404` if no events exist for `run_id` and the run is not active\n(never started, unknown, or pruned after the TTL elapsed).\n\nAfter `done` the stream may carry one `suggestions` frame\n(`SseSuggestionsEvent`) with follow-up prompts for the finished turn; it\nthen closes when the run finishes.",
         "operationId": "stream_run_events",
         "parameters": [
           {
@@ -13931,6 +13931,41 @@
           "data": {
             "$ref": "#/components/schemas/SseToolResultEvent",
             "description": "Inner event payload."
+          }
+        }
+      },
+      "SseSuggestion": {
+        "type": "object",
+        "description": "One follow-up prompt in an [`SseSuggestionsEvent`].",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Text to send as the user's next message."
+          }
+        }
+      },
+      "SseSuggestionsEvent": {
+        "type": "object",
+        "description": "SSE `suggestions` event: tappable follow-up prompts for a finished turn.\n\nSent only on the run's replay stream, after `done`, when\n`[suggestions].enabled` is on for the org.",
+        "required": [
+          "message_id",
+          "suggestions"
+        ],
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The assistant message the suggestions follow (`done.message_id`)."
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SseSuggestion"
+            },
+            "description": "Prompts the user could send next, best first."
           }
         }
       },

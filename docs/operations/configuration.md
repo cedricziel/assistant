@@ -14,7 +14,7 @@ All paths are relative to `~/.assistant/`.
 | File                       | Scope             | Sections                                                                                                                                                                                                                                               |
 | -------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `server.toml`              | The whole process | `[bus]`, `[mcp]`, `[notifications]`                                                                                                                                                                                                                    |
-| `orgs/<org-slug>/org.toml` | One organization  | `[llm]` (including `[llm.embeddings]`), `[agent]`, `[skills]`, `[observability]`, `[memory]`, `[compaction]`, `[learning]`, `[titling]`, `[permissions]`, `[signal]`, `[slack]`, `[mattermost]`, `[nextcloud]`, `[matrix]`, `[transcription]`, `[tts]` |
+| `orgs/<org-slug>/org.toml` | One organization  | `[llm]` (including `[llm.embeddings]`), `[agent]`, `[skills]`, `[observability]`, `[memory]`, `[compaction]`, `[learning]`, `[titling]`, `[suggestions]`, `[permissions]`, `[signal]`, `[slack]`, `[mattermost]`, `[nextcloud]`, `[matrix]`, `[transcription]`, `[tts]` |
 
 What the `server.toml` sections do:
 
@@ -61,6 +61,38 @@ These flags override the matching setting of every org:
 | `--llm-base-url` | web UI            | `[llm]` base URL     |
 | `--agent`        | web UI            | `[agent]` Persona id |
 | `--persona`      | `assistant` (CLI) | `[agent]` Persona id |
+
+## Follow-up suggestions
+
+After a web chat turn completes, the server can make one short extra call to
+the org's main LLM and offer the result as tappable follow-up prompts. It is
+on by default.
+
+```toml
+[suggestions]
+enabled = true        # master switch
+max_suggestions = 3   # 1..=5; values outside are clamped
+timeout_secs = 10     # 1..=15; values outside are clamped; budget for the whole phase
+```
+
+- **Cost.** One non-streamed call per completed web turn, with at most 1 000
+  characters each of the last user message and the answer as input and a few
+  short lines as output. It is recorded as a GenAI span with
+  `assistant.feature = "follow_up_suggestions"`.
+- **Timing.** The call starts after the answer has been sent, so it never delays
+  the answer or the push notification. The chat stream closes at `done`;
+  suggestions arrive as a `suggestions` event on the run's replay stream.
+  A call that outlasts `timeout_secs`, or whose client has left (no replay
+  subscriber two seconds after `done`), is dropped and nothing is stored.
+- **Ollama.** On a single GPU the extra call can briefly hold up the user's next
+  message. Set `enabled = false` if that matters more than the chips.
+- **Which turns.** Only turns sent from the web chat (send, and later edit and
+  regenerate). Voice messages, `quick-message` and messenger, CLI, MCP,
+  scheduler and A2A turns never make the call. There is no setting for this.
+- **Reopening.** Suggestions live in the run's event log (24 hours). They are not
+  restored when a conversation is opened from history.
+
+Set `enabled = false` to turn the feature off. No call is made then.
 
 ## Checking your configuration
 
