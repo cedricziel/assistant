@@ -11,6 +11,8 @@ const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
   'CompactExpandable',
+  'CodeBlock',
+  'ConversationListView',
   'FeedbackButtons',
   'FeedbackCommentField',
   'MessageActionButton',
@@ -28,13 +30,11 @@ const List<String> kAssistantUiElements = [
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
   // 'ChatThreadLayout', // slot: chat-element-library 10
-  // 'CodeBlock', // slot: chat-a11y-and-code-blocks C4
   // 'CodeDiffResultView', // slot: tool-result-renderers C7
   // 'CodeFileResultView', // slot: tool-result-renderers C7
   // 'CommandBody', // slot: chat-element-library 7b
   // 'Composer', // slot: chat-element-library 11a
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
-  // 'ConversationListView', // slot: chat-element-library 12
   // 'ConversationSearchResultsView', // slot: conversation-list-management 14
   // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5

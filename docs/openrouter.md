@@ -102,6 +102,28 @@ keys you set are sent. An unknown key fails config load. See
 | `aspect_ratio` | string | Image proportions, for example `"16:9"`    |
 | `image_size`   | string | Image resolution: `"1K"`, `"2K"` or `"4K"` |
 
+### `[llm.openrouter.audio_input]` section
+
+Sends voice notes to the model as audio. An unknown key fails config
+load. See [Voice](#voice).
+
+| Key        | Default          | Description                                                         |
+| ---------- | ---------------- | ------------------------------------------------------------------- |
+| `enabled`  | `false`          | Send the recording of a voice turn                                  |
+| `formats`  | `["wav", "mp3"]` | Formats sent unchanged. Any other format is converted to 16 kHz WAV |
+| `max_secs` | `600`            | Longer recordings are sent as text only                             |
+
+### `[llm.openrouter.audio_output]` section
+
+Asks the model to speak its reply to a voice turn. An unknown key fails
+config load. See [Voice](#voice).
+
+| Key               | Default   | Description                                |
+| ----------------- | --------- | ------------------------------------------ |
+| `enabled`         | `false`   | Ask for a spoken reply on voice turns      |
+| `voice`           | `"alloy"` | Voice sent in the request's `audio` object |
+| `pcm_sample_rate` | `24000`   | Sample rate of the model's raw PCM, in Hz  |
+
 ### `[llm.openrouter.cache]` section
 
 Prompt caching settings. An unknown key fails config load. See
@@ -285,6 +307,8 @@ chat call waits for that fetch for at most 5 seconds.
 | Streaming      | Yes                                                                                                                                                                                                                                |
 | Vision         | Yes when the model lists `image` in its input modalities; otherwise each image is replaced by a short text note                                                                                                                    |
 | PDF input      | Native when the model lists `file` in its input modalities; otherwise parsed by the `file-parser` plugin. See [PDFs](#pdfs)                                                                                                        |
+| Audio input    | Sent as audio when `audio_input.enabled` and the model lists `audio` in its input modalities. See [Voice](#voice)                                                                                                                  |
+| Audio output   | Spoken replies when `audio_output.enabled` and the model lists `audio` in its output modalities. See [Voice](#voice)                                                                                                               |
 | Context window | Smallest `context_length` among the endpoints routing can select                                                                                                                                                                   |
 | Chat options   | `tool_choice`, `parallel_tool_calls` and JSON schemas are sent natively when the model lists them in `supported_parameters`, with `provider.require_parameters = true`; otherwise `tool_choice` falls back to a prompt instruction |
 | Embeddings     | Yes, through OpenRouter's embeddings endpoint                                                                                                                                                                                      |
@@ -346,6 +370,79 @@ error. Errors and retries work as for chat, and errors name the model.
 ## Text-to-speech
 
 `[tts] provider = "openrouter"` speaks replies through OpenRouter's `/audio/speech` endpoint, by default with `openai/gpt-4o-mini-tts` and voice `alloy`. The key resolves as for transcription. At startup the provider checks the voice, `speed` and `instructions` against the model's catalog entry. See [Text-to-speech](transcription.md#openrouter-tts).
+
+## Voice
+
+A voice turn is a message that carries a recording. Every interface that
+accepts voice passes the recording into the turn, with the transcript as
+the message text, or `[Voice message]` when there is no transcript. See
+[Voice Transcription](transcription.md#how-it-works).
+
+The recording reaches the model only on the turn it arrives. History
+never replays audio. A provider that doesn't take audio, including
+OpenRouter without `audio_input`, gets the text alone.
+
+```toml
+[llm]
+provider = "openrouter"
+model    = "<slug of a model with audio input and output>"
+
+[llm.openrouter.audio_input]
+enabled = true
+
+[llm.openrouter.audio_output]
+enabled = true
+voice   = "alloy"
+```
+
+### Audio input
+
+Audio input is active when `audio_input.enabled` is true and the model's
+catalog entry lists `audio` in its input modalities (see
+[Capabilities](#capabilities)).
+
+The recording goes in the user message as an `input_audio` part. A format
+missing from `formats` is converted to 16 kHz mono WAV with ffmpeg. A
+recording longer than `max_secs`, or one that ffprobe can't read or ffmpeg
+can't convert, is left out, and the text is sent alone. Both tools must be
+on `PATH`.
+
+With audio attached, the text part is prefixed with
+`Transcript (may contain errors): `, unless it is just `[Voice message]`.
+
+If OpenRouter answers 400 with a message that mentions audio or
+modalities, the call is repeated once without audio. Audio input then
+stays off until restart. The reason is logged once. See
+[Troubleshooting](#openrouter-rejected-audio-input-sending-voice-notes-as-text-from-now-on).
+
+### Spoken replies
+
+On a voice turn, when `audio_output.enabled` is true and the model's
+catalog entry lists `audio` in its output modalities, the call streams
+with `modalities` including `audio` and
+`audio: {"voice": ..., "format": "pcm16"}`.
+
+The PCM is transcoded with ffmpeg to the `[tts] format` (`mp3` by
+default; `wav` and `ogg` also work; `pcm` is passed through as is) and
+attached to the reply as an audio clip. When the model sends no text, the
+transcript of its speech becomes the answer text. If the transcode fails,
+the answer is text only.
+
+If OpenRouter answers 400 with a message that mentions audio or
+modalities, the call is repeated once without audio. Spoken replies then
+stay off until restart. See
+[Troubleshooting](#openrouter-rejected-audio-output-replying-in-text-from-now-on).
+
+### Fallback
+
+Any provider can speak a voice turn's answer. When `[tts]` is
+configured and the turn produced no audio, neither from the model nor from
+a tool such as `voice-response`, the orchestrator speaks the final answer
+with the TTS provider and attaches the clip. See
+[Text-to-speech](transcription.md#text-to-speech).
+
+Without `[tts]`, voice turns reply in text, and so does a turn whose
+synthesis fails. Typed turns never get a clip.
 
 ## Image generation
 
@@ -643,3 +740,29 @@ The model always reasons. Set another `effort`, then restart.
 `image` in its output modalities. Remove `image_output`, or pick an
 image-output model such as `google/gemini-2.5-flash-image`. Restart after
 the fix; the catalog is not fetched again.
+
+### "OpenRouter rejected audio input; sending voice notes as text from now on"
+
+OpenRouter answered 400 about audio or modalities. The call was repeated
+without the recording, and no audio is sent until restart. Pick a model
+that lists `audio` in its input modalities, or remove `audio_input`.
+
+### "OpenRouter rejected audio output; replying in text from now on"
+
+OpenRouter answered 400 about audio or modalities. The call was repeated
+without asking for speech, and no audio is requested until restart. Pick a
+model that lists `audio` in its output modalities, or remove
+`audio_output`. With `[tts]` configured, the TTS provider still speaks
+voice turns.
+
+### "could not convert the voice note; sending text only"
+
+ffmpeg failed to convert a recording to WAV. The turn went ahead on the
+transcript. Check that `ffmpeg` and `ffprobe` are on `PATH`. The same
+fallback logs `could not probe the voice note` when ffprobe fails and
+`voice note has no readable duration` when it reports no duration.
+
+### "could not transcode OpenRouter's spoken reply"
+
+ffmpeg failed to turn the model's PCM into the `[tts] format`. The reply
+is text only. Check that `ffmpeg` is on `PATH`.

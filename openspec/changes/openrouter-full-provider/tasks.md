@@ -145,13 +145,13 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 - [x] 20.1 Write failing tests: the web-ui voice send path and the Signal, Matrix, Mattermost and Nextcloud voice handlers attach the recording as `ContentBlock::Audio`, with the transcript as text, or `[Voice message]` when `[transcription]` is absent (no longer dropped). Confirm red. Add the `Audio` variant, implement, then verify.
 - [x] 20.1a Write failing tests: the orchestrator keeps audio only for the current turn and only for providers with audio input support; `history.rs` drops `Audio` from past messages; the Anthropic, OpenAI, Moonshot and Ollama builders drop `Audio`. Confirm red. Implement, then verify.
 - [x] 20.1b Write failing tests for OpenRouter audio input: `audio_input` config parsing; an `input_audio` part with conversion to WAV for formats outside `formats`; the transcript part prefixed "Transcript (may contain errors):"; `max_secs` cutoff; a 400 on `input_audio` leads to one repeat without audio, then disabled. Confirm red. Implement, then verify.
-- [ ] 20.2 Write failing tests: a voice turn with audio-capable provider support requests audio options; a non-voice turn does not. Confirm red. Implement in the orchestrator, then verify.
-- [ ] 20.3 Write failing SSE fixture tests for the OpenRouter client: `delta.audio.data` concatenated, transcript used when there is no content, PCM read at `pcm_sample_rate` and transcoded to `[tts] format`, attached as `GeneratedMedia::Audio`. Confirm red. Implement, then verify.
-- [ ] 20.4 Write failing tests: a 400 on the audio modality repeats the call once without audio and disables audio for the provider instance; TTS fallback synthesizes the clip; text only when `[tts]` is absent. Confirm red. Implement, then verify.
-- [ ] 20.5 Document voice-native chat (audio input and replies) in `docs/openrouter.md` and `docs/transcription.md`.
+- [x] 20.2 Write failing tests: a voice turn with audio-capable provider support requests audio options; a non-voice turn does not. Confirm red. Implement in the orchestrator, then verify.
+- [x] 20.3 Write failing SSE fixture tests for the OpenRouter client: `delta.audio.data` concatenated, transcript used when there is no content, PCM read at `pcm_sample_rate` and transcoded to `[tts] format`, attached as `GeneratedMedia::Audio`. Confirm red. Implement, then verify.
+- [x] 20.4 Write failing tests: a 400 on the audio modality repeats the call once without audio and disables audio for the provider instance; TTS fallback synthesizes the clip; text only when `[tts]` is absent. Confirm red. Implement, then verify.
+- [x] 20.5 Document voice-native chat (audio input and replies) in `docs/openrouter.md` and `docs/transcription.md`.
 
 ## 21. Doctor and final docs
 
-- [ ] 21.1 Write failing tests for doctor: every OpenRouter-backed feature is listed with its key source and no key material; one `/key` call is made per distinct key; valid, invalid (401) and unreachable outcomes are reported. Confirm red. Implement, then verify.
+- [x] 21.1 Write failing tests for doctor: every OpenRouter-backed feature is listed with its key source and no key material; one `/key` call is made per distinct key; valid, invalid (401) and unreachable outcomes are reported. Confirm red. Implement, then verify.
 - [ ] 21.2 Final pass on `docs/openrouter.md`: a "one key for everything" example and a full configuration reference. Check every claim against the code.
 - [ ] 21.3 Run `make lint && make format && make test` and `openspec validate openrouter-full-provider --strict`. All must be clean.

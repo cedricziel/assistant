@@ -15,7 +15,9 @@ library;
 // export 'src/composer/composer.dart'; // slot: chat-element-library 11a
 // export 'src/composer/composer_voice_button.dart'; // slot: chat-element-library 11b
 export 'src/branch_picker.dart';
+export 'src/code/code_block.dart';
 export 'src/composer/queued_message_bubble.dart';
+export 'src/conversations/conversation_list_view.dart';
 export 'src/feedback/feedback_buttons.dart';
 export 'src/feedback/feedback_comment_field.dart';
 export 'src/highlight/code_token.dart';
