@@ -10,4 +10,5 @@ const List<String> kAssistantUiElements = [
   'QuestionCard',
   'StarterPrompts',
   'SuggestionChips',
+  'ThreadDensityScope',
 ];

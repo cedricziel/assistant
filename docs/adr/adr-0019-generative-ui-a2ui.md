@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-11-26
 **Builds on**: [ADR-0009](adr-0009-testability-architecture.md), [ADR-0017](adr-0017-turn-interactions.md), [ADR-0018](adr-0018-conversation-message-tree.md)
-**Related**: [adr-0011-tool-permission-decision-model.md](adr-0011-tool-permission-decision-model.md) (two ADRs carry the number 0011; this is the tool-permission one)
+**Related**: [ADR-0023](adr-0023-tool-permission-decision-model.md) (tool permissions)
 
 ## Context
 

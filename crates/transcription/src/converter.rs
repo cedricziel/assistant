@@ -34,6 +34,16 @@ pub enum AudioFormat {
     Flac,
     /// WebM audio (usually supported natively)
     Webm,
+    /// AMR narrow- or wide-band voice notes
+    Amr,
+    /// 3GPP / 3GPP2 container
+    ThreeGpp,
+    /// Apple Core Audio Format
+    Caf,
+    /// AIFF audio
+    Aiff,
+    /// QuickTime video container
+    Mov,
     /// Unknown/other format
     Unknown,
 }
@@ -41,15 +51,20 @@ pub enum AudioFormat {
 impl AudioFormat {
     /// Detect audio format from MIME type.
     pub fn from_mime(mime: &str) -> Self {
-        match mime.to_lowercase().as_str() {
+        match crate::essence(mime).as_str() {
             "audio/mp4" | "audio/m4a" | "audio/x-m4a" => Self::M4a,
             "video/mp4" => Self::Mp4,
             "audio/aac" => Self::Aac,
             "audio/mpeg" | "audio/mp3" => Self::Mp3,
-            "audio/wav" | "audio/x-wav" => Self::Wav,
+            "audio/wav" | "audio/x-wav" | "audio/wave" => Self::Wav,
             "audio/ogg" | "audio/opus" => Self::Ogg,
             "audio/flac" | "audio/x-flac" => Self::Flac,
-            "audio/webm" => Self::Webm,
+            "audio/webm" | "video/webm" => Self::Webm,
+            "audio/amr" | "audio/amr-wb" => Self::Amr,
+            "audio/3gpp" | "audio/3gpp2" => Self::ThreeGpp,
+            "audio/x-caf" => Self::Caf,
+            "audio/aiff" | "audio/x-aiff" => Self::Aiff,
+            "video/quicktime" => Self::Mov,
             _ => Self::Unknown,
         }
     }
@@ -78,6 +93,11 @@ impl AudioFormat {
             Self::Ogg => "ogg",
             Self::Flac => "flac",
             Self::Webm => "webm",
+            Self::Amr => "amr",
+            Self::ThreeGpp => "3gp",
+            Self::Caf => "caf",
+            Self::Aiff => "aiff",
+            Self::Mov => "mov",
             Self::Unknown => "bin",
         }
     }
@@ -488,6 +508,23 @@ impl AudioConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_mime_ignores_parameters_and_knows_new_formats() {
+        assert_eq!(
+            AudioFormat::from_mime("audio/ogg; codecs=opus"),
+            AudioFormat::Ogg
+        );
+        assert_eq!(AudioFormat::from_mime("AUDIO/MPEG"), AudioFormat::Mp3);
+        assert_eq!(AudioFormat::from_mime("audio/amr"), AudioFormat::Amr);
+        assert_eq!(AudioFormat::from_mime("audio/amr-wb"), AudioFormat::Amr);
+        assert_eq!(AudioFormat::from_mime("audio/3gpp"), AudioFormat::ThreeGpp);
+        assert_eq!(AudioFormat::from_mime("audio/x-caf"), AudioFormat::Caf);
+        assert_eq!(AudioFormat::from_mime("audio/x-aiff"), AudioFormat::Aiff);
+        assert_eq!(AudioFormat::from_mime("audio/wave"), AudioFormat::Wav);
+        assert_eq!(AudioFormat::from_mime("video/quicktime"), AudioFormat::Mov);
+        assert_eq!(AudioFormat::from_mime("video/webm"), AudioFormat::Webm);
+    }
 
     #[test]
     fn test_audio_format_from_mime() {
