@@ -11,6 +11,7 @@ const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
   'CodeBlock',
+  'Composer',
   'ConversationListView',
   'FeedbackButtons',
   'FeedbackCommentField',
@@ -21,6 +22,7 @@ const List<String> kAssistantUiElements = [
   'PermissionRuleTile',
   'QuestionCard',
   'QueuedMessageBubble',
+  'SlashCommandMenu',
   'StarterPrompts',
   'SuggestionChips',
   'ThreadDensityScope',
@@ -33,7 +35,6 @@ const List<String> kAssistantUiElements = [
   // 'CodeFileResultView', // slot: tool-result-renderers C7
   // 'CommandBody', // slot: chat-element-library 7b
   // 'CompactExpandable', // slot: tool-result-renderers C2
-  // 'Composer', // slot: chat-element-library 11a
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
   // 'ConversationSearchResultsView', // slot: conversation-list-management 14
   // 'DataTableResultView', // slot: tool-result-renderers C6
@@ -49,7 +50,6 @@ const List<String> kAssistantUiElements = [
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
   // 'RegenerateMenuButton', // slot: message-branching 10
-  // 'SlashCommandMenu', // slot: chat-element-library 11a
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'SubagentBody', // slot: chat-element-library 7b
   // 'SurfaceFrame', // slot: generative-ui-a2ui 13

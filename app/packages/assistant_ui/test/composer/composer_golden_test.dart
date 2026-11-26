@@ -161,4 +161,28 @@ void main() {
       matchesGoldenFile('goldens/composer_attachments_light.png'),
     );
   });
+
+  for (final brightness in Brightness.values) {
+    testWidgets('slash_command_menu (${brightness.name})', (tester) async {
+      await pumpGolden(
+        tester,
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: SlashCommandMenu(
+            commands: _commands,
+            filter: '',
+            onSelect: (_) {},
+          ),
+        ),
+        size: const Size(420, 200),
+        brightness: brightness,
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+
+      await expectLater(
+        find.byType(MaterialApp),
+        matchesGoldenFile('goldens/slash_command_menu_${brightness.name}.png'),
+      );
+    });
+  }
 }
