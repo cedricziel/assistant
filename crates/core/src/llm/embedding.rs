@@ -367,6 +367,7 @@ mod tests {
                 parallel_tool_calls: true,
                 json_schema: false,
                 audio_input: false,
+                audio_output: false,
             }
         }
 

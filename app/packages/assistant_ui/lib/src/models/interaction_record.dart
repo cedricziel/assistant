@@ -64,11 +64,59 @@ enum InteractionStatus {
   cancelled,
 }
 
+/// One choice offered by a [QuestionItem].
+class QuestionOption {
+  const QuestionOption({
+    required this.id,
+    required this.label,
+    this.description,
+  });
+
+  final String id;
+  final String label;
+  final String? description;
+}
+
+/// One question of a [InteractionKind.question] interaction.
+class QuestionItem {
+  const QuestionItem({
+    required this.id,
+    required this.prompt,
+    this.options = const [],
+    this.multiple = false,
+    this.freeText = false,
+  });
+
+  final String id;
+  final String prompt;
+  final List<QuestionOption> options;
+
+  /// Whether more than one option may be chosen.
+  final bool multiple;
+
+  /// Whether the owner may (or, with no options, must) answer in text.
+  final bool freeText;
+}
+
+/// The owner's answer to one [QuestionItem].
+class QuestionAnswer {
+  const QuestionAnswer({
+    required this.questionId,
+    this.selectedOptionIds = const [],
+    this.text,
+  });
+
+  final String questionId;
+  final List<String> selectedOptionIds;
+  final String? text;
+}
+
 /// One interaction a turn put to its owner, as the elements render it.
 ///
 /// Pure data: the app maps the wire request, the resolution and the stored
-/// detail into this. The approval fields ([toolName] and below) are used when
-/// [kind] is [InteractionKind.toolApproval].
+/// detail into this. The approval fields ([toolName] to [ruleId]) are used when
+/// [kind] is [InteractionKind.toolApproval]; [questions], [answers] and
+/// [declined] when it is [InteractionKind.question].
 class InteractionRecord {
   const InteractionRecord({
     required this.id,
@@ -86,6 +134,9 @@ class InteractionRecord {
     this.decision,
     this.resolvedAt,
     this.ruleId,
+    this.questions = const [],
+    this.answers = const [],
+    this.declined = false,
     this.rendersCard = true,
   });
 
@@ -118,6 +169,16 @@ class InteractionRecord {
 
   /// The rule that the answer saved, if any.
   final String? ruleId;
+
+  /// What the assistant asks, in order.
+  final List<QuestionItem> questions;
+
+  /// The owner's answers, one per question, once [status] is
+  /// [InteractionStatus.resolved] and the owner did not decline.
+  final List<QuestionAnswer> answers;
+
+  /// Whether the owner chose "I won't answer" instead of answering.
+  final bool declined;
 
   /// False when the kind wants no timeline card. The turn still waits.
   final bool rendersCard;
