@@ -106,11 +106,11 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 15. OpenRouter transcription
 
-- [ ] 15.1 Write failing wiremock tests: JSON body with `input_audio`, `language`, `prompt` and `verbose_json`; language normalized to BCP-47; duration reported. Confirm red. Implement `openrouter.rs`, then verify.
-- [ ] 15.2 Write failing tests: a 400 for `verbose_json` falls back once to `json` and is remembered; 413 gives the size error; 429 honors `Retry-After`. Confirm red. Implement, then verify.
-- [ ] 15.3 Write failing tests for chunking: a 180-second recording becomes 4 ordered requests whose texts are joined; one failed chunk fails the whole transcription; unknown duration is sent whole; config caps `max_chunk_secs` at 55. Confirm red. Implement, then verify.
-- [ ] 15.4 Write failing tests for `build_provider(cfg, llm).await` with the OpenRouter variant, key reuse and the missing-key error. Confirm red. Add the variant, make the builder async, and update the `web-ui` and `interface-cli` call sites. Verify with `cargo test -p assistant-transcription`.
-- [ ] 15.5 Update `docs/transcription.md` and `docs/openrouter.md`.
+- [x] 15.1 Write failing wiremock tests: JSON body with `input_audio`, `language`, `prompt` and `verbose_json`; language normalized to BCP-47; duration reported. Confirm red. Implement `openrouter.rs`, then verify.
+- [x] 15.2 Write failing tests: a 400 for `verbose_json` falls back once to `json` and is remembered; 413 gives the size error; 429 honors `Retry-After`. Confirm red. Implement, then verify.
+- [x] 15.3 Write failing tests for chunking: a 180-second recording becomes 4 ordered requests whose texts are joined; one failed chunk fails the whole transcription; unknown duration is sent whole; config caps `max_chunk_secs` at 55. Confirm red. Implement, then verify.
+- [x] 15.4 Write failing tests for `build_provider(cfg, llm).await` with the OpenRouter variant, key reuse and the missing-key error. Confirm red. Add the variant, make the builder async, and update the `web-ui` and `interface-cli` call sites. Verify with `cargo test -p assistant-transcription`.
+- [x] 15.5 Update `docs/transcription.md` and `docs/openrouter.md`.
 
 ## 16. OpenRouter TTS
 

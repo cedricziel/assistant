@@ -76,15 +76,29 @@ worst-case Dio path where headers are also buffered.
 The progress card transitions to a stalled state after
 `kTurnStallThreshold` (30 s). In that state a "Skip" button appears
 (behind `kSkipButtonEnabled`, default `true`). Tapping it calls
-`api.cancelTurn(conversationId, runId)` via
-`ChatNotifier.requestCancelTurn()`.
+`ChatNotifier.stopTurn()`, the same path as the Stop button.
 
-The button is fire-and-forget: the SSE stream eventually emits a
-final `agent_error` with `reason: "cancelled"`, which the notifier's
-existing terminal-event handling translates into normal post-turn
-cleanup (placeholder cleared, user bubble marked ok). The user gets
-instant visual feedback that the tap registered; reconciliation
-arrives over the stream a tick later.
+`stopTurn()` moves the turn into the **Stopping** state
+(`ChatState.isStopping`): the Stop action reads "Stopping…" and is
+disabled, and the app sends `api.cancelTurn(conversationId, runId)`. The
+server answers over the still-open stream with a final `agent_error` with
+`reason: "cancelled"`, which reconciles the turn as a `stopped` assistant
+message (the partial reply, or "_Stopped._" when nothing had streamed) and
+drains the queue.
+
+If no terminal frame arrives within `ChatStreamSession.stopGrace`, the app
+probes `turnStatus` once and detaches the stream locally:
+
+- `running` or unreachable → the app keeps the streamed partial as a
+  `stopped` message and shows "The server hasn't confirmed the stop. The
+  reply may still finish."
+- `completed`, `errored` or `unknown` → the server has an outcome the
+  stream failed to deliver, so the app refreshes the conversation from the
+  server (keeping the queue) and shows what was persisted.
+
+The server persists a stopped reply with `finish_reason = "cancelled"`.
+History mapping turns that into `MessageStatus.stopped`, so a reload (and
+the refresh above) shows the same "Stopped" label as the live session.
 
 ## Server side
 

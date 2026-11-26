@@ -478,18 +478,17 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     // -- Build transcription provider (for voice message STT) ----------------
-    let transcription_provider = config
-        .transcription
-        .as_ref()
-        .map(|tc| {
-            let provider = build_transcription_provider(tc)?;
+    let transcription_provider = match config.transcription.as_ref() {
+        Some(tc) => {
+            let provider = build_transcription_provider(tc, &config.llm).await?;
             info!(
                 provider = provider.name(),
                 "Audio transcription enabled (web UI)"
             );
-            Ok::<_, anyhow::Error>(provider)
-        })
-        .transpose()?;
+            Some(provider)
+        }
+        None => None,
+    };
 
     // -- Spawn TTL sweep task ------------------------------------------------
     {

@@ -250,8 +250,8 @@ timeout_secs = 120
 # boot_path = "~/.assistant/agents/default/BOOT.md"
 
 # ── Transcription (speech-to-text) ────────────────────────────────────────────
-# Providers: "whisper" (OpenAI), "ollama" (local), "deepgram"
-# API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY
+# Providers: "whisper" (OpenAI), "ollama" (local), "deepgram", "openrouter"
+# API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY, OPENROUTER_API_KEY
 #
 # [transcription]
 # provider = "whisper"
@@ -259,6 +259,15 @@ timeout_secs = 120
 # # api_key = "sk-..."                 # or set OPENAI_API_KEY env var
 # # base_url = "https://api.openai.com/v1"
 # # language = "en"                    # optional BCP-47 language hint
+#
+# [transcription]
+# provider = "openrouter"
+# model    = "openai/whisper-1"         # default
+# # api_key = "sk-or-..."              # else the [llm] key, else OPENROUTER_API_KEY
+# # base_url = "https://openrouter.ai/api/v1"
+# # language = "en"
+# # prompt = "Names: Acme"             # vocabulary hint
+# # max_chunk_secs = 50                # split longer audio; capped at 55
 
 # ── Text-to-speech (TTS) ─────────────────────────────────────────────────────
 # Providers: "openai", "deepgram"
