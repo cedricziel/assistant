@@ -25,11 +25,15 @@ pub mod command_events;
 pub mod conversation_broadcaster;
 pub mod conversation_events;
 pub mod conversation_search;
+pub mod conversation_summaries;
 pub mod conversations;
 pub mod integration_store;
+pub mod interactions;
 pub mod interface_instance_store;
 pub mod memory_chunks;
 pub mod message_bus;
+pub mod message_feedback;
+pub mod message_timings;
 pub mod org_oidc_config_store;
 pub mod org_storage;
 pub mod org_store;
@@ -69,17 +73,33 @@ pub use conversation_events::{
     ConversationEventRow, ConversationEventStore, InMemoryConversationEventStore, LiveEvent,
     RunBroadcaster, SqliteConversationEventStore,
 };
+pub use conversation_summaries::{
+    ConversationSummary, ConversationSummaryStore, InMemoryConversationSummaryStore,
+    SqliteConversationSummaryStore,
+};
 pub use conversations::{
-    ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
+    ConversationPatch, ConversationRecord, ConversationStore, InMemoryConversationStore,
+    MetadataUpdate, SqliteConversationStore,
 };
 pub use integration_store::{
     SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
+};
+pub use interactions::{
+    InMemoryInteractionStore, InteractionRow, InteractionStatus, InteractionStore, NewInteraction,
+    ResolveOutcome, SqliteInteractionStore,
 };
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use memory_chunks::{
     FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,
 };
 pub use message_bus::{InMemoryMessageBus, SqliteMessageBus};
+pub use message_feedback::{
+    InMemoryMessageFeedbackStore, MessageFeedbackRating, MessageFeedbackRow, MessageFeedbackStore,
+    SqliteMessageFeedbackStore,
+};
+pub use message_timings::{
+    InMemoryMessageTimingStore, MessageTimingStore, SqliteMessageTimingStore,
+};
 pub use org_oidc_config_store::SqliteOrgOidcConfigStore;
 pub use org_storage::OrgStorageLayer;
 pub use org_store::SqliteOrgStore;
@@ -213,6 +233,21 @@ impl StorageLayer {
         SqliteSkillExecutionStore::new(self.pool.clone())
     }
 
+    /// Convenience: build an `InteractionStore` backed by this pool.
+    pub fn interaction_store(&self) -> SqliteInteractionStore {
+        SqliteInteractionStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `ConversationSummaryStore` backed by this pool.
+    pub fn conversation_summary_store(&self) -> SqliteConversationSummaryStore {
+        SqliteConversationSummaryStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `MessageTimingStore` backed by this pool.
+    pub fn message_timing_store(&self) -> SqliteMessageTimingStore {
+        SqliteMessageTimingStore::new(self.pool.clone())
+    }
+
     /// Convenience: build a `ToolPermissionRuleStore` backed by this pool.
     pub fn tool_permission_rule_store(&self) -> SqliteToolPermissionRuleStore {
         SqliteToolPermissionRuleStore::new(self.pool.clone())
@@ -271,6 +306,11 @@ impl StorageLayer {
     /// Convenience: build a [`SqliteAttachmentStore`] backed by this pool.
     pub fn attachment_store(&self) -> SqliteAttachmentStore {
         SqliteAttachmentStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`MessageFeedbackStore`] backed by this pool.
+    pub fn message_feedback_store(&self) -> SqliteMessageFeedbackStore {
+        SqliteMessageFeedbackStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`WebhookStore`] scoped to a Persona.
@@ -439,6 +479,194 @@ mod tests {
         assert_eq!(table_exists, 1, "personas table should exist");
 
         let _ = tokio::fs::remove_file(&db_path).await;
+        Ok(())
+    }
+
+    /// Migration 061 turns the flat message list into a chain: every row's
+    /// parent is its predecessor by `(turn, created_at, rowid)` and each
+    /// conversation's active leaf is its last row.
+    #[tokio::test]
+    async fn message_tree_migration_backfills_chain_and_leaf() -> Result<()> {
+        let pool = SqlitePool::connect("sqlite::memory:").await?;
+        sqlx::raw_sql("PRAGMA foreign_keys=ON;")
+            .execute(&pool)
+            .await?;
+        for sql in [
+            include_str!("../../../migrations/001_conversations.sql"),
+            include_str!("../../../migrations/005_tool_calls.sql"),
+            include_str!("../../../migrations/040_message_sender.sql"),
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await?;
+        }
+
+        let conv = Uuid::new_v4().to_string();
+        let empty_conv = Uuid::new_v4().to_string();
+        for id in [&conv, &empty_conv] {
+            sqlx::query("INSERT INTO conversations (id) VALUES (?)")
+                .bind(id)
+                .execute(&pool)
+                .await?;
+        }
+        // Inserted out of order on purpose: the chain follows (turn, created_at).
+        let rows = [
+            ("m2", "assistant", 1, "2026-01-01 00:00:02"),
+            ("m1", "user", 0, "2026-01-01 00:00:01"),
+            ("m3", "user", 2, "2026-01-01 00:00:03"),
+        ];
+        for (id, role, turn, at) in rows {
+            sqlx::query(
+                "INSERT INTO messages (id, conversation_id, role, content, turn, created_at) \
+                 VALUES (?, ?, ?, 'x', ?, ?)",
+            )
+            .bind(id)
+            .bind(&conv)
+            .bind(role)
+            .bind(turn)
+            .bind(at)
+            .execute(&pool)
+            .await?;
+        }
+
+        sqlx::raw_sql(include_str!("../../../migrations/061_message_tree.sql"))
+            .execute(&pool)
+            .await?;
+
+        let parents: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT id, parent_id FROM messages ORDER BY turn")
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(
+            parents,
+            vec![
+                ("m1".to_string(), None),
+                ("m2".to_string(), Some("m1".to_string())),
+                ("m3".to_string(), Some("m2".to_string())),
+            ],
+            "backfilled parent chain"
+        );
+
+        let leaf: Option<String> =
+            sqlx::query_scalar("SELECT active_leaf_id FROM conversations WHERE id = ?")
+                .bind(&conv)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(leaf.as_deref(), Some("m3"), "leaf is the last row");
+
+        let empty_leaf: Option<String> =
+            sqlx::query_scalar("SELECT active_leaf_id FROM conversations WHERE id = ?")
+                .bind(&empty_conv)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(
+            empty_leaf, None,
+            "a conversation without messages has no leaf"
+        );
+        Ok(())
+    }
+
+    /// Migration 062 adds a nullable `finish_reason`: rows written before it
+    /// read `NULL` and keep every other value.
+    #[tokio::test]
+    async fn message_finish_reason_migration_leaves_existing_rows_null() -> Result<()> {
+        const NAME: &str = "062_message_finish_reason";
+        let pool = SqlitePool::connect("sqlite::memory:").await?;
+        for &(name, sql) in SPACE_MIGRATIONS.iter().filter(|(name, _)| *name < NAME) {
+            sqlx::raw_sql(sql)
+                .execute(&pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("applying {name}: {e}"))?;
+        }
+
+        let conv = Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO conversations (id) VALUES (?)")
+            .bind(&conv)
+            .execute(&pool)
+            .await?;
+        for (id, role, content, turn) in [("m1", "user", "hi", 0), ("m2", "assistant", "yo", 1)] {
+            sqlx::query(
+                "INSERT INTO messages (id, conversation_id, role, content, turn) \
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(&conv)
+            .bind(role)
+            .bind(content)
+            .bind(turn)
+            .execute(&pool)
+            .await?;
+        }
+
+        let &(_, sql) = SPACE_MIGRATIONS
+            .iter()
+            .find(|(name, _)| *name == NAME)
+            .ok_or_else(|| anyhow::anyhow!("{NAME} is not registered"))?;
+        sqlx::raw_sql(sql).execute(&pool).await?;
+
+        let rows: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT id, content, finish_reason FROM messages ORDER BY turn")
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(
+            rows,
+            vec![
+                ("m1".to_string(), "hi".to_string(), None),
+                ("m2".to_string(), "yo".to_string(), None),
+            ],
+            "existing rows keep their content and read NULL"
+        );
+        Ok(())
+    }
+
+    /// Migration 060 adds a nullable `model`: rows written before it read
+    /// `NULL` and keep every other value.
+    #[tokio::test]
+    async fn message_model_migration_leaves_existing_rows_null() -> Result<()> {
+        const NAME: &str = "060_message_model";
+        let pool = SqlitePool::connect("sqlite::memory:").await?;
+        for &(name, sql) in SPACE_MIGRATIONS.iter().filter(|(name, _)| *name < NAME) {
+            sqlx::raw_sql(sql)
+                .execute(&pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("applying {name}: {e}"))?;
+        }
+
+        let conv = Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO conversations (id) VALUES (?)")
+            .bind(&conv)
+            .execute(&pool)
+            .await?;
+        for (id, role, content, turn) in [("m1", "user", "hi", 0), ("m2", "assistant", "yo", 1)] {
+            sqlx::query(
+                "INSERT INTO messages (id, conversation_id, role, content, turn) \
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(&conv)
+            .bind(role)
+            .bind(content)
+            .bind(turn)
+            .execute(&pool)
+            .await?;
+        }
+
+        let &(_, sql) = SPACE_MIGRATIONS
+            .iter()
+            .find(|(name, _)| *name == NAME)
+            .ok_or_else(|| anyhow::anyhow!("{NAME} is not registered"))?;
+        sqlx::raw_sql(sql).execute(&pool).await?;
+
+        let rows: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT id, content, model FROM messages ORDER BY turn")
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(
+            rows,
+            vec![
+                ("m1".to_string(), "hi".to_string(), None),
+                ("m2".to_string(), "yo".to_string(), None),
+            ],
+            "existing rows keep their content and read NULL"
+        );
         Ok(())
     }
 

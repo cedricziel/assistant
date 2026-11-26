@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::ApiState;
@@ -148,6 +149,7 @@ pub async fn list_commands(space: SpaceCtx, State(state): State<ApiState>) -> Re
     responses(
         (status = 200, description = "Command executed successfully", body = CommandEventResponse),
         (status = 400, description = "Unknown command"),
+        (status = 404, description = "Conversation not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -192,7 +194,6 @@ pub async fn execute_command(
         conversation_id: conv_id,
         conversation_configs: orchestrator.conversation_configs(),
         orchestrator,
-        active_turns: state.active_turns.clone(),
         evict_conversation: None, // Web UI doesn't have an LRU cache to evict
         default_model,
     };
@@ -237,6 +238,7 @@ pub async fn execute_command(
     responses(
         (status = 200, description = "List of command events", body = Vec<CommandEventResponse>),
         (status = 400, description = "Invalid ID"),
+        (status = 404, description = "Conversation not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -345,6 +347,82 @@ mod tests {
         let responses: Vec<CommandEventResponse> =
             events.into_iter().map(CommandEventResponse::from).collect();
         assert_eq!(responses[0].command, "help");
+    }
+
+    /// A web turn is registered with the orchestrator, so `/stop` finds and
+    /// cancels it. Before the registry, nothing wrote the web `active_turns`
+    /// map and `/stop` always answered "Nothing to stop.".
+    #[tokio::test]
+    async fn stop_cancels_a_running_web_turn() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::api::test_helpers::{app, body_json, seed_conversation, test_state};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_secs(20))
+                    .set_body_json(serde_json::json!({
+                        "model": "test",
+                        "message": { "role": "assistant", "content": "late" },
+                        "done": true
+                    })),
+            )
+            .mount(&server)
+            .await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+        let orchestrator = state
+            .runtimes
+            .get("default", "default")
+            .await
+            .unwrap()
+            .orchestrator
+            .clone();
+        let router = app(state);
+
+        // Keep the SSE response alive so the turn keeps running.
+        let _stream = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/messages"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"take your time"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !orchestrator.conversation_turn_in_flight(conv_id) {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the web turn was never registered"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/command"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"command":"stop","args":[]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp.into_body()).await;
+        assert_eq!(body["ack_text"], "Stopped.");
     }
 
     #[tokio::test]

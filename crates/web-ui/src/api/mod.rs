@@ -17,7 +17,9 @@ pub mod capabilities;
 pub mod catalog;
 pub mod commands;
 pub mod conversations;
+pub mod feedback;
 pub mod integrations;
+pub mod interactions;
 pub mod interfaces;
 pub mod members;
 pub mod messages;
@@ -115,11 +117,10 @@ use axum::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
 };
 use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
-use uuid::Uuid;
 
 use crate::errors::json_error;
 use crate::space::{SpaceCtx, SpaceResolver};
@@ -149,8 +150,6 @@ pub struct ApiState {
     pub command_registry: Arc<CommandRegistry>,
     /// Per-space conversation-list broadcasters for reactive SSE streaming.
     pub conversation_broadcasters: ConversationBroadcasters,
-    /// Active turns map: conv_id → request_id (for `/stop`).
-    pub active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
 }
 
 impl ApiState {
@@ -170,7 +169,6 @@ impl ApiState {
             run_broadcaster: RunBroadcaster::new(),
             command_registry: Arc::new(CommandRegistry::new()),
             conversation_broadcasters: ConversationBroadcasters::default(),
-            active_turns: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -257,6 +255,10 @@ pub fn api_router() -> Router<ApiState> {
         )
         .route("/conversations/{id}/messages", post(messages::send_message))
         .route(
+            "/conversations/{id}/messages/{message_id}/feedback",
+            put(feedback::set_message_feedback).delete(feedback::delete_message_feedback),
+        )
+        .route(
             "/conversations/{id}/voice",
             post(messages::send_voice_message),
         )
@@ -279,6 +281,11 @@ pub fn api_router() -> Router<ApiState> {
             post(turns::cancel_turn),
         )
         .merge(tool_permission_rules::tool_permission_rules_router())
+        .route(
+            "/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond",
+            post(interactions::respond_to_interaction)
+                .layer(DefaultBodyLimit::max(interactions::MAX_RESPOND_BODY_BYTES)),
+        )
         .route("/messages/{id}/audio", get(audio::get_message_audio))
         .route("/audio/{id}", get(audio::get_audio))
         .route("/commands", get(commands::list_commands))

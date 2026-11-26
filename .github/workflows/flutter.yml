@@ -63,6 +63,10 @@ jobs:
         if: steps.filter.outputs.flutter == 'true'
         run: cd packages/assistant_ui && flutter test
 
+      - name: Analyze and test widgetbook gallery
+        if: steps.filter.outputs.flutter == 'true'
+        run: cd widgetbook && flutter analyze --fatal-infos && flutter test
+
   # Regenerates the Dart client with the generator version pinned in the
   # Makefile and fails when the committed output differs. Not a required check.
   api-client-drift:

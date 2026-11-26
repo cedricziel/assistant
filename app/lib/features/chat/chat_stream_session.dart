@@ -35,6 +35,11 @@ class ChatStreamSession {
   /// next iteration.
   bool cancelled = false;
 
+  /// Set when the user taps Stop; stays set for the rest of the turn. While
+  /// the run id is still unknown it defers the server cancel to
+  /// `RunStartedEvent`.
+  bool stopRequested = false;
+
   /// Whether the pending-queue drain loop is running.
   bool draining = false;
 
@@ -57,6 +62,7 @@ class ChatStreamSession {
   /// Reset per-turn state before streaming a new message.
   void beginTurn() {
     cancelled = false;
+    stopRequested = false;
     runId = null;
     lastSeq = 0;
     clearDisconnected();

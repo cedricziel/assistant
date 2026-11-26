@@ -24,6 +24,7 @@ use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 use super::{Orchestrator, value_to_params_map};
+use crate::history::{FinalAnswerMeta, persist_final_answer};
 use crate::webhook_dispatch;
 
 #[async_trait]
@@ -138,10 +139,13 @@ impl SubagentRunner for Orchestrator {
         };
 
         // Determine the tool specs to advertise to the LLM for this subagent.
+        self.llm.ready().await;
         let provider_caps = self.llm.capabilities();
         let tool_specs = Self::filter_tool_specs(
             self.executor.to_specs_filtered(&allowed_tools),
             &provider_caps,
+            // A subagent has no user attached, so it never sees rich-client tools.
+            false,
         );
 
         // Build the system prompt.  If the spawn request provides one, use it;
@@ -231,6 +235,7 @@ impl SubagentRunner for Orchestrator {
                     &history,
                     &tool_specs,
                 );
+                let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
                 let llm_start = std::time::Instant::now();
                 let response = if let Some(ref parent_sink) = parent_event_sink {
                     // Stream subagent LLM output, forwarding chunks as SubagentEvent.
@@ -336,10 +341,18 @@ impl SubagentRunner for Orchestrator {
                                 m.turn = base_turn + iteration as i64 + 1;
                                 m
                             };
-                            if let Err(e) = conv_store
-                                .save_message(&assistant_msg)
-                                .instrument(iteration_span.clone())
-                                .await
+                            if let Err(e) = persist_final_answer(
+                                &conv_store,
+                                &self.storage.message_timing_store(),
+                                assistant_msg,
+                                FinalAnswerMeta {
+                                    traceparent: llm_traceparent,
+                                    timing: None,
+                                    model: Some(self.llm.model_name().to_string()),
+                                },
+                            )
+                            .instrument(iteration_span.clone())
+                            .await
                             {
                                 warn!("Failed to persist subagent answer: {e}");
                             }
@@ -376,7 +389,7 @@ impl SubagentRunner for Orchestrator {
                                     tool_count: subagent_tool_count,
                                     had_errors: subagent_had_errors,
                                     active_skill: None,
-                                    history: history.clone(),
+                                    history: history.to_vec(),
                                 },
                                 self.learning_config.clone(),
                                 std::sync::Arc::clone(&self.storage),
@@ -574,10 +587,13 @@ impl SubagentRunner for Orchestrator {
                         if let Err(e) = conv_store.save_message(&thinking_msg).await {
                             warn!("Failed to persist subagent thinking step: {e}");
                         }
-                        history.push(ChatHistoryMessage::Text {
-                            role: ChatRole::Assistant,
-                            content: text,
-                        });
+                        history.push(
+                            ChatHistoryMessage::Text {
+                                role: ChatRole::Assistant,
+                                content: text,
+                            },
+                            Some(thinking_msg.id),
+                        );
                     }
                 }
             }

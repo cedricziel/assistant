@@ -65,6 +65,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(DeviceCodeResponseSchema.serializer)
       ..add(ErrorBody.serializer)
       ..add(ExecuteCommandRequest.serializer)
+      ..add(FeedbackRating.serializer)
       ..add(HttpAuthSecurityScheme.serializer)
       ..add(ImplicitOAuthFlow.serializer)
       ..add(IntegrationAuthKind.serializer)
@@ -75,11 +76,15 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(IntegrationStatus.serializer)
       ..add(IntegrationSummary.serializer)
       ..add(IntegrationTrust.serializer)
+      ..add(InteractionDetail.serializer)
+      ..add(InteractionOutcomeView.serializer)
+      ..add(InteractionStatusView.serializer)
       ..add(InterfaceInstanceResponse.serializer)
       ..add(ListTaskPushNotificationConfigsResponse.serializer)
       ..add(ListTasksResponse.serializer)
       ..add(MemberEntry.serializer)
       ..add(Message.serializer)
+      ..add(MessageFeedbackResponse.serializer)
       ..add(MessageSummary.serializer)
       ..add(ModelPart.serializer)
       ..add(MutualTlsSecurityScheme.serializer)
@@ -98,12 +103,21 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(PersonaFromTemplateResponse.serializer)
       ..add(PersonaSkillAccess.serializer)
       ..add(PersonaSummary.serializer)
+      ..add(ProtectedResourceMetadata.serializer)
       ..add(PublishCatalogItemRequest.serializer)
       ..add(PushNotificationConfig.serializer)
       ..add(PutOrgOidcConfigRequest.serializer)
+      ..add(QuestionAnswer.serializer)
       ..add(QuickMessageRequest.serializer)
       ..add(QuickMessageResponse.serializer)
       ..add(RegisterAgentRequest.serializer)
+      ..add(RespondToInteractionRequest.serializer)
+      ..add(RespondToInteractionRequestOneOf.serializer)
+      ..add(RespondToInteractionRequestOneOf1.serializer)
+      ..add(RespondToInteractionRequestOneOf1KindEnum.serializer)
+      ..add(RespondToInteractionRequestOneOf2.serializer)
+      ..add(RespondToInteractionRequestOneOf2KindEnum.serializer)
+      ..add(RespondToInteractionRequestOneOfKindEnum.serializer)
       ..add(Role.serializer)
       ..add(RotateSecretResponse.serializer)
       ..add(RuleScope.serializer)
@@ -116,6 +130,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ServerMetadata.serializer)
       ..add(SetActivePersonaRequest.serializer)
       ..add(SetCredentialRequest.serializer)
+      ..add(SetMessageFeedbackRequest.serializer)
       ..add(SetSkillAccessModeRequest.serializer)
       ..add(SetSpaceAccessRequest.serializer)
       ..add(SkillDetail.serializer)
@@ -124,6 +139,8 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SpaceAccessMode.serializer)
       ..add(SpaceDetail.serializer)
       ..add(SpaceSummary.serializer)
+      ..add(SseInteractionRequestedEvent.serializer)
+      ..add(SseInteractionResolvedEvent.serializer)
       ..add(SseStatusEvent.serializer)
       ..add(SseSubagentCompletedEvent.serializer)
       ..add(SseSubagentStartedEvent.serializer)
@@ -149,6 +166,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(TestIntegrationResponse.serializer)
       ..add(TokenResponse.serializer)
       ..add(ToolCallSummary.serializer)
+      ..add(ToolDecision.serializer)
       ..add(ToolPermissionRuleSummary.serializer)
       ..add(TurnState.serializer)
       ..add(TurnStatusResponse.serializer)
@@ -161,6 +179,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(UpdateIntegrationRequest.serializer)
       ..add(UpdateMemberRequest.serializer)
       ..add(UpdateOrgRequest.serializer)
+      ..add(UpdatePersonaRequest.serializer)
       ..add(UpdateSkillRequest.serializer)
       ..add(UpdateSpaceRequest.serializer)
       ..add(UpdateUserRequest.serializer)
@@ -219,8 +238,20 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
           () => ListBuilder<PersonaFileSlot>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(QuestionAnswer)]),
+          () => ListBuilder<QuestionAnswer>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
@@ -304,6 +335,15 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(AgentInterface)]),
           () => ListBuilder<AgentInterface>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

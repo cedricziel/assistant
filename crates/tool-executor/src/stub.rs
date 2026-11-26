@@ -216,6 +216,7 @@ mod tests {
             params_schema: serde_json::json!({}),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         }]);
         let specs = stub.to_specs();
         assert_eq!(specs.len(), 1);

@@ -42,58 +42,58 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 - [x] 6.1 Write failing tests for `chat_structured` strategy selection: native schema, forced `respond` tool, then prompt embedding; driven by `ChatOptionsSupport` on a scripted provider. Confirm red. Implement, then verify.
 - [x] 6.2 Write failing tests: validation through `jsonschema`, fenced JSON stripped, one repair retry carrying the errors, and a final error containing the errors and the raw output. Confirm red. Implement, then verify.
-- [ ] 6.3 Write failing wiremock tests for native JSON schema on OpenAI, and for the forced tool on Anthropic. Confirm red. Implement, then verify.
-- [ ] 6.4 Write failing tests: the skill learner and skill improver send schemas and accept fenced or chatty model output that the fallback path repairs. Confirm red. Migrate both judges, then verify.
+- [x] 6.3 Write failing wiremock tests for native JSON schema on OpenAI, and for the forced tool on Anthropic. Confirm red. Implement, then verify.
+- [x] 6.4 Write failing tests: the skill learner and skill improver send schemas and accept fenced or chatty model output that the fallback path repairs. Confirm red. Migrate both judges, then verify.
 
 ## 7. OpenRouter wire client
 
-- [ ] 7.1 Write failing wiremock tests for non-streaming chat: request shape (messages, tools, `max_completion_tokens`), served model in meta, tool-call parsing, text answer, and usage including `cost`. Confirm red.
-- [ ] 7.2 Implement `wire.rs`, `request.rs` and non-streaming `chat`. Verify 5.1.
-- [ ] 7.3 Write failing SSE tests covering comment lines, text deltas, tool-call deltas, the final usage chunk, mid-stream `error` with `finish_reason: "error"`, and `[DONE]`. Confirm red. Implement `stream.rs`, then verify.
-- [ ] 7.4 Write failing error tests for the 402, 403 moderation reasons, 429 with `Retry-After`, 503 retried, 400 not retried, and a 200 body with `error`. Confirm red. Implement `errors.rs` on top of task 2, then verify.
-- [ ] 7.5 Write failing tests for the `HTTP-Referer`, `X-OpenRouter-Title` and `X-OpenRouter-Categories` headers, and config rejection of more than two categories. Confirm red. Implement, then verify.
-- [ ] 7.6 Write failing tests: `[llm.openrouter.provider]` is sent as `provider`, unknown keys are rejected, and `fallback_models` is sent as `models` with the primary first. Confirm red. Implement, then verify.
-- [ ] 7.7 Write failing tests: `session_id` and `user` come from `LlmCallContext` and are omitted without it. Confirm red. Implement, then verify.
-- [ ] 7.8 Switch `OpenRouterProvider` from `ChatCompletionsProvider` to the new client, delete the dead code, and verify the existing OpenRouter tests still pass.
-- [ ] 7.9 Rewrite the chat, routing, identity and errors sections of `docs/openrouter.md`.
-- [ ] 7.10 Write failing wiremock tests for OpenRouter native `tool_choice`, `parallel_tool_calls` and JSON schema, each adding `provider.require_parameters: true`, plus the `response-healing` plugin on native non-streaming structured calls. Confirm red. Implement, then verify.
+- [x] 7.1 Write failing wiremock tests for non-streaming chat: request shape (messages, tools, `max_completion_tokens`), served model in meta, tool-call parsing, text answer, and usage including `cost`. Confirm red.
+- [x] 7.2 Implement `wire.rs`, `request.rs` and non-streaming `chat`. Verify 5.1.
+- [x] 7.3 Write failing SSE tests covering comment lines, text deltas, tool-call deltas, the final usage chunk, mid-stream `error` with `finish_reason: "error"`, and `[DONE]`. Confirm red. Implement `stream.rs`, then verify.
+- [x] 7.4 Write failing error tests for the 402, 403 moderation reasons, 429 with `Retry-After`, 503 retried, 400 not retried, and a 200 body with `error`. Confirm red. Implement `errors.rs` on top of task 2, then verify.
+- [x] 7.5 Write failing tests for the `HTTP-Referer`, `X-OpenRouter-Title` and `X-OpenRouter-Categories` headers, and config rejection of more than two categories. Confirm red. Implement, then verify.
+- [x] 7.6 Write failing tests: `[llm.openrouter.provider]` is sent as `provider`, unknown keys are rejected, and `fallback_models` is sent as `models` with the primary first. Confirm red. Implement, then verify.
+- [x] 7.7 Write failing tests: `session_id` and `user` come from `LlmCallContext` and are omitted without it. Confirm red. Implement, then verify.
+- [x] 7.8 Switch `OpenRouterProvider` from `ChatCompletionsProvider` to the new client, delete the dead code, and verify the existing OpenRouter tests still pass.
+- [x] 7.9 Rewrite the chat, routing, identity and errors sections of `docs/openrouter.md`.
+- [x] 7.10 Write failing wiremock tests for OpenRouter native `tool_choice`, `parallel_tool_calls` and JSON schema, each adding `provider.require_parameters: true`, plus the `response-healing` plugin on native non-streaming structured calls. Confirm red. Implement, then verify.
 
 ## 8. Model catalog and capabilities
 
-- [ ] 8.1 Write failing wiremock tests: context window is the minimum over selectable endpoints and respects `only` or `order` without fallbacks; `vision`, tools, reasoning and file input are derived from the catalog. Confirm red.
-- [ ] 8.2 Implement `catalog.rs` with an `ArcSwap` snapshot, a background fetch, and a 5-second first-call wait. Add `arc-swap` to the workspace dependencies. Verify 6.1.
-- [ ] 8.3 Write failing tests: an unknown model fails each call without an upstream request; a catalog outage yields conservative capabilities and refreshes after the backoff (driven by a test clock). Confirm red. Implement, then verify.
-- [ ] 8.4 Document capability detection in `docs/openrouter.md`.
-- [ ] 8.5 Write a failing test that chat-option support (`tool_choice`, `parallel_tool_calls`, `structured_outputs`/`response_format`, image and audio output) comes from the catalog. Confirm red. Implement, then verify.
+- [x] 8.1 Write failing wiremock tests: context window is the minimum over selectable endpoints and respects `only` or `order` without fallbacks; `vision`, tools, reasoning and file input are derived from the catalog. Confirm red.
+- [x] 8.2 Implement `catalog.rs` with an `ArcSwap` snapshot, a background fetch, and a 5-second first-call wait. Add `arc-swap` to the workspace dependencies. Verify 6.1.
+- [x] 8.3 Write failing tests: an unknown model fails each call without an upstream request; a catalog outage yields conservative capabilities and refreshes after the backoff (driven by a test clock). Confirm red. Implement, then verify.
+- [x] 8.4 Document capability detection in `docs/openrouter.md`.
+- [x] 8.5 Write a failing test that chat-option support (`tool_choice`, `parallel_tool_calls`, `structured_outputs`/`response_format`, image and audio output) comes from the catalog. Confirm red. Implement, then verify.
 
 ## 9. Reasoning
 
-- [ ] 9.1 Write failing tests: config parsing, `effort` combined with `max_tokens` rejected, `reasoning` sent, and an effort the catalog does not support fails with the supported list. Confirm red. Implement, then verify.
-- [ ] 9.2 Write failing tests: text and summary details stream as `Thinking`, encrypted details are hidden, `exclude` emits nothing, and `finish_reason: "length"` with empty content is an error. Confirm red. Implement, then verify.
-- [ ] 9.3 Write failing tests: tool-call `reasoning_details` are stored as `ProviderState`, sent back unchanged and in order, survive a history rebuild from storage, and are not sent when the state's provider differs. Confirm red. Implement, then verify.
-- [ ] 9.4 Document reasoning in `docs/openrouter.md`.
+- [x] 9.1 Write failing tests: config parsing, `effort` combined with `max_tokens` rejected, `reasoning` sent, and an effort the catalog does not support fails with the supported list. Confirm red. Implement, then verify.
+- [x] 9.2 Write failing tests: text and summary details stream as `Thinking`, encrypted details are hidden, `exclude` emits nothing, and `finish_reason: "length"` with empty content is an error. Confirm red. Implement, then verify.
+- [x] 9.3 Write failing tests: tool-call `reasoning_details` are stored as `ProviderState`, sent back unchanged and in order, survive a history rebuild from storage, and are not sent when the state's provider differs. Confirm red. Implement, then verify.
+- [x] 9.4 Document reasoning in `docs/openrouter.md`.
 
 ## 10. Prompt caching
 
-- [ ] 10.1 Write failing table tests for breakpoint placement on Anthropic, Google, Qwen and OpenAI, with caching disabled, and with `ttl = "1h"`. Confirm red. Implement, then verify.
-- [ ] 10.2 Write a failing test that cached and cache-write tokens reach meta. Confirm red. Implement, then verify.
-- [ ] 10.3 Document caching in `docs/openrouter.md`.
+- [x] 10.1 Write failing table tests for breakpoint placement on Anthropic, Google, Qwen and OpenAI, with caching disabled, and with `ttl = "1h"`. Confirm red. Implement, then verify.
+- [x] 10.2 Write a failing test that cached and cache-write tokens reach meta. Confirm red. Implement, then verify.
+- [x] 10.3 Document caching in `docs/openrouter.md`.
 
 ## 11. Web search
 
-- [ ] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
-- [ ] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
-- [ ] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
+- [x] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
+- [x] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
+- [x] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
 
 ## 12. PDFs
 
-- [ ] 12.1 Write failing tests: a PDF becomes a `file` part with a data URI, and the default filename is `document.pdf`. Confirm red. Implement, then verify.
-- [ ] 12.2 Write failing tests for the `pdf_engine` plugin, the `cloudflare-ai` default for models without native file input, no plugin for native models, and coexistence with the web plugin. Confirm red. Implement, then verify.
-- [ ] 12.3 Document PDFs in `docs/openrouter.md`.
+- [x] 12.1 Write failing tests: a PDF becomes a `file` part with a data URI, and the default filename is `document.pdf`. Confirm red. Implement, then verify.
+- [x] 12.2 Write failing tests for the `pdf_engine` plugin, the `cloudflare-ai` default for models without native file input, no plugin for native models, and coexistence with the web plugin. Confirm red. Implement, then verify.
+- [x] 12.3 Document PDFs in `docs/openrouter.md`.
 
 ## 13. Embeddings
 
-- [ ] 13.1 Write failing tests: `embedding_model` is optional, and Ollama, OpenAI and OpenRouter each resolve their own default. Confirm red. Make the field `Option` and update the providers and `cmd_doctor`, then verify.
+- [ ] 13.1 Write failing tests: `embedding_model` is optional, and Ollama, OpenAI and OpenRouter each resolve their own default. Confirm red. Make the field `Option` and update the providers and `cmd_doctor`, then verify. The Ollama and OpenAI defaults are done; the OpenRouter default lands with 13.2.
 - [ ] 13.2 Write failing wiremock tests for OpenRouter `embed` and `embed_batch`: one request with an `input` array, results reordered by `index`, a count mismatch is an error, batches over 2048 are split, and errors are mapped. Confirm red. Implement, then verify.
 - [ ] 13.3 Write a failing `org_context` test for `EmbeddingProviderKind::OpenRouter`, covering the default model, key reuse and routing keys. Confirm red. Implement, then verify.
 - [ ] 13.4 Document embeddings in `docs/openrouter.md` and `docs/operations/configuration.md`.

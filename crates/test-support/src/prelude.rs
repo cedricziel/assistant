@@ -26,14 +26,16 @@ pub use assistant_core::tool::ToolDispatcher;
 pub use assistant_llm_provider::{RecordedCall, ScriptedLlmProvider};
 pub use assistant_storage::{
     AgentStore, AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
-    InMemoryAgentStore, InMemoryAttachmentStore, InMemoryCommandEventStore,
-    InMemoryConversationEventStore, InMemoryConversationStore, InMemoryMemoryChunkStore,
-    InMemoryMessageBus, InMemoryPersonaSkillAccessStore, InMemoryPersonaStore,
-    InMemoryPushSubscriptionStore, InMemoryRefinementsStore, InMemoryScheduledTaskStore,
-    InMemorySlackActiveThreadStore, InMemoryToolPermissionRuleStore, InMemoryWebhookStore,
-    InMemoryWorkflowStore, MemoryChunkStore, PersonaSkillAccessStore, PersonaStore,
-    PushSubscriptionStore, RefinementsStore, ScheduledTaskStore, SlackActiveThreadStore,
-    ToolPermissionRuleStore, WebhookStore, WorkflowStore,
+    ConversationSummaryStore, InMemoryAgentStore, InMemoryAttachmentStore,
+    InMemoryCommandEventStore, InMemoryConversationEventStore, InMemoryConversationStore,
+    InMemoryConversationSummaryStore, InMemoryInteractionStore, InMemoryMemoryChunkStore,
+    InMemoryMessageBus, InMemoryMessageFeedbackStore, InMemoryMessageTimingStore,
+    InMemoryPersonaSkillAccessStore, InMemoryPersonaStore, InMemoryPushSubscriptionStore,
+    InMemoryRefinementsStore, InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore,
+    InMemoryToolPermissionRuleStore, InMemoryWebhookStore, InMemoryWorkflowStore, InteractionStore,
+    MemoryChunkStore, MessageFeedbackStore, MessageTimingStore, PersonaSkillAccessStore,
+    PersonaStore, PushSubscriptionStore, RefinementsStore, ScheduledTaskStore,
+    SlackActiveThreadStore, ToolPermissionRuleStore, WebhookStore, WorkflowStore,
 };
 pub use assistant_storage::{InMemorySkillCatalog, SkillCatalog};
 pub use assistant_storage::{InMemorySurfaceStore, SurfaceStore};

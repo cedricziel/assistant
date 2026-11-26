@@ -17,6 +17,7 @@ part 'message_summary.g.dart';
 /// * [attachments] - Attachments linked to this message.
 /// * [content]
 /// * [createdAt]
+/// * [finishReason] - Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message.
 /// * [id]
 /// * [role]
 /// * [skillName] - Name of the tool or skill that produced this result (present when `role == \"tool\"`).
@@ -35,6 +36,10 @@ abstract class MessageSummary
 
   @BuiltValueField(wireName: r'created_at')
   DateTime get createdAt;
+
+  /// Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message.
+  @BuiltValueField(wireName: r'finish_reason')
+  String? get finishReason;
 
   @BuiltValueField(wireName: r'id')
   String get id;
@@ -101,6 +106,13 @@ class _$MessageSummarySerializer
       object.createdAt,
       specifiedType: const FullType(DateTime),
     );
+    if (object.finishReason != null) {
+      yield r'finish_reason';
+      yield serializers.serialize(
+        object.finishReason,
+        specifiedType: const FullType.nullable(String),
+      );
+    }
     yield r'id';
     yield serializers.serialize(
       object.id,
@@ -182,6 +194,14 @@ class _$MessageSummarySerializer
             specifiedType: const FullType(DateTime),
           ) as DateTime;
           result.createdAt = valueDes;
+          break;
+        case r'finish_reason':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(String),
+          ) as String?;
+          if (valueDes == null) continue;
+          result.finishReason = valueDes;
           break;
         case r'id':
           final valueDes = serializers.deserialize(

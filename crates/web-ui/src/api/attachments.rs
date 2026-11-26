@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use assistant_storage::AttachmentStore as _;
 
+use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::ApiState;
@@ -70,7 +71,7 @@ impl AttachmentMetaResponse {
         (status = 201, description = "Attachment uploaded", body = AttachmentMetaResponse),
         (status = 400, description = "Bad request (invalid MIME type, too large, etc.)"),
         (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Conversation not found"),
+        (status = 404, description = "Conversation not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]

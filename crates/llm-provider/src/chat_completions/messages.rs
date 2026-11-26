@@ -2,7 +2,7 @@
 //!
 //! Converts [`ChatHistoryMessage`] slices into the `async-openai` Chat
 //! Completions request format.  Shared by all OpenAI-compatible providers
-//! (Moonshot, OpenRouter, …).
+//! (such as Moonshot).
 
 use async_openai::types::chat::{
     ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,

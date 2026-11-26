@@ -140,9 +140,42 @@ timeout_secs = 120
 # timeout_secs    = 120
 #
 # [llm.openrouter]
-# referer    = "https://my-app.example.com"  # HTTP-Referer header (OpenRouter TOS)
-# title      = "My App"                       # X-Title header (dashboard display)
-# max_tokens = 8192                            # max completion tokens per response
+# referer         = "https://my-app.example.com"  # HTTP-Referer header (app attribution)
+# title           = "My App"                       # X-OpenRouter-Title header (dashboard display)
+# categories      = ["cli-agent"]                  # X-OpenRouter-Categories header, at most two
+# max_tokens      = 8192                           # sent as max_completion_tokens
+# fallback_models = ["openai/gpt-4o"]              # tried in order after `model`
+# pdf_engine      = "mistral-ocr"                  # "native" | "cloudflare-ai" | "mistral-ocr"
+#
+# # Provider routing, sent as the request's `provider` object. Only set keys
+# # are sent; unknown keys fail config load. See docs/openrouter.md.
+# [llm.openrouter.provider]
+# data_collection = "deny"   # "allow" | "deny"
+# zdr             = true     # zero-data-retention endpoints only
+# # sort          = "price"  # "price" | "throughput" | "latency"
+# # order         = ["anthropic", "openai"]
+#
+# # Reasoning, sent as the request's `reasoning` object. `effort` and
+# # `max_tokens` are exclusive; the effort is checked against the model's
+# # catalog entry. See docs/openrouter.md.
+# [llm.openrouter.reasoning]
+# effort        = "high"   # "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+# # max_tokens  = 4096     # reasoning token budget, instead of `effort`
+# # exclude     = true     # reason without returning the reasoning
+#
+# # Prompt caching breakpoints for anthropic/, google/ and qwen/ models;
+# # other models cache automatically. See docs/openrouter.md.
+# [llm.openrouter.cache]
+# enabled = true   # false sends no cache_control
+# ttl     = "5m"   # "5m" | "1h" (1h: Anthropic models only)
+#
+# # OpenRouter's `web` plugin. When enabled, the local `web-search` tool is
+# # not offered. See docs/openrouter.md.
+# [llm.openrouter.web_search]
+# enabled     = true
+# # engine      = "exa"   # "native" | "exa" | "firecrawl" | "parallel" | "perplexity"
+# # max_results = 5
+# # search_context_size = "high"   # "low" | "medium" | "high"; native engine only
 #
 # Browse models at: https://openrouter.ai/models
 

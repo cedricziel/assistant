@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **createdAt** | [**DateTime**](DateTime.md) |  | 
 **id** | **String** |  | 
+**pinnedAt** | [**DateTime**](DateTime.md) | When the conversation was pinned; absent when it is not pinned. | [optional] 
 **title** | **String** |  | 
 **updatedAt** | [**DateTime**](DateTime.md) |  | 
 

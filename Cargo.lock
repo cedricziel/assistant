@@ -138,6 +138,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84a22b5d51209f6de83d37a0b33d320acb8da88823e42a94c075140708f032a5"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "argon2"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -393,6 +402,7 @@ name = "assistant-llm-provider"
 version = "0.3.1"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "assistant-core",
  "async-openai",
  "async-trait",
@@ -552,6 +562,7 @@ name = "assistant-tool-executor"
 version = "0.3.1"
 dependencies = [
  "anyhow",
+ "assistant-a2ui",
  "assistant-core",
  "assistant-skills",
  "assistant-storage",
@@ -563,6 +574,7 @@ dependencies = [
  "jsonschema",
  "reqwest",
  "scraper",
+ "serde",
  "serde_json",
  "stop-words",
  "tempfile",
@@ -604,6 +616,7 @@ dependencies = [
  "assistant-core",
  "assistant-llm-provider",
  "assistant-mcp-client",
+ "assistant-mcp-server",
  "assistant-runtime",
  "assistant-storage",
  "assistant-transcription",
@@ -626,6 +639,7 @@ dependencies = [
  "mime_guess",
  "p256 0.13.2",
  "reqwest",
+ "rmcp",
  "rust-embed",
  "serde",
  "serde_json",
@@ -4549,17 +4563,21 @@ version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "391f153431ab68664d946513ea0cb3edbca78eaf99c5a983036cacab6220d85b"
 dependencies = [
+ "async-trait",
  "base64 0.23.1",
  "bytes",
  "chrono",
  "futures",
  "http",
+ "http-body",
+ "http-body-util",
  "indexmap 2.14.0",
  "libc",
  "pastey",
  "percent-encoding",
  "pin-project-lite",
  "process-wrap",
+ "rand 0.10.4",
  "reqwest",
  "schemars 1.2.1",
  "serde",
@@ -4570,6 +4588,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower-service",
  "tracing",
  "unicode-general-category",
  "unicode-normalization",

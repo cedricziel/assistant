@@ -6,12 +6,13 @@
 //! - `POST   /api/conversations`           — create a new conversation
 //! - `GET    /api/conversations/{id}`      — get a conversation with its history
 //! - `DELETE /api/conversations/{id}`      — delete a conversation
-//! - `PATCH  /api/conversations/{id}`      — update a conversation's title
+//! - `PATCH  /api/conversations/{id}`      — update a conversation's title or pin state
 
 use std::collections::HashMap;
 use std::convert::Infallible;
 
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::Event;
@@ -24,10 +25,12 @@ use uuid::Uuid;
 
 use assistant_core::types::conversation::MessageRole;
 use assistant_storage::{
-    AttachmentStore as _, ConversationEvent, ConversationRecord, ConversationStore,
-    SqliteConversationStore,
+    AttachmentStore as _, ConversationEvent, ConversationPatch, ConversationRecord,
+    ConversationStore, MetadataUpdate, SqliteConversationStore,
 };
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::attachments::AttachmentMetaResponse;
@@ -43,7 +46,8 @@ pub(crate) async fn caller_store(ctx: &SpaceCtx, state: &ApiState) -> SqliteConv
         .with_user_id(ctx.auth.user_id.0.clone())
 }
 
-/// Load a conversation the caller owns, or the `404` response to return.
+/// Load a conversation the caller owns, or the enveloped `404`/`500` response
+/// to return.
 ///
 /// A conversation owned by someone else is reported as missing, so the
 /// response does not confirm that the id exists.
@@ -53,10 +57,13 @@ pub(crate) async fn owned_conversation(
 ) -> Result<ConversationRecord, Response> {
     match store.get_conversation(id).await {
         Ok(Some(conv)) => Ok(conv),
-        Ok(None) => Err((StatusCode::NOT_FOUND, "Conversation not found").into_response()),
+        Ok(None) => Err(json_error(StatusCode::NOT_FOUND, "Conversation not found")),
         Err(e) => {
             warn!("Failed to load conversation {id}: {e}");
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error",
+            ))
         }
     }
 }
@@ -70,6 +77,9 @@ pub struct ConversationSummary {
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// When the conversation was pinned; absent when it is not pinned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<DateTime<Utc>>,
 }
 
 impl From<&ConversationRecord> for ConversationSummary {
@@ -79,6 +89,7 @@ impl From<&ConversationRecord> for ConversationSummary {
             title: display_title(record),
             created_at: record.created_at,
             updated_at: record.updated_at,
+            pinned_at: record.pinned_at,
         }
     }
 }
@@ -111,10 +122,121 @@ pub struct ToolCallSummary {
     pub result: Option<String>,
     /// `"ok"`, `"error"`, or `"denied"`.
     pub status: String,
+    /// Provider-assigned id of the call, when the provider supplied one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// Structured output of the tool, a JSON object with a `kind` tag. Absent
+    /// when the tool returned text only, the data exceeded the size limit, or
+    /// the call predates structured data. Each `kind` is defined by a JSON
+    /// Schema in `schemas/tool-results/`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub data: Option<serde_json::Value>,
 }
 
 /// Maximum length for tool result strings in history summaries.
 const TOOL_RESULT_HISTORY_LIMIT: usize = 512;
+
+/// The tool-result rows of a conversation, with a record of which have been
+/// joined to an assistant tool call.
+struct ToolRows {
+    rows: Vec<assistant_core::types::conversation::Message>,
+    claimed: Vec<bool>,
+}
+
+impl ToolRows {
+    fn new(rows: Vec<assistant_core::types::conversation::Message>) -> Self {
+        let claimed = vec![false; rows.len()];
+        Self { rows, claimed }
+    }
+
+    /// Claim the unclaimed row of `turn` that satisfies `matches`, the
+    /// earliest first.
+    fn claim(
+        &mut self,
+        turn: i64,
+        matches: impl Fn(&assistant_core::types::conversation::Message) -> bool,
+    ) -> Option<usize> {
+        let idx = self
+            .rows
+            .iter()
+            .enumerate()
+            .position(|(i, r)| !self.claimed[i] && r.turn == turn && matches(r))?;
+        self.claimed[idx] = true;
+        Some(idx)
+    }
+
+    /// Summarise the `tool_calls_json` entries of one assistant row.
+    ///
+    /// Each call joins to its result row by `tool_call_id`. Calls without a
+    /// matching id take the next unclaimed row of the same tool name in the
+    /// turn, which is the dispatch order.
+    fn summaries(&mut self, turn: i64, items: &[serde_json::Value]) -> Vec<ToolCallSummary> {
+        let calls: Vec<(String, Option<String>, &serde_json::Value)> = items
+            .iter()
+            .filter_map(|v| {
+                let name = v.get("name").and_then(|n| n.as_str())?.to_string();
+                let id = v.get("id").and_then(|i| i.as_str()).map(str::to_string);
+                Some((name, id, v))
+            })
+            .collect();
+
+        let mut joined: Vec<Option<usize>> = calls
+            .iter()
+            .map(|(_, id, _)| {
+                let id = id.as_deref()?;
+                self.claim(turn, |r| r.tool_call_id.as_deref() == Some(id))
+            })
+            .collect();
+        for (slot, (name, _, _)) in joined.iter_mut().zip(&calls) {
+            if slot.is_none() {
+                *slot = self.claim(turn, |r| r.skill_name.as_deref() == Some(name.as_str()));
+            }
+        }
+
+        calls
+            .into_iter()
+            .zip(joined)
+            .map(|((name, id, v), row)| {
+                let row = row.map(|i| &self.rows[i]);
+                let result = row.map(|r| truncate_for_history(&r.content));
+                let status = match row.and_then(|r| r.tool_status.as_deref()) {
+                    Some(status) => status.to_string(),
+                    None => status_from_content(result.as_deref()).to_string(),
+                };
+                ToolCallSummary {
+                    name,
+                    arguments: v.get("params").cloned(),
+                    result,
+                    status,
+                    tool_call_id: row.and_then(|r| r.tool_call_id.clone()).or(id),
+                    data: row
+                        .and_then(|r| r.tool_data_json.as_deref())
+                        .and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok())
+                        .filter(serde_json::Value::is_object),
+                }
+            })
+            .collect()
+    }
+}
+
+/// Cut `s` to [`TOOL_RESULT_HISTORY_LIMIT`] bytes on a character boundary.
+fn truncate_for_history(s: &str) -> String {
+    if s.len() <= TOOL_RESULT_HISTORY_LIMIT {
+        return s.to_string();
+    }
+    let cut = s.floor_char_boundary(TOOL_RESULT_HISTORY_LIMIT);
+    format!("{}…", &s[..cut])
+}
+
+/// Status of a row stored before `tool_status` existed.
+fn status_from_content(result: Option<&str>) -> &'static str {
+    match result {
+        Some(r) if r.starts_with("Error executing") => "error",
+        Some(r) if r.starts_with("User denied") => "denied",
+        _ => "ok",
+    }
+}
 
 /// A single message in a conversation.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -139,6 +261,10 @@ pub struct MessageSummary {
     /// Attachments linked to this message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AttachmentMetaResponse>,
+    /// Why the reply ended early; `"cancelled"` for a reply the user stopped.
+    /// Omitted for every other message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
 }
 
 // -- Request types -----------------------------------------------------------
@@ -150,11 +276,43 @@ pub struct CreateConversationRequest {
     pub title: Option<String>,
 }
 
-/// Body for `PATCH /api/conversations/{id}`.
+/// Longest title a user may set, in Unicode scalar values.
+const MAX_TITLE_CHARS: usize = 200;
+
+/// Body for `PATCH /api/conversations/{id}`. At least one field is required.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateConversationRequest {
-    /// New title for the conversation.
-    pub title: String,
+    /// New title. Trimmed; must be 1 to 200 characters after trimming.
+    pub title: Option<String>,
+    /// `true` pins the conversation, `false` unpins it.
+    pub pinned: Option<bool>,
+}
+
+impl UpdateConversationRequest {
+    /// Validate the request and turn it into a storage patch, or the message
+    /// for the `400` response.
+    fn into_patch(self) -> Result<ConversationPatch, &'static str> {
+        if self.title.is_none() && self.pinned.is_none() {
+            return Err("Nothing to update: provide title or pinned");
+        }
+        let title = match self.title {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return Err("Title must not be blank");
+                }
+                if trimmed.chars().count() > MAX_TITLE_CHARS {
+                    return Err("Title must be at most 200 characters");
+                }
+                Some(trimmed.to_owned())
+            }
+            None => None,
+        };
+        Ok(ConversationPatch {
+            title,
+            pinned: self.pinned,
+        })
+    }
 }
 
 // -- Handlers ----------------------------------------------------------------
@@ -382,7 +540,7 @@ pub async fn create_conversation(
         (status = 200, description = "Conversation with messages", body = ConversationDetail),
         (status = 400, description = "Invalid ID"),
         (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Not found"),
+        (status = 404, description = "Not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -426,16 +584,14 @@ pub async fn get_conversation(
         }
     }
 
-    // Collect tool-result messages (role=tool) keyed by (turn, tool_name)
-    // so we can join them with the corresponding assistant tool-call messages.
-    let mut tool_results: HashMap<(i64, String), String> = HashMap::new();
-    for m in &history {
-        if matches!(m.role, MessageRole::Tool)
-            && let Some(ref name) = m.skill_name
-        {
-            tool_results.insert((m.turn, name.clone()), m.content.clone());
-        }
-    }
+    // Tool-result rows (role=tool), joined to assistant tool calls below.
+    let mut tool_rows = ToolRows::new(
+        history
+            .iter()
+            .filter(|m| matches!(m.role, MessageRole::Tool) && m.skill_name.is_some())
+            .cloned()
+            .collect(),
+    );
 
     let messages = history
         .into_iter()
@@ -444,45 +600,7 @@ pub async fn get_conversation(
             let tool_calls = m.tool_calls_json.as_deref().and_then(|json| {
                 serde_json::from_str::<Vec<serde_json::Value>>(json)
                     .ok()
-                    .map(|items| {
-                        items
-                            .into_iter()
-                            .filter_map(|v| {
-                                let name =
-                                    v.get("name").and_then(|n| n.as_str()).map(str::to_string)?;
-                                let arguments = v.get("params").cloned();
-                                let raw_result = tool_results.get(&(m.turn, name.clone())).cloned();
-                                let result = raw_result.map(|r| {
-                                    if r.len() > TOOL_RESULT_HISTORY_LIMIT {
-                                        let mut s = r[..TOOL_RESULT_HISTORY_LIMIT].to_string();
-                                        s.push('…');
-                                        s
-                                    } else {
-                                        r
-                                    }
-                                });
-                                let status = if result
-                                    .as_ref()
-                                    .is_some_and(|r| r.starts_with("Error executing"))
-                                {
-                                    "error"
-                                } else if result
-                                    .as_ref()
-                                    .is_some_and(|r| r.starts_with("User denied"))
-                                {
-                                    "denied"
-                                } else {
-                                    "ok"
-                                };
-                                Some(ToolCallSummary {
-                                    name,
-                                    arguments,
-                                    result,
-                                    status: status.to_string(),
-                                })
-                            })
-                            .collect::<Vec<_>>()
-                    })
+                    .map(|items| tool_rows.summaries(m.turn, &items))
                     .filter(|v: &Vec<_>| !v.is_empty())
             });
             let tts_available =
@@ -498,6 +616,7 @@ pub async fn get_conversation(
                 skill_name: m.skill_name,
                 tts_available,
                 attachments,
+                finish_reason: m.finish_reason.map(|r| r.as_str().to_string()),
             }
         })
         .collect();
@@ -560,7 +679,10 @@ pub async fn delete_conversation(
     }
 }
 
-/// `PATCH /api/conversations/{id}` — update a conversation's title.
+/// `PATCH /api/conversations/{id}` — update a conversation's title and/or pin state.
+///
+/// Neither change moves the conversation in the list: only new messages bump
+/// `updated_at`.
 #[utoipa::path(
     patch,
     path = "/api/conversations/{id}",
@@ -569,10 +691,11 @@ pub async fn delete_conversation(
     request_body = UpdateConversationRequest,
     responses(
         (status = 200, description = "Updated conversation", body = ConversationSummary),
-        (status = 400, description = "Invalid ID"),
+        (status = 400, description = "Invalid ID or body", body = ErrorBody),
         (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Not found"),
-        (status = 500, description = "Internal server error"),
+        (status = 403, description = "Read-only access", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
+        (status = 500, description = "Internal server error", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -580,14 +703,21 @@ pub async fn update_conversation(
     ctx: SpaceCtx,
     State(state): State<ApiState>,
     Path(id): Path<String>,
-    Json(body): Json<UpdateConversationRequest>,
+    body: Result<Json<UpdateConversationRequest>, JsonRejection>,
 ) -> Response {
     if let Err(denied) = ctx.require(Access::Write) {
         return denied.into_response();
     }
-    let conv_id = match Uuid::parse_str(&id) {
-        Ok(u) => u,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
+    let Ok(conv_id) = Uuid::parse_str(&id) else {
+        return json_error(StatusCode::BAD_REQUEST, "Invalid conversation ID");
+    };
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => return json_error(StatusCode::BAD_REQUEST, rejection.body_text()),
+    };
+    let patch = match body.into_patch() {
+        Ok(patch) => patch,
+        Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
     };
 
     let store = caller_store(&ctx, &state).await.with_broadcaster(
@@ -595,30 +725,17 @@ pub async fn update_conversation(
             .conversation_broadcasters
             .for_space(&ctx.org_slug, &ctx.space_slug),
     );
-    if let Err(response) = owned_conversation(&store, conv_id).await {
-        return response;
-    }
-    match store.update_title(conv_id, &body.title).await {
-        Ok(()) => {}
-        Err(e) if e.to_string().contains("not found") => {
-            return (StatusCode::NOT_FOUND, "Conversation not found").into_response();
+    match store.update_metadata(conv_id, patch).await {
+        Ok(MetadataUpdate::Updated(record)) => {
+            Json(ConversationSummary::from(&record)).into_response()
         }
+        Ok(MetadataUpdate::NotFound) => json_error(StatusCode::NOT_FOUND, "Conversation not found"),
         Err(e) => {
-            warn!("Failed to update conversation title: {e}");
-            return (
+            warn!("Failed to update conversation {conv_id}: {e}");
+            json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to update conversation",
             )
-                .into_response();
-        }
-    }
-
-    match store.get_conversation(conv_id).await {
-        Ok(Some(c)) => Json(ConversationSummary::from(&c)).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
-        Err(e) => {
-            warn!("Failed to fetch updated conversation: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
         }
     }
 }
@@ -805,6 +922,211 @@ mod tests {
         assert_eq!(json["messages"], serde_json::json!([]));
     }
 
+    /// Seed an assistant tool-call row followed by tool rows, then load the
+    /// conversation through the handler and return the assistant's
+    /// `tool_calls` array.
+    async fn history_tool_calls(
+        calls: serde_json::Value,
+        tool_rows: Vec<assistant_core::types::conversation::Message>,
+    ) -> Vec<serde_json::Value> {
+        use assistant_core::types::conversation::Message;
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Tools")).await.unwrap();
+
+        let mut user = Message::user(conv.id, "go");
+        user.turn = 1;
+        store.save_message(&user).await.unwrap();
+        let mut assistant = Message::assistant(conv.id, "");
+        assistant.turn = 1;
+        assistant.tool_calls_json = Some(calls.to_string());
+        store.save_message(&assistant).await.unwrap();
+        for mut row in tool_rows {
+            row.conversation_id = conv.id;
+            row.turn = 1;
+            store.save_message(&row).await.unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        json["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|m| m["tool_calls"].as_array().cloned())
+            .expect("assistant message carries tool_calls")
+    }
+
+    fn tool_row(
+        name: &str,
+        content: &str,
+        id: Option<&str>,
+        status: Option<&str>,
+        data: Option<serde_json::Value>,
+    ) -> assistant_core::types::conversation::Message {
+        use assistant_core::types::conversation::{Message, MessageRole};
+
+        let mut m = Message::new(Uuid::nil(), MessageRole::Tool, content);
+        m.skill_name = Some(name.into());
+        m.tool_call_id = id.map(str::to_string);
+        m.tool_status = status.map(str::to_string);
+        m.tool_data_json = data.map(|d| d.to_string());
+        m
+    }
+
+    #[tokio::test]
+    async fn history_joins_same_named_calls_by_ordinal_without_ids() {
+        let calls = serde_json::json!([
+            {"name": "bash", "params": {"command": "echo A"}},
+            {"name": "bash", "params": {"command": "echo B"}},
+        ]);
+        let rows = vec![
+            tool_row("bash", "A", None, None, None),
+            tool_row("bash", "B", None, None, None),
+        ];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["result"], "A");
+        assert_eq!(tc[1]["result"], "B");
+    }
+
+    #[tokio::test]
+    async fn history_joins_by_tool_call_id_with_own_data() {
+        let calls = serde_json::json!([
+            {"name": "bash", "params": {}, "id": "c1"},
+            {"name": "bash", "params": {}, "id": "c2"},
+        ]);
+        // Rows stored in the opposite order: the id wins over position.
+        let rows = vec![
+            tool_row(
+                "bash",
+                "B",
+                Some("c2"),
+                Some("ok"),
+                Some(serde_json::json!({"kind": "terminal", "stdout": "B"})),
+            ),
+            tool_row(
+                "bash",
+                "A",
+                Some("c1"),
+                Some("ok"),
+                Some(serde_json::json!({"kind": "terminal", "stdout": "A"})),
+            ),
+        ];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["result"], "A");
+        assert_eq!(tc[0]["data"]["stdout"], "A");
+        assert_eq!(tc[0]["tool_call_id"], "c1");
+        assert_eq!(tc[1]["result"], "B");
+        assert_eq!(tc[1]["data"]["stdout"], "B");
+        assert_eq!(tc[1]["tool_call_id"], "c2");
+    }
+
+    #[tokio::test]
+    async fn history_status_comes_from_the_column() {
+        let calls = serde_json::json!([{"name": "bash", "params": {}}]);
+        let rows = vec![tool_row("bash", "exit 1", None, Some("error"), None)];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["status"], "error");
+    }
+
+    #[tokio::test]
+    async fn history_null_metadata_omits_data_and_uses_prefix_rule() {
+        let calls = serde_json::json!([
+            {"name": "a", "params": {}},
+            {"name": "b", "params": {}},
+            {"name": "c", "params": {}},
+        ]);
+        let rows = vec![
+            tool_row("a", "Error executing a: boom", None, None, None),
+            tool_row("b", "User denied b", None, None, None),
+            tool_row("c", "fine", None, None, None),
+        ];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["status"], "error");
+        assert_eq!(tc[1]["status"], "denied");
+        assert_eq!(tc[2]["status"], "ok");
+        for call in &tc {
+            assert!(call.get("data").is_none(), "NULL data must be omitted");
+        }
+    }
+
+    #[tokio::test]
+    async fn history_truncates_multibyte_result_without_panicking() {
+        // 'é' is two bytes, so byte 512 falls inside a character.
+        let content = format!("x{}", "é".repeat(400));
+        let calls = serde_json::json!([{"name": "bash", "params": {}}]);
+        let rows = vec![tool_row("bash", &content, None, None, None)];
+        let tc = history_tool_calls(calls, rows).await;
+        let result = tc[0]["result"].as_str().unwrap();
+        assert!(result.ends_with('…'));
+        assert!(content.starts_with(result.trim_end_matches('…')));
+    }
+
+    #[tokio::test]
+    async fn history_surfaces_tool_call_id_when_row_has_it() {
+        let calls = serde_json::json!([{"name": "bash", "params": {}, "id": "call_7"}]);
+        let rows = vec![tool_row("bash", "ok", Some("call_7"), Some("ok"), None)];
+        let tc = history_tool_calls(calls, rows).await;
+        assert_eq!(tc[0]["tool_call_id"], "call_7");
+    }
+
+    #[tokio::test]
+    async fn get_conversation_exposes_finish_reason_only_when_set() {
+        use assistant_core::types::conversation::{Message, MessageFinishReason};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Test")).await.unwrap();
+        let user = Message::user(conv.id, "hi");
+        let mut stopped = Message::assistant(conv.id, "Partial answer");
+        stopped.turn = 1;
+        stopped.finish_reason = Some(MessageFinishReason::Cancelled);
+        let mut plain = Message::assistant(conv.id, "Full answer");
+        plain.turn = 2;
+        for m in [&user, &stopped, &plain] {
+            store.save_message(m).await.unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let messages = json["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert!(
+            messages[0].get("finish_reason").is_none(),
+            "user message omits finish_reason"
+        );
+        assert_eq!(messages[1]["finish_reason"], "cancelled");
+        assert!(
+            messages[2].get("finish_reason").is_none(),
+            "ordinary assistant message omits finish_reason"
+        );
+    }
+
     #[tokio::test]
     async fn get_conversation_unknown_id_returns_404() {
         let server = MockServer::start().await;
@@ -938,6 +1260,300 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // -- PATCH validation, pin and error envelopes -----------------------------
+
+    /// Send `PATCH /conversations/{id}` as the default system caller.
+    async fn patch(
+        state: super::super::ApiState,
+        id: &str,
+        body: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        patch_as(state, assistant_core::auth::AuthContext::system(), id, body).await
+    }
+
+    async fn patch_as(
+        state: super::super::ApiState,
+        auth: assistant_core::auth::AuthContext,
+        id: &str,
+        body: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let resp = app_with_auth(state, auth)
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/conversations/{id}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = body_bytes(resp.into_body()).await;
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    fn caller(
+        user: &str,
+        role: assistant_core::identity::Role,
+    ) -> assistant_core::auth::AuthContext {
+        let mut ctx = assistant_core::auth::AuthContext::system();
+        ctx.user_id = assistant_core::identity::UserId::from(user);
+        ctx.space_roles = std::collections::HashMap::from([(
+            assistant_core::identity::SpaceId::from("default"),
+            role,
+        )]);
+        ctx
+    }
+
+    #[tokio::test]
+    async fn patch_trims_the_title() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await;
+        let (status, json) = patch(state, &id.to_string(), r#"{"title":"  Trip plan  "}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["title"], "Trip plan", "title must be trimmed");
+    }
+
+    #[tokio::test]
+    async fn patch_rejects_invalid_bodies_with_400_and_error_key() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let too_long = format!(r#"{{"title":"{}"}}"#, "é".repeat(201));
+        let cases = [
+            ("blank title", r#"{"title":"   "}"#.to_owned()),
+            ("title over 200 chars", too_long),
+            ("empty object", "{}".to_owned()),
+            ("wrong-typed pinned", r#"{"pinned":"yes"}"#.to_owned()),
+            ("malformed JSON", "{not json".to_owned()),
+        ];
+        for (name, body) in cases {
+            let (status, json) = patch(state.clone(), &id, &body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+            assert!(
+                json["error"].is_string(),
+                "{name}: missing error key: {json}"
+            );
+        }
+        let (status, json) = patch(state, "not-a-uuid", r#"{"title":"x"}"#).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "invalid uuid");
+        assert!(json["error"].is_string(), "invalid uuid: missing error key");
+    }
+
+    #[tokio::test]
+    async fn patch_accepts_a_title_of_exactly_200_chars() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let body = format!(r#"{{"title":"{}"}}"#, "é".repeat(200));
+        let (status, _) = patch(state, &id, &body).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "200 two-byte chars are within the limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_pinned_returns_pinned_at_and_unpinned_omits_it() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let (_, before) = patch(state.clone(), &id, r#"{"title":"x"}"#).await;
+        assert!(
+            before.get("pinned_at").is_none(),
+            "unset pinned_at must be absent: {before}"
+        );
+
+        let (status, pinned) = patch(state.clone(), &id, r#"{"pinned":true}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            pinned["pinned_at"].is_string(),
+            "pinned_at missing: {pinned}"
+        );
+
+        let (_, unpinned) = patch(state, &id, r#"{"pinned":false}"#).await;
+        assert!(
+            unpinned.get("pinned_at").is_none(),
+            "unpin must drop pinned_at: {unpinned}"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_title_and_pinned_together_emit_one_upserted() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await;
+        let broadcaster = state
+            .conversation_broadcasters
+            .for_space("default", "default");
+        let mut rx = broadcaster.subscribe();
+        let (status, _) = patch(state, &id.to_string(), r#"{"title":"Both","pinned":true}"#).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let first = rx.try_recv().expect("one upserted event");
+        match first {
+            assistant_storage::ConversationEvent::Upserted(rec) => {
+                assert_eq!(rec.title.as_deref(), Some("Both"));
+                assert!(rec.pinned_at.is_some());
+            }
+            other => panic!("expected Upserted, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "title + pinned must emit exactly one event"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_another_users_conversation_returns_404_with_error_key() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let other = caller("mallory", assistant_core::identity::Role::Member);
+        let (status, json) = patch_as(state, other, &id, r#"{"title":"x"}"#).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(json["error"].is_string(), "missing error key: {json}");
+    }
+
+    #[tokio::test]
+    async fn patch_by_read_only_member_returns_403_with_error_key() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let viewer = caller("system", assistant_core::identity::Role::Viewer);
+        let (status, json) = patch_as(state, viewer, &id, r#"{"title":"x"}"#).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(json["error"].is_string(), "missing error key: {json}");
+    }
+
+    #[tokio::test]
+    async fn rename_does_not_reorder_the_list() {
+        let (state, storage) = event_log_state().await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let older = store.create_conversation(Some("Older")).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        store.create_conversation(Some("Newer")).await.unwrap();
+
+        let (status, _) = patch(
+            state.clone(),
+            &older.id.to_string(),
+            r#"{"title":"Renamed"}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/conversations")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let list = body_json(resp.into_body()).await;
+        let titles: Vec<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["title"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            titles,
+            ["Newer", "Renamed"],
+            "a rename must not move the row"
+        );
+    }
+
+    struct StubTts;
+
+    #[async_trait::async_trait]
+    impl assistant_transcription::TtsProvider for StubTts {
+        fn name(&self) -> &str {
+            "stub"
+        }
+
+        async fn synthesize(
+            &self,
+            _request: assistant_transcription::TtsRequest,
+        ) -> anyhow::Result<assistant_transcription::TtsResult> {
+            Ok(assistant_transcription::TtsResult {
+                audio_data: b"audio".to_vec(),
+                mime_type: "audio/mpeg".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_conversation_404_is_a_json_envelope_on_every_route() {
+        let (state, _) = event_log_state().await;
+        let state = state.with_tts_provider(std::sync::Arc::new(StubTts));
+        let missing = Uuid::new_v4();
+        let (multipart_type, multipart) = multipart_body("file", "a.png", "image/png", &tiny_png());
+        let json_type = "application/json".to_owned();
+        let json_body = br#"{"command":"help","message":"hi"}"#.to_vec();
+        let routes = [
+            (
+                "GET",
+                format!("/conversations/{missing}"),
+                &json_type,
+                &json_body,
+            ),
+            (
+                "POST",
+                format!("/conversations/{missing}/command"),
+                &json_type,
+                &json_body,
+            ),
+            (
+                "POST",
+                format!("/conversations/{missing}/attachments"),
+                &multipart_type,
+                &multipart,
+            ),
+            (
+                "GET",
+                format!("/conversations/{missing}/turns/{}/status", Uuid::new_v4()),
+                &json_type,
+                &json_body,
+            ),
+            (
+                "POST",
+                format!("/conversations/{missing}/messages"),
+                &json_type,
+                &json_body,
+            ),
+            (
+                "GET",
+                format!("/messages/{missing}/audio"),
+                &json_type,
+                &json_body,
+            ),
+        ];
+        for (method, uri, content_type, body) in routes {
+            let resp = app(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(&uri)
+                        .header("Content-Type", content_type.as_str())
+                        .body(Body::from(body.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = resp.status();
+            let bytes = body_bytes(resp.into_body()).await;
+            let json: serde_json::Value = serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| panic!("{method} {uri}: body is not JSON: {bytes:?}"));
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}");
+            assert!(
+                json["error"].is_string(),
+                "{method} {uri}: missing error key"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1126,6 +1742,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stream_snapshot_and_upserted_carry_pinned_at() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await;
+        let broadcaster = state
+            .conversation_broadcasters
+            .for_space("default", "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system")
+            .with_broadcaster(broadcaster);
+        store
+            .update_metadata(
+                id,
+                assistant_storage::ConversationPatch {
+                    title: None,
+                    pinned: Some(true),
+                },
+            )
+            .await
+            .unwrap();
+
+        // A second pin-state change arrives as a delta after the snapshot.
+        let app = app(state);
+        let handle = tokio::spawn(async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            body_bytes(resp.into_body()).await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        store
+            .update_metadata(
+                id,
+                assistant_storage::ConversationPatch {
+                    title: Some("Renamed".into()),
+                    pinned: None,
+                },
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(store);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("stream should finish")
+            .expect("stream task should not panic");
+        let text = String::from_utf8_lossy(&body);
+        let events: Vec<&str> = text.split("\n\n").filter(|e| !e.is_empty()).collect();
+        assert!(
+            events.len() >= 2,
+            "expected snapshot and upserted, got: {text}"
+        );
+        for event in &events[..2] {
+            assert!(
+                event.contains("\"pinned_at\""),
+                "event lacks pinned_at: {event}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn test_update_title_broadcasts_upserted_with_new_title() {
         // Closes the loop the title-generator worker depends on: when the
         // worker calls update_title on an existing conversation, an Upserted
@@ -1205,6 +1888,7 @@ mod tests {
                 user_id: Some("system".to_string()),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
+                pinned_at: None,
             },
         ));
 
@@ -1218,6 +1902,7 @@ mod tests {
                 user_id: Some("system".to_string()),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
+                pinned_at: None,
             },
         ));
 
@@ -1341,6 +2026,7 @@ mod tests {
             user_id: Some("system".to_string()),
             created_at,
             updated_at: created_at + chrono::Duration::hours(1),
+            pinned_at: None,
         }
     }
 

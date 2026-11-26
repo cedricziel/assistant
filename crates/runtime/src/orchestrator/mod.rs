@@ -12,8 +12,8 @@ use assistant_core::types::conversation::{ExecutionContext, Interface, Message, 
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
     LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec, TurnScope,
-    TurnToolSource, context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type,
-    is_text_mime_type, strip_html_comments,
+    TurnTiming, TurnToolSource, context::agent_base_dir, is_resizable_mime_type,
+    is_supported_mime_type, is_text_mime_type, strip_html_comments,
 };
 use assistant_storage::{
     AttachmentStore as _AttachmentStoreTrait, SkillRegistry, StorageLayer,
@@ -31,6 +31,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
+use crate::history::{FinalAnswerMeta, TurnHistory, persist_final_answer};
+use turn_timing::{CallMarks, TurnTimer};
+
 // ── Submodules ────────────────────────────────────────────────────────────────
 
 mod dispatch;
@@ -38,15 +41,19 @@ mod prompt;
 pub mod stream_event;
 mod turn_cancellations;
 mod turn_control;
+mod turn_registry;
+mod turn_timing;
 
 mod subagent;
+mod submit;
 mod worker;
 
 #[cfg(test)]
 mod tests;
 
 pub use stream_event::OrchestratorEvent;
-pub use worker::SubmitOptions;
+pub use submit::SubmitTurn;
+pub use turn_registry::{TurnLease, TurnMode, TurnRegistry};
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -126,7 +133,7 @@ pub trait ConfirmationCallback: Send + Sync {
 pub enum CancelOutcome {
     /// A cancellation token was registered for this `request_id` and has been
     /// triggered. The turn worker will abort on its next yield point and
-    /// `submit_turn` will return an error containing the cancellation marker.
+    /// `submit` will return an error containing the cancellation marker.
     Cancelled,
     /// No matching turn was registered — either the turn already finished
     /// (success or error), was never started, or used a different request_id.
@@ -151,6 +158,12 @@ pub const TURN_CANCELLED_BEFORE_START_MARKER: &str = "cancelled_before_start";
 /// from being redelivered to a second worker.
 pub const DEFAULT_BUS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
+/// How long a worker defers a turn whose conversation is held by an exclusive
+/// turn. Each deferral is a redelivery, and the bus gives up after
+/// `MAX_TURN_REDELIVERIES`, so this must stay long enough for one branching
+/// turn to finish.
+pub const DEFAULT_TURN_DEFER_DELAY: Duration = Duration::from_secs(15);
+
 /// The result of a single orchestrator turn.
 pub struct TurnResult {
     /// The assistant's final answer to the user.
@@ -171,6 +184,8 @@ pub struct TurnResult {
     /// `true` if any tool dispatch in this turn returned an `Err(...)`.
     /// Used to gate post-turn skill-learner evaluation.
     pub had_errors: bool,
+    /// How long the turn took. `None` when the turn was not measured.
+    pub timing: Option<TurnTiming>,
 }
 
 // ── Internal enums ────────────────────────────────────────────────────────────
@@ -236,6 +251,7 @@ fn end_turn_spec() -> ToolSpec {
         }),
         is_mutating: false,
         requires_confirmation: false,
+        requires_rich_client: false,
     }
 }
 
@@ -300,12 +316,17 @@ pub struct Orchestrator {
     /// Cancellation tokens for running subagents, keyed by agent ID.
     pub(crate) agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
     /// Cancellation tokens for in-flight bus turns, keyed by request ID
-    /// (the `batch_id` / `correlation_id` set by `submit_turn`).
-    /// When `submit_turn` times out it cancels the token so the worker
+    /// (the `batch_id` / `correlation_id` set by `submit`).
+    /// When `submit` times out it cancels the token so the worker
     /// drops the in-progress turn future rather than running to completion.
     /// Also remembers requests cancelled before a worker claimed them, so the
     /// worker skips them.
     pub(crate) turn_cancellations: tokio::sync::RwLock<turn_cancellations::TurnCancellations>,
+    /// The turns running in this process, per conversation.
+    pub(crate) turn_registry: TurnRegistry,
+    /// How long the worker defers a turn that claims a conversation held by an
+    /// exclusive (branching) turn. Tests shorten it with `with_turn_defer_delay`.
+    pub(crate) turn_defer_delay: Duration,
     /// OTel metric instruments for GenAI and operational metrics.
     pub(crate) metrics: crate::MetricsRecorder,
     /// Active assistant agent ID for memory/workspace conversation scoping.
@@ -315,7 +336,7 @@ pub struct Orchestrator {
     pub adapter_registry: crate::AdapterRegistry,
     /// Context compaction configuration.
     pub(crate) compaction_config: assistant_core::types::features::CompactionConfig,
-    /// How long `submit_turn` waits for the worker to return a result before
+    /// How long `submit` waits for the worker to return a result before
     /// timing out. Defaults to 10 800 s (3 h). Configurable per persona via
     /// `with_submit_timeout`.
     pub(crate) submit_timeout_secs: u64,
@@ -388,6 +409,8 @@ impl Orchestrator {
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             turn_cancellations: tokio::sync::RwLock::new(Default::default()),
+            turn_registry: TurnRegistry::default(),
+            turn_defer_delay: DEFAULT_TURN_DEFER_DELAY,
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
             compaction_config,
@@ -435,7 +458,7 @@ impl Orchestrator {
         ToolOverlay::new(binding.source.tools_for_turn(&scope).await)
     }
 
-    /// Override the `submit_turn` timeout for this orchestrator instance.
+    /// Override the `submit` timeout for this orchestrator instance.
     ///
     /// Call this after [`Orchestrator::new`] to apply a per-persona timeout
     /// loaded from the database.  The value must be > 0.
@@ -447,6 +470,12 @@ impl Orchestrator {
     /// Override how often the worker refreshes the bus claim of a running turn.
     pub fn with_bus_heartbeat_interval(mut self, interval: Duration) -> Self {
         self.bus_heartbeat_interval = interval;
+        self
+    }
+
+    /// Override how long the worker defers a turn held back by an exclusive lease.
+    pub fn with_turn_defer_delay(mut self, delay: Duration) -> Self {
+        self.turn_defer_delay = delay;
         self
     }
 
@@ -465,14 +494,14 @@ impl Orchestrator {
         &self.bus
     }
 
-    /// Cancel an in-flight turn by `request_id` (the same UUID `submit_turn`
+    /// Cancel an in-flight turn by `request_id` (the same UUID `submit`
     /// assigned, also used as the SSE `run_id` when callers pass it through
-    /// [`Self::submit_turn_with_request_id`]).
+    /// [`Self::submit`]).
     ///
     /// Cancellation is propagated via the existing per-turn `CancellationToken`
     /// stored in [`Self::turn_cancellations`]; the worker's `tokio::select!`
     /// aborts the in-flight LLM/tool work on the next yield point, and
-    /// `submit_turn` returns an error containing the cancellation marker.
+    /// `submit` returns an error containing the cancellation marker.
     ///
     /// Returns [`CancelOutcome::Cancelled`] if a matching token was found,
     /// [`CancelOutcome::NotFound`] if the turn has already finished or was
@@ -491,6 +520,18 @@ impl Orchestrator {
     /// i.e. a turn is in flight under this id. Exposed primarily for tests.
     pub async fn is_turn_in_flight(&self, request_id: Uuid) -> bool {
         self.turn_cancellations.read().await.contains(request_id)
+    }
+
+    /// The registry of turns running in this process. It is per process: a
+    /// turn another service runs against the same database is not visible
+    /// here.
+    pub fn turn_registry(&self) -> &TurnRegistry {
+        &self.turn_registry
+    }
+
+    /// True while any turn runs in `conversation_id` on this orchestrator.
+    pub fn conversation_turn_in_flight(&self, conversation_id: Uuid) -> bool {
+        self.turn_registry.in_flight(conversation_id)
     }
 
     /// Attach an [`AudioStore`] so that audio produced by the `voice-response`
@@ -560,15 +601,35 @@ impl Orchestrator {
         config
     }
 
-    /// The provider a turn of `conversation_id` runs on: the default, or one
-    /// for the model its `/model` override names.
-    async fn llm_for(&self, conversation_id: Uuid) -> Result<Arc<dyn LlmProvider>> {
-        let model = self
-            .conversation_configs
-            .read()
-            .await
-            .get(&conversation_id)
-            .and_then(|config| config.model_override.clone());
+    /// The provider a turn of `conversation_id` runs on: the model the turn
+    /// itself asks for, else the one its `/model` override names, else the
+    /// default.
+    /// The provider is [`ready`](LlmProvider::ready), so the capabilities a
+    /// turn reads are final.
+    async fn llm_for(
+        &self,
+        conversation_id: Uuid,
+        turn_model: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>> {
+        let llm = self.select_llm(conversation_id, turn_model).await?;
+        llm.ready().await;
+        Ok(llm)
+    }
+
+    async fn select_llm(
+        &self,
+        conversation_id: Uuid,
+        turn_model: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>> {
+        let model = match turn_model {
+            Some(model) => Some(model.to_string()),
+            None => self
+                .conversation_configs
+                .read()
+                .await
+                .get(&conversation_id)
+                .and_then(|config| config.model_override.clone()),
+        };
         let Some(model) = model.filter(|m| m != self.llm.model_name()) else {
             return Ok(Arc::clone(&self.llm));
         };
@@ -656,13 +717,9 @@ impl Orchestrator {
 
         info!(path = %boot_path.display(), "Running BOOT.md startup hook");
         match self
-            .submit_turn(
-                &assistant_core::auth::AuthContext::system(),
-                &stripped,
-                conversation_id,
-                interface,
-                None,
-                SubmitOptions::default(),
+            .submit(
+                SubmitTurn::new(stripped.as_str(), conversation_id, interface)
+                    .with_auth(&assistant_core::auth::AuthContext::system()),
             )
             .await
         {
@@ -849,6 +906,7 @@ impl Orchestrator {
                 params_schema: h.params_schema(),
                 is_mutating: h.is_mutating(),
                 requires_confirmation: h.requires_confirmation(),
+                requires_rich_client: h.requires_rich_client(),
             })
             .collect();
 
@@ -870,12 +928,18 @@ impl Orchestrator {
 
         // 4. Load global tool specs and merge with extensions.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
-        let llm = self.llm_for(conversation_id).await?;
+        let llm = self
+            .llm_for(conversation_id, identity.model_override.as_deref())
+            .await?;
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
-        let global_specs =
-            Self::filter_tool_specs(self.executor.to_specs_with(&overlay), &provider_caps);
+        let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
+        let global_specs = Self::filter_tool_specs(
+            self.executor.to_specs_with(&overlay),
+            &provider_caps,
+            rich_client,
+        );
         let all_specs: Vec<ToolSpec> = ext_specs
             .iter()
             .cloned()
@@ -950,6 +1014,7 @@ impl Orchestrator {
                 &history,
                 &all_specs,
             );
+            let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
@@ -1040,7 +1105,13 @@ impl Orchestrator {
                         &interface,
                         &ext_map,
                         &conv_store,
+                        &self.storage.message_timing_store(),
                         turn_had_errors,
+                        FinalAnswerMeta {
+                            traceparent: llm_traceparent,
+                            timing: None,
+                            model: Some(llm.model_name().to_string()),
+                        },
                     )
                     .await?;
                     match outcome {
@@ -1210,6 +1281,7 @@ impl Orchestrator {
                             attachment_ids: turn_attachment_ids,
                             message_id: None,
                             had_errors: turn_had_errors,
+                            timing: None,
                         });
                     }
                 }
@@ -1230,10 +1302,13 @@ impl Orchestrator {
                     if let Err(e) = conv_store.save_message(&thinking_msg).await {
                         warn!("Failed to persist thinking step: {e}");
                     }
-                    history.push(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: text,
-                    });
+                    history.push(
+                        ChatHistoryMessage::Text {
+                            role: ChatRole::Assistant,
+                            content: text,
+                        },
+                        Some(thinking_msg.id),
+                    );
                 }
             }
         }
@@ -1275,6 +1350,7 @@ impl Orchestrator {
             "Starting turn"
         );
 
+        let mut timer = TurnTimer::new(self.clock.now_instant());
         let (_conv_cx, turn_cx) = setup_turn_trace(trace_cx, conversation_id, &interface);
 
         // 1-3. Set up conversation, load prior history, persist user message.
@@ -1289,12 +1365,18 @@ impl Orchestrator {
             .await?;
 
         // 4. Load all registered tool specs.
-        let llm = self.llm_for(conversation_id).await?;
+        let llm = self
+            .llm_for(conversation_id, identity.model_override.as_deref())
+            .await?;
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
-        let tool_specs =
-            Self::filter_tool_specs(self.executor.to_specs_with(&overlay), &provider_caps);
+        let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
+        let tool_specs = Self::filter_tool_specs(
+            self.executor.to_specs_with(&overlay),
+            &provider_caps,
+            rich_client,
+        );
 
         // 5. Build the system prompt fresh from disk.
         let system_prompt = self.compose_system_prompt(&interface).await;
@@ -1360,13 +1442,28 @@ impl Orchestrator {
                 &history,
                 &tool_specs,
             );
+            let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
             let llm_start = std::time::Instant::now();
-            let response = if let Some(ref oe_sink) = token_sink {
+            let call_start = self.clock.now_instant();
+            let (response, call_end, marks) = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
                 let (chunk_tx, mut chunk_rx) = mpsc::channel::<StreamChunk>(64);
                 let oe_sink_clone = oe_sink.clone();
+                let marks = Arc::new(tokio::sync::Mutex::new(CallMarks::default()));
+                let forward_marks = Arc::clone(&marks);
+                let forward_clock = Arc::clone(&self.clock);
                 let forward_handle = tokio::spawn(async move {
                     while let Some(chunk) = chunk_rx.recv().await {
+                        // Read the clock before any await so the instant is
+                        // the chunk's arrival, not the lock's.
+                        let arrived = forward_clock.now_instant();
+                        {
+                            let mut m = forward_marks.lock().await;
+                            m.first_chunk.get_or_insert(arrived);
+                            if matches!(chunk, StreamChunk::Text(_)) {
+                                m.first_text.get_or_insert(arrived);
+                            }
+                        }
                         let event = match chunk {
                             StreamChunk::Text(t) => OrchestratorEvent::Token(t),
                             StreamChunk::Thinking(t) => OrchestratorEvent::Thinking(t),
@@ -1384,20 +1481,24 @@ impl Orchestrator {
                     )
                     .instrument(iteration_span.clone())
                     .await;
+                let call_end = self.clock.now_instant();
                 // Wait for the forwarding task to drain any buffered tokens before
                 // continuing — ensures callers see all Token events after this await.
                 forward_handle.await.ok();
-                result
+                let marks = *marks.lock().await;
+                (result, call_end, marks)
             } else {
-                llm.chat_with(
-                    &system_prompt,
-                    &history,
-                    &tool_specs,
-                    &self.chat_options(),
-                    None,
-                )
-                .instrument(iteration_span.clone())
-                .await
+                let result = llm
+                    .chat_with(
+                        &system_prompt,
+                        &history,
+                        &tool_specs,
+                        &self.chat_options(),
+                        None,
+                    )
+                    .instrument(iteration_span.clone())
+                    .await;
+                (result, self.clock.now_instant(), CallMarks::default())
             };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
@@ -1419,6 +1520,7 @@ impl Orchestrator {
                     return Err(e);
                 }
             };
+            timer.record_call(call_start, call_end, marks, response.meta().output_tokens);
             crate::otel_spans::finish_llm_span(
                 &mut llm_span,
                 response.meta(),
@@ -1449,20 +1551,29 @@ impl Orchestrator {
                 LlmResponse::FinalAnswer(text, _meta) => {
                     info!(iteration, "LLM returned final answer");
 
-                    let saved_message_id = if !text.trim().is_empty() {
+                    let (saved_message_id, timing) = if !text.trim().is_empty() {
+                        let timing = timer.finish(self.clock.now_instant());
                         let assistant_msg = {
                             let mut m = Message::assistant(conversation_id, &text);
                             m.turn = base_turn + iteration as i64 + 1;
                             m
                         };
                         let msg_id = assistant_msg.id;
-                        conv_store
-                            .save_message(&assistant_msg)
-                            .instrument(iteration_span.clone())
-                            .await?;
-                        Some(msg_id)
+                        persist_final_answer(
+                            &conv_store,
+                            &self.storage.message_timing_store(),
+                            assistant_msg,
+                            FinalAnswerMeta {
+                                traceparent: llm_traceparent,
+                                timing: Some(timing.clone()),
+                                model: Some(llm.model_name().to_string()),
+                            },
+                        )
+                        .instrument(iteration_span.clone())
+                        .await?;
+                        (Some(msg_id), Some(timing))
                     } else {
-                        None
+                        (None, None)
                     };
 
                     crate::conversation_indexer::spawn_index(
@@ -1481,7 +1592,7 @@ impl Orchestrator {
                                 tool_count: turn_tool_count,
                                 had_errors: turn_had_errors,
                                 active_skill: active_skill.clone(),
-                                history: history.clone(),
+                                history: history.to_vec(),
                             },
                             self.learning_config.clone(),
                             Arc::clone(&self.storage),
@@ -1496,6 +1607,7 @@ impl Orchestrator {
                         attachment_ids: turn_attachment_ids,
                         message_id: saved_message_id,
                         had_errors: turn_had_errors,
+                        timing,
                     });
                 }
 
@@ -1584,10 +1696,13 @@ impl Orchestrator {
                     if let Err(e) = conv_store.save_message(&thinking_msg).await {
                         warn!("Failed to persist thinking step: {e}");
                     }
-                    history.push(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: text,
-                    });
+                    history.push(
+                        ChatHistoryMessage::Text {
+                            role: ChatRole::Assistant,
+                            content: text,
+                        },
+                        Some(thinking_msg.id),
+                    );
                 }
             }
         }
@@ -1664,7 +1779,7 @@ impl Orchestrator {
         attachments: Vec<ContentBlock>,
         attachment_ids: &[Uuid],
         agent_id: &str,
-    ) -> Result<(SqliteConversationStore, Vec<ChatHistoryMessage>, i64)> {
+    ) -> Result<(SqliteConversationStore, TurnHistory, i64)> {
         // Note: returns the concrete SqliteConversationStore because the
         // function is an internal helper called only from this impl. External
         // consumer signatures (helper fns in dispatch.rs, turn_control.rs,
@@ -1713,7 +1828,10 @@ impl Orchestrator {
             .await
             .unwrap_or_default();
 
-        let mut history = crate::history::messages_to_chat_history(prior, &att_map);
+        let summaries = self.storage.conversation_summary_store();
+        let mut history =
+            crate::history::build_turn_history(prior, conversation_id, &summaries, &att_map)
+                .await?;
         crate::history::sanitize_history(&mut history);
 
         // Load stored attachments by ID and convert to the appropriate ContentBlock.
@@ -1748,14 +1866,20 @@ impl Orchestrator {
         }
 
         if all_attachments.is_empty() {
-            history.push(ChatHistoryMessage::Text {
-                role: ChatRole::User,
-                content: user_message.to_string(),
-            });
+            history.push(
+                ChatHistoryMessage::Text {
+                    role: ChatRole::User,
+                    content: user_message.to_string(),
+                },
+                Some(user_msg.id),
+            );
         } else {
             let mut blocks = vec![ContentBlock::Text(user_message.to_string())];
             blocks.extend(all_attachments);
-            history.push(ChatHistoryMessage::MultimodalUser { content: blocks });
+            history.push(
+                ChatHistoryMessage::MultimodalUser { content: blocks },
+                Some(user_msg.id),
+            );
         }
 
         Ok((conv_store, history, base_turn))

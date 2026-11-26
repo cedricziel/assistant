@@ -1,6 +1,7 @@
+import 'package:assistant_ui/models.dart';
+
 import '../../api/models/stream_event.dart';
 import 'chat_history_mapping.dart';
-import 'chat_models.dart';
 
 // Pure reducers that apply one SSE event to the chat message list.
 //
@@ -132,6 +133,7 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
     record.status = resolvedStatus;
     record.arguments = event.arguments;
     record.result = event.result;
+    record.data = event.data;
     record.duration = DateTime.now().difference(record.startedAt);
     msgs[entryIdx].isStreaming = false;
   } else {
@@ -150,6 +152,7 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
             status: resolvedStatus,
             arguments: event.arguments,
             result: event.result,
+            data: event.data,
           ),
         ],
       ),

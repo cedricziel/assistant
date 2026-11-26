@@ -10,9 +10,13 @@ mod contract {
     pub mod command_event_store;
     pub mod conversation_event_store;
     pub mod conversation_store;
+    pub mod conversation_summary_store;
     pub mod integration_credential_store;
     pub mod integration_health_store;
     pub mod integration_store;
+    pub mod interaction_store;
+    pub mod message_feedback_store;
+    pub mod message_timing_store;
     pub mod push_subscription_store;
     pub mod refinements_store;
     pub mod scheduled_task_store;

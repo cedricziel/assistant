@@ -72,6 +72,7 @@ import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/device_code_response_schema.dart';
 import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/execute_command_request.dart';
+import 'package:assistant_api/src/model/feedback_rating.dart';
 import 'package:assistant_api/src/model/http_auth_security_scheme.dart';
 import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
 import 'package:assistant_api/src/model/integration_auth_kind.dart';
@@ -82,11 +83,15 @@ import 'package:assistant_api/src/model/integration_policy_response.dart';
 import 'package:assistant_api/src/model/integration_status.dart';
 import 'package:assistant_api/src/model/integration_summary.dart';
 import 'package:assistant_api/src/model/integration_trust.dart';
+import 'package:assistant_api/src/model/interaction_detail.dart';
+import 'package:assistant_api/src/model/interaction_outcome_view.dart';
+import 'package:assistant_api/src/model/interaction_status_view.dart';
 import 'package:assistant_api/src/model/interface_instance_response.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
 import 'package:assistant_api/src/model/list_tasks_response.dart';
 import 'package:assistant_api/src/model/member_entry.dart';
 import 'package:assistant_api/src/model/message.dart';
+import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
@@ -105,12 +110,18 @@ import 'package:assistant_api/src/model/persona_file_slot.dart';
 import 'package:assistant_api/src/model/persona_from_template_response.dart';
 import 'package:assistant_api/src/model/persona_skill_access.dart';
 import 'package:assistant_api/src/model/persona_summary.dart';
+import 'package:assistant_api/src/model/protected_resource_metadata.dart';
 import 'package:assistant_api/src/model/publish_catalog_item_request.dart';
 import 'package:assistant_api/src/model/push_notification_config.dart';
 import 'package:assistant_api/src/model/put_org_oidc_config_request.dart';
+import 'package:assistant_api/src/model/question_answer.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
 import 'package:assistant_api/src/model/register_agent_request.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of1.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.dart';
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
 import 'package:assistant_api/src/model/rule_scope.dart';
@@ -123,6 +134,7 @@ import 'package:assistant_api/src/model/server_capabilities.dart';
 import 'package:assistant_api/src/model/server_metadata.dart';
 import 'package:assistant_api/src/model/set_active_persona_request.dart';
 import 'package:assistant_api/src/model/set_credential_request.dart';
+import 'package:assistant_api/src/model/set_message_feedback_request.dart';
 import 'package:assistant_api/src/model/set_skill_access_mode_request.dart';
 import 'package:assistant_api/src/model/set_space_access_request.dart';
 import 'package:assistant_api/src/model/skill_detail.dart';
@@ -131,6 +143,8 @@ import 'package:assistant_api/src/model/space_access_entry.dart';
 import 'package:assistant_api/src/model/space_access_mode.dart';
 import 'package:assistant_api/src/model/space_detail.dart';
 import 'package:assistant_api/src/model/space_summary.dart';
+import 'package:assistant_api/src/model/sse_interaction_requested_event.dart';
+import 'package:assistant_api/src/model/sse_interaction_resolved_event.dart';
 import 'package:assistant_api/src/model/sse_status_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_completed_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_started_event.dart';
@@ -156,6 +170,7 @@ import 'package:assistant_api/src/model/template_response.dart';
 import 'package:assistant_api/src/model/test_integration_response.dart';
 import 'package:assistant_api/src/model/token_response.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
+import 'package:assistant_api/src/model/tool_decision.dart';
 import 'package:assistant_api/src/model/tool_permission_rule_summary.dart';
 import 'package:assistant_api/src/model/turn_state.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
@@ -168,6 +183,7 @@ import 'package:assistant_api/src/model/update_integration_policy_request.dart';
 import 'package:assistant_api/src/model/update_integration_request.dart';
 import 'package:assistant_api/src/model/update_member_request.dart';
 import 'package:assistant_api/src/model/update_org_request.dart';
+import 'package:assistant_api/src/model/update_persona_request.dart';
 import 'package:assistant_api/src/model/update_skill_request.dart';
 import 'package:assistant_api/src/model/update_space_request.dart';
 import 'package:assistant_api/src/model/update_user_request.dart';
@@ -249,6 +265,7 @@ part 'serializers.g.dart';
   DeviceCodeResponseSchema,
   ErrorBody,
   ExecuteCommandRequest,
+  FeedbackRating,
   HttpAuthSecurityScheme,
   ImplicitOAuthFlow,
   IntegrationAuthKind,
@@ -259,11 +276,15 @@ part 'serializers.g.dart';
   IntegrationStatus,
   IntegrationSummary,
   IntegrationTrust,
+  InteractionDetail,
+  InteractionOutcomeView,
+  InteractionStatusView,
   InterfaceInstanceResponse,
   ListTaskPushNotificationConfigsResponse,
   ListTasksResponse,
   MemberEntry,
   Message,
+  MessageFeedbackResponse,
   MessageSummary,
   ModelPart,
   MutualTlsSecurityScheme,
@@ -282,12 +303,18 @@ part 'serializers.g.dart';
   PersonaFromTemplateResponse,
   PersonaSkillAccess,
   PersonaSummary,
+  ProtectedResourceMetadata,
   PublishCatalogItemRequest,
   PushNotificationConfig,
   PutOrgOidcConfigRequest,
+  QuestionAnswer,
   QuickMessageRequest,
   QuickMessageResponse,
   RegisterAgentRequest,
+  RespondToInteractionRequest,
+  RespondToInteractionRequestOneOf,
+  RespondToInteractionRequestOneOf1,
+  RespondToInteractionRequestOneOf2,
   Role,
   RotateSecretResponse,
   RuleScope,
@@ -300,6 +327,7 @@ part 'serializers.g.dart';
   ServerMetadata,
   SetActivePersonaRequest,
   SetCredentialRequest,
+  SetMessageFeedbackRequest,
   SetSkillAccessModeRequest,
   SetSpaceAccessRequest,
   SkillDetail,
@@ -308,6 +336,8 @@ part 'serializers.g.dart';
   SpaceAccessMode,
   SpaceDetail,
   SpaceSummary,
+  SseInteractionRequestedEvent,
+  SseInteractionResolvedEvent,
   SseStatusEvent,
   SseSubagentCompletedEvent,
   SseSubagentStartedEvent,
@@ -333,6 +363,7 @@ part 'serializers.g.dart';
   TestIntegrationResponse,
   TokenResponse,
   ToolCallSummary,
+  ToolDecision,
   ToolPermissionRuleSummary,
   TurnState,
   TurnStatusResponse,
@@ -345,6 +376,7 @@ part 'serializers.g.dart';
   UpdateIntegrationRequest,
   UpdateMemberRequest,
   UpdateOrgRequest,
+  UpdatePersonaRequest,
   UpdateSkillRequest,
   UpdateSpaceRequest,
   UpdateUserRequest,
