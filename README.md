@@ -134,6 +134,7 @@ ollama pull qwen2.5:14b
 | `schedule-task` | Schedule a prompt task (cron or one-shot)                  |
 | `list-tasks`    | List all scheduled tasks with status and next run time     |
 | `cancel-task`   | Cancel a scheduled task by ID or name                      |
+| `plan-update`   | Publish the working plan (steps with statuses) to the user |
 
 **Subagent Processes**
 
