@@ -412,6 +412,7 @@ impl LlmProvider for OpenAIProvider {
         ChatOptionsSupport {
             tool_choice: true,
             parallel_tool_calls: true,
+            json_schema: false,
         }
     }
 
@@ -1207,6 +1208,7 @@ mod tests {
             let options = ChatOptions {
                 tool_choice: ToolChoice::Required,
                 parallel_tool_calls: Some(false),
+                ..ChatOptions::default()
             };
             let body = request(&[], options);
             assert!(body.get("tool_choice").is_none(), "{body}");

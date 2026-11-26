@@ -40,8 +40,8 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 6. Structured output (all providers)
 
-- [ ] 6.1 Write failing tests for `chat_structured` strategy selection: native schema, forced `respond` tool, then prompt embedding; driven by `ChatOptionsSupport` on a scripted provider. Confirm red. Implement, then verify.
-- [ ] 6.2 Write failing tests: validation through `jsonschema`, fenced JSON stripped, one repair retry carrying the errors, and a final error containing the errors and the raw output. Confirm red. Implement, then verify.
+- [x] 6.1 Write failing tests for `chat_structured` strategy selection: native schema, forced `respond` tool, then prompt embedding; driven by `ChatOptionsSupport` on a scripted provider. Confirm red. Implement, then verify.
+- [x] 6.2 Write failing tests: validation through `jsonschema`, fenced JSON stripped, one repair retry carrying the errors, and a final error containing the errors and the raw output. Confirm red. Implement, then verify.
 - [ ] 6.3 Write failing wiremock tests for native JSON schema on OpenAI, and for the forced tool on Anthropic. Confirm red. Implement, then verify.
 - [ ] 6.4 Write failing tests: the skill learner and skill improver send schemas and accept fenced or chatty model output that the fallback path repairs. Confirm red. Migrate both judges, then verify.
 

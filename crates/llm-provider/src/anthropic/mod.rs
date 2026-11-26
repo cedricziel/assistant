@@ -424,6 +424,7 @@ impl LlmProvider for AnthropicProvider {
         ChatOptionsSupport {
             tool_choice: true,
             parallel_tool_calls: true,
+            json_schema: false,
         }
     }
 
@@ -1914,6 +1915,7 @@ mod tests {
             let forced = ChatOptions {
                 tool_choice: ToolChoice::Required,
                 parallel_tool_calls: Some(true),
+                ..ChatOptions::default()
             };
             assert_eq!(
                 body(forced)["tool_choice"],
@@ -1922,6 +1924,7 @@ mod tests {
             let none = ChatOptions {
                 tool_choice: ToolChoice::None,
                 parallel_tool_calls: Some(false),
+                ..ChatOptions::default()
             };
             assert_eq!(
                 body(none)["tool_choice"],
