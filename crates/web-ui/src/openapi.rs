@@ -369,6 +369,7 @@ pub struct ApiErrorResponse {
         crate::oauth::complete::complete,
         crate::oauth::revoke::revoke,
         crate::oauth::revoke::metadata,
+        crate::mcp::protected_resource_metadata,
         // Organization management
         crate::api::orgs::list_orgs,
         crate::api::orgs::create_org,
@@ -581,6 +582,7 @@ pub struct ApiErrorResponse {
             crate::oauth::device::DeviceVerifyForm,
             crate::oauth::revoke::RevokeRequest,
             crate::oauth::revoke::ServerMetadata,
+            crate::mcp::ProtectedResourceMetadata,
             crate::oauth::complete::CompleteResponse,
             crate::oauth::DeviceCodeResponseSchema,
             crate::oauth::ClientRegistrationSchema,

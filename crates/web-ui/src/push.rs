@@ -71,7 +71,7 @@ pub async fn ensure_vapid_keys(
 /// Returns `(private_key_base64url, public_key_base64url)` where:
 /// - The private key is PEM-encoded PKCS#8, then base64url-encoded
 /// - The public key is the raw uncompressed point (65 bytes), base64url-encoded
-fn generate_vapid_keypair() -> Result<(String, String)> {
+pub(crate) fn generate_vapid_keypair() -> Result<(String, String)> {
     let signing_key = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
     let verifying_key = signing_key.verifying_key();
 

@@ -146,6 +146,7 @@ Class | Method | HTTP request | Description
 [*OauthApi*](doc/OauthApi.md) | [**deviceVerifySubmit**](doc/OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
 [*OauthApi*](doc/OauthApi.md) | [**identifyPost**](doc/OauthApi.md#identifypost) | **POST** /oauth/authorize/identify | POST /oauth/authorize/identify — find the org an email signs in to.
 [*OauthApi*](doc/OauthApi.md) | [**metadata**](doc/OauthApi.md#metadata) | **GET** /.well-known/oauth-authorization-server | GET /.well-known/oauth-authorization-server
+[*OauthApi*](doc/OauthApi.md) | [**protectedResourceMetadata**](doc/OauthApi.md#protectedresourcemetadata) | **GET** /.well-known/oauth-protected-resource/mcp | GET /.well-known/oauth-protected-resource/mcp
 [*OauthApi*](doc/OauthApi.md) | [**register**](doc/OauthApi.md#register) | **POST** /oauth/register | POST /oauth/register — register a new OAuth2 client.
 [*OauthApi*](doc/OauthApi.md) | [**revoke**](doc/OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh or access token.
 [*OauthApi*](doc/OauthApi.md) | [**token**](doc/OauthApi.md#token) | **POST** /oauth/token | POST /oauth/token
@@ -317,6 +318,7 @@ Class | Method | HTTP request | Description
  - [PersonaFromTemplateResponse](doc/PersonaFromTemplateResponse.md)
  - [PersonaSkillAccess](doc/PersonaSkillAccess.md)
  - [PersonaSummary](doc/PersonaSummary.md)
+ - [ProtectedResourceMetadata](doc/ProtectedResourceMetadata.md)
  - [PublishCatalogItemRequest](doc/PublishCatalogItemRequest.md)
  - [PushNotificationConfig](doc/PushNotificationConfig.md)
  - [PutOrgOidcConfigRequest](doc/PutOrgOidcConfigRequest.md)

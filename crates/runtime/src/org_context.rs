@@ -151,10 +151,9 @@ fn build_embedding_provider(
                     .clone()
                     .unwrap_or_else(|| main_cfg.base_url.clone()),
                 timeout_secs: main_cfg.timeout_secs,
-                embedding_model: emb_cfg
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| "nomic-embed-text".to_string()),
+                embedding_model: emb_cfg.model.clone().unwrap_or_else(|| {
+                    assistant_llm_provider::ollama::DEFAULT_EMBEDDING_MODEL.to_string()
+                }),
             };
             let provider = OllamaProvider::new(ollama_cfg)
                 .context("Failed to create Ollama embedding provider")?;
@@ -179,10 +178,9 @@ fn build_embedding_provider(
                     .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
                 timeout_secs: main_cfg.timeout_secs,
                 max_tokens: 8192,
-                embedding_model: emb_cfg
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| "text-embedding-3-small".to_string()),
+                embedding_model: emb_cfg.model.clone().unwrap_or_else(|| {
+                    assistant_llm_provider::openai::DEFAULT_EMBEDDING_MODEL.to_string()
+                }),
                 web_search: None,
             };
             let provider = OpenAIProvider::new(provider_cfg, api_key.expose())

@@ -275,7 +275,7 @@ chat call waits for that fetch for at most 5 seconds.
 | PDF input      | Native when the model lists `file` in its input modalities; otherwise parsed by the `file-parser` plugin. See [PDFs](#pdfs)                                                                                                        |
 | Context window | Smallest `context_length` among the endpoints routing can select                                                                                                                                                                   |
 | Chat options   | `tool_choice`, `parallel_tool_calls` and JSON schemas are sent natively when the model lists them in `supported_parameters`, with `provider.require_parameters = true`; otherwise `tool_choice` falls back to a prompt instruction |
-| Embeddings     | No                                                                                                                                                                                                                                 |
+| Embeddings     | Yes, through OpenRouter's embeddings endpoint                                                                                                                                                                                      |
 
 History compaction reads the context window on every turn.
 `[llm.openrouter.provider]` decides which endpoints count:
@@ -295,15 +295,8 @@ fetch is retried on a chat call, no sooner than 10 minutes later. Once a
 fetch succeeds, the catalog is not fetched again for the life of the
 provider.
 
-Since OpenRouter does not expose an embeddings endpoint, configure a
-dedicated embedding provider if you need vector search:
-
-```toml
-[llm.embeddings]
-provider = "voyage"
-model    = "voyage-3-lite"
-# api_key = "pa-..."  # or set VOYAGE_API_KEY env var
-```
+Embeddings for vector search use OpenRouter's embeddings endpoint with
+`[llm] embedding_model`, or `openai/text-embedding-3-small` when it is unset.
 
 ## Models
 

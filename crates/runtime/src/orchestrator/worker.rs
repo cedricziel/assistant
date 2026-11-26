@@ -294,6 +294,7 @@ impl Orchestrator {
                         space_id: turn_req.space_id.map(SpaceId::from),
                         interactive: turn_req.interactive,
                         run_id: msg.batch_id,
+                        model_override: turn_req.model_override.clone(),
                     };
 
                     // Keep the bus claim alive for as long as the turn runs so

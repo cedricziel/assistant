@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use assistant_core::permission::PermissionPolicy;
-use assistant_mcp_server::{AssistantMcpServer, serve_stdio};
+use assistant_mcp_server::{AssistantMcpServer, ListChangeListeners, serve_stdio};
 use assistant_runtime::StubOrchestrationEngine;
 use assistant_storage::InMemorySkillCatalog;
 use assistant_tool_executor::StubToolDispatcher;
@@ -38,6 +38,7 @@ fn serve_child() {
         Arc::new(InMemorySkillCatalog::new()),
         PermissionPolicy::default(),
         std::env::temp_dir(),
+        ListChangeListeners::default(),
     );
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
     runtime.block_on(serve_stdio(server)).expect("serve stdio");

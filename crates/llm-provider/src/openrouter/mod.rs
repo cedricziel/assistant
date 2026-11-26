@@ -37,6 +37,8 @@ use self::request::{ModelInputs, RequestSettings, apply_options, build_chat_requ
 
 const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const DEFAULT_MAX_TOKENS: u32 = 8192;
+/// Embedding model used when `[llm] embedding_model` is unset.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "openai/text-embedding-3-small";
 
 // ── OpenRouterProvider ──────────────────────────────────────────────────────
 
@@ -44,6 +46,7 @@ const DEFAULT_MAX_TOKENS: u32 = 8192;
 ///
 pub struct OpenRouterProvider {
     client: OpenRouterClient,
+    embedding_model: String,
     catalog: Arc<OpenRouterCatalog>,
     settings: RequestSettings,
     base_url: String,
@@ -140,6 +143,10 @@ impl OpenRouterProvider {
                 cfg.timeout_secs,
                 extra_headers,
             )?,
+            embedding_model: cfg
+                .embedding_model
+                .clone()
+                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
             settings: RequestSettings {
                 model: cfg.model.clone(),
                 max_tokens,
@@ -248,11 +255,16 @@ impl LlmProvider for OpenRouterProvider {
             .await
     }
 
-    async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
-        Err(anyhow::anyhow!(
-            "OpenRouter does not support embeddings directly. \
-             Configure a dedicated embedding provider under [llm.embeddings]."
-        ))
+    async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        self.client
+            .embed(&self.embedding_model, &[text])
+            .await?
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("OpenRouter returned no embedding"))
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        self.client.embed(&self.embedding_model, texts).await
     }
 
     fn provider_name(&self) -> &str {
@@ -2228,6 +2240,144 @@ mod tests {
         let parts = body["messages"][1]["content"].as_array().unwrap();
         assert_eq!(parts.len(), 1, "{parts:?}");
         assert!(body.get("plugins").is_none(), "{body}");
+    }
+
+    // ── Wiremock: embeddings ────────────────────────────────────────────
+
+    /// Answers each embeddings request with one vector per input, `[i, len]`,
+    /// listed in reverse order to check reordering by `index`.
+    async fn mount_embeddings(server: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path("/embeddings"))
+            .respond_with(|req: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&req.body).unwrap();
+                let count = body["input"].as_array().unwrap().len();
+                let data: Vec<Value> = (0..count)
+                    .rev()
+                    .map(|i| json!({"object": "embedding", "index": i, "embedding": [i as f32, count as f32]}))
+                    .collect();
+                ResponseTemplate::new(200).set_body_json(json!({"object": "list", "data": data}))
+            })
+            .mount(server)
+            .await;
+    }
+
+    async fn embedding_bodies(server: &MockServer) -> Vec<Value> {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/embeddings")
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn embed_batch_sends_one_request_and_returns_input_order() {
+        let server = MockServer::start().await;
+        mount_embeddings(&server).await;
+
+        let vectors = make_provider(&server.uri())
+            .embed_batch(&["a", "b", "c"])
+            .await
+            .unwrap();
+
+        assert_eq!(vectors, [vec![0.0, 3.0], vec![1.0, 3.0], vec![2.0, 3.0]]);
+        let bodies = embedding_bodies(&server).await;
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(
+            bodies[0],
+            json!({"model": "openai/text-embedding-3-small", "input": ["a", "b", "c"], "encoding_format": "float"})
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_returns_one_vector_with_the_configured_model() {
+        let server = MockServer::start().await;
+        mount_embeddings(&server).await;
+        let cfg = LlmConfig {
+            provider: LlmProviderKind::OpenRouter,
+            api_key: Some(Secret::new("test-key")),
+            base_url: server.uri(),
+            embedding_model: Some("qwen/qwen3-embedding-8b".into()),
+            ..LlmConfig::default()
+        };
+
+        let vector = OpenRouterProvider::from_llm_config(&cfg)
+            .unwrap()
+            .embed("hello")
+            .await
+            .unwrap();
+
+        assert_eq!(vector, [0.0, 1.0]);
+        assert_eq!(
+            embedding_bodies(&server).await[0]["model"],
+            "qwen/qwen3-embedding-8b"
+        );
+    }
+
+    #[tokio::test]
+    async fn batches_over_2048_texts_are_split() {
+        let server = MockServer::start().await;
+        mount_embeddings(&server).await;
+        let texts: Vec<String> = (0..2050).map(|i| format!("t{i}")).collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+
+        let vectors = make_provider(&server.uri())
+            .embed_batch(&refs)
+            .await
+            .unwrap();
+
+        assert_eq!(vectors.len(), 2050);
+        assert_eq!(
+            vectors[2049],
+            [1.0, 2.0],
+            "the second request's second vector"
+        );
+        let sizes: Vec<usize> = embedding_bodies(&server)
+            .await
+            .iter()
+            .map(|b| b["input"].as_array().unwrap().len())
+            .collect();
+        assert_eq!(sizes, [2048, 2]);
+    }
+
+    #[tokio::test]
+    async fn embedding_count_mismatch_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/embeddings"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                {"index": 0, "embedding": [1.0]}
+            ]})))
+            .mount(&server)
+            .await;
+
+        let err = make_provider(&server.uri())
+            .embed_batch(&["a", "b"])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("1") && err.contains("2"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn unknown_embedding_model_error_names_the_model() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/embeddings"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({"error": {
+                "code": 404, "message": "No endpoints found"
+            }})))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = make_provider(&server.uri()).embed("x").await.unwrap_err();
+        let err = format!("{err:#}");
+        assert!(err.contains("openai/text-embedding-3-small"), "{err}");
+        assert!(err.contains("No endpoints found"), "{err}");
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────

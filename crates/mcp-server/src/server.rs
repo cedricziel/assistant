@@ -6,15 +6,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    CallToolRequestParams, CallToolResponse, CallToolResult, CompleteRequestParams, CompleteResult,
+    ContentBlock, GetPromptRequestParams, GetPromptResponse, Implementation, ListPromptsResult,
     ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
-    ServerConfig, Tool,
+    ProgressNotificationParam, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
+    ServerCapabilities, ServerConfig, SubscriptionFilter, Tool,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{NotificationContext, RequestContext, SubscriptionContext};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
-use tracing::warn;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use assistant_core::permission::{PermissionPolicy, PermissionRequest};
@@ -25,14 +26,15 @@ use assistant_storage::{SkillCatalog, SkillRegistry};
 use assistant_tool_executor::install_skill_from_source;
 
 use crate::identity::{Caller, resolve_caller};
-use crate::resources;
+use crate::listeners::ListChangeListeners;
+use crate::{prompts, resources};
 
 const RUN_PROMPT: &str = "run-prompt";
 const INSTALL_SKILL: &str = "install-skill";
 
 /// Revisions this server implements, oldest first. Pinned rather than taken from
 /// rmcp's known set so a rmcp upgrade cannot silently advertise older revisions.
-const SUPPORTED_VERSIONS: &[ProtocolVersion] =
+pub(crate) const SUPPORTED_VERSIONS: &[ProtocolVersion] =
     &[ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28];
 
 /// Serves the assistant's tools and skills to MCP clients.
@@ -47,15 +49,19 @@ pub struct AssistantMcpServer {
     policy: PermissionPolicy,
     user_skills_dir: PathBuf,
     install_registry: Option<Arc<SkillRegistry>>,
+    listeners: ListChangeListeners,
 }
 
 impl AssistantMcpServer {
+    /// Builds a server that tells `listeners` when installed skills change and
+    /// registers its own listening sessions with them.
     pub fn new(
         orchestrator: Arc<dyn OrchestrationEngine>,
         executor: Arc<dyn ToolDispatcher>,
         catalog: Arc<dyn SkillCatalog>,
         policy: PermissionPolicy,
         user_skills_dir: PathBuf,
+        listeners: ListChangeListeners,
     ) -> Self {
         Self {
             catalog,
@@ -64,6 +70,7 @@ impl AssistantMcpServer {
             policy,
             user_skills_dir,
             install_registry: None,
+            listeners,
         }
     }
 
@@ -117,20 +124,38 @@ impl AssistantMcpServer {
                 .any(|spec| spec.name == tool_name && spec.requires_confirmation)
     }
 
+    /// Runs one turn. Reports progress at start and completion when the
+    /// request carries a progress token, and cancels the turn when the client
+    /// cancels the request.
     async fn run_prompt(
         &self,
         caller: &Caller,
         input: &Value,
+        context: &RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let prompt = required_str(input, "prompt")?;
-        let turn = self
-            .orchestrator
-            .submit_turn(&caller.auth, prompt, Uuid::new_v4(), Interface::Mcp, None)
-            .await
-            .map_err(|e| {
+        report_progress(context, 0.0, "Turn started").await;
+        let request_id = Uuid::new_v4();
+        let turn = self.orchestrator.submit_turn_with_request_id(
+            &caller.auth,
+            request_id,
+            prompt,
+            Uuid::new_v4(),
+            Interface::Mcp,
+            None,
+        );
+        let turn = tokio::select! {
+            turn = turn => turn.map_err(|e| {
                 warn!(error = %e, "run_prompt failed");
                 ErrorData::internal_error(e.to_string(), None)
-            })?;
+            })?,
+            () = context.ct.cancelled() => {
+                self.orchestrator.cancel_turn(request_id).await;
+                // rmcp sends nothing for a cancelled request.
+                return Err(ErrorData::internal_error("run-prompt was cancelled", None));
+            }
+        };
+        report_progress(context, 1.0, "Turn finished").await;
         Ok(text_result(turn.answer))
     }
 
@@ -148,6 +173,7 @@ impl AssistantMcpServer {
                 warn!(source, error = %e, "install_skill failed");
                 ErrorData::internal_error(e.to_string(), None)
             })?;
+        self.listeners.notify_all_changed().await;
         Ok(text_result(format!("Skill '{name}' installed.")))
     }
 }
@@ -164,6 +190,19 @@ fn tool(
     Tool::new(name, description, schema)
 }
 
+/// Sends `progress` out of a total of 1 when the request asked for progress.
+async fn report_progress(context: &RequestContext<RoleServer>, progress: f64, message: &str) {
+    let Some(token) = context.meta.get_progress_token() else {
+        return;
+    };
+    let notification = ProgressNotificationParam::new(token, progress)
+        .with_total(1.0)
+        .with_message(message);
+    if let Err(error) = context.peer.notify_progress(notification).await {
+        debug!(%error, "progress notification not delivered");
+    }
+}
+
 fn text_result(text: impl Into<String>) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
@@ -174,18 +213,38 @@ fn required_str<'a>(input: &'a Value, name: &str) -> Result<&'a str, ErrorData> 
     })
 }
 
+/// What the server advertises in `initialize` and `server/discover`.
+pub(crate) fn server_info() -> ServerConfig {
+    ServerConfig::new(
+        ServerCapabilities::builder()
+            .enable_completions()
+            .enable_prompts()
+            .enable_prompts_list_changed()
+            .enable_resources()
+            .enable_resources_list_changed()
+            .enable_tools()
+            .enable_tool_list_changed()
+            .build(),
+    )
+    .with_server_info(Implementation::new(
+        "assistant-mcp-server",
+        env!("CARGO_PKG_VERSION"),
+    ))
+}
+
+/// The notifications a `subscriptions/listen` stream may carry. rmcp narrows
+/// this to what the client requested.
+pub(crate) fn listenable() -> SubscriptionFilter {
+    SubscriptionFilter::builder()
+        .tools_list_changed()
+        .prompts_list_changed()
+        .resources_list_changed()
+        .build()
+}
+
 impl ServerHandler for AssistantMcpServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .build(),
-        )
-        .with_server_info(Implementation::new(
-            "assistant-mcp-server",
-            env!("CARGO_PKG_VERSION"),
-        ))
+        server_info()
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
@@ -218,7 +277,10 @@ impl ServerHandler for AssistantMcpServer {
         // `run-prompt` is exempt from the policy: its tool calls pass the
         // orchestrator's own gate.
         if tool_name == RUN_PROMPT {
-            return self.run_prompt(&caller, &input).await.map(Into::into);
+            return self
+                .run_prompt(&caller, &input, &context)
+                .await
+                .map(Into::into);
         }
 
         // MCP callers cannot be prompted, so the policy decides alone.
@@ -292,5 +354,47 @@ impl ServerHandler for AssistantMcpServer {
         resources::read(self.catalog.as_ref(), &request.uri)
             .await
             .map(Into::into)
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(prompts::list(self.catalog.as_ref()).await)
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        prompts::get(self.catalog.as_ref(), &request)
+            .await
+            .map(Into::into)
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        prompts::complete(self.catalog.as_ref(), &request).await
+    }
+
+    fn accepted_subscription_filter(
+        &self,
+        _requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        Some(listenable())
+    }
+
+    async fn listen(&self, subscription: SubscriptionContext) -> Result<(), ErrorData> {
+        self.listeners.listen(subscription).await;
+        Ok(())
+    }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
+        self.listeners.add_legacy_peer(context.peer).await;
     }
 }

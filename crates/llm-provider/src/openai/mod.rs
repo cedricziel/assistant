@@ -4,4 +4,4 @@ pub mod oauth;
 mod provider;
 
 pub use oauth::OAuthManager;
-pub use provider::{OpenAIProvider, OpenAIProviderConfig};
+pub use provider::{DEFAULT_EMBEDDING_MODEL, OpenAIProvider, OpenAIProviderConfig};
