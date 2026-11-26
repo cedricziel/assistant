@@ -130,6 +130,10 @@ pub struct LlmConfig {
     /// Provider-specific OpenRouter options.
     #[serde(default)]
     pub openrouter: OpenRouterOptions,
+    /// Models a member may pick for one regenerated reply, besides the
+    /// default. Empty: only the default model is offered.
+    #[serde(default)]
+    pub available_models: Vec<String>,
     /// Optional dedicated embedding provider override.
     ///
     /// When set, embeddings are served by this provider instead of the main
@@ -154,6 +158,7 @@ impl Default for LlmConfig {
             openai: OpenAIOptions::default(),
             moonshot: MoonshotOptions::default(),
             openrouter: OpenRouterOptions::default(),
+            available_models: Vec::new(),
             embeddings: None,
         }
     }
@@ -825,6 +830,20 @@ mod tests {
         let section = section.map(Secret::new);
         resolve_openrouter_key(section.as_ref(), llm, OPENROUTER_API_KEY_ENV, env)
             .map(|s| s.expose().to_string())
+    }
+
+    #[test]
+    fn available_models_defaults_to_empty() {
+        let unset: LlmConfig = toml::from_str("").unwrap();
+        assert!(unset.available_models.is_empty(), "no allowlist by default");
+        assert!(LlmConfig::default().available_models.is_empty());
+    }
+
+    #[test]
+    fn available_models_parses_the_allowlist() {
+        let cfg: LlmConfig =
+            toml::from_str(r#"available_models = ["claude-opus-4", "gpt-5"]"#).unwrap();
+        assert_eq!(cfg.available_models, vec!["claude-opus-4", "gpt-5"]);
     }
 
     #[test]

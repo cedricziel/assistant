@@ -222,6 +222,8 @@ pub(crate) struct FinalAnswerMeta {
     /// How long the turn took; stored under the saved message's id. `None`
     /// for paths that do not measure it.
     pub timing: Option<TurnTiming>,
+    /// The model that produced the answer: the provider's `model_name()`.
+    pub model: Option<String>,
 }
 
 /// Save a final assistant answer, stamping it with `meta`.
@@ -235,6 +237,7 @@ pub(crate) async fn persist_final_answer(
     meta: FinalAnswerMeta,
 ) -> anyhow::Result<()> {
     msg.traceparent = meta.traceparent;
+    msg.model = meta.model;
     conv_store.save_message(&msg).await?;
     if let Some(timing) = meta.timing
         && let Err(e) = timing_store.put(msg.conversation_id, msg.id, &timing).await
@@ -295,6 +298,7 @@ mod tests {
             tool_status: None,
             tool_data_json: None,
             traceparent: None,
+            model: None,
             finish_reason: None,
         }
     }
@@ -317,6 +321,7 @@ mod tests {
             tool_status: None,
             tool_data_json: None,
             traceparent: None,
+            model: None,
             finish_reason: None,
         }
     }

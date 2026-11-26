@@ -147,6 +147,40 @@ async fn submit_turn_publishes_and_waits_for_result() {
 }
 
 #[tokio::test]
+async fn worker_runs_a_submitted_turn_on_its_model_override() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "answer").await;
+
+    let mut config = OrgConfig::default();
+    config.memory.enabled = false;
+    config.llm.base_url = server.uri();
+    super::allow_all_tools(&mut config);
+    let (orch, _storage) = build_with_config(&server.uri(), config).await;
+
+    let orch_worker = orch.clone();
+    tokio::spawn(async move {
+        orch_worker.run_worker("test-worker").await;
+    });
+
+    let mut turn =
+        SubmitTurn::new("hello", Uuid::new_v4(), Interface::Cli).with_auth(&AuthContext::system());
+    turn.model_override = Some("turn-model".to_string());
+    orch.submit(turn).await.unwrap();
+
+    let models: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|req| {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).ok()?;
+            body["model"].as_str().map(str::to_string)
+        })
+        .collect();
+    assert_eq!(models, vec!["turn-model"], "the bus carries the override");
+}
+
+#[tokio::test]
 async fn worker_propagates_submit_correlation_fields_to_turn_result() {
     let server = MockServer::start().await;
     mount_answer(&server, "correlated response").await;
