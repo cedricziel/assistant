@@ -28,6 +28,7 @@ members = [
     "crates/integration-tests",
     "crates/web-ui",
     "crates/a2a-json-schema",
+    "crates/a2ui",
     "crates/bus-nats",
     "crates/backup",
     "crates/test-support",
@@ -168,6 +169,9 @@ hmac = "0.13"
 hex = "0.4"
 # URL parsing
 url = "2"
+# Regex parsing and safety analysis for A2UI surface validation
+regex = "1.12"
+regex-syntax = "0.8"
 # OS-level CSPRNG
 getrandom = "0.4"
 # VAPID-signed Web Push dispatch
