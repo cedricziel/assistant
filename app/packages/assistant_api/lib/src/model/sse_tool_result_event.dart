@@ -3,6 +3,7 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:built_value/json_object.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -11,16 +12,22 @@ part 'sse_tool_result_event.g.dart';
 /// SSE `tool_result` event — result of a tool invocation.
 ///
 /// Properties:
-/// * [arguments] - The arguments passed to the tool (JSON string).
+/// * [arguments] - The arguments passed to the tool, as a JSON object.
+/// * [data] - Structured output of the tool, a JSON object with a `kind` tag. Absent when the tool returned text only or the data exceeded the size limit. Each `kind` is defined by a JSON Schema in `schemas/tool-results/`.
 /// * [result] - The tool's output or error message.
 /// * [status] - Whether the tool call succeeded or failed.
+/// * [toolCallId] - Identifier of the tool call this result answers, when the provider supplied one.
 /// * [toolName] - Name of the tool that was called.
 @BuiltValue()
 abstract class SseToolResultEvent
     implements Built<SseToolResultEvent, SseToolResultEventBuilder> {
-  /// The arguments passed to the tool (JSON string).
+  /// The arguments passed to the tool, as a JSON object.
   @BuiltValueField(wireName: r'arguments')
-  String? get arguments;
+  JsonObject? get arguments;
+
+  /// Structured output of the tool, a JSON object with a `kind` tag. Absent when the tool returned text only or the data exceeded the size limit. Each `kind` is defined by a JSON Schema in `schemas/tool-results/`.
+  @BuiltValueField(wireName: r'data')
+  JsonObject? get data;
 
   /// The tool's output or error message.
   @BuiltValueField(wireName: r'result')
@@ -29,6 +36,10 @@ abstract class SseToolResultEvent
   /// Whether the tool call succeeded or failed.
   @BuiltValueField(wireName: r'status')
   String get status;
+
+  /// Identifier of the tool call this result answers, when the provider supplied one.
+  @BuiltValueField(wireName: r'tool_call_id')
+  String? get toolCallId;
 
   /// Name of the tool that was called.
   @BuiltValueField(wireName: r'tool_name')
@@ -64,7 +75,14 @@ class _$SseToolResultEventSerializer
       yield r'arguments';
       yield serializers.serialize(
         object.arguments,
-        specifiedType: const FullType.nullable(String),
+        specifiedType: const FullType.nullable(JsonObject),
+      );
+    }
+    if (object.data != null) {
+      yield r'data';
+      yield serializers.serialize(
+        object.data,
+        specifiedType: const FullType.nullable(JsonObject),
       );
     }
     if (object.result != null) {
@@ -79,6 +97,13 @@ class _$SseToolResultEventSerializer
       object.status,
       specifiedType: const FullType(String),
     );
+    if (object.toolCallId != null) {
+      yield r'tool_call_id';
+      yield serializers.serialize(
+        object.toolCallId,
+        specifiedType: const FullType.nullable(String),
+      );
+    }
     yield r'tool_name';
     yield serializers.serialize(
       object.toolName,
@@ -112,10 +137,18 @@ class _$SseToolResultEventSerializer
         case r'arguments':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(String),
-          ) as String?;
+            specifiedType: const FullType.nullable(JsonObject),
+          ) as JsonObject?;
           if (valueDes == null) continue;
           result.arguments = valueDes;
+          break;
+        case r'data':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(JsonObject),
+          ) as JsonObject?;
+          if (valueDes == null) continue;
+          result.data = valueDes;
           break;
         case r'result':
           final valueDes = serializers.deserialize(
@@ -131,6 +164,14 @@ class _$SseToolResultEventSerializer
             specifiedType: const FullType(String),
           ) as String;
           result.status = valueDes;
+          break;
+        case r'tool_call_id':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(String),
+          ) as String?;
+          if (valueDes == null) continue;
+          result.toolCallId = valueDes;
           break;
         case r'tool_name':
           final valueDes = serializers.deserialize(
