@@ -101,7 +101,7 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 ## 14. Audio pipeline
 
 - [x] 14.1 Write failing tests for MIME recognition: the new types, and parameters stripped. Confirm red. Implement, then verify.
-- [ ] 14.2 Write failing tests, skipped when ffmpeg is absent, for `probe_duration`, `to_wav_16k_mono` (including audio extracted from a video container), `split` and `transcode` covering pcm to mp3, wav to ogg/opus, and mp3 to wav. Confirm red. Implement `AudioPipeline`, then verify.
+- [x] 14.2 Write failing tests, skipped when ffmpeg is absent, for `probe_duration`, `to_wav_16k_mono` (including audio extracted from a video container), `split` and `transcode` covering pcm to mp3, wav to ogg/opus, and mp3 to wav. Confirm red. Implement `AudioPipeline`, then verify.
 - [ ] 14.3 Write failing tests for `ConvertingTranscriber`: it passes through accepted formats, converts the others, and gives a clear error when ffmpeg is missing (injected through the ffmpeg path). Confirm red. Implement, move Deepgram onto it, delete the ad-hoc conversion, then verify.
 
 ## 15. OpenRouter transcription
