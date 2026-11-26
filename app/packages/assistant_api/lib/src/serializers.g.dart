@@ -154,6 +154,8 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SseSubagentThinkingEvent.serializer)
       ..add(SseSubagentTokenEvent.serializer)
       ..add(SseSubagentToolResultEvent.serializer)
+      ..add(SseSuggestion.serializer)
+      ..add(SseSuggestionsEvent.serializer)
       ..add(SseThinkingEvent.serializer)
       ..add(SseTokenEvent.serializer)
       ..add(SseToolResultEvent.serializer)
@@ -252,6 +254,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SseSuggestion)]),
+          () => ListBuilder<SseSuggestion>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

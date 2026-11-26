@@ -182,6 +182,8 @@ export 'package:assistant_api/src/model/sse_subagent_status_event.dart';
 export 'package:assistant_api/src/model/sse_subagent_thinking_event.dart';
 export 'package:assistant_api/src/model/sse_subagent_token_event.dart';
 export 'package:assistant_api/src/model/sse_subagent_tool_result_event.dart';
+export 'package:assistant_api/src/model/sse_suggestion.dart';
+export 'package:assistant_api/src/model/sse_suggestions_event.dart';
 export 'package:assistant_api/src/model/sse_thinking_event.dart';
 export 'package:assistant_api/src/model/sse_token_event.dart';
 export 'package:assistant_api/src/model/sse_tool_result_event.dart';

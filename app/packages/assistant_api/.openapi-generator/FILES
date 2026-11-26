@@ -165,6 +165,8 @@ doc/SseSubagentStatusEvent.md
 doc/SseSubagentThinkingEvent.md
 doc/SseSubagentTokenEvent.md
 doc/SseSubagentToolResultEvent.md
+doc/SseSuggestion.md
+doc/SseSuggestionsEvent.md
 doc/SseThinkingEvent.md
 doc/SseTokenEvent.md
 doc/SseToolResultEvent.md
@@ -404,6 +406,8 @@ lib/src/model/sse_subagent_status_event.dart
 lib/src/model/sse_subagent_thinking_event.dart
 lib/src/model/sse_subagent_token_event.dart
 lib/src/model/sse_subagent_tool_result_event.dart
+lib/src/model/sse_suggestion.dart
+lib/src/model/sse_suggestions_event.dart
 lib/src/model/sse_thinking_event.dart
 lib/src/model/sse_token_event.dart
 lib/src/model/sse_tool_result_event.dart

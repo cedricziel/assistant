@@ -805,7 +805,7 @@ void (empty response body)
 
 `GET /api/conversations/{id}/runs/{run_id}/events/stream`
 
-Replays stored events from `?since` (default 0), then tails live events if the run is still active. Closes when the run finishes, not at the `done` or `agent_error` frame: events such as `suggestions` follow `done`. A client that disconnects stops the tail at once.  Returns `404` if no events exist for `run_id` and the run is not active (never started, unknown, or pruned after the TTL elapsed).
+Replays stored events from `?since` (default 0), then tails live events if the run is still active. Closes when the run finishes, not at the `done` or `agent_error` frame: events such as `suggestions` follow `done`. A client that disconnects stops the tail at once.  Returns `404` if no events exist for `run_id` and the run is not active (never started, unknown, or pruned after the TTL elapsed).  After `done` the stream may carry one `suggestions` frame (`SseSuggestionsEvent`) with follow-up prompts for the finished turn; it then closes when the run finishes.
 
 ### Example
 ```dart
