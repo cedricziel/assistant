@@ -1,6 +1,7 @@
+import 'package:assistant_ui/models.dart';
+
 import '../../api/models/stream_event.dart';
 import 'chat_history_mapping.dart';
-import 'chat_models.dart';
 
 // Pure reducers that apply one SSE event to the chat message list.
 //

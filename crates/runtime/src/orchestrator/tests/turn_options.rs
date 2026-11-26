@@ -19,7 +19,7 @@ use assistant_llm_provider::scripted::ScriptedLlmProvider;
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 
-use super::super::{Orchestrator, SubmitOptions};
+use super::super::{Orchestrator, SubmitTurn};
 
 /// What a tool saw in its [`ExecutionContext`].
 type Seen = Arc<Mutex<Vec<(bool, Option<Uuid>)>>>;
@@ -121,15 +121,10 @@ fn only(seen: &Seen) -> (bool, Option<Uuid>) {
 async fn a_web_turn_with_default_options_is_not_interactive() {
     let (orch, seen) = rig().await;
     let request_id = Uuid::new_v4();
-    orch.submit_turn_with_request_id(
-        &AuthContext::system(),
-        request_id,
-        "go",
-        Uuid::new_v4(),
-        Interface::Web,
-        None,
-        vec![],
-        SubmitOptions::default(),
+    orch.submit(
+        SubmitTurn::new("go", Uuid::new_v4(), Interface::Web)
+            .with_auth(&AuthContext::system())
+            .with_request_id(request_id),
     )
     .await
     .unwrap();
@@ -140,15 +135,11 @@ async fn a_web_turn_with_default_options_is_not_interactive() {
 async fn an_interactive_submit_reaches_the_tool_with_its_run_id() {
     let (orch, seen) = rig().await;
     let request_id = Uuid::new_v4();
-    orch.submit_turn_with_request_id(
-        &AuthContext::system(),
-        request_id,
-        "go",
-        Uuid::new_v4(),
-        Interface::Web,
-        None,
-        vec![],
-        SubmitOptions { interactive: true },
+    orch.submit(
+        SubmitTurn::new("go", Uuid::new_v4(), Interface::Web)
+            .with_auth(&AuthContext::system())
+            .with_request_id(request_id)
+            .with_interactive(true),
     )
     .await
     .unwrap();
@@ -158,13 +149,8 @@ async fn an_interactive_submit_reaches_the_tool_with_its_run_id() {
 #[tokio::test]
 async fn interactivity_follows_the_flag_not_the_interface() {
     let (orch, seen) = rig().await;
-    orch.submit_turn(
-        &AuthContext::system(),
-        "go",
-        Uuid::new_v4(),
-        Interface::Cli,
-        None,
-        SubmitOptions::default(),
+    orch.submit(
+        SubmitTurn::new("go", Uuid::new_v4(), Interface::Cli).with_auth(&AuthContext::system()),
     )
     .await
     .unwrap();

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:assistant_api/assistant_api.dart';
+import 'package:assistant_ui/models.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/features/chat/commands_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';

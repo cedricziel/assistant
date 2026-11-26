@@ -25,7 +25,7 @@ use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::ApiState;
-use super::conversations::{caller_store, owned_conversation_json};
+use super::conversations::{caller_store, owned_conversation};
 use super::messages::caller_can_post;
 
 /// Longest accepted comment, in Unicode scalar values.
@@ -113,7 +113,7 @@ async fn authorize_target(
         .map_err(|_| json_error(StatusCode::BAD_REQUEST, "Invalid message ID"))?;
 
     let store = caller_store(ctx, state).await;
-    owned_conversation_json(&store, conv_id).await?;
+    owned_conversation(&store, conv_id).await?;
     let message = match store.get_message(message_id).await {
         Ok(Some(m)) if m.conversation_id == conv_id => m,
         Ok(_) => return Err(json_error(StatusCode::NOT_FOUND, "Message not found")),

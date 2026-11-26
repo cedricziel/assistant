@@ -6,12 +6,13 @@
 //! - `POST   /api/conversations`           — create a new conversation
 //! - `GET    /api/conversations/{id}`      — get a conversation with its history
 //! - `DELETE /api/conversations/{id}`      — delete a conversation
-//! - `PATCH  /api/conversations/{id}`      — update a conversation's title
+//! - `PATCH  /api/conversations/{id}`      — update a conversation's title or pin state
 
 use std::collections::HashMap;
 use std::convert::Infallible;
 
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::Event;
@@ -24,11 +25,12 @@ use uuid::Uuid;
 
 use assistant_core::types::conversation::MessageRole;
 use assistant_storage::{
-    AttachmentStore as _, ConversationEvent, ConversationRecord, ConversationStore,
-    SqliteConversationStore,
+    AttachmentStore as _, ConversationEvent, ConversationPatch, ConversationRecord,
+    ConversationStore, MetadataUpdate, SqliteConversationStore,
 };
 
 use crate::errors::json_error;
+use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::attachments::AttachmentMetaResponse;
@@ -54,21 +56,6 @@ pub(crate) async fn owned_conversation(
 ) -> Result<ConversationRecord, Response> {
     match store.get_conversation(id).await {
         Ok(Some(conv)) => Ok(conv),
-        Ok(None) => Err((StatusCode::NOT_FOUND, "Conversation not found").into_response()),
-        Err(e) => {
-            warn!("Failed to load conversation {id}: {e}");
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
-        }
-    }
-}
-
-/// Like [`owned_conversation`], but every error uses the `{"error"}` envelope.
-pub(crate) async fn owned_conversation_json(
-    store: &SqliteConversationStore,
-    id: Uuid,
-) -> Result<ConversationRecord, Response> {
-    match store.get_conversation(id).await {
-        Ok(Some(conv)) => Ok(conv),
         Ok(None) => Err(json_error(StatusCode::NOT_FOUND, "Conversation not found")),
         Err(e) => {
             warn!("Failed to load conversation {id}: {e}");
@@ -89,6 +76,9 @@ pub struct ConversationSummary {
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// When the conversation was pinned; absent when it is not pinned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<DateTime<Utc>>,
 }
 
 impl From<&ConversationRecord> for ConversationSummary {
@@ -98,6 +88,7 @@ impl From<&ConversationRecord> for ConversationSummary {
             title: display_title(record),
             created_at: record.created_at,
             updated_at: record.updated_at,
+            pinned_at: record.pinned_at,
         }
     }
 }
@@ -169,11 +160,43 @@ pub struct CreateConversationRequest {
     pub title: Option<String>,
 }
 
-/// Body for `PATCH /api/conversations/{id}`.
+/// Longest title a user may set, in Unicode scalar values.
+const MAX_TITLE_CHARS: usize = 200;
+
+/// Body for `PATCH /api/conversations/{id}`. At least one field is required.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateConversationRequest {
-    /// New title for the conversation.
-    pub title: String,
+    /// New title. Trimmed; must be 1 to 200 characters after trimming.
+    pub title: Option<String>,
+    /// `true` pins the conversation, `false` unpins it.
+    pub pinned: Option<bool>,
+}
+
+impl UpdateConversationRequest {
+    /// Validate the request and turn it into a storage patch, or the message
+    /// for the `400` response.
+    fn into_patch(self) -> Result<ConversationPatch, &'static str> {
+        if self.title.is_none() && self.pinned.is_none() {
+            return Err("Nothing to update: provide title or pinned");
+        }
+        let title = match self.title {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return Err("Title must not be blank");
+                }
+                if trimmed.chars().count() > MAX_TITLE_CHARS {
+                    return Err("Title must be at most 200 characters");
+                }
+                Some(trimmed.to_owned())
+            }
+            None => None,
+        };
+        Ok(ConversationPatch {
+            title,
+            pinned: self.pinned,
+        })
+    }
 }
 
 // -- Handlers ----------------------------------------------------------------
@@ -401,7 +424,7 @@ pub async fn create_conversation(
         (status = 200, description = "Conversation with messages", body = ConversationDetail),
         (status = 400, description = "Invalid ID"),
         (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Not found"),
+        (status = 404, description = "Not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -579,7 +602,10 @@ pub async fn delete_conversation(
     }
 }
 
-/// `PATCH /api/conversations/{id}` — update a conversation's title.
+/// `PATCH /api/conversations/{id}` — update a conversation's title and/or pin state.
+///
+/// Neither change moves the conversation in the list: only new messages bump
+/// `updated_at`.
 #[utoipa::path(
     patch,
     path = "/api/conversations/{id}",
@@ -588,10 +614,11 @@ pub async fn delete_conversation(
     request_body = UpdateConversationRequest,
     responses(
         (status = 200, description = "Updated conversation", body = ConversationSummary),
-        (status = 400, description = "Invalid ID"),
+        (status = 400, description = "Invalid ID or body", body = ErrorBody),
         (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Not found"),
-        (status = 500, description = "Internal server error"),
+        (status = 403, description = "Read-only access", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
+        (status = 500, description = "Internal server error", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -599,14 +626,21 @@ pub async fn update_conversation(
     ctx: SpaceCtx,
     State(state): State<ApiState>,
     Path(id): Path<String>,
-    Json(body): Json<UpdateConversationRequest>,
+    body: Result<Json<UpdateConversationRequest>, JsonRejection>,
 ) -> Response {
     if let Err(denied) = ctx.require(Access::Write) {
         return denied.into_response();
     }
-    let conv_id = match Uuid::parse_str(&id) {
-        Ok(u) => u,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
+    let Ok(conv_id) = Uuid::parse_str(&id) else {
+        return json_error(StatusCode::BAD_REQUEST, "Invalid conversation ID");
+    };
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => return json_error(StatusCode::BAD_REQUEST, rejection.body_text()),
+    };
+    let patch = match body.into_patch() {
+        Ok(patch) => patch,
+        Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
     };
 
     let store = caller_store(&ctx, &state).await.with_broadcaster(
@@ -614,30 +648,17 @@ pub async fn update_conversation(
             .conversation_broadcasters
             .for_space(&ctx.org_slug, &ctx.space_slug),
     );
-    if let Err(response) = owned_conversation(&store, conv_id).await {
-        return response;
-    }
-    match store.update_title(conv_id, &body.title).await {
-        Ok(()) => {}
-        Err(e) if e.to_string().contains("not found") => {
-            return (StatusCode::NOT_FOUND, "Conversation not found").into_response();
+    match store.update_metadata(conv_id, patch).await {
+        Ok(MetadataUpdate::Updated(record)) => {
+            Json(ConversationSummary::from(&record)).into_response()
         }
+        Ok(MetadataUpdate::NotFound) => json_error(StatusCode::NOT_FOUND, "Conversation not found"),
         Err(e) => {
-            warn!("Failed to update conversation title: {e}");
-            return (
+            warn!("Failed to update conversation {conv_id}: {e}");
+            json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to update conversation",
             )
-                .into_response();
-        }
-    }
-
-    match store.get_conversation(conv_id).await {
-        Ok(Some(c)) => Json(ConversationSummary::from(&c)).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
-        Err(e) => {
-            warn!("Failed to fetch updated conversation: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
         }
     }
 }
@@ -959,6 +980,300 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
+    // -- PATCH validation, pin and error envelopes -----------------------------
+
+    /// Send `PATCH /conversations/{id}` as the default system caller.
+    async fn patch(
+        state: super::super::ApiState,
+        id: &str,
+        body: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        patch_as(state, assistant_core::auth::AuthContext::system(), id, body).await
+    }
+
+    async fn patch_as(
+        state: super::super::ApiState,
+        auth: assistant_core::auth::AuthContext,
+        id: &str,
+        body: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let resp = app_with_auth(state, auth)
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/conversations/{id}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = body_bytes(resp.into_body()).await;
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    fn caller(
+        user: &str,
+        role: assistant_core::identity::Role,
+    ) -> assistant_core::auth::AuthContext {
+        let mut ctx = assistant_core::auth::AuthContext::system();
+        ctx.user_id = assistant_core::identity::UserId::from(user);
+        ctx.space_roles = std::collections::HashMap::from([(
+            assistant_core::identity::SpaceId::from("default"),
+            role,
+        )]);
+        ctx
+    }
+
+    #[tokio::test]
+    async fn patch_trims_the_title() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await;
+        let (status, json) = patch(state, &id.to_string(), r#"{"title":"  Trip plan  "}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["title"], "Trip plan", "title must be trimmed");
+    }
+
+    #[tokio::test]
+    async fn patch_rejects_invalid_bodies_with_400_and_error_key() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let too_long = format!(r#"{{"title":"{}"}}"#, "é".repeat(201));
+        let cases = [
+            ("blank title", r#"{"title":"   "}"#.to_owned()),
+            ("title over 200 chars", too_long),
+            ("empty object", "{}".to_owned()),
+            ("wrong-typed pinned", r#"{"pinned":"yes"}"#.to_owned()),
+            ("malformed JSON", "{not json".to_owned()),
+        ];
+        for (name, body) in cases {
+            let (status, json) = patch(state.clone(), &id, &body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+            assert!(
+                json["error"].is_string(),
+                "{name}: missing error key: {json}"
+            );
+        }
+        let (status, json) = patch(state, "not-a-uuid", r#"{"title":"x"}"#).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "invalid uuid");
+        assert!(json["error"].is_string(), "invalid uuid: missing error key");
+    }
+
+    #[tokio::test]
+    async fn patch_accepts_a_title_of_exactly_200_chars() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let body = format!(r#"{{"title":"{}"}}"#, "é".repeat(200));
+        let (status, _) = patch(state, &id, &body).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "200 two-byte chars are within the limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_pinned_returns_pinned_at_and_unpinned_omits_it() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let (_, before) = patch(state.clone(), &id, r#"{"title":"x"}"#).await;
+        assert!(
+            before.get("pinned_at").is_none(),
+            "unset pinned_at must be absent: {before}"
+        );
+
+        let (status, pinned) = patch(state.clone(), &id, r#"{"pinned":true}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            pinned["pinned_at"].is_string(),
+            "pinned_at missing: {pinned}"
+        );
+
+        let (_, unpinned) = patch(state, &id, r#"{"pinned":false}"#).await;
+        assert!(
+            unpinned.get("pinned_at").is_none(),
+            "unpin must drop pinned_at: {unpinned}"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_title_and_pinned_together_emit_one_upserted() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await;
+        let broadcaster = state
+            .conversation_broadcasters
+            .for_space("default", "default");
+        let mut rx = broadcaster.subscribe();
+        let (status, _) = patch(state, &id.to_string(), r#"{"title":"Both","pinned":true}"#).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let first = rx.try_recv().expect("one upserted event");
+        match first {
+            assistant_storage::ConversationEvent::Upserted(rec) => {
+                assert_eq!(rec.title.as_deref(), Some("Both"));
+                assert!(rec.pinned_at.is_some());
+            }
+            other => panic!("expected Upserted, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "title + pinned must emit exactly one event"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_another_users_conversation_returns_404_with_error_key() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let other = caller("mallory", assistant_core::identity::Role::Member);
+        let (status, json) = patch_as(state, other, &id, r#"{"title":"x"}"#).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(json["error"].is_string(), "missing error key: {json}");
+    }
+
+    #[tokio::test]
+    async fn patch_by_read_only_member_returns_403_with_error_key() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let viewer = caller("system", assistant_core::identity::Role::Viewer);
+        let (status, json) = patch_as(state, viewer, &id, r#"{"title":"x"}"#).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(json["error"].is_string(), "missing error key: {json}");
+    }
+
+    #[tokio::test]
+    async fn rename_does_not_reorder_the_list() {
+        let (state, storage) = event_log_state().await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let older = store.create_conversation(Some("Older")).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        store.create_conversation(Some("Newer")).await.unwrap();
+
+        let (status, _) = patch(
+            state.clone(),
+            &older.id.to_string(),
+            r#"{"title":"Renamed"}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/conversations")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let list = body_json(resp.into_body()).await;
+        let titles: Vec<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["title"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            titles,
+            ["Newer", "Renamed"],
+            "a rename must not move the row"
+        );
+    }
+
+    struct StubTts;
+
+    #[async_trait::async_trait]
+    impl assistant_transcription::TtsProvider for StubTts {
+        fn name(&self) -> &str {
+            "stub"
+        }
+
+        async fn synthesize(
+            &self,
+            _request: assistant_transcription::TtsRequest,
+        ) -> anyhow::Result<assistant_transcription::TtsResult> {
+            Ok(assistant_transcription::TtsResult {
+                audio_data: b"audio".to_vec(),
+                mime_type: "audio/mpeg".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_conversation_404_is_a_json_envelope_on_every_route() {
+        let (state, _) = event_log_state().await;
+        let state = state.with_tts_provider(std::sync::Arc::new(StubTts));
+        let missing = Uuid::new_v4();
+        let (multipart_type, multipart) = multipart_body("file", "a.png", "image/png", &tiny_png());
+        let json_type = "application/json".to_owned();
+        let json_body = br#"{"command":"help","message":"hi"}"#.to_vec();
+        let routes = [
+            (
+                "GET",
+                format!("/conversations/{missing}"),
+                &json_type,
+                &json_body,
+            ),
+            (
+                "POST",
+                format!("/conversations/{missing}/command"),
+                &json_type,
+                &json_body,
+            ),
+            (
+                "POST",
+                format!("/conversations/{missing}/attachments"),
+                &multipart_type,
+                &multipart,
+            ),
+            (
+                "GET",
+                format!("/conversations/{missing}/turns/{}/status", Uuid::new_v4()),
+                &json_type,
+                &json_body,
+            ),
+            (
+                "POST",
+                format!("/conversations/{missing}/messages"),
+                &json_type,
+                &json_body,
+            ),
+            (
+                "GET",
+                format!("/messages/{missing}/audio"),
+                &json_type,
+                &json_body,
+            ),
+        ];
+        for (method, uri, content_type, body) in routes {
+            let resp = app(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(&uri)
+                        .header("Content-Type", content_type.as_str())
+                        .body(Body::from(body.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = resp.status();
+            let bytes = body_bytes(resp.into_body()).await;
+            let json: serde_json::Value = serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| panic!("{method} {uri}: body is not JSON: {bytes:?}"));
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}");
+            assert!(
+                json["error"].is_string(),
+                "{method} {uri}: missing error key"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn delete_conversation_bad_uuid_returns_400() {
         let server = MockServer::start().await;
@@ -1142,6 +1457,73 @@ mod tests {
             text.contains("Delta Test"),
             "upserted event should contain the conversation title"
         );
+    }
+
+    #[tokio::test]
+    async fn stream_snapshot_and_upserted_carry_pinned_at() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await;
+        let broadcaster = state
+            .conversation_broadcasters
+            .for_space("default", "default");
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system")
+            .with_broadcaster(broadcaster);
+        store
+            .update_metadata(
+                id,
+                assistant_storage::ConversationPatch {
+                    title: None,
+                    pinned: Some(true),
+                },
+            )
+            .await
+            .unwrap();
+
+        // A second pin-state change arrives as a delta after the snapshot.
+        let app = app(state);
+        let handle = tokio::spawn(async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            body_bytes(resp.into_body()).await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        store
+            .update_metadata(
+                id,
+                assistant_storage::ConversationPatch {
+                    title: Some("Renamed".into()),
+                    pinned: None,
+                },
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(store);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("stream should finish")
+            .expect("stream task should not panic");
+        let text = String::from_utf8_lossy(&body);
+        let events: Vec<&str> = text.split("\n\n").filter(|e| !e.is_empty()).collect();
+        assert!(
+            events.len() >= 2,
+            "expected snapshot and upserted, got: {text}"
+        );
+        for event in &events[..2] {
+            assert!(
+                event.contains("\"pinned_at\""),
+                "event lacks pinned_at: {event}"
+            );
+        }
     }
 
     #[tokio::test]

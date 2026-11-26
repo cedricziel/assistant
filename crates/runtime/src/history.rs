@@ -206,6 +206,28 @@ pub(crate) fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
     }
 }
 
+/// Per-reply metadata recorded on a final assistant answer.
+///
+/// Every final-answer save site goes through [`persist_final_answer`] with one
+/// of these, so a new field (timing, model, ...) is added here and in the
+/// helper instead of at each site.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FinalAnswerMeta {
+    /// W3C `traceparent` of the LLM span that produced the answer; `None`
+    /// when tracing is off.
+    pub traceparent: Option<String>,
+}
+
+/// Save a final assistant answer, stamping it with `meta`.
+pub(crate) async fn persist_final_answer(
+    conv_store: &dyn ConversationStore,
+    mut msg: Message,
+    meta: FinalAnswerMeta,
+) -> anyhow::Result<()> {
+    msg.traceparent = meta.traceparent;
+    conv_store.save_message(&msg).await
+}
+
 /// Persist a synthetic assistant message so the conversation history
 /// maintains proper User→Assistant alternation after a turn error.
 ///
@@ -253,6 +275,10 @@ mod tests {
             sender_user_id: None,
             parent_id: None,
             run_id: None,
+            tool_call_id: None,
+            tool_status: None,
+            tool_data_json: None,
+            traceparent: None,
         }
     }
 
@@ -270,6 +296,10 @@ mod tests {
             sender_user_id: None,
             parent_id: None,
             run_id: None,
+            tool_call_id: None,
+            tool_status: None,
+            tool_data_json: None,
+            traceparent: None,
         }
     }
 

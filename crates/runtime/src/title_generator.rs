@@ -695,6 +695,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: None,
             had_errors: false,
+            timing: None,
         })
         .unwrap();
         let mut req = PublishRequest::new(bus_messages::topic::TURN_COMPLETED, payload)
@@ -754,6 +755,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: None,
             had_errors: false,
+            timing: None,
         })
         .unwrap();
         bus.publish(

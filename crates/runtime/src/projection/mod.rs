@@ -172,6 +172,10 @@ impl StreamProjector for SseProjector {
                     log_payload: p,
                 }
             }
+            // Projected onto the wire by the stream-events PR (7c); until then
+            // interactions are dormant and nothing reaches the stream.
+            OrchestratorEvent::InteractionRequested { .. }
+            | OrchestratorEvent::InteractionResolved { .. } => return Vec::new(),
             OrchestratorEvent::SurfaceUpdate {
                 surface_id,
                 tool_call_id,
@@ -271,7 +275,9 @@ impl StreamProjector for CliProjector {
             | OrchestratorEvent::SubagentStarted { .. }
             | OrchestratorEvent::SubagentCompleted { .. }
             | OrchestratorEvent::SubagentEvent { .. }
-            | OrchestratorEvent::AudioReady { .. } => Vec::new(),
+            | OrchestratorEvent::AudioReady { .. }
+            | OrchestratorEvent::InteractionRequested { .. }
+            | OrchestratorEvent::InteractionResolved { .. } => Vec::new(),
             // Totality only: surfaces are gated to interactive web turns, so
             // this arm is unreachable in practice.
             OrchestratorEvent::SurfaceUpdate { fallback_text, .. } => {

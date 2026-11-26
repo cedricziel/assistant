@@ -8,17 +8,22 @@ import 'package:built_value/serializer.dart';
 
 part 'update_conversation_request.g.dart';
 
-/// Body for `PATCH /api/conversations/{id}`.
+/// Body for `PATCH /api/conversations/{id}`. At least one field is required.
 ///
 /// Properties:
-/// * [title] - New title for the conversation.
+/// * [pinned] - `true` pins the conversation, `false` unpins it.
+/// * [title] - New title. Trimmed; must be 1 to 200 characters after trimming.
 @BuiltValue()
 abstract class UpdateConversationRequest
     implements
         Built<UpdateConversationRequest, UpdateConversationRequestBuilder> {
-  /// New title for the conversation.
+  /// `true` pins the conversation, `false` unpins it.
+  @BuiltValueField(wireName: r'pinned')
+  bool? get pinned;
+
+  /// New title. Trimmed; must be 1 to 200 characters after trimming.
   @BuiltValueField(wireName: r'title')
-  String get title;
+  String? get title;
 
   UpdateConversationRequest._();
 
@@ -50,11 +55,20 @@ class _$UpdateConversationRequestSerializer
     UpdateConversationRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    yield r'title';
-    yield serializers.serialize(
-      object.title,
-      specifiedType: const FullType(String),
-    );
+    if (object.pinned != null) {
+      yield r'pinned';
+      yield serializers.serialize(
+        object.pinned,
+        specifiedType: const FullType.nullable(bool),
+      );
+    }
+    if (object.title != null) {
+      yield r'title';
+      yield serializers.serialize(
+        object.title,
+        specifiedType: const FullType.nullable(String),
+      );
+    }
   }
 
   @override
@@ -80,11 +94,20 @@ class _$UpdateConversationRequestSerializer
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'pinned':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(bool),
+          ) as bool?;
+          if (valueDes == null) continue;
+          result.pinned = valueDes;
+          break;
         case r'title':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(String),
-          ) as String;
+            specifiedType: const FullType.nullable(String),
+          ) as String?;
+          if (valueDes == null) continue;
           result.title = valueDes;
           break;
         default:

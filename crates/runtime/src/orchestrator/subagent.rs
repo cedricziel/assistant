@@ -24,6 +24,7 @@ use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 use super::{Orchestrator, value_to_params_map};
+use crate::history::{FinalAnswerMeta, persist_final_answer};
 use crate::webhook_dispatch;
 
 #[async_trait]
@@ -233,6 +234,7 @@ impl SubagentRunner for Orchestrator {
                     &history,
                     &tool_specs,
                 );
+                let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
                 let llm_start = std::time::Instant::now();
                 let response = if let Some(ref parent_sink) = parent_event_sink {
                     // Stream subagent LLM output, forwarding chunks as SubagentEvent.
@@ -338,10 +340,15 @@ impl SubagentRunner for Orchestrator {
                                 m.turn = base_turn + iteration as i64 + 1;
                                 m
                             };
-                            if let Err(e) = conv_store
-                                .save_message(&assistant_msg)
-                                .instrument(iteration_span.clone())
-                                .await
+                            if let Err(e) = persist_final_answer(
+                                &conv_store,
+                                assistant_msg,
+                                FinalAnswerMeta {
+                                    traceparent: llm_traceparent,
+                                },
+                            )
+                            .instrument(iteration_span.clone())
+                            .await
                             {
                                 warn!("Failed to persist subagent answer: {e}");
                             }

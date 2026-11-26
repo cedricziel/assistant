@@ -228,6 +228,11 @@ impl StorageLayer {
         SqliteSkillExecutionStore::new(self.pool.clone())
     }
 
+    /// Convenience: build an `InteractionStore` backed by this pool.
+    pub fn interaction_store(&self) -> SqliteInteractionStore {
+        SqliteInteractionStore::new(self.pool.clone())
+    }
+
     /// Convenience: build a `MessageTimingStore` backed by this pool.
     pub fn message_timing_store(&self) -> SqliteMessageTimingStore {
         SqliteMessageTimingStore::new(self.pool.clone())

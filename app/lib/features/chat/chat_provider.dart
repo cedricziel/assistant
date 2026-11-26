@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:assistant_ui/models.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -15,6 +16,8 @@ import 'chat_stream_session.dart';
 import 'chat_timeline_reducers.dart';
 import 'chat_turn_transitions.dart';
 import 'conversation_list_provider.dart';
+
+export 'package:assistant_ui/models.dart';
 
 export 'chat_history_mapping.dart';
 export 'chat_models.dart';

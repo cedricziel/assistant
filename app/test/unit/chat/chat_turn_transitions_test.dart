@@ -1,5 +1,6 @@
 import 'package:assistant_app/features/chat/chat_models.dart';
 import 'package:assistant_app/features/chat/chat_turn_transitions.dart';
+import 'package:assistant_ui/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 ChatMessage _user(String id) => ChatMessage(

@@ -7,6 +7,7 @@
 //! and sends the configured attribution headers, routing preferences and
 //! fallback models.
 
+mod catalog;
 mod client;
 mod errors;
 mod request;
@@ -19,11 +20,16 @@ use tracing::debug;
 
 use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, LlmProvider, LlmResponse, StreamChunk, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, Clock, LlmProvider,
+    LlmResponse, ResponseFormat, StreamChunk, SystemClock, ToolChoice, ToolSpec, ToolSupport,
+    chat_with_fallback,
 };
 
+use std::sync::Arc;
+
+use self::catalog::OpenRouterCatalog;
 use self::client::OpenRouterClient;
-use self::request::{RequestSettings, build_chat_request};
+use self::request::{RequestSettings, apply_options, build_chat_request};
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -36,17 +42,45 @@ const DEFAULT_MAX_TOKENS: u32 = 8192;
 ///
 pub struct OpenRouterProvider {
     client: OpenRouterClient,
+    catalog: Arc<OpenRouterCatalog>,
     settings: RequestSettings,
     base_url: String,
 }
 
 impl OpenRouterProvider {
+    async fn send(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+        stream: bool,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+    ) -> anyhow::Result<LlmResponse> {
+        self.catalog.wait_ready().await;
+        self.catalog.check_model()?;
+        let mut request = build_chat_request(&self.settings, system_prompt, history, tools);
+        request.stream = stream;
+        apply_options(&mut request, options);
+        if stream {
+            self.client.chat_stream(&request, chunk_sink).await
+        } else {
+            self.client.chat(&request).await
+        }
+    }
+
     /// Create from the unified [`LlmConfig`].
     ///
     /// Resolves the API key from `config.api_key` or `OPENROUTER_API_KEY` env
     /// var.  Falls back to `DEFAULT_BASE_URL` when the base URL is the Ollama
     /// default (i.e. not explicitly configured).
     pub fn from_llm_config(cfg: &LlmConfig) -> anyhow::Result<Self> {
+        Self::with_clock(cfg, Arc::new(SystemClock))
+    }
+
+    /// Like [`from_llm_config`](Self::from_llm_config), timing catalog
+    /// retries with `clock`.
+    fn with_clock(cfg: &LlmConfig, clock: Arc<dyn Clock>) -> anyhow::Result<Self> {
         let api_key = resolve_openrouter_key(None, cfg, OPENROUTER_API_KEY_ENV, |name| {
             std::env::var(name).ok()
         })
@@ -84,6 +118,14 @@ impl OpenRouterProvider {
         debug!(model = %cfg.model, base_url = %base_url, "Creating OpenRouter provider");
 
         Ok(Self {
+            catalog: OpenRouterCatalog::new(
+                base_url.clone(),
+                api_key.clone(),
+                cfg.timeout_secs,
+                cfg.model.clone(),
+                cfg.openrouter.provider.clone(),
+                clock,
+            )?,
             client: OpenRouterClient::new(
                 base_url.clone(),
                 api_key,
@@ -103,15 +145,19 @@ impl OpenRouterProvider {
 
 #[async_trait]
 impl LlmProvider for OpenRouterProvider {
+    /// From the model catalog once it has loaded. Until then, and when it
+    /// can't be reached: native tools, no vision, unknown context window.
     fn capabilities(&self) -> Capabilities {
+        let info = self.catalog.info();
         Capabilities {
-            tools: ToolSupport::Native,
+            tools: match info.as_deref() {
+                Some(info) if !info.tools => ToolSupport::None,
+                _ => ToolSupport::Native,
+            },
             streaming: true,
-            // Model-dependent, but safe to declare — the Chat Completions layer
-            // handles multimodal content blocks regardless.
-            vision: true,
+            vision: info.as_deref().is_some_and(|i| i.vision),
             hosted_tools: vec![],
-            context_window_tokens: None, // varies by model
+            context_window_tokens: info.and_then(|i| i.context_window_tokens),
         }
     }
 
@@ -121,8 +167,9 @@ impl LlmProvider for OpenRouterProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        let request = build_chat_request(&self.settings, system_prompt, history, tools);
-        self.client.chat(&request).await
+        let options = ChatOptions::default();
+        self.send(system_prompt, history, tools, &options, false, None)
+            .await
     }
 
     async fn chat_streaming(
@@ -132,9 +179,57 @@ impl LlmProvider for OpenRouterProvider {
         tools: &[ToolSpec],
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        let mut request = build_chat_request(&self.settings, system_prompt, history, tools);
-        request.stream = true;
-        self.client.chat_stream(&request, chunk_sink).await
+        let options = ChatOptions::default();
+        self.send(system_prompt, history, tools, &options, true, chunk_sink)
+            .await
+    }
+
+    async fn ready(&self) {
+        self.catalog.wait_ready().await;
+    }
+
+    /// From the model's catalog entry; nothing until the catalog loads.
+    fn chat_options_support(&self) -> ChatOptionsSupport {
+        self.catalog
+            .info()
+            .map_or_else(ChatOptionsSupport::default, |info| ChatOptionsSupport {
+                tool_choice: info.tool_choice,
+                parallel_tool_calls: info.parallel_tool_calls,
+                json_schema: info.json_schema,
+            })
+    }
+
+    /// Sends the options the model supports natively. A `tool_choice` the
+    /// model doesn't support goes through [`chat_with_fallback`]; other
+    /// unsupported options are dropped.
+    async fn chat_with(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+    ) -> anyhow::Result<LlmResponse> {
+        self.catalog.wait_ready().await;
+        let support = self.chat_options_support();
+        if options.tool_choice != ToolChoice::Auto && !support.tool_choice {
+            return chat_with_fallback(self, system_prompt, history, tools, options, chunk_sink)
+                .await;
+        }
+        let native = ChatOptions {
+            tool_choice: options.tool_choice.clone(),
+            parallel_tool_calls: options
+                .parallel_tool_calls
+                .filter(|_| support.parallel_tool_calls),
+            response_format: if support.json_schema {
+                options.response_format.clone()
+            } else {
+                ResponseFormat::Text
+            },
+        };
+        let stream = chunk_sink.is_some();
+        self.send(system_prompt, history, tools, &native, stream, chunk_sink)
+            .await
     }
 
     async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
@@ -160,9 +255,9 @@ impl LlmProvider for OpenRouterProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::Secret;
     use assistant_core::types::llm::LlmProviderKind;
     use assistant_core::types::llm::OpenRouterOptions;
+    use assistant_core::{ChatOptions, ChatOptionsSupport, ResponseFormat, Secret, ToolChoice};
     use serde_json::{Value, json};
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -236,7 +331,8 @@ mod tests {
         let caps = provider.capabilities();
         assert_eq!(caps.tools, ToolSupport::Native);
         assert!(caps.streaming);
-        assert!(caps.vision);
+        assert!(!caps.vision, "conservative until the catalog loads");
+        assert_eq!(caps.context_window_tokens, None);
     }
 
     #[test]
@@ -410,8 +506,19 @@ mod tests {
             .await;
     }
 
+    /// The chat requests the server received, ignoring catalog fetches.
+    async fn chat_requests(server: &MockServer) -> Vec<wiremock::Request> {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/chat/completions")
+            .collect()
+    }
+
     async fn sent_body(server: &MockServer) -> Value {
-        let requests = server.received_requests().await.unwrap();
+        let requests = chat_requests(server).await;
         serde_json::from_slice(&requests[0].body).unwrap()
     }
 
@@ -690,7 +797,7 @@ mod tests {
             .await
             .unwrap();
 
-        let requests = server.received_requests().await.unwrap();
+        let requests = chat_requests(&server).await;
         let value = requests[0].headers.get("x-openrouter-categories").unwrap();
         assert_eq!(value.to_str().unwrap(), "cli-agent,chat");
     }
@@ -765,6 +872,561 @@ mod tests {
         let body = sent_body(&server).await;
         assert_eq!(body["session_id"], conversation_id.to_string());
         assert_eq!(body["user"], "abc123");
+    }
+
+    // ── Wiremock: model catalog ─────────────────────────────────────────
+
+    const MODEL: &str = "anthropic/claude-sonnet-4.5";
+
+    /// Serves `model` from `/models` and `endpoints` from its endpoints route.
+    async fn mount_catalog(server: &MockServer, model: Value, endpoints: Value) {
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                {"id": "other/model", "context_length": 1000},
+                model,
+            ]})))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/models/{MODEL}/endpoints")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"data": {"id": MODEL, "endpoints": endpoints}})),
+            )
+            .mount(server)
+            .await;
+    }
+
+    fn catalog_model(input: &[&str], params: &[&str]) -> Value {
+        json!({
+            "id": MODEL,
+            "context_length": 200_000,
+            "architecture": {"input_modalities": input, "output_modalities": ["text"]},
+            "supported_parameters": params,
+        })
+    }
+
+    fn endpoint(provider: &str, tag: &str, context_length: u64) -> Value {
+        json!({"provider_name": provider, "tag": tag, "context_length": context_length})
+    }
+
+    /// Capabilities after the first chat call, which waits for the catalog.
+    async fn caps_after_first_call(
+        server: &MockServer,
+        options: OpenRouterOptions,
+    ) -> Capabilities {
+        mount_once(server, chat_response("OK")).await;
+        let provider = provider_with(&server.uri(), options);
+        provider.chat("sys", &[], &[]).await.unwrap();
+        provider.capabilities()
+    }
+
+    #[tokio::test]
+    async fn catalog_sets_context_window_vision_and_tools() {
+        let server = MockServer::start().await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text", "image"], &["tools", "tool_choice"]),
+            json!([
+                endpoint("Anthropic", "anthropic", 200_000),
+                endpoint("Google", "google-vertex", 128_000)
+            ]),
+        )
+        .await;
+
+        let caps = caps_after_first_call(&server, OpenRouterOptions::default()).await;
+        assert_eq!(
+            caps.context_window_tokens,
+            Some(128_000),
+            "smallest selectable endpoint"
+        );
+        assert!(caps.vision);
+        assert_eq!(caps.tools, ToolSupport::Native);
+    }
+
+    #[tokio::test]
+    async fn text_only_model_without_tools() {
+        let server = MockServer::start().await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text"], &["temperature"]),
+            json!([endpoint("Anthropic", "anthropic", 200_000)]),
+        )
+        .await;
+
+        let caps = caps_after_first_call(&server, OpenRouterOptions::default()).await;
+        assert!(!caps.vision);
+        assert_eq!(caps.tools, ToolSupport::None);
+    }
+
+    fn routing(routing: assistant_core::types::llm::OpenRouterRouting) -> OpenRouterOptions {
+        OpenRouterOptions {
+            provider: Some(routing),
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    async fn two_endpoint_catalog(server: &MockServer) {
+        mount_catalog(
+            server,
+            catalog_model(&["text"], &["tools"]),
+            json!([
+                endpoint("Anthropic", "anthropic", 200_000),
+                endpoint("Google", "google-vertex", 128_000)
+            ]),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn only_restricts_the_selectable_endpoints() {
+        use assistant_core::types::llm::OpenRouterRouting;
+        let server = MockServer::start().await;
+        two_endpoint_catalog(&server).await;
+
+        let options = routing(OpenRouterRouting {
+            only: Some(vec!["anthropic".into()]),
+            ..OpenRouterRouting::default()
+        });
+        let caps = caps_after_first_call(&server, options).await;
+        assert_eq!(caps.context_window_tokens, Some(200_000));
+    }
+
+    #[tokio::test]
+    async fn order_restricts_only_without_fallbacks() {
+        use assistant_core::types::llm::OpenRouterRouting;
+        let server = MockServer::start().await;
+        two_endpoint_catalog(&server).await;
+        let order = Some(vec!["anthropic".into()]);
+
+        let with_fallbacks = routing(OpenRouterRouting {
+            order: order.clone(),
+            ..OpenRouterRouting::default()
+        });
+        let caps = caps_after_first_call(&server, with_fallbacks).await;
+        assert_eq!(
+            caps.context_window_tokens,
+            Some(128_000),
+            "fallbacks may reach google"
+        );
+
+        let server = MockServer::start().await;
+        two_endpoint_catalog(&server).await;
+        let pinned = routing(OpenRouterRouting {
+            order,
+            allow_fallbacks: Some(false),
+            ..OpenRouterRouting::default()
+        });
+        let caps = caps_after_first_call(&server, pinned).await;
+        assert_eq!(caps.context_window_tokens, Some(200_000));
+    }
+
+    #[tokio::test]
+    async fn ignored_endpoints_do_not_count() {
+        use assistant_core::types::llm::OpenRouterRouting;
+        let server = MockServer::start().await;
+        two_endpoint_catalog(&server).await;
+
+        let options = routing(OpenRouterRouting {
+            ignore: Some(vec!["google-vertex".into()]),
+            ..OpenRouterRouting::default()
+        });
+        let caps = caps_after_first_call(&server, options).await;
+        assert_eq!(caps.context_window_tokens, Some(200_000));
+    }
+
+    #[tokio::test]
+    async fn first_call_waits_for_a_slow_catalog() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_millis(300))
+                    .set_body_json(
+                        json!({"data": [catalog_model(&["text", "image"], &["tools"])]}),
+                    ),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/models/{MODEL}/endpoints")))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"data": {"endpoints": [
+                    endpoint("Anthropic", "anthropic", 64_000)
+                ]}})),
+            )
+            .mount(&server)
+            .await;
+
+        let caps = caps_after_first_call(&server, OpenRouterOptions::default()).await;
+        assert_eq!(caps.context_window_tokens, Some(64_000));
+    }
+
+    #[tokio::test]
+    async fn catalog_failure_keeps_conservative_capabilities() {
+        let server = MockServer::start().await;
+        // No catalog mocks: /models answers 404.
+
+        let caps = caps_after_first_call(&server, OpenRouterOptions::default()).await;
+        assert_eq!(caps.tools, ToolSupport::Native);
+        assert!(!caps.vision);
+        assert_eq!(caps.context_window_tokens, None);
+    }
+
+    async fn catalog_fetches(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/models")
+            .count()
+    }
+
+    #[tokio::test]
+    async fn unknown_model_fails_every_call_without_an_upstream_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                {"id": "other/model"}
+            ]})))
+            .mount(&server)
+            .await;
+        let provider = provider_with(&server.uri(), OpenRouterOptions::default());
+
+        for _ in 0..2 {
+            let err = provider
+                .chat("sys", &[], &[])
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("no model `anthropic/claude-sonnet-4.5`"),
+                "{err}"
+            );
+        }
+        let err = provider
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no model"), "{err}");
+        assert_eq!(request_count(&server).await, 0, "nothing is sent upstream");
+        assert_eq!(
+            catalog_fetches(&server).await,
+            1,
+            "an unknown model is not refetched"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_outage_is_retried_after_ten_minutes() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text", "image"], &["tools"]),
+            json!([endpoint("Anthropic", "anthropic", 64_000)]),
+        )
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(chat_response("OK")))
+            .mount(&server)
+            .await;
+        let clock = assistant_core::FakeClock::new_at_seed();
+        let cfg = LlmConfig {
+            provider: LlmProviderKind::OpenRouter,
+            model: MODEL.to_string(),
+            api_key: Some(Secret::new("test-key")),
+            base_url: server.uri(),
+            ..LlmConfig::default()
+        };
+        let provider =
+            OpenRouterProvider::with_clock(&cfg, std::sync::Arc::new(clock.clone())).unwrap();
+
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert!(
+            !provider.capabilities().vision,
+            "conservative during the outage"
+        );
+        assert_eq!(catalog_fetches(&server).await, 1);
+
+        clock.advance(std::time::Duration::from_secs(9 * 60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(
+            catalog_fetches(&server).await,
+            1,
+            "no retry before ten minutes"
+        );
+
+        clock.advance(std::time::Duration::from_secs(60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(catalog_fetches(&server).await, 2);
+        let caps = provider.capabilities();
+        assert!(caps.vision, "capabilities update once a fetch succeeds");
+        assert_eq!(caps.context_window_tokens, Some(64_000));
+
+        clock.advance(std::time::Duration::from_secs(60 * 60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(
+            catalog_fetches(&server).await,
+            2,
+            "a loaded catalog is not refetched"
+        );
+    }
+
+    // ── Wiremock: native chat options ───────────────────────────────────
+
+    fn submit_tool() -> ToolSpec {
+        ToolSpec {
+            name: "submit".into(),
+            description: "Submit".into(),
+            params_schema: json!({"type": "object"}),
+            is_mutating: false,
+            requires_confirmation: false,
+            requires_rich_client: false,
+        }
+    }
+
+    fn submit_call() -> Value {
+        json!({
+            "id": "gen-t",
+            "model": MODEL,
+            "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "submit", "arguments": "{}"}}
+            ]}}],
+        })
+    }
+
+    async fn provider_for(
+        server: &MockServer,
+        params: &[&str],
+        options: OpenRouterOptions,
+    ) -> OpenRouterProvider {
+        mount_catalog(
+            server,
+            catalog_model(&["text"], params),
+            json!([endpoint("Anthropic", "anthropic", 200_000)]),
+        )
+        .await;
+        provider_with(&server.uri(), options)
+    }
+
+    fn forced(name: &str) -> ChatOptions {
+        ChatOptions {
+            tool_choice: ToolChoice::Tool(name.into()),
+            ..ChatOptions::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn option_support_comes_from_the_catalog() {
+        let cases: [(&[&str], ChatOptionsSupport); 3] = [
+            (
+                &[
+                    "tools",
+                    "tool_choice",
+                    "parallel_tool_calls",
+                    "structured_outputs",
+                ],
+                ChatOptionsSupport {
+                    tool_choice: true,
+                    parallel_tool_calls: true,
+                    json_schema: true,
+                },
+            ),
+            (
+                &["tools", "response_format"],
+                ChatOptionsSupport {
+                    json_schema: true,
+                    ..ChatOptionsSupport::default()
+                },
+            ),
+            (&["tools"], ChatOptionsSupport::default()),
+        ];
+        for (params, expected) in cases {
+            let server = MockServer::start().await;
+            mount_once(&server, chat_response("OK")).await;
+            let provider = provider_for(&server, params, OpenRouterOptions::default()).await;
+            provider.chat("sys", &[], &[]).await.unwrap();
+            assert_eq!(provider.chat_options_support(), expected, "{params:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn forced_tool_is_sent_natively_and_requires_parameters() {
+        use assistant_core::types::llm::{OpenRouterDataCollection, OpenRouterRouting};
+
+        let server = MockServer::start().await;
+        mount_once(&server, submit_call()).await;
+        let options = OpenRouterOptions {
+            provider: Some(OpenRouterRouting {
+                data_collection: Some(OpenRouterDataCollection::Deny),
+                ..OpenRouterRouting::default()
+            }),
+            ..OpenRouterOptions::default()
+        };
+        let provider = provider_for(&server, &["tools", "tool_choice"], options).await;
+
+        provider
+            .chat_with("sys", &[], &[submit_tool()], &forced("submit"), None)
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(
+            body["tool_choice"],
+            json!({"type": "function", "function": {"name": "submit"}})
+        );
+        assert_eq!(
+            body["provider"],
+            json!({"data_collection": "deny", "require_parameters": true}),
+            "configured routing is kept"
+        );
+        assert_eq!(
+            body["messages"][0]["content"], "sys",
+            "no prompt instruction"
+        );
+    }
+
+    #[tokio::test]
+    async fn parallel_tool_calls_is_sent_only_with_tools() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(chat_response("OK")))
+            .mount(&server)
+            .await;
+        let provider = provider_for(
+            &server,
+            &["tools", "parallel_tool_calls"],
+            OpenRouterOptions::default(),
+        )
+        .await;
+        let sequential = ChatOptions {
+            parallel_tool_calls: Some(false),
+            ..ChatOptions::default()
+        };
+
+        provider
+            .chat_with("sys", &[], &[submit_tool()], &sequential, None)
+            .await
+            .unwrap();
+        provider
+            .chat_with("sys", &[], &[], &sequential, None)
+            .await
+            .unwrap();
+
+        let requests = chat_requests(&server).await;
+        let with_tools: Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let without: Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(with_tools["parallel_tool_calls"], false);
+        assert!(
+            with_tools.get("provider").is_none(),
+            "parallel alone needs no require_parameters"
+        );
+        assert!(without.get("parallel_tool_calls").is_none(), "{without}");
+    }
+
+    #[tokio::test]
+    async fn json_schema_is_native_with_response_healing_when_not_streaming() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(chat_response(r#"{"ok": true}"#)),
+            )
+            .mount(&server)
+            .await;
+        let provider = provider_for(
+            &server,
+            &["structured_outputs"],
+            OpenRouterOptions::default(),
+        )
+        .await;
+        let schema = json!({
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": false,
+        });
+
+        let value = assistant_core::chat_structured(&provider, "sys", &[], "verdict", &schema)
+            .await
+            .unwrap();
+        assert_eq!(value, json!({"ok": true}));
+
+        let body = sent_body(&server).await;
+        assert_eq!(
+            body["response_format"],
+            json!({"type": "json_schema", "json_schema": {"name": "verdict", "strict": true, "schema": schema}})
+        );
+        assert_eq!(body["plugins"], json!([{"id": "response-healing"}]));
+        assert_eq!(body["provider"], json!({"require_parameters": true}));
+    }
+
+    #[tokio::test]
+    async fn streaming_json_schema_skips_response_healing() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+        let provider = provider_for(
+            &server,
+            &["structured_outputs"],
+            OpenRouterOptions::default(),
+        )
+        .await;
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let options = ChatOptions {
+            response_format: ResponseFormat::JsonSchema {
+                name: "verdict".into(),
+                schema: json!({"type": "object"}),
+                strict: true,
+            },
+            ..ChatOptions::default()
+        };
+
+        provider
+            .chat_with("sys", &[], &[], &options, Some(tx))
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert!(body.get("plugins").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn unsupported_tool_choice_uses_the_prompt_fallback() {
+        let server = MockServer::start().await;
+        mount_once(&server, submit_call()).await;
+        let provider = provider_for(&server, &["tools"], OpenRouterOptions::default()).await;
+
+        provider
+            .chat_with("sys", &[], &[submit_tool()], &forced("submit"), None)
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert!(body.get("tool_choice").is_none(), "{body}");
+        assert!(body.get("provider").is_none(), "{body}");
+        let system = body["messages"][0]["content"].as_str().unwrap();
+        assert!(system.contains("`submit`"), "{system}");
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────
@@ -934,7 +1596,7 @@ mod tests {
     }
 
     async fn request_count(server: &MockServer) -> usize {
-        server.received_requests().await.unwrap().len()
+        chat_requests(server).await.len()
     }
 
     #[tokio::test]
