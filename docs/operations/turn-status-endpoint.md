@@ -136,16 +136,35 @@ cancelled after it started.
 
 ### Partial-output preservation
 
-The text streamed up to the moment of cancellation lives in
-`partial_content` on the final `agent_error` event. Clients can
-display it (truncated, with a "Cancelled" badge) rather than
-discarding the partial assistant reply.
+A turn cancelled after it started keeps what the user saw. The runtime
+persists the text streamed up to the cancel as the turn's assistant
+message, marked `finish_reason: "cancelled"`. When nothing had streamed
+yet, it persists the placeholder `_Stopped._` instead, so history and the
+next LLM turn always contain a reply. The final `agent_error` event
+carries that text as `partial_content` and the row's id as `message_id`:
 
-Note that **no persisted message row** is created for a cancelled
-turn — the conversation's message list only contains the user prompt
-and any assistant replies from prior turns. The partial text is
-purely on the SSE event log (which has TTL — see
-`docs/operations/conversation-events.md`).
+```json
+event: agent_error
+data: {
+  "reason": "cancelled",
+  "message": "Turn cancelled by user",
+  "partial_content": "…tokens streamed before cancel…",
+  "message_id": "…assistant message uuid…"
+}
+```
+
+- If the worker had already saved the turn's final answer when the cancel
+  was observed, nothing is saved twice: `message_id` names that answer and
+  its `finish_reason` stays unset.
+- If saving fails, the event is still emitted with `partial_content` and
+  without `message_id`.
+- A turn cancelled before it started persists no assistant row, not even
+  the placeholder (see above).
+- A stopped first turn is still auto-titled: the runtime announces
+  `turn.completed` for the saved reply, so the title generator runs under
+  its usual eligibility rules.
+- `GET /api/conversations/{id}` lists the row with `finish_reason:
+  "cancelled"`.
 
 ## Auth and idempotency
 

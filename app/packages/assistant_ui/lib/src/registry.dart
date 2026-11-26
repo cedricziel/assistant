@@ -13,6 +13,7 @@ const List<String> kAssistantUiElements = [
   'ChatMarkdownScope',
   'CodeBlock',
   'CompactExpandable',
+  'Composer',
   'ConversationListView',
   'ConversationSearchResultsView',
   'FeedbackButtons',
@@ -27,6 +28,7 @@ const List<String> kAssistantUiElements = [
   'QuestionCard',
   'QueuedMessageBubble',
   'RegenerateMenuButton',
+  'SlashCommandMenu',
   'StarterPrompts',
   'SuggestionChips',
   'SurfaceFrame',
@@ -46,7 +48,6 @@ const List<String> kAssistantUiElements = [
   // 'CodeDiffResultView', // slot: tool-result-renderers C7
   // 'CodeFileResultView', // slot: tool-result-renderers C7
   // 'CommandBody', // slot: chat-element-library 7b
-  // 'Composer', // slot: chat-element-library 11a
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
   // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
@@ -58,7 +59,6 @@ const List<String> kAssistantUiElements = [
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
-  // 'SlashCommandMenu', // slot: chat-element-library 11a
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
