@@ -790,6 +790,7 @@ fn extract_response_meta(response: &Response) -> LlmResponseMeta {
             .map(|u| u64::from(u.output_tokens_details.reasoning_tokens)),
         finish_reason: Some(status),
         cost_usd: None,
+        ..LlmResponseMeta::default()
     }
 }
 

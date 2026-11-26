@@ -134,6 +134,7 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
     record.arguments = event.arguments;
     record.result = event.result;
     record.data = event.data;
+    record.app = event.app;
     record.duration = DateTime.now().difference(record.startedAt);
     msgs[entryIdx].isStreaming = false;
   } else {
@@ -150,9 +151,11 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
           ToolCallRecord(
             toolName: event.toolName,
             status: resolvedStatus,
+            toolCallId: event.toolCallId,
             arguments: event.arguments,
             result: event.result,
             data: event.data,
+            app: event.app,
           ),
         ],
       ),

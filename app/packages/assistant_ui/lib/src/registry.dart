@@ -6,13 +6,16 @@
 /// `golden` test for each entry.
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
+  'BranchPicker',
   'ConversationSearchResultsView',
   'HighlightedSegments',
   'MessageActionButton',
   'MessageActions',
+  'MessageEditor',
   'MessageTimingIndicator',
   'QueuedMessageBubble',
   'StarterPrompts',
   'SuggestionChips',
   'ThreadDensityScope',
+  'UnknownInteractionCard',
 ];

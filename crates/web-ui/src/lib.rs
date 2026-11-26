@@ -30,7 +30,7 @@ use assistant_core::{
     MessageBus, apply_agent_context, default_workspace_dir, load_server_config, server_config_path,
     set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
-use assistant_mcp_server::ListChangeListeners;
+use assistant_mcp_server::{ListChangeListeners, TaskStore};
 use assistant_runtime::{OrgContexts, SpaceRuntimes, SpaceSupervisor, init_tracing};
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use axum::{Extension, Router, http::StatusCode, routing::get};
@@ -297,15 +297,14 @@ async fn run_with_args(args: Args) -> Result<()> {
     let audio_store = Arc::new(audio_store::AudioStore::new());
 
     // -- Build TTS provider (for voice message playback) ---------------------
-    let tts_provider = config
-        .tts
-        .as_ref()
-        .map(|tc| {
-            let provider = build_tts_provider(tc)?;
+    let tts_provider = match config.tts.as_ref() {
+        Some(tc) => {
+            let provider = build_tts_provider(tc, &config.llm).await?;
             info!(provider = provider.name(), "TTS enabled (web UI)");
-            Ok::<_, anyhow::Error>(provider)
-        })
-        .transpose()?;
+            Some(provider)
+        }
+        None => None,
+    };
 
     // -- Integration tools: assembled per turn, never registered ambiently ----
     let secrets = Arc::new(
@@ -636,6 +635,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         runtimes: runtimes.clone(),
         issuer: base_url.clone(),
         listeners: ListChangeListeners::default(),
+        tasks: TaskStore::default(),
     };
 
     // -- Management API states (orgs, users, spaces, members, API keys) ------

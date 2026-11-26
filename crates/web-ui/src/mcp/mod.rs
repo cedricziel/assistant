@@ -22,7 +22,9 @@ use assistant_auth::api_keys;
 use assistant_auth::middleware::{AuthState, SessionError};
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::{Action, ResourceKind};
-use assistant_mcp_server::{AssistantMcpServer, ListChangeListeners, streamable_http_service};
+use assistant_mcp_server::{
+    AssistantMcpServer, ListChangeListeners, TaskStore, streamable_http_service,
+};
 use assistant_runtime::SpaceRuntimes;
 
 use crate::auth::{bearer_token, is_same_origin};
@@ -43,6 +45,8 @@ pub struct McpState {
     /// Sessions to notify when installed skills change. One registry for the
     /// whole endpoint, because every request gets a new server.
     pub listeners: ListChangeListeners,
+    /// `run-prompt` tasks, shared for the same reason.
+    pub tasks: TaskStore,
 }
 
 impl McpState {
@@ -154,6 +158,7 @@ async fn require_mcp_access(
         runtime.orchestrator.permission_policy().clone(),
         state.runtimes.pools().base_dir().join("skills"),
         state.listeners.clone(),
+        state.tasks.clone(),
     ));
 
     request.extensions_mut().insert(auth);
@@ -330,6 +335,7 @@ mod tests {
                 runtimes: api.runtimes,
                 issuer: ISSUER.into(),
                 listeners: Default::default(),
+                tasks: Default::default(),
             });
             Self {
                 router,
