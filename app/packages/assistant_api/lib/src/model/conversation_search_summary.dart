@@ -14,6 +14,7 @@ part 'conversation_search_summary.g.dart';
 /// A conversation matched by a search: the [`ConversationSummary`] fields plus highlighted title and message excerpts.  The summary fields are repeated rather than flattened so the generated client keeps `ConversationSummary` a plain instantiable model.
 ///
 /// Properties:
+/// * [archivedAt] - When the conversation was archived; absent when it is not archived.
 /// * [createdAt]
 /// * [id]
 /// * [matches] - Up to 3 matching messages, best first; empty when only the title matched.
@@ -25,6 +26,10 @@ part 'conversation_search_summary.g.dart';
 abstract class ConversationSearchSummary
     implements
         Built<ConversationSearchSummary, ConversationSearchSummaryBuilder> {
+  /// When the conversation was archived; absent when it is not archived.
+  @BuiltValueField(wireName: r'archived_at')
+  DateTime? get archivedAt;
+
   @BuiltValueField(wireName: r'created_at')
   DateTime get createdAt;
 
@@ -79,6 +84,13 @@ class _$ConversationSearchSummarySerializer
     ConversationSearchSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
+    if (object.archivedAt != null) {
+      yield r'archived_at';
+      yield serializers.serialize(
+        object.archivedAt,
+        specifiedType: const FullType.nullable(DateTime),
+      );
+    }
     yield r'created_at';
     yield serializers.serialize(
       object.createdAt,
@@ -141,6 +153,14 @@ class _$ConversationSearchSummarySerializer
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'archived_at':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(DateTime),
+          ) as DateTime?;
+          if (valueDes == null) continue;
+          result.archivedAt = valueDes;
+          break;
         case r'created_at':
           final valueDes = serializers.deserialize(
             value,

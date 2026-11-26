@@ -240,10 +240,10 @@ Depends on: PR 1b, PR 3, PR 4, **chat-stop-cancels-turn PR 5**
 Parallel with: the timeline chain, PR 8a, PR 11a–c, PR 12
 Unblocks: PR 10, follow-up-suggestions PR 8 (starters)
 
-- [ ] 9.1 Test first: port `app/test/widget/features/chat/turn_progress_card_test.dart` to `packages/assistant_ui/test/turn_progress_card_test.dart`, pumping with literal `status`, `now`, `showSkip` and `onSkip` and no `ProviderScope` (null renders nothing; active label; stall label; skip fires `onSkip`). Confirm RED.
-- [ ] 9.2 Move `TurnProgressCard`, `kTurnStallThreshold`, `turnStatusLabel` and `stalledTurnStatusLabel` (from `turn_status_label.dart`) into the package, with parameters replacing `ref.watch` and `ref.read` (`turn_progress_card.dart:65,135`). The 1-second ticker (`:42-59`) becomes an injectable clock; the app passes the real one. `kSkipButtonEnabled` and the `stopTurn()` call (from chat-stop-cancels-turn) stay in `ChatScreen`. Confirm GREEN, characterization goldens unchanged.
-- [ ] 9.3 Test first: `ThreadErrorBanner(message, onDismiss)` (lifted from `chat_screen.dart:416-456`) and `ThreadEmptyState(title, subtitle, starters)` (from `empty_chat.dart`, default copy plus the starters slot). Confirm RED, implement, delete `empty_chat.dart`. Confirm GREEN.
-- [ ] 9.4 Use-cases and goldens for all three.
+- [x] 9.1 Test first: port `app/test/widget/features/chat/turn_progress_card_test.dart` to `packages/assistant_ui/test/turn_progress_card_test.dart`, pumping with literal `status`, `now`, `showSkip` and `onSkip` and no `ProviderScope` (null renders nothing; active label; stall label; skip fires `onSkip`). Confirm RED.
+- [x] 9.2 Move `TurnProgressCard`, `kTurnStallThreshold`, `turnStatusLabel` and `stalledTurnStatusLabel` (from `turn_status_label.dart`) into the package, with parameters replacing `ref.watch` and `ref.read` (`turn_progress_card.dart:65,135`). The 1-second ticker (`:42-59`) becomes an injectable clock; the app passes the real one. `kSkipButtonEnabled` and the `stopTurn()` call (from chat-stop-cancels-turn) stay in `ChatScreen`. Confirm GREEN, characterization goldens unchanged.
+- [x] 9.3 Test first: `ThreadErrorBanner(message, onDismiss)` (lifted from `chat_screen.dart:416-456`) and `ThreadEmptyState(title, subtitle, starters)` (from `empty_chat.dart`, default copy plus the starters slot). Confirm RED, implement, delete `empty_chat.dart`. Confirm GREEN.
+- [x] 9.4 Use-cases and goldens for all three.
 
 ## PR 10 — feat(app): chat thread layout and viewport
 

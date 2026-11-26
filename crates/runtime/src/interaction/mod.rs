@@ -8,7 +8,10 @@
 pub mod broker;
 pub mod kinds;
 
-pub use broker::{InteractionBroker, InteractionRequest, RespondError, Responder};
+pub use broker::{
+    InteractionBroker, InteractionRequest, RespondError, Responder, WAITER_STALE_AFTER,
+    resolved_event,
+};
 pub use kinds::{
     InteractionKindHandler, InteractionKinds, InteractionOutcome, MAX_ANSWER_CHARS,
     MAX_ARGUMENTS_BYTES, PushCopy, QuestionKind, ToolApprovalKind, cap_arguments,
