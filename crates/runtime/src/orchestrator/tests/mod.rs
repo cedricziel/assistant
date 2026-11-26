@@ -92,8 +92,6 @@ async fn build_customized(
     config: OrgConfig,
     customize: impl FnOnce(Orchestrator) -> Orchestrator,
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
-    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
     let llm: Arc<dyn LlmProvider> = Arc::new(
         LlmClient::new(LlmClientConfig {
             model: "test".to_string(),
@@ -103,6 +101,18 @@ async fn build_customized(
         })
         .unwrap(),
     );
+    build_with_llm(llm, config, customize).await
+}
+
+/// Like [`build_customized`], with a caller-supplied provider instead of an
+/// Ollama client pointed at a mock server.
+async fn build_with_llm(
+    llm: Arc<dyn LlmProvider>,
+    config: OrgConfig,
+    customize: impl FnOnce(Orchestrator) -> Orchestrator,
+) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
     let executor = Arc::new(ToolExecutor::new(
         storage.clone(),
         llm.clone(),
@@ -218,6 +228,8 @@ impl ToolHandler for MockExtTool {
 
 mod active_skill;
 mod bus_worker;
+mod call_context;
+mod chat_options;
 mod dispatch;
 mod end_turn;
 mod history;

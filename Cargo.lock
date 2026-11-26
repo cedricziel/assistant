@@ -313,6 +313,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "hex",
+ "jsonschema",
  "reqwest",
  "rustls",
  "serde",
