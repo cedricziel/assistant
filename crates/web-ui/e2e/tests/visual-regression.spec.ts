@@ -482,6 +482,78 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("chat page with a pending tool approval", async ({ page }) => {
+    // Approvals stay dormant on the server until PR 20a, so fixture the
+    // frames instead: a tool call is requested, then its `tool_approval`
+    // interaction arrives and the turn waits for the owner. The POST stream
+    // deliberately never sends `done`, so the card stays pending.
+    const runId = "00000000-0000-4000-8000-0000000000b1";
+    const toolCallId = "call-approval-1";
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const sse = (frames: [string, string, unknown][]) =>
+      frames
+        .map(
+          ([event, id, data]) =>
+            `event: ${event}\nid: ${id}\ndata: ${
+              typeof data === "string" ? data : JSON.stringify(data)
+            }\n\n`,
+        )
+        .join("");
+    const frames: [string, string, unknown][] = [
+      ["run_started", "0", { run_id: runId }],
+      [
+        "status",
+        "1",
+        { message: "Calling tool: bash", tool_call_id: toolCallId },
+      ],
+      [
+        "interaction_requested",
+        "2",
+        {
+          interaction_id: "00000000-0000-4000-8000-0000000000b2",
+          kind: "tool_approval",
+          created_at: new Date().toISOString(),
+          expires_at: expiresAt,
+          tool_call_id: toolCallId,
+          renders_card: true,
+          tool_name: "bash",
+          arguments: { command: "git status" },
+          options: ["allow_once", "reject_once"],
+        },
+      ],
+    ];
+    await page.route(/\/api\/conversations\/[^/]+\/messages$/, (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: sse(frames),
+      });
+    });
+    // A replay tail would repeat the frames; the reducers ignore duplicates.
+    await page.route(
+      new RegExp(`/api/conversations/[^/]+/runs/${runId}/events/stream`),
+      (route) =>
+        route.fulfill({ contentType: "text/event-stream", body: sse(frames) }),
+    );
+
+    await navigateAndSettle(page, "/chat");
+    await enableAccessibility(page);
+    const input = page.getByRole("textbox").last();
+    await input.fill("Status of the repo?");
+    await input.press("Enter");
+    await expect(page.getByText("Waiting for your approval")).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(
+      page.getByRole("button", { name: "Allow bash once" }),
+    ).toBeVisible();
+    await page.waitForTimeout(CSS_SETTLE_MS);
+    await expect(page).toHaveScreenshot("chat-tool-approval.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
   test("skills list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/skills");
     await expect(page).toHaveScreenshot("skills-empty.png", {
