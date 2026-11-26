@@ -66,6 +66,13 @@ pub trait ConversationStore: Send + Sync {
     /// Set a conversation's title and lock it from auto-titling.
     async fn update_title(&self, id: Uuid, title: &str) -> Result<()>;
 
+    /// Write an auto-generated title, only while the conversation is unlocked.
+    ///
+    /// Locks the row and leaves `updated_at` unchanged. Returns `false` (and
+    /// emits no event) when the row is missing or already locked, so a manual
+    /// rename that lands while the LLM is running is never overwritten.
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool>;
+
     /// Replace the full message history of a conversation.
     async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()>;
 
@@ -359,6 +366,31 @@ impl ConversationStore for SqliteConversationStore {
         Ok(())
     }
 
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE conversations
+                 SET title = ?1, title_locked = 1
+                 WHERE id = ?2 AND agent_id = ?3 AND title_locked = 0",
+        )
+        .bind(title)
+        .bind(id.to_string())
+        .bind(&self.agent_id)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to set generated title for conversation {id}"))?;
+        if result.rows_affected() == 0 {
+            return Ok(false);
+        }
+
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
+        }
+
+        Ok(true)
+    }
+
     /// Delete a conversation and all its messages (cascade).
     /// Replace all persisted messages for a conversation with the provided
     /// set.  Existing messages are deleted first; the new messages are then
@@ -419,8 +451,8 @@ impl ConversationStore for SqliteConversationStore {
 
         sqlx::query(
             "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, provider_state_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -432,6 +464,7 @@ impl ConversationStore for SqliteConversationStore {
         .bind(msg.turn)
         .bind(msg.created_at)
         .bind(&msg.sender_user_id)
+        .bind(&msg.provider_state_json)
         .execute(&self.pool)
         .await?;
 
@@ -458,7 +491,7 @@ impl ConversationStore for SqliteConversationStore {
         let conv_id_str = conversation_id.to_string();
 
         let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.provider_state_json \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
@@ -481,6 +514,7 @@ impl ConversationStore for SqliteConversationStore {
                     content: r.get("content"),
                     skill_name: r.get("skill_name"),
                     tool_calls_json: r.get("tool_calls_json"),
+                    provider_state_json: r.get("provider_state_json"),
                     turn: r.get("turn"),
                     created_at: r.get("created_at"),
                     sender_user_id: r.get("sender_user_id"),
@@ -493,7 +527,7 @@ impl ConversationStore for SqliteConversationStore {
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let id_str = message_id.to_string();
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.provider_state_json \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
@@ -514,6 +548,7 @@ impl ConversationStore for SqliteConversationStore {
                 content: r.get("content"),
                 skill_name: r.get("skill_name"),
                 tool_calls_json: r.get("tool_calls_json"),
+                provider_state_json: r.get("provider_state_json"),
                 turn: r.get("turn"),
                 created_at: r.get("created_at"),
                 sender_user_id: r.get("sender_user_id"),
@@ -528,7 +563,7 @@ impl ConversationStore for SqliteConversationStore {
 
         // Fetch the newest rows first, then reverse to restore chronological order.
         let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.provider_state_json \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
@@ -554,6 +589,7 @@ impl ConversationStore for SqliteConversationStore {
                     content: r.get("content"),
                     skill_name: r.get("skill_name"),
                     tool_calls_json: r.get("tool_calls_json"),
+                    provider_state_json: r.get("provider_state_json"),
                     turn: r.get("turn"),
                     created_at: r.get("created_at"),
                     sender_user_id: r.get("sender_user_id"),
@@ -748,6 +784,27 @@ impl ConversationStore for InMemoryConversationStore {
             b.emit(ConversationEvent::Upserted(rec));
         }
         Ok(())
+    }
+
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool> {
+        let updated = {
+            let mut state = self.lock_state();
+            match state.conversations.get_mut(&id) {
+                Some(c) if c.agent_id == self.agent_id && !c.title_locked => {
+                    c.title = Some(title.to_string());
+                    c.title_locked = true;
+                    Some(c.clone())
+                }
+                _ => None,
+            }
+        };
+        let Some(rec) = updated else {
+            return Ok(false);
+        };
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(rec));
+        }
+        Ok(true)
     }
 
     async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
@@ -1183,6 +1240,64 @@ mod tests {
         }
     }
 
+    /// Assert the receiver holds no event, i.e. the last write was silent.
+    fn assert_no_event(rx: &mut tokio::sync::broadcast::Receiver<ConversationEvent>) {
+        assert!(
+            matches!(
+                rx.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ),
+            "no event expected"
+        );
+    }
+
+    async fn generated_title_event_contract(
+        store: &dyn ConversationStore,
+        rx: &mut tokio::sync::broadcast::Receiver<ConversationEvent>,
+    ) {
+        let conv = store.create_conversation(None).await.unwrap();
+        // Drain the creation event.
+        let _ = rx.try_recv();
+
+        assert!(
+            store
+                .set_generated_title(conv.id, "Generated")
+                .await
+                .unwrap()
+        );
+        match rx.try_recv() {
+            Ok(ConversationEvent::Upserted(record)) => {
+                assert_eq!(record.id, conv.id, "event must carry the conversation id");
+                assert_eq!(record.title.as_deref(), Some("Generated"));
+                assert!(record.title_locked, "event must carry title_locked = true");
+            }
+            other => panic!("expected Upserted event, got {other:?}"),
+        }
+
+        // The row is now locked: a second generated write is a silent no-op.
+        assert!(!store.set_generated_title(conv.id, "Again").await.unwrap());
+        assert_no_event(rx);
+    }
+
+    #[tokio::test]
+    async fn test_set_generated_title_emits_upserted_only_when_written_sqlite() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        generated_title_event_contract(&store, &mut rx).await;
+    }
+
+    #[tokio::test]
+    async fn test_set_generated_title_emits_upserted_only_when_written_in_memory() {
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = InMemoryConversationStore::new().with_broadcaster(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        generated_title_event_contract(&store, &mut rx).await;
+    }
+
     // -----------------------------------------------------------------------
     // User-scoping tests
     // -----------------------------------------------------------------------
@@ -1277,6 +1392,34 @@ mod tests {
             history[0].sender_user_id.as_deref(),
             Some("alice"),
             "sender_user_id should round-trip"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_message_provider_state_round_trips() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut with_state = Message::assistant(conv.id, "");
+        with_state.turn = 1;
+        with_state.tool_calls_json = Some(r#"[{"name":"bash","params":{}}]"#.into());
+        with_state.provider_state_json =
+            Some(r#"{"provider":"openrouter","model":"m","data":{"reasoning_details":[]}}"#.into());
+        store.save_message(&with_state).await.unwrap();
+
+        let mut without = Message::assistant(conv.id, "done");
+        without.turn = 2;
+        store.save_message(&without).await.unwrap();
+
+        let history = store.load_history(conv.id).await.unwrap();
+        assert_eq!(
+            history[0].provider_state_json, with_state.provider_state_json,
+            "provider state should round-trip unchanged"
+        );
+        assert!(
+            history[1].provider_state_json.is_none(),
+            "messages without provider state read back as None"
         );
     }
 

@@ -1,6 +1,6 @@
 ## Purpose
 
-Record every conversation run as a durable, replayable event log so a client that reconnects mid-run or after it finished can recover the full stream.
+Durable per-conversation event log that backs run replay and turn status.
 
 ## Requirements
 

@@ -47,6 +47,7 @@ pub enum ContentBlock {
 /// * `MultimodalUser` — a user message with mixed text and image content.
 /// * `AssistantToolCalls` — the assistant's decision to invoke one or more
 ///   tools.  Serialises to `{"role":"assistant","content":"","tool_calls":[…]}`.
+///   Carries the provider's [`ProviderState`] for that turn, if any.
 /// * `ToolResult` — the result returned for a single tool invocation.
 ///   Serialises to `{"role":"tool","name":"…","content":"…"}`.
 #[derive(Debug, Clone)]
@@ -59,7 +60,10 @@ pub enum ChatHistoryMessage {
     /// [`ContentBlock::Text`] parts and discard images.
     MultimodalUser { content: Vec<ContentBlock> },
     /// The assistant requested one or more tool calls in a single turn.
-    AssistantToolCalls(Vec<ToolCallItem>),
+    AssistantToolCalls {
+        items: Vec<ToolCallItem>,
+        provider_state: Option<ProviderState>,
+    },
     /// The result of a single tool invocation.
     ToolResult { name: String, content: String },
 }
@@ -84,6 +88,20 @@ pub struct ToolCallItem {
     pub id: Option<String>,
 }
 
+/// Provider-specific state that must travel with an assistant tool-call turn
+/// and be sent back unchanged on later calls, such as OpenRouter's
+/// `reasoning_details`. A provider only reads state whose `provider` matches
+/// its own name, so switching providers never leaks it elsewhere.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderState {
+    /// [`LlmProvider::provider_name`](crate::LlmProvider::provider_name) of the
+    /// provider that produced it.
+    pub provider: String,
+    /// Model that produced it.
+    pub model: String,
+    pub data: serde_json::Value,
+}
+
 /// Metadata returned alongside the model's response.
 ///
 /// Fields are best-effort: providers populate what they can, leaving the rest
@@ -92,10 +110,18 @@ pub struct ToolCallItem {
 pub struct LlmResponseMeta {
     /// Model identifier echoed by the provider (e.g. `"qwen2.5:7b"`).
     pub model: Option<String>,
-    /// Number of tokens in the prompt (input).
+    /// Number of tokens in the prompt (input), including cached tokens.
     pub input_tokens: Option<u64>,
-    /// Number of tokens in the completion (output).
+    /// Number of tokens in the completion (output), including reasoning tokens.
     pub output_tokens: Option<u64>,
+    /// Input tokens served from the provider's prompt cache.
+    pub cached_input_tokens: Option<u64>,
+    /// Input tokens written to the provider's prompt cache.
+    pub cache_write_input_tokens: Option<u64>,
+    /// Output tokens spent on reasoning.
+    pub reasoning_tokens: Option<u64>,
+    /// Cost of the call in US dollars, when the provider reports it.
+    pub cost_usd: Option<f64>,
     /// Provider-specific finish/stop reason (e.g. `"stop"`, `"tool_calls"`).
     pub finish_reason: Option<String>,
     /// Provider-assigned response/message ID.
@@ -135,6 +161,8 @@ pub struct ToolCallResponse {
     /// `None` if no thinking was produced, or if thinking was already
     /// streamed via `StreamChunk::Thinking` during the call.
     pub thinking: Option<String>,
+    /// State to store with this turn and send back on later calls.
+    pub provider_state: Option<ProviderState>,
 }
 
 /// The outcome of a single LLM chat invocation.

@@ -2,7 +2,7 @@
 //!
 //! These utilities are used by the Slack and Mattermost interface binaries to
 //! reduce code duplication for common startup tasks: finding skill
-//! directories and providing an auto-deny confirmation callback.
+//! directories.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -12,31 +12,6 @@ use assistant_core::types::features::MemoryConfig;
 use assistant_core::{LlmProvider, expand_tilde, types::agent::OrgConfig};
 use assistant_skills::SkillSource;
 use assistant_storage::StorageLayer;
-
-use crate::orchestrator::ConfirmationCallback;
-
-// ── Auto-deny confirmation callback ───────────────────────────────────────────
-
-/// A [`ConfirmationCallback`] that always denies, suitable for automated
-/// interfaces where interactive prompts are not possible.
-///
-/// This callback handles tools marked `requires_confirmation` in automated
-/// interfaces where the user cannot be interactively prompted.
-pub struct AutoDenyConfirmation {
-    /// Human-readable interface name used in log messages (e.g. `"Slack"`).
-    pub interface_name: &'static str,
-}
-
-impl ConfirmationCallback for AutoDenyConfirmation {
-    fn confirm(&self, tool_name: &str, _params: &serde_json::Value) -> bool {
-        tracing::warn!(
-            tool = tool_name,
-            "{} interface: auto-denying confirmation-required tool",
-            self.interface_name,
-        );
-        false
-    }
-}
 
 // ── Skill directories ──────────────────────────────────────────────────────────
 
@@ -133,17 +108,6 @@ fn resolve_extra_dir(raw: &str, project_root: Option<&Path>) -> PathBuf {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    // ── AutoDenyConfirmation ──────────────────────────────────────────────
-
-    #[test]
-    fn auto_deny_always_returns_false() {
-        let cb = AutoDenyConfirmation {
-            interface_name: "TestInterface",
-        };
-        assert!(!cb.confirm("any-tool", &serde_json::json!({})));
-        assert!(!cb.confirm("dangerous", &serde_json::json!({"foo": 1})));
-    }
 
     // ── resolve_extra_dir ─────────────────────────────────────────────────
 

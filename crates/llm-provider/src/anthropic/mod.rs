@@ -302,7 +302,7 @@ fn build_anthropic_messages(history: &[ChatHistoryMessage]) -> (Vec<Value>, Vec<
                 messages.push(json!({"role": "user", "content": blocks}));
             }
 
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 // Start a new batch; previous pending_ids from older rounds are consumed
                 // by ToolResult messages, so only the current batch goes here.
                 pending_ids.clear();
@@ -614,6 +614,7 @@ impl AnthropicProvider {
                     } else {
                         Some(thinking_buf.clone())
                     },
+                    provider_state: None,
                 }));
             }
         }
@@ -725,7 +726,9 @@ async fn process_sse_event(
             if let Some(msg) = json.get("message") {
                 meta.model = msg.get("model").and_then(|v| v.as_str()).map(String::from);
                 meta.response_id = msg.get("id").and_then(|v| v.as_str()).map(String::from);
-                meta.input_tokens = msg.pointer("/usage/input_tokens").and_then(|v| v.as_u64());
+                if let Some(usage) = msg.get("usage") {
+                    apply_anthropic_usage(meta, usage);
+                }
             }
         }
 
@@ -821,6 +824,9 @@ async fn process_sse_event(
             {
                 meta.output_tokens = Some(out);
             }
+            if let Some(usage) = json.get("usage") {
+                merge_anthropic_delta_usage(meta, usage);
+            }
         }
 
         _ => {}
@@ -889,6 +895,7 @@ fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<Ll
             } else {
                 Some(thinking_parts.join(""))
             },
+            provider_state: None,
         }));
     }
     if !thinking_parts.is_empty() {
@@ -902,18 +909,73 @@ fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<Ll
 /// Top-level fields: `model`, `id`, `stop_reason`, `usage.input_tokens`,
 /// `usage.output_tokens`.
 fn extract_anthropic_meta(json: &Value) -> LlmResponseMeta {
-    LlmResponseMeta {
+    let mut meta = LlmResponseMeta {
         model: json.get("model").and_then(|v| v.as_str()).map(String::from),
         response_id: json.get("id").and_then(|v| v.as_str()).map(String::from),
         finish_reason: json
             .get("stop_reason")
             .and_then(|v| v.as_str())
             .map(String::from),
-        input_tokens: json.pointer("/usage/input_tokens").and_then(|v| v.as_u64()),
         output_tokens: json
             .pointer("/usage/output_tokens")
             .and_then(|v| v.as_u64()),
+        ..Default::default()
+    };
+    if let Some(usage) = json.get("usage") {
+        apply_anthropic_usage(&mut meta, usage);
     }
+    meta
+}
+
+/// Fold a `message_delta` usage object into `meta`. Its counts are cumulative
+/// but may omit fields, so a count it leaves out keeps the value seen in
+/// `message_start`.
+fn merge_anthropic_delta_usage(meta: &mut LlmResponseMeta, usage: &Value) {
+    let count = |key: &str| usage.get(key).and_then(Value::as_u64);
+    let (delta_uncached, delta_cached, delta_write) = (
+        count("input_tokens"),
+        count("cache_read_input_tokens"),
+        count("cache_creation_input_tokens"),
+    );
+    if delta_uncached.is_none() && delta_cached.is_none() && delta_write.is_none() {
+        return;
+    }
+    let prior_cached = meta.cached_input_tokens.unwrap_or(0);
+    let prior_write = meta.cache_write_input_tokens.unwrap_or(0);
+    let uncached = delta_uncached.unwrap_or_else(|| {
+        meta.input_tokens
+            .unwrap_or(0)
+            .saturating_sub(prior_cached + prior_write)
+    });
+    if delta_cached.is_some() {
+        meta.cached_input_tokens = delta_cached;
+    }
+    if delta_write.is_some() {
+        meta.cache_write_input_tokens = delta_write;
+    }
+    meta.input_tokens = Some(
+        uncached
+            + meta.cached_input_tokens.unwrap_or(0)
+            + meta.cache_write_input_tokens.unwrap_or(0),
+    );
+}
+
+/// Copy input-side token counts from an Anthropic `usage` object. Anthropic's
+/// `input_tokens` excludes cache reads and writes; the GenAI conventions count
+/// them as input, so `meta.input_tokens` is the sum.
+fn apply_anthropic_usage(meta: &mut LlmResponseMeta, usage: &Value) {
+    let count = |key: &str| usage.get(key).and_then(Value::as_u64);
+    let uncached = count("input_tokens");
+    meta.cached_input_tokens = count("cache_read_input_tokens");
+    meta.cache_write_input_tokens = count("cache_creation_input_tokens");
+    meta.input_tokens = match (
+        uncached,
+        meta.cached_input_tokens,
+        meta.cache_write_input_tokens,
+    ) {
+        (None, None, None) => None,
+        (a, b, c) => Some(a.unwrap_or(0) + b.unwrap_or(0) + c.unwrap_or(0)),
+    };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1194,11 +1256,14 @@ mod tests {
 
     #[test]
     fn assistant_tool_calls_emit_tool_use_blocks_with_ids() {
-        let history = vec![ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-            name: "shell".to_string(),
-            params: serde_json::json!({"cmd": "ls"}),
-            id: Some("toolu_123".to_string()),
-        }])];
+        let history = vec![ChatHistoryMessage::AssistantToolCalls {
+            items: vec![ToolCallItem {
+                name: "shell".to_string(),
+                params: serde_json::json!({"cmd": "ls"}),
+                id: Some("toolu_123".to_string()),
+            }],
+            provider_state: None,
+        }];
         let (messages, _) = build_anthropic_messages(&history);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["role"], "assistant");
@@ -1212,11 +1277,14 @@ mod tests {
 
     #[test]
     fn assistant_tool_calls_without_id_synthesise_one() {
-        let history = vec![ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-            name: "shell".to_string(),
-            params: serde_json::json!({}),
-            id: None,
-        }])];
+        let history = vec![ChatHistoryMessage::AssistantToolCalls {
+            items: vec![ToolCallItem {
+                name: "shell".to_string(),
+                params: serde_json::json!({}),
+                id: None,
+            }],
+            provider_state: None,
+        }];
         let (messages, _) = build_anthropic_messages(&history);
         let blocks = messages[0]["content"].as_array().unwrap();
         let id = blocks[0]["id"].as_str().unwrap();
@@ -1226,11 +1294,14 @@ mod tests {
     #[test]
     fn tool_result_pairs_with_matching_pending_call() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "shell".to_string(),
-                params: serde_json::json!({}),
-                id: Some("call_a".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "shell".to_string(),
+                    params: serde_json::json!({}),
+                    id: Some("call_a".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "shell".to_string(),
                 content: "ok".to_string(),
@@ -1368,6 +1439,28 @@ mod tests {
     }
 
     #[test]
+    fn extract_meta_counts_cache_tokens_as_input() {
+        let json = serde_json::json!({
+            "usage": {
+                "input_tokens": 100,
+                "cache_read_input_tokens": 900,
+                "cache_creation_input_tokens": 50,
+                "output_tokens": 10
+            }
+        });
+        let m = extract_anthropic_meta(&json);
+        assert_eq!(
+            m.input_tokens,
+            Some(1050),
+            "Anthropic excludes cache tokens from input_tokens; semconv wants the total"
+        );
+        assert_eq!(m.cached_input_tokens, Some(900));
+        assert_eq!(m.cache_write_input_tokens, Some(50));
+        assert_eq!(m.reasoning_tokens, None);
+        assert_eq!(m.cost_usd, None);
+    }
+
+    #[test]
     fn extract_meta_handles_missing_fields_gracefully() {
         let json = serde_json::json!({});
         let m = extract_anthropic_meta(&json);
@@ -1427,6 +1520,107 @@ mod tests {
         assert_eq!(meta.model.as_deref(), Some("claude-3-5-sonnet"));
         assert_eq!(meta.response_id.as_deref(), Some("msg_xyz"));
         assert_eq!(meta.input_tokens, Some(100));
+    }
+
+    #[tokio::test]
+    async fn process_sse_event_message_start_counts_cache_tokens() {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, mut meta) = empty_state();
+        let evt = serde_json::json!({
+            "message": {
+                "usage": {
+                    "input_tokens": 5,
+                    "cache_read_input_tokens": 2000,
+                    "cache_creation_input_tokens": 300
+                }
+            }
+        });
+        process_sse_event(
+            "message_start",
+            &evt,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            &mut meta,
+        )
+        .await;
+        assert_eq!(meta.input_tokens, Some(2305));
+        assert_eq!(meta.cached_input_tokens, Some(2000));
+        assert_eq!(meta.cache_write_input_tokens, Some(300));
+    }
+
+    async fn feed(meta: &mut LlmResponseMeta, event: &str, json: serde_json::Value) {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, _) = empty_state();
+        process_sse_event(
+            event,
+            &json,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            meta,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn message_delta_updates_cumulative_cache_counts() {
+        let mut meta = LlmResponseMeta::default();
+        feed(
+            &mut meta,
+            "message_start",
+            serde_json::json!({"message": {"usage": {
+                "input_tokens": 5,
+                "cache_read_input_tokens": 2000,
+                "cache_creation_input_tokens": 300
+            }}}),
+        )
+        .await;
+        feed(
+            &mut meta,
+            "message_delta",
+            serde_json::json!({
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 50, "input_tokens": 7, "cache_read_input_tokens": 2100}
+            }),
+        )
+        .await;
+        assert_eq!(meta.output_tokens, Some(50));
+        assert_eq!(
+            meta.cached_input_tokens,
+            Some(2100),
+            "the delta's cumulative count wins"
+        );
+        assert_eq!(
+            meta.cache_write_input_tokens,
+            Some(300),
+            "a count absent from the delta keeps its message_start value"
+        );
+        assert_eq!(meta.input_tokens, Some(7 + 2100 + 300));
+    }
+
+    #[tokio::test]
+    async fn message_delta_with_only_output_tokens_keeps_input_counts() {
+        let mut meta = LlmResponseMeta::default();
+        feed(
+            &mut meta,
+            "message_start",
+            serde_json::json!({"message": {"usage": {"input_tokens": 5, "cache_read_input_tokens": 2000}}}),
+        )
+        .await;
+        feed(
+            &mut meta,
+            "message_delta",
+            serde_json::json!({"delta": {}, "usage": {"output_tokens": 9}}),
+        )
+        .await;
+        assert_eq!(meta.input_tokens, Some(2005));
+        assert_eq!(meta.cached_input_tokens, Some(2000));
+        assert_eq!(meta.output_tokens, Some(9));
     }
 
     #[tokio::test]

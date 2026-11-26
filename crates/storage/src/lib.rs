@@ -24,6 +24,7 @@ pub mod catalog_item_store;
 pub mod command_events;
 pub mod conversation_broadcaster;
 pub mod conversation_events;
+pub mod conversation_search;
 pub mod conversations;
 pub mod integration_store;
 pub mod interface_instance_store;
@@ -480,6 +481,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "045_skill_executions",
             include_str!("../../../migrations/045_skill_executions.sql"),
+        ),
+        (
+            "046_message_provider_state",
+            include_str!("../../../migrations/046_message_provider_state.sql"),
         ),
         (
             "053_message_timings",

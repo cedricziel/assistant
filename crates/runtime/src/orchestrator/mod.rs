@@ -19,6 +19,7 @@ use assistant_storage::{
 };
 use assistant_tool_executor::{ToolExecutor, ToolOverlay};
 use assistant_transcription::AudioStore;
+use async_trait::async_trait;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,
     trace::{Span as _, Status as OtelStatus, TraceContextExt, Tracer as _},
@@ -33,6 +34,7 @@ use uuid::Uuid;
 mod dispatch;
 mod prompt;
 pub mod stream_event;
+mod turn_cancellations;
 mod turn_control;
 
 mod subagent;
@@ -45,12 +47,70 @@ pub use stream_event::OrchestratorEvent;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+/// Which answers a [`ConfirmationCallback`] may offer the user.
+///
+/// The once answers (`AllowOnce`, `RejectOnce`) are always available; the
+/// "always" answers persist a rule and are offered only when the request
+/// carries a suggested rule to save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ApprovalOptions {
+    /// `AllowAlways` may be offered.
+    pub allow_always: bool,
+    /// `RejectAlways` may be offered.
+    pub reject_always: bool,
+}
+
+impl ApprovalOptions {
+    /// Offer only `AllowOnce` and `RejectOnce`.
+    pub const fn once_only() -> Self {
+        Self {
+            allow_always: false,
+            reject_always: false,
+        }
+    }
+
+    /// Whether neither "always" answer may be offered.
+    pub const fn is_once_only(&self) -> bool {
+        !self.allow_always && !self.reject_always
+    }
+}
+
+/// One tool call awaiting a human decision.
+pub struct ConfirmationRequest<'a> {
+    pub tool_name: &'a str,
+    pub params: &'a serde_json::Value,
+    pub ctx: &'a ExecutionContext,
+    /// Provider id of the call, when the turn streams one.
+    pub tool_call_id: Option<&'a str>,
+    /// Why the permission pipeline could not decide on its own.
+    pub reason: &'a str,
+    /// Which answers may be offered.
+    pub options: ApprovalOptions,
+    /// Stream sink for the turn, when it has one.
+    pub event_sink: Option<&'a mpsc::Sender<OrchestratorEvent>>,
+}
+
+/// A human's (or a timeout's) answer to a [`ConfirmationRequest`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationAnswer {
+    AllowOnce,
+    AllowAlways,
+    RejectOnce,
+    RejectAlways,
+    /// Nobody answered before the request timed out.
+    Expired,
+    /// The turn ended or was cancelled while the request was open.
+    Cancelled,
+}
+
 /// Callback trait for requesting user confirmation before executing a tool.
-/// Typically implemented by the CLI interface.
+///
+/// A runtime without a callback denies every call the pipeline leaves
+/// undecided.
+#[async_trait]
 pub trait ConfirmationCallback: Send + Sync {
-    /// Return `true` if the user confirms execution of `tool_name` with
-    /// `params`, or `false` to deny.
-    fn confirm(&self, tool_name: &str, params: &serde_json::Value) -> bool;
+    /// Ask for a decision on `req`. May wait for as long as the human takes.
+    async fn confirm(&self, req: ConfirmationRequest<'_>) -> ConfirmationAnswer;
 }
 
 /// Outcome of [`Orchestrator::cancel_turn`].
@@ -75,6 +135,11 @@ pub enum CancelOutcome {
 /// in `assistant-web-ui`) match on this substring to emit a final
 /// `agent_error` event with the structured cancellation reason.
 pub const TURN_CANCELLED_MARKER: &str = "turn_cancelled";
+
+/// Additional error message fragment present, beside [`TURN_CANCELLED_MARKER`],
+/// when the turn was cancelled before any worker claimed it. Nothing of such a
+/// turn ran: the user message was never added to the conversation history.
+pub const TURN_CANCELLED_BEFORE_START_MARKER: &str = "cancelled_before_start";
 
 /// The result of a single orchestrator turn.
 pub struct TurnResult {
@@ -228,7 +293,9 @@ pub struct Orchestrator {
     /// (the `batch_id` / `correlation_id` set by `submit_turn`).
     /// When `submit_turn` times out it cancels the token so the worker
     /// drops the in-progress turn future rather than running to completion.
-    pub(crate) turn_cancellations: tokio::sync::RwLock<HashMap<Uuid, CancellationToken>>,
+    /// Also remembers requests cancelled before a worker claimed them, so the
+    /// worker skips them.
+    pub(crate) turn_cancellations: tokio::sync::RwLock<turn_cancellations::TurnCancellations>,
     /// OTel metric instruments for GenAI and operational metrics.
     pub(crate) metrics: crate::MetricsRecorder,
     /// Active assistant agent ID for memory/workspace conversation scoping.
@@ -321,7 +388,7 @@ impl Orchestrator {
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
-            turn_cancellations: tokio::sync::RwLock::new(HashMap::new()),
+            turn_cancellations: tokio::sync::RwLock::new(Default::default()),
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
             compaction_config,
@@ -406,29 +473,18 @@ impl Orchestrator {
     /// never registered. The caller is responsible for any side effects
     /// (e.g. emitting a final SSE `agent_error` event for streaming clients).
     pub async fn cancel_turn(&self, request_id: Uuid) -> CancelOutcome {
-        let token = self
-            .turn_cancellations
-            .read()
-            .await
-            .get(&request_id)
-            .cloned();
-        match token {
-            Some(t) => {
-                t.cancel();
-                info!(request_id = %request_id, "cancel_turn: cancelled in-flight turn");
-                CancelOutcome::Cancelled
-            }
-            None => CancelOutcome::NotFound,
+        if self.turn_cancellations.write().await.cancel(request_id) {
+            info!(request_id = %request_id, "cancel_turn: cancelled in-flight turn");
+            CancelOutcome::Cancelled
+        } else {
+            CancelOutcome::NotFound
         }
     }
 
     /// True when `request_id` currently has a registered cancellation token —
     /// i.e. a turn is in flight under this id. Exposed primarily for tests.
     pub async fn is_turn_in_flight(&self, request_id: Uuid) -> bool {
-        self.turn_cancellations
-            .read()
-            .await
-            .contains_key(&request_id)
+        self.turn_cancellations.read().await.contains(request_id)
     }
 
     /// Attach an [`AudioStore`] so that audio produced by the `voice-response`
@@ -966,6 +1022,7 @@ impl Orchestrator {
                         conversation_id,
                         base_turn + iteration as i64 + 1,
                         &tool_call_items,
+                        tool_call_resp.provider_state.as_ref(),
                     )
                     .await;
 
@@ -1397,6 +1454,7 @@ impl Orchestrator {
                         conversation_id,
                         base_turn + iteration as i64 + 1,
                         &tool_call_items,
+                        tool_call_resp.provider_state.as_ref(),
                     )
                     .instrument(iteration_span.clone())
                     .await;

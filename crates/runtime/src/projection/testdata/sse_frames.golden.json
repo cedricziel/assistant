@@ -1,0 +1,29 @@
+[
+  {
+    "event": "token",
+    "payload": { "token": "Running it" }
+  },
+  {
+    "event": "tool_result",
+    "payload": {
+      "tool_name": "bash",
+      "status": "ok",
+      "arguments": { "command": "ls" },
+      "result": "a.txt",
+      "tool_call_id": "call_1"
+    }
+  },
+  {
+    "event": "subagent_tool_result",
+    "payload": {
+      "agent_id": "a1",
+      "data": {
+        "tool_name": "web-fetch",
+        "status": "ok",
+        "arguments": { "url": "https://example.com" },
+        "result": "<html>",
+        "tool_call_id": "call_2"
+      }
+    }
+  }
+]

@@ -201,7 +201,7 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     try {
       final response = await api.conversations.createConversation(
         createConversationRequest: CreateConversationRequest(
-          (b) => b.title = title ?? 'New Chat',
+          (b) => b.title = title,
         ),
       );
       return response.data?.id;

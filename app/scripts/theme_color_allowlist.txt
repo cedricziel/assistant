@@ -29,8 +29,6 @@ lib/features/admin/admin_screen.dart
 lib/features/api_keys/api_keys_screen.dart
 lib/features/chat/streaming_timeline_entry.dart
 lib/features/chat/svg_builder.dart
-lib/features/chat/timeline_section.dart
-lib/features/chat/tool_call_chip.dart
 lib/features/connection/connection_screen.dart
 lib/features/logs/logs_screen.dart
 lib/features/personas/persona_detail_screen.dart

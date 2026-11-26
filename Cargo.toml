@@ -1,6 +1,6 @@
 [package]
 name = "assistant"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -28,6 +28,7 @@ members = [
     "crates/integration-tests",
     "crates/web-ui",
     "crates/a2a-json-schema",
+    "crates/a2ui",
     "crates/bus-nats",
     "crates/backup",
     "crates/test-support",
@@ -55,7 +56,7 @@ todo = "warn"
 unused_must_use = "deny"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/cedricziel/assistant"
@@ -78,6 +79,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 # Encoding
 base64 = "0.23"
+# Accent folding for conversation search
+unicode-normalization = "0.1.25"
 # HTTP client
 reqwest = { version = "0.13", features = ["json", "stream", "rustls-no-provider", "multipart", "form"], default-features = false }
 # Force vendored OpenSSL for static linking when cross-compiling (e.g. musl targets).
@@ -166,6 +169,9 @@ hmac = "0.13"
 hex = "0.4"
 # URL parsing
 url = "2"
+# Regex parsing and safety analysis for A2UI surface validation
+regex = "1.12"
+regex-syntax = "0.8"
 # OS-level CSPRNG
 getrandom = "0.4"
 # VAPID-signed Web Push dispatch

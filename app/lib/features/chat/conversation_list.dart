@@ -42,9 +42,7 @@ class ConversationList extends ConsumerWidget {
             key: const Key('new_chat_button'),
             onPressed: () async {
               final notifier = ref.read(conversationListProvider.notifier);
-              final createdId = await notifier.createConversation(
-                title: 'New Chat',
-              );
+              final createdId = await notifier.createConversation();
               if (createdId != null) {
                 ref.read(chatProvider.notifier).clearConversation();
                 if (context.mounted) {

@@ -65,15 +65,6 @@ void main() {
         expect(find.text('Sign in'), findsWidgets);
       });
 
-      testWidgets('renders email and password fields', (tester) async {
-        final repo = await _makeRepo();
-        await tester.pumpWidget(_buildSubject(repo));
-        await tester.pumpAndSettle();
-
-        expect(find.widgetWithText(TextFormField, 'Email'), findsOneWidget);
-        expect(find.widgetWithText(TextFormField, 'Password'), findsOneWidget);
-      });
-
       testWidgets('renders Sign in button', (tester) async {
         final repo = await _makeRepo();
         await tester.pumpWidget(_buildSubject(repo));
@@ -88,38 +79,6 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Use token authentication instead'), findsOneWidget);
-      });
-
-      testWidgets('validates empty email', (tester) async {
-        final repo = await _makeRepo();
-        await tester.pumpWidget(_buildSubject(repo));
-        await tester.pumpAndSettle();
-
-        // Leave email empty, enter password.
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Password'),
-          'secret',
-        );
-        await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Email is required'), findsOneWidget);
-      });
-
-      testWidgets('validates empty password', (tester) async {
-        final repo = await _makeRepo();
-        await tester.pumpWidget(_buildSubject(repo));
-        await tester.pumpAndSettle();
-
-        // Enter email, leave password empty.
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Email'),
-          'alice@example.com',
-        );
-        await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Password is required'), findsOneWidget);
       });
     });
 
@@ -151,7 +110,7 @@ void main() {
         await tester.pumpAndSettle();
         await _switchToLegacyMode(tester);
 
-        expect(find.text('Sign in with email and password'), findsOneWidget);
+        expect(find.text('Sign in with your account'), findsOneWidget);
       });
 
       testWidgets('submitting with empty token creates context and navigates', (
@@ -237,7 +196,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Starts in OAuth2 mode.
-        expect(find.widgetWithText(TextFormField, 'Email'), findsOneWidget);
+        expect(find.textContaining("server's sign-in page"), findsOneWidget);
         expect(
           find.widgetWithText(TextFormField, 'Token (optional)'),
           findsNothing,
@@ -245,16 +204,16 @@ void main() {
 
         // Switch to legacy.
         await _switchToLegacyMode(tester);
-        expect(find.widgetWithText(TextFormField, 'Email'), findsNothing);
+        expect(find.textContaining("server's sign-in page"), findsNothing);
         expect(
           find.widgetWithText(TextFormField, 'Token (optional)'),
           findsOneWidget,
         );
 
         // Switch back to OAuth2.
-        await tester.tap(find.text('Sign in with email and password'));
+        await tester.tap(find.text('Sign in with your account'));
         await tester.pumpAndSettle();
-        expect(find.widgetWithText(TextFormField, 'Email'), findsOneWidget);
+        expect(find.textContaining("server's sign-in page"), findsOneWidget);
         expect(
           find.widgetWithText(TextFormField, 'Token (optional)'),
           findsNothing,

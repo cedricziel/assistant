@@ -40,7 +40,8 @@ enum EntryState {
   stale,
 }
 
-/// A streaming-aware timeline entry that replaces [ChatTimelineSection].
+/// A streaming-aware timeline entry for one thinking, tool call or subagent
+/// step in the chat timeline.
 ///
 /// Adapts its presentation based on [density], [entryState], and whether
 /// the user has manually pinned it open.

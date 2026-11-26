@@ -346,13 +346,7 @@ mod tests {
         ) -> anyhow::Result<LlmResponse> {
             Ok(LlmResponse::FinalAnswer(
                 self.response.clone(),
-                LlmResponseMeta {
-                    model: None,
-                    input_tokens: None,
-                    output_tokens: None,
-                    finish_reason: None,
-                    response_id: None,
-                },
+                LlmResponseMeta::default(),
             ))
         }
 
@@ -365,13 +359,7 @@ mod tests {
         ) -> anyhow::Result<LlmResponse> {
             Ok(LlmResponse::FinalAnswer(
                 self.response.clone(),
-                LlmResponseMeta {
-                    model: None,
-                    input_tokens: None,
-                    output_tokens: None,
-                    finish_reason: None,
-                    response_id: None,
-                },
+                LlmResponseMeta::default(),
             ))
         }
     }
