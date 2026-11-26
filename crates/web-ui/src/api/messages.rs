@@ -597,12 +597,12 @@ pub struct SseSubagentStatusEvent {
 /// `GET /api/conversations/{id}/runs/{run_id}/events/stream`
 ///
 /// Replays stored events from `?since` (default 0), then tails live events
-/// if the run is still active.  Closes automatically when the `done` or
-/// `error` event is reached.
+/// if the run is still active. Closes when the run finishes, not at the
+/// `done` or `agent_error` frame: events such as `suggestions` follow `done`.
+/// A client that disconnects stops the tail at once.
 ///
-/// Returns:
-/// - `404` if no events exist for `run_id` (run never started or unknown)
-/// - `410` if the run existed but all events have been pruned (TTL elapsed)
+/// Returns `404` if no events exist for `run_id` and the run is not active
+/// (never started, unknown, or pruned after the TTL elapsed).
 #[utoipa::path(
     get,
     path = "/api/conversations/{id}/runs/{run_id}/events/stream",
@@ -614,8 +614,7 @@ pub struct SseSubagentStatusEvent {
     ),
     responses(
         (status = 200, description = "SSE stream of run events", content_type = "text/event-stream"),
-        (status = 404, description = "Run not found"),
-        (status = 410, description = "Run events expired"),
+        (status = 404, description = "Run not found or its events expired"),
     ),
     security(("bearer_token" = []))
 )]
@@ -673,11 +672,6 @@ pub async fn stream_run_events(
         }
     }
 
-    // Check if events were pruned (run existed, events gone).
-    // A run_id with zero rows that is NOT in the broadcaster means it's 410.
-    // (Handled above — if has_events is false and no live entry → 404.)
-    // For simplicity we treat unknown old runs as 404.
-
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
     // Subscribe to live broadcast channel before replaying, so we don't miss
@@ -694,11 +688,6 @@ pub async fn stream_run_events(
         }
     };
 
-    // Check if the run completed before we even arrived.
-    let already_complete = past_events
-        .iter()
-        .any(|e| e.event_type == "done" || e.event_type == "agent_error");
-
     let conv_id_str_clone = conv_id_str.clone();
     tokio::spawn(async move {
         // Send all replayed events.
@@ -712,44 +701,46 @@ pub async fn stream_run_events(
             }
         }
 
-        // If the run was already complete, close the stream.
-        if already_complete || !is_active {
+        // A run that is no longer registered has nothing more to deliver.
+        if !is_active {
             return;
         }
 
-        // Tail live events.
+        // Tail live events until the run finishes. `done` does not end the
+        // run: later frames such as `suggestions` still follow it.
         let mut live_rx = match live_rx {
             Some(r) => r,
             None => return,
         };
 
         loop {
-            match live_rx.recv().await {
-                Ok(live) => {
-                    let ev = Event::default()
-                        .event(live.event_type.as_str())
-                        .data(live.payload.to_string())
-                        .id(live.sequence.to_string());
-                    let is_terminal = live.event_type == "done" || live.event_type == "agent_error";
-                    if sse_tx.send(Ok(ev)).await.is_err() {
+            tokio::select! {
+                // A departed client releases its receiver without waiting
+                // for the next event.
+                _ = sse_tx.closed() => return,
+                received = live_rx.recv() => match received {
+                    Ok(live) => {
+                        let ev = Event::default()
+                            .event(live.event_type.as_str())
+                            .data(live.payload.to_string())
+                            .id(live.sequence.to_string());
+                        if sse_tx.send(Ok(ev)).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Run finished and the sender was dropped.
                         return;
                     }
-                    if is_terminal {
-                        return;
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(
+                            "stream_run_events lagged by {n} events for run {run_id} conv {conv_id_str_clone}"
+                        );
+                        // Continue — we already replayed from DB; lagged live events
+                        // are a minor gap in the tail (tokens may be duplicated on
+                        // reconnect from DB, which is acceptable).
                     }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    // Run completed and sender was dropped.
-                    return;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    warn!(
-                        "stream_run_events lagged by {n} events for run {run_id} conv {conv_id_str_clone}"
-                    );
-                    // Continue — we already replayed from DB; lagged live events
-                    // are a minor gap in the tail (tokens may be duplicated on
-                    // reconnect from DB, which is acceptable).
-                }
+                },
             }
         }
     });
@@ -1706,6 +1697,140 @@ mod tests {
         assert!(text.contains("done"), "done event missing: {text}");
     }
 
+    /// A finished run replays every stored row, including those after `done`.
+    #[tokio::test]
+    async fn stream_run_events_replays_rows_after_done_and_closes() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await.to_string();
+        let run_id = Uuid::new_v4().to_string();
+
+        for (seq, kind) in [(0, "run_started"), (1, "done"), (2, "suggestions")] {
+            storage
+                .conversation_event_store()
+                .append_event(&run_id, &conv_id, seq, kind, &serde_json::json!({}))
+                .await
+                .unwrap();
+        }
+
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id}/events/stream"
+            ))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app(state).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("event: done"), "done missing: {text}");
+        assert!(
+            text.contains("event: suggestions"),
+            "suggestions after done missing: {text}"
+        );
+    }
+
+    /// An active run whose `done` row is already stored keeps tailing, and
+    /// delivers an event broadcast after `done`, until the run finishes.
+    #[tokio::test]
+    async fn stream_run_events_tails_past_done_until_run_finishes() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await.to_string();
+        let run_id = Uuid::new_v4();
+        let run_id_str = run_id.to_string();
+
+        for (seq, kind) in [(0, "run_started"), (1, "done")] {
+            storage
+                .conversation_event_store()
+                .append_event(&run_id_str, &conv_id, seq, kind, &serde_json::json!({}))
+                .await
+                .unwrap();
+        }
+
+        let broadcast_tx = state.run_broadcaster.start_run(run_id).await;
+        let broadcaster = state.run_broadcaster.clone();
+        tokio::spawn(async move {
+            tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+                while broadcast_tx.receiver_count() == 0 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("handler never subscribed to the run broadcaster");
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 2,
+                event_type: "suggestions".to_string(),
+                payload: serde_json::json!({"suggestions": [{"prompt": "later-prompt"}]}),
+            });
+            broadcaster.finish_run(&run_id).await;
+        });
+
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id_str}/events/stream"
+            ))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app(state).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            body_bytes(resp.into_body()),
+        )
+        .await
+        .expect("stream must close once the run finishes");
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("event: done"),
+            "replayed done missing: {text}"
+        );
+        assert!(
+            text.contains("later-prompt"),
+            "event broadcast after done missing: {text}"
+        );
+    }
+
+    /// A replay client that goes away releases its broadcast receiver
+    /// without any further event being broadcast.
+    #[tokio::test]
+    async fn stream_run_events_releases_receiver_when_client_drops() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await.to_string();
+        let run_id = Uuid::new_v4();
+        let run_id_str = run_id.to_string();
+
+        // No stored rows: the handler has nothing to replay, so it can only
+        // notice the departed client while it waits on the live channel.
+        let broadcast_tx = state.run_broadcaster.start_run(run_id).await;
+
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id_str}/events/stream"
+            ))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app(state).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body();
+
+        tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+            while broadcast_tx.receiver_count() == 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("handler never subscribed to the run broadcaster");
+
+        drop(body);
+
+        tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+            while broadcast_tx.receiver_count() != 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("departed client must release its broadcast receiver");
+    }
+
     /// Race-condition path: broadcaster is active but no DB events have been
     /// persisted yet (run_started event is still in-flight). The handler should
     /// recognise the run as active and switch to live-tail mode.
@@ -1800,9 +1925,8 @@ mod tests {
         );
     }
 
-    /// After events are pruned (TTL), the endpoint returns 404.
-    /// (We do not distinguish 404 vs 410 in the current implementation —
-    /// both expired and never-existed runs return 404.)
+    /// After events are pruned (TTL), the endpoint returns 404, the same as
+    /// for a run that never existed.
     #[tokio::test]
     async fn stream_run_events_returns_404_for_pruned_run() {
         let sl = Arc::new(StorageLayer::new_in_memory().await.unwrap());
