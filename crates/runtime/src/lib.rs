@@ -37,7 +37,7 @@ pub use metrics::MetricsRecorder;
 pub use orchestration::{OrchestrationEngine, RecordedSubmitTurn, StubOrchestrationEngine};
 pub use orchestrator::{
     CancelOutcome, Orchestrator, OrchestratorEvent, SubmitTurn, TURN_CANCELLED_BEFORE_START_MARKER,
-    TURN_CANCELLED_MARKER, TurnResult,
+    TURN_CANCELLED_MARKER, TurnLease, TurnMode, TurnRegistry, TurnResult,
 };
 pub use org_context::{OrgConfigAdjust, OrgContext, OrgContexts, build_llm};
 pub use otel_spans::start_conversation_context;
