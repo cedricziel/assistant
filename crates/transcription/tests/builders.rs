@@ -20,6 +20,33 @@ fn is_audio_mime_accepts_common_audio_types() {
 }
 
 #[test]
+fn is_audio_mime_accepts_voice_note_and_video_containers() {
+    for mime in [
+        "audio/amr",
+        "audio/amr-wb",
+        "audio/3gpp",
+        "audio/3gpp2",
+        "audio/x-caf",
+        "audio/aiff",
+        "audio/x-aiff",
+        "audio/wave",
+        "video/mp4",
+        "video/webm",
+        "video/quicktime",
+    ] {
+        assert!(is_audio_mime(mime), "{mime}");
+    }
+}
+
+#[test]
+fn is_audio_mime_ignores_parameters_and_case() {
+    assert!(is_audio_mime("audio/ogg; codecs=opus"));
+    assert!(is_audio_mime("Audio/OGG"));
+    assert!(!is_audio_mime("video/x-matroska"));
+    assert!(!is_audio_mime("audio/mpegurl"), "a playlist is not audio");
+}
+
+#[test]
 fn is_audio_mime_rejects_non_audio() {
     assert!(!is_audio_mime("text/plain"));
     assert!(!is_audio_mime("image/png"));
@@ -81,6 +108,8 @@ fn build_transcription_whisper_uses_api_key_from_config() {
         base_url: None,
         model: None,
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
     let provider = build_provider(&config).ok();
     assert!(provider.is_some());
@@ -97,6 +126,8 @@ fn build_transcription_ollama_constructs_without_api_key() {
         base_url: Some("http://localhost:11434".into()),
         model: Some("whisper".into()),
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
     let provider = build_provider(&config).ok();
     assert!(provider.is_some());
@@ -111,6 +142,8 @@ fn build_transcription_deepgram_uses_api_key_from_config() {
         base_url: None,
         model: None,
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
     let provider = build_provider(&config).ok();
     assert!(provider.is_some());

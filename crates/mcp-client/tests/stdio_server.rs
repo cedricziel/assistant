@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use assistant_core::ToolHandler;
 use assistant_core::types::skills_mcp::{McpServerEntry, McpTransportConfig, McpTrustLevel};
 use assistant_mcp_client::manager::McpClientManager;
 
@@ -36,6 +35,7 @@ fn shell_entry(env: HashMap<String, String>) -> McpServerEntry {
         env,
         enabled: true,
         trust: McpTrustLevel::Trust,
+        tool_timeout_secs: None,
     }
 }
 

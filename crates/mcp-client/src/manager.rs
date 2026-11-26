@@ -147,7 +147,7 @@ impl McpClientManager {
         tools_changed: &Arc<Notify>,
     ) -> Result<(McpClient, Vec<Tool>)> {
         let stale = StaleTools::waking(tools_changed.clone());
-        let client = match &entry.transport {
+        let mut client = match &entry.transport {
             McpTransportConfig::Stdio { command } => {
                 let resolved_env = resolve_env_vars(&entry.env);
 
@@ -216,6 +216,9 @@ impl McpClientManager {
                     })?
             }
         };
+        if let Some(secs) = entry.tool_timeout_secs {
+            client = client.with_tool_timeout(Duration::from_secs(secs));
+        }
 
         let tools = client
             .list_tools()
@@ -504,6 +507,13 @@ impl McpClientManager {
                 }
             }
         })
+    }
+
+    /// The client and trust level of `server`, if it is connected.
+    pub(crate) async fn connected(&self, server: &str) -> Option<(Arc<McpClient>, McpTrustLevel)> {
+        let servers = self.servers.read().await;
+        let state = servers.get(server)?;
+        Some((state.client.clone()?, state.entry.trust.clone()))
     }
 
     /// Every configured server with its client, `None` while disconnected.

@@ -12,6 +12,7 @@ pub mod context;
 pub mod identity;
 pub mod integrations;
 pub mod llm;
+pub mod mcp_app;
 pub mod memory;
 pub mod permission;
 pub mod secret;

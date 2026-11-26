@@ -1,24 +1,19 @@
 import 'dart:async';
 
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
 
 import '../../shared/platform/widgets.dart';
-import 'message_meta_actions.dart';
 
 /// State for the read-aloud TTS action.
 enum _ReadAloudState { idle, loading, playing, error }
 
 /// Stateful meta action that fetches on-demand TTS and plays it back.
 class ReadAloudAction extends StatefulWidget {
-  const ReadAloudAction({
-    super.key,
-    required this.fetchAudio,
-    required this.color,
-  });
+  const ReadAloudAction({super.key, required this.fetchAudio});
 
   final Future<({Uint8List bytes, String mimeType})?> Function() fetchAudio;
-  final Color color;
 
   @override
   State<ReadAloudAction> createState() => _ReadAloudActionState();
@@ -83,18 +78,19 @@ class _ReadAloudActionState extends State<ReadAloudAction> {
 
   @override
   Widget build(BuildContext context) {
-    final errorColor = Theme.of(context).colorScheme.error;
+    final scheme = Theme.of(context).colorScheme;
+    final errorColor = scheme.error;
+    final mutedColor = scheme.onSurface.withValues(alpha: 0.6);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         switch (_state) {
-          _ReadAloudState.idle => MetaActionButton(
+          _ReadAloudState.idle => MessageActionButton(
             icon: Icons.volume_up_outlined,
             label: 'Read aloud',
-            color: widget.color,
-            onTap: _toggle,
+            onPressed: _toggle,
           ),
           _ReadAloudState.loading => Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -106,28 +102,26 @@ class _ReadAloudActionState extends State<ReadAloudAction> {
                   height: 14,
                   child: CircularProgressIndicator.adaptive(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(widget.color),
+                    valueColor: AlwaysStoppedAnimation<Color>(mutedColor),
                   ),
                 ),
                 const SizedBox(width: 4),
                 Text(
                   'Loading\u2026',
-                  style: TextStyle(fontSize: 12, color: widget.color),
+                  style: TextStyle(fontSize: 12, color: mutedColor),
                 ),
               ],
             ),
           ),
-          _ReadAloudState.playing => MetaActionButton(
+          _ReadAloudState.playing => MessageActionButton(
             icon: Icons.stop_rounded,
             label: 'Stop reading',
-            color: widget.color,
-            onTap: _toggle,
+            onPressed: _toggle,
           ),
-          _ReadAloudState.error => MetaActionButton(
+          _ReadAloudState.error => MessageActionButton(
             icon: Icons.volume_up_outlined,
             label: 'Read aloud',
-            color: widget.color,
-            onTap: _toggle,
+            onPressed: _toggle,
           ),
         },
         if (_state == _ReadAloudState.error)
