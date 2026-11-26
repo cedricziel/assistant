@@ -317,6 +317,7 @@ mod tests {
             params_schema: serde_json::json!({"type": "object"}),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         }
     }
 

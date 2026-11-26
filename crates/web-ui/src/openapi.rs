@@ -879,6 +879,39 @@ mod tests {
         }
     }
 
+    /// `tool_result` frames carry JSON objects for `arguments` and `data`, and
+    /// the call id, so generated clients decode them as maps, not strings.
+    #[test]
+    fn sse_tool_result_event_documents_object_arguments_data_and_call_id() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let schema = &spec["components"]["schemas"]["SseToolResultEvent"];
+        let props = &schema["properties"];
+        for field in ["arguments", "data"] {
+            let ty = &props[field]["type"];
+            let is_object =
+                ty == "object" || ty.as_array().is_some_and(|t| t.contains(&"object".into()));
+            assert!(
+                is_object,
+                "{field} must be type object, got {}",
+                props[field]
+            );
+        }
+        assert!(
+            props["tool_call_id"].is_object(),
+            "tool_call_id must be documented: {props}"
+        );
+        let required = schema["required"].as_array().expect("required list");
+        assert!(
+            !required.iter().any(|r| r == "tool_call_id" || r == "data"),
+            "tool_call_id and data stay optional: {required:?}"
+        );
+        let data_doc = props["data"]["description"].as_str().unwrap_or_default();
+        assert!(
+            data_doc.contains("schemas/tool-results/"),
+            "data must point at schemas/tool-results/: {data_doc}"
+        );
+    }
+
     /// Telemetry is emitted over OTLP only; the REST API must not expose
     /// local trace, log or analytics viewers.
     #[test]

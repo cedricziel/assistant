@@ -13281,10 +13281,17 @@
         "properties": {
           "arguments": {
             "type": [
-              "string",
+              "object",
               "null"
             ],
-            "description": "The arguments passed to the tool (JSON string)."
+            "description": "The arguments passed to the tool, as a JSON object."
+          },
+          "data": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Structured output of the tool, a JSON object with a `kind` tag. Absent\nwhen the tool returned text only or the data exceeded the size limit.\nEach `kind` is defined by a JSON Schema in `schemas/tool-results/`."
           },
           "result": {
             "type": [
@@ -13296,6 +13303,13 @@
           "status": {
             "type": "string",
             "description": "Whether the tool call succeeded or failed."
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of the tool call this result answers, when the provider\nsupplied one."
           },
           "tool_name": {
             "type": "string",
