@@ -12,6 +12,8 @@ pub struct ChatRequest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Value>,
     pub max_completion_tokens: u32,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stream: bool,
 }
 
 #[derive(Debug, Deserialize)]

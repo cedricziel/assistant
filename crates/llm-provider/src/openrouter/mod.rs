@@ -2,14 +2,13 @@
 //! unified API gateway.
 //!
 //! OpenRouter provides access to 300+ models from multiple providers through
-//! a single OpenAI-compatible Chat Completions endpoint. Non-streaming
-//! calls use the OpenRouter wire client in this module, which keeps fields
-//! a generic client drops, such as `usage.cost`. Streaming still goes
-//! through [`ChatCompletionsProvider`]. Both send the configured
-//! `HTTP-Referer` and `X-Title` headers.
+//! a single OpenAI-compatible Chat Completions endpoint. The wire client in
+//! this module keeps fields a generic client drops, such as `usage.cost`,
+//! and sends the configured `HTTP-Referer` and `X-Title` headers.
 
 mod client;
 mod request;
+mod stream;
 mod wire;
 
 use async_trait::async_trait;
@@ -20,8 +19,6 @@ use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_open
 use assistant_core::{
     Capabilities, ChatHistoryMessage, LlmProvider, LlmResponse, StreamChunk, ToolSpec, ToolSupport,
 };
-
-use crate::chat_completions::{ChatCompletionsConfig, ChatCompletionsProvider};
 
 use self::client::OpenRouterClient;
 use self::request::build_chat_request;
@@ -36,10 +33,10 @@ const DEFAULT_MAX_TOKENS: u32 = 8192;
 /// [`LlmProvider`] backed by the OpenRouter Chat Completions API.
 ///
 pub struct OpenRouterProvider {
-    /// OpenRouter wire client for non-streaming calls.
     client: OpenRouterClient,
-    /// Shared Chat Completions client, used for streaming.
-    inner: ChatCompletionsProvider,
+    model: String,
+    base_url: String,
+    max_tokens: u32,
 }
 
 impl OpenRouterProvider {
@@ -77,30 +74,18 @@ impl OpenRouterProvider {
 
         let max_tokens = cfg.openrouter.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
 
-        let config = ChatCompletionsConfig {
+        debug!(model = %cfg.model, base_url = %base_url, "Creating OpenRouter provider");
+
+        Ok(Self {
+            client: OpenRouterClient::new(
+                base_url.clone(),
+                api_key,
+                cfg.timeout_secs,
+                extra_headers,
+            )?,
             model: cfg.model.clone(),
             base_url,
-            api_key,
-            timeout_secs: cfg.timeout_secs,
             max_tokens,
-            extra_headers,
-        };
-
-        debug!(
-            model = %config.model,
-            base_url = %config.base_url,
-            "Creating OpenRouter provider"
-        );
-
-        let client = OpenRouterClient::new(
-            config.base_url.clone(),
-            config.api_key.clone(),
-            config.timeout_secs,
-            config.extra_headers.clone(),
-        )?;
-        Ok(Self {
-            client,
-            inner: ChatCompletionsProvider::new(config)?,
         })
     }
 }
@@ -125,14 +110,8 @@ impl LlmProvider for OpenRouterProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        let config = &self.inner.config;
-        let request = build_chat_request(
-            &config.model,
-            config.max_tokens,
-            system_prompt,
-            history,
-            tools,
-        );
+        let request =
+            build_chat_request(&self.model, self.max_tokens, system_prompt, history, tools);
         self.client.chat(&request).await
     }
 
@@ -143,9 +122,10 @@ impl LlmProvider for OpenRouterProvider {
         tools: &[ToolSpec],
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.inner
-            .chat_sse(system_prompt, history, tools, chunk_sink)
-            .await
+        let mut request =
+            build_chat_request(&self.model, self.max_tokens, system_prompt, history, tools);
+        request.stream = true;
+        self.client.chat_stream(&request, chunk_sink).await
     }
 
     async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
@@ -160,11 +140,11 @@ impl LlmProvider for OpenRouterProvider {
     }
 
     fn model_name(&self) -> &str {
-        &self.inner.config.model
+        &self.model
     }
 
     fn server_address(&self) -> &str {
-        &self.inner.config.base_url
+        &self.base_url
     }
 }
 
@@ -265,7 +245,7 @@ mod tests {
         };
         let provider = OpenRouterProvider::from_llm_config(&cfg).unwrap();
         assert_eq!(provider.model_name(), "anthropic/claude-sonnet-4-20250514");
-        assert_eq!(provider.inner.config.max_tokens, 4096);
+        assert_eq!(provider.max_tokens, 4096);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────
@@ -669,6 +649,148 @@ mod tests {
             }
             other => panic!("expected ToolCalls, got {other:?}"),
         }
+    }
+
+    // ── Wiremock: OpenRouter SSE ────────────────────────────────────────
+
+    async fn mount_sse(server: &MockServer, events: &[&str]) {
+        let body: String = events.iter().map(|e| format!("{e}\n\n")).collect();
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    fn drain(rx: &mut tokio::sync::mpsc::Receiver<StreamChunk>) -> Vec<String> {
+        let mut texts = Vec::new();
+        while let Ok(chunk) = rx.try_recv() {
+            if let StreamChunk::Text(t) = chunk {
+                texts.push(t);
+            }
+        }
+        texts
+    }
+
+    #[tokio::test]
+    async fn stream_skips_comments_and_reports_final_usage() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                ": OPENROUTER PROCESSING",
+                r#"data: {"id":"gen-s","model":"openai/gpt-4o","choices":[{"delta":{"content":"Hel"}}]}"#,
+                ": OPENROUTER PROCESSING",
+                r#"data: {"id":"gen-s","model":"openai/gpt-4o","choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}"#,
+                r#"data: {"id":"gen-s","model":"openai/gpt-4o","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2,"cost":0.0004}}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        let response = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], Some(tx))
+            .await
+            .unwrap();
+
+        let LlmResponse::FinalAnswer(text, meta) = response else {
+            panic!("expected a final answer, got {response:?}");
+        };
+        assert_eq!(text, "Hello");
+        assert_eq!(drain(&mut rx), ["Hel", "lo"], "comments produce no chunks");
+        assert_eq!(meta.model.as_deref(), Some("openai/gpt-4o"));
+        assert_eq!(meta.response_id.as_deref(), Some("gen-s"));
+        assert_eq!(meta.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(meta.input_tokens, Some(7));
+        assert_eq!(meta.output_tokens, Some(2));
+        assert_eq!(meta.cost_usd, Some(0.0004));
+    }
+
+    #[tokio::test]
+    async fn stream_request_sets_stream_true() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+
+        make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(sent_body(&server).await["stream"], true);
+    }
+
+    #[tokio::test]
+    async fn stream_accumulates_two_tool_calls_by_index() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"file-read","arguments":"{\"pa"}}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","function":{"name":"file-read","arguments":"{}"}}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"/a\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+
+        let response = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[read_tool()], None)
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        let ids: Vec<_> = calls.items.iter().map(|c| c.id.as_deref()).collect();
+        assert_eq!(ids, [Some("call_a"), Some("call_b")]);
+        assert_eq!(calls.items[0].params, json!({"path": "/a"}));
+        assert_eq!(calls.items[1].params, json!({}));
+    }
+
+    #[tokio::test]
+    async fn mid_stream_error_fails_the_call() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"content":"partial"}}]}"#,
+                r#"data: {"error":{"code":"server_error","message":"Provider disconnected"},"choices":[{"delta":{"content":""},"finish_reason":"error"}]}"#,
+            ],
+        )
+        .await;
+
+        let err = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Provider disconnected"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn stream_ending_without_done_or_finish_fails() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[r#"data: {"choices":[{"delta":{"content":"cut"}}]}"#],
+        )
+        .await;
+
+        let err = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("ended"), "{err}");
     }
 
     // ── Wiremock: error handling ─────────────────────────────────────────
