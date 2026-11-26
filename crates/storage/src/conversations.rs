@@ -102,9 +102,6 @@ pub trait ConversationStore: Send + Sync {
     /// rename that lands while the LLM is running is never overwritten.
     async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool>;
 
-    /// Replace the full message history of a conversation.
-    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()>;
-
     /// Delete a conversation (and its messages).
     async fn delete_conversation(&self, id: Uuid) -> Result<()>;
 
@@ -679,39 +676,6 @@ impl ConversationStore for SqliteConversationStore {
     }
 
     /// Delete a conversation and all its messages (cascade).
-    /// Replace all persisted messages for a conversation with the provided
-    /// set.  Existing messages are deleted first; the new messages are then
-    /// inserted in order.  The conversation record itself is kept intact.
-    ///
-    /// Used by context compaction to persist a shrunk history so subsequent
-    /// turns do not reload the full pre-compaction history from storage.
-    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
-        let conv_id_str = conversation_id.to_string();
-
-        // Verify the conversation belongs to this agent before mutating.
-        self.ensure_conversation_agent(conversation_id).await?;
-
-        // Delete the rows and clear the leaf together, so the first re-insert
-        // cannot take a deleted row as its parent.
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        sqlx::query("DELETE FROM messages WHERE conversation_id = ?1")
-            .bind(&conv_id_str)
-            .execute(&mut *tx)
-            .await
-            .with_context(|| format!("deleting messages for conversation {conversation_id}"))?;
-        sqlx::query("UPDATE conversations SET active_leaf_id = NULL WHERE id = ?1")
-            .bind(&conv_id_str)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-
-        for msg in messages {
-            self.save_message(msg).await?;
-        }
-
-        Ok(())
-    }
-
     async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
         let result = sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
@@ -1217,18 +1181,6 @@ impl ConversationStore for InMemoryConversationStore {
             b.emit(ConversationEvent::Upserted(rec));
         }
         Ok(true)
-    }
-
-    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
-        {
-            let mut state = self.lock_state();
-            state.messages.remove(&conversation_id);
-            state.leaves.remove(&conversation_id);
-        }
-        for msg in messages {
-            self.save_message(msg).await?;
-        }
-        Ok(())
     }
 
     async fn delete_conversation(&self, id: Uuid) -> Result<()> {

@@ -913,6 +913,7 @@ impl Orchestrator {
                 &self.agent_id,
             )
             .await?;
+        let summary_store = self.storage.conversation_summary_store();
 
         // 4. Load global tool specs and merge with extensions.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
@@ -961,7 +962,7 @@ impl Orchestrator {
                         &mut history,
                         &llm,
                         &compaction_config,
-                        Some((&conv_store, conversation_id)),
+                        Some((&summary_store, conversation_id)),
                     )
                     .await;
                 }
@@ -1074,7 +1075,7 @@ impl Orchestrator {
                     &mut history,
                     &llm,
                     &compaction_config,
-                    Some((&conv_store, conversation_id)),
+                    Some((&summary_store, conversation_id)),
                 )
                 .await;
             }
@@ -1348,6 +1349,7 @@ impl Orchestrator {
                 &self.agent_id,
             )
             .await?;
+        let summary_store = self.storage.conversation_summary_store();
 
         // 4. Load all registered tool specs.
         let llm = self.llm_for(conversation_id).await?;
@@ -1385,7 +1387,7 @@ impl Orchestrator {
                         &mut history,
                         &llm,
                         &compaction_config,
-                        Some((&conv_store, conversation_id)),
+                        Some((&summary_store, conversation_id)),
                     )
                     .await;
                 }
@@ -1525,7 +1527,7 @@ impl Orchestrator {
                     &mut history,
                     &llm,
                     &compaction_config,
-                    Some((&conv_store, conversation_id)),
+                    Some((&summary_store, conversation_id)),
                 )
                 .await;
             }

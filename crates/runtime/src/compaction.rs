@@ -8,8 +8,8 @@
 //! 1. Asks the LLM to produce a short summary of the conversation so far.
 //! 2. Replaces the in-memory `history` with a single summary turn followed
 //!    by the `keep_recent_turns` most recent turns.
-//! 3. Persists the compacted representation back to storage so compaction
-//!    survives turn boundaries.
+//! 3. Records the summary, keyed by the last message it covers, so compaction
+//!    survives turn boundaries. Stored messages are never deleted.
 //!
 //! If the old-turns transcript is larger than [`CHUNK_CHARS`], the history is
 //! summarised in chunks before being merged into a final summary, preventing
@@ -20,13 +20,11 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
 use assistant_core::types::features::CompactionConfig;
 use assistant_core::{
     ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, ToolCallItem,
-    types::conversation::Message, types::conversation::MessageRole,
 };
-use assistant_storage::conversations::ConversationStore;
+use assistant_storage::ConversationSummaryStore;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -300,63 +298,6 @@ async fn summarise_messages(
     }
 }
 
-/// Convert a `ChatHistoryMessage` back to a storable [`Message`].
-///
-/// Tool-calls JSON is re-serialised for `AssistantToolCalls`; the `skill_name`
-/// field is preserved for `ToolResult` messages.  Turn indices are assigned
-/// sequentially starting from `turn_offset`.
-fn chat_history_to_message(
-    msg: &ChatHistoryMessage,
-    conversation_id: Uuid,
-    turn: i64,
-) -> Option<Message> {
-    match msg {
-        ChatHistoryMessage::Text { role, content } => {
-            let r = match role {
-                ChatRole::User => MessageRole::User,
-                ChatRole::Assistant => MessageRole::Assistant,
-                ChatRole::System => return None, // system messages live in the prompt
-                ChatRole::Tool => MessageRole::Tool,
-            };
-            let mut m = Message::new(conversation_id, r, content.clone());
-            m.turn = turn;
-            Some(m)
-        }
-        ChatHistoryMessage::MultimodalUser { content } => {
-            let text = content
-                .iter()
-                .filter_map(|b| match b {
-                    ContentBlock::Text(t) => Some(t.as_str()),
-                    ContentBlock::Image { .. } | ContentBlock::Document { .. } => None,
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            let mut m = Message::new(conversation_id, MessageRole::User, text);
-            m.turn = turn;
-            Some(m)
-        }
-        ChatHistoryMessage::AssistantToolCalls {
-            items: calls,
-            provider_state,
-        } => {
-            let json = serde_json::to_string(calls).ok()?;
-            let mut m = Message::new(conversation_id, MessageRole::Assistant, String::new());
-            m.tool_calls_json = Some(json);
-            m.provider_state_json = provider_state
-                .as_ref()
-                .and_then(|s| serde_json::to_string(s).ok());
-            m.turn = turn;
-            Some(m)
-        }
-        ChatHistoryMessage::ToolResult { name, content } => {
-            let mut m = Message::new(conversation_id, MessageRole::Tool, content.clone());
-            m.skill_name = Some(name.clone());
-            m.turn = turn;
-            Some(m)
-        }
-    }
-}
-
 /// The assistant message that stands in for compacted messages.
 pub(crate) fn summary_message(summary: &str) -> ChatHistoryMessage {
     ChatHistoryMessage::Text {
@@ -365,24 +306,26 @@ pub(crate) fn summary_message(summary: &str) -> ChatHistoryMessage {
     }
 }
 
-/// Persist the compacted history back to storage so it survives turn
-/// boundaries.  All existing messages for the conversation are replaced with
-/// the compacted set.
-async fn persist_compacted(
-    conv_store: &dyn ConversationStore,
+/// Record `summary` as covering `conversation_id` through the message
+/// `through`. Without a persisted row to name (the summarised range ends in a
+/// summary or a synthetic repair) nothing is written. The stored messages are
+/// never touched.
+async fn persist_summary(
+    summaries: &dyn ConversationSummaryStore,
     conversation_id: Uuid,
-    compacted: &[ChatHistoryMessage],
-) -> Result<()> {
-    conv_store
-        .replace_history(
-            conversation_id,
-            &compacted
-                .iter()
-                .enumerate()
-                .filter_map(|(i, msg)| chat_history_to_message(msg, conversation_id, i as i64))
-                .collect::<Vec<_>>(),
-        )
+    through: Option<Uuid>,
+    summary: &str,
+) {
+    let Some(through_message_id) = through else {
+        warn!("Compaction split maps to no persisted message; summary not persisted");
+        return;
+    };
+    if let Err(e) = summaries
+        .insert(conversation_id, through_message_id, summary)
         .await
+    {
+        warn!(error = %e, "Failed to persist conversation summary; in-memory compaction still applies");
+    }
 }
 
 /// Compact the conversation history in-place.
@@ -391,9 +334,9 @@ async fn persist_compacted(
 /// `history` slice with:
 ///   `[summary turn, …keep_recent_turns most-recent turns]`
 ///
-/// If `conv_store` and `conversation_id` are provided the compacted state is
-/// also written back to storage so that the next turn does not reload stale
-/// full history.
+/// If `summaries` and a conversation id are provided, the summary is also
+/// recorded through the last summarised message, so the next turn's history
+/// builder applies it. No stored message is deleted or rewritten.
 ///
 /// Returns `true` if compaction was performed, `false` if there was nothing
 /// to compact or the summary request failed.
@@ -401,7 +344,7 @@ pub(crate) async fn maybe_compact(
     history: &mut TurnHistory,
     llm: &Arc<dyn LlmProvider>,
     cfg: &CompactionConfig,
-    conv_store: Option<(&dyn ConversationStore, Uuid)>,
+    summaries: Option<(&dyn ConversationSummaryStore, Uuid)>,
 ) -> bool {
     let keep = cfg.keep_recent_turns;
 
@@ -428,6 +371,9 @@ pub(crate) async fn maybe_compact(
         }
     };
 
+    // The summary runs through the last summarised row; read it before the
+    // prefix is replaced.
+    let through = history.row_id(split_at - 1);
     history.replace_prefix_with_summary(split_at, summary_message(&summary));
 
     info!(
@@ -435,11 +381,9 @@ pub(crate) async fn maybe_compact(
         "Context compaction complete"
     );
 
-    // Persist so the next turn does not reload the full history.
-    if let Some((store, conv_id)) = conv_store
-        && let Err(e) = persist_compacted(store, conv_id, history).await
-    {
-        warn!(error = %e, "Failed to persist compacted history; in-memory compaction still applies");
+    // Record the summary so the next turn does not reload the full history.
+    if let Some((store, conv_id)) = summaries {
+        persist_summary(store, conv_id, through, &summary).await;
     }
 
     true
@@ -695,8 +639,11 @@ mod tests {
 
     use assistant_core::LlmResponse;
     use assistant_core::LlmResponseMeta;
+    use assistant_core::types::conversation::Message;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
-    use assistant_storage::InMemoryConversationStore;
+    use assistant_storage::{
+        ConversationStore, InMemoryConversationStore, InMemoryConversationSummaryStore,
+    };
     use uuid::Uuid;
 
     fn turn_history() -> Vec<ChatHistoryMessage> {
@@ -804,29 +751,90 @@ mod tests {
         );
     }
 
+    /// Six stored messages (u1 a1 u2 a2 u3 a3) saved to `conv_store`, plus the
+    /// history built from them with each entry mapped to its row.
+    async fn stored_history(
+        conv_store: &InMemoryConversationStore,
+    ) -> (Uuid, Vec<Uuid>, TurnHistory) {
+        let conv = conv_store.create_conversation(None).await.unwrap();
+        let mut history = TurnHistory::default();
+        let mut ids = Vec::new();
+        for (i, msg) in turn_history().into_iter().enumerate() {
+            let (role, content) = match &msg {
+                ChatHistoryMessage::Text { role, content } => (role.clone(), content.clone()),
+                other => panic!("unexpected {other:?}"),
+            };
+            let stored = match role {
+                ChatRole::User => Message::user(conv.id, content),
+                _ => Message::assistant(conv.id, content),
+            };
+            let mut stored = stored;
+            stored.turn = i as i64;
+            conv_store.save_message(&stored).await.unwrap();
+            history.push(msg, Some(stored.id));
+            ids.push(stored.id);
+        }
+        (conv.id, ids, history)
+    }
+
     #[tokio::test]
-    async fn maybe_compact_persists_to_conversation_store() {
-        use assistant_storage::ConversationStore;
+    async fn maybe_compact_keeps_every_message_and_records_a_summary() {
         let llm: Arc<dyn LlmProvider> =
             Arc::new(ScriptedLlmProvider::new().with_canned_responses(vec![
                 LlmResponse::FinalAnswer("compacted summary".into(), LlmResponseMeta::default()),
             ]));
-        let store = InMemoryConversationStore::new();
+        let conv_store = InMemoryConversationStore::new();
+        let summaries = InMemoryConversationSummaryStore::new();
         let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
-        let conv_id = Uuid::new_v4();
-        let history = turn_history();
+        let (conv_id, ids, mut history) = stored_history(&conv_store).await;
 
-        let mut history = TurnHistory::unmapped(history);
-        let compacted = maybe_compact(&mut history, &llm, &cfg, Some((&store, conv_id))).await;
+        let compacted = maybe_compact(&mut history, &llm, &cfg, Some((&summaries, conv_id))).await;
         assert!(compacted);
 
-        // The store should now hold the compacted history.
-        let loaded = store.load_history(conv_id).await.unwrap();
-        // Summary turn + kept recent messages → at least 2 rows.
+        let stored = conv_store.load_history(conv_id).await.unwrap();
+        assert_eq!(
+            stored.iter().map(|m| m.id).collect::<Vec<_>>(),
+            ids,
+            "compaction must not delete or rewrite any stored message"
+        );
+        // keep_recent_turns = 1 keeps "Spain?"/"Madrid." (ids[4], ids[5]), so the
+        // summary runs through the last summarised row, ids[3].
+        let summary = summaries
+            .newest_on_path(conv_id, &ids)
+            .await
+            .unwrap()
+            .expect("a summary row is recorded");
+        assert_eq!(summary.through_message_id, ids[3]);
+        assert_eq!(summary.content, "compacted summary");
+    }
+
+    #[tokio::test]
+    async fn maybe_compact_skips_persistence_when_the_split_maps_to_no_row() {
+        let llm: Arc<dyn LlmProvider> =
+            Arc::new(ScriptedLlmProvider::new().with_canned_responses(vec![
+                LlmResponse::FinalAnswer("compacted summary".into(), LlmResponseMeta::default()),
+            ]));
+        let conv_store = InMemoryConversationStore::new();
+        let summaries = InMemoryConversationSummaryStore::new();
+        let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
+        let (conv_id, ids, stored) = stored_history(&conv_store).await;
+        // The entry just before the split (index 3) has no persisted row.
+        let mut history = TurnHistory::default();
+        for (i, (msg, id)) in stored.messages().iter().zip(stored.row_ids()).enumerate() {
+            history.push(msg.clone(), if i == 3 { None } else { id });
+        }
+
+        let compacted = maybe_compact(&mut history, &llm, &cfg, Some((&summaries, conv_id))).await;
+
+        assert!(compacted, "the in-memory compaction still applies");
+        assert_eq!(history.len(), 3, "summary plus the two kept messages");
         assert!(
-            loaded.len() >= 2,
-            "expected persisted history; got {}",
-            loaded.len()
+            summaries
+                .newest_on_path(conv_id, &ids)
+                .await
+                .unwrap()
+                .is_none(),
+            "no summary row is written without a resolvable split"
         );
     }
 

@@ -5,7 +5,6 @@
 //! make sense for SQLite and sit below the macro.
 
 use assistant_core::TurnTiming;
-use assistant_core::types::conversation::Message;
 use assistant_storage::{
     ConversationStore, InMemoryMessageTimingStore, MessageTimingStore, SqliteConversationStore,
     SqliteMessageTimingStore, StorageLayer,
@@ -135,34 +134,4 @@ async fn sqlite_conversation_delete_removes_timings() {
 
     let got = timings.get_for_conversation(conv.id).await.unwrap();
     assert!(got.is_empty(), "cascade delete removes the timing rows");
-}
-
-#[tokio::test]
-async fn sqlite_replace_history_keeps_timing_of_kept_message() {
-    let storage = StorageLayer::new_in_memory().await.unwrap();
-    let conversations = SqliteConversationStore::new(storage.pool.clone());
-    let timings = SqliteMessageTimingStore::new(storage.pool.clone());
-    let conv = conversations.create_conversation(None).await.unwrap();
-
-    let question = Message::user(conv.id, "hi");
-    let mut answer = Message::assistant(conv.id, "hello");
-    answer.turn = 1;
-    conversations.save_message(&question).await.unwrap();
-    conversations.save_message(&answer).await.unwrap();
-    timings
-        .put(conv.id, answer.id, &full_timing())
-        .await
-        .unwrap();
-
-    conversations
-        .replace_history(conv.id, std::slice::from_ref(&answer))
-        .await
-        .unwrap();
-
-    let got = timings.get_for_conversation(conv.id).await.unwrap();
-    assert_eq!(
-        got.get(&answer.id),
-        Some(&full_timing()),
-        "compaction rewrites messages but must not drop the timing"
-    );
 }
