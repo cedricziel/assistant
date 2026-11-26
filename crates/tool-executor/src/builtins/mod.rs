@@ -19,6 +19,7 @@ pub mod plan_update;
 pub mod process;
 pub(crate) mod render_lang;
 pub mod render_surface;
+pub(crate) mod render_table;
 pub mod schedule_task;
 pub mod self_analyze;
 pub mod voice_response;
