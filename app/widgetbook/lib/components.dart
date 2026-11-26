@@ -3,6 +3,8 @@ import 'package:widgetbook/widgetbook.dart';
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
 import 'components/code_block.dart';
+import 'components/code_diff_result_view.dart';
+import 'components/code_file_result_view.dart';
 import 'components/compact_expandable.dart';
 import 'components/conversation_list_view.dart';
 import 'components/conversation_search_results_view.dart';
@@ -50,8 +52,6 @@ final List<WidgetbookComponent> kComponents = [
   // attachmentTrayComponent, // slot: chat-element-library 11b
   // branchPickerComponent, // slot: message-branching 9
   // chatThreadLayoutComponent, // slot: chat-element-library 10
-  // codeDiffResultViewComponent, // slot: tool-result-renderers C7
-  // codeFileResultViewComponent, // slot: tool-result-renderers C7
   // commandBodyComponent, // slot: chat-element-library 7b
   // composerComponent, // slot: chat-element-library 11a
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
@@ -78,6 +78,8 @@ final List<WidgetbookComponent> kComponents = [
   approvalCardComponent,
   branchPickerComponent,
   codeBlockComponent,
+  codeDiffResultViewComponent,
+  codeFileResultViewComponent,
   compactExpandableComponent,
   conversationListViewComponent,
   conversationSearchResultsViewComponent,
