@@ -34,6 +34,7 @@ fn echo_stub() -> Arc<StubToolDispatcher> {
         params_schema: json!({}),
         is_mutating: false,
         requires_confirmation: false,
+        requires_rich_client: false,
     }]))
 }
 

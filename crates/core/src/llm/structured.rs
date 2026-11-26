@@ -24,6 +24,10 @@ enum Strategy {
 ///
 /// Fails when the schema is invalid, or with the validation errors and the
 /// raw output when the repair attempt is also invalid.
+///
+/// Native schemas are sent in strict mode, which OpenAI accepts only when
+/// every object lists all its properties in `required` and sets
+/// `additionalProperties: false`.
 pub async fn chat_structured(
     llm: &dyn LlmProvider,
     system_prompt: &str,
@@ -64,6 +68,7 @@ pub async fn chat_structured(
                 params_schema: schema.clone(),
                 is_mutating: false,
                 requires_confirmation: false,
+                requires_rich_client: false,
             }],
             ChatOptions {
                 tool_choice: ToolChoice::Tool(RESPOND_TOOL.to_owned()),

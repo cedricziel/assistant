@@ -178,6 +178,17 @@ pub(crate) async fn state_over_in(
 ) -> (ApiState, SpaceResolver) {
     let mut config = OrgConfig::default();
     config.memory.enabled = false;
+    state_over_config(root, llm_url, spaces, workers, config).await
+}
+
+/// [`state_over_in`] with an explicit org `config`.
+pub(crate) async fn state_over_config(
+    root: &Path,
+    llm_url: &str,
+    spaces: &[TestSpace],
+    workers: bool,
+    config: OrgConfig,
+) -> (ApiState, SpaceResolver) {
     let llm = Arc::new(
         LlmClient::new(LlmClientConfig {
             model: "test".to_string(),

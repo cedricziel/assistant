@@ -18,6 +18,9 @@ pub struct ToolSpec {
     pub is_mutating: bool,
     /// Whether the user must confirm before this tool runs.
     pub requires_confirmation: bool,
+    /// Whether the tool only works when the client can render rich UI (see
+    /// [`ToolHandler::requires_rich_client`](crate::ToolHandler::requires_rich_client)).
+    pub requires_rich_client: bool,
 }
 
 impl ToolSpec {
@@ -56,6 +59,7 @@ mod tests {
             params_schema,
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         }
     }
 

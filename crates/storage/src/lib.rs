@@ -27,9 +27,12 @@ pub mod conversation_events;
 pub mod conversation_search;
 pub mod conversations;
 pub mod integration_store;
+pub mod interactions;
 pub mod interface_instance_store;
 pub mod memory_chunks;
 pub mod message_bus;
+pub mod message_feedback;
+pub mod message_timings;
 pub mod org_oidc_config_store;
 pub mod org_storage;
 pub mod org_store;
@@ -70,16 +73,28 @@ pub use conversation_events::{
     RunBroadcaster, SqliteConversationEventStore,
 };
 pub use conversations::{
-    ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
+    ConversationPatch, ConversationRecord, ConversationStore, InMemoryConversationStore,
+    MetadataUpdate, SqliteConversationStore,
 };
 pub use integration_store::{
     SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
+};
+pub use interactions::{
+    InMemoryInteractionStore, InteractionRow, InteractionStatus, InteractionStore, NewInteraction,
+    ResolveOutcome, SqliteInteractionStore,
 };
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use memory_chunks::{
     FtsMatch, InMemoryMemoryChunkStore, MemoryChunkStore, SqliteMemoryChunkStore, StoredChunk,
 };
 pub use message_bus::{InMemoryMessageBus, SqliteMessageBus};
+pub use message_feedback::{
+    InMemoryMessageFeedbackStore, MessageFeedbackRating, MessageFeedbackRow, MessageFeedbackStore,
+    SqliteMessageFeedbackStore,
+};
+pub use message_timings::{
+    InMemoryMessageTimingStore, MessageTimingStore, SqliteMessageTimingStore,
+};
 pub use org_oidc_config_store::SqliteOrgOidcConfigStore;
 pub use org_storage::OrgStorageLayer;
 pub use org_store::SqliteOrgStore;
@@ -213,6 +228,11 @@ impl StorageLayer {
         SqliteSkillExecutionStore::new(self.pool.clone())
     }
 
+    /// Convenience: build a `MessageTimingStore` backed by this pool.
+    pub fn message_timing_store(&self) -> SqliteMessageTimingStore {
+        SqliteMessageTimingStore::new(self.pool.clone())
+    }
+
     /// Convenience: build a `ToolPermissionRuleStore` backed by this pool.
     pub fn tool_permission_rule_store(&self) -> SqliteToolPermissionRuleStore {
         SqliteToolPermissionRuleStore::new(self.pool.clone())
@@ -271,6 +291,11 @@ impl StorageLayer {
     /// Convenience: build a [`SqliteAttachmentStore`] backed by this pool.
     pub fn attachment_store(&self) -> SqliteAttachmentStore {
         SqliteAttachmentStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`MessageFeedbackStore`] backed by this pool.
+    pub fn message_feedback_store(&self) -> SqliteMessageFeedbackStore {
+        SqliteMessageFeedbackStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`WebhookStore`] scoped to a Persona.
