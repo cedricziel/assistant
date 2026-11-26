@@ -110,6 +110,7 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**listConversations**](doc/ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**readMcpAppResource**](doc/ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**respondToInteraction**](doc/ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
+[*ConversationsApi*](doc/ConversationsApi.md) | [**searchConversations**](doc/ConversationsApi.md#searchconversations) | **GET** /api/conversations/search | Search conversations by title and message text.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendMessage**](doc/ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**setMessageFeedback**](doc/ConversationsApi.md#setmessagefeedback) | **PUT** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;PUT /api/conversations/{id}/messages/{message_id}/feedback&#x60; — rate a reply.
@@ -263,6 +264,7 @@ Class | Method | HTTP request | Description
  - [CommandEventResponse](doc/CommandEventResponse.md)
  - [CompleteResponse](doc/CompleteResponse.md)
  - [ConversationDetail](doc/ConversationDetail.md)
+ - [ConversationSearchSummary](doc/ConversationSearchSummary.md)
  - [ConversationSummary](doc/ConversationSummary.md)
  - [CreateApiKeyRequest](doc/CreateApiKeyRequest.md)
  - [CreateApiKeyResponse](doc/CreateApiKeyResponse.md)
@@ -309,6 +311,7 @@ Class | Method | HTTP request | Description
  - [Message](doc/Message.md)
  - [MessageFeedbackResponse](doc/MessageFeedbackResponse.md)
  - [MessageFeedbackSummary](doc/MessageFeedbackSummary.md)
+ - [MessageSearchMatch](doc/MessageSearchMatch.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
  - [MutualTlsSecurityScheme](doc/MutualTlsSecurityScheme.md)
@@ -343,6 +346,7 @@ Class | Method | HTTP request | Description
  - [Role](doc/Role.md)
  - [RotateSecretResponse](doc/RotateSecretResponse.md)
  - [RuleScope](doc/RuleScope.md)
+ - [SearchSegment](doc/SearchSegment.md)
  - [SecurityRequirement](doc/SecurityRequirement.md)
  - [SecurityScheme](doc/SecurityScheme.md)
  - [SendMessageConfiguration](doc/SendMessageConfiguration.md)

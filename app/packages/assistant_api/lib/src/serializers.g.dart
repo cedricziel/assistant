@@ -44,6 +44,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(CommandEventResponse.serializer)
       ..add(CompleteResponse.serializer)
       ..add(ConversationDetail.serializer)
+      ..add(ConversationSearchSummary.serializer)
       ..add(ConversationSummary.serializer)
       ..add(CreateApiKeyRequest.serializer)
       ..add(CreateApiKeyResponse.serializer)
@@ -90,6 +91,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(Message.serializer)
       ..add(MessageFeedbackResponse.serializer)
       ..add(MessageFeedbackSummary.serializer)
+      ..add(MessageSearchMatch.serializer)
       ..add(MessageSummary.serializer)
       ..add(ModelPart.serializer)
       ..add(MutualTlsSecurityScheme.serializer)
@@ -127,6 +129,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(Role.serializer)
       ..add(RotateSecretResponse.serializer)
       ..add(RuleScope.serializer)
+      ..add(SearchSegment.serializer)
       ..add(SecurityRequirement.serializer)
       ..add(SecurityScheme.serializer)
       ..add(SendMessageConfiguration.serializer)
@@ -243,6 +246,12 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(JsonObject)]),
           () => ListBuilder<JsonObject>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(MessageSearchMatch)]),
+          () => ListBuilder<MessageSearchMatch>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SearchSegment)]),
+          () => ListBuilder<SearchSegment>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(MessageSummary)]),
           () => ListBuilder<MessageSummary>())
       ..addBuilderFactory(
@@ -257,6 +266,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(QuestionAnswer)]),
           () => ListBuilder<QuestionAnswer>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SearchSegment)]),
+          () => ListBuilder<SearchSegment>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
