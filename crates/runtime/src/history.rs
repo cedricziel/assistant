@@ -295,6 +295,7 @@ mod tests {
             tool_status: None,
             tool_data_json: None,
             traceparent: None,
+            finish_reason: None,
         }
     }
 
@@ -316,6 +317,7 @@ mod tests {
             tool_status: None,
             tool_data_json: None,
             traceparent: None,
+            finish_reason: None,
         }
     }
 
