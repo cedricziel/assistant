@@ -474,6 +474,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             include_str!("../../../migrations/045_skill_executions.sql"),
         ),
         (
+            "046_message_provider_state",
+            include_str!("../../../migrations/046_message_provider_state.sql"),
+        ),
+        (
             "052_conversation_pinned_at",
             include_str!("../../../migrations/052_conversation_pinned_at.sql"),
         ),

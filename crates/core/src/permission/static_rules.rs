@@ -19,7 +19,7 @@ const FILE_TOOLS: [&str; 4] = ["file-read", "file-write", "file-edit", "file-glo
 const WORKSPACE_TOKEN: &str = "<workspace>";
 /// Shell metacharacters after which an allow rule can no longer vouch for the
 /// whole command line.
-const SHELL_META: [char; 10] = [';', '|', '&', '\n', '`', '$', '(', ')', '<', '>'];
+pub(super) const SHELL_META: [char; 10] = [';', '|', '&', '\n', '`', '$', '(', ')', '<', '>'];
 
 /// Parsed deny / ask / allow rule sets plus the extra workspace roots.
 #[derive(Debug, Clone, Default)]

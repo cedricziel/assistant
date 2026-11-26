@@ -34,7 +34,8 @@ pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;
 pub use orchestration::{OrchestrationEngine, RecordedSubmitTurn, StubOrchestrationEngine};
 pub use orchestrator::{
-    CancelOutcome, Orchestrator, OrchestratorEvent, TURN_CANCELLED_MARKER, TurnResult,
+    CancelOutcome, Orchestrator, OrchestratorEvent, TURN_CANCELLED_BEFORE_START_MARKER,
+    TURN_CANCELLED_MARKER, TurnResult,
 };
 pub use org_context::{OrgConfigAdjust, OrgContext, OrgContexts, build_llm};
 pub use otel_spans::start_conversation_context;

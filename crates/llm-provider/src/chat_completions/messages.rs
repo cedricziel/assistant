@@ -112,7 +112,7 @@ pub fn build_chat_messages(
                 }
             }
 
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 let tc_enums: Vec<ChatCompletionMessageToolCalls> = calls
                     .iter()
                     .enumerate()
@@ -202,7 +202,7 @@ pub fn build_raw_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -
                 messages.push(json!({"role": "user", "content": parts}));
             }
 
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 let tool_calls: Vec<Value> = calls
                     .iter()
                     .enumerate()
@@ -279,11 +279,14 @@ mod tests {
     #[test]
     fn build_chat_messages_tool_calls_and_results() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "my-tool".to_string(),
-                params: json!({"key": "val"}),
-                id: Some("call_123".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "my-tool".to_string(),
+                    params: json!({"key": "val"}),
+                    id: Some("call_123".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "my-tool".to_string(),
                 content: "result".to_string(),
@@ -297,11 +300,14 @@ mod tests {
     #[test]
     fn build_chat_messages_multi_turn_tool_calls() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "tool-a".to_string(),
-                params: json!({}),
-                id: Some("call_r1".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "tool-a".to_string(),
+                    params: json!({}),
+                    id: Some("call_r1".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "tool-a".to_string(),
                 content: "result-a".to_string(),
@@ -310,11 +316,14 @@ mod tests {
                 role: ChatRole::Assistant,
                 content: "thinking...".to_string(),
             },
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "tool-b".to_string(),
-                params: json!({}),
-                id: Some("call_r2".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "tool-b".to_string(),
+                    params: json!({}),
+                    id: Some("call_r2".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "tool-b".to_string(),
                 content: "result-b".to_string(),
@@ -328,27 +337,33 @@ mod tests {
     #[test]
     fn build_chat_messages_late_tool_result_preserves_id() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![
-                ToolCallItem {
-                    name: "tool-a".to_string(),
-                    params: json!({}),
-                    id: Some("call_a".to_string()),
-                },
-                ToolCallItem {
-                    name: "tool-b".to_string(),
-                    params: json!({}),
-                    id: Some("call_b".to_string()),
-                },
-            ]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![
+                    ToolCallItem {
+                        name: "tool-a".to_string(),
+                        params: json!({}),
+                        id: Some("call_a".to_string()),
+                    },
+                    ToolCallItem {
+                        name: "tool-b".to_string(),
+                        params: json!({}),
+                        id: Some("call_b".to_string()),
+                    },
+                ],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "tool-a".to_string(),
                 content: "result-a".to_string(),
             },
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "tool-c".to_string(),
-                params: json!({}),
-                id: Some("call_c".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "tool-c".to_string(),
+                    params: json!({}),
+                    id: Some("call_c".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "tool-b".to_string(),
                 content: "result-b".to_string(),
@@ -393,11 +408,14 @@ mod tests {
     #[test]
     fn build_raw_messages_tool_calls_and_results() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "my-tool".to_string(),
-                params: json!({"key": "val"}),
-                id: Some("call_123".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "my-tool".to_string(),
+                    params: json!({"key": "val"}),
+                    id: Some("call_123".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "my-tool".to_string(),
                 content: "result".to_string(),
@@ -411,27 +429,33 @@ mod tests {
     #[test]
     fn build_raw_messages_late_tool_result_preserves_id() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![
-                ToolCallItem {
-                    name: "tool-a".to_string(),
-                    params: json!({}),
-                    id: Some("call_a".to_string()),
-                },
-                ToolCallItem {
-                    name: "tool-b".to_string(),
-                    params: json!({}),
-                    id: Some("call_b".to_string()),
-                },
-            ]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![
+                    ToolCallItem {
+                        name: "tool-a".to_string(),
+                        params: json!({}),
+                        id: Some("call_a".to_string()),
+                    },
+                    ToolCallItem {
+                        name: "tool-b".to_string(),
+                        params: json!({}),
+                        id: Some("call_b".to_string()),
+                    },
+                ],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "tool-a".to_string(),
                 content: "result-a".to_string(),
             },
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "tool-c".to_string(),
-                params: json!({}),
-                id: Some("call_c".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "tool-c".to_string(),
+                    params: json!({}),
+                    id: Some("call_c".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "tool-b".to_string(),
                 content: "result-b".to_string(),
@@ -500,11 +524,14 @@ mod tests {
 
     #[test]
     fn build_raw_messages_assistant_tool_call_without_id_synthesises_one() {
-        let history = vec![ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-            name: "shell".into(),
-            params: json!({}),
-            id: None,
-        }])];
+        let history = vec![ChatHistoryMessage::AssistantToolCalls {
+            items: vec![ToolCallItem {
+                name: "shell".into(),
+                params: json!({}),
+                id: None,
+            }],
+            provider_state: None,
+        }];
         let msgs = build_raw_messages("", &history);
         let calls = msgs[0]["tool_calls"].as_array().unwrap();
         let id = calls[0]["id"].as_str().unwrap();
