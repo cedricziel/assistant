@@ -2058,7 +2058,11 @@ mod tests {
             &state,
             run_id,
             conv_id,
-            RunOptions { push: false },
+            RunOptions {
+                push: false,
+                suggestions: false,
+            },
+            "hi".to_string(),
             event_rx,
             turn_rx,
         )
