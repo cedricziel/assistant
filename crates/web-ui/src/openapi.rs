@@ -290,6 +290,7 @@ pub struct ApiErrorResponse {
         crate::api::messages::stream_run_events,
         crate::api::turns::get_turn_status,
         crate::api::turns::cancel_turn,
+        crate::api::interactions::respond_to_interaction,
         crate::api::audio::get_message_audio,
         crate::api::audio::get_audio,
         crate::api::attachments::upload_attachment,
@@ -561,6 +562,15 @@ pub struct ApiErrorResponse {
             // Turn status types
             crate::api::turns::TurnState,
             crate::api::turns::TurnStatusResponse,
+            // Turn interaction types
+            crate::api::interactions::RespondToInteractionRequest,
+            crate::api::interactions::ToolDecision,
+            crate::api::interactions::QuestionAnswer,
+            crate::api::interactions::InteractionDetail,
+            crate::api::interactions::InteractionStatusView,
+            crate::api::interactions::InteractionOutcomeView,
+            crate::api::interactions::SseInteractionRequestedEvent,
+            crate::api::interactions::SseInteractionResolvedEvent,
             // OAuth2 types
             crate::oauth::OAuthErrorResponse,
             crate::oauth::token::TokenRequest,

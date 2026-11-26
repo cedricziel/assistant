@@ -562,6 +562,7 @@ name = "assistant-tool-executor"
 version = "0.3.1"
 dependencies = [
  "anyhow",
+ "assistant-a2ui",
  "assistant-core",
  "assistant-skills",
  "assistant-storage",
@@ -573,6 +574,7 @@ dependencies = [
  "jsonschema",
  "reqwest",
  "scraper",
+ "serde",
  "serde_json",
  "stop-words",
  "tempfile",

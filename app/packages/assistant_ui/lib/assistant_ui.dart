@@ -11,3 +11,4 @@ export 'src/suggestions/suggestion_chips.dart';
 export 'src/theme/assistant_ui_colors.dart';
 export 'src/theme/assistant_ui_spacing.dart';
 export 'src/theme/code_theme.dart';
+export 'src/timing/message_timing_indicator.dart';
