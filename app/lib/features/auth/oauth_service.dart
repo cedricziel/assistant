@@ -10,16 +10,13 @@ import 'pkce.dart';
 /// server's OAuth2 endpoints.
 ///
 /// Uses the generated [OauthApi] client for typed requests and response
-/// parsing.  The only exception is [login], which needs custom redirect
-/// handling that the generated client cannot express.
+/// parsing.
 ///
 /// This service is stateless — it takes a server URL and performs HTTP calls
 /// via [Dio]. Token storage is handled by the caller ([ContextRepository]).
 class OAuthService {
   OAuthService({required this.serverUrl, Dio? dio}) {
-    // When a pre-configured Dio is supplied (e.g. for tests with a mock
-    // interceptor) we pass it through to AssistantApi so both the raw Dio
-    // calls in login() and the generated OauthApi share the same instance.
+    // Tests pass a Dio with a mock interceptor.
     _api = AssistantApi(dio: dio, basePathOverride: serverUrl);
     _oauthApi = _api.getOauthApi();
   }
@@ -27,9 +24,6 @@ class OAuthService {
   final String serverUrl;
   late final AssistantApi _api;
   late final OauthApi _oauthApi;
-
-  /// The underlying [Dio] instance (for the custom redirect flow in [login]).
-  Dio get _dio => _api.dio;
 
   // -- Dynamic Client Registration (RFC 7591) --------------------------------
 
@@ -107,87 +101,6 @@ class OAuthService {
     return _toCredentials(response.data!, clientId);
   }
 
-  // -- Direct login (email + password → auth code → tokens) ------------------
-
-  /// Performs a direct login by posting credentials to the authorization
-  /// endpoint and then exchanging the resulting auth code for tokens.
-  ///
-  /// This is a convenience for web/macOS where we can show an in-app login
-  /// form rather than redirecting to a browser.
-  ///
-  /// Uses raw [Dio] because the generated client cannot express the
-  /// `followRedirects: false` + Location-header capture flow.
-  Future<OAuthCredentials> login({
-    required String email,
-    required String password,
-    required String clientId,
-    required String redirectUri,
-    required PkceChallenge pkce,
-  }) async {
-    // POST credentials to get an auth code via redirect (302/303).
-    //
-    // The server redirects to /oauth/complete?code=... which returns JSON.
-    // We handle three platform-dependent behaviours:
-    //
-    // 1. Dio honours `followRedirects: false` → 303 with Location header.
-    // 2. Dio throws DioException on the 303 → extract Location from error.
-    // 3. Dio follows the redirect (web/iOS) → response body is JSON from
-    //    /oauth/complete containing `{"code": "..."}`.
-    String? code;
-
-    try {
-      final authResponse = await _dio.post<dynamic>(
-        '/oauth/authorize',
-        data: {
-          'client_id': clientId,
-          'redirect_uri': redirectUri,
-          'code_challenge': pkce.challenge,
-          'email': email,
-          'password': password,
-        },
-        options: Options(
-          contentType: 'application/x-www-form-urlencoded',
-          followRedirects: false,
-          validateStatus: (status) =>
-              status != null && (status >= 200 && status < 400),
-        ),
-      );
-
-      // Path 1: Redirect captured — extract code from Location header.
-      final location = authResponse.headers.value('location');
-      if (location != null) {
-        code = _extractCodeFromLocation(location, redirectUri);
-      }
-
-      // Path 3: Redirect was followed — extract code from response body.
-      if (code == null && authResponse.data is Map) {
-        code = (authResponse.data as Map)['code'] as String?;
-      }
-    } on DioException catch (e) {
-      // Path 2: Dio threw on the redirect status.
-      final status = e.response?.statusCode;
-      if (status != null && status >= 300 && status < 400) {
-        final location = e.response?.headers.value('location');
-        if (location != null) {
-          code = _extractCodeFromLocation(location, redirectUri);
-        }
-      }
-      if (code == null) rethrow;
-    }
-
-    if (code == null) {
-      throw OAuthException('No authorization code in server response');
-    }
-
-    // Exchange the auth code for tokens via the generated client.
-    return exchangeCode(
-      code: code,
-      clientId: clientId,
-      redirectUri: redirectUri,
-      pkceVerifier: pkce.verifier,
-    );
-  }
-
   // -- Token refresh ---------------------------------------------------------
 
   /// Refreshes an expired access token using the stored refresh token.
@@ -232,31 +145,6 @@ class OAuthService {
   }
 
   // -- Helpers ---------------------------------------------------------------
-
-  /// Extracts the authorization code from a Location header value.
-  ///
-  /// Validates that the redirect target matches the registered [redirectUri]
-  /// to prevent code theft via injected Location headers.
-  String? _extractCodeFromLocation(String location, String redirectUri) {
-    final locationUri = Uri.parse(location);
-    final expectedUri = Uri.parse(redirectUri);
-    if (locationUri.scheme != expectedUri.scheme ||
-        locationUri.host != expectedUri.host ||
-        locationUri.port != expectedUri.port ||
-        locationUri.path != expectedUri.path) {
-      throw OAuthException(
-        'Redirect location does not match registered redirect_uri',
-      );
-    }
-
-    final code = locationUri.queryParameters['code'];
-    if (code == null) {
-      final error = locationUri.queryParameters['error'] ?? 'unknown_error';
-      final desc = locationUri.queryParameters['error_description'] ?? '';
-      throw OAuthException('Authorization failed: $error $desc');
-    }
-    return code;
-  }
 
   /// Converts a generated [TokenResponse] into our [OAuthCredentials].
   OAuthCredentials _toCredentials(TokenResponse token, String clientId) {

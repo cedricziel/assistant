@@ -410,6 +410,7 @@ impl SubagentRunner for Orchestrator {
                             conversation_id,
                             base_turn + iteration as i64 + 1,
                             &tool_call_items,
+                            tool_call_resp.provider_state.as_ref(),
                         )
                         .instrument(iteration_span.clone())
                         .await;

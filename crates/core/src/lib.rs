@@ -69,8 +69,8 @@ pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport};
 pub use llm::stream_chunk::StreamChunk;
 pub use llm::tool_spec::ToolSpec;
 pub use llm::types::{
-    ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ToolCallItem,
-    ToolCallResponse,
+    ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ProviderState,
+    ToolCallItem, ToolCallResponse,
 };
 pub use memory::{
     MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,

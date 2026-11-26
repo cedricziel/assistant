@@ -25,7 +25,7 @@ pub mod messages;
 pub mod tools;
 
 pub use messages::{build_chat_messages, build_raw_messages};
-pub use tools::{extract_chat_meta, parse_tool_calls, tool_spec_to_chat};
+pub use tools::{apply_chat_usage, extract_chat_meta, parse_tool_calls, tool_spec_to_chat};
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -156,6 +156,7 @@ impl ChatCompletionsProvider {
                     items,
                     meta,
                     thinking: None,
+                    provider_state: None,
                 }));
             }
         }
@@ -216,8 +217,7 @@ impl ChatCompletionsProvider {
         let mut model_name = String::new();
         let mut response_id = String::new();
         let mut finish_reason: Option<String> = None;
-        let mut input_tokens: Option<u64> = None;
-        let mut output_tokens: Option<u64> = None;
+        let mut usage = None;
 
         while let Some(result) = stream.next().await {
             let chunk =
@@ -229,9 +229,8 @@ impl ChatCompletionsProvider {
             if response_id.is_empty() {
                 response_id.clone_from(&chunk.id);
             }
-            if let Some(ref usage) = chunk.usage {
-                input_tokens = Some(usage.prompt_tokens as u64);
-                output_tokens = Some(usage.completion_tokens as u64);
+            if chunk.usage.is_some() {
+                usage.clone_from(&chunk.usage);
             }
 
             for choice in &chunk.choices {
@@ -272,7 +271,7 @@ impl ChatCompletionsProvider {
 
         debug!("Chat Completions SSE stream complete");
 
-        let meta = LlmResponseMeta {
+        let mut meta = LlmResponseMeta {
             model: if model_name.is_empty() {
                 None
             } else {
@@ -284,9 +283,11 @@ impl ChatCompletionsProvider {
                 Some(response_id)
             },
             finish_reason,
-            input_tokens,
-            output_tokens,
+            ..Default::default()
         };
+        if let Some(usage) = &usage {
+            apply_chat_usage(&mut meta, usage);
+        }
 
         if !tool_map.is_empty() {
             let items: Vec<ToolCallItem> = tool_map
@@ -311,6 +312,7 @@ impl ChatCompletionsProvider {
                     items,
                     meta,
                     thinking: None,
+                    provider_state: None,
                 }));
             }
         }
