@@ -19,7 +19,12 @@ All paths are relative to `~/.assistant/`.
 What the `server.toml` sections do:
 
 - `[bus]` selects the message bus backend, `sqlite` or `nats`.
-- `[mcp]` lists external MCP servers. Their tools are registered in every space. A server name must not start with `org_`, `space_` or `user_`: those prefixes belong to integration tools, and the file fails to load otherwise.
+- `[mcp]` lists external MCP servers under `[[mcp.servers]]`. Their tools and
+  skills are offered in every space. A server name must not start with `org_`,
+  `space_` or `user_`. Those prefixes belong to integration tools, and the file
+  fails to load otherwise. Skills these servers publish are verified and cached
+  under `~/.assistant/cache/mcp-skills/`, which is not backed up. For the keys
+  and behavior, see [MCP](../mcp.md#connect-external-mcp-servers).
 - `[notifications]` holds the Web Push VAPID keys. The web UI generates them on
   first start and writes them back to this file.
 
@@ -32,6 +37,16 @@ rejected.
 Annotated examples are `server.toml` and `org.toml` at the repo root. Release
 archives and packages include them, and Docker images put them at
 `/etc/assistant/server.toml.example` and `/etc/assistant/org.toml.example`.
+
+### Embeddings
+
+`[llm] embedding_model` is optional. Unset, the chat provider's default
+applies: Ollama `nomic-embed-text`, OpenAI `text-embedding-3-small`,
+OpenRouter `openai/text-embedding-3-small`.
+
+`[llm.embeddings]` picks a separate embedding provider: `ollama`,
+`openai`, `openrouter` or `voyage`, with optional `model`, `base_url` and
+`api_key`. See [OpenRouter embeddings](../openrouter.md#embeddings).
 
 ## How files are loaded
 
