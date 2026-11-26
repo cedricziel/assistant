@@ -11,6 +11,7 @@ import 'components/code_file_result_view.dart';
 import 'components/compact_expandable.dart';
 import 'components/composer.dart';
 import 'components/composer_voice_button.dart';
+import 'components/conversation_archived_section.dart';
 import 'components/conversation_list_view.dart';
 import 'components/conversation_search_results_view.dart';
 import 'components/data_table_result_view.dart';
@@ -85,6 +86,7 @@ final List<WidgetbookComponent> kComponents = [
   compactExpandableComponent,
   composerComponent,
   composerVoiceButtonComponent,
+  conversationArchivedSectionComponent,
   conversationListViewComponent,
   conversationSearchResultsViewComponent,
   dataTableResultViewComponent,
