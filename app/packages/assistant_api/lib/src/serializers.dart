@@ -162,6 +162,8 @@ import 'package:assistant_api/src/model/sse_subagent_status_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_thinking_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_token_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_tool_result_event.dart';
+import 'package:assistant_api/src/model/sse_suggestion.dart';
+import 'package:assistant_api/src/model/sse_suggestions_event.dart';
 import 'package:assistant_api/src/model/sse_thinking_event.dart';
 import 'package:assistant_api/src/model/sse_token_event.dart';
 import 'package:assistant_api/src/model/sse_tool_result_event.dart';
@@ -368,6 +370,8 @@ part 'serializers.g.dart';
   SseSubagentThinkingEvent,
   SseSubagentTokenEvent,
   SseSubagentToolResultEvent,
+  SseSuggestion,
+  SseSuggestionsEvent,
   SseThinkingEvent,
   SseTokenEvent,
   SseToolResultEvent,

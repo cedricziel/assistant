@@ -49,8 +49,8 @@ use crate::api::conversations::{
 use crate::api::messages::{
     QuickMessageRequest, QuickMessageResponse, SendMessageRequest as ApiSendMessageRequest,
     SseStatusEvent, SseSubagentCompletedEvent, SseSubagentStartedEvent, SseSubagentStatusEvent,
-    SseSubagentThinkingEvent, SseSubagentTokenEvent, SseSubagentToolResultEvent, SseThinkingEvent,
-    SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
+    SseSubagentThinkingEvent, SseSubagentTokenEvent, SseSubagentToolResultEvent, SseSuggestion,
+    SseSuggestionsEvent, SseThinkingEvent, SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
 };
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::surfaces::SurfaceSummary;
@@ -577,6 +577,8 @@ pub struct ApiErrorResponse {
             SseSubagentThinkingEvent,
             SseSubagentToolResultEvent,
             SseSubagentStatusEvent,
+            SseSuggestionsEvent,
+            SseSuggestion,
             // Turn status types
             crate::api::turns::TurnState,
             crate::api::turns::TurnStatusResponse,
@@ -918,6 +920,30 @@ mod tests {
                 "{excluded} must not document X-Space-Id"
             );
         }
+    }
+
+    /// The `suggestions` frame is documented with `message_id` and a list of
+    /// `{prompt}` items, and the replay endpoint says it follows `done`.
+    #[test]
+    fn sse_suggestions_event_is_documented() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let schemas = &spec["components"]["schemas"];
+        let event = &schemas["SseSuggestionsEvent"];
+        assert!(event["properties"]["message_id"].is_object(), "{event}");
+        assert!(event["properties"]["suggestions"].is_object(), "{event}");
+        assert!(
+            schemas["SseSuggestion"]["properties"]["prompt"].is_object(),
+            "{}",
+            schemas["SseSuggestion"]
+        );
+        let replay = spec["paths"]["/api/conversations/{id}/runs/{run_id}/events/stream"]["get"]
+            ["description"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            replay.contains("suggestions"),
+            "replay description: {replay}"
+        );
     }
 
     /// `tool_result` frames carry JSON objects for `arguments` and `data`, and

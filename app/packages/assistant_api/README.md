@@ -376,6 +376,8 @@ Class | Method | HTTP request | Description
  - [SseSubagentThinkingEvent](doc/SseSubagentThinkingEvent.md)
  - [SseSubagentTokenEvent](doc/SseSubagentTokenEvent.md)
  - [SseSubagentToolResultEvent](doc/SseSubagentToolResultEvent.md)
+ - [SseSuggestion](doc/SseSuggestion.md)
+ - [SseSuggestionsEvent](doc/SseSuggestionsEvent.md)
  - [SseThinkingEvent](doc/SseThinkingEvent.md)
  - [SseTokenEvent](doc/SseTokenEvent.md)
  - [SseToolResultEvent](doc/SseToolResultEvent.md)
