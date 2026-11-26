@@ -393,6 +393,13 @@ class ApiClient {
       return;
     }
 
+    // Same as `streamMessages`: surface the run ID before any body frame so
+    // Stop can cancel the turn even while the body is still buffered.
+    final runIdHeader = response.headers.value('X-Run-Id');
+    if (runIdHeader != null) {
+      yield RunStartedEvent(runIdHeader);
+    }
+
     yield* _parseSse(withHeartbeatTimeout(response.data!.stream));
   }
 
