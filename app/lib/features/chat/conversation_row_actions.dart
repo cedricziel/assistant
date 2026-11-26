@@ -10,7 +10,7 @@ import '../../shared/platform/adaptive_snack_bar.dart';
 import 'conversation_list_provider.dart';
 
 /// An action offered on a conversation row.
-enum ConversationRowAction { rename, togglePin, delete }
+enum ConversationRowAction { rename, togglePin, toggleArchive, delete }
 
 /// How the actions of a row are presented.
 enum ConversationActionPresentation { menu, sheet }
@@ -55,6 +55,7 @@ Future<void> showConversationRowActions(
 ) async {
   final item = request.item;
   final pinned = item.pinnedAt != null;
+  final archived = item.archivedAt != null;
   final presentation = conversationActionPresentation(
     request.kind,
     platform: defaultTargetPlatform,
@@ -64,7 +65,12 @@ Future<void> showConversationRowActions(
   final ConversationRowAction? chosen;
   switch (presentation) {
     case ConversationActionPresentation.menu:
-      chosen = await _showMenu(context, request, pinned: pinned);
+      chosen = await _showMenu(
+        context,
+        request,
+        pinned: pinned,
+        archived: archived,
+      );
     case ConversationActionPresentation.sheet:
       chosen = await showAdaptiveActionSheet<ConversationRowAction>(
         context: context,
@@ -72,7 +78,7 @@ Future<void> showConversationRowActions(
         actions: [
           for (final action in ConversationRowAction.values)
             AdaptiveActionSheetAction<ConversationRowAction>(
-              label: _label(action, pinned: pinned),
+              label: _label(action, pinned: pinned, archived: archived),
               isDestructive: action == ConversationRowAction.delete,
               onPressed: (ctx) => Navigator.of(ctx).pop(action),
             ),
@@ -92,6 +98,17 @@ Future<void> showConversationRowActions(
         showAdaptiveSnackBar(
           context,
           'Could not ${pinned ? 'unpin' : 'pin'} conversation: $error',
+        );
+      }
+    case ConversationRowAction.toggleArchive:
+      final error = await ref
+          .read(conversationListProvider.notifier)
+          .setArchived(item.id, !archived);
+      if (error != null && context.mounted) {
+        showAdaptiveSnackBar(
+          context,
+          'Could not ${archived ? 'unarchive' : 'archive'} conversation: '
+          '$error',
         );
       }
     case ConversationRowAction.delete:
@@ -143,17 +160,22 @@ Future<void> _rename(
   }
 }
 
-String _label(ConversationRowAction action, {required bool pinned}) =>
-    switch (action) {
-      ConversationRowAction.rename => 'Rename',
-      ConversationRowAction.togglePin => pinned ? 'Unpin' : 'Pin',
-      ConversationRowAction.delete => 'Delete',
-    };
+String _label(
+  ConversationRowAction action, {
+  required bool pinned,
+  required bool archived,
+}) => switch (action) {
+  ConversationRowAction.rename => 'Rename',
+  ConversationRowAction.togglePin => pinned ? 'Unpin' : 'Pin',
+  ConversationRowAction.toggleArchive => archived ? 'Unarchive' : 'Archive',
+  ConversationRowAction.delete => 'Delete',
+};
 
 Future<ConversationRowAction?> _showMenu(
   BuildContext context,
   ConversationActionRequest request, {
   required bool pinned,
+  required bool archived,
 }) {
   final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
   final anchor = request.anchorRect;
@@ -177,7 +199,7 @@ Future<ConversationRowAction?> _showMenu(
         PopupMenuItem<ConversationRowAction>(
           value: action,
           child: Text(
-            _label(action, pinned: pinned),
+            _label(action, pinned: pinned, archived: archived),
             style: action == ConversationRowAction.delete
                 ? TextStyle(color: error)
                 : null,

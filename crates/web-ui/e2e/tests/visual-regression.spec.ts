@@ -412,6 +412,76 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("chat page with follow-up suggestion chips", async ({ page }) => {
+    // The e2e server's LLM is a scripted stand-in, so fixture the turn: the
+    // POST stream ends at `done`, and the run's replay tail carries the
+    // `suggestions` frame the app listens for afterwards.
+    const runId = "00000000-0000-4000-8000-0000000000a1";
+    const messageId = "00000000-0000-4000-8000-0000000000a2";
+    const sse = (frames: [string, string, unknown][]) =>
+      frames
+        .map(
+          ([event, id, data]) =>
+            `event: ${event}\nid: ${id}\ndata: ${
+              typeof data === "string" ? data : JSON.stringify(data)
+            }\n\n`,
+        )
+        .join("");
+    await page.route(/\/api\/conversations\/[^/]+\/messages$/, (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          ["run_started", "0", { run_id: runId }],
+          [
+            "done",
+            "1",
+            {
+              role: "assistant",
+              content: "Berlin is sunny today.",
+              message_id: messageId,
+            },
+          ],
+        ]),
+      });
+    });
+    await page.route(
+      new RegExp(`/api/conversations/[^/]+/runs/${runId}/events/stream`),
+      (route) =>
+        route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            [
+              "suggestions",
+              "2",
+              {
+                message_id: messageId,
+                suggestions: [
+                  { prompt: "What about tomorrow?" },
+                  { prompt: "Show the weekly forecast" },
+                  { prompt: "Should I bring an umbrella?" },
+                ],
+              },
+            ],
+          ]),
+        }),
+    );
+
+    await navigateAndSettle(page, "/chat");
+    await enableAccessibility(page);
+    const input = page.getByRole("textbox").last();
+    await input.fill("What is the weather in Berlin?");
+    await input.press("Enter");
+    await expect(
+      page.getByRole("button", { name: "What about tomorrow?" }),
+    ).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(CSS_SETTLE_MS);
+    await expect(page).toHaveScreenshot("chat-follow-up-suggestions.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
   test("skills list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/skills");
     await expect(page).toHaveScreenshot("skills-empty.png", {
