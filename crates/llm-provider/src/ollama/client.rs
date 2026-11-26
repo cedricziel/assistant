@@ -191,6 +191,7 @@ impl LlmClient {
                     items,
                     meta,
                     thinking,
+                    provider_state: None,
                 }));
             }
         }
@@ -399,6 +400,7 @@ impl LlmClient {
                     } else {
                         Some(thinking_buf.clone())
                     },
+                    provider_state: None,
                 }));
             }
         }
@@ -481,6 +483,7 @@ fn extract_ollama_meta(json: &Value) -> LlmResponseMeta {
             .and_then(|v| v.as_str())
             .map(String::from),
         response_id: None, // Ollama does not emit a response ID.
+        ..Default::default()
     }
 }
 
@@ -526,7 +529,7 @@ fn build_json_messages(
                 };
                 messages.push(json!({ "role": role_str, "content": content }));
             }
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 let tool_calls: Vec<Value> = calls
                     .iter()
                     .map(|c| {
@@ -850,6 +853,7 @@ mod tests {
             }),
             is_mutating: true,
             requires_confirmation: true,
+            requires_rich_client: false,
         };
         let v = tool_spec_to_ollama_json(&spec);
         assert_eq!(v["type"], "function");

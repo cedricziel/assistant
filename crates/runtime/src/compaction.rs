@@ -30,6 +30,8 @@ use assistant_storage::conversations::ConversationStore;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::history::TurnHistory;
+
 /// Maximum characters to include in a single summarisation request.
 /// Transcripts larger than this are summarised in chunks first.
 const CHUNK_CHARS: usize = 12_000;
@@ -84,9 +86,9 @@ pub fn estimate_total_tokens(
 /// history until the estimate fits.
 ///
 /// Returns `true` if any messages were dropped.
-pub fn hard_truncate(
+pub(crate) fn hard_truncate(
     system_prompt: &str,
-    history: &mut Vec<ChatHistoryMessage>,
+    history: &mut TurnHistory,
     tool_specs: &[assistant_core::ToolSpec],
     cfg: &CompactionConfig,
 ) -> bool {
@@ -185,7 +187,7 @@ fn message_text(msg: &ChatHistoryMessage) -> String {
             })
             .collect::<Vec<_>>()
             .join(" "),
-        ChatHistoryMessage::AssistantToolCalls(calls) => {
+        ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
             let summaries: Vec<String> = calls
                 .iter()
                 .map(|c: &ToolCallItem| {
@@ -215,7 +217,7 @@ fn build_transcript(messages: &[ChatHistoryMessage]) -> String {
                     ChatRole::Tool => "Tool",
                 },
                 ChatHistoryMessage::MultimodalUser { .. } => "User",
-                ChatHistoryMessage::AssistantToolCalls(_) => "Assistant",
+                ChatHistoryMessage::AssistantToolCalls { .. } => "Assistant",
                 ChatHistoryMessage::ToolResult { .. } => "Tool",
             };
             format!("[Turn {i}] {role_label}: {}", message_text(msg))
@@ -333,10 +335,16 @@ fn chat_history_to_message(
             m.turn = turn;
             Some(m)
         }
-        ChatHistoryMessage::AssistantToolCalls(calls) => {
+        ChatHistoryMessage::AssistantToolCalls {
+            items: calls,
+            provider_state,
+        } => {
             let json = serde_json::to_string(calls).ok()?;
             let mut m = Message::new(conversation_id, MessageRole::Assistant, String::new());
             m.tool_calls_json = Some(json);
+            m.provider_state_json = provider_state
+                .as_ref()
+                .and_then(|s| serde_json::to_string(s).ok());
             m.turn = turn;
             Some(m)
         }
@@ -346,6 +354,14 @@ fn chat_history_to_message(
             m.turn = turn;
             Some(m)
         }
+    }
+}
+
+/// The assistant message that stands in for compacted messages.
+pub(crate) fn summary_message(summary: &str) -> ChatHistoryMessage {
+    ChatHistoryMessage::Text {
+        role: ChatRole::Assistant,
+        content: format!("[Conversation summary — earlier context compacted]\n\n{summary}"),
     }
 }
 
@@ -381,8 +397,8 @@ async fn persist_compacted(
 ///
 /// Returns `true` if compaction was performed, `false` if there was nothing
 /// to compact or the summary request failed.
-pub async fn maybe_compact(
-    history: &mut Vec<ChatHistoryMessage>,
+pub(crate) async fn maybe_compact(
+    history: &mut TurnHistory,
     llm: &Arc<dyn LlmProvider>,
     cfg: &CompactionConfig,
     conv_store: Option<(&dyn ConversationStore, Uuid)>,
@@ -412,13 +428,7 @@ pub async fn maybe_compact(
         }
     };
 
-    let recent = history.split_off(split_at);
-    let summary_msg = ChatHistoryMessage::Text {
-        role: ChatRole::Assistant,
-        content: format!("[Conversation summary — earlier context compacted]\n\n{summary}"),
-    };
-
-    *history = std::iter::once(summary_msg).chain(recent).collect();
+    history.replace_prefix_with_summary(split_at, summary_message(&summary));
 
     info!(
         new_history_len = history.len(),
@@ -494,7 +504,10 @@ mod tests {
                 role: ChatRole::User,
                 content: "q1".into(),
             },
-            ChatHistoryMessage::AssistantToolCalls(vec![]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "t".into(),
                 content: "r".into(),
@@ -600,6 +613,7 @@ mod tests {
             params_schema: serde_json::json!({"type": "object"}),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         }];
 
         let history_only = estimate_tokens(&history);
@@ -616,7 +630,7 @@ mod tests {
         // Context window = 1000 tokens, reserve = 200 → hard limit = 800 tokens.
         // Each message is 400 chars = 100 estimated tokens.
         let c = cfg(true, 1_000, 200, 100, 2);
-        let mut history: Vec<ChatHistoryMessage> = (0..10)
+        let history: Vec<ChatHistoryMessage> = (0..10)
             .map(|i| ChatHistoryMessage::Text {
                 role: if i % 2 == 0 {
                     ChatRole::User
@@ -628,6 +642,7 @@ mod tests {
             .collect();
 
         // 10 messages × 100 tokens = 1000 tokens > 800 hard limit
+        let mut history = TurnHistory::unmapped(history);
         let dropped = hard_truncate("", &mut history, &[], &c);
         assert!(dropped, "should have dropped messages");
         assert!(
@@ -646,7 +661,7 @@ mod tests {
     #[test]
     fn hard_truncate_noop_when_under_limit() {
         let c = cfg(true, 200_000, 20_000, 30_000, 10);
-        let mut history = vec![
+        let history = vec![
             ChatHistoryMessage::Text {
                 role: ChatRole::User,
                 content: "hello".into(),
@@ -657,6 +672,7 @@ mod tests {
             },
         ];
         let original_len = history.len();
+        let mut history = TurnHistory::unmapped(history);
         let dropped = hard_truncate("system prompt", &mut history, &[], &c);
         assert!(!dropped, "should not have dropped any messages");
         assert_eq!(history.len(), original_len);
@@ -666,10 +682,11 @@ mod tests {
     fn hard_truncate_preserves_at_least_one_message() {
         // Even when a single message exceeds the limit, we keep at least 1.
         let c = cfg(true, 100, 50, 10, 1);
-        let mut history = vec![ChatHistoryMessage::Text {
+        let history = vec![ChatHistoryMessage::Text {
             role: ChatRole::User,
             content: "x".repeat(10_000),
         }];
+        let mut history = TurnHistory::unmapped(history);
         hard_truncate("", &mut history, &[], &c);
         assert_eq!(history.len(), 1, "should keep at least one message");
     }
@@ -721,9 +738,10 @@ mod tests {
             )],
         ));
         let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
-        let mut history = turn_history();
+        let history = turn_history();
         let initial_len = history.len();
 
+        let mut history = TurnHistory::unmapped(history);
         let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
         assert!(compacted);
         assert!(history.len() < initial_len);
@@ -756,8 +774,9 @@ mod tests {
         let llm: Arc<dyn LlmProvider> = Arc::new(ScriptedLlmProvider::new());
         // keep_recent_turns=10 ≫ available turns in history → split_at == 0 → noop.
         let cfg = cfg(true, 200_000, 20_000, 30_000, 10);
-        let mut history = turn_history();
+        let history = turn_history();
         let before = history.clone();
+        let mut history = TurnHistory::unmapped(history);
         let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
         assert!(!compacted);
         assert_eq!(history.len(), before.len());
@@ -773,8 +792,9 @@ mod tests {
                 LlmResponse::Thinking("just reasoning".into(), LlmResponseMeta::default()),
             ]));
         let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
-        let mut history = turn_history();
+        let history = turn_history();
         let before_len = history.len();
+        let mut history = TurnHistory::unmapped(history);
         let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
         assert!(!compacted);
         assert_eq!(
@@ -794,8 +814,9 @@ mod tests {
         let store = InMemoryConversationStore::new();
         let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
         let conv_id = Uuid::new_v4();
-        let mut history = turn_history();
+        let history = turn_history();
 
+        let mut history = TurnHistory::unmapped(history);
         let compacted = maybe_compact(&mut history, &llm, &cfg, Some((&store, conv_id))).await;
         assert!(compacted);
 
@@ -849,6 +870,7 @@ mod tests {
             Arc::new(ScriptedLlmProvider::new().with_canned_responses(responses));
 
         let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
+        let mut history = TurnHistory::unmapped(history);
         let compacted = maybe_compact(&mut history, &llm, &cfg, None).await;
         assert!(compacted);
         // First message is the summary turn; last preserves the "what's next?" prompt.

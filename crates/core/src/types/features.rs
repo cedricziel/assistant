@@ -1,5 +1,7 @@
 //! Per-feature runtime configuration (memory, compaction, learning, titling,
-//! push notifications, integrations).
+//! suggestions, push notifications, integrations).
+
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -239,6 +241,67 @@ impl Default for TitlingConfig {
     }
 }
 
+// ── Suggestions ───────────────────────────────────────────────────────────────
+
+/// Upper bound, in seconds, of `[suggestions].timeout_secs`.
+///
+/// This is a protocol constant: the client's suggestion listen window is
+/// derived from it, so raising it requires raising the client window too.
+pub const SUGGESTIONS_MAX_TIMEOUT_SECS: u64 = 15;
+
+/// Follow-up suggestion configuration (`[suggestions]` section).
+///
+/// Controls the short extra LLM call that runs after a web turn completes and
+/// proposes prompts the user could send next.  The call uses the org's main
+/// LLM provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuggestionsConfig {
+    /// Master switch (default: `true`).  When `false`, no suggestion call is
+    /// ever made.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Maximum number of suggestions per turn (default: `3`, clamped to
+    /// `1..=5` by [`effective_max`](Self::effective_max)).
+    #[serde(default = "default_suggestions_max")]
+    pub max_suggestions: usize,
+    /// Budget in seconds for the whole suggestion phase (default: `10`,
+    /// clamped to `1..=`[`SUGGESTIONS_MAX_TIMEOUT_SECS`] by
+    /// [`effective_timeout`](Self::effective_timeout)).
+    #[serde(default = "default_suggestions_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_suggestions_max() -> usize {
+    3
+}
+
+fn default_suggestions_timeout_secs() -> u64 {
+    10
+}
+
+impl SuggestionsConfig {
+    /// The suggestion count to request, clamped to `1..=5`.
+    pub fn effective_max(&self) -> usize {
+        self.max_suggestions.clamp(1, 5)
+    }
+
+    /// The suggestion phase budget, clamped to
+    /// `1..=`[`SUGGESTIONS_MAX_TIMEOUT_SECS`] seconds.
+    pub fn effective_timeout(&self) -> Duration {
+        Duration::from_secs(self.timeout_secs.clamp(1, SUGGESTIONS_MAX_TIMEOUT_SECS))
+    }
+}
+
+impl Default for SuggestionsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_suggestions: default_suggestions_max(),
+            timeout_secs: default_suggestions_timeout_secs(),
+        }
+    }
+}
+
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 /// Push notification / VAPID configuration (`[notifications]` section).
@@ -319,4 +382,29 @@ mod tests {
         let cfg: MemoryConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.indexing_interval_seconds, Some(60));
     }
+}
+
+// -- UiConfig -----------------------------------------------------------------
+
+/// Generative-UI settings (`[ui]` section of `org.toml`).
+///
+/// Host entries are exact hostnames, lower-cased on load.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiConfig {
+    /// Hosts `https:` surface images may load from. Empty allows any `https:`
+    /// host; the server enforces the list, clients never see it.
+    #[serde(default, deserialize_with = "lowercase_hosts")]
+    pub image_hosts: Vec<String>,
+    /// Hosts whose `openUrl` targets open without a confirmation prompt.
+    /// Empty means every link asks first.
+    #[serde(default, deserialize_with = "lowercase_hosts")]
+    pub link_hosts: Vec<String>,
+}
+
+fn lowercase_hosts<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let hosts = Vec::<String>::deserialize(deserializer)?;
+    Ok(hosts.into_iter().map(|h| h.to_lowercase()).collect())
 }

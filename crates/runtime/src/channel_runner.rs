@@ -33,7 +33,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::command_registry::{CommandContext, CommandRegistry};
-use crate::orchestrator::Orchestrator;
+use crate::orchestrator::{Orchestrator, TurnMode};
 
 /// LRU capacity for the in-memory `conversation_key → Uuid` map.
 /// Compile-time-evaluated so the non-zero invariant cannot regress.
@@ -60,8 +60,6 @@ pub struct ChannelRunner {
     command_registry: Arc<CommandRegistry>,
     /// Per-conversation config overrides (model, etc.).
     conversation_configs: Arc<RwLock<HashMap<Uuid, ConversationConfig>>>,
-    /// Active turns: conv_id → request_id (for `/stop`).
-    active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
     /// Store for persisting command events.
     command_event_store: Arc<dyn CommandEventStore>,
     /// Optional resolver that maps platform user IDs to assistant user IDs.
@@ -83,7 +81,6 @@ impl ChannelRunner {
             shutdown: None,
             command_registry: Arc::new(CommandRegistry::new()),
             conversation_configs,
-            active_turns: Arc::new(RwLock::new(HashMap::new())),
             command_event_store,
             identity_resolver: None,
         }
@@ -168,6 +165,7 @@ impl ChannelRunner {
                 // routing is implemented.
                 org_id: None,
                 space_id: None,
+                ..TurnIdentity::default()
             },
             Ok(None) => {
                 tracing::debug!(
@@ -358,7 +356,6 @@ impl ChannelRunner {
                                         conversation_id: conv_id,
                                         conversation_configs: self.conversation_configs.clone(),
                                         orchestrator: self.orchestrator.clone(),
-                                        active_turns: self.active_turns.clone(),
                                         evict_conversation: Some(Box::new(move || {
                                             // Evict via try_lock; the LRU cache uses a
                                             // tokio Mutex so we cannot .await inside
@@ -409,7 +406,6 @@ impl ChannelRunner {
                                 Self::get_conv_lock(&self.conv_locks, conv_id).await;
                             let adapter = self.adapter.clone();
                             let orchestrator = self.orchestrator.clone();
-                            let active_turns = self.active_turns.clone();
 
                             // Resolve platform identity before spawning the turn.
                             let identity = Self::resolve_identity(
@@ -422,9 +418,19 @@ impl ChannelRunner {
                             tokio::spawn(async move {
                                 let _guard = lock.lock().await;
 
-                                // Track the active turn for /stop.
-                                let request_id = Uuid::new_v4();
-                                active_turns.write().await.insert(conv_id, request_id);
+                                // Register the turn so /stop, /status and
+                                // branching see it. A conversation held by an
+                                // exclusive turn makes the message wait.
+                                let _lease = loop {
+                                    if let Some(lease) = orchestrator.turn_registry().try_begin(
+                                        conv_id,
+                                        Uuid::new_v4(),
+                                        TurnMode::Shared,
+                                    ) {
+                                        break lease;
+                                    }
+                                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                                };
 
                                 Self::dispatch(
                                     channel_msg,
@@ -434,8 +440,6 @@ impl ChannelRunner {
                                     identity,
                                 )
                                 .await;
-
-                                active_turns.write().await.remove(&conv_id);
                             });
                         }
                     }

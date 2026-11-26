@@ -23,7 +23,7 @@ mod wiring;
 use args::{Cli, Command, OrchestratorCommand, SkillCommand};
 use cli_helpers::{CliConfirmation, normalize_worker_interface, parse_interface_selection};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,8 +43,8 @@ use assistant_core::{
     set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_runtime::{
-    BinaryRole, CommandContext, CommandRegistry, OrgContexts, SpaceSupervisor, init_tracing,
-    orchestrator::ConfirmationCallback, start_conversation_context,
+    BinaryRole, CommandContext, CommandRegistry, OrgContexts, SpaceSupervisor, SubmitTurn,
+    init_tracing, orchestrator::ConfirmationCallback, start_conversation_context,
 };
 use assistant_storage::OrgPoolFactory;
 use assistant_storage::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG};
@@ -141,13 +141,11 @@ async fn main() -> Result<()> {
         wiring::select_binary_role(cli.command.as_ref(), orchestrator_interface_filtered);
     let worker_plan = assistant_runtime::core_worker_plan(binary_role.clone());
 
-    let confirmation_cb: Arc<dyn ConfirmationCallback> =
+    let confirmation_cb: Option<Arc<dyn ConfirmationCallback>> =
         if wiring::uses_auto_deny_confirmation(cli.command.as_ref(), orchestrator_no_repl) {
-            Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
-                interface_name: "background",
-            })
+            None
         } else {
-            Arc::new(CliConfirmation)
+            Some(Arc::new(CliConfirmation::stdin()))
         };
 
     let _otel_guard = init_tracing()?;
@@ -193,12 +191,13 @@ async fn main() -> Result<()> {
 
         let result = bs
             .orchestrator
-            .submit_turn(
-                &assistant_core::auth::AuthContext::system(),
-                &prompt,
-                conversation_id,
-                Interface::Cli,
-                None,
+            .submit(
+                SubmitTurn::new(prompt, conversation_id, Interface::Cli)
+                    .with_auth(&assistant_core::auth::AuthContext::system())
+                    .with_interactive(wiring::cli_turn_is_interactive(
+                        cli.command.as_ref(),
+                        orchestrator_no_repl,
+                    )),
             )
             .await?;
         println!("{}", result.answer);
@@ -329,6 +328,8 @@ async fn main() -> Result<()> {
     }
 
     // 11. One conversation per session.
+    let repl_interactive =
+        wiring::cli_turn_is_interactive(cli.command.as_ref(), orchestrator_no_repl);
     let conversation_id = Uuid::new_v4();
     let _conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
     info!(conversation_id = %conversation_id, "Starting CLI session");
@@ -352,8 +353,6 @@ async fn main() -> Result<()> {
     // 13. Shared command registry and per-conversation state.
     let command_registry = CommandRegistry::new();
     let conversation_configs = bs.orchestrator.conversation_configs();
-    let active_turns: Arc<tokio::sync::RwLock<HashMap<Uuid, Uuid>>> =
-        Arc::new(tokio::sync::RwLock::new(HashMap::new()));
     let default_model = bs.config.llm.model.clone();
 
     // 14. Build the reedline editor and prompt.
@@ -466,7 +465,6 @@ async fn main() -> Result<()> {
                                     conversation_id,
                                     conversation_configs: conversation_configs.clone(),
                                     orchestrator: bs.orchestrator.clone(),
-                                    active_turns: active_turns.clone(),
                                     evict_conversation: None,
                                     default_model: default_model.clone(),
                                 };
@@ -501,12 +499,11 @@ async fn main() -> Result<()> {
                 let prompt = input.to_string();
                 let msg_ts = SystemClock.now();
                 let submit = tokio::spawn(async move {
-                    orch.submit_turn(
-                        &assistant_core::auth::AuthContext::system(),
-                        &prompt,
-                        conversation_id,
-                        Interface::Cli,
-                        Some(msg_ts),
+                    orch.submit(
+                        SubmitTurn::new(prompt, conversation_id, Interface::Cli)
+                            .with_auth(&assistant_core::auth::AuthContext::system())
+                            .with_timestamp(Some(msg_ts))
+                            .with_interactive(repl_interactive),
                     )
                     .await
                 });

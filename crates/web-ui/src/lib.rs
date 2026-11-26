@@ -30,7 +30,6 @@ use assistant_core::{
     MessageBus, apply_agent_context, default_workspace_dir, load_server_config, server_config_path,
     set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
-use assistant_runtime::bootstrap::AutoDenyConfirmation;
 use assistant_runtime::{OrgContexts, SpaceRuntimes, SpaceSupervisor, init_tracing};
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use axum::{Extension, Router, http::StatusCode, routing::get};
@@ -324,15 +323,9 @@ async fn run_with_args(args: Args) -> Result<()> {
         Arc::new(assistant_core::clock::SystemClock),
     ));
 
-    let mut runtimes = SpaceRuntimes::new(
-        pool_factory.clone(),
-        orgs.clone(),
-        Arc::new(AutoDenyConfirmation {
-            interface_name: "Web",
-        }),
-    )
-    .with_audio_store(audio_store.clone())
-    .with_turn_tool_source(integration_tools);
+    let mut runtimes = SpaceRuntimes::new(pool_factory.clone(), orgs.clone(), None)
+        .with_audio_store(audio_store.clone())
+        .with_turn_tool_source(integration_tools);
     if let Some(bus) = shared_nats_bus(&server_config).await? {
         runtimes = runtimes.with_shared_bus(bus);
     }

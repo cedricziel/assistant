@@ -164,6 +164,7 @@ mod tests {
             turn: 0,
             interface: Interface::Cli,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,
@@ -215,6 +216,7 @@ mod tests {
             params_schema: serde_json::json!({}),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         }]);
         let specs = stub.to_specs();
         assert_eq!(specs.len(), 1);

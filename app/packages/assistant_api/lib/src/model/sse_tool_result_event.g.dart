@@ -8,11 +8,15 @@ part of 'sse_tool_result_event.dart';
 
 class _$SseToolResultEvent extends SseToolResultEvent {
   @override
-  final String? arguments;
+  final JsonObject? arguments;
+  @override
+  final JsonObject? data;
   @override
   final String? result;
   @override
   final String status;
+  @override
+  final String? toolCallId;
   @override
   final String toolName;
 
@@ -22,8 +26,10 @@ class _$SseToolResultEvent extends SseToolResultEvent {
 
   _$SseToolResultEvent._(
       {this.arguments,
+      this.data,
       this.result,
       required this.status,
+      this.toolCallId,
       required this.toolName})
       : super._();
   @override
@@ -40,8 +46,10 @@ class _$SseToolResultEvent extends SseToolResultEvent {
     if (identical(other, this)) return true;
     return other is SseToolResultEvent &&
         arguments == other.arguments &&
+        data == other.data &&
         result == other.result &&
         status == other.status &&
+        toolCallId == other.toolCallId &&
         toolName == other.toolName;
   }
 
@@ -49,8 +57,10 @@ class _$SseToolResultEvent extends SseToolResultEvent {
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, arguments.hashCode);
+    _$hash = $jc(_$hash, data.hashCode);
     _$hash = $jc(_$hash, result.hashCode);
     _$hash = $jc(_$hash, status.hashCode);
+    _$hash = $jc(_$hash, toolCallId.hashCode);
     _$hash = $jc(_$hash, toolName.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -60,8 +70,10 @@ class _$SseToolResultEvent extends SseToolResultEvent {
   String toString() {
     return (newBuiltValueToStringHelper(r'SseToolResultEvent')
           ..add('arguments', arguments)
+          ..add('data', data)
           ..add('result', result)
           ..add('status', status)
+          ..add('toolCallId', toolCallId)
           ..add('toolName', toolName))
         .toString();
   }
@@ -71,9 +83,13 @@ class SseToolResultEventBuilder
     implements Builder<SseToolResultEvent, SseToolResultEventBuilder> {
   _$SseToolResultEvent? _$v;
 
-  String? _arguments;
-  String? get arguments => _$this._arguments;
-  set arguments(String? arguments) => _$this._arguments = arguments;
+  JsonObject? _arguments;
+  JsonObject? get arguments => _$this._arguments;
+  set arguments(JsonObject? arguments) => _$this._arguments = arguments;
+
+  JsonObject? _data;
+  JsonObject? get data => _$this._data;
+  set data(JsonObject? data) => _$this._data = data;
 
   String? _result;
   String? get result => _$this._result;
@@ -82,6 +98,10 @@ class SseToolResultEventBuilder
   String? _status;
   String? get status => _$this._status;
   set status(String? status) => _$this._status = status;
+
+  String? _toolCallId;
+  String? get toolCallId => _$this._toolCallId;
+  set toolCallId(String? toolCallId) => _$this._toolCallId = toolCallId;
 
   String? _toolName;
   String? get toolName => _$this._toolName;
@@ -95,8 +115,10 @@ class SseToolResultEventBuilder
     final $v = _$v;
     if ($v != null) {
       _arguments = $v.arguments;
+      _data = $v.data;
       _result = $v.result;
       _status = $v.status;
+      _toolCallId = $v.toolCallId;
       _toolName = $v.toolName;
       _$v = null;
     }
@@ -120,9 +142,11 @@ class SseToolResultEventBuilder
     final _$result = _$v ??
         _$SseToolResultEvent._(
           arguments: arguments,
+          data: data,
           result: result,
           status: BuiltValueNullFieldError.checkNotNull(
               status, r'SseToolResultEvent', 'status'),
+          toolCallId: toolCallId,
           toolName: BuiltValueNullFieldError.checkNotNull(
               toolName, r'SseToolResultEvent', 'toolName'),
         );

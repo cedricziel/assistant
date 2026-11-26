@@ -101,16 +101,19 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**createConversation**](doc/ConversationsApi.md#createconversation) | **POST** /api/conversations | &#x60;POST /api/conversations&#x60; — create a new conversation.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**createQuickMessage**](doc/ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**deleteConversation**](doc/ConversationsApi.md#deleteconversation) | **DELETE** /api/conversations/{id} | &#x60;DELETE /api/conversations/{id}&#x60; — delete a conversation and all its messages.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**deleteMessageFeedback**](doc/ConversationsApi.md#deletemessagefeedback) | **DELETE** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;DELETE /api/conversations/{id}/messages/{message_id}/feedback&#x60; — clear feedback.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getAudio**](doc/ConversationsApi.md#getaudio) | **GET** /api/audio/{id} | &#x60;GET /api/audio/{id}&#x60; — serve a synthesized audio blob from the in-memory store.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getConversation**](doc/ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getMessageAudio**](doc/ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it as &#x60;audio/mpeg&#x60;.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getTurnStatus**](doc/ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**listConversations**](doc/ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**respondToInteraction**](doc/ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendMessage**](doc/ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**setMessageFeedback**](doc/ConversationsApi.md#setmessagefeedback) | **PUT** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;PUT /api/conversations/{id}/messages/{message_id}/feedback&#x60; — rate a reply.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
-[*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**clearCredential**](doc/IntegrationsApi.md#clearcredential) | **DELETE** /api/integrations/{id}/credential | &#x60;DELETE /api/integrations/{id}/credential&#x60; — remove the header credential.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**createIntegration**](doc/IntegrationsApi.md#createintegration) | **POST** /api/integrations | &#x60;POST /api/integrations&#x60; — install an integration.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**deleteIntegration**](doc/IntegrationsApi.md#deleteintegration) | **DELETE** /api/integrations/{id} | &#x60;DELETE /api/integrations/{id}&#x60; — remove an integration and its credentials.
@@ -164,6 +167,7 @@ Class | Method | HTTP request | Description
 [*PersonasApi*](doc/PersonasApi.md) | [**patchSkillAccessMode**](doc/PersonasApi.md#patchskillaccessmode) | **PATCH** /api/personas/{id}/skill-access | &#x60;PATCH /api/personas/{id}/skill-access&#x60; — set skill access mode.
 [*PersonasApi*](doc/PersonasApi.md) | [**putPersonaFile**](doc/PersonasApi.md#putpersonafile) | **PUT** /api/personas/{id}/files/{filename} | &#x60;PUT /api/personas/{id}/files/{filename}&#x60; — write a persona file slot.
 [*PersonasApi*](doc/PersonasApi.md) | [**setActivePersona**](doc/PersonasApi.md#setactivepersona) | **POST** /api/personas/active | &#x60;POST /api/personas/active&#x60; — switch the active persona for the session.
+[*PersonasApi*](doc/PersonasApi.md) | [**updatePersona**](doc/PersonasApi.md#updatepersona) | **PATCH** /api/personas/{id} | &#x60;PATCH /api/personas/{id}&#x60; — update a persona&#39;s starter prompts.
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**createPushNotificationConfig**](doc/PushNotificationsApi.md#createpushnotificationconfig) | **POST** /tasks/{task_id}/pushNotificationConfigs | &#x60;POST /tasks/:task_id/pushNotificationConfigs&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**deletePushNotificationConfig**](doc/PushNotificationsApi.md#deletepushnotificationconfig) | **DELETE** /tasks/{task_id}/pushNotificationConfigs/{config_id} | &#x60;DELETE /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**getPushNotificationConfig**](doc/PushNotificationsApi.md#getpushnotificationconfig) | **GET** /tasks/{task_id}/pushNotificationConfigs/{config_id} | &#x60;GET /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
@@ -276,6 +280,7 @@ Class | Method | HTTP request | Description
  - [DeviceCodeResponseSchema](doc/DeviceCodeResponseSchema.md)
  - [ErrorBody](doc/ErrorBody.md)
  - [ExecuteCommandRequest](doc/ExecuteCommandRequest.md)
+ - [FeedbackRating](doc/FeedbackRating.md)
  - [HttpAuthSecurityScheme](doc/HttpAuthSecurityScheme.md)
  - [ImplicitOAuthFlow](doc/ImplicitOAuthFlow.md)
  - [IntegrationAuthKind](doc/IntegrationAuthKind.md)
@@ -286,11 +291,15 @@ Class | Method | HTTP request | Description
  - [IntegrationStatus](doc/IntegrationStatus.md)
  - [IntegrationSummary](doc/IntegrationSummary.md)
  - [IntegrationTrust](doc/IntegrationTrust.md)
+ - [InteractionDetail](doc/InteractionDetail.md)
+ - [InteractionOutcomeView](doc/InteractionOutcomeView.md)
+ - [InteractionStatusView](doc/InteractionStatusView.md)
  - [InterfaceInstanceResponse](doc/InterfaceInstanceResponse.md)
  - [ListTaskPushNotificationConfigsResponse](doc/ListTaskPushNotificationConfigsResponse.md)
  - [ListTasksResponse](doc/ListTasksResponse.md)
  - [MemberEntry](doc/MemberEntry.md)
  - [Message](doc/Message.md)
+ - [MessageFeedbackResponse](doc/MessageFeedbackResponse.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
  - [MutualTlsSecurityScheme](doc/MutualTlsSecurityScheme.md)
@@ -313,9 +322,14 @@ Class | Method | HTTP request | Description
  - [PublishCatalogItemRequest](doc/PublishCatalogItemRequest.md)
  - [PushNotificationConfig](doc/PushNotificationConfig.md)
  - [PutOrgOidcConfigRequest](doc/PutOrgOidcConfigRequest.md)
+ - [QuestionAnswer](doc/QuestionAnswer.md)
  - [QuickMessageRequest](doc/QuickMessageRequest.md)
  - [QuickMessageResponse](doc/QuickMessageResponse.md)
  - [RegisterAgentRequest](doc/RegisterAgentRequest.md)
+ - [RespondToInteractionRequest](doc/RespondToInteractionRequest.md)
+ - [RespondToInteractionRequestOneOf](doc/RespondToInteractionRequestOneOf.md)
+ - [RespondToInteractionRequestOneOf1](doc/RespondToInteractionRequestOneOf1.md)
+ - [RespondToInteractionRequestOneOf2](doc/RespondToInteractionRequestOneOf2.md)
  - [Role](doc/Role.md)
  - [RotateSecretResponse](doc/RotateSecretResponse.md)
  - [SecurityRequirement](doc/SecurityRequirement.md)
@@ -327,6 +341,7 @@ Class | Method | HTTP request | Description
  - [ServerMetadata](doc/ServerMetadata.md)
  - [SetActivePersonaRequest](doc/SetActivePersonaRequest.md)
  - [SetCredentialRequest](doc/SetCredentialRequest.md)
+ - [SetMessageFeedbackRequest](doc/SetMessageFeedbackRequest.md)
  - [SetSkillAccessModeRequest](doc/SetSkillAccessModeRequest.md)
  - [SetSpaceAccessRequest](doc/SetSpaceAccessRequest.md)
  - [SkillDetail](doc/SkillDetail.md)
@@ -335,6 +350,8 @@ Class | Method | HTTP request | Description
  - [SpaceAccessMode](doc/SpaceAccessMode.md)
  - [SpaceDetail](doc/SpaceDetail.md)
  - [SpaceSummary](doc/SpaceSummary.md)
+ - [SseInteractionRequestedEvent](doc/SseInteractionRequestedEvent.md)
+ - [SseInteractionResolvedEvent](doc/SseInteractionResolvedEvent.md)
  - [SseStatusEvent](doc/SseStatusEvent.md)
  - [SseSubagentCompletedEvent](doc/SseSubagentCompletedEvent.md)
  - [SseSubagentStartedEvent](doc/SseSubagentStartedEvent.md)
@@ -360,6 +377,7 @@ Class | Method | HTTP request | Description
  - [TestIntegrationResponse](doc/TestIntegrationResponse.md)
  - [TokenResponse](doc/TokenResponse.md)
  - [ToolCallSummary](doc/ToolCallSummary.md)
+ - [ToolDecision](doc/ToolDecision.md)
  - [TurnState](doc/TurnState.md)
  - [TurnStatusResponse](doc/TurnStatusResponse.md)
  - [UnsubscribeRequest](doc/UnsubscribeRequest.md)
@@ -371,6 +389,7 @@ Class | Method | HTTP request | Description
  - [UpdateIntegrationRequest](doc/UpdateIntegrationRequest.md)
  - [UpdateMemberRequest](doc/UpdateMemberRequest.md)
  - [UpdateOrgRequest](doc/UpdateOrgRequest.md)
+ - [UpdatePersonaRequest](doc/UpdatePersonaRequest.md)
  - [UpdateSkillRequest](doc/UpdateSkillRequest.md)
  - [UpdateSpaceRequest](doc/UpdateSpaceRequest.md)
  - [UpdateUserRequest](doc/UpdateUserRequest.md)

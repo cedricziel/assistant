@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use assistant_core::clock::{Clock, SystemClock};
-use assistant_core::types::conversation::{Message, MessageRole};
+use assistant_core::types::conversation::{Message, MessageFinishReason, MessageRole};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
@@ -37,6 +37,28 @@ pub struct ConversationRecord {
     pub user_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// When the owner pinned this conversation; `None` when not pinned.
+    /// Pinned conversations list first, newest pin first.
+    pub pinned_at: Option<DateTime<Utc>>,
+}
+
+/// A partial update of conversation metadata. `None` fields are left unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConversationPatch {
+    /// New title. Setting it locks the title against auto-titling and
+    /// overwrites an already locked title.
+    pub title: Option<String>,
+    /// `Some(true)` pins (keeping an existing `pinned_at`), `Some(false)` unpins.
+    pub pinned: Option<bool>,
+}
+
+/// Outcome of [`ConversationStore::update_metadata`].
+#[derive(Debug, Clone)]
+pub enum MetadataUpdate {
+    /// The patch was applied; carries the stored row after the update.
+    Updated(ConversationRecord),
+    /// No conversation with that id exists for this store's scope.
+    NotFound,
 }
 
 /// Trait-based interface for conversation + message persistence.
@@ -60,11 +82,25 @@ pub trait ConversationStore: Send + Sync {
     /// Fetch a conversation by ID. Returns `None` if not found.
     async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>>;
 
-    /// List all conversations for the configured agent (most-recently-updated first).
+    /// List all conversations for the configured agent: pinned first (newest
+    /// pin first), then most-recently-updated first.
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>>;
 
     /// Set a conversation's title and lock it from auto-titling.
+    ///
+    /// Does not change `updated_at`: renaming must not reorder the list.
     async fn update_title(&self, id: Uuid, title: &str) -> Result<()>;
+
+    /// Apply a partial metadata update in one step and emit one `Upserted`
+    /// event. Does not change `updated_at`.
+    async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate>;
+
+    /// Write an auto-generated title, only while the conversation is unlocked.
+    ///
+    /// Locks the row and leaves `updated_at` unchanged. Returns `false` (and
+    /// emits no event) when the row is missing or already locked, so a manual
+    /// rename that lands while the LLM is running is never overwritten.
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool>;
 
     /// Replace the full message history of a conversation.
     async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()>;
@@ -83,6 +119,61 @@ pub trait ConversationStore: Send + Sync {
 
     /// Return the last N messages for a conversation, oldest first.
     async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>>;
+
+    /// Persist `msg` as a child of `parent_id` (`None` creates a new root)
+    /// and make it the active leaf.
+    ///
+    /// Errors when `parent_id` is not a message of the same conversation.
+    /// Like [`save_message`](Self::save_message), a conflicting message id
+    /// inserts nothing and leaves the active leaf where it is.
+    async fn branch_message(&self, msg: &Message, parent_id: Option<Uuid>) -> Result<()>;
+
+    /// The children of `parent_id` in creation order; `None` lists the roots.
+    async fn children_of(
+        &self,
+        conversation_id: Uuid,
+        parent_id: Option<Uuid>,
+    ) -> Result<Vec<Message>>;
+
+    /// `message_id` and its siblings (same parent, or all roots) in creation
+    /// order. `None` when the message is not in the conversation.
+    async fn list_siblings(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>>;
+
+    /// The chain from the root down to and including `message_id`.
+    /// `None` when the message is not in the conversation.
+    async fn ancestors(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>>;
+
+    /// Switch the active path to the branch through `message_id`: descend
+    /// from it through the most recently created child at each level and make
+    /// the reached message the active leaf. Returns the new leaf, or `None`
+    /// when the message is not in the conversation.
+    ///
+    /// Leaves `updated_at` unchanged and emits [`ConversationEvent::Upserted`].
+    async fn switch_to(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>>;
+
+    /// Make `message_id` the active leaf exactly, without descending.
+    /// Returns it, or `None` when the message is not in the conversation.
+    async fn set_leaf(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>>;
+
+    /// Delete the rows written by turn run `run_id`, except `keep`, in one
+    /// statement. Returns how many rows were removed. Errors, deleting
+    /// nothing, when a surviving row has a deleted row as its parent. Does
+    /// not move the active leaf; callers reset it with
+    /// [`set_leaf`](Self::set_leaf).
+    async fn delete_run_rows(
+        &self,
+        conversation_id: Uuid,
+        run_id: Uuid,
+        keep: Option<Uuid>,
+    ) -> Result<u64>;
 }
 
 /// SQLite-backed store for conversations and messages.
@@ -160,9 +251,196 @@ impl SqliteConversationStore {
     }
 }
 
+/// Map a `conversations` row (see the `SELECT` lists above) to a record.
+fn conversation_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<ConversationRecord> {
+    let raw_id: String = r.get("id");
+    Ok(ConversationRecord {
+        id: Uuid::parse_str(&raw_id)?,
+        agent_id: r.get("agent_id"),
+        title: r.get("title"),
+        title_locked: r.get("title_locked"),
+        user_id: r.get("user_id"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+        pinned_at: r.get("pinned_at"),
+    })
+}
+
 // -----------------------------------------------------------------------
 // ConversationStore trait impl for SqliteConversationStore
 // -----------------------------------------------------------------------
+
+impl SqliteConversationStore {
+    /// Insert `msg` and make it the active leaf in one `BEGIN IMMEDIATE`
+    /// transaction. `parent` is `None` to append under the current leaf, or
+    /// `Some(explicit_parent)` to branch (the inner `None` is a new root).
+    async fn insert_message(&self, msg: &Message, parent: Option<Option<Uuid>>) -> Result<()> {
+        let id = msg.id.to_string();
+        let conversation_id = msg.conversation_id.to_string();
+        let role = msg.role.to_string();
+
+        self.ensure_conversation_agent(msg.conversation_id).await?;
+
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        let parent_id: Option<String> = match parent {
+            None => {
+                sqlx::query_scalar(
+                    "SELECT active_leaf_id FROM conversations WHERE id = ?1 AND agent_id = ?2",
+                )
+                .bind(&conversation_id)
+                .bind(&self.agent_id)
+                .fetch_one(&mut *tx)
+                .await?
+            }
+            Some(explicit) => {
+                if let Some(parent) = explicit {
+                    let in_conversation: bool = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?1 AND conversation_id = ?2)",
+                    )
+                    .bind(parent.to_string())
+                    .bind(&conversation_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    if !in_conversation {
+                        anyhow::bail!(
+                            "parent message {parent} is not in conversation {}",
+                            msg.conversation_id
+                        );
+                    }
+                }
+                explicit.map(|p| p.to_string())
+            }
+        };
+
+        let insert = sqlx::query(
+            "INSERT INTO messages \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json, tool_call_id, tool_status, tool_data_json, traceparent, finish_reason, model) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18) \
+             ON CONFLICT(id) DO NOTHING",
+        )
+        .bind(&id)
+        .bind(&conversation_id)
+        .bind(&role)
+        .bind(&msg.content)
+        .bind(&msg.skill_name)
+        .bind(&msg.tool_calls_json)
+        .bind(msg.turn)
+        .bind(msg.created_at)
+        .bind(&msg.sender_user_id)
+        .bind(&parent_id)
+        .bind(msg.run_id.map(|r| r.to_string()))
+        .bind(&msg.provider_state_json)
+        .bind(&msg.tool_call_id)
+        .bind(&msg.tool_status)
+        .bind(&msg.tool_data_json)
+        .bind(&msg.traceparent)
+        .bind(msg.finish_reason.map(MessageFinishReason::as_str))
+        .bind(&msg.model)
+        .execute(&mut *tx)
+        .await?;
+        let inserted = insert.rows_affected() > 0;
+
+        if inserted {
+            sqlx::query(
+                "UPDATE conversations SET active_leaf_id = ?1, updated_at = ?2 \
+                 WHERE id = ?3 AND agent_id = ?4",
+            )
+            .bind(&id)
+            .bind(self.clock.now())
+            .bind(&conversation_id)
+            .bind(&self.agent_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        if inserted {
+            self.emit_upserted(msg.conversation_id).await;
+        }
+
+        Ok(())
+    }
+
+    /// Set the active leaf to `message_id`, or to the leaf reached by
+    /// descending through the newest child at each level when `descend`.
+    /// Never touches `updated_at`.
+    async fn point_leaf_at(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        descend: bool,
+    ) -> Result<Option<Uuid>> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if !self
+            .owns_message(&mut *tx, conversation_id, message_id)
+            .await?
+        {
+            return Ok(None);
+        }
+        let leaf = if descend {
+            let leaf: String = sqlx::query_scalar(
+                "WITH RECURSIVE descent(id, depth) AS ( \
+                     SELECT ?1, 0 \
+                     UNION ALL \
+                     SELECT c.id, d.depth + 1 \
+                     FROM descent d \
+                     INNER JOIN messages c ON c.id = ( \
+                         SELECT m.id FROM messages m \
+                         WHERE m.conversation_id = ?2 AND m.parent_id = d.id \
+                         ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) \
+                 ) \
+                 SELECT id FROM descent ORDER BY depth DESC LIMIT 1",
+            )
+            .bind(message_id.to_string())
+            .bind(conversation_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            Uuid::parse_str(&leaf)?
+        } else {
+            message_id
+        };
+        sqlx::query("UPDATE conversations SET active_leaf_id = ?1 WHERE id = ?2 AND agent_id = ?3")
+            .bind(leaf.to_string())
+            .bind(conversation_id.to_string())
+            .bind(&self.agent_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(Some(leaf))
+    }
+
+    /// Broadcast the conversation's current record, when a broadcaster is set.
+    async fn emit_upserted(&self, conversation_id: Uuid) {
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(conversation_id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
+        }
+    }
+
+    /// Whether `message_id` is a message of `conversation_id` that this
+    /// store's agent owns.
+    async fn owns_message(
+        &self,
+        executor: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<bool> {
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS( \
+                SELECT 1 FROM messages m \
+                INNER JOIN conversations c ON c.id = m.conversation_id \
+                WHERE m.id = ?1 AND m.conversation_id = ?2 AND c.agent_id = ?3)",
+        )
+        .bind(message_id.to_string())
+        .bind(conversation_id.to_string())
+        .bind(&self.agent_id)
+        .fetch_one(executor)
+        .await?)
+    }
+}
 
 #[async_trait]
 impl ConversationStore for SqliteConversationStore {
@@ -234,6 +512,7 @@ impl ConversationStore for SqliteConversationStore {
             user_id: self.user_id.clone(),
             created_at: now,
             updated_at: now,
+            pinned_at: None,
         };
 
         if let Some(b) = &self.broadcaster {
@@ -249,7 +528,7 @@ impl ConversationStore for SqliteConversationStore {
 
         let row = if self.user_id.is_some() {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2 AND user_id = ?3",
             )
@@ -260,7 +539,7 @@ impl ConversationStore for SqliteConversationStore {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2",
             )
@@ -270,29 +549,17 @@ impl ConversationStore for SqliteConversationStore {
             .await?
         };
 
-        row.map(|r| {
-            let raw_id: String = r.get("id");
-            Ok(ConversationRecord {
-                id: Uuid::parse_str(&raw_id)?,
-                agent_id: r.get("agent_id"),
-                title: r.get("title"),
-                title_locked: r.get("title_locked"),
-                user_id: r.get("user_id"),
-                created_at: r.get("created_at"),
-                updated_at: r.get("updated_at"),
-            })
-        })
-        .transpose()
+        row.as_ref().map(conversation_from_row).transpose()
     }
 
     /// List all conversations, most-recently updated first.
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
         let rows = if self.user_id.is_some() {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
                  FROM conversations \
                  WHERE agent_id = ?1 AND user_id = ?2 \
-                 ORDER BY updated_at DESC",
+                 ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC",
             )
             .bind(&self.agent_id)
             .bind(&self.user_id)
@@ -300,30 +567,17 @@ impl ConversationStore for SqliteConversationStore {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
                  FROM conversations \
                  WHERE agent_id = ?1 \
-                 ORDER BY updated_at DESC",
+                 ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC",
             )
             .bind(&self.agent_id)
             .fetch_all(&self.pool)
             .await?
         };
 
-        rows.into_iter()
-            .map(|r| {
-                let raw_id: String = r.get("id");
-                Ok(ConversationRecord {
-                    id: Uuid::parse_str(&raw_id)?,
-                    agent_id: r.get("agent_id"),
-                    title: r.get("title"),
-                    title_locked: r.get("title_locked"),
-                    user_id: r.get("user_id"),
-                    created_at: r.get("created_at"),
-                    updated_at: r.get("updated_at"),
-                })
-            })
-            .collect()
+        rows.iter().map(conversation_from_row).collect()
     }
 
     /// Update the title of an existing conversation.
@@ -336,11 +590,10 @@ impl ConversationStore for SqliteConversationStore {
         let id_str = id.to_string();
         let result = sqlx::query(
             "UPDATE conversations
-                 SET title = ?1, title_locked = 1, updated_at = ?2
-                 WHERE id = ?3 AND agent_id = ?4",
+                 SET title = ?1, title_locked = 1
+                 WHERE id = ?2 AND agent_id = ?3",
         )
         .bind(title)
-        .bind(self.clock.now())
         .bind(&id_str)
         .bind(&self.agent_id)
         .execute(&self.pool)
@@ -359,6 +612,73 @@ impl ConversationStore for SqliteConversationStore {
         Ok(())
     }
 
+    async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate> {
+        let id_str = id.to_string();
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .with_context(|| format!("failed to begin metadata update for conversation {id}"))?;
+
+        let result = sqlx::query(
+            "UPDATE conversations
+                 SET title = COALESCE(?1, title),
+                     title_locked = CASE WHEN ?1 IS NULL THEN title_locked ELSE 1 END,
+                     pinned_at = CASE ?2
+                         WHEN 1 THEN COALESCE(pinned_at, ?3)
+                         WHEN 0 THEN NULL
+                         ELSE pinned_at
+                     END
+                 WHERE id = ?4 AND agent_id = ?5 AND (?6 IS NULL OR user_id = ?6)",
+        )
+        .bind(&patch.title)
+        .bind(patch.pinned)
+        .bind(self.clock.now())
+        .bind(&id_str)
+        .bind(&self.agent_id)
+        .bind(&self.user_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("failed to update metadata for conversation {id}"))?;
+        tx.commit().await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(MetadataUpdate::NotFound);
+        }
+        let Some(conv) = self.get_conversation(id).await? else {
+            return Ok(MetadataUpdate::NotFound);
+        };
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(conv.clone()));
+        }
+        Ok(MetadataUpdate::Updated(conv))
+    }
+
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE conversations
+                 SET title = ?1, title_locked = 1
+                 WHERE id = ?2 AND agent_id = ?3 AND title_locked = 0",
+        )
+        .bind(title)
+        .bind(id.to_string())
+        .bind(&self.agent_id)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to set generated title for conversation {id}"))?;
+        if result.rows_affected() == 0 {
+            return Ok(false);
+        }
+
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
+        }
+
+        Ok(true)
+    }
+
     /// Delete a conversation and all its messages (cascade).
     /// Replace all persisted messages for a conversation with the provided
     /// set.  Existing messages are deleted first; the new messages are then
@@ -372,11 +692,19 @@ impl ConversationStore for SqliteConversationStore {
         // Verify the conversation belongs to this agent before mutating.
         self.ensure_conversation_agent(conversation_id).await?;
 
+        // Delete the rows and clear the leaf together, so the first re-insert
+        // cannot take a deleted row as its parent.
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query("DELETE FROM messages WHERE conversation_id = ?1")
             .bind(&conv_id_str)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .with_context(|| format!("deleting messages for conversation {conversation_id}"))?;
+        sqlx::query("UPDATE conversations SET active_leaf_id = NULL WHERE id = ?1")
+            .bind(&conv_id_str)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
 
         for msg in messages {
             self.save_message(msg).await?;
@@ -409,161 +737,173 @@ impl ConversationStore for SqliteConversationStore {
     // Messages
     // -----------------------------------------------------------------------
 
-    /// Persist a message to the database.
+    /// Persist a message, appending it at the conversation's active leaf.
+    ///
+    /// The leaf is read, the row inserted under it and the leaf moved in one
+    /// `BEGIN IMMEDIATE` transaction, so concurrent writers cannot fork the
+    /// chain. Re-saving an existing id inserts nothing and leaves the leaf
+    /// where it is.
     async fn save_message(&self, msg: &Message) -> Result<()> {
-        let id = msg.id.to_string();
-        let conversation_id = msg.conversation_id.to_string();
-        let role = msg.role.to_string();
-
-        self.ensure_conversation_agent(msg.conversation_id).await?;
-
-        sqlx::query(
-            "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
-             ON CONFLICT(id) DO NOTHING",
-        )
-        .bind(&id)
-        .bind(&conversation_id)
-        .bind(&role)
-        .bind(&msg.content)
-        .bind(&msg.skill_name)
-        .bind(&msg.tool_calls_json)
-        .bind(msg.turn)
-        .bind(msg.created_at)
-        .bind(&msg.sender_user_id)
-        .execute(&self.pool)
-        .await?;
-
-        // Update the conversation's updated_at timestamp
-        let now = self.clock.now();
-        sqlx::query("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND agent_id = ?3")
-            .bind(now)
-            .bind(&conversation_id)
-            .bind(&self.agent_id)
-            .execute(&self.pool)
-            .await?;
-
-        if let Some(b) = &self.broadcaster
-            && let Ok(Some(conv)) = self.get_conversation(msg.conversation_id).await
-        {
-            b.emit(ConversationEvent::Upserted(conv));
-        }
-
-        Ok(())
+        self.insert_message(msg, None).await
     }
 
-    /// Load all messages for a conversation, ordered by turn then created_at.
+    /// Load the active path of a conversation, root first.
     async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>> {
-        let conv_id_str = conversation_id.to_string();
+        let rows = sqlx::query(ACTIVE_PATH_SQL)
+            .bind(conversation_id.to_string())
+            .bind(&self.agent_id)
+            .bind(-1_i64)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
-             FROM messages m \
-             INNER JOIN conversations c ON c.id = m.conversation_id \
-             WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
-             ORDER BY m.turn ASC, m.created_at ASC",
-        )
-        .bind(&conv_id_str)
-        .bind(&self.agent_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        rows.into_iter()
-            .map(|r| {
-                let id_str: String = r.get("id");
-                let conv_str: String = r.get("conversation_id");
-                let role_str: String = r.get("role");
-                Ok(Message {
-                    id: Uuid::parse_str(&id_str)?,
-                    conversation_id: Uuid::parse_str(&conv_str)?,
-                    role: parse_role(&role_str)?,
-                    content: r.get("content"),
-                    skill_name: r.get("skill_name"),
-                    tool_calls_json: r.get("tool_calls_json"),
-                    turn: r.get("turn"),
-                    created_at: r.get("created_at"),
-                    sender_user_id: r.get("sender_user_id"),
-                })
-            })
-            .collect()
+        let mut messages = rows
+            .iter()
+            .map(message_from_row)
+            .collect::<Result<Vec<_>>>()?;
+        messages.reverse();
+        Ok(messages)
     }
 
     /// Fetch a single message by its ID (agent-scoped via the conversation join).
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
-        let id_str = message_id.to_string();
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason, m.model \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
         )
-        .bind(&id_str)
+        .bind(message_id.to_string())
         .bind(&self.agent_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(|r| {
-            let id_s: String = r.get("id");
-            let conv_s: String = r.get("conversation_id");
-            let role_s: String = r.get("role");
-            Ok(Message {
-                id: Uuid::parse_str(&id_s)?,
-                conversation_id: Uuid::parse_str(&conv_s)?,
-                role: parse_role(&role_s)?,
-                content: r.get("content"),
-                skill_name: r.get("skill_name"),
-                tool_calls_json: r.get("tool_calls_json"),
-                turn: r.get("turn"),
-                created_at: r.get("created_at"),
-                sender_user_id: r.get("sender_user_id"),
-            })
-        })
-        .transpose()
+        row.as_ref().map(message_from_row).transpose()
     }
 
-    /// Return the last `limit` messages for a conversation, in chronological order.
+    /// Return the last `limit` messages of the active path, in chronological order.
     async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
-        let conv_id_str = conversation_id.to_string();
+        // The query walks leaf-first, so `LIMIT` keeps the tail of the path.
+        let rows = sqlx::query(ACTIVE_PATH_SQL)
+            .bind(conversation_id.to_string())
+            .bind(&self.agent_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        // Fetch the newest rows first, then reverse to restore chronological order.
-        let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
-             FROM messages m \
-             INNER JOIN conversations c ON c.id = m.conversation_id \
-             WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
-             ORDER BY m.turn DESC, m.created_at DESC \
-             LIMIT ?3",
-        )
-        .bind(&conv_id_str)
-        .bind(&self.agent_id)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut messages: Vec<Message> = rows
-            .into_iter()
-            .map(|r| {
-                let id_str: String = r.get("id");
-                let conv_str: String = r.get("conversation_id");
-                let role_str: String = r.get("role");
-                Ok(Message {
-                    id: Uuid::parse_str(&id_str)?,
-                    conversation_id: Uuid::parse_str(&conv_str)?,
-                    role: parse_role(&role_str)?,
-                    content: r.get("content"),
-                    skill_name: r.get("skill_name"),
-                    tool_calls_json: r.get("tool_calls_json"),
-                    turn: r.get("turn"),
-                    created_at: r.get("created_at"),
-                    sender_user_id: r.get("sender_user_id"),
-                })
-            })
+        let mut messages = rows
+            .iter()
+            .map(message_from_row)
             .collect::<Result<Vec<_>>>()?;
-
-        // Restore chronological order
         messages.reverse();
         Ok(messages)
+    }
+
+    async fn branch_message(&self, msg: &Message, parent_id: Option<Uuid>) -> Result<()> {
+        self.insert_message(msg, Some(parent_id)).await
+    }
+
+    async fn children_of(
+        &self,
+        conversation_id: Uuid,
+        parent_id: Option<Uuid>,
+    ) -> Result<Vec<Message>> {
+        let rows = sqlx::query(
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason, m.model \
+             FROM messages m \
+             INNER JOIN conversations c ON c.id = m.conversation_id \
+             WHERE m.conversation_id = ?1 AND c.agent_id = ?2 AND m.parent_id IS ?3 \
+             ORDER BY m.created_at ASC, m.rowid ASC",
+        )
+        .bind(conversation_id.to_string())
+        .bind(&self.agent_id)
+        .bind(parent_id.map(|p| p.to_string()))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(message_from_row).collect()
+    }
+
+    async fn list_siblings(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>> {
+        if !self
+            .owns_message(&self.pool, conversation_id, message_id)
+            .await?
+        {
+            return Ok(None);
+        }
+        let parent: Option<String> =
+            sqlx::query_scalar("SELECT parent_id FROM messages WHERE id = ?1")
+                .bind(message_id.to_string())
+                .fetch_one(&self.pool)
+                .await?;
+        let parent = parent.as_deref().map(Uuid::parse_str).transpose()?;
+        Ok(Some(self.children_of(conversation_id, parent).await?))
+    }
+
+    async fn ancestors(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>> {
+        if !self
+            .owns_message(&self.pool, conversation_id, message_id)
+            .await?
+        {
+            return Ok(None);
+        }
+        let rows = sqlx::query(
+            "WITH RECURSIVE chain(id, parent_id, depth) AS ( \
+                 SELECT id, parent_id, 0 FROM messages WHERE id = ?1 \
+                 UNION ALL \
+                 SELECT m.id, m.parent_id, ch.depth + 1 \
+                 FROM chain ch INNER JOIN messages m ON m.id = ch.parent_id \
+             ) \
+             SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason, m.model \
+             FROM chain INNER JOIN messages m ON m.id = chain.id \
+             ORDER BY chain.depth DESC",
+        )
+        .bind(message_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(Some(
+            rows.iter().map(message_from_row).collect::<Result<_>>()?,
+        ))
+    }
+
+    async fn switch_to(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>> {
+        let leaf = self
+            .point_leaf_at(conversation_id, message_id, true)
+            .await?;
+        if leaf.is_some() {
+            self.emit_upserted(conversation_id).await;
+        }
+        Ok(leaf)
+    }
+
+    async fn set_leaf(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>> {
+        self.point_leaf_at(conversation_id, message_id, false).await
+    }
+
+    async fn delete_run_rows(
+        &self,
+        conversation_id: Uuid,
+        run_id: Uuid,
+        keep: Option<Uuid>,
+    ) -> Result<u64> {
+        self.ensure_conversation_agent(conversation_id).await?;
+        let result = sqlx::query(
+            "DELETE FROM messages \
+             WHERE conversation_id = ?1 AND run_id = ?2 AND (?3 IS NULL OR id <> ?3)",
+        )
+        .bind(conversation_id.to_string())
+        .bind(run_id.to_string())
+        .bind(keep.map(|k| k.to_string()))
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("deleting rows of run {run_id}"))?;
+        Ok(result.rows_affected())
     }
 }
 
@@ -595,6 +935,8 @@ pub struct InMemoryConversationStore {
 struct MemoryState {
     conversations: HashMap<Uuid, ConversationRecord>,
     messages: HashMap<Uuid, Vec<Message>>,
+    /// Active leaf per conversation (the tip of the active path).
+    leaves: HashMap<Uuid, Uuid>,
 }
 
 impl InMemoryConversationStore {
@@ -645,6 +987,74 @@ impl InMemoryConversationStore {
     }
 }
 
+impl InMemoryConversationStore {
+    /// Insert `msg` and make it the active leaf. `parent` is `None` to append
+    /// under the current leaf, or `Some(explicit_parent)` to branch.
+    fn insert_message(&self, msg: &Message, parent: Option<Option<Uuid>>) -> Result<()> {
+        let mut state = self.lock_state();
+        let rows = state.messages.get(&msg.conversation_id);
+        let parent_id = match parent {
+            None => state.leaves.get(&msg.conversation_id).copied(),
+            Some(explicit) => {
+                if let Some(p) = explicit
+                    && !rows.is_some_and(|rows| rows.iter().any(|m| m.id == p))
+                {
+                    anyhow::bail!(
+                        "parent message {p} is not in conversation {}",
+                        msg.conversation_id
+                    );
+                }
+                explicit
+            }
+        };
+        if rows.is_some_and(|rows| rows.iter().any(|m| m.id == msg.id)) {
+            return Ok(());
+        }
+        let mut stored = msg.clone();
+        stored.parent_id = parent_id;
+        state
+            .messages
+            .entry(msg.conversation_id)
+            .or_default()
+            .push(stored);
+        state.leaves.insert(msg.conversation_id, msg.id);
+        if let Some(conv) = state.conversations.get_mut(&msg.conversation_id) {
+            conv.updated_at = self.clock.now();
+        }
+        Ok(())
+    }
+
+    /// Set the active leaf to `message_id`, descending through the newest
+    /// child at each level when `descend`. Never touches `updated_at`.
+    fn point_leaf_at(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        descend: bool,
+    ) -> Option<Uuid> {
+        let mut state = self.lock_state();
+        let rows = state.messages.get(&conversation_id)?;
+        rows.iter().find(|m| m.id == message_id)?;
+        let mut leaf = message_id;
+        while descend && let Some(child) = rows.iter().rev().find(|m| m.parent_id == Some(leaf)) {
+            leaf = child.id;
+        }
+        state.leaves.insert(conversation_id, leaf);
+        Some(leaf)
+    }
+
+    fn emit_upserted(&self, conversation_id: Uuid) {
+        let record = self
+            .lock_state()
+            .conversations
+            .get(&conversation_id)
+            .cloned();
+        if let (Some(b), Some(rec)) = (&self.broadcaster, record) {
+            b.emit(ConversationEvent::Upserted(rec));
+        }
+    }
+}
+
 impl Default for InMemoryConversationStore {
     fn default() -> Self {
         Self::new()
@@ -673,6 +1083,7 @@ impl ConversationStore for InMemoryConversationStore {
                     user_id: self.user_id.clone(),
                     created_at: now,
                     updated_at: now,
+                    pinned_at: None,
                 });
             if entry.agent_id != self.agent_id {
                 anyhow::bail!(
@@ -723,12 +1134,16 @@ impl ConversationStore for InMemoryConversationStore {
             })
             .cloned()
             .collect();
-        out.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
+        out.sort_by_key(|c| {
+            (
+                c.pinned_at.is_none(),
+                std::cmp::Reverse((c.pinned_at, c.updated_at)),
+            )
+        });
         Ok(out)
     }
 
     async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
-        let now = self.clock.now();
         let updated = {
             let mut state = self.lock_state();
             let conv = state.conversations.get_mut(&id);
@@ -736,7 +1151,6 @@ impl ConversationStore for InMemoryConversationStore {
                 Some(c) if c.agent_id == self.agent_id => {
                     c.title = Some(title.to_string());
                     c.title_locked = true;
-                    c.updated_at = now;
                     Some(c.clone())
                 }
                 _ => None,
@@ -750,9 +1164,71 @@ impl ConversationStore for InMemoryConversationStore {
         Ok(())
     }
 
+    async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate> {
+        let now = self.clock.now();
+        let updated = {
+            let mut state = self.lock_state();
+            state
+                .conversations
+                .get_mut(&id)
+                .filter(|c| c.agent_id == self.agent_id)
+                .filter(|c| {
+                    self.user_id
+                        .as_ref()
+                        .is_none_or(|u| c.user_id.as_ref() == Some(u))
+                })
+                .map(|c| {
+                    if let Some(title) = patch.title {
+                        c.title = Some(title);
+                        c.title_locked = true;
+                    }
+                    match patch.pinned {
+                        Some(true) => c.pinned_at = c.pinned_at.or(Some(now)),
+                        Some(false) => c.pinned_at = None,
+                        None => {}
+                    }
+                    c.clone()
+                })
+        };
+        let Some(rec) = updated else {
+            return Ok(MetadataUpdate::NotFound);
+        };
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(rec.clone()));
+        }
+        Ok(MetadataUpdate::Updated(rec))
+    }
+
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool> {
+        let updated = {
+            let mut state = self.lock_state();
+            match state.conversations.get_mut(&id) {
+                Some(c) if c.agent_id == self.agent_id && !c.title_locked => {
+                    c.title = Some(title.to_string());
+                    c.title_locked = true;
+                    Some(c.clone())
+                }
+                _ => None,
+            }
+        };
+        let Some(rec) = updated else {
+            return Ok(false);
+        };
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(rec));
+        }
+        Ok(true)
+    }
+
     async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
-        let mut state = self.lock_state();
-        state.messages.insert(conversation_id, messages.to_vec());
+        {
+            let mut state = self.lock_state();
+            state.messages.remove(&conversation_id);
+            state.leaves.remove(&conversation_id);
+        }
+        for msg in messages {
+            self.save_message(msg).await?;
+        }
         Ok(())
     }
 
@@ -760,6 +1236,7 @@ impl ConversationStore for InMemoryConversationStore {
         let mut state = self.lock_state();
         state.conversations.remove(&id);
         state.messages.remove(&id);
+        state.leaves.remove(&id);
         if let Some(b) = &self.broadcaster {
             b.emit(ConversationEvent::Deleted {
                 conversation_id: id,
@@ -770,25 +1247,12 @@ impl ConversationStore for InMemoryConversationStore {
     }
 
     async fn save_message(&self, msg: &Message) -> Result<()> {
-        let mut state = self.lock_state();
-        state
-            .messages
-            .entry(msg.conversation_id)
-            .or_default()
-            .push(msg.clone());
-        if let Some(conv) = state.conversations.get_mut(&msg.conversation_id) {
-            conv.updated_at = self.clock.now();
-        }
-        Ok(())
+        self.insert_message(msg, None)
     }
 
     async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>> {
         let state = self.lock_state();
-        Ok(state
-            .messages
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_default())
+        Ok(active_path(&state, conversation_id))
     }
 
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
@@ -803,11 +1267,7 @@ impl ConversationStore for InMemoryConversationStore {
 
     async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
         let state = self.lock_state();
-        let mut out = state
-            .messages
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_default();
+        let mut out = active_path(&state, conversation_id);
         if limit > 0 {
             let limit = limit as usize;
             if out.len() > limit {
@@ -817,11 +1277,188 @@ impl ConversationStore for InMemoryConversationStore {
         }
         Ok(out)
     }
+
+    async fn branch_message(&self, msg: &Message, parent_id: Option<Uuid>) -> Result<()> {
+        self.insert_message(msg, Some(parent_id))
+    }
+
+    async fn children_of(
+        &self,
+        conversation_id: Uuid,
+        parent_id: Option<Uuid>,
+    ) -> Result<Vec<Message>> {
+        let state = self.lock_state();
+        Ok(children(&state, conversation_id, parent_id))
+    }
+
+    async fn list_siblings(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>> {
+        let state = self.lock_state();
+        let Some(msg) = find_message(&state, conversation_id, message_id) else {
+            return Ok(None);
+        };
+        Ok(Some(children(&state, conversation_id, msg.parent_id)))
+    }
+
+    async fn ancestors(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>> {
+        let state = self.lock_state();
+        let Some(start) = find_message(&state, conversation_id, message_id) else {
+            return Ok(None);
+        };
+        let mut chain = vec![start.clone()];
+        let mut cursor = start.parent_id;
+        while let Some(id) = cursor {
+            let Some(parent) = find_message(&state, conversation_id, id) else {
+                break;
+            };
+            chain.push(parent.clone());
+            cursor = parent.parent_id;
+        }
+        chain.reverse();
+        Ok(Some(chain))
+    }
+
+    async fn switch_to(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>> {
+        let leaf = self.point_leaf_at(conversation_id, message_id, true);
+        if leaf.is_some() {
+            self.emit_upserted(conversation_id);
+        }
+        Ok(leaf)
+    }
+
+    async fn set_leaf(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>> {
+        Ok(self.point_leaf_at(conversation_id, message_id, false))
+    }
+
+    async fn delete_run_rows(
+        &self,
+        conversation_id: Uuid,
+        run_id: Uuid,
+        keep: Option<Uuid>,
+    ) -> Result<u64> {
+        let mut state = self.lock_state();
+        let Some(rows) = state.messages.get_mut(&conversation_id) else {
+            return Ok(0);
+        };
+        let doomed: Vec<Uuid> = rows
+            .iter()
+            .filter(|m| m.run_id == Some(run_id) && Some(m.id) != keep)
+            .map(|m| m.id)
+            .collect();
+        if let Some(orphan) = rows
+            .iter()
+            .find(|m| !doomed.contains(&m.id) && m.parent_id.is_some_and(|p| doomed.contains(&p)))
+        {
+            anyhow::bail!(
+                "message {} still hangs under a row of run {run_id}",
+                orphan.id
+            );
+        }
+        rows.retain(|m| !doomed.contains(&m.id));
+        Ok(doomed.len() as u64)
+    }
+}
+
+fn find_message(state: &MemoryState, conversation_id: Uuid, id: Uuid) -> Option<&Message> {
+    state
+        .messages
+        .get(&conversation_id)?
+        .iter()
+        .find(|m| m.id == id)
+}
+
+/// The children of `parent` (the roots for `None`) in insertion order.
+fn children(state: &MemoryState, conversation_id: Uuid, parent: Option<Uuid>) -> Vec<Message> {
+    state
+        .messages
+        .get(&conversation_id)
+        .map(|rows| {
+            rows.iter()
+                .filter(|m| m.parent_id == parent)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Walk from the conversation's active leaf up the parent chain, root first.
+fn active_path(state: &MemoryState, conversation_id: Uuid) -> Vec<Message> {
+    let Some(rows) = state.messages.get(&conversation_id) else {
+        return Vec::new();
+    };
+    let by_id: HashMap<Uuid, &Message> = rows.iter().map(|m| (m.id, m)).collect();
+    let mut path = Vec::new();
+    let mut cursor = state.leaves.get(&conversation_id).copied();
+    while let Some(id) = cursor {
+        let Some(msg) = by_id.get(&id) else { break };
+        path.push((*msg).clone());
+        cursor = msg.parent_id;
+    }
+    path.reverse();
+    path
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// The active path of a conversation, newest message first: a recursive walk
+/// from `conversations.active_leaf_id` up the `parent_id` chain.
+/// Binds: `?1` conversation id, `?2` agent id, `?3` row limit (`-1` for all).
+const ACTIVE_PATH_SQL: &str = "\
+    WITH RECURSIVE path(id, parent_id, depth) AS ( \
+        SELECT m.id, m.parent_id, 0 \
+        FROM conversations c \
+        INNER JOIN messages m ON m.id = c.active_leaf_id \
+        WHERE c.id = ?1 AND c.agent_id = ?2 \
+        UNION ALL \
+        SELECT m.id, m.parent_id, p.depth + 1 \
+        FROM path p \
+        INNER JOIN messages m ON m.id = p.parent_id \
+    ) \
+    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason, m.model \
+    FROM path \
+    INNER JOIN messages m ON m.id = path.id \
+    ORDER BY path.depth ASC \
+    LIMIT ?3";
+
+fn message_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Message> {
+    let id_str: String = r.get("id");
+    let conv_str: String = r.get("conversation_id");
+    let role_str: String = r.get("role");
+    let parent_str: Option<String> = r.get("parent_id");
+    let run_str: Option<String> = r.get("run_id");
+    let finish_str: Option<String> = r.get("finish_reason");
+    Ok(Message {
+        id: Uuid::parse_str(&id_str)?,
+        conversation_id: Uuid::parse_str(&conv_str)?,
+        role: parse_role(&role_str)?,
+        content: r.get("content"),
+        skill_name: r.get("skill_name"),
+        tool_calls_json: r.get("tool_calls_json"),
+        provider_state_json: r.get("provider_state_json"),
+        turn: r.get("turn"),
+        created_at: r.get("created_at"),
+        sender_user_id: r.get("sender_user_id"),
+        parent_id: parent_str.as_deref().map(Uuid::parse_str).transpose()?,
+        run_id: run_str.as_deref().map(Uuid::parse_str).transpose()?,
+        tool_call_id: r.get("tool_call_id"),
+        tool_status: r.get("tool_status"),
+        tool_data_json: r.get("tool_data_json"),
+        traceparent: r.get("traceparent"),
+        model: r.get("model"),
+        finish_reason: finish_str
+            .as_deref()
+            .and_then(MessageFinishReason::from_stored),
+    })
+}
 
 fn parse_role(s: &str) -> Result<MessageRole> {
     match s {
@@ -1183,6 +1820,117 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_update_metadata_emits_one_upserted_event_with_pin() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut rx = broadcaster.subscribe();
+        let patch = ConversationPatch {
+            title: Some("Pinned".to_string()),
+            pinned: Some(true),
+        };
+        store.update_metadata(conv.id, patch).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => {
+                assert_eq!(record.title.as_deref(), Some("Pinned"));
+                assert!(record.pinned_at.is_some(), "event must carry pinned_at");
+            }
+            other => panic!("expected Upserted event, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "one patch must emit exactly one event"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_is_scoped_to_user() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let alice = storage.conversation_store().with_user_id("alice");
+        let bob = storage.conversation_store().with_user_id("bob");
+        let conv = alice.create_conversation(Some("Mine")).await.unwrap();
+
+        let patch = ConversationPatch {
+            title: None,
+            pinned: Some(true),
+        };
+        let res = bob.update_metadata(conv.id, patch).await.unwrap();
+        assert!(
+            matches!(res, MetadataUpdate::NotFound),
+            "another user's conversation must not be patched"
+        );
+        let loaded = alice.get_conversation(conv.id).await.unwrap().unwrap();
+        assert!(loaded.pinned_at.is_none());
+    }
+
+    /// Assert the receiver holds no event, i.e. the last write was silent.
+    fn assert_no_event(rx: &mut tokio::sync::broadcast::Receiver<ConversationEvent>) {
+        assert!(
+            matches!(
+                rx.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ),
+            "no event expected"
+        );
+    }
+
+    async fn generated_title_event_contract(
+        store: &dyn ConversationStore,
+        rx: &mut tokio::sync::broadcast::Receiver<ConversationEvent>,
+    ) {
+        let conv = store.create_conversation(None).await.unwrap();
+        // Drain the creation event.
+        let _ = rx.try_recv();
+
+        assert!(
+            store
+                .set_generated_title(conv.id, "Generated")
+                .await
+                .unwrap()
+        );
+        match rx.try_recv() {
+            Ok(ConversationEvent::Upserted(record)) => {
+                assert_eq!(record.id, conv.id, "event must carry the conversation id");
+                assert_eq!(record.title.as_deref(), Some("Generated"));
+                assert!(record.title_locked, "event must carry title_locked = true");
+            }
+            other => panic!("expected Upserted event, got {other:?}"),
+        }
+
+        // The row is now locked: a second generated write is a silent no-op.
+        assert!(!store.set_generated_title(conv.id, "Again").await.unwrap());
+        assert_no_event(rx);
+    }
+
+    #[tokio::test]
+    async fn test_set_generated_title_emits_upserted_only_when_written_sqlite() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        generated_title_event_contract(&store, &mut rx).await;
+    }
+
+    #[tokio::test]
+    async fn test_set_generated_title_emits_upserted_only_when_written_in_memory() {
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = InMemoryConversationStore::new().with_broadcaster(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        generated_title_event_contract(&store, &mut rx).await;
+    }
+
     // -----------------------------------------------------------------------
     // User-scoping tests
     // -----------------------------------------------------------------------
@@ -1281,6 +2029,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_message_provider_state_round_trips() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut with_state = Message::assistant(conv.id, "");
+        with_state.turn = 1;
+        with_state.tool_calls_json = Some(r#"[{"name":"bash","params":{}}]"#.into());
+        with_state.provider_state_json =
+            Some(r#"{"provider":"openrouter","model":"m","data":{"reasoning_details":[]}}"#.into());
+        store.save_message(&with_state).await.unwrap();
+
+        let mut without = Message::assistant(conv.id, "done");
+        without.turn = 2;
+        store.save_message(&without).await.unwrap();
+
+        let history = store.load_history(conv.id).await.unwrap();
+        assert_eq!(
+            history[0].provider_state_json, with_state.provider_state_json,
+            "provider state should round-trip unchanged"
+        );
+        assert!(
+            history[1].provider_state_json.is_none(),
+            "messages without provider state read back as None"
+        );
+    }
+
+    #[tokio::test]
     async fn test_message_sender_user_id_defaults_to_none() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let store = storage.conversation_store();
@@ -1325,5 +2101,37 @@ mod tests {
             }
             _ => panic!("expected Upserted event"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_switch_to_emits_upserted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+        let conv = store.create_conversation(None).await.unwrap();
+        let a = Message::user(conv.id, "a");
+        store.save_message(&a).await.unwrap();
+        store
+            .branch_message(&Message::assistant(conv.id, "b"), Some(a.id))
+            .await
+            .unwrap();
+
+        let mut rx = broadcaster.subscribe();
+        store.switch_to(conv.id, a.id).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => assert_eq!(record.id, conv.id),
+            _ => panic!("expected Upserted event"),
+        }
+        assert_no_event(&mut rx);
+
+        store.set_leaf(conv.id, a.id).await.unwrap();
+        assert_no_event(&mut rx);
     }
 }

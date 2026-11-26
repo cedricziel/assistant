@@ -18,6 +18,7 @@ fn ctx() -> ExecutionContext {
         turn: 0,
         interface: Interface::Cli,
         interactive: false,
+        run_id: None,
         allowed_tools: None,
         depth: 0,
         user_id: None,
@@ -57,16 +58,17 @@ async fn bash_echo_returns_stdout() {
 }
 
 #[tokio::test]
-async fn bash_nonzero_exit_is_reported_but_not_an_error() {
+async fn bash_nonzero_exit_is_reported_as_a_failure() {
     let handler = BashHandler::new();
     let out = handler
         .run(params(&[("command", json!("exit 7"))]), &ctx())
         .await
         .unwrap();
-    // The handler returns success=true regardless of exit code; the
-    // caller inspects the structured `exit_code` field.
-    assert!(out.success);
+    // A non-zero exit is a failure (design D11); the text is unchanged and
+    // the terminal data carries the code.
+    assert!(!out.success);
     assert!(out.content.contains("Exit code: 7"));
+    assert_eq!(out.data.as_ref().unwrap()["exit_code"], 7);
 }
 
 #[tokio::test]

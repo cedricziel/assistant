@@ -44,6 +44,26 @@ Position-based access level within the multi-user model. Four predefined roles: 
 
 Fine-grained permission in `resource:action` format (e.g. `conversations:write`, `personas:read`). Used by API keys to restrict access beyond what the user's role grants.
 
+## Branch
+
+One version of a conversation from a fork onward. Editing a user message or regenerating a reply adds a sibling message under the same parent, and everything after the new sibling is a new branch. All branches stay in the conversation's message tree and the user switches between them.
+
+## Active Path
+
+The chain of messages from the root to the Active Leaf. It is the only part of the message tree that history readers (LLM context, `/status`, titling, indexing) and the chat view follow.
+
+## Active Leaf
+
+The message that `conversations.active_leaf_id` points to, the tip of the Active Path. New messages append to it, and switching branches moves it.
+
+## Interaction
+
+A typed question that a running turn puts to the turn's owner, such as a tool approval or a question from the `ask-user` tool. It has an id, a `kind`, a kind-specific request, and at most one response. Stored in `space.db` and carried to the browser as `interaction_requested` and `interaction_resolved` events. See [ADR-0017](adr/adr-0017-turn-interactions.md).
+
+## Surface
+
+Model-authored interactive UI (a form, card or choice list) shown in the web chat. A Persona builds one with the `render-surface` tool from the assistant catalog, a trimmed A2UI v1.0 component set. The server validates and stores it, and the user answers it directly instead of replying in prose. See [ADR-0019](adr/adr-0019-generative-ui-a2ui.md).
+
 ## Naming Rules
 
 - Prefer explicit terms: `Persona`, `Subagent Process`, `A2A Profile`.

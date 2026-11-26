@@ -15,11 +15,12 @@ use super::{Decision, PermissionRequest, Rule, Verdict};
 use crate::types::permissions::PermissionsConfig;
 
 const DECIDER: &str = "static-rules";
+const USER_DECIDER: &str = "user-rules";
 const FILE_TOOLS: [&str; 4] = ["file-read", "file-write", "file-edit", "file-glob"];
 const WORKSPACE_TOKEN: &str = "<workspace>";
 /// Shell metacharacters after which an allow rule can no longer vouch for the
 /// whole command line.
-const SHELL_META: [char; 10] = [';', '|', '&', '\n', '`', '$', '(', ')', '<', '>'];
+pub(super) const SHELL_META: [char; 10] = [';', '|', '&', '\n', '`', '$', '(', ')', '<', '>'];
 
 /// Parsed deny / ask / allow rule sets plus the extra workspace roots.
 #[derive(Debug, Clone, Default)]
@@ -53,10 +54,65 @@ impl StaticRules {
     }
 
     /// Decide `req` from the static rules alone; `Abstain` when none applies.
+    ///
+    /// The stages run in order: deny (with confinement), ask, allow. The
+    /// permission policy calls them separately to interleave user rules.
     pub fn evaluate(&self, req: &PermissionRequest<'_>) -> Decision {
-        let roots = LazyRoots::new(&req.ctx.agent_id, &self.extra_roots);
+        let roots = self.roots(req);
+        [Self::deny_stage, Self::ask_stage, Self::allow_stage]
+            .into_iter()
+            .map(|stage| stage(self, req, &roots))
+            .find(|decision| decision.verdict != Verdict::Abstain)
+            .unwrap_or_else(abstain)
+    }
 
-        if let Some(rule) = first_match(&self.deny, req, &roots, Mode::Deny) {
+    /// Deny rules, then file-tool confinement.
+    pub fn evaluate_deny(&self, req: &PermissionRequest<'_>) -> Decision {
+        self.deny_stage(req, &self.roots(req))
+    }
+
+    /// Ask rules: calls that always need a human.
+    pub fn evaluate_ask(&self, req: &PermissionRequest<'_>) -> Decision {
+        self.ask_stage(req, &self.roots(req))
+    }
+
+    /// Allow rules, with allow-mode matching.
+    pub fn evaluate_allow(&self, req: &PermissionRequest<'_>) -> Decision {
+        self.allow_stage(req, &self.roots(req))
+    }
+
+    /// First of a user's saved deny `rules` that matches, if any.
+    pub fn evaluate_user_deny(&self, rules: &[Rule], req: &PermissionRequest<'_>) -> Decision {
+        match first_match(rules, req, &self.roots(req), Mode::Deny) {
+            Some(rule) => Decision::new(
+                Verdict::Deny,
+                USER_DECIDER,
+                format!("denied by saved rule {rule}"),
+            )
+            .with_rule(rule.as_str()),
+            None => abstain(),
+        }
+    }
+
+    /// First of a user's saved allow `rules` that covers the whole call, if any.
+    pub fn evaluate_user_allow(&self, rules: &[Rule], req: &PermissionRequest<'_>) -> Decision {
+        match first_match(rules, req, &self.roots(req), Mode::Allow) {
+            Some(rule) => Decision::new(
+                Verdict::Allow,
+                USER_DECIDER,
+                format!("allowed by saved rule {rule}"),
+            )
+            .with_rule(rule.as_str()),
+            None => abstain(),
+        }
+    }
+
+    fn roots<'a>(&'a self, req: &'a PermissionRequest<'_>) -> LazyRoots<'a> {
+        LazyRoots::new(&req.ctx.agent_id, &self.extra_roots)
+    }
+
+    fn deny_stage(&self, req: &PermissionRequest<'_>, roots: &LazyRoots<'_>) -> Decision {
+        if let Some(rule) = first_match(&self.deny, req, roots, Mode::Deny) {
             return Decision::new(Verdict::Deny, DECIDER, format!("denied by rule {rule}"))
                 .with_rule(rule.as_str());
         }
@@ -73,18 +129,28 @@ impl StaticRules {
             .with_rule("workspace-roots");
         }
 
-        if let Some(rule) = first_match(&self.ask, req, &roots, Mode::Deny) {
-            return Decision::new(Verdict::Ask, DECIDER, format!("ask rule {rule} matched"))
-                .with_rule(rule.as_str());
-        }
-
-        if let Some(rule) = first_match(&self.allow, req, &roots, Mode::Allow) {
-            return Decision::new(Verdict::Allow, DECIDER, format!("allowed by rule {rule}"))
-                .with_rule(rule.as_str());
-        }
-
-        Decision::new(Verdict::Abstain, DECIDER, "no static rule matched")
+        abstain()
     }
+
+    fn ask_stage(&self, req: &PermissionRequest<'_>, roots: &LazyRoots<'_>) -> Decision {
+        match first_match(&self.ask, req, roots, Mode::Deny) {
+            Some(rule) => Decision::new(Verdict::Ask, DECIDER, format!("ask rule {rule} matched"))
+                .with_rule(rule.as_str()),
+            None => abstain(),
+        }
+    }
+
+    fn allow_stage(&self, req: &PermissionRequest<'_>, roots: &LazyRoots<'_>) -> Decision {
+        match first_match(&self.allow, req, roots, Mode::Allow) {
+            Some(rule) => Decision::new(Verdict::Allow, DECIDER, format!("allowed by rule {rule}"))
+                .with_rule(rule.as_str()),
+            None => abstain(),
+        }
+    }
+}
+
+fn abstain() -> Decision {
+    Decision::new(Verdict::Abstain, DECIDER, "no static rule matched")
 }
 
 /// Workspace roots, resolved on first use: most tools never need them.
@@ -335,6 +401,7 @@ mod tests {
             turn: 0,
             interface: Interface::Scheduler,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,
@@ -611,6 +678,99 @@ mod tests {
             verdict(&rules, "file-glob", json!({ "pattern": "/etc/*" })),
             Verdict::Deny
         );
+    }
+
+    fn stage(
+        rules: &StaticRules,
+        tool: &str,
+        params: Value,
+        f: fn(&StaticRules, &PermissionRequest<'_>) -> Decision,
+    ) -> Decision {
+        let ctx = ctx();
+        f(
+            rules,
+            &PermissionRequest {
+                tool_name: tool,
+                params: &params,
+                ctx: &ctx,
+                requires_confirmation: false,
+                task_context: None,
+            },
+        )
+    }
+
+    #[test]
+    fn each_stage_reports_only_its_own_rules() {
+        let rules = StaticRules::from_config(&cfg(
+            &["bash(rm *)"],
+            &["bash(git push*)"],
+            &["bash(git *)"],
+            &[],
+        ));
+        let cases = [
+            ("rm file", Verdict::Deny, Verdict::Abstain, Verdict::Abstain),
+            ("git push", Verdict::Abstain, Verdict::Ask, Verdict::Allow),
+            (
+                "git log",
+                Verdict::Abstain,
+                Verdict::Abstain,
+                Verdict::Allow,
+            ),
+            ("ls", Verdict::Abstain, Verdict::Abstain, Verdict::Abstain),
+        ];
+        for (command, deny, ask, allow) in cases {
+            let params = || json!({ "command": command });
+            assert_eq!(
+                stage(&rules, "bash", params(), StaticRules::evaluate_deny).verdict,
+                deny,
+                "deny stage for {command:?}"
+            );
+            assert_eq!(
+                stage(&rules, "bash", params(), StaticRules::evaluate_ask).verdict,
+                ask,
+                "ask stage for {command:?}"
+            );
+            assert_eq!(
+                stage(&rules, "bash", params(), StaticRules::evaluate_allow).verdict,
+                allow,
+                "allow stage for {command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn deny_stage_includes_workspace_confinement() {
+        let d = stage(
+            &StaticRules::builtin(),
+            "file-read",
+            json!({ "path": "/etc/passwd" }),
+            StaticRules::evaluate_deny,
+        );
+        assert_eq!(d.verdict, Verdict::Deny);
+        assert_eq!(d.rule.as_deref(), Some("workspace-roots"));
+    }
+
+    #[test]
+    fn evaluate_composes_the_stages_in_order() {
+        let rules = StaticRules::from_config(&cfg(
+            &["bash(git push --force*)"],
+            &["bash(git push*)"],
+            &["bash(git *)"],
+            &[],
+        ));
+        for command in ["git push --force", "git push", "git log", "ls"] {
+            let params = json!({ "command": command });
+            let expected = [
+                StaticRules::evaluate_deny,
+                StaticRules::evaluate_ask,
+                StaticRules::evaluate_allow,
+            ]
+            .into_iter()
+            .map(|f| stage(&rules, "bash", params.clone(), f))
+            .find(|d| d.verdict != Verdict::Abstain)
+            .unwrap_or_else(abstain);
+            assert_eq!(decide(&rules, "bash", params), expected, "{command:?}");
+        }
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! and dispatches execution.  All messenger interfaces and the CLI share the
 //! same registry instance.
 
-use assistant_storage::ConversationStore;
+use assistant_storage::{ConversationStore, StorageLayer};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -14,7 +14,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::compaction;
-use crate::orchestrator::Orchestrator;
+use crate::orchestrator::{CancelOutcome, Orchestrator};
 
 // -- Execution context --------------------------------------------------------
 
@@ -26,8 +26,6 @@ pub struct CommandContext {
     pub conversation_configs: Arc<RwLock<HashMap<Uuid, ConversationConfig>>>,
     /// Orchestrator reference (for `/stop`, `/compact`, `/status`).
     pub orchestrator: Arc<Orchestrator>,
-    /// Active turns map: conv_id → request_id (for `/stop`).
-    pub active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
     /// Callback to evict the conversation key from the LRU cache (for `/new`).
     /// When called, the next message from this context will create a new conversation.
     pub evict_conversation: Option<Box<dyn FnOnce() + Send>>,
@@ -190,34 +188,22 @@ impl CommandRegistry {
     }
 
     async fn cmd_stop(&self, ctx: CommandContext) -> CommandResult {
-        // Look up the active request_id for this conversation.
-        let request_id = ctx
-            .active_turns
-            .read()
-            .await
-            .get(&ctx.conversation_id)
-            .copied();
-
-        match request_id {
-            Some(rid) => {
-                // Find the cancellation token in the orchestrator.
-                let token = ctx
-                    .orchestrator
-                    .turn_cancellations
-                    .read()
-                    .await
-                    .get(&rid)
-                    .cloned();
-
-                if let Some(t) = token {
-                    t.cancel();
-                    info!(conv_id = %ctx.conversation_id, request_id = %rid, "Turn cancelled via /stop");
-                    CommandResult::ack("Stopped.")
-                } else {
-                    CommandResult::ack("Nothing to stop.")
-                }
+        // Cancel every turn the orchestrator has running in this conversation.
+        let mut stopped = false;
+        for request_id in ctx
+            .orchestrator
+            .turn_registry()
+            .request_ids(ctx.conversation_id)
+        {
+            if ctx.orchestrator.cancel_turn(request_id).await == CancelOutcome::Cancelled {
+                info!(conv_id = %ctx.conversation_id, request_id = %request_id, "Turn cancelled via /stop");
+                stopped = true;
             }
-            None => CommandResult::ack("Nothing to stop."),
+        }
+        if stopped {
+            CommandResult::ack("Stopped.")
+        } else {
+            CommandResult::ack("Nothing to stop.")
         }
     }
 
@@ -259,10 +245,8 @@ impl CommandRegistry {
         };
 
         let is_active = ctx
-            .active_turns
-            .read()
-            .await
-            .contains_key(&ctx.conversation_id);
+            .orchestrator
+            .conversation_turn_in_flight(ctx.conversation_id);
 
         let mut lines = vec![
             format!("Conversation: {}", ctx.conversation_id),
@@ -270,10 +254,11 @@ impl CommandRegistry {
             format!("Turn active: {}", if is_active { "yes" } else { "no" }),
         ];
 
-        // Estimate token usage from history if possible.
-        let conv_store = ctx.orchestrator.storage.conversation_store();
-        if let Ok(messages) = conv_store.load_history(ctx.conversation_id).await {
-            let history = crate::history::messages_to_chat_history(messages, &Default::default());
+        // Estimate token usage over what the model actually sees: the
+        // summary-applied history, not the whole path.
+        if let Ok(history) =
+            Self::load_turn_history(&ctx.orchestrator.storage, ctx.conversation_id).await
+        {
             let tokens = compaction::estimate_tokens(&history);
             lines.push(format!("Estimated tokens: ~{tokens}"));
         }
@@ -281,19 +266,37 @@ impl CommandRegistry {
         CommandResult::ack(lines.join("\n"))
     }
 
+    /// The history the model sees for `conversation_id`.
+    async fn load_turn_history(
+        storage: &StorageLayer,
+        conversation_id: Uuid,
+    ) -> anyhow::Result<crate::history::TurnHistory> {
+        let path = storage
+            .conversation_store()
+            .load_history(conversation_id)
+            .await?;
+        crate::history::build_turn_history(
+            path,
+            conversation_id,
+            &storage.conversation_summary_store(),
+            &Default::default(),
+        )
+        .await
+    }
+
     async fn cmd_compact(&self, ctx: CommandContext) -> CommandResult {
         let conv_store = ctx.orchestrator.storage.conversation_store();
 
-        // Load conversation history.
-        let messages = match conv_store.load_history(ctx.conversation_id).await {
-            Ok(m) => m,
-            Err(e) => {
-                warn!(error = %e, "Failed to load messages for /compact");
-                return CommandResult::ack("Failed to load conversation history.");
-            }
-        };
-
-        let mut history = crate::history::messages_to_chat_history(messages, &Default::default());
+        // Compact the summary-applied history, so an existing summary is
+        // folded into the new one rather than the whole path re-summarised.
+        let mut history =
+            match Self::load_turn_history(&ctx.orchestrator.storage, ctx.conversation_id).await {
+                Ok(h) => h,
+                Err(e) => {
+                    warn!(error = %e, "Failed to load messages for /compact");
+                    return CommandResult::ack("Failed to load conversation history.");
+                }
+            };
 
         if history.is_empty() {
             return CommandResult::ack("Nothing to compact.");

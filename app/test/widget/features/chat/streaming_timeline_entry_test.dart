@@ -360,6 +360,86 @@ void main() {
       expect(find.byIcon(Icons.error_outline), findsOneWidget);
     });
 
+    group('status icons', () {
+      Future<void> pumpToolCall(
+        WidgetTester tester,
+        ToolCallStatus status,
+      ) async {
+        final msg = ChatMessage(
+          id: 'test-tool-$status',
+          role: 'assistant',
+          content: '',
+          timelineType: TimelineEntryType.toolCall,
+          toolCalls: [ToolCallRecord(toolName: 'bash', status: status)],
+        );
+        await tester.pumpWidget(
+          _wrap(
+            StreamingTimelineEntry(
+              message: msg,
+              density: TimelineDensity.normal,
+              entryState: status == ToolCallStatus.pending
+                  ? EntryState.active
+                  : EntryState.complete,
+            ),
+          ),
+        );
+        await tester.pump();
+      }
+
+      Color iconColor(WidgetTester tester, IconData icon) =>
+          tester.widget<Icon>(find.byIcon(icon)).color!;
+
+      testWidgets('pending shows a spinner and no outcome icon', (
+        tester,
+      ) async {
+        await pumpToolCall(tester, ToolCallStatus.pending);
+
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(find.byIcon(Icons.check_circle_outline), findsNothing);
+        expect(find.byIcon(Icons.error_outline), findsNothing);
+        expect(find.byIcon(Icons.block), findsNothing);
+      });
+
+      testWidgets('ok shows a green checkmark', (tester) async {
+        await pumpToolCall(tester, ToolCallStatus.ok);
+
+        expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
+        expect(iconColor(tester, Icons.check_circle_outline), Colors.green);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+      });
+
+      testWidgets('error shows a cross in the error colour', (tester) async {
+        await pumpToolCall(tester, ToolCallStatus.error);
+
+        expect(find.byIcon(Icons.error_outline), findsOneWidget);
+        final scheme = Theme.of(
+          tester.element(find.byIcon(Icons.error_outline)),
+        ).colorScheme;
+        expect(iconColor(tester, Icons.error_outline), scheme.error);
+      });
+
+      testWidgets('denied shows an amber prohibition icon', (tester) async {
+        await pumpToolCall(tester, ToolCallStatus.denied);
+
+        expect(find.byIcon(Icons.block), findsOneWidget);
+        expect(iconColor(tester, Icons.block), Colors.amber);
+      });
+
+      testWidgets('cancelled shows a muted block icon labelled Cancelled', (
+        tester,
+      ) async {
+        await pumpToolCall(tester, ToolCallStatus.cancelled);
+
+        expect(find.byIcon(Icons.block), findsOneWidget);
+        expect(iconColor(tester, Icons.block), isNot(Colors.amber));
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(
+          tester.widget<Icon>(find.byIcon(Icons.block)).semanticLabel,
+          'Cancelled',
+        );
+      });
+    });
+
     testWidgets('compact density renders tool name only without duration', (
       tester,
     ) async {

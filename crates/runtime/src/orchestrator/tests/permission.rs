@@ -1,6 +1,9 @@
 //! The permission pipeline gates every tool call dispatched by the
 //! orchestrator, including non-interactive turns.
 
+use std::sync::Arc;
+
+use async_trait::async_trait;
 use serde_json::json;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
@@ -9,7 +12,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{ExecutionContext, Interface, TurnIdentity};
 
-use crate::orchestrator::ConfirmationCallback;
+use crate::orchestrator::{ConfirmationAnswer, ConfirmationCallback, ConfirmationRequest};
 
 use super::super::OrchestratorEvent;
 use super::{build_customized, build_with_config, ollama_answer, ollama_tool_calls_with_args};
@@ -107,11 +110,33 @@ async fn hard_deny_beats_a_configured_allow() {
     assert!(message.contains("bash(sudo *)"), "{message}");
 }
 
-struct FixedAnswer(bool);
+/// Callback that returns a scripted answer and records what it was asked.
+struct Scripted {
+    answer: ConfirmationAnswer,
+    seen: std::sync::Mutex<Vec<(String, Option<String>, String, bool)>>,
+}
 
-impl ConfirmationCallback for FixedAnswer {
-    fn confirm(&self, _tool_name: &str, _params: &serde_json::Value) -> bool {
-        self.0
+impl Scripted {
+    fn new(answer: ConfirmationAnswer) -> Arc<Self> {
+        Arc::new(Self {
+            answer,
+            seen: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait]
+impl ConfirmationCallback for Scripted {
+    async fn confirm(&self, req: ConfirmationRequest<'_>) -> ConfirmationAnswer {
+        // Yield so the test proves the call is genuinely awaited.
+        tokio::task::yield_now().await;
+        self.seen.lock().unwrap().push((
+            req.tool_name.to_string(),
+            req.tool_call_id.map(str::to_string),
+            req.reason.to_string(),
+            req.options.is_once_only(),
+        ));
+        self.answer
     }
 }
 
@@ -126,6 +151,7 @@ fn ctx(interactive: bool) -> ExecutionContext {
             Interface::Slack
         },
         interactive,
+        run_id: None,
         allowed_tools: None,
         depth: 0,
         user_id: None,
@@ -134,33 +160,88 @@ fn ctx(interactive: bool) -> ExecutionContext {
     }
 }
 
-async fn authorize(answer: Option<bool>, interactive: bool) -> Result<(), String> {
-    let (orch, _) = build_customized("http://127.0.0.1:1", config(&[]), |o| match answer {
-        Some(a) => o.with_confirmation_callback(std::sync::Arc::new(FixedAnswer(a))),
+async fn authorize_with(callback: Option<Arc<Scripted>>, interactive: bool) -> Result<(), String> {
+    let (orch, _) = build_customized("http://127.0.0.1:1", config(&[]), |o| match callback {
+        Some(cb) => o.with_confirmation_callback(cb),
         None => o,
     })
     .await;
     let params = json!({ "command": "make build" });
-    orch.authorize_tool_call("bash", &params, &ctx(interactive), false, None)
-        .await
+    orch.authorize_tool_call(
+        "bash",
+        &params,
+        &ctx(interactive),
+        false,
+        None,
+        None,
+        Some("call-1"),
+    )
+    .await
+}
+
+async fn authorize(answer: ConfirmationAnswer) -> Result<(), String> {
+    authorize_with(Some(Scripted::new(answer)), true).await
+}
+
+#[tokio::test]
+async fn allow_answers_run_the_tool() {
+    assert_eq!(authorize(ConfirmationAnswer::AllowOnce).await, Ok(()));
+    assert_eq!(authorize(ConfirmationAnswer::AllowAlways).await, Ok(()));
+}
+
+#[tokio::test]
+async fn reject_and_cancel_answers_report_a_user_denial() {
+    for answer in [
+        ConfirmationAnswer::RejectOnce,
+        ConfirmationAnswer::RejectAlways,
+        ConfirmationAnswer::Cancelled,
+    ] {
+        let denied = authorize(answer).await.unwrap_err();
+        assert!(
+            denied.contains("User denied execution of 'bash'"),
+            "{answer:?}: {denied}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn expired_answer_tells_the_llm_the_request_expired() {
+    let message = authorize(ConfirmationAnswer::Expired).await.unwrap_err();
+    assert!(message.contains("expired"), "{message}");
+    assert!(message.contains("bash"), "{message}");
+    assert!(!message.contains("User denied"), "{message}");
+}
+
+#[tokio::test]
+async fn the_request_carries_the_call_id_reason_and_once_only_options() {
+    let cb = Scripted::new(ConfirmationAnswer::AllowOnce);
+    authorize_with(Some(cb.clone()), true).await.unwrap();
+    let seen = cb.seen.lock().unwrap();
+    let (tool, call_id, reason, once_only) = seen.first().expect("callback consulted");
+    assert_eq!(tool, "bash");
+    assert_eq!(call_id.as_deref(), Some("call-1"));
+    assert!(!reason.is_empty());
+    assert!(*once_only, "no suggested rule yet, so only once answers");
 }
 
 #[tokio::test]
 async fn interactive_turn_defers_undecided_calls_to_the_human() {
-    assert_eq!(authorize(Some(true), true).await, Ok(()));
-    let denied = authorize(Some(false), true).await.unwrap_err();
+    assert_eq!(authorize(ConfirmationAnswer::AllowOnce).await, Ok(()));
+    let denied = authorize(ConfirmationAnswer::RejectOnce).await.unwrap_err();
     assert!(denied.contains("User denied"), "{denied}");
 }
 
 #[tokio::test]
 async fn callback_is_never_consulted_on_non_interactive_turns() {
-    let err = authorize(Some(true), false).await.unwrap_err();
+    let cb = Scripted::new(ConfirmationAnswer::AllowOnce);
+    let err = authorize_with(Some(cb.clone()), false).await.unwrap_err();
+    assert!(cb.seen.lock().unwrap().is_empty(), "callback was consulted");
     assert!(err.contains("cannot prompt a user"), "{err}");
 }
 
 #[tokio::test]
 async fn interactive_turn_without_a_callback_is_denied() {
-    assert!(authorize(None, true).await.is_err());
+    assert!(authorize_with(None, true).await.is_err());
 }
 
 #[tokio::test]
@@ -168,7 +249,7 @@ async fn tools_requiring_confirmation_are_denied_when_nobody_can_be_asked() {
     let (orch, _) = build_with_config("http://127.0.0.1:1", config(&[])).await;
     let params = json!({});
     let err = orch
-        .authorize_tool_call("mcp__x__do", &params, &ctx(false), true, None)
+        .authorize_tool_call("mcp__x__do", &params, &ctx(false), true, None, None, None)
         .await
         .unwrap_err();
     assert!(err.contains("requires confirmation"), "{err}");

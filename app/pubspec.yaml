@@ -1,10 +1,13 @@
 name: assistant_app
 description: A new Flutter project.
 publish_to: none
-version: 0.3.0
+version: 0.3.1
 environment:
   sdk: ^3.13.0
   flutter: 3.50.1
+workspace:
+  - packages/assistant_ui
+  - widgetbook
 dependencies:
   flutter:
     sdk: flutter
@@ -33,6 +36,8 @@ dependencies:
   built_collection: ^5.1.2
   assistant_api:
     path: packages/assistant_api
+  assistant_ui:
+    path: packages/assistant_ui
   tray_manager: ^0.5.3
   window_manager: ^0.5.2
   flutter_smooth_markdown: ^0.8.1
@@ -48,6 +53,7 @@ dependencies:
   connectivity_plus: ^7.3.2
   share_plus: ^13.3.1
   flutter_svg: ^2.5.0
+  flutter_web_auth_2: ^5.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -57,6 +63,7 @@ dev_dependencies:
   dart_pre_commit: ^6.1.5
   image: ^4.13.1
   fake_async: ^1.3.3
+  shared_preferences_platform_interface: ^2.4.2
 flutter_launcher_icons:
   web:
     generate: true

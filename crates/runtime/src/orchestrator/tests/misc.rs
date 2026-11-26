@@ -159,6 +159,7 @@ async fn turn_identity_reaches_tool_handler() {
         user_id: Some(UserId::from("usr_alice")),
         org_id: Some(OrgId::from("org_acme")),
         space_id: Some(SpaceId::from("spc_default")),
+        ..TurnIdentity::default()
     };
 
     let result = orch

@@ -135,7 +135,8 @@ pub fn select_binary_role(command: Option<&Command>, interface_filtered: bool) -
     }
 }
 
-/// Whether tool confirmations are auto-denied (no terminal interaction).
+/// Whether the process has no confirmation callback, so undecided tool calls
+/// are denied (no terminal interaction).
 pub fn uses_auto_deny_confirmation(command: Option<&Command>, no_repl: bool) -> bool {
     #[cfg(feature = "mcp")]
     if matches!(command, Some(Command::Mcp)) {
@@ -147,6 +148,14 @@ pub fn uses_auto_deny_confirmation(command: Option<&Command>, no_repl: bool) -> 
         Some(Messenger::Slack | Messenger::Mattermost | Messenger::Nextcloud | Messenger::Signal)
     );
     dedicated || no_repl
+}
+
+/// Whether a turn submitted by the CLI binary has a human waiting. Only a REPL
+/// turn has someone at the terminal who can answer prompts: the one-shot
+/// `skill generate` command and a `--no-repl` process do not.
+pub fn cli_turn_is_interactive(command: Option<&Command>, no_repl: bool) -> bool {
+    let one_shot = matches!(command, Some(Command::Skill { .. }));
+    !one_shot && !no_repl
 }
 
 /// Messengers to start in background mode, in start order.
@@ -233,6 +242,32 @@ mod tests {
     fn no_repl_auto_denies() {
         assert!(auto_deny(&["orchestrator", "run", "--no-repl"], true));
         assert!(!auto_deny(&["orchestrator", "run"], false));
+    }
+
+    fn turn_is_interactive(args: &[&str], no_repl: bool) -> bool {
+        cli_turn_is_interactive(parse(args).command.as_ref(), no_repl)
+    }
+
+    #[test]
+    fn repl_turns_are_interactive() {
+        assert!(turn_is_interactive(&[], false));
+        assert!(turn_is_interactive(&["orchestrator", "run"], false));
+    }
+
+    #[test]
+    fn one_shot_command_turns_are_not_interactive() {
+        assert!(!turn_is_interactive(
+            &["skill", "generate", "greet people"],
+            false
+        ));
+    }
+
+    #[test]
+    fn no_repl_turns_are_not_interactive() {
+        assert!(!turn_is_interactive(
+            &["orchestrator", "run", "--no-repl"],
+            true
+        ));
     }
 
     #[cfg(feature = "mcp")]

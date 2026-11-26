@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::channels::{MatrixConfig, MattermostConfig, NextcloudConfig, SignalConfig, SlackConfig};
 use super::features::{
     CompactionConfig, IntegrationsConfig, LearningConfig, MemoryConfig, NotificationsConfig,
-    TitlingConfig,
+    SuggestionsConfig, TitlingConfig, UiConfig,
 };
 use super::llm::LlmConfig;
 use super::observability::ObservabilityConfig;
@@ -60,6 +60,12 @@ pub struct OrgConfig {
     /// Conversation title-generator configuration (`[titling]` section).
     #[serde(default)]
     pub titling: TitlingConfig,
+    /// Follow-up suggestion configuration (`[suggestions]` section).
+    #[serde(default)]
+    pub suggestions: SuggestionsConfig,
+    /// Generative-UI settings (`[ui]` section); `None` when absent.
+    #[serde(default)]
+    pub ui: Option<UiConfig>,
     #[serde(default)]
     pub agent: AgentConfig,
     /// Tool-permission rules and decision model (`[permissions]` section).
@@ -104,7 +110,10 @@ fn default_agent_id() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::{OrgConfig, ServerConfig};
+    use crate::types::features::{SUGGESTIONS_MAX_TIMEOUT_SECS, SuggestionsConfig};
     use crate::types::llm::{EmbeddingProviderKind, LlmProviderKind};
 
     // -- TitlingConfig defaults / overrides ----------------------------------
@@ -119,6 +128,57 @@ mod tests {
         assert!(titling.enabled, "default: enabled = true");
         assert_eq!(titling.min_turns, 2);
         assert_eq!(titling.long_first_message_chars, 200);
+    }
+
+    // -- SuggestionsConfig defaults / overrides / clamps ----------------------
+
+    #[test]
+    fn test_suggestions_defaults_when_block_absent() {
+        let cfg: OrgConfig = toml::from_str("llm_provider = \"ollama\"").unwrap();
+        let suggestions = cfg.suggestions;
+        assert!(suggestions.enabled, "default: enabled = true");
+        assert_eq!(suggestions.max_suggestions, 3);
+        assert_eq!(suggestions.timeout_secs, 10);
+    }
+
+    #[test]
+    fn test_suggestions_explicit_block_overrides_defaults() {
+        let toml_str = r#"
+            [suggestions]
+            enabled = false
+            max_suggestions = 5
+            timeout_secs = 12
+        "#;
+        let cfg: OrgConfig = toml::from_str(toml_str).unwrap();
+        assert!(!cfg.suggestions.enabled);
+        assert_eq!(cfg.suggestions.max_suggestions, 5);
+        assert_eq!(cfg.suggestions.timeout_secs, 12);
+    }
+
+    #[test]
+    fn test_suggestions_effective_max_is_clamped() {
+        let mut cfg = SuggestionsConfig::default();
+        cfg.max_suggestions = 9;
+        assert_eq!(cfg.effective_max(), 5, "9 clamps to 5");
+        cfg.max_suggestions = 0;
+        assert_eq!(cfg.effective_max(), 1, "0 clamps to 1");
+        cfg.max_suggestions = 4;
+        assert_eq!(cfg.effective_max(), 4, "in-range value is kept");
+    }
+
+    #[test]
+    fn test_suggestions_effective_timeout_is_clamped() {
+        let mut cfg = SuggestionsConfig::default();
+        cfg.timeout_secs = 0;
+        assert_eq!(cfg.effective_timeout(), Duration::from_secs(1));
+        cfg.timeout_secs = 60;
+        assert_eq!(
+            cfg.effective_timeout(),
+            Duration::from_secs(SUGGESTIONS_MAX_TIMEOUT_SECS)
+        );
+        assert_eq!(SUGGESTIONS_MAX_TIMEOUT_SECS, 15);
+        cfg.timeout_secs = 7;
+        assert_eq!(cfg.effective_timeout(), Duration::from_secs(7));
     }
 
     #[test]
@@ -136,6 +196,64 @@ mod tests {
         assert!(!titling.enabled);
         assert_eq!(titling.min_turns, 4);
         assert_eq!(titling.long_first_message_chars, 500);
+    }
+
+    // -- UiConfig (`[ui]`) ---------------------------------------------------
+
+    #[test]
+    fn ui_section_loads_both_host_lists() {
+        let cfg: OrgConfig = toml::from_str(
+            r#"
+            [ui]
+            image_hosts = ["a.example"]
+            link_hosts = ["docs.example"]
+            "#,
+        )
+        .unwrap();
+        let ui = cfg.ui.expect("section present");
+        assert_eq!(ui.image_hosts, vec!["a.example"]);
+        assert_eq!(ui.link_hosts, vec!["docs.example"]);
+    }
+
+    #[test]
+    fn ui_section_absent_yields_none() {
+        let cfg: OrgConfig = toml::from_str("").unwrap();
+        assert!(cfg.ui.is_none(), "no [ui] section means no UiConfig");
+    }
+
+    #[test]
+    fn ui_absent_keys_yield_empty_lists() {
+        let cfg: OrgConfig = toml::from_str("[ui]").unwrap();
+        let ui = cfg.ui.expect("section present");
+        assert!(
+            ui.image_hosts.is_empty(),
+            "empty image_hosts means any https host"
+        );
+        assert!(
+            ui.link_hosts.is_empty(),
+            "empty link_hosts means every link asks"
+        );
+    }
+
+    #[test]
+    fn ui_non_string_entry_fails_to_load() {
+        let err = toml::from_str::<OrgConfig>("[ui]\nimage_hosts = [\"a.example\", 7]\n");
+        assert!(err.is_err(), "a non-string host must not load");
+    }
+
+    #[test]
+    fn ui_hosts_are_lower_cased_on_load() {
+        let cfg: OrgConfig = toml::from_str(
+            r#"
+            [ui]
+            image_hosts = ["Images.Example"]
+            link_hosts = ["Docs.EXAMPLE"]
+            "#,
+        )
+        .unwrap();
+        let ui = cfg.ui.expect("section present");
+        assert_eq!(ui.image_hosts, vec!["images.example"]);
+        assert_eq!(ui.link_hosts, vec!["docs.example"]);
     }
 
     // -- Integrations catalog ------------------------------------------------

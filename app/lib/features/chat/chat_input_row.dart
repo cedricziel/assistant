@@ -1,10 +1,9 @@
+import 'package:assistant_ui/models.dart';
 import 'package:flutter/services.dart';
 
 import '../../shared/platform/widgets.dart';
 import '../../api/models/server_capabilities.dart';
-import 'attachment_provider.dart';
 import 'command_autocomplete.dart';
-import 'commands_provider.dart';
 import '../../shared/theme/assistant_colors.dart';
 import '../../shared/theme/assistant_spacing.dart';
 import 'image_utils.dart';
@@ -16,6 +15,7 @@ class ChatInputRow extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.isSending,
+    this.isStopping = false,
     required this.pendingQueueCount,
     required this.pendingAttachments,
     required this.capabilities,
@@ -31,6 +31,7 @@ class ChatInputRow extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isSending;
+  final bool isStopping;
   final int pendingQueueCount;
   final List<PendingAttachment> pendingAttachments;
   final ServerCapabilities capabilities;
@@ -281,7 +282,8 @@ class _ChatInputRowState extends State<ChatInputRow> {
               if (widget.isSending)
                 IconButton.filled(
                   key: const Key('stop_button'),
-                  onPressed: widget.onStop,
+                  onPressed: widget.isStopping ? null : widget.onStop,
+                  tooltip: widget.isStopping ? 'Stopping…' : null,
                   icon: const Icon(Icons.stop_rounded),
                 )
               else

@@ -19,6 +19,7 @@ Method | HTTP request | Description
 [**patchSkillAccessMode**](PersonasApi.md#patchskillaccessmode) | **PATCH** /api/personas/{id}/skill-access | &#x60;PATCH /api/personas/{id}/skill-access&#x60; — set skill access mode.
 [**putPersonaFile**](PersonasApi.md#putpersonafile) | **PUT** /api/personas/{id}/files/{filename} | &#x60;PUT /api/personas/{id}/files/{filename}&#x60; — write a persona file slot.
 [**setActivePersona**](PersonasApi.md#setactivepersona) | **POST** /api/personas/active | &#x60;POST /api/personas/active&#x60; — switch the active persona for the session.
+[**updatePersona**](PersonasApi.md#updatepersona) | **PATCH** /api/personas/{id} | &#x60;PATCH /api/personas/{id}&#x60; — update a persona&#39;s starter prompts.
 
 
 # **addSkillAccess**
@@ -448,6 +449,51 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**PersonaSummary**](PersonaSummary.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **updatePersona**
+> PersonaDetail updatePersona(id, updatePersonaRequest, xSpaceId)
+
+`PATCH /api/personas/{id}` — update a persona's starter prompts.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getPersonasApi();
+final String id = id_example; // String | Persona ID
+final UpdatePersonaRequest updatePersonaRequest = ; // UpdatePersonaRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.updatePersona(id, updatePersonaRequest, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling PersonasApi->updatePersona: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Persona ID | 
+ **updatePersonaRequest** | [**UpdatePersonaRequest**](UpdatePersonaRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**PersonaDetail**](PersonaDetail.md)
 
 ### Authorization
 

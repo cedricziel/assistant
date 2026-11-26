@@ -122,6 +122,15 @@ impl StreamProjector for A2aProjector {
                 TaskState::TaskStateWorking,
                 Some(self.agent_message(format!("Audio ready: {audio_id}"))),
             ),
+            // Interactions are answered through the web respond route, which
+            // A2A clients do not use.
+            OrchestratorEvent::InteractionRequested { .. }
+            | OrchestratorEvent::InteractionResolved { .. } => return Vec::new(),
+            // Totality only: surfaces are gated to interactive web turns, so
+            // this arm is unreachable in practice.
+            OrchestratorEvent::SurfaceUpdate { fallback_text, .. } => {
+                StreamResponse::from_message(self.agent_message(fallback_text.clone()))
+            }
         };
         vec![frame]
     }
@@ -145,6 +154,7 @@ mod tests {
                 arguments: Some(json!({"path": "/x"})),
                 result: Some("contents".into()),
                 tool_call_id: None,
+                data: None,
             },
             OrchestratorEvent::SkillComplete {
                 skill_name: "tdd".into(),
@@ -170,6 +180,16 @@ mod tests {
             },
             OrchestratorEvent::AudioReady {
                 audio_id: "audio-1".into(),
+            },
+            OrchestratorEvent::SurfaceUpdate {
+                surface_id: "s-1".into(),
+                tool_call_id: None,
+                anchor_message_id: "m-1".into(),
+                anchor_call_index: 0,
+                title: "Trip form".into(),
+                fallback_text: "Trip form: choose a date".into(),
+                status: "active".into(),
+                messages: Vec::new(),
             },
         ]
     }
@@ -210,5 +230,31 @@ mod tests {
             .status_update
             .expect("agent_error projects to a status update");
         assert!(matches!(update.status.state, TaskState::TaskStateFailed));
+    }
+
+    #[test]
+    fn surface_update_projects_fallback_text_part() {
+        let p = A2aProjector::new("task-1", "ctx-1");
+        let frames = p.project(&OrchestratorEvent::SurfaceUpdate {
+            surface_id: "s-1".into(),
+            tool_call_id: None,
+            anchor_message_id: "m-1".into(),
+            anchor_call_index: 0,
+            title: "Trip form".into(),
+            fallback_text: "Trip form: choose a date".into(),
+            status: "active".into(),
+            messages: Vec::new(),
+        });
+        let msg = frames
+            .into_iter()
+            .next()
+            .expect("one frame")
+            .message
+            .expect("surface_update projects to a message");
+        assert_eq!(msg.role, Role::RoleAgent);
+        assert_eq!(
+            msg.parts[0].text.as_deref(),
+            Some("Trip form: choose a date")
+        );
     }
 }

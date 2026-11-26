@@ -489,6 +489,23 @@ impl MessageBus for NatsMessageBus {
         Ok(())
     }
 
+    /// **NATS behavioural note:** sends `AckKind::Progress`, which resets the
+    /// message's `ack_wait` timer without acknowledging it. The message stays
+    /// in flight so a later `ack`/`nack` still finds it.
+    async fn touch(&self, message_id: Uuid) -> Result<()> {
+        let inflight = self.inflight.read().await;
+        let msg = inflight
+            .get(&message_id)
+            .ok_or_else(|| anyhow::anyhow!("no inflight NATS message for id {message_id}"))?;
+
+        msg.ack_with(AckKind::Progress)
+            .await
+            .map_err(|e| anyhow::anyhow!("NATS progress ack failed: {e}"))?;
+
+        debug!(id = %message_id, "touched bus message via NATS progress ack");
+        Ok(())
+    }
+
     async fn fail(&self, message_id: Uuid) -> Result<()> {
         let msg = self
             .inflight

@@ -1,5 +1,6 @@
 import 'package:assistant_app/features/chat/chat_models.dart';
 import 'package:assistant_app/features/chat/chat_turn_transitions.dart';
+import 'package:assistant_ui/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 ChatMessage _user(String id) => ChatMessage(
@@ -70,6 +71,133 @@ void main() {
       );
       expect(cleared.statusMessage, isNull);
       expect(cleared.currentTurnStatus, isNull);
+    });
+  });
+
+  group('stoppedTurnState', () {
+    test('turns the placeholder into a stopped message with the id', () {
+      final next = stoppedTurnState(
+        _streaming(),
+        userMsgId: 'u1',
+        partialContent: 'The capital',
+        messageId: 'M',
+      );
+
+      expect(next.messages.map((m) => m.id), ['u1', 'M']);
+      final stopped = next.messages.last;
+      expect(stopped.status, MessageStatus.stopped);
+      expect(stopped.content, 'The capital');
+      expect(stopped.isStreaming, isFalse);
+      expect(stopped.isAssistant, isTrue);
+      expect(next.isSending, isFalse);
+      expect(next.streamingContent, isEmpty);
+      expect(next.error, isNull);
+      expect(next.currentTurnStatus, isNull);
+    });
+
+    test('uses a synthetic id when the server sent none', () {
+      final next = stoppedTurnState(
+        _streaming(),
+        userMsgId: 'u1',
+        partialContent: 'partial',
+      );
+
+      final stopped = next.messages.last;
+      expect(stopped.id, isNot(streamingPlaceholderId));
+      expect(stopped.id, startsWith('assistant-'));
+      expect(stopped.status, MessageStatus.stopped);
+    });
+
+    test('marks the user message ok', () {
+      final next = stoppedTurnState(
+        _streaming(),
+        userMsgId: 'u1',
+        partialContent: 'p',
+        messageId: 'M',
+      );
+      expect(next.messages.first.status, MessageStatus.ok);
+    });
+
+    test('marks the user message failed when it was not persisted', () {
+      final next = stoppedTurnState(
+        _streaming(),
+        userMsgId: 'u1',
+        partialContent: '',
+        userMessagePersisted: false,
+      );
+      expect(next.messages.single.status, MessageStatus.failed);
+      expect(next.error, isNull);
+    });
+
+    test('flips pending tool calls to cancelled and completes entries', () {
+      final state = _streaming();
+      final tool = ChatMessage(
+        id: 'toolcall-bash-1',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        timelineType: TimelineEntryType.toolCall,
+        toolCalls: [
+          ToolCallRecord(toolName: 'bash', status: ToolCallStatus.pending),
+          ToolCallRecord(toolName: 'ls', status: ToolCallStatus.ok),
+        ],
+      );
+      state.messages.insert(1, tool);
+
+      final next = stoppedTurnState(
+        state,
+        userMsgId: 'u1',
+        partialContent: 'p',
+        messageId: 'M',
+      );
+
+      final entry = next.messages.firstWhere((m) => m.id == tool.id);
+      expect(entry.toolCalls[0].status, ToolCallStatus.cancelled);
+      expect(entry.toolCalls[1].status, ToolCallStatus.ok);
+      expect(entry.isStreaming, isFalse);
+    });
+
+    test('keeps the "_Stopped._" placeholder as a stopped message', () {
+      final next = stoppedTurnState(
+        _streaming(),
+        userMsgId: 'u1',
+        partialContent: '_Stopped._',
+        messageId: 'M',
+      );
+      expect(next.messages.last.id, 'M');
+      expect(next.messages.last.content, '_Stopped._');
+      expect(next.messages.last.status, MessageStatus.stopped);
+    });
+
+    test('falls back to the streamed content when partial is empty', () {
+      final next = stoppedTurnState(
+        _streaming(),
+        userMsgId: 'u1',
+        partialContent: '',
+        messageId: 'M',
+      );
+      expect(next.messages.last.content, 'partial');
+    });
+
+    test('removes the placeholder when nothing streamed and no id', () {
+      final state = _streaming().copyWith(streamingContent: '');
+      state.messages.last.content = '';
+
+      final next = stoppedTurnState(state, userMsgId: 'u1', partialContent: '');
+
+      expect(next.messages.map((m) => m.id), ['u1']);
+      expect(next.messages.single.status, MessageStatus.ok);
+    });
+
+    test('preserves the pending queue and conversation', () {
+      final next = stoppedTurnState(
+        _streaming(),
+        userMsgId: 'u1',
+        partialContent: 'p',
+        messageId: 'M',
+      );
+      expect(next.pendingQueue, hasLength(1));
+      expect(next.conversationId, 'c1');
     });
   });
 

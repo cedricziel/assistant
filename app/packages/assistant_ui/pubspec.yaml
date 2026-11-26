@@ -1,0 +1,18 @@
+name: assistant_ui
+description: Pure, state-free chat elements for the assistant app.
+publish_to: none
+version: 0.0.1
+resolution: workspace
+environment:
+  sdk: ^3.13.0
+  flutter: 3.50.1
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_smooth_markdown: ^0.8.1
+  highlight: 0.7.0
+  material_ui: ^1.11.1
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

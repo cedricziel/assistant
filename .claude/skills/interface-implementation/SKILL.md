@@ -75,7 +75,8 @@ The `assistant_runtime::bootstrap` module provides shared helpers:
 
 - `load_config(path)` — loads config TOML
 - `skill_dirs(config, project_root)` — returns skill search directories
-- `AutoDenyConfirmation` — for non-interactive interfaces
+
+Non-interactive interfaces pass no `ConfirmationCallback` (`None`): undecided tool calls are denied.
 
 ### 3. Spawn the worker
 

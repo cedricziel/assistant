@@ -168,14 +168,69 @@ void main() {
       expect(e.summary, equals('Found 3 results'));
     });
 
-    test('emits AgentErrorEvent from agent_error SSE event', () async {
-      const sse = 'event:agent_error\ndata:LLM timeout\n\n';
-      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+    test(
+      'parses a cancelled agent_error frame into structured fields',
+      () async {
+        const sse =
+            'event:agent_error\n'
+            'data:{"reason":"cancelled","message":"m","partial_content":"p",'
+            '"message_id":"M","user_message_persisted":false}\n\n';
+        final events = await parseSseByteStream(_sseBytes(sse)).toList();
 
-      expect(events.length, equals(1));
-      expect(events.first, isA<AgentErrorEvent>());
-      expect((events.first as AgentErrorEvent).message, equals('LLM timeout'));
-    });
+        expect(events.length, equals(1));
+        final e = events.first as AgentErrorEvent;
+        expect(e.reason, equals(AgentErrorReason.cancelled));
+        expect(e.message, equals('m'));
+        expect(e.partialContent, equals('p'));
+        expect(e.messageId, equals('M'));
+        expect(e.userMessagePersisted, isFalse);
+      },
+    );
+
+    test(
+      'agent_error without user_message_persisted defaults to true',
+      () async {
+        const sse = 'event:agent_error\ndata:{"reason":"cancelled"}\n\n';
+        final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+        final e = events.first as AgentErrorEvent;
+        expect(e.userMessagePersisted, isTrue);
+        expect(e.partialContent, isEmpty);
+        expect(e.messageId, isNull);
+      },
+    );
+
+    test(
+      'agent_error reason "error" and unknown reasons map to error',
+      () async {
+        const sse =
+            'event:agent_error\ndata:{"reason":"error","message":"boom"}\n\n'
+            'event:agent_error\ndata:{"reason":"mystery","message":"x"}\n\n';
+        final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+        expect(events.length, equals(2));
+        for (final event in events) {
+          expect(
+            (event as AgentErrorEvent).reason,
+            equals(AgentErrorReason.error),
+          );
+        }
+        expect((events.first as AgentErrorEvent).message, equals('boom'));
+      },
+    );
+
+    test(
+      'agent_error with a non-JSON body is an error with the body',
+      () async {
+        const sse = 'event:agent_error\ndata:LLM timeout\n\n';
+        final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+        expect(events.length, equals(1));
+        final e = events.first as AgentErrorEvent;
+        expect(e.reason, equals(AgentErrorReason.error));
+        expect(e.message, equals('LLM timeout'));
+      },
+    );
 
     test('handles multi-chunk byte stream reassembly', () async {
       // Simulate chunked delivery: SSE event split across two byte chunks.
@@ -278,7 +333,10 @@ void main() {
     });
 
     test('AgentErrorEvent stores message', () {
-      const event = AgentErrorEvent('timeout');
+      const event = AgentErrorEvent(
+        reason: AgentErrorReason.error,
+        message: 'timeout',
+      );
       expect(event.message, equals('timeout'));
     });
 
@@ -302,7 +360,8 @@ void main() {
           'success': true,
           'summary': 'ok',
         }),
-        const AgentErrorEvent('err'),
+        const AgentErrorEvent(reason: AgentErrorReason.error, message: 'err'),
+        const SuggestionsEvent(messageId: 'm', prompts: ['p']),
       ];
 
       int count = 0;
@@ -325,6 +384,7 @@ void main() {
           case SubagentThinkingEvent():
           case SubagentToolResultEvent():
           case SubagentStatusEvent():
+          case SuggestionsEvent():
             count++;
         }
       }

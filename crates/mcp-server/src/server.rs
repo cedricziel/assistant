@@ -79,6 +79,8 @@ impl AssistantMcpServer {
             .executor
             .to_specs()
             .into_iter()
+            // An MCP client cannot render a surface.
+            .filter(|spec| !spec.requires_rich_client)
             .map(|spec| tool(spec.name, spec.description, spec.params_schema))
             .collect();
         tools.push(tool(
@@ -231,6 +233,7 @@ impl ServerHandler for AssistantMcpServer {
             turn: 0,
             interface: Interface::Mcp,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,

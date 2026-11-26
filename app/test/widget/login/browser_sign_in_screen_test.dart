@@ -24,13 +24,17 @@ class _FakeSecureStorage implements SecureKeyValueStorage {
 }
 
 class _FakeBrowser implements BrowserSignInPlatform {
+  _FakeBrowser({this.hostedServerUrl = 'https://assistant.example.com'});
+
   PendingBrowserSignIn? pending;
   Uri? navigatedTo;
 
   @override
-  bool get isSupported => true;
+  final String? hostedServerUrl;
   @override
-  String get appOrigin => 'https://assistant.example.com';
+  String get redirectUri => hostedServerUrl == null
+      ? 'com.cedricziel.assistant:/oauth/callback'
+      : '$hostedServerUrl/login/callback';
   @override
   void savePending(PendingBrowserSignIn value) => pending = value;
   @override
@@ -41,11 +45,14 @@ class _FakeBrowser implements BrowserSignInPlatform {
   }
 
   @override
-  void navigateTo(Uri url) => navigatedTo = url;
+  Future<Uri?> open(Uri url) async {
+    navigatedTo = url;
+    return null;
+  }
 }
 
 class _FakeOAuthService extends OAuthService {
-  _FakeOAuthService() : super(serverUrl: 'https://assistant.example.com');
+  _FakeOAuthService(String serverUrl) : super(serverUrl: serverUrl);
 
   @override
   Future<String> registerClient({
@@ -65,7 +72,7 @@ Future<Widget> _buildSubject(_FakeBrowser browser, String location) async {
     overrides: [
       contextRepositoryProvider.overrideWithValue(repo),
       browserSignInPlatformProvider.overrideWithValue(browser),
-      oauthServiceFactoryProvider.overrideWithValue((_) => _FakeOAuthService()),
+      oauthServiceFactoryProvider.overrideWithValue(_FakeOAuthService.new),
     ],
     child: MaterialApp.router(
       routerConfig: GoRouter(
@@ -109,6 +116,28 @@ void main() {
       expect(
         browser.navigatedTo?.queryParameters['redirect_uri'],
         'https://assistant.example.com/login/callback',
+      );
+    });
+    testWidgets('native: asks for the server, then opens its sign-in page', (
+      tester,
+    ) async {
+      final browser = _FakeBrowser(hostedServerUrl: null);
+      await tester.pumpWidget(await _buildSubject(browser, '/login'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextFormField, 'Password'), findsNothing);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Server URL'),
+        'https://my-server.example.com',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+      await tester.pump();
+
+      expect(browser.navigatedTo?.host, 'my-server.example.com');
+      expect(browser.navigatedTo?.path, '/oauth/authorize');
+      expect(
+        browser.navigatedTo?.queryParameters['redirect_uri'],
+        'com.cedricziel.assistant:/oauth/callback',
       );
     });
   });

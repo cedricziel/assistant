@@ -74,6 +74,10 @@ impl MessageBus for ScopedMessageBus {
         self.inner.nack_delayed(message_id, delay).await
     }
 
+    async fn touch(&self, message_id: Uuid) -> Result<()> {
+        self.inner.touch(message_id).await
+    }
+
     async fn fail(&self, message_id: Uuid) -> Result<()> {
         self.inner.fail(message_id).await
     }
