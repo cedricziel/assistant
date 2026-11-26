@@ -301,6 +301,7 @@ assistant/
 │   ├── interface-signal/               # Signal interface library
 │   ├── web-ui/                         # Flutter web host, REST API + A2A protocol server
 │   ├── a2a-json-schema/                # A2A protocol JSON Schema types
+│   ├── a2ui/                           # A2UI v1.0 message types and assistant catalog
 │   └── integration-tests/              # End-to-end smoke tests
 ├── docker/                             # Dockerfiles (all build the unified assistant binary)
 ├── migrations/                         # SQLite migration files

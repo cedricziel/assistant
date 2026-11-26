@@ -787,6 +787,13 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
         } catch (_) {
           // ignore malformed audio_ready events
         }
+      } else if (eventType == 'suggestions' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield SuggestionsEvent.fromJson(json, sequenceId: seq);
+        } catch (_) {
+          // ignore malformed suggestions events
+        }
       }
       eventType = null;
       dataLine = null;

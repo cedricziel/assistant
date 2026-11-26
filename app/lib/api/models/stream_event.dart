@@ -450,3 +450,45 @@ class AudioReadyEvent extends StreamEvent {
     return AudioReadyEvent(json['audio_id'] as String? ?? '');
   }
 }
+
+/// Follow-up prompts the server suggests for the answer in [messageId].
+///
+/// Corresponds to `event:suggestions` in the SSE stream. The JSON body is
+/// `{"message_id":"<uuid>","suggestions":[{"prompt":"..."}]}`. It arrives
+/// after `done`, on the run's replay stream only.
+class SuggestionsEvent extends StreamEvent {
+  const SuggestionsEvent({
+    required this.messageId,
+    required this.prompts,
+    super.sequenceId,
+  });
+
+  /// The assistant message the suggestions follow up on.
+  final String messageId;
+
+  /// Prompt texts in server order.
+  final List<String> prompts;
+
+  /// Throws a [FormatException] when `message_id` is missing. Items without a
+  /// string `prompt` are skipped so a future item shape cannot break the frame.
+  factory SuggestionsEvent.fromJson(
+    Map<String, dynamic> json, {
+    int? sequenceId,
+  }) {
+    final messageId = json['message_id'];
+    if (messageId is! String || messageId.isEmpty) {
+      throw const FormatException('message_id is required');
+    }
+    final items = json['suggestions'];
+    return SuggestionsEvent(
+      messageId: messageId,
+      prompts: [
+        if (items is List)
+          for (final item in items)
+            if (item is Map && item['prompt'] is String)
+              item['prompt'] as String,
+      ],
+      sequenceId: sequenceId,
+    );
+  }
+}

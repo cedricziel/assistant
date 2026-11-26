@@ -1,0 +1,11 @@
+{
+  "kind": "sources",
+  "command": "ls",
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "duration_ms": 5,
+  "timed_out": false
+}

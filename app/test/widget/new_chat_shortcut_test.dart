@@ -12,6 +12,9 @@ import 'package:assistant_app/shared/nav_shell.dart';
 class _FakeConversationListNotifier extends AsyncNotifier<ConversationListState>
     implements ConversationListNotifier {
   int createCount = 0;
+
+  /// The `title` argument of every [createConversation] call.
+  final List<String?> titles = [];
   String? nextId = 'new-convo-123';
 
   /// How long to delay the response (simulates network latency for the
@@ -26,6 +29,7 @@ class _FakeConversationListNotifier extends AsyncNotifier<ConversationListState>
   @override
   Future<String?> createConversation({String? title}) async {
     createCount++;
+    titles.add(title);
     if (delay > Duration.zero) await Future<void>.delayed(delay);
     return nextId;
   }
@@ -129,6 +133,9 @@ void main() {
         '/chat/new-convo-123',
         reason: 'Should navigate to the new conversation',
       );
+      expect(notifier.titles, [
+        null,
+      ], reason: 'An explicit title would lock the row against auto-titling');
     });
 
     testWidgets(

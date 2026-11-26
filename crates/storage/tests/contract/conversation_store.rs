@@ -95,6 +95,47 @@ async fn update_title_locks(store: Box<dyn ConversationStore>) {
     assert!(loaded.title_locked, "explicit update_title must lock");
 }
 
+async fn set_generated_title_writes_unlocked_row(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(None).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
+    let written = store
+        .set_generated_title(conv.id, "Generated")
+        .await
+        .unwrap();
+
+    assert!(written, "unlocked row must accept the generated title");
+    let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert_eq!(loaded.title.as_deref(), Some("Generated"));
+    assert!(loaded.title_locked, "generated title must lock the row");
+    assert_eq!(
+        loaded.updated_at, conv.updated_at,
+        "generated title must not change updated_at"
+    );
+}
+
+async fn set_generated_title_skips_locked_row(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(None).await.unwrap();
+    store.update_title(conv.id, "Trip plan").await.unwrap();
+
+    let written = store
+        .set_generated_title(conv.id, "Generated")
+        .await
+        .unwrap();
+
+    assert!(!written, "locked row must reject the generated title");
+    let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert_eq!(loaded.title.as_deref(), Some("Trip plan"));
+}
+
+async fn set_generated_title_skips_missing_row(store: Box<dyn ConversationStore>) {
+    let written = store
+        .set_generated_title(Uuid::new_v4(), "Generated")
+        .await
+        .unwrap();
+    assert!(!written, "missing row must report no write");
+}
+
 async fn save_and_load_history(store: Box<dyn ConversationStore>) {
     let conv = store.create_conversation(Some("History")).await.unwrap();
     let u = user_msg(conv.id, "hi", 0);
@@ -294,6 +335,21 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_update_title_locks() {
                 update_title_locks($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_set_generated_title_writes_unlocked_row() {
+                set_generated_title_writes_unlocked_row($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_set_generated_title_skips_locked_row() {
+                set_generated_title_skips_locked_row($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_set_generated_title_skips_missing_row() {
+                set_generated_title_skips_missing_row($constructor).await;
             }
 
             #[tokio::test]

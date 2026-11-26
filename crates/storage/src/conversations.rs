@@ -66,6 +66,13 @@ pub trait ConversationStore: Send + Sync {
     /// Set a conversation's title and lock it from auto-titling.
     async fn update_title(&self, id: Uuid, title: &str) -> Result<()>;
 
+    /// Write an auto-generated title, only while the conversation is unlocked.
+    ///
+    /// Locks the row and leaves `updated_at` unchanged. Returns `false` (and
+    /// emits no event) when the row is missing or already locked, so a manual
+    /// rename that lands while the LLM is running is never overwritten.
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool>;
+
     /// Replace the full message history of a conversation.
     async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()>;
 
@@ -357,6 +364,31 @@ impl ConversationStore for SqliteConversationStore {
         }
 
         Ok(())
+    }
+
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE conversations
+                 SET title = ?1, title_locked = 1
+                 WHERE id = ?2 AND agent_id = ?3 AND title_locked = 0",
+        )
+        .bind(title)
+        .bind(id.to_string())
+        .bind(&self.agent_id)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to set generated title for conversation {id}"))?;
+        if result.rows_affected() == 0 {
+            return Ok(false);
+        }
+
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
+        }
+
+        Ok(true)
     }
 
     /// Delete a conversation and all its messages (cascade).
@@ -722,6 +754,27 @@ impl ConversationStore for InMemoryConversationStore {
             b.emit(ConversationEvent::Upserted(rec));
         }
         Ok(())
+    }
+
+    async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool> {
+        let updated = {
+            let mut state = self.lock_state();
+            match state.conversations.get_mut(&id) {
+                Some(c) if c.agent_id == self.agent_id && !c.title_locked => {
+                    c.title = Some(title.to_string());
+                    c.title_locked = true;
+                    Some(c.clone())
+                }
+                _ => None,
+            }
+        };
+        let Some(rec) = updated else {
+            return Ok(false);
+        };
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(rec));
+        }
+        Ok(true)
     }
 
     async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
@@ -1223,6 +1276,64 @@ mod tests {
             }
             _ => panic!("expected Upserted event"),
         }
+    }
+
+    /// Assert the receiver holds no event, i.e. the last write was silent.
+    fn assert_no_event(rx: &mut tokio::sync::broadcast::Receiver<ConversationEvent>) {
+        assert!(
+            matches!(
+                rx.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ),
+            "no event expected"
+        );
+    }
+
+    async fn generated_title_event_contract(
+        store: &dyn ConversationStore,
+        rx: &mut tokio::sync::broadcast::Receiver<ConversationEvent>,
+    ) {
+        let conv = store.create_conversation(None).await.unwrap();
+        // Drain the creation event.
+        let _ = rx.try_recv();
+
+        assert!(
+            store
+                .set_generated_title(conv.id, "Generated")
+                .await
+                .unwrap()
+        );
+        match rx.try_recv() {
+            Ok(ConversationEvent::Upserted(record)) => {
+                assert_eq!(record.id, conv.id, "event must carry the conversation id");
+                assert_eq!(record.title.as_deref(), Some("Generated"));
+                assert!(record.title_locked, "event must carry title_locked = true");
+            }
+            other => panic!("expected Upserted event, got {other:?}"),
+        }
+
+        // The row is now locked: a second generated write is a silent no-op.
+        assert!(!store.set_generated_title(conv.id, "Again").await.unwrap());
+        assert_no_event(rx);
+    }
+
+    #[tokio::test]
+    async fn test_set_generated_title_emits_upserted_only_when_written_sqlite() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        generated_title_event_contract(&store, &mut rx).await;
+    }
+
+    #[tokio::test]
+    async fn test_set_generated_title_emits_upserted_only_when_written_in_memory() {
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = InMemoryConversationStore::new().with_broadcaster(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        generated_title_event_contract(&store, &mut rx).await;
     }
 
     // -----------------------------------------------------------------------

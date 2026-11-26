@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Durable per-conversation event log that backs run replay and turn status.
+
+## Requirements
 
 ### Requirement: Orchestrator emits a run_started event with a run ID
 

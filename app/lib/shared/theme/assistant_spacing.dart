@@ -1,13 +1,17 @@
+import 'package:assistant_ui/assistant_ui.dart';
+
 /// Spacing scale on a 4 dp base. Replace inline `EdgeInsets.all(12)` /
 /// `SizedBox(height: 16)` / similar magic numbers with these tokens so
 /// future spacing audits affect every consumer at once.
+///
+/// The values live in `assistant_ui` so the package and the app cannot drift.
 abstract class AssistantSpacing {
-  static const double xs = 4;
-  static const double sm = 8;
-  static const double md = 12;
-  static const double lg = 16;
-  static const double xl = 24;
-  static const double xxl = 32;
+  static const double xs = AssistantUiSpacing.xs;
+  static const double sm = AssistantUiSpacing.sm;
+  static const double md = AssistantUiSpacing.md;
+  static const double lg = AssistantUiSpacing.lg;
+  static const double xl = AssistantUiSpacing.xl;
+  static const double xxl = AssistantUiSpacing.xxl;
 }
 
 /// Corner radius scale. Cards, chips, and buttons on the migrated screens

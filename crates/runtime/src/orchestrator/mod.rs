@@ -4,8 +4,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
+use assistant_core::llm::call_context::LlmCallContext;
 use assistant_core::types::conversation::{ExecutionContext, Interface, Message, TurnIdentity};
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
@@ -19,6 +21,7 @@ use assistant_storage::{
 };
 use assistant_tool_executor::{ToolExecutor, ToolOverlay};
 use assistant_transcription::AudioStore;
+use async_trait::async_trait;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,
     trace::{Span as _, Status as OtelStatus, TraceContextExt, Tracer as _},
@@ -46,12 +49,70 @@ pub use stream_event::OrchestratorEvent;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+/// Which answers a [`ConfirmationCallback`] may offer the user.
+///
+/// The once answers (`AllowOnce`, `RejectOnce`) are always available; the
+/// "always" answers persist a rule and are offered only when the request
+/// carries a suggested rule to save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ApprovalOptions {
+    /// `AllowAlways` may be offered.
+    pub allow_always: bool,
+    /// `RejectAlways` may be offered.
+    pub reject_always: bool,
+}
+
+impl ApprovalOptions {
+    /// Offer only `AllowOnce` and `RejectOnce`.
+    pub const fn once_only() -> Self {
+        Self {
+            allow_always: false,
+            reject_always: false,
+        }
+    }
+
+    /// Whether neither "always" answer may be offered.
+    pub const fn is_once_only(&self) -> bool {
+        !self.allow_always && !self.reject_always
+    }
+}
+
+/// One tool call awaiting a human decision.
+pub struct ConfirmationRequest<'a> {
+    pub tool_name: &'a str,
+    pub params: &'a serde_json::Value,
+    pub ctx: &'a ExecutionContext,
+    /// Provider id of the call, when the turn streams one.
+    pub tool_call_id: Option<&'a str>,
+    /// Why the permission pipeline could not decide on its own.
+    pub reason: &'a str,
+    /// Which answers may be offered.
+    pub options: ApprovalOptions,
+    /// Stream sink for the turn, when it has one.
+    pub event_sink: Option<&'a mpsc::Sender<OrchestratorEvent>>,
+}
+
+/// A human's (or a timeout's) answer to a [`ConfirmationRequest`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationAnswer {
+    AllowOnce,
+    AllowAlways,
+    RejectOnce,
+    RejectAlways,
+    /// Nobody answered before the request timed out.
+    Expired,
+    /// The turn ended or was cancelled while the request was open.
+    Cancelled,
+}
+
 /// Callback trait for requesting user confirmation before executing a tool.
-/// Typically implemented by the CLI interface.
+///
+/// A runtime without a callback denies every call the pipeline leaves
+/// undecided.
+#[async_trait]
 pub trait ConfirmationCallback: Send + Sync {
-    /// Return `true` if the user confirms execution of `tool_name` with
-    /// `params`, or `false` to deny.
-    fn confirm(&self, tool_name: &str, params: &serde_json::Value) -> bool;
+    /// Ask for a decision on `req`. May wait for as long as the human takes.
+    async fn confirm(&self, req: ConfirmationRequest<'_>) -> ConfirmationAnswer;
 }
 
 /// Outcome of [`Orchestrator::cancel_turn`].
@@ -81,6 +142,13 @@ pub const TURN_CANCELLED_MARKER: &str = "turn_cancelled";
 /// when the turn was cancelled before any worker claimed it. Nothing of such a
 /// turn ran: the user message was never added to the conversation history.
 pub const TURN_CANCELLED_BEFORE_START_MARKER: &str = "cancelled_before_start";
+
+/// How often a worker refreshes the bus claim of the turn it is running.
+///
+/// Bus claims are reaped, and NATS `ack_wait` expires, after 5 minutes; a
+/// 60 second heartbeat keeps a long tool run or a turn waiting on a human
+/// from being redelivered to a second worker.
+pub const DEFAULT_BUS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The result of a single orchestrator turn.
 pub struct TurnResult {
@@ -250,6 +318,10 @@ pub struct Orchestrator {
     /// timing out. Defaults to 10 800 s (3 h). Configurable per persona via
     /// `with_submit_timeout`.
     pub(crate) submit_timeout_secs: u64,
+    /// How often the worker refreshes the bus claim of the turn it is
+    /// running. Must stay well below the bus reap / `ack_wait` timeout
+    /// (5 min). Tests shorten it with `with_bus_heartbeat_interval`.
+    pub(crate) bus_heartbeat_interval: Duration,
     /// Optional audio store for retrieving TTS blobs produced by the
     /// `voice-response` tool.  When present, synthesised audio is appended
     /// to `TurnResult::attachments` so channel adapters can deliver it.
@@ -296,22 +368,7 @@ impl Orchestrator {
         let memory_loader = MemoryLoader::new(config);
         memory_loader.ensure_defaults();
 
-        // Use the provider's reported context window to configure compaction.
-        // If the provider reports a specific window, use the smaller of that
-        // and the user-configured value to avoid exceeding the model's limit.
-        let mut compaction_config = config.compaction.clone();
-        if let Some(provider_window) = llm.capabilities().context_window_tokens {
-            let effective = provider_window.min(compaction_config.context_window_tokens);
-            if effective != compaction_config.context_window_tokens {
-                info!(
-                    config_window = compaction_config.context_window_tokens,
-                    provider_window,
-                    effective,
-                    "Adjusting compaction context_window_tokens to match provider limit"
-                );
-            }
-            compaction_config.context_window_tokens = effective;
-        }
+        let compaction_config = config.compaction.clone();
 
         let skill_executions = Arc::new(storage.skill_execution_store());
 
@@ -334,6 +391,7 @@ impl Orchestrator {
             agent_id: config.agent.id.clone(),
             compaction_config,
             submit_timeout_secs: 10_800,
+            bus_heartbeat_interval: DEFAULT_BUS_HEARTBEAT_INTERVAL,
             adapter_registry: crate::AdapterRegistry::new(),
             audio_store: None,
             conversation_configs: Arc::default(),
@@ -382,6 +440,12 @@ impl Orchestrator {
     /// loaded from the database.  The value must be > 0.
     pub fn with_submit_timeout(mut self, secs: u64) -> Self {
         self.submit_timeout_secs = secs.max(1);
+        self
+    }
+
+    /// Override how often the worker refreshes the bus claim of a running turn.
+    pub fn with_bus_heartbeat_interval(mut self, interval: Duration) -> Self {
+        self.bus_heartbeat_interval = interval;
         self
     }
 
@@ -471,6 +535,28 @@ impl Orchestrator {
         &self,
     ) -> Arc<tokio::sync::RwLock<HashMap<Uuid, assistant_core::ConversationConfig>>> {
         Arc::clone(&self.conversation_configs)
+    }
+
+    /// Options for agent-loop calls.
+    fn chat_options(&self) -> assistant_core::ChatOptions {
+        assistant_core::ChatOptions {
+            parallel_tool_calls: self.llm_config.parallel_tool_calls,
+            ..Default::default()
+        }
+    }
+
+    /// `config` with its context window capped at what `llm` reports now.
+    /// Read per turn, so a window the provider learns after startup (or a
+    /// `/model` override) applies on the next turn.
+    pub(crate) fn compaction_for(
+        config: &assistant_core::types::features::CompactionConfig,
+        llm: &dyn LlmProvider,
+    ) -> assistant_core::types::features::CompactionConfig {
+        let mut config = config.clone();
+        if let Some(window) = llm.capabilities().context_window_tokens {
+            config.context_window_tokens = config.context_window_tokens.min(window);
+        }
+        config
     }
 
     /// The provider a turn of `conversation_id` runs on: the default, or one
@@ -616,19 +702,21 @@ impl Orchestrator {
             interface = ?interface,
             extension_tools = extensions.len()
         );
-        self.run_turn_with_tools_impl(
-            user_message,
-            conversation_id,
-            interface,
-            extensions,
-            trace_cx,
-            attachments,
-            None,
-            attachment_ids,
-            identity,
-        )
-        .instrument(turn_span)
-        .await
+        let call_context = LlmCallContext::for_turn(conversation_id, &identity);
+        call_context
+            .scope(self.run_turn_with_tools_impl(
+                user_message,
+                conversation_id,
+                interface,
+                extensions,
+                trace_cx,
+                attachments,
+                None,
+                attachment_ids,
+                identity,
+            ))
+            .instrument(turn_span)
+            .await
     }
 
     /// Like [`run_turn_with_tools`] but streams LLM text tokens (including the
@@ -656,19 +744,21 @@ impl Orchestrator {
             extension_tools = extensions.len(),
             streaming = true
         );
-        self.run_turn_with_tools_impl(
-            user_message,
-            conversation_id,
-            interface,
-            extensions,
-            trace_cx,
-            attachments,
-            Some(token_sink),
-            attachment_ids,
-            identity,
-        )
-        .instrument(turn_span)
-        .await
+        let call_context = LlmCallContext::for_turn(conversation_id, &identity);
+        call_context
+            .scope(self.run_turn_with_tools_impl(
+                user_message,
+                conversation_id,
+                interface,
+                extensions,
+                trace_cx,
+                attachments,
+                Some(token_sink),
+                attachment_ids,
+                identity,
+            ))
+            .instrument(turn_span)
+            .await
     }
 
     /// Process one turn of the conversation.
@@ -681,16 +771,18 @@ impl Orchestrator {
         attachment_ids: Vec<Uuid>,
         identity: TurnIdentity,
     ) -> Result<TurnResult> {
-        self.run_turn_core(
-            user_message,
-            conversation_id,
-            interface,
-            None,
-            trace_cx,
-            attachment_ids,
-            identity,
-        )
-        .await
+        let call_context = LlmCallContext::for_turn(conversation_id, &identity);
+        call_context
+            .scope(self.run_turn_core(
+                user_message,
+                conversation_id,
+                interface,
+                None,
+                trace_cx,
+                attachment_ids,
+                identity,
+            ))
+            .await
     }
 
     /// Like [`run_turn`] but streams final-answer tokens through `token_sink`.
@@ -705,16 +797,18 @@ impl Orchestrator {
         attachment_ids: Vec<Uuid>,
         identity: TurnIdentity,
     ) -> Result<TurnResult> {
-        self.run_turn_core(
-            user_message,
-            conversation_id,
-            interface,
-            Some(token_sink),
-            trace_cx,
-            attachment_ids,
-            identity,
-        )
-        .await
+        let call_context = LlmCallContext::for_turn(conversation_id, &identity);
+        call_context
+            .scope(self.run_turn_core(
+                user_message,
+                conversation_id,
+                interface,
+                Some(token_sink),
+                trace_cx,
+                attachment_ids,
+                identity,
+            ))
+            .await
     }
 
     // ── Turn implementations ──────────────────────────────────────────────────
@@ -775,6 +869,7 @@ impl Orchestrator {
         // 4. Load global tool specs and merge with extensions.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
         let llm = self.llm_for(conversation_id).await?;
+        let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
         let global_specs =
@@ -809,11 +904,11 @@ impl Orchestrator {
             {
                 let estimated =
                     crate::compaction::estimate_total_tokens(&system_prompt, &history, &all_specs);
-                if crate::compaction::should_compact(estimated, &self.compaction_config) {
+                if crate::compaction::should_compact(estimated, &compaction_config) {
                     crate::compaction::maybe_compact(
                         &mut history,
                         &llm,
-                        &self.compaction_config,
+                        &compaction_config,
                         Some((&conv_store, conversation_id)),
                     )
                     .await;
@@ -826,7 +921,7 @@ impl Orchestrator {
                 &system_prompt,
                 &mut history,
                 &all_specs,
-                &self.compaction_config,
+                &compaction_config,
             );
 
             let ctx = ExecutionContext {
@@ -867,14 +962,27 @@ impl Orchestrator {
                     }
                 });
                 let result = llm
-                    .chat_streaming(&system_prompt, &history, &all_specs, Some(chunk_tx))
+                    .chat_with(
+                        &system_prompt,
+                        &history,
+                        &all_specs,
+                        &self.chat_options(),
+                        Some(chunk_tx),
+                    )
                     .await;
                 // Wait for the forwarding task to drain any buffered tokens before
                 // continuing — ensures callers see all Token events after this await.
                 forward_handle.await.ok();
                 result
             } else {
-                llm.chat(&system_prompt, &history, &all_specs).await
+                llm.chat_with(
+                    &system_prompt,
+                    &history,
+                    &all_specs,
+                    &self.chat_options(),
+                    None,
+                )
+                .await
             };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
@@ -906,12 +1014,12 @@ impl Orchestrator {
             // the provider as a secondary signal to catch any cases the pre-call
             // estimator missed.
             if let Some(tokens) = response.meta().input_tokens
-                && crate::compaction::should_compact(tokens, &self.compaction_config)
+                && crate::compaction::should_compact(tokens, &compaction_config)
             {
                 crate::compaction::maybe_compact(
                     &mut history,
                     &llm,
-                    &self.compaction_config,
+                    &compaction_config,
                     Some((&conv_store, conversation_id)),
                 )
                 .await;
@@ -1179,6 +1287,7 @@ impl Orchestrator {
 
         // 4. Load all registered tool specs.
         let llm = self.llm_for(conversation_id).await?;
+        let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
         let tool_specs =
@@ -1203,11 +1312,11 @@ impl Orchestrator {
             {
                 let estimated =
                     crate::compaction::estimate_total_tokens(&system_prompt, &history, &tool_specs);
-                if crate::compaction::should_compact(estimated, &self.compaction_config) {
+                if crate::compaction::should_compact(estimated, &compaction_config) {
                     crate::compaction::maybe_compact(
                         &mut history,
                         &llm,
-                        &self.compaction_config,
+                        &compaction_config,
                         Some((&conv_store, conversation_id)),
                     )
                     .await;
@@ -1221,7 +1330,7 @@ impl Orchestrator {
                 &system_prompt,
                 &mut history,
                 &tool_specs,
-                &self.compaction_config,
+                &compaction_config,
             );
 
             let ctx = ExecutionContext {
@@ -1262,7 +1371,13 @@ impl Orchestrator {
                     }
                 });
                 let result = llm
-                    .chat_streaming(&system_prompt, &history, &tool_specs, Some(chunk_tx))
+                    .chat_with(
+                        &system_prompt,
+                        &history,
+                        &tool_specs,
+                        &self.chat_options(),
+                        Some(chunk_tx),
+                    )
                     .instrument(iteration_span.clone())
                     .await;
                 // Wait for the forwarding task to drain any buffered tokens before
@@ -1270,9 +1385,15 @@ impl Orchestrator {
                 forward_handle.await.ok();
                 result
             } else {
-                llm.chat(&system_prompt, &history, &tool_specs)
-                    .instrument(iteration_span.clone())
-                    .await
+                llm.chat_with(
+                    &system_prompt,
+                    &history,
+                    &tool_specs,
+                    &self.chat_options(),
+                    None,
+                )
+                .instrument(iteration_span.clone())
+                .await
             };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
@@ -1309,12 +1430,12 @@ impl Orchestrator {
 
             // Post-call compaction using the accurate provider-reported token count.
             if let Some(tokens) = response.meta().input_tokens
-                && crate::compaction::should_compact(tokens, &self.compaction_config)
+                && crate::compaction::should_compact(tokens, &compaction_config)
             {
                 crate::compaction::maybe_compact(
                     &mut history,
                     &llm,
-                    &self.compaction_config,
+                    &compaction_config,
                     Some((&conv_store, conversation_id)),
                 )
                 .await;

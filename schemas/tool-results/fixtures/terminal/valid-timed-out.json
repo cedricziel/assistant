@@ -1,0 +1,11 @@
+{
+  "kind": "terminal",
+  "command": "sleep 600",
+  "exit_code": null,
+  "stdout": "started\n",
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "duration_ms": 30000,
+  "timed_out": true
+}

@@ -141,15 +141,13 @@ impl SpaceSupervisor {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use crate::org_context::OrgContexts;
+    use crate::space_runtime::SpaceRuntimes;
     use assistant_core::identity::{OrgId, SpaceId};
     use assistant_core::store::{OrgStore as _, Organization, Space, SpaceStore as _};
     use assistant_core::types::agent::OrgConfig;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
     use assistant_storage::{OrgPoolFactory, OrgStorageLayer};
-
-    use crate::bootstrap::AutoDenyConfirmation;
-    use crate::org_context::OrgContexts;
-    use crate::space_runtime::SpaceRuntimes;
 
     use super::*;
 
@@ -172,9 +170,7 @@ mod tests {
                     config,
                     Arc::new(ScriptedLlmProvider::new()),
                 )),
-                Arc::new(AutoDenyConfirmation {
-                    interface_name: "test",
-                }),
+                None,
             ));
             let now = chrono::DateTime::UNIX_EPOCH;
             org_storage

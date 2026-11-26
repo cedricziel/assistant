@@ -35,6 +35,7 @@ pub use assistant_storage::{
     ScheduledTaskStore, SlackActiveThreadStore, WebhookStore, WorkflowStore,
 };
 pub use assistant_storage::{InMemorySkillCatalog, SkillCatalog};
+pub use assistant_storage::{InMemorySurfaceStore, SurfaceStore};
 pub use assistant_tool_executor::{RecordedToolCall, StubToolDispatcher};
 
 pub use crate::fixture::{Fixture, FixtureBuilder};

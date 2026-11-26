@@ -40,6 +40,11 @@ pub enum OrchestratorEvent {
         /// Provider-assigned tool-call ID (e.g. Anthropic `tool_use_id`).
         /// `None` for providers that do not use IDs (Ollama).
         tool_call_id: Option<String>,
+        /// Structured render data from `ToolOutput.data`, capped at
+        /// `TOOL_RESULT_DATA_LIMIT_BYTES` (32 KiB) in the orchestrator.
+        /// `None` when the tool produced none, the data was over the cap, or
+        /// the call was denied. Never reaches the LLM, webhooks or adapters.
+        data: Option<serde_json::Value>,
     },
 
     /// A skill run completed (success or failure).
@@ -109,6 +114,30 @@ pub enum OrchestratorEvent {
         /// The UUID of the audio blob in the server's [`AudioStore`].
         /// Retrieve via `GET /api/audio/{audio_id}`.
         audio_id: String,
+    },
+
+    /// A generative-UI surface was created, or its status changed.
+    ///
+    /// Carries A2UI v1.0 messages untouched in `messages`. A status change
+    /// (`active` to `submitted`) re-emits the event with an empty `messages`
+    /// list. The CLI and A2A projectors render only `fallback_text`.
+    SurfaceUpdate {
+        /// UUID of the surface.
+        surface_id: String,
+        /// Provider-assigned tool-call ID, when the surface came from a tool call.
+        tool_call_id: Option<String>,
+        /// Id of the tool-call message the surface is anchored to.
+        anchor_message_id: String,
+        /// Index of the call within the anchor message.
+        anchor_call_index: u32,
+        /// Human-readable surface title.
+        title: String,
+        /// Plain-text rendering for clients that cannot render the surface.
+        fallback_text: String,
+        /// Surface status: `"active"` or `"submitted"`.
+        status: String,
+        /// A2UI v1.0 messages; empty for a status-only update.
+        messages: Vec<serde_json::Value>,
     },
 }
 
@@ -228,6 +257,7 @@ mod tests {
             arguments: None,
             result: Some("contents".to_string()),
             tool_call_id: Some("call_xyz789".to_string()),
+            data: None,
         };
         match event {
             OrchestratorEvent::ToolResult { tool_call_id, .. } => {
@@ -247,6 +277,7 @@ mod tests {
                 arguments: Some(serde_json::json!({"query": "rust async"})),
                 result: Some("Found results".to_string()),
                 tool_call_id: Some("call_inner_123".to_string()),
+                data: None,
             }),
         };
         match event {

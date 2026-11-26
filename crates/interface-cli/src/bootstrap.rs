@@ -54,7 +54,7 @@ async fn shared_nats_bus(config: &ServerConfig) -> Result<Option<Arc<dyn Message
 
 pub async fn bootstrap(
     home: &Path,
-    confirmation_cb: Arc<dyn ConfirmationCallback>,
+    confirmation_cb: Option<Arc<dyn ConfirmationCallback>>,
     pools: Arc<OrgPoolFactory>,
     server: ServerConfig,
     orgs: Arc<OrgContexts>,

@@ -135,7 +135,8 @@ pub fn select_binary_role(command: Option<&Command>, interface_filtered: bool) -
     }
 }
 
-/// Whether tool confirmations are auto-denied (no terminal interaction).
+/// Whether the process has no confirmation callback, so undecided tool calls
+/// are denied (no terminal interaction).
 pub fn uses_auto_deny_confirmation(command: Option<&Command>, no_repl: bool) -> bool {
     #[cfg(feature = "mcp")]
     if matches!(command, Some(Command::Mcp)) {
