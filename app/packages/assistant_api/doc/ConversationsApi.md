@@ -22,6 +22,7 @@ Method | HTTP request | Description
 [**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
 [**readMcpAppResource**](ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
 [**respondToInteraction**](ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
+[**searchConversations**](ConversationsApi.md#searchconversations) | **GET** /api/conversations/search | Search conversations by title and message text.
 [**sendMessage**](ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [**sendVoiceMessage**](ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, keep it as the user message&#39;s attachment, transcribe it, run through the orchestrator, and stream the response as SSE.
 [**setMessageFeedback**](ConversationsApi.md#setmessagefeedback) | **PUT** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;PUT /api/conversations/{id}/messages/{message_id}/feedback&#x60; — rate a reply.
@@ -618,6 +619,51 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **searchConversations**
+> BuiltList<ConversationSearchSummary> searchConversations(q, limit, xSpaceId)
+
+Search conversations by title and message text.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String q = q_example; // String | Search text, split on whitespace into at most 8 tokens (at most 200 characters). Each token is a prefix of a message word or a substring of the title.
+final int limit = 56; // int | Maximum results (default 20, capped at 50).
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.searchConversations(q, limit, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->searchConversations: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **q** | **String**| Search text, split on whitespace into at most 8 tokens (at most 200 characters). Each token is a prefix of a message word or a substring of the title. | [optional] 
+ **limit** | **int**| Maximum results (default 20, capped at 50). | [optional] 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**BuiltList&lt;ConversationSearchSummary&gt;**](ConversationSearchSummary.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **sendMessage**
 > sendMessage(id, apiSendMessageRequest, xSpaceId)
 
@@ -808,7 +854,7 @@ void (empty response body)
 
 `GET /api/conversations/{id}/runs/{run_id}/events/stream`
 
-Replays stored events from `?since` (default 0), then tails live events if the run is still active. Closes when the run finishes, not at the `done` or `agent_error` frame: events such as `suggestions` follow `done`. A client that disconnects stops the tail at once.  Returns `404` if no events exist for `run_id` and the run is not active (never started, unknown, or pruned after the TTL elapsed).
+Replays stored events from `?since` (default 0), then tails live events if the run is still active. Closes when the run finishes, not at the `done` or `agent_error` frame: events such as `suggestions` follow `done`. A client that disconnects stops the tail at once.  Returns `404` if no events exist for `run_id` and the run is not active (never started, unknown, or pruned after the TTL elapsed).  After `done` the stream may carry one `suggestions` frame (`SseSuggestionsEvent`) with follow-up prompts for the finished turn; it then closes when the run finishes.
 
 ### Example
 ```dart

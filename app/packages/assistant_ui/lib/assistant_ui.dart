@@ -16,10 +16,14 @@ library;
 // export 'src/composer/composer_voice_button.dart'; // slot: chat-element-library 11b
 export 'src/branch_picker.dart';
 export 'src/composer/queued_message_bubble.dart';
+export 'src/conversations/conversation_list_view.dart';
+export 'src/feedback/feedback_buttons.dart';
+export 'src/feedback/feedback_comment_field.dart';
 export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
 export 'src/interactions/approval_card.dart';
 export 'src/interactions/permission_rule_tile.dart';
+export 'src/interactions/question_card.dart';
 export 'src/interactions/unknown_interaction_card.dart';
 export 'src/message_actions.dart';
 export 'src/message_editor.dart';

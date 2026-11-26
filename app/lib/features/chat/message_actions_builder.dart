@@ -18,9 +18,9 @@ import 'read_aloud_action.dart';
 /// Regenerate ([onRegenerate]) for persisted assistant messages, only while no
 /// turn works ([turnWorking] is false while idle and while a turn only waits
 /// for the user). [onRegenerateWith] adds a model menu when [regenerateModels]
-/// has two or more entries. A [branch] puts a [BranchPicker] in the leading
-/// slot, wired to [onSwitchBranch] with the new zero-based index; the picker is
-/// busy while [turnWorking]. All of these stay off until their callbacks are
+/// has two or more entries. A message with `branch` gets a [BranchPicker] in
+/// the leading slot, wired to [onSwitchBranch] with the id of the sibling
+/// version to show; the picker is busy while [turnWorking]. All of these stay off until their callbacks are
 /// supplied.
 Widget buildMessageActions({
   required ChatMessage message,
@@ -34,12 +34,11 @@ Widget buildMessageActions({
   Widget? feedback,
   bool isPersisted = false,
   bool turnWorking = false,
-  ({int index, int count})? branch,
   VoidCallback? onEdit,
   VoidCallback? onRegenerate,
   ValueChanged<String>? onRegenerateWith,
   List<RegenerateModel> regenerateModels = const [],
-  ValueChanged<int>? onSwitchBranch,
+  ValueChanged<String>? onSwitchBranch,
 }) {
   final isUser = message.isUser;
   final alignment = isUser ? WrapAlignment.end : WrapAlignment.start;
@@ -60,6 +59,7 @@ Widget buildMessageActions({
 
   final hasContent = message.content.isNotEmpty;
   final isFailed = message.status == MessageStatus.failed;
+  final branch = message.branch;
   final canBranch = isPersisted && !turnWorking;
   final showEdit = canBranch && isUser && onEdit != null;
   final showRegenerate = canBranch && !isUser && onRegenerate != null;
@@ -81,8 +81,10 @@ Widget buildMessageActions({
                 index: branch.index,
                 count: branch.count,
                 busy: turnWorking,
-                onPrevious: () => onSwitchBranch(branch.index - 1),
-                onNext: () => onSwitchBranch(branch.index + 1),
+                onPrevious: () =>
+                    onSwitchBranch(branch.siblingIds[branch.index - 1]),
+                onNext: () =>
+                    onSwitchBranch(branch.siblingIds[branch.index + 1]),
               )
             : null,
         actions: [

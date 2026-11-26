@@ -10,11 +10,15 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
+  'ConversationListView',
+  'FeedbackButtons',
+  'FeedbackCommentField',
   'MessageActionButton',
   'MessageActions',
   'MessageEditor',
   'MessageTimingIndicator',
   'PermissionRuleTile',
+  'QuestionCard',
   'QueuedMessageBubble',
   'RegenerateMenuButton',
   'StarterPrompts',
@@ -32,7 +36,6 @@ const List<String> kAssistantUiElements = [
   // 'CompactExpandable', // slot: tool-result-renderers C2
   // 'Composer', // slot: chat-element-library 11a
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
-  // 'ConversationListView', // slot: chat-element-library 12
   // 'ConversationSearchResultsView', // slot: conversation-list-management 14
   // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
@@ -46,7 +49,6 @@ const List<String> kAssistantUiElements = [
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
-  // 'QuestionCard', // slot: tool-approval-prompts 14a
   // 'SlashCommandMenu', // slot: chat-element-library 11a
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'SubagentBody', // slot: chat-element-library 7b

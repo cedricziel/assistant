@@ -21,12 +21,11 @@ Widget _wrap(
   Widget? feedback,
   bool isPersisted = false,
   bool turnWorking = false,
-  ({int index, int count})? branch,
   VoidCallback? onEdit,
   VoidCallback? onRegenerate,
   ValueChanged<String>? onRegenerateWith,
   List<RegenerateModel> regenerateModels = const [],
-  ValueChanged<int>? onSwitchBranch,
+  ValueChanged<String>? onSwitchBranch,
 }) => MaterialApp(
   home: Scaffold(
     body: Align(
@@ -42,7 +41,6 @@ Widget _wrap(
         feedback: feedback,
         isPersisted: isPersisted,
         turnWorking: turnWorking,
-        branch: branch,
         onEdit: onEdit,
         onRegenerate: onRegenerate,
         onRegenerateWith: onRegenerateWith,
@@ -53,12 +51,16 @@ Widget _wrap(
   ),
 );
 
-ChatMessage _user({List<ChatAttachment>? attachments}) => ChatMessage(
-  id: 'u',
-  role: 'user',
-  content: 'A question',
-  attachments: attachments,
-);
+ChatMessage _user({List<ChatAttachment>? attachments, BranchInfo? branch}) =>
+    ChatMessage(
+      id: 'u',
+      role: 'user',
+      content: 'A question',
+      attachments: attachments,
+      branch: branch,
+    );
+
+const _branch = BranchInfo(count: 3, index: 1, siblingIds: ['m1', 'm2', 'm3']);
 
 const _models = [
   RegenerateModel(name: 'model-a', isDefault: true),
@@ -67,6 +69,7 @@ const _models = [
 
 ChatMessage _assistant({
   String content = 'A reply',
+  BranchInfo? branch,
   MessageStatus status = MessageStatus.ok,
   bool isStreaming = false,
 }) => ChatMessage(
@@ -75,6 +78,7 @@ ChatMessage _assistant({
   content: content,
   status: status,
   isStreaming: isStreaming,
+  branch: branch,
 );
 
 double _left(WidgetTester tester, String key) =>
@@ -344,12 +348,11 @@ void main() {
     testWidgets('leading is a BranchPicker when the message has a branch', (
       tester,
     ) async {
-      final switched = <int>[];
+      final switched = <String>[];
       await tester.pumpWidget(
         _wrap(
-          _assistant(),
+          _assistant(branch: _branch),
           isPersisted: true,
-          branch: (index: 1, count: 3),
           onSwitchBranch: switched.add,
         ),
       );
@@ -362,16 +365,21 @@ void main() {
       );
       picker.onPrevious();
       picker.onNext();
-      expect(switched, [0, 2]);
+      expect(switched, ['m1', 'm3']);
     });
 
     testWidgets('the picker is busy only while a turn works', (tester) async {
       await tester.pumpWidget(
         _wrap(
-          _user(),
+          _user(
+            branch: const BranchInfo(
+              count: 2,
+              index: 0,
+              siblingIds: ['a', 'b'],
+            ),
+          ),
           isPersisted: true,
           turnWorking: true,
-          branch: (index: 0, count: 2),
           onSwitchBranch: (_) {},
         ),
       );
