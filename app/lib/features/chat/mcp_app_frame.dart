@@ -7,26 +7,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../../shared/platform/adaptive_dialog.dart';
-import 'mcp_app_bridge.dart';
-import 'mcp_app_provider.dart';
-import 'mcp_app_surface.dart';
+import '../../shared/platform/adaptive_dialog.dart';
+import 'mcp_app/mcp_app_bridge.dart';
+import 'mcp_app/mcp_app_provider.dart';
+import 'mcp_app/mcp_app_surface.dart';
 
 const _initialHeight = 160.0;
 const _minHeight = 48.0;
 const _maxHeight = 800.0;
 
-/// An MCP App rendered in a sandbox below its tool call, marked as
-/// third-party content from its server.
-class McpAppFrame extends ConsumerStatefulWidget {
-  const McpAppFrame({
-    super.key,
-    required this.app,
-    required this.toolCall,
-    this.conversationId,
-  });
+/// The MCP App of [toolCall], rendered in a sandbox below its chip and marked
+/// as third-party content from its server. Renders nothing for a tool call
+/// without an app.
+class McpAppFrame extends StatelessWidget {
+  const McpAppFrame({super.key, required this.toolCall, this.conversationId});
 
-  final McpApp app;
   final ToolCallRecord toolCall;
 
   /// The conversation the tool call belongs to; without it the app cannot
@@ -34,10 +29,33 @@ class McpAppFrame extends ConsumerStatefulWidget {
   final String? conversationId;
 
   @override
-  ConsumerState<McpAppFrame> createState() => _McpAppFrameState();
+  Widget build(BuildContext context) {
+    final app = toolCall.app;
+    if (app == null) return const SizedBox.shrink();
+    return _McpAppFrameBody(
+      app: app,
+      toolCall: toolCall,
+      conversationId: conversationId,
+    );
+  }
 }
 
-class _McpAppFrameState extends ConsumerState<McpAppFrame> {
+class _McpAppFrameBody extends ConsumerStatefulWidget {
+  const _McpAppFrameBody({
+    required this.app,
+    required this.toolCall,
+    required this.conversationId,
+  });
+
+  final McpApp app;
+  final ToolCallRecord toolCall;
+  final String? conversationId;
+
+  @override
+  ConsumerState<_McpAppFrameBody> createState() => _McpAppFrameState();
+}
+
+class _McpAppFrameState extends ConsumerState<_McpAppFrameBody> {
   late final McpAppSurface _surface;
   McpAppBridge? _bridge;
   double _height = _initialHeight;

@@ -9,7 +9,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
 import 'chat_provider.dart';
 import '../../shared/theme/legacy_theme.dart';
 import 'markdown_link_handler.dart';
-import 'mcp_app/mcp_app_frame.dart';
+import 'mcp_app_frame.dart';
 
 /// A streaming-aware timeline entry for one thinking, tool call or subagent
 /// step in the chat timeline.
@@ -238,18 +238,12 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
       forceExpand: record.status == ToolCallStatus.error,
       showInline: showArgs,
     );
-    final app = record.app;
-    if (app == null) return chip;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         chip,
-        McpAppFrame(
-          app: app,
-          toolCall: record,
-          conversationId: widget.conversationId,
-        ),
+        McpAppFrame(toolCall: record, conversationId: widget.conversationId),
       ],
     );
   }

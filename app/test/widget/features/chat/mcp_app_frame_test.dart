@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'package:assistant_app/features/chat/mcp_app/mcp_app_bridge.dart';
-import 'package:assistant_app/features/chat/mcp_app/mcp_app_frame.dart';
+import 'package:assistant_app/features/chat/mcp_app_frame.dart';
 import 'package:assistant_app/features/chat/mcp_app/mcp_app_provider.dart';
 
 import '../../../support/fake_mcp_app.dart';
@@ -38,11 +38,7 @@ Future<FakeMcpAppBackend> _pump(WidgetTester tester, {Widget? child}) async {
         home: Scaffold(
           body:
               child ??
-              McpAppFrame(
-                app: _app,
-                toolCall: _record(),
-                conversationId: 'conv-1',
-              ),
+              McpAppFrame(toolCall: _record(), conversationId: 'conv-1'),
         ),
       ),
     ),
@@ -81,6 +77,20 @@ void main() {
       expect(find.text('Third-party app from weather'), findsOneWidget);
 
       await _unmount(tester);
+    });
+
+    testWidgets('renders nothing for a tool call without an app', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        child: McpAppFrame(
+          toolCall: ToolCallRecord(toolName: 'bash', status: ToolCallStatus.ok),
+        ),
+      );
+
+      expect(find.byKey(fakeMcpAppViewKey), findsNothing);
+      expect(FakeMcpAppSurface.created, isEmpty);
     });
 
     testWidgets('grows to the height the app reports', (tester) async {
