@@ -5,6 +5,8 @@
 
 mod http;
 mod identity;
+mod listeners;
+mod prompts;
 mod resources;
 mod server;
 
@@ -23,6 +25,7 @@ use tracing::info;
 
 pub use http::{RequestBoundServer, streamable_http_service};
 pub use identity::with_identity;
+pub use listeners::ListChangeListeners;
 pub use server::AssistantMcpServer;
 
 /// Serve MCP over the process's stdin and stdout until the client disconnects.
@@ -51,6 +54,7 @@ pub async fn run(
         registry.clone(),
         policy,
         user_skills_dir,
+        ListChangeListeners::default(),
     )
     .with_install_registry(registry);
 

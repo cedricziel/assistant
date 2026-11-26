@@ -285,7 +285,7 @@ impl CommandRegistry {
     }
 
     async fn cmd_compact(&self, ctx: CommandContext) -> CommandResult {
-        let conv_store = ctx.orchestrator.storage.conversation_store();
+        let summaries = ctx.orchestrator.storage.conversation_summary_store();
 
         // Compact the summary-applied history, so an existing summary is
         // folded into the new one rather than the whole path re-summarised.
@@ -306,7 +306,7 @@ impl CommandRegistry {
             &mut history,
             &ctx.orchestrator.llm,
             &ctx.orchestrator.compaction_config,
-            Some((&conv_store, ctx.conversation_id)),
+            Some((&summaries, ctx.conversation_id)),
         )
         .await;
 

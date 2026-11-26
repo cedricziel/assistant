@@ -7,7 +7,7 @@
 // Allow their use until that crate is published on crates.io.
 #![allow(deprecated)]
 
-use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::metrics::{Counter, Histogram, Meter};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 use opentelemetry_semantic_conventions::attribute::{
@@ -50,6 +50,8 @@ pub struct MetricsRecorder {
     pub submit_result_unmatched_count: Counter<u64>,
     /// `assistant.slack.duplicate_event_total` — duplicate Slack events dropped.
     pub slack_duplicate_event_count: Counter<u64>,
+    /// `assistant.feedback.count` — user feedback events (not current votes).
+    pub feedback_count: Counter<u64>,
 }
 
 impl Default for MetricsRecorder {
@@ -61,8 +63,11 @@ impl Default for MetricsRecorder {
 impl MetricsRecorder {
     /// Create all instruments from the global meter provider.
     pub fn new() -> Self {
-        let meter = global::meter("assistant-runtime");
+        Self::with_meter(&global::meter("assistant-runtime"))
+    }
 
+    /// Create all instruments from `meter`.
+    pub fn with_meter(meter: &Meter) -> Self {
         Self {
             // -- GenAI semconv -----------------------------------------------
             token_usage: meter
@@ -135,6 +140,12 @@ impl MetricsRecorder {
             slack_duplicate_event_count: meter
                 .u64_counter("assistant.slack.duplicate_event_total")
                 .with_description("Number of duplicate Slack events dropped")
+                .with_unit("{event}")
+                .build(),
+
+            feedback_count: meter
+                .u64_counter("assistant.feedback.count")
+                .with_description("Number of user feedback events on assistant replies")
                 .with_unit("{event}")
                 .build(),
         }
@@ -275,5 +286,67 @@ impl MetricsRecorder {
             KeyValue::new("agent.id", agent_id.to_string()),
         ];
         self.slack_duplicate_event_count.add(1, &attrs);
+    }
+
+    /// Record a user feedback event. `rating` is `positive`, `negative` or
+    /// `cleared`.
+    pub fn record_feedback(&self, agent_id: &str, rating: &str) {
+        let attrs = [
+            KeyValue::new("rating", rating.to_string()),
+            KeyValue::new("agent_id", agent_id.to_string()),
+        ];
+        self.feedback_count.add(1, &attrs);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use opentelemetry::metrics::MeterProvider as _;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+
+    use super::*;
+
+    #[test]
+    fn record_feedback_counts_events_by_rating_and_agent() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(exporter.clone()).build())
+            .build();
+        let recorder = MetricsRecorder::with_meter(&provider.meter("test"));
+
+        recorder.record_feedback("default", "negative");
+        recorder.record_feedback("default", "negative");
+        recorder.record_feedback("default", "cleared");
+        provider.force_flush().expect("flush");
+
+        let mut points = Vec::new();
+        for rm in exporter.get_finished_metrics().expect("metrics") {
+            for sm in rm.scope_metrics() {
+                for m in sm
+                    .metrics()
+                    .filter(|m| m.name() == "assistant.feedback.count")
+                {
+                    if let AggregatedMetrics::U64(MetricData::Sum(sum)) = m.data() {
+                        for dp in sum.data_points() {
+                            let attr = |k: &str| {
+                                dp.attributes()
+                                    .find(|kv| kv.key.as_str() == k)
+                                    .map(|kv| kv.value.to_string())
+                            };
+                            points.push((attr("rating"), attr("agent_id"), dp.value()));
+                        }
+                    }
+                }
+            }
+        }
+        points.sort();
+        assert_eq!(
+            points,
+            vec![
+                (Some("cleared".into()), Some("default".into()), 1),
+                (Some("negative".into()), Some("default".into()), 2),
+            ]
+        );
     }
 }

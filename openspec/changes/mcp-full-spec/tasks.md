@@ -23,10 +23,10 @@ Each numbered group is one PR in the stack, in order.
 
 ## 4. Prompts, completions, list changes, progress and cancellation (PR 4)
 
-- [ ] 4.1 Add failing tests for `prompts/list`, `prompts/get` with and without `input`, and `completion/complete` for prompt names and the skill template; confirm red
-- [ ] 4.2 Implement prompts and completions from the skill catalog and verify the tests pass
-- [ ] 4.3 Add a failing test: a client listening for tool and prompt list changes receives notifications after `install-skill`; implement change fan-out and verify it passes
-- [ ] 4.4 Add failing tests for `run-prompt` progress notifications with a progress token and turn cancellation on request cancel (using `StubOrchestrationEngine`); implement and verify they pass
+- [x] 4.1 Add failing tests for `prompts/list`, `prompts/get` with and without `input`, and `completion/complete` for prompt names and the skill template; confirm red
+- [x] 4.2 Implement prompts and completions from the skill catalog and verify the tests pass
+- [x] 4.3 Add a failing test: a client listening for tool and prompt list changes receives notifications after `install-skill`; implement change fan-out and verify it passes
+- [x] 4.4 Add failing tests for `run-prompt` progress notifications with a progress token and turn cancellation on request cancel (using `StubOrchestrationEngine`); implement and verify they pass
 
 ## 5. Audience-bound tokens and `mcp:execute` (PR 5)
 
@@ -84,7 +84,7 @@ Each numbered group is one PR in the stack, in order.
 
 ## 13. Docs and ADR (PR 13)
 
-- [ ] 13.1 Add `docs/adr/adr-0017-mcp-on-rmcp.md` covering the rmcp migration, audience-bound tokens and the opaque-origin app sandbox
+- [x] 13.1 Add `docs/adr/adr-0022-mcp-on-rmcp.md` (0017 was taken) covering the rmcp migration, audience-bound tokens and the opaque-origin app sandbox
 - [ ] 13.2 Write `docs/mcp.md` (stdio and HTTP setup, OAuth/DCR and API keys, tasks, remote skills, MCP Apps and their limitation) and update `docs/tool-permissions.md`, `docs/authentication.md` and `docs/operations/configuration.md`; check every claim against the code
 
 ## 14. Verification

@@ -5,6 +5,7 @@ pub mod command_registry;
 pub(crate) mod compaction;
 pub(crate) mod conversation_indexer;
 pub mod decision_model;
+pub mod feedback_telemetry;
 pub mod follow_ups;
 pub(crate) mod history;
 pub mod interaction;
@@ -31,6 +32,7 @@ pub use adapter_registry::AdapterRegistry;
 pub use bootstrap::spawn_memory_indexer;
 pub use channel_runner::ChannelRunner;
 pub use command_registry::{CommandContext, CommandRegistry};
+pub use feedback_telemetry::{FeedbackTelemetrySink, OtelFeedbackTelemetrySink};
 pub use interface_runner::InterfaceRunner;
 pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;
@@ -40,7 +42,7 @@ pub use orchestrator::{
     TURN_CANCELLED_MARKER, TurnLease, TurnMode, TurnRegistry, TurnResult,
 };
 pub use org_context::{OrgConfigAdjust, OrgContext, OrgContexts, build_llm};
-pub use otel_spans::start_conversation_context;
+pub use otel_spans::{FeedbackLabel, FeedbackTelemetry, start_conversation_context};
 pub use scheduler::spawn_scheduler;
 pub use space_runtime::{SpaceRuntime, SpaceRuntimes};
 pub use space_supervisor::{SpaceRef, SpaceSupervisor, SpaceTaskSpawner};

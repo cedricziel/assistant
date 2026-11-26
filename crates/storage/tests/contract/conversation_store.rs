@@ -314,23 +314,6 @@ async fn delete_conversation_removes_history(store: Box<dyn ConversationStore>) 
     assert!(history.is_empty(), "history is cascaded on delete");
 }
 
-async fn replace_history_overwrites(store: Box<dyn ConversationStore>) {
-    let conv = store.create_conversation(Some("R")).await.unwrap();
-    store
-        .save_message(&user_msg(conv.id, "old", 0))
-        .await
-        .unwrap();
-    let replacement = vec![
-        user_msg(conv.id, "new1", 0),
-        assistant_msg(conv.id, "new2", 0),
-    ];
-    store.replace_history(conv.id, &replacement).await.unwrap();
-    let loaded = store.load_history(conv.id).await.unwrap();
-    assert_eq!(loaded.len(), 2);
-    assert_eq!(loaded[0].content, "new1");
-    assert_eq!(loaded[1].content, "new2");
-}
-
 async fn sequential_saves_form_a_chain_ending_at_the_leaf(store: Box<dyn ConversationStore>) {
     let conv = store.create_conversation(Some("Chain")).await.unwrap();
     let a = user_msg(conv.id, "a", 0);
@@ -403,30 +386,6 @@ async fn deleting_a_long_chain_succeeds(store: Box<dyn ConversationStore>) {
     store.delete_conversation(conv.id).await.unwrap();
     assert!(store.get_conversation(conv.id).await.unwrap().is_none());
     assert!(store.load_history(conv.id).await.unwrap().is_empty());
-}
-
-async fn replace_history_rechains_the_new_rows(store: Box<dyn ConversationStore>) {
-    let conv = store.create_conversation(Some("Rechain")).await.unwrap();
-    for i in 0..3 {
-        store
-            .save_message(&user_msg(conv.id, &format!("old{i}"), i))
-            .await
-            .unwrap();
-    }
-    let replacement = vec![
-        user_msg(conv.id, "new1", 0),
-        assistant_msg(conv.id, "new2", 0),
-        user_msg(conv.id, "new3", 0),
-    ];
-    store.replace_history(conv.id, &replacement).await.unwrap();
-
-    let loaded = store.load_history(conv.id).await.unwrap();
-    let ids: Vec<Uuid> = loaded.iter().map(|m| m.id).collect();
-    let expected: Vec<Uuid> = replacement.iter().map(|m| m.id).collect();
-    assert_eq!(ids, expected, "history equals the re-inserted rows");
-    assert_eq!(loaded[0].parent_id, None, "the first kept row is a root");
-    assert_eq!(loaded[1].parent_id, Some(replacement[0].id));
-    assert_eq!(loaded[2].parent_id, Some(replacement[1].id));
 }
 
 async fn tool_result_metadata_roundtrips(store: Box<dyn ConversationStore>) {
@@ -790,23 +749,6 @@ async fn finish_reason_round_trips(store: Box<dyn ConversationStore>) {
     assert_eq!(single.finish_reason, Some(MessageFinishReason::Cancelled));
 }
 
-async fn replace_history_keeps_finish_reason(store: Box<dyn ConversationStore>) {
-    let conv = store.create_conversation(Some("t")).await.unwrap();
-    let mut stopped = assistant_msg(conv.id, "partial", 0);
-    stopped.finish_reason = Some(MessageFinishReason::Cancelled);
-    store
-        .replace_history(conv.id, std::slice::from_ref(&stopped))
-        .await
-        .unwrap();
-
-    let history = store.load_history(conv.id).await.unwrap();
-    assert_eq!(
-        history[0].finish_reason,
-        Some(MessageFinishReason::Cancelled),
-        "replace_history preserves the finish reason"
-    );
-}
-
 async fn model_round_trips(store: Box<dyn ConversationStore>) {
     let conv = store.create_conversation(Some("t")).await.unwrap();
     let user = user_msg(conv.id, "hi", 0);
@@ -832,19 +774,6 @@ async fn model_round_trips(store: Box<dyn ConversationStore>) {
     assert_eq!(single.model.as_deref(), Some("claude-opus-4"));
 }
 
-async fn replace_history_keeps_model(store: Box<dyn ConversationStore>) {
-    let conv = store.create_conversation(Some("t")).await.unwrap();
-    let mut answered = assistant_msg(conv.id, "full", 0);
-    answered.model = Some("claude-opus-4".to_string());
-    store
-        .replace_history(conv.id, std::slice::from_ref(&answered))
-        .await
-        .unwrap();
-
-    let history = store.load_history(conv.id).await.unwrap();
-    assert_eq!(history[0].model.as_deref(), Some("claude-opus-4"));
-}
-
 macro_rules! contract_tests {
     ($store_name:ident, $constructor:expr) => {
         mod $store_name {
@@ -856,18 +785,8 @@ macro_rules! contract_tests {
             }
 
             #[tokio::test]
-            async fn t_replace_history_keeps_model() {
-                replace_history_keeps_model($constructor).await;
-            }
-
-            #[tokio::test]
             async fn t_finish_reason_round_trips() {
                 finish_reason_round_trips($constructor).await;
-            }
-
-            #[tokio::test]
-            async fn t_replace_history_keeps_finish_reason() {
-                replace_history_keeps_finish_reason($constructor).await;
             }
 
             #[tokio::test]
@@ -966,11 +885,6 @@ macro_rules! contract_tests {
             }
 
             #[tokio::test]
-            async fn t_replace_history_overwrites() {
-                replace_history_overwrites($constructor).await;
-            }
-
-            #[tokio::test]
             async fn t_sequential_saves_form_a_chain_ending_at_the_leaf() {
                 sequential_saves_form_a_chain_ending_at_the_leaf($constructor).await;
             }
@@ -993,11 +907,6 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_deleting_a_long_chain_succeeds() {
                 deleting_a_long_chain_succeeds($constructor).await;
-            }
-
-            #[tokio::test]
-            async fn t_replace_history_rechains_the_new_rows() {
-                replace_history_rechains_the_new_rows($constructor).await;
             }
 
             #[tokio::test]
