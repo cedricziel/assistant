@@ -336,7 +336,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(AlertDialog), findsOneWidget);
-      await tester.enterText(find.byType(TextField), 'Quarterly plan');
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        'Quarterly plan',
+      );
       await tester.pump();
       await tester.tap(find.widgetWithText(TextButton, 'Rename'));
       await tester.pumpAndSettle();
