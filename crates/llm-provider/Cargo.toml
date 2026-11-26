@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Consolidated LLM provider implementations (Ollama, Anthropic, OpenAI, Moonshot)"
 
 [dependencies]
+assistant-audio      = { path = "../audio" }
 assistant-core       = { path = "../core" }
 async-trait          = { workspace = true }
 anyhow               = { workspace = true }
