@@ -58,6 +58,15 @@ pub struct Responder<'a> {
     pub run_id: &'a str,
 }
 
+impl Responder<'_> {
+    /// Whether `row` belongs to this caller, conversation and run.
+    pub fn owns(&self, row: &InteractionRow) -> bool {
+        row.user_id == self.user_id
+            && row.conversation_id == self.conversation_id
+            && row.run_id == self.run_id
+    }
+}
+
 /// Why [`InteractionBroker::respond`] refused.
 #[derive(Debug)]
 pub enum RespondError {
@@ -272,11 +281,7 @@ impl InteractionBroker {
             .store
             .get(interaction_id)
             .await?
-            .filter(|r| {
-                r.user_id == who.user_id
-                    && r.conversation_id == who.conversation_id
-                    && r.run_id == who.run_id
-            })
+            .filter(|r| who.owns(r))
             .ok_or(RespondError::NotFound)?;
 
         if row.status != InteractionStatus::Pending {
