@@ -21,8 +21,9 @@ import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
 import 'attachment_provider.dart';
 import 'chat_announcer.dart';
+import 'chat_empty_starters.dart';
+import 'chat_markdown_config.dart';
 import 'chat_provider.dart';
-import 'chat_input_row.dart';
 import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
@@ -31,6 +32,7 @@ import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
 import 'reconnect_banner.dart';
 import 'streaming_timeline_entry.dart';
+import 'voice_recorder_button.dart';
 
 /// Feature flag for the stall-state "Skip" button that triggers
 /// `POST /api/conversations/{c}/turns/{t}/cancel`.
@@ -368,7 +370,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // The inline list / drawer decision compares the chat pane's own width
     // (the window minus the nav sidebar), so it sits above the Scaffold,
     // which it drives (body, app bar leading, drawer).
-    return LayoutBuilder(
+    final thread = LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= Breakpoints.wide;
         final threadWidth =
@@ -396,6 +398,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               : Drawer(
                   child: SafeArea(
                     child: ConversationListPane(
+                      selectedId: widget.conversationId,
                       onConversationSelected: () => Navigator.of(context).pop(),
                     ),
                   ),
@@ -417,7 +420,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           ),
                         ),
                       ),
-                      child: const ConversationListPane(),
+                      child: ConversationListPane(
+                        selectedId: widget.conversationId,
+                      ),
                     ),
                   ),
 
@@ -467,7 +472,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               children: [
                                 chatState.messages.isEmpty &&
                                         chatState.pendingQueue.isEmpty
-                                    ? const ThreadEmptyState()
+                                    ? const ChatEmptyStarters()
                                     : ListView.builder(
                                         controller: _scrollController,
                                         padding: const EdgeInsets.symmetric(
@@ -614,34 +619,53 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ),
 
                         // Input row.
-                        ChatInputRow(
+                        Composer(
                           controller: _inputController,
                           focusNode: _inputFocus,
                           isSending: chatState.isSending,
                           isStopping: chatState.isStopping,
                           pendingQueueCount: chatState.pendingQueue.length,
                           pendingAttachments: pendingAttachments,
-                          capabilities: capabilities,
                           commands: commands,
+                          showVoice: capabilities.voiceSend,
+                          voiceButton: VoiceRecorderButton(
+                            onRecordingComplete: _sendVoiceMessage,
+                            onError: (err) {
+                              ScaffoldMessenger.of(context)
+                                  .showSnackBar(SnackBar(content: Text(err)));
+                            },
+                          ),
+                          inputBuilder:
+                              (
+                                context,
+                                controller,
+                                focusNode,
+                                placeholder,
+                                onSubmit,
+                              ) => AdaptiveTextField(
+                                key: const Key('message_input'),
+                                controller: controller,
+                                focusNode: focusNode,
+                                placeholder: placeholder,
+                                cursorColor: Theme.of(context)
+                                    .colorScheme
+                                    .primary,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                minLines: 1,
+                                maxLines: 6,
+                                textInputAction: TextInputAction.send,
+                                onSubmitted: (_) => onSubmit(),
+                              ),
                           onSend: _sendMessage,
                           onStop: () =>
                               ref.read(chatProvider.notifier).stopTurn(),
-                          onVoiceRecorded: _sendVoiceMessage,
                           onPickImage: _pickImages,
                           onRemoveAttachment: (i) => ref
                               .read(pendingAttachmentsProvider.notifier)
                               .removeAt(i),
-                          onPasteImage: (bytes) {
-                            ref
-                                .read(pendingAttachmentsProvider.notifier)
-                                .add(
-                                  PendingAttachment(
-                                    bytes: bytes,
-                                    filename: 'pasted_image.png',
-                                    mimeType: 'image/png',
-                                  ),
-                                );
-                          },
                         ),
                       ],
                     ),
@@ -653,5 +677,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         );
       },
     );
+    return ChatMarkdownConfig(child: thread);
   }
 }

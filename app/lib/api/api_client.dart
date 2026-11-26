@@ -348,6 +348,7 @@ class ApiClient {
         return ServerCapabilities(
           voiceSend: data.voiceSend,
           voiceReceive: data.voiceReceive,
+          linkHosts: data.ui.linkHosts.toList(),
         );
       }
     } catch (_) {

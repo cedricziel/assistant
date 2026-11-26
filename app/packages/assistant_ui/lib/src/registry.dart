@@ -10,7 +10,12 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
+  'ChatMarkdownScope',
   'CodeBlock',
+  'CodeDiffResultView',
+  'CodeFileResultView',
+  'CompactExpandable',
+  'Composer',
   'ConversationListView',
   'ConversationSearchResultsView',
   'FeedbackButtons',
@@ -24,9 +29,12 @@ const List<String> kAssistantUiElements = [
   'PermissionRuleTile',
   'QuestionCard',
   'QueuedMessageBubble',
+  'RegenerateMenuButton',
+  'SlashCommandMenu',
   'StarterPrompts',
   'SuggestionChips',
   'SurfaceFrame',
+  'ThinkingBody',
   'ThreadDensityScope',
   'ThreadEmptyState',
   'ThreadErrorBanner',
@@ -39,11 +47,7 @@ const List<String> kAssistantUiElements = [
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
   // 'ChatThreadLayout', // slot: chat-element-library 10
-  // 'CodeDiffResultView', // slot: tool-result-renderers C7
-  // 'CodeFileResultView', // slot: tool-result-renderers C7
   // 'CommandBody', // slot: chat-element-library 7b
-  // 'CompactExpandable', // slot: tool-result-renderers C2
-  // 'Composer', // slot: chat-element-library 11a
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
   // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
@@ -55,12 +59,9 @@ const List<String> kAssistantUiElements = [
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
-  // 'RegenerateMenuButton', // slot: message-branching 10
-  // 'SlashCommandMenu', // slot: chat-element-library 11a
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
-  // 'ThinkingBody', // slot: chat-element-library 7a
   // 'ThreadViewport', // slot: chat-element-library 10
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c

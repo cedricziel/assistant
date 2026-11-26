@@ -7,6 +7,7 @@ part of 'turn_state.dart';
 // **************************************************************************
 
 const TurnState _$running = const TurnState._('running');
+const TurnState _$awaitingInput = const TurnState._('awaitingInput');
 const TurnState _$completed = const TurnState._('completed');
 const TurnState _$errored = const TurnState._('errored');
 const TurnState _$unknown = const TurnState._('unknown');
@@ -17,6 +18,8 @@ TurnState _$valueOf(String name) {
   switch (name) {
     case 'running':
       return _$running;
+    case 'awaitingInput':
+      return _$awaitingInput;
     case 'completed':
       return _$completed;
     case 'errored':
@@ -32,6 +35,7 @@ TurnState _$valueOf(String name) {
 
 final BuiltSet<TurnState> _$values = BuiltSet<TurnState>(const <TurnState>[
   _$running,
+  _$awaitingInput,
   _$completed,
   _$errored,
   _$unknown,
@@ -41,6 +45,7 @@ final BuiltSet<TurnState> _$values = BuiltSet<TurnState>(const <TurnState>[
 class _$TurnStateMeta {
   const _$TurnStateMeta();
   TurnState get running => _$running;
+  TurnState get awaitingInput => _$awaitingInput;
   TurnState get completed => _$completed;
   TurnState get errored => _$errored;
   TurnState get unknown => _$unknown;
@@ -59,6 +64,7 @@ Serializer<TurnState> _$turnStateSerializer = _$TurnStateSerializer();
 class _$TurnStateSerializer implements PrimitiveSerializer<TurnState> {
   static const Map<String, Object> _toWire = const <String, Object>{
     'running': 'running',
+    'awaitingInput': 'awaiting_input',
     'completed': 'completed',
     'errored': 'errored',
     'unknown': 'unknown',
@@ -66,6 +72,7 @@ class _$TurnStateSerializer implements PrimitiveSerializer<TurnState> {
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'running': 'running',
+    'awaiting_input': 'awaitingInput',
     'completed': 'completed',
     'errored': 'errored',
     'unknown': 'unknown',

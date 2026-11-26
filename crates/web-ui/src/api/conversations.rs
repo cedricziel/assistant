@@ -205,6 +205,10 @@ pub struct ConversationDetail {
     pub messages: Vec<MessageSummary>,
     /// Generative UI surfaces anchored on the returned messages.
     pub surfaces: Vec<SurfaceSummary>,
+    /// Every interaction of the conversation (tool approvals, questions), in
+    /// creation order. Includes those of runs on inactive branches; the client
+    /// decides what to show.
+    pub interactions: Vec<super::interactions::InteractionDetail>,
 }
 
 /// Summary of a single tool invocation within an assistant message.
@@ -865,6 +869,13 @@ pub(crate) async fn conversation_detail(
         }
     };
 
+    let interactions = super::interactions::conversation_interactions(ctx, state, conv_id, None)
+        .await
+        .unwrap_or_else(|e| {
+            warn!(error = %e, "Failed to load interactions for conversation");
+            Vec::new()
+        });
+
     // The caller's feedback for the whole conversation, in one query.
     let mut feedback_by_msg: HashMap<Uuid, MessageFeedbackSummary> = ctx
         .storage
@@ -933,6 +944,7 @@ pub(crate) async fn conversation_detail(
         updated_at: conv.updated_at,
         messages,
         surfaces,
+        interactions,
     }
 }
 
@@ -1747,6 +1759,89 @@ mod tests {
         let feedback = &json["messages"][0]["feedback"];
         assert_eq!(feedback["rating"], "positive");
         assert!(feedback.get("comment").is_none(), "no comment key");
+    }
+
+    #[tokio::test]
+    async fn get_conversation_lists_all_interactions_in_creation_order() {
+        use assistant_storage::{InteractionStatus, InteractionStore as _, NewInteraction};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Test")).await.unwrap();
+        let interactions = storage.interaction_store();
+
+        // Two runs (one may be on an inactive branch), one answered and one open.
+        let mut ids = Vec::new();
+        for kind in ["tool_approval", "question"] {
+            let id = uuid::Uuid::new_v4().to_string();
+            interactions
+                .create(NewInteraction {
+                    id: id.clone(),
+                    conversation_id: conv.id.to_string(),
+                    run_id: uuid::Uuid::new_v4().to_string(),
+                    user_id: "system".into(),
+                    kind: kind.into(),
+                    tool_call_id: None,
+                    request: serde_json::json!({"tool_name": "bash"}),
+                    expires_at: Utc::now() + chrono::Duration::minutes(10),
+                })
+                .await
+                .unwrap();
+            ids.push(id);
+        }
+        interactions
+            .resolve_if_pending(
+                &ids[0],
+                InteractionStatus::Resolved,
+                Some(&serde_json::json!({"decision": "allow_once"})),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let listed = json["interactions"].as_array().unwrap();
+        assert_eq!(listed.len(), 2, "{json}");
+        assert_eq!(listed[0]["interaction_id"], ids[0]);
+        assert_eq!(listed[0]["status"], "resolved");
+        assert_eq!(listed[1]["interaction_id"], ids[1]);
+        assert_eq!(listed[1]["status"], "pending");
+        assert_eq!(listed[1]["kind"], "question");
+    }
+
+    #[tokio::test]
+    async fn get_conversation_without_interactions_returns_an_empty_list() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Test")).await.unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["interactions"], serde_json::json!([]));
     }
 
     #[tokio::test]

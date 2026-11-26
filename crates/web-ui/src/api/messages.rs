@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use assistant_core::VOICE_PLACEHOLDER;
 use assistant_core::auth::AuthContext;
+use assistant_core::bus_messages::TurnAnchor;
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::llm::provider::LlmProvider;
@@ -32,12 +33,14 @@ use assistant_core::types::conversation::Interface;
 use assistant_core::types::features::SuggestionsConfig;
 use assistant_runtime::OrchestratorEvent;
 use assistant_runtime::SubmitTurn;
+use assistant_runtime::orchestrator::{TurnLease, TurnMode};
 use assistant_runtime::projection::{SseProjector, StreamProjector};
 use assistant_storage::{
     ConversationEventStore as _, ConversationStore, PushSubscriptionStore, SqliteConversationStore,
 };
 use assistant_transcription::TranscriptionRequest;
 
+use crate::errors::json_error;
 use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
@@ -112,6 +115,7 @@ pub struct QuickMessageResponse {
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
         (status = 404, description = "Conversation not found", body = ErrorBody),
+        (status = 409, description = "An edit or regenerate is running in this conversation", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -149,63 +153,133 @@ pub async fn send_message(
     // Generate a unique ID for this orchestrator run.
     let run_id = Uuid::new_v4();
 
-    let (event_tx, event_rx) = mpsc::channel::<OrchestratorEvent>(64);
-
     let orchestrator = match state.runtime(&ctx).await {
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    let user_attachment_ids = body.attachment_ids;
-    let user_message = content.clone();
+    // An edit or regenerate holds the conversation exclusively: an append
+    // would land its user row on a leaf that is about to move.
+    let Some(lease) = orchestrator
+        .turn_registry()
+        .try_begin(conv_id, run_id, TurnMode::Shared)
+    else {
+        return json_error(
+            StatusCode::CONFLICT,
+            "An edit or regenerate is running in this conversation",
+        );
+    };
+    let opts = RunOptions::web_turn(TurnAnchor::Append).with_user_message_id(Uuid::new_v4());
     // Use `run_id` as the orchestrator's `request_id` so external cancel
     // calls — `POST .../turns/{run_id}/cancel` — can find the matching
     // CancellationToken via `Orchestrator::cancel_turn`.
-    let turn_result_rx = {
-        let (tx, rx) =
-            tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
-        let submit_request_id = run_id;
-        tokio::spawn(async move {
-            let result = orchestrator
-                .submit_streaming(
-                    SubmitTurn::new(content, conv_id, Interface::Web)
-                        .with_auth(&auth)
-                        .with_request_id(submit_request_id)
-                        .with_attachments(user_attachment_ids)
-                        // The turn may run in another process, which relays
-                        // its events over the bus instead of into `event_tx`.
-                        .with_relay_events(true),
-                    event_tx,
-                )
-                .await;
-            let _ = tx.send(result);
-        });
-        rx
-    };
+    let turn = opts
+        .submit_turn(content.clone(), conv_id, &auth, run_id, lease)
+        .with_attachments(body.attachment_ids);
+    let (event_rx, turn_result_rx) = start_turn(orchestrator, turn);
 
     stream_turn_to_sse(
         &ctx,
         &state,
         run_id,
         conv_id,
-        RunOptions {
-            push: true,
-            suggestions: true,
-        },
-        user_message,
+        opts,
+        content,
         event_rx,
         turn_result_rx,
     )
     .await
 }
 
+/// Submit `turn` in the background and return the channels
+/// [`stream_turn_to_sse`] reads: its events and its outcome.
+pub(crate) fn start_turn(
+    orchestrator: std::sync::Arc<assistant_runtime::Orchestrator>,
+    turn: SubmitTurn,
+) -> (
+    mpsc::Receiver<OrchestratorEvent>,
+    tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+) {
+    let (event_tx, event_rx) = mpsc::channel::<OrchestratorEvent>(64);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let result = orchestrator.submit_streaming(turn, event_tx).await;
+        let _ = tx.send(result);
+    });
+    (event_rx, rx)
+}
+
+/// Whether web turns can answer prompts (tool approvals, questions).
+/// `tool-approval-prompts`' enabling PR flips it, once the client cards
+/// exist. Send, edit and regenerate all read it through
+/// [`RunOptions::web_turn`], so they flip together.
+const WEB_TURNS_INTERACTIVE: bool = false;
+
 /// Per-entry-point policy for [`stream_turn_to_sse`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct RunOptions {
     /// Send Web Push notifications for skill, error and completion events.
     pub push: bool,
     /// Offer follow-up suggestions after a completed turn (`[suggestions]`
     /// still has to be enabled for the org).
     pub suggestions: bool,
+    /// A human is waiting on the turn and can answer prompts.
+    pub interactive: bool,
+    /// Where the turn's rows attach in the message tree.
+    pub anchor: TurnAnchor,
+    /// The id the run persists its user row under (the answered message for a
+    /// regenerate). Announced in `run_started`.
+    pub user_message_id: Option<Uuid>,
+}
+
+impl RunOptions {
+    /// The options of a streaming web turn. Send, edit and regenerate all
+    /// build theirs here, so a policy change applies to the three together.
+    pub(crate) const fn web_turn(anchor: TurnAnchor) -> Self {
+        Self {
+            push: true,
+            suggestions: true,
+            interactive: WEB_TURNS_INTERACTIVE,
+            anchor,
+            user_message_id: None,
+        }
+    }
+
+    pub(crate) const fn with_user_message_id(mut self, id: Uuid) -> Self {
+        self.user_message_id = Some(id);
+        self
+    }
+
+    /// Tests use it to flip the flag the enabling PR will flip.
+    #[cfg(test)]
+    pub(crate) const fn with_interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
+        self
+    }
+
+    /// The turn to submit under `lease`, a web turn identified by `run_id`.
+    pub(crate) fn submit_turn(
+        &self,
+        prompt: String,
+        conversation_id: Uuid,
+        auth: &AuthContext,
+        run_id: Uuid,
+        lease: TurnLease,
+    ) -> SubmitTurn {
+        let mut turn = SubmitTurn::new(prompt, conversation_id, Interface::Web)
+            .with_auth(auth)
+            .with_request_id(run_id)
+            .with_lease(lease)
+            .with_interactive(self.interactive)
+            // The turn may run in another process, which relays its events
+            // over the bus instead of into the local sink.
+            .with_relay_events(true);
+        turn.anchor = self.anchor.clone();
+        // A regenerate persists no user row, so it has no id to pre-assign.
+        if !matches!(self.anchor, TurnAnchor::Regenerate { .. }) {
+            turn.user_message_id = self.user_message_id;
+        }
+        turn
+    }
 }
 
 /// Drive one turn to its SSE response: emit `run_started` (sequence 0), forward
@@ -258,6 +332,9 @@ pub(crate) async fn stream_turn_to_sse(
     let relay = runtime
         .as_ref()
         .map(|runtime| runtime.orchestrator.run_event_relay(conv_id, run_id));
+    // A cancelled turn hands its streamed text back to the runtime to persist.
+    let orchestrator = runtime.as_ref().map(|runtime| runtime.orchestrator.clone());
+
     // Settles the run's interactions when it ends (ADR-0017).
     let interaction_broker = super::interactions::broker_or_store_only(
         runtime
@@ -272,7 +349,10 @@ pub(crate) async fn stream_turn_to_sse(
 
     // Emit run_started event (sequence 0) to the durable log.
     let run_id_str = run_id.to_string();
-    let run_started_payload = serde_json::json!({"run_id": run_id_str});
+    let run_started_payload = match opts.user_message_id {
+        Some(id) => serde_json::json!({"run_id": run_id_str, "user_message_id": id}),
+        None => serde_json::json!({"run_id": run_id_str}),
+    };
     if let Err(e) = event_store
         .append_event(
             &run_id_str,
@@ -493,7 +573,7 @@ pub(crate) async fn stream_turn_to_sse(
             },
             Errored(String),
         }
-        let (reply_text, reply_message_id, reply_attachment_ids, terminal) =
+        let (mut reply_text, reply_message_id, reply_attachment_ids, terminal) =
             match run_events.into_turn_result().await {
                 Ok(Ok(result)) => (
                     result.answer,
@@ -574,6 +654,35 @@ pub(crate) async fn stream_turn_to_sse(
             TerminalKind::Cancelled { .. } | TerminalKind::Errored(_) => None,
         };
 
+        // The turn's user message was saved, so the stopped reply (or the
+        // placeholder when nothing streamed) becomes its assistant message.
+        // A turn cancelled before it started saved nothing to answer.
+        let mut cancelled_message_id = None;
+        if matches!(
+            terminal,
+            TerminalKind::Cancelled {
+                before_start: false
+            }
+        ) {
+            let persisted = match &orchestrator {
+                Some(orchestrator) => {
+                    orchestrator
+                        .persist_cancelled_reply(conv_id, &reply_text, &Interface::Web)
+                        .await
+                }
+                None => Err(anyhow::anyhow!("no runtime for the conversation")),
+            };
+            match persisted {
+                Ok(message_id) => {
+                    cancelled_message_id = Some(message_id);
+                    if reply_text.trim().is_empty() {
+                        reply_text = assistant_runtime::CANCELLED_REPLY_PLACEHOLDER.to_string();
+                    }
+                }
+                Err(e) => warn!("Failed to persist the cancelled reply of run {run_id}: {e:#}"),
+            }
+        }
+
         let (event_type, payload) = match &terminal {
             TerminalKind::Done => {
                 let mut done_data = serde_json::json!({
@@ -601,6 +710,9 @@ pub(crate) async fn stream_turn_to_sse(
                 });
                 if *before_start {
                     cancelled["user_message_persisted"] = serde_json::Value::Bool(false);
+                }
+                if let Some(message_id) = cancelled_message_id {
+                    cancelled["message_id"] = serde_json::Value::String(message_id.to_string());
                 }
                 ("agent_error", cancelled)
             }
@@ -1798,6 +1910,85 @@ mod tests {
         );
     }
 
+    // -- RunOptions::web_turn ---------------------------------------------------
+
+    fn web_anchors() -> [TurnAnchor; 3] {
+        let (parent, edited, user) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        [
+            TurnAnchor::Append,
+            TurnAnchor::Edit {
+                parent_message_id: Some(parent),
+                edited_message_id: edited,
+            },
+            TurnAnchor::Regenerate {
+                user_message_id: user,
+            },
+        ]
+    }
+
+    fn submitted(opts: &RunOptions) -> assistant_runtime::SubmitTurn {
+        let conv = Uuid::new_v4();
+        let run = Uuid::new_v4();
+        let lease = assistant_runtime::orchestrator::TurnRegistry::default()
+            .try_begin(
+                conv,
+                run,
+                assistant_runtime::orchestrator::TurnMode::Exclusive,
+            )
+            .unwrap();
+        opts.submit_turn(
+            "text".into(),
+            conv,
+            &assistant_core::auth::AuthContext::system(),
+            run,
+            lease,
+        )
+    }
+
+    #[test]
+    fn send_edit_and_regenerate_submit_the_same_web_turn_policy() {
+        for interactive in [false, true] {
+            let submitted: Vec<_> = web_anchors()
+                .into_iter()
+                .map(|anchor| {
+                    let opts = RunOptions::web_turn(anchor).with_interactive(interactive);
+                    assert!(opts.push && opts.suggestions, "{:?}", opts.anchor);
+                    let turn = submitted(&opts);
+                    (turn.interactive, turn.relay_events)
+                })
+                .collect();
+            assert_eq!(
+                submitted,
+                vec![(interactive, true); 3],
+                "the flag reaches all three entry points alike"
+            );
+        }
+    }
+
+    #[test]
+    fn web_turns_are_not_interactive_until_the_approvals_pr_enables_them() {
+        for anchor in web_anchors() {
+            let opts = RunOptions::web_turn(anchor);
+            assert!(!opts.interactive, "{:?}", opts.anchor);
+            assert!(!submitted(&opts).interactive, "{:?}", opts.anchor);
+        }
+    }
+
+    #[test]
+    fn a_regenerate_pre_assigns_no_user_row_id() {
+        let id = Uuid::new_v4();
+        for anchor in web_anchors() {
+            let regenerates = matches!(anchor, TurnAnchor::Regenerate { .. });
+            let turn = submitted(&RunOptions::web_turn(anchor.clone()).with_user_message_id(id));
+            assert_eq!(turn.anchor, anchor);
+            assert_eq!(
+                turn.user_message_id,
+                (!regenerates).then_some(id),
+                "{anchor:?}"
+            );
+        }
+    }
+
     // -- send_message frame sequence (characterisation of the streamed runner) --
 
     /// One parsed SSE frame: `(event, data, id)`.
@@ -2138,6 +2329,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             tokens,
             Some(Ok(turn_result("done text"))),
@@ -2301,6 +2493,8 @@ mod tests {
 
     // -- stream_turn_to_sse driven directly -----------------------------------
 
+    use assistant_core::bus_messages::TurnAnchor;
+
     use super::{RunOptions, stream_turn_to_sse};
 
     fn system_ctx(storage: &Arc<StorageLayer>) -> crate::space::SpaceCtx {
@@ -2318,6 +2512,7 @@ mod tests {
     const NO_SUGGESTIONS: RunOptions = RunOptions {
         push: true,
         suggestions: false,
+        ..RunOptions::web_turn(TurnAnchor::Append)
     };
 
     /// Run the shared runner over hand-fed channels; returns the run id and SSE frames.
@@ -2434,6 +2629,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             "hi".to_string(),
             event_rx,
@@ -2732,6 +2928,192 @@ mod tests {
         assert_eq!(payload["partial_content"], "par");
     }
 
+    /// Save the user row of a turn that is about to be cancelled.
+    async fn seed_user_row(storage: &Arc<StorageLayer>, conv_id: Uuid, text: &str) {
+        SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system")
+            .save_message(&assistant_core::types::conversation::Message::user(
+                conv_id, text,
+            ))
+            .await
+            .unwrap();
+    }
+
+    /// The conversation's messages as `GET /conversations/{id}` lists them.
+    async fn history_of(state: &ApiState, conv_id: Uuid) -> Vec<serde_json::Value> {
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{conv_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_json(resp.into_body()).await;
+        json["messages"].as_array().cloned().unwrap_or_default()
+    }
+
+    fn last_payload(frames: &[Frame]) -> serde_json::Value {
+        serde_json::from_str(&frames.last().unwrap().1).unwrap()
+    }
+
+    fn cancelled() -> Option<anyhow::Result<assistant_runtime::TurnResult>> {
+        Some(Err(anyhow::anyhow!(
+            assistant_runtime::TURN_CANCELLED_MARKER
+        )))
+    }
+
+    #[tokio::test]
+    async fn runner_persists_the_streamed_partial_of_a_cancelled_turn() {
+        use assistant_runtime::OrchestratorEvent::Token;
+
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        seed_user_row(&storage, conv_id, "hi").await;
+
+        let (run_id, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            NO_SUGGESTIONS,
+            vec![Token("The capital ".into()), Token("of France".into())],
+            cancelled(),
+        )
+        .await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(payload["partial_content"], "The capital of France");
+        let history = history_of(&state, conv_id).await;
+        assert_eq!(history.len(), 2, "user row plus the partial: {history:?}");
+        assert_eq!(history[1]["role"], "assistant");
+        assert_eq!(history[1]["content"], "The capital of France");
+        assert_eq!(history[1]["finish_reason"], "cancelled");
+        assert_eq!(
+            payload["message_id"], history[1]["id"],
+            "the frame names the persisted row"
+        );
+        let log = event_log(&storage, &run_id).await;
+        assert_eq!(
+            log.last().unwrap().2["message_id"],
+            payload["message_id"],
+            "the replayed terminal carries message_id too"
+        );
+    }
+
+    #[tokio::test]
+    async fn runner_persists_the_placeholder_when_nothing_streamed() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        seed_user_row(&storage, conv_id, "hi").await;
+
+        let (_, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            NO_SUGGESTIONS,
+            vec![],
+            cancelled(),
+        )
+        .await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["partial_content"], "_Stopped._");
+        let history = history_of(&state, conv_id).await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1]["content"], "_Stopped._");
+        assert_eq!(history[1]["finish_reason"], "cancelled");
+        assert_eq!(payload["message_id"], history[1]["id"]);
+    }
+
+    #[tokio::test]
+    async fn runner_cancelled_before_start_persists_nothing() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+
+        let (_, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            NO_SUGGESTIONS,
+            vec![],
+            Some(Err(anyhow::anyhow!(
+                "{} before it started ({})",
+                assistant_runtime::TURN_CANCELLED_MARKER,
+                assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER
+            ))),
+        )
+        .await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["user_message_persisted"], false);
+        assert!(payload.get("message_id").is_none());
+        assert_eq!(payload["partial_content"], "", "no placeholder either");
+        assert!(history_of(&state, conv_id).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn runner_still_ends_a_cancelled_turn_when_the_partial_cannot_be_saved() {
+        use assistant_runtime::OrchestratorEvent::Token;
+
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        seed_user_row(&storage, conv_id, "hi").await;
+        sqlx::query(
+            "CREATE TRIGGER refuse_cancelled BEFORE INSERT ON messages \
+             WHEN NEW.finish_reason = 'cancelled' BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+        )
+        .execute(&storage.pool)
+        .await
+        .unwrap();
+
+        let (_, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            NO_SUGGESTIONS,
+            vec![Token("par".into())],
+            cancelled(),
+        )
+        .await;
+
+        let (event, _, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload = last_payload(&frames);
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(payload["partial_content"], "par");
+        assert!(payload.get("message_id").is_none(), "{payload}");
+    }
+
+    #[tokio::test]
+    async fn send_message_cancelled_before_any_token_persists_the_stopped_row() {
+        let server = MockServer::start().await;
+        mount_llm_hang(&server).await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state.clone(), conv_id, "slow").await;
+        let run_id = run_id_of(&resp);
+        cancel_when_running(&orchestrator, &server, Uuid::parse_str(&run_id).unwrap()).await;
+        let frames = sse_frames(resp).await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(payload["partial_content"], "_Stopped._");
+        let history = history_of(&state, conv_id).await;
+        assert_eq!(
+            history.len(),
+            2,
+            "user row plus the placeholder: {history:?}"
+        );
+        assert_eq!(history[0]["role"], "user");
+        assert_eq!(history[1]["content"], "_Stopped._");
+        assert_eq!(history[1]["finish_reason"], "cancelled");
+        assert_eq!(payload["message_id"], history[1]["id"]);
+    }
+
     #[tokio::test]
     async fn runner_reports_a_dropped_turn_channel_as_an_error() {
         let (state, storage) = event_log_state().await;
@@ -2757,6 +3139,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             vec![],
             Some(Ok(turn_result("quiet"))),
@@ -2776,6 +3159,7 @@ mod tests {
     const SUGGEST: RunOptions = RunOptions {
         push: true,
         suggestions: true,
+        ..RunOptions::web_turn(TurnAnchor::Append)
     };
 
     /// State over `llm` whose org has `[suggestions]` set as given.

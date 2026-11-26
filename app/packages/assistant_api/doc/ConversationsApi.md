@@ -15,12 +15,15 @@ Method | HTTP request | Description
 [**createQuickMessage**](ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
 [**deleteConversation**](ConversationsApi.md#deleteconversation) | **DELETE** /api/conversations/{id} | &#x60;DELETE /api/conversations/{id}&#x60; — delete a conversation and all its messages.
 [**deleteMessageFeedback**](ConversationsApi.md#deletemessagefeedback) | **DELETE** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;DELETE /api/conversations/{id}/messages/{message_id}/feedback&#x60; — clear feedback.
+[**editMessage**](ConversationsApi.md#editmessage) | **POST** /api/conversations/{id}/messages/{message_id}/edit | &#x60;POST /api/conversations/{id}/messages/{message_id}/edit&#x60; — replace a user message and stream the new reply.
 [**getAudio**](ConversationsApi.md#getaudio) | **GET** /api/audio/{id} | &#x60;GET /api/audio/{id}&#x60; — serve a synthesized audio blob from the in-memory store.
 [**getConversation**](ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
 [**getMessageAudio**](ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it in the configured &#x60;[tts] format&#x60;.
 [**getTurnStatus**](ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
+[**listConversationInteractions**](ConversationsApi.md#listconversationinteractions) | **GET** /api/conversations/{conversation_id}/interactions | &#x60;GET /api/conversations/{conversation_id}/interactions&#x60;
 [**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list conversations, newest first.
 [**readMcpAppResource**](ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
+[**regenerateMessage**](ConversationsApi.md#regeneratemessage) | **POST** /api/conversations/{id}/messages/{message_id}/regenerate | &#x60;POST /api/conversations/{id}/messages/{message_id}/regenerate&#x60; — answer a user message again and stream the new reply.
 [**respondToInteraction**](ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
 [**searchConversations**](ConversationsApi.md#searchconversations) | **GET** /api/conversations/search | Search conversations by title and message text.
 [**sendMessage**](ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
@@ -86,7 +89,7 @@ Name | Type | Description  | Notes
 
 `POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`
 
-Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this conversation and a matching token is registered, otherwise no-op. The cancel also covers a turn no worker has claimed yet: its stream ends at once with `agent_error {\"reason\":\"cancelled\",\"user_message_persisted\":false}`. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker's `tokio::select!`, the SSE stream's terminal `agent_error` event, and the `event_store`. Clients should poll `GET .../status` (or wait for the stream's `agent_error`) to observe the transition.
+Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this conversation and a matching token is registered, otherwise no-op. The cancel also covers a turn no worker has claimed yet: its stream ends at once with `agent_error {\"reason\":\"cancelled\",\"user_message_persisted\":false}`. A turn cancelled after it started keeps its streamed text as an assistant message with `finish_reason: \"cancelled\"` (the placeholder `_Stopped._` when nothing streamed), reported as `message_id` on the terminal `agent_error`. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker's `tokio::select!`, the SSE stream's terminal `agent_error` event, and the `event_store`. Clients should poll `GET .../status` (or wait for the stream's `agent_error`) to observe the transition.
 
 ### Example
 ```dart
@@ -304,6 +307,54 @@ void (empty response body)
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **editMessage**
+> editMessage(id, messageId, editMessageRequest, xSpaceId)
+
+`POST /api/conversations/{id}/messages/{message_id}/edit` — replace a user message and stream the new reply.
+
+Saves the new text as a sibling of `message_id`, carries the original's attachments forward, makes the new branch active and answers it. The original message and everything below it stay stored. The first frame is `run_started{run_id, user_message_id}`, the id the new message is saved under. Returns `409` while a turn is working or another edit or regenerate runs.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final String messageId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | The user message to edit
+final EditMessageRequest editMessageRequest = ; // EditMessageRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    api.editMessage(id, messageId, editMessageRequest, xSpaceId);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->editMessage: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Conversation ID | 
+ **messageId** | **String**| The user message to edit | 
+ **editMessageRequest** | [**EditMessageRequest**](EditMessageRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: text/event-stream, application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **getAudio**
 > getAudio(id, xSpaceId)
 
@@ -478,6 +529,53 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **listConversationInteractions**
+> BuiltList<InteractionDetail> listConversationInteractions(conversationId, status, xSpaceId)
+
+`GET /api/conversations/{conversation_id}/interactions`
+
+The interactions of one of the caller's conversations, oldest first, as a bare array. `?status=pending` narrows it to those still waiting, which is how a client that opens a conversation finds a run to attach to.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String conversationId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation UUID
+final InteractionStatusView status = ; // InteractionStatusView | Only interactions in this state, such as `pending`.
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.listConversationInteractions(conversationId, status, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->listConversationInteractions: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **conversationId** | **String**| Conversation UUID | 
+ **status** | [**InteractionStatusView**](.md)| Only interactions in this state, such as `pending`. | [optional] 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**BuiltList&lt;InteractionDetail&gt;**](InteractionDetail.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **listConversations**
 > BuiltList<ConversationSummary> listConversations(archived, xSpaceId)
 
@@ -569,6 +667,52 @@ Name | Type | Description  | Notes
 
  - **Content-Type**: application/json
  - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **regenerateMessage**
+> regenerateMessage(id, messageId, xSpaceId)
+
+`POST /api/conversations/{id}/messages/{message_id}/regenerate` — answer a user message again and stream the new reply.
+
+`message_id` is a user message or any row of a reply; a reply row resolves to the user message above it. No user message is saved: the new reply becomes another version of the old one. The first frame is `run_started{run_id, user_message_id}` with the answered message's id. Returns `409` while a turn is working or another edit or regenerate runs.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final String messageId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | A user message, or any row of the reply to regenerate
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    api.regenerateMessage(id, messageId, xSpaceId);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->regenerateMessage: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Conversation ID | 
+ **messageId** | **String**| A user message, or any row of the reply to regenerate | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: text/event-stream, application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

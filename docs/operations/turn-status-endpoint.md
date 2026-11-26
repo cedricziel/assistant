@@ -19,7 +19,7 @@ the `X-Run-Id` response header on the streaming send endpoint).
 {
   "turn_id": "8c1f5e0e-…",
   "conversation_id": "0a2b…",
-  "state": "running" | "completed" | "errored" | "unknown",
+  "state": "running" | "awaiting_input" | "completed" | "errored" | "unknown",
   "last_event_at": "2026-05-18T07:30:00Z" | null,
   "last_event_kind": "token" | "tool_result" | "done" | "agent_error" | … | null
 }
@@ -69,14 +69,17 @@ turn, not from the kind of the last row:
 
 - any `agent_error` row → `errored`
 - else any `done` row → `completed`
+- else any `interaction_requested` row without an `interaction_resolved` row
+  of the same `interaction_id` → `awaiting_input`
 - else → `running`
 - no events for the turn id → `unknown`
 - conversation id on the first row doesn't match the path → `unknown`
   (guards against turn-id collision across conversations)
 
-Terminal rows take precedence over non-terminal ones. A state added later for
-a non-terminal condition (such as `awaiting_input`) ranks below `completed`
-and above `running`: `errored` > `completed` > `awaiting_input` > `running`.
+Terminal rows take precedence over non-terminal ones:
+`errored` > `completed` > `awaiting_input` > `running`. `awaiting_input` depends
+on which rows exist, not on the last one, so a later `status` or
+`surface_update` row does not hide a pending interaction.
 
 `last_event_kind` and `last_event_at` describe the most recent row, and
 `done` is no longer always the last frame of a run. A completed turn can end
@@ -136,16 +139,35 @@ cancelled after it started.
 
 ### Partial-output preservation
 
-The text streamed up to the moment of cancellation lives in
-`partial_content` on the final `agent_error` event. Clients can
-display it (truncated, with a "Cancelled" badge) rather than
-discarding the partial assistant reply.
+A turn cancelled after it started keeps what the user saw. The runtime
+persists the text streamed up to the cancel as the turn's assistant
+message, marked `finish_reason: "cancelled"`. When nothing had streamed
+yet, it persists the placeholder `_Stopped._` instead, so history and the
+next LLM turn always contain a reply. The final `agent_error` event
+carries that text as `partial_content` and the row's id as `message_id`:
 
-Note that **no persisted message row** is created for a cancelled
-turn — the conversation's message list only contains the user prompt
-and any assistant replies from prior turns. The partial text is
-purely on the SSE event log (which has TTL — see
-`docs/operations/conversation-events.md`).
+```json
+event: agent_error
+data: {
+  "reason": "cancelled",
+  "message": "Turn cancelled by user",
+  "partial_content": "…tokens streamed before cancel…",
+  "message_id": "…assistant message uuid…"
+}
+```
+
+- If the worker had already saved the turn's final answer when the cancel
+  was observed, nothing is saved twice: `message_id` names that answer and
+  its `finish_reason` stays unset.
+- If saving fails, the event is still emitted with `partial_content` and
+  without `message_id`.
+- A turn cancelled before it started persists no assistant row, not even
+  the placeholder (see above).
+- A stopped first turn is still auto-titled: the runtime announces
+  `turn.completed` for the saved reply, so the title generator runs under
+  its usual eligibility rules.
+- `GET /api/conversations/{id}` lists the row with `finish_reason:
+  "cancelled"`.
 
 ## Auth and idempotency
 
