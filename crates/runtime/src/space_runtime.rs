@@ -524,6 +524,7 @@ mod tests {
                     Uuid::new_v4(),
                     Interface::Web,
                     None,
+                    crate::orchestrator::SubmitOptions::default(),
                 ),
             )
             .await
@@ -569,6 +570,7 @@ mod tests {
                 conversation,
                 Interface::Web,
                 None,
+                crate::orchestrator::SubmitOptions::default(),
             ),
         )
         .await

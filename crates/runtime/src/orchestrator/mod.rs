@@ -46,6 +46,7 @@ mod worker;
 mod tests;
 
 pub use stream_event::OrchestratorEvent;
+pub use worker::SubmitOptions;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -661,6 +662,7 @@ impl Orchestrator {
                 conversation_id,
                 interface,
                 None,
+                SubmitOptions::default(),
             )
             .await
         {
@@ -929,7 +931,8 @@ impl Orchestrator {
                 agent_id: self.agent_id.clone(),
                 turn: iteration as i64,
                 interface: interface.clone(),
-                interactive: false,
+                interactive: identity.interactive,
+                run_id: identity.run_id,
                 allowed_tools: None,
                 depth: 0,
                 user_id: identity.user_id.clone(),
@@ -1338,7 +1341,8 @@ impl Orchestrator {
                 agent_id: self.agent_id.clone(),
                 turn: iteration as i64,
                 interface: interface.clone(),
-                interactive: matches!(interface, Interface::Cli),
+                interactive: identity.interactive,
+                run_id: identity.run_id,
                 allowed_tools: None,
                 depth: 0,
                 user_id: identity.user_id.clone(),
