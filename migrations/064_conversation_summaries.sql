@@ -1,4 +1,4 @@
--- Migration 063: conversation summaries for non-destructive compaction.
+-- Migration 064: conversation summaries for non-destructive compaction.
 --
 -- A summary stands in for every message of a path up to and including
 -- `through_message_id`. It is a side table, not a tree node, so it never shows
