@@ -387,6 +387,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               : Drawer(
                   child: SafeArea(
                     child: ConversationListPane(
+                      selectedId: widget.conversationId,
                       onConversationSelected: () => Navigator.of(context).pop(),
                     ),
                   ),
@@ -408,7 +409,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           ),
                         ),
                       ),
-                      child: const ConversationListPane(),
+                      child: ConversationListPane(
+                        selectedId: widget.conversationId,
+                      ),
                     ),
                   ),
 
