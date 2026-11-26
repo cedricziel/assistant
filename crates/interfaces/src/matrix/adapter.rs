@@ -17,7 +17,7 @@ use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, ToolHandler,
     types::conversation::ChannelType,
 };
-use assistant_transcription::{TranscriptionProvider, TranscriptionRequest};
+use assistant_transcription::TranscriptionProvider;
 use async_trait::async_trait;
 use futures::stream::Stream;
 use lru::LruCache;
@@ -25,7 +25,7 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::common::{Reconnect, pending_cache};
+use crate::common::{Reconnect, VoiceCapture, pending_cache};
 
 use super::client::MatrixClient;
 
@@ -292,14 +292,6 @@ impl ChannelAdapter for MatrixAdapter {
                                             debug!(sender = %event.sender, "Matrix: user not in allowlist; dropping voice");
                                             continue;
                                         }
-                                        let Some(ref provider) = transcription else {
-                                            warn!(
-                                                room_id,
-                                                sender = %event.sender,
-                                                "Matrix: received voice message but no transcription provider configured; dropping"
-                                            );
-                                            continue;
-                                        };
                                         let mxc_url =
                                             match event.content.get("url").and_then(|v| v.as_str())
                                             {
@@ -322,25 +314,20 @@ impl ChannelAdapter for MatrixAdapter {
                                                 continue;
                                             }
                                         };
-                                        let request = TranscriptionRequest {
-                                            audio_data: audio_bytes,
-                                            mime_type,
-                                            filename: None,
-                                            language: transcription_language.clone(),
+                                        let mut capture = VoiceCapture::new(
+                                            transcription.as_deref(),
+                                            transcription_language.as_deref(),
+                                            "matrix",
+                                        );
+                                        capture.add(audio_bytes, &mime_type, None).await;
+                                        let Some(content) = capture.into_content("") else {
+                                            continue;
                                         };
-                                        let transcript = match provider.transcribe(request).await {
-                                            Ok(r) => r.text,
-                                            Err(e) => {
-                                                warn!(error = %e, room_id, "Matrix: audio transcription failed");
-                                                continue;
-                                            }
-                                        };
-                                        let text = format!("[Voice message]: {transcript}");
                                         let msg = build_message(
                                             room_id,
                                             &event.sender,
                                             event.event_id.clone(),
-                                            ChannelContent::Text(text),
+                                            content,
                                         );
                                         if tx.send(msg).await.is_err() {
                                             return;
@@ -709,7 +696,7 @@ mod tests {
     // ── voice tests ───────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn voice_message_transcribed_and_emitted() {
+    async fn voice_message_carries_transcript_and_recording() {
         let server = MockServer::start().await;
         // Media download mock
         Mock::given(method("GET"))
@@ -739,11 +726,18 @@ mod tests {
             .expect("timeout")
             .expect("stream ended");
 
-        assert!(
-            matches!(&msg.content, ChannelContent::Text(t) if t == "[Voice message]: hello world"),
-            "unexpected content: {:?}",
-            msg.content
-        );
+        match &msg.content {
+            ChannelContent::Voice {
+                data,
+                mime_type,
+                text,
+            } => {
+                assert_eq!(data, b"audio");
+                assert_eq!(mime_type, "audio/ogg");
+                assert_eq!(text, "[Voice message]: hello world");
+            }
+            other => panic!("expected Voice, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -811,22 +805,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn voice_message_no_provider_dropped() {
+    async fn voice_message_without_provider_keeps_recording_with_placeholder() {
         let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_matrix/media/v3/download/example.com/audio2"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(b"audio".as_ref())
+                    .append_header("Content-Type", "audio/ogg"),
+            )
+            .mount(&server)
+            .await;
         let event_sync = sync_with_event(
             "m.audio",
             "@user:example.com",
             serde_json::json!({ "url": "mxc://example.com/audio2" }),
         );
-        // Third sync returns empty so the stream doesn't hang.
-        Mock::given(method("GET"))
-            .and(path("/_matrix/client/v3/sync"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "next_batch": "s2", "rooms": {} })),
-            )
-            .mount(&server)
-            .await;
         mount_two_syncs(&server, event_sync).await;
 
         let client = make_client(&server);
@@ -834,13 +828,17 @@ mod tests {
         let adapter = make_adapter(client, &state); // no transcription provider
 
         let mut stream = adapter.start().await.unwrap();
-        // Expect NO message within a short window.
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
-        assert!(
-            result.is_err(),
-            "expected timeout — no message should be emitted"
-        );
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+            .await
+            .expect("timeout")
+            .expect("stream ended");
+        match &msg.content {
+            ChannelContent::Voice { data, text, .. } => {
+                assert_eq!(data, b"audio");
+                assert_eq!(text, "[Voice message]");
+            }
+            other => panic!("expected Voice, got {other:?}"),
+        }
     }
 
     #[tokio::test]

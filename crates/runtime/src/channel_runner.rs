@@ -142,6 +142,17 @@ impl ChannelRunner {
                 };
                 Some(("[Image attached]".to_string(), vec![block]))
             }
+            ChannelContent::Voice {
+                data,
+                mime_type,
+                text,
+            } => Some((
+                text.clone(),
+                vec![ContentBlock::Audio {
+                    media_type: mime_type.clone(),
+                    data: base64::engine::general_purpose::STANDARD.encode(data),
+                }],
+            )),
             _ => None,
         }
     }
@@ -675,6 +686,27 @@ mod tests {
                 assert_eq!(decoded, data);
             }
             other => panic!("expected ContentBlock::Image, got {:?}", other),
+        }
+    }
+
+    /// A voice message dispatches its text with the recording as audio.
+    #[test]
+    fn voice_dispatches_text_and_recording() {
+        use assistant_core::{ChannelContent, ContentBlock};
+
+        let content = ChannelContent::Voice {
+            data: b"OggS".to_vec(),
+            mime_type: "audio/ogg".to_string(),
+            text: "[Voice message]: hello".to_string(),
+        };
+        let (text, attachments) = ChannelRunner::content_to_dispatch(&content).unwrap();
+        assert_eq!(text, "[Voice message]: hello");
+        match attachments.as_slice() {
+            [ContentBlock::Audio { media_type, data }] => {
+                assert_eq!(media_type, "audio/ogg");
+                assert_eq!(data, "T2dnUw==");
+            }
+            other => panic!("expected one audio block, got {other:?}"),
         }
     }
 

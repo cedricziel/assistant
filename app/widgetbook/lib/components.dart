@@ -3,6 +3,8 @@ import 'package:widgetbook/widgetbook.dart';
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
 import 'components/conversation_search_results_view.dart';
+import 'components/feedback_buttons.dart';
+import 'components/feedback_comment_field.dart';
 import 'components/highlighted_segments.dart';
 import 'components/message_action_button.dart';
 import 'components/message_actions.dart';
@@ -53,12 +55,10 @@ final List<WidgetbookComponent> kComponents = [
   // composerComponent, // slot: chat-element-library 11a
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
   // conversationListViewComponent, // slot: chat-element-library 12
-  // conversationSearchResultsViewComponent, // slot: conversation-list-management 14
   // dataTableResultViewComponent, // slot: tool-result-renderers C6
   // feedbackButtonsComponent, // slot: message-feedback 5
   // feedbackCommentFieldComponent, // slot: message-feedback 5
   // genericToolResultViewComponent, // slot: chat-element-library 6
-  // highlightedSegmentsComponent, // slot: conversation-list-management 14
   // jsonTreeViewComponent, // slot: tool-result-renderers C2b
   // linkPreviewResultViewComponent, // slot: tool-result-renderers C5
   // messageBodyComponent, // slot: chat-element-library 8b
@@ -87,6 +87,8 @@ final List<WidgetbookComponent> kComponents = [
   approvalCardComponent,
   branchPickerComponent,
   conversationSearchResultsViewComponent,
+  feedbackButtonsComponent,
+  feedbackCommentFieldComponent,
   highlightedSegmentsComponent,
   messageActionButtonComponent,
   messageActionsComponent,

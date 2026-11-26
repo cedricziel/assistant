@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use assistant_core::types::conversation::{ExecutionContext, Interface};
 use assistant_core::{ToolHandler, ToolOutput};
 use assistant_tool_executor::builtins::bash::BashHandler;
+use assistant_tool_executor::builtins::file_edit::FileEditHandler;
 use assistant_tool_executor::builtins::file_read::FileReadHandler;
+use assistant_tool_executor::builtins::file_write::FileWriteHandler;
 use assistant_tool_executor::builtins::list_tasks::ListTasksHandler;
 use assistant_tool_executor::builtins::plan_update::PlanUpdateHandler;
 use assistant_tool_executor::builtins::process::ProcessHandler;
@@ -701,4 +703,193 @@ async fn process_list_publishes_a_data_table() {
         )
         .await
         .unwrap();
+}
+
+// -- file-edit / file-write ---------------------------------------------------
+
+fn root_of(dir: &TempDir) -> Vec<String> {
+    vec![dir.path().to_string_lossy().into_owned()]
+}
+
+async fn edit_file(
+    name: &str,
+    content: &str,
+    old: &str,
+    new: &str,
+) -> (FileEditHandler, ToolOutput, TempDir) {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join(name);
+    tokio::fs::write(&file, content).await.unwrap();
+    let handler = FileEditHandler::new().with_extra_roots(root_of(&dir));
+    let out = handler
+        .run(
+            params(&[
+                ("path", json!(file.to_string_lossy())),
+                ("old_string", json!(old)),
+                ("new_string", json!(new)),
+            ]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
+    (handler, out, dir)
+}
+
+async fn write_file(dir: &TempDir, name: &str, content: &str) -> (FileWriteHandler, ToolOutput) {
+    let file = dir.path().join(name);
+    let handler = FileWriteHandler::new().with_extra_roots(root_of(dir));
+    let out = handler
+        .run(
+            params(&[
+                ("path", json!(file.to_string_lossy())),
+                ("content", json!(content)),
+            ]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
+    (handler, out)
+}
+
+#[tokio::test]
+async fn file_edit_publishes_a_code_diff() {
+    let (handler, out, dir) = edit_file(
+        "main.rs",
+        "fn a() {}\nfn b() {}\nfn c() {}\n",
+        "fn b() {}",
+        "fn b2() {}",
+    )
+    .await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(data["kind"], "code_diff");
+    assert_eq!(
+        data["path"],
+        dir.path().join("main.rs").to_string_lossy().as_ref()
+    );
+    assert_eq!(data["language"], "rust");
+    assert_eq!(data["operation"], "edit");
+    assert_eq!(data["added"], 1);
+    assert_eq!(data["removed"], 1);
+    assert_eq!(data["truncated"], false);
+    let hunks = data["hunks"].as_array().unwrap();
+    assert_eq!(hunks.len(), 1);
+    let lines = hunks[0]["lines"].as_array().unwrap();
+    assert!(lines.contains(&json!({"op": "remove", "text": "fn b() {}"})));
+    assert!(lines.contains(&json!({"op": "add", "text": "fn b2() {}"})));
+    assert!(lines.contains(&json!({"op": "context", "text": "fn a() {}"})));
+    assert_eq!(hunks[0]["old_start"], 1);
+    assert_eq!(hunks[0]["new_start"], 1);
+    assert_eq!(hunks[0]["old_lines"], 3);
+    assert_eq!(hunks[0]["new_lines"], 3);
+}
+
+#[tokio::test]
+async fn file_edit_not_found_has_no_data() {
+    let (_handler, out, _dir) = edit_file("a.txt", "hello\n", "nope", "x").await;
+    assert!(!out.success);
+    assert!(out.data.is_none());
+}
+
+#[tokio::test]
+async fn file_edit_of_non_utf8_file_has_no_data() {
+    // `read_to_string` fails on invalid UTF-8, so the edit is refused.
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("bin.dat");
+    tokio::fs::write(&file, [0xff, 0xfe, 0x00]).await.unwrap();
+    let handler = FileEditHandler::new().with_extra_roots(root_of(&dir));
+    let out = handler
+        .run(
+            params(&[
+                ("path", json!(file.to_string_lossy())),
+                ("old_string", json!("a")),
+                ("new_string", json!("b")),
+            ]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
+    assert!(out.data.is_none());
+}
+
+#[tokio::test]
+async fn file_write_new_path_is_a_create_diff() {
+    let dir = TempDir::new().unwrap();
+    let (handler, out) = write_file(&dir, "new.py", "a\nb\nc\n").await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(data["kind"], "code_diff");
+    assert_eq!(data["language"], "python");
+    assert_eq!(data["operation"], "create");
+    assert_eq!(data["added"], 3);
+    assert_eq!(data["removed"], 0);
+    assert_eq!(data["truncated"], false);
+}
+
+#[tokio::test]
+async fn file_write_over_existing_file_is_an_overwrite_diff() {
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("f.txt"), "one\ntwo\n")
+        .await
+        .unwrap();
+    let (handler, out) = write_file(&dir, "f.txt", "one\nthree\n").await;
+    let data = validated_data(&handler, &out);
+    assert_eq!(data["operation"], "overwrite");
+    assert_eq!(data["added"], 1);
+    assert_eq!(data["removed"], 1);
+}
+
+#[tokio::test]
+async fn file_write_overwriting_non_utf8_file_has_no_data() {
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("bin.dat"), [0xff, 0xfe, 0x00])
+        .await
+        .unwrap();
+    let (_handler, out) = write_file(&dir, "bin.dat", "text\n").await;
+    assert!(out.success, "the write itself still succeeds");
+    assert!(out.data.is_none());
+}
+
+#[tokio::test]
+async fn file_write_overwriting_a_file_over_256_kib_has_no_data() {
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("big.txt"), "a\n".repeat(200_000))
+        .await
+        .unwrap();
+    let (_handler, out) = write_file(&dir, "big.txt", "small\n").await;
+    assert!(out.success);
+    assert!(out.data.is_none());
+}
+
+#[tokio::test]
+async fn large_diff_is_capped_at_400_lines() {
+    let dir = TempDir::new().unwrap();
+    let content: String = (0..1000).map(|i| format!("line {i}\n")).collect();
+    let (handler, out) = write_file(&dir, "many.txt", &content).await;
+    let data = validated_data(&handler, &out);
+    assert_eq!(data["truncated"], true);
+    let shown: usize = data["hunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["lines"].as_array().unwrap().len())
+        .sum();
+    assert!(shown <= 400, "{shown} diff lines");
+    assert!(data["added"].as_u64().unwrap() >= 400, "counts stay honest");
+    let size = serde_json::to_vec(&data).unwrap().len();
+    assert!(size < 32 * 1024, "data is {size} bytes");
+}
+
+#[tokio::test]
+async fn minified_line_is_cut_to_512_chars() {
+    let long = "x".repeat(100_000);
+    let (handler, out, _dir) = edit_file("min.js", "var a = 1;\n", "var a = 1;", &long).await;
+    let data = validated_data(&handler, &out);
+    assert_eq!(data["truncated"], true);
+    for hunk in data["hunks"].as_array().unwrap() {
+        for line in hunk["lines"].as_array().unwrap() {
+            let text = line["text"].as_str().unwrap();
+            assert!(text.chars().count() <= 512, "line has {} chars", text.len());
+        }
+    }
 }

@@ -9,8 +9,8 @@ use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, warn};
 use url::Url;
 
-use crate::converter::AudioFormat;
 use crate::provider::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
+use assistant_audio::AudioFormat;
 
 /// Default timeout for transcription requests (120 s — audio can be long).
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
