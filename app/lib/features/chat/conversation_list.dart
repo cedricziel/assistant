@@ -94,6 +94,33 @@ class ConversationListPane extends ConsumerWidget {
               pinnedAt: conv.pinnedAt,
             ),
         ];
+        final archived = listState.archived;
+        final archivedItems = [
+          for (final conv in archived.conversations)
+            ConversationListItem(
+              id: conv.id,
+              title: conv.title,
+              updatedAt: conv.updatedAt,
+              archivedAt: conv.archivedAt,
+            ),
+        ];
+        final notifier = ref.read(conversationListProvider.notifier);
+        Future<bool> deleteById(String id) {
+          final title = [
+            ...items,
+            ...archivedItems,
+          ].where((i) => i.id == id).firstOrNull?.title;
+          return confirmAndDeleteConversation(context, ref, id, title ?? '');
+        }
+
+        void open(String id) {
+          context.go('/chat/$id');
+          onConversationSelected?.call();
+        }
+
+        void showActions(ConversationActionRequest request) =>
+            showConversationRowActions(context, ref, request);
+
         return ConversationListView(
           items: items,
           selectedId: selectedId,
@@ -109,16 +136,21 @@ class ConversationListPane extends ConsumerWidget {
               ),
             ),
           ),
-          onSelect: (id) {
-            context.go('/chat/$id');
-            onConversationSelected?.call();
-          },
-          onDelete: (id) {
-            final title = items.where((i) => i.id == id).firstOrNull?.title;
-            return confirmAndDeleteConversation(context, ref, id, title ?? '');
-          },
-          onRequestActions: (request) =>
-              showConversationRowActions(context, ref, request),
+          onSelect: open,
+          onDelete: deleteById,
+          onRequestActions: showActions,
+          archivedSection: ConversationArchivedSection(
+            expanded: archived.expanded,
+            onExpandedChanged: notifier.setArchivedExpanded,
+            items: archivedItems,
+            loading: archived.loading,
+            error: archived.error,
+            onRetry: notifier.loadArchived,
+            selectedId: selectedId,
+            onSelect: open,
+            onDelete: deleteById,
+            onRequestActions: showActions,
+          ),
         );
       },
     );
