@@ -106,6 +106,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use assistant_core::mcp_app::{McpAppServerChain, McpAppServers};
 use assistant_runtime::{
     CommandRegistry, FeedbackTelemetrySink, OtelFeedbackTelemetrySink, SpaceRuntime, SpaceRuntimes,
 };
@@ -154,6 +155,8 @@ pub struct ApiState {
     pub conversation_broadcasters: ConversationBroadcasters,
     /// Receives an event for every stored or cleared message vote.
     pub feedback_telemetry: Arc<dyn FeedbackTelemetrySink>,
+    /// Where MCP Apps' calls go: the servers their tools came from.
+    pub mcp_apps: Arc<dyn McpAppServers>,
 }
 
 impl ApiState {
@@ -174,6 +177,7 @@ impl ApiState {
             command_registry: Arc::new(CommandRegistry::new()),
             conversation_broadcasters: ConversationBroadcasters::default(),
             feedback_telemetry: Arc::new(OtelFeedbackTelemetrySink::new()),
+            mcp_apps: Arc::new(McpAppServerChain::default()),
         }
     }
 
@@ -203,6 +207,11 @@ impl ApiState {
 
     pub fn with_tts_provider(mut self, provider: Arc<dyn TtsProvider>) -> Self {
         self.tts_provider = Some(provider);
+        self
+    }
+
+    pub fn with_mcp_apps(mut self, servers: Arc<dyn McpAppServers>) -> Self {
+        self.mcp_apps = servers;
         self
     }
 }
@@ -289,6 +298,16 @@ pub fn api_router() -> Router<ApiState> {
             "/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond",
             post(interactions::respond_to_interaction)
                 .layer(DefaultBodyLimit::max(interactions::MAX_RESPOND_BODY_BYTES)),
+        )
+        .route(
+            "/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call",
+            post(mcp_apps::call_mcp_app_tool)
+                .layer(DefaultBodyLimit::max(mcp_apps::MAX_APP_REQUEST_BODY_BYTES)),
+        )
+        .route(
+            "/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read",
+            post(mcp_apps::read_mcp_app_resource)
+                .layer(DefaultBodyLimit::max(mcp_apps::MAX_APP_REQUEST_BODY_BYTES)),
         )
         .route("/messages/{id}/audio", get(audio::get_message_audio))
         .route("/audio/{id}", get(audio::get_audio))
