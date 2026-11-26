@@ -83,6 +83,8 @@ pub enum TtsProviderKind {
     OpenAI,
     /// Deepgram TTS API (`POST /v1/speak`).
     Deepgram,
+    /// OpenRouter TTS (`POST /audio/speech`).
+    OpenRouter,
 }
 
 /// Configuration for text-to-speech synthesis.
@@ -171,7 +173,7 @@ impl TtsFormat {
         match name.trim().to_lowercase().as_str() {
             "mp3" => Ok(Self::Mp3),
             "wav" => Ok(Self::Wav),
-            "ogg" => Ok(Self::Ogg),
+            "ogg" | "opus" => Ok(Self::Ogg),
             "pcm" => Ok(Self::Pcm),
             other => anyhow::bail!("unsupported TTS format `{other}`; use mp3, wav, ogg or pcm"),
         }
@@ -219,6 +221,11 @@ mod tests {
         );
         let err = TtsFormat::parse("aac").unwrap_err().to_string();
         assert!(err.contains("mp3, wav, ogg or pcm"), "{err}");
+        assert_eq!(
+            TtsFormat::parse("opus").unwrap(),
+            TtsFormat::Ogg,
+            "Ogg/Opus"
+        );
     }
 
     #[test]

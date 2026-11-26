@@ -67,7 +67,14 @@ async fn prepare_history_applies_the_summary_and_keeps_base_turn_raw() {
     let conv = conversation_with_summary(&storage).await;
 
     let (_, history, base_turn) = orch
-        .prepare_history("u3", conv, Vec::new(), &[], &orch.agent_id)
+        .prepare_history(
+            "u3",
+            conv,
+            Vec::new(),
+            &[],
+            &orch.agent_id,
+            &TurnIdentity::default(),
+        )
         .await
         .unwrap();
 
@@ -310,7 +317,14 @@ async fn a_branch_created_before_the_summarised_range_gets_no_summary() {
     store.branch_message(&edited, Some(ids[1])).await.unwrap();
 
     let (_, history, _) = orch
-        .prepare_history("next", conv, Vec::new(), &[], &orch.agent_id)
+        .prepare_history(
+            "next",
+            conv,
+            Vec::new(),
+            &[],
+            &orch.agent_id,
+            &TurnIdentity::default(),
+        )
         .await
         .unwrap();
 
