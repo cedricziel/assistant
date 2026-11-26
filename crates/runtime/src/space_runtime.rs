@@ -398,11 +398,8 @@ impl SpaceRuntimes {
         self.sync_builtins_once(&registry);
 
         let project_root = std::env::current_dir().ok();
-        let dirs = crate::bootstrap::skill_dirs_in(
-            Some(self.pools.base_dir()),
-            config,
-            project_root.as_deref(),
-        );
+        let dirs =
+            crate::bootstrap::skill_dirs(self.pools.base_dir(), config, project_root.as_deref());
         let dirs: Vec<(&Path, SkillSource)> =
             dirs.iter().map(|(p, s)| (p.as_path(), s.clone())).collect();
         registry
