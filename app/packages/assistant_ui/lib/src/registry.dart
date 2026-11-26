@@ -10,6 +10,7 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
+  'ChatThreadLayout',
   'CodeBlock',
   'ConversationListView',
   'ConversationSearchResultsView',
@@ -31,6 +32,7 @@ const List<String> kAssistantUiElements = [
   'ThreadDensityScope',
   'ThreadEmptyState',
   'ThreadErrorBanner',
+  'ThreadViewport',
   'TimelineEntryShell',
   'ToolCallBody',
   'ToolResultRendererScope',
@@ -39,7 +41,6 @@ const List<String> kAssistantUiElements = [
   'UnknownInteractionCard',
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
-  // 'ChatThreadLayout', // slot: chat-element-library 10
   // 'CodeDiffResultView', // slot: tool-result-renderers C7
   // 'CodeFileResultView', // slot: tool-result-renderers C7
   // 'CommandBody', // slot: chat-element-library 7b
@@ -61,7 +62,6 @@ const List<String> kAssistantUiElements = [
   // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'ThinkingBody', // slot: chat-element-library 7a
-  // 'ThreadViewport', // slot: chat-element-library 10
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c
   // 'TypingIndicator', // slot: chat-element-library 8b
