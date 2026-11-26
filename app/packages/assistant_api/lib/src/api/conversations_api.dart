@@ -14,8 +14,10 @@ import 'package:assistant_api/src/model/conversation_detail.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
 import 'package:assistant_api/src/model/create_conversation_request.dart';
 import 'package:assistant_api/src/model/error_body.dart';
+import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
+import 'package:assistant_api/src/model/set_message_feedback_request.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
 import 'package:built_collection/built_collection.dart';
@@ -362,6 +364,73 @@ class ConversationsApi {
         '{' r'id' '}',
         encodeQueryParameter(_serializers, id, const FullType(String))
             .toString());
+    final _options = Options(
+      method: r'DELETE',
+      headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      validateStatus: validateStatus,
+    );
+
+    final _response = await _dio.request<Object>(
+      _path,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    return _response;
+  }
+
+  /// &#x60;DELETE /api/conversations/{id}/messages/{message_id}/feedback&#x60; — clear feedback.
+  /// Returns 204 whether or not feedback existed.
+  ///
+  /// Parameters:
+  /// * [id] - Conversation ID
+  /// * [messageId] - Assistant message ID
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future]
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<void>> deleteMessageFeedback({
+    required String id,
+    required String messageId,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/api/conversations/{id}/messages/{message_id}/feedback'
+        .replaceAll(
+            '{' r'id' '}',
+            encodeQueryParameter(_serializers, id, const FullType(String))
+                .toString())
+        .replaceAll(
+            '{' r'message_id' '}',
+            encodeQueryParameter(
+                    _serializers, messageId, const FullType(String))
+                .toString());
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
@@ -939,6 +1008,124 @@ class ConversationsApi {
     );
 
     return _response;
+  }
+
+  /// &#x60;PUT /api/conversations/{id}/messages/{message_id}/feedback&#x60; — rate a reply.
+  /// Replaces the caller&#39;s previous feedback on the message in full.
+  ///
+  /// Parameters:
+  /// * [id] - Conversation ID
+  /// * [messageId] - Assistant message ID
+  /// * [setMessageFeedbackRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [MessageFeedbackResponse] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<MessageFeedbackResponse>> setMessageFeedback({
+    required String id,
+    required String messageId,
+    required SetMessageFeedbackRequest setMessageFeedbackRequest,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/api/conversations/{id}/messages/{message_id}/feedback'
+        .replaceAll(
+            '{' r'id' '}',
+            encodeQueryParameter(_serializers, id, const FullType(String))
+                .toString())
+        .replaceAll(
+            '{' r'message_id' '}',
+            encodeQueryParameter(
+                    _serializers, messageId, const FullType(String))
+                .toString());
+    final _options = Options(
+      method: r'PUT',
+      headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      contentType: 'application/json',
+      validateStatus: validateStatus,
+    );
+
+    dynamic _bodyData;
+
+    try {
+      const _type = FullType(SetMessageFeedbackRequest);
+      _bodyData = _serializers.serialize(setMessageFeedbackRequest,
+          specifiedType: _type);
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final _response = await _dio.request<Object>(
+      _path,
+      data: _bodyData,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    MessageFeedbackResponse? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(MessageFeedbackResponse),
+            ) as MessageFeedbackResponse;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<MessageFeedbackResponse>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
   }
 
   /// &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.

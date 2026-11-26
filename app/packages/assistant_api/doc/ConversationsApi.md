@@ -13,6 +13,7 @@ Method | HTTP request | Description
 [**createConversation**](ConversationsApi.md#createconversation) | **POST** /api/conversations | &#x60;POST /api/conversations&#x60; — create a new conversation.
 [**createQuickMessage**](ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
 [**deleteConversation**](ConversationsApi.md#deleteconversation) | **DELETE** /api/conversations/{id} | &#x60;DELETE /api/conversations/{id}&#x60; — delete a conversation and all its messages.
+[**deleteMessageFeedback**](ConversationsApi.md#deletemessagefeedback) | **DELETE** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;DELETE /api/conversations/{id}/messages/{message_id}/feedback&#x60; — clear feedback.
 [**getAudio**](ConversationsApi.md#getaudio) | **GET** /api/audio/{id} | &#x60;GET /api/audio/{id}&#x60; — serve a synthesized audio blob from the in-memory store.
 [**getConversation**](ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
 [**getMessageAudio**](ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it as &#x60;audio/mpeg&#x60;.
@@ -20,6 +21,7 @@ Method | HTTP request | Description
 [**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
 [**sendMessage**](ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [**sendVoiceMessage**](ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
+[**setMessageFeedback**](ConversationsApi.md#setmessagefeedback) | **PUT** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;PUT /api/conversations/{id}/messages/{message_id}/feedback&#x60; — rate a reply.
 [**streamConversations**](ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [**streamRunEvents**](ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [**updateConversation**](ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
@@ -199,6 +201,52 @@ void (empty response body)
 
  - **Content-Type**: Not defined
  - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **deleteMessageFeedback**
+> deleteMessageFeedback(id, messageId, xSpaceId)
+
+`DELETE /api/conversations/{id}/messages/{message_id}/feedback` — clear feedback.
+
+Returns 204 whether or not feedback existed.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final String messageId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Assistant message ID
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    api.deleteMessageFeedback(id, messageId, xSpaceId);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->deleteMessageFeedback: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Conversation ID | 
+ **messageId** | **String**| Assistant message ID | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
@@ -504,6 +552,55 @@ void (empty response body)
 
  - **Content-Type**: multipart/form-data
  - **Accept**: text/event-stream, application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **setMessageFeedback**
+> MessageFeedbackResponse setMessageFeedback(id, messageId, setMessageFeedbackRequest, xSpaceId)
+
+`PUT /api/conversations/{id}/messages/{message_id}/feedback` — rate a reply.
+
+Replaces the caller's previous feedback on the message in full.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final String messageId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Assistant message ID
+final SetMessageFeedbackRequest setMessageFeedbackRequest = ; // SetMessageFeedbackRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.setMessageFeedback(id, messageId, setMessageFeedbackRequest, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->setMessageFeedback: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Conversation ID | 
+ **messageId** | **String**| Assistant message ID | 
+ **setMessageFeedbackRequest** | [**SetMessageFeedbackRequest**](SetMessageFeedbackRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**MessageFeedbackResponse**](MessageFeedbackResponse.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
