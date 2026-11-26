@@ -12,6 +12,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 jsonschema = { workspace = true }
 anyhow = { workspace = true }
+regex = { workspace = true }
+regex-syntax = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
 
 # Panic-free contract: production code propagates errors via `anyhow::Result`.
 # Tests are exempt because `make lint` (`cargo clippy --workspace`) does not
