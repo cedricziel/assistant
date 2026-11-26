@@ -31,5 +31,6 @@ pub fn build_chat_request(
             })
             .collect(),
         max_completion_tokens: max_tokens,
+        stream: false,
     }
 }
