@@ -548,23 +548,27 @@ fn has_audio(message: &ChatHistoryMessage) -> bool {
 
 #[tokio::test]
 async fn audio_is_stripped_for_providers_without_audio_input() {
-    let server = MockServer::start().await;
-    mount_answer(&server, "ok").await;
-    let (orch, _) = build(&server.uri()).await;
+    let llm = hearing_provider(false, &["ok"]);
+    let (orch, _) = super::build_with_llm(llm.clone(), OrgConfig::default(), |o| o).await;
 
-    let (_store, history, _turn) = orch
-        .prepare_history(
-            "[Voice message]: hello",
-            Uuid::new_v4(),
-            vec![voice_note()],
-            &[],
-            &orch.agent_id,
-            &TurnIdentity::default(),
-        )
-        .await
-        .unwrap();
+    orch.run_turn_with_tools(
+        "[Voice message]: hello",
+        Uuid::new_v4(),
+        Interface::Signal,
+        vec![],
+        None,
+        vec![voice_note()],
+        vec![],
+        TurnIdentity::default(),
+    )
+    .await
+    .unwrap();
 
-    match history.last().expect("history non-empty") {
+    match llm.recorded_calls()[0]
+        .history
+        .last()
+        .expect("the turn's message")
+    {
         ChatHistoryMessage::Text { role, content } => {
             assert_eq!(*role, ChatRole::User);
             assert_eq!(content, "[Voice message]: hello", "the text stays");
@@ -647,4 +651,89 @@ async fn stored_voice_note_is_heard_once_and_replayed_as_text() {
         "a past voice message is not replayed: {:?}",
         calls[1].history
     );
+}
+
+/// Hears audio only once `ready` has run, like a provider whose catalog is
+/// still loading when the turn starts.
+struct HearsWhenReady {
+    inner: Arc<assistant_llm_provider::scripted::ScriptedLlmProvider>,
+    ready: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait]
+impl LlmProvider for HearsWhenReady {
+    fn capabilities(&self) -> assistant_core::Capabilities {
+        self.inner.capabilities()
+    }
+
+    async fn chat(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[assistant_core::ToolSpec],
+    ) -> anyhow::Result<assistant_core::LlmResponse> {
+        self.inner.chat(system_prompt, history, tools).await
+    }
+
+    async fn chat_streaming(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[assistant_core::ToolSpec],
+        chunk_sink: Option<tokio::sync::mpsc::Sender<assistant_core::StreamChunk>>,
+    ) -> anyhow::Result<assistant_core::LlmResponse> {
+        self.inner
+            .chat_streaming(system_prompt, history, tools, chunk_sink)
+            .await
+    }
+
+    async fn ready(&self) {
+        self.ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn chat_options_support(&self) -> assistant_core::ChatOptionsSupport {
+        assistant_core::ChatOptionsSupport {
+            audio_input: self.ready.load(std::sync::atomic::Ordering::SeqCst),
+            ..Default::default()
+        }
+    }
+
+    async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+        Ok(vec![])
+    }
+
+    fn provider_name(&self) -> &str {
+        "scripted"
+    }
+
+    fn model_name(&self) -> &str {
+        "scripted-model"
+    }
+}
+
+#[tokio::test]
+async fn audio_support_is_read_once_the_provider_is_ready() {
+    let inner = hearing_provider(false, &["ok"]);
+    let llm = Arc::new(HearsWhenReady {
+        inner: inner.clone(),
+        ready: std::sync::atomic::AtomicBool::new(false),
+    });
+    let (orch, _) = super::build_with_llm(llm, OrgConfig::default(), |o| o).await;
+
+    orch.run_turn_with_tools(
+        "hello",
+        Uuid::new_v4(),
+        Interface::Signal,
+        vec![],
+        None,
+        vec![voice_note()],
+        vec![],
+        TurnIdentity::default(),
+    )
+    .await
+    .unwrap();
+
+    let calls = inner.recorded_calls();
+    let sent = calls[0].history.last().expect("the turn's message");
+    assert!(has_audio(sent), "the recording reaches the model: {sent:?}");
 }

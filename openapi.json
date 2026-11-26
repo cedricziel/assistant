@@ -680,6 +680,88 @@
         ]
       }
     },
+    "/api/conversations/search": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Search conversations by title and message text.",
+        "operationId": "search_conversations",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search text, split on whitespace into at most 8 tokens (at most 200\ncharacters). Each token is a prefix of a message word or a substring of\nthe title.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum results (default 20, capped at 50).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching conversations, best first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConversationSearchSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Blank query, query over 200 characters or more than 8 words",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/stream": {
       "get": {
         "tags": [
@@ -2019,7 +2101,7 @@
           "conversations"
         ],
         "summary": "`GET /api/conversations/{id}/runs/{run_id}/events/stream`",
-        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active. Closes when the run finishes, not at the\n`done` or `agent_error` frame: events such as `suggestions` follow `done`.\nA client that disconnects stops the tail at once.\n\nReturns `404` if no events exist for `run_id` and the run is not active\n(never started, unknown, or pruned after the TTL elapsed).",
+        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active. Closes when the run finishes, not at the\n`done` or `agent_error` frame: events such as `suggestions` follow `done`.\nA client that disconnects stops the tail at once.\n\nReturns `404` if no events exist for `run_id` and the run is not active\n(never started, unknown, or pruned after the TTL elapsed).\n\nAfter `done` the stream may carry one `suggestions` frame\n(`SseSuggestionsEvent`) with follow-up prompts for the finished turn; it\nthen closes when the run finishes.",
         "operationId": "stream_run_events",
         "parameters": [
           {
@@ -11671,6 +11753,57 @@
           }
         }
       },
+      "ConversationSearchSummary": {
+        "type": "object",
+        "description": "A conversation matched by a search: the [`ConversationSummary`] fields plus\nhighlighted title and message excerpts.\n\nThe summary fields are repeated rather than flattened so the generated\nclient keeps `ConversationSummary` a plain instantiable model.",
+        "required": [
+          "id",
+          "title",
+          "created_at",
+          "updated_at",
+          "title_segments",
+          "matches"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSearchMatch"
+            },
+            "description": "Up to 3 matching messages, best first; empty when only the title\nmatched."
+          },
+          "pinned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the conversation was pinned; absent when it is not pinned."
+          },
+          "title": {
+            "type": "string"
+          },
+          "title_segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchSegment"
+            },
+            "description": "The title split into highlighted and plain runs."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "ConversationSummary": {
         "type": "object",
         "description": "A conversation summary (no messages).",
@@ -13105,6 +13238,37 @@
           }
         }
       },
+      "MessageSearchMatch": {
+        "type": "object",
+        "description": "A message that matched a search query.",
+        "required": [
+          "message_id",
+          "role",
+          "created_at",
+          "segments"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "description": "`user` or `assistant`."
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchSegment"
+            },
+            "description": "An excerpt around the hits; elided text is marked with `…`."
+          }
+        }
+      },
       "MessageSummary": {
         "type": "object",
         "description": "A single message in a conversation.",
@@ -14050,6 +14214,22 @@
           "space"
         ]
       },
+      "SearchSegment": {
+        "type": "object",
+        "description": "A run of text in a search result, flagged when it matched a query token.\n\nConcatenating the `text` of a list of segments yields the displayed string.",
+        "required": [
+          "text",
+          "highlighted"
+        ],
+        "properties": {
+          "highlighted": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
       "SecurityRequirement": {
         "type": "object",
         "description": "Defines the security requirements for an agent.",
@@ -14734,6 +14914,41 @@
           "data": {
             "$ref": "#/components/schemas/SseToolResultEvent",
             "description": "Inner event payload."
+          }
+        }
+      },
+      "SseSuggestion": {
+        "type": "object",
+        "description": "One follow-up prompt in an [`SseSuggestionsEvent`].",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Text to send as the user's next message."
+          }
+        }
+      },
+      "SseSuggestionsEvent": {
+        "type": "object",
+        "description": "SSE `suggestions` event: tappable follow-up prompts for a finished turn.\n\nSent only on the run's replay stream, after `done`, when\n`[suggestions].enabled` is on for the org.",
+        "required": [
+          "message_id",
+          "suggestions"
+        ],
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The assistant message the suggestions follow (`done.message_id`)."
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SseSuggestion"
+            },
+            "description": "Prompts the user could send next, best first."
           }
         }
       },

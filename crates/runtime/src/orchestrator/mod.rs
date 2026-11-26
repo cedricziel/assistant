@@ -971,6 +971,9 @@ impl Orchestrator {
         let llm = self
             .llm_for(conversation_id, identity.model_override.as_deref())
             .await?;
+        if !llm.chat_options_support().audio_input {
+            history.drop_audio();
+        }
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
@@ -1425,6 +1428,9 @@ impl Orchestrator {
         let llm = self
             .llm_for(conversation_id, identity.model_override.as_deref())
             .await?;
+        if !llm.chat_options_support().audio_input {
+            history.drop_audio();
+        }
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
         let overlay = self.turn_overlay(&identity).await;
@@ -2022,10 +2028,6 @@ impl Orchestrator {
                      Image attachments included but may be ignored by the model."
                 );
             }
-        }
-
-        if !self.llm.chat_options_support().audio_input {
-            all_attachments.retain(|b| !matches!(b, ContentBlock::Audio { .. }));
         }
 
         let user_row_id = user.as_ref().or(regenerated.as_ref()).map(|m| m.id);
