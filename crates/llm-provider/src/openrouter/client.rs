@@ -9,7 +9,10 @@ use assistant_core::{LlmResponse, Secret, StreamChunk};
 
 use super::errors::http_error;
 use super::stream::{LineBuffer, StreamAccumulator};
-use super::wire::{ChatRequest, ChatResponse};
+use super::wire::{ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse};
+
+/// OpenRouter accepts at most this many texts per embeddings request.
+const MAX_EMBEDDING_INPUTS: usize = 2048;
 use crate::retry::{RetryConfig, classify_provider_error, parse_retry_after, with_retry_hinted};
 
 pub struct OpenRouterClient {
@@ -74,28 +77,63 @@ impl OpenRouterClient {
         finish(acc, sink.as_ref()).await
     }
 
-    /// Posts `request`, retrying transient failures.
+    /// Posts a chat `request`, retrying transient failures.
     async fn send(&self, request: &ChatRequest) -> anyhow::Result<reqwest::Response> {
-        with_retry_hinted(&self.retry, "OpenRouter", classify_provider_error, || {
-            self.send_once(request)
-        })
-        .await
-    }
-
-    /// Posts `request` once and fails on a non-success status.
-    async fn send_once(&self, request: &ChatRequest) -> anyhow::Result<reqwest::Response> {
         debug!(
             model = %request.model,
             tools = request.tools.len(),
             stream = request.stream,
             "Sending OpenRouter request"
         );
-        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
+        self.post("chat/completions", request).await
+    }
+
+    /// Embeds `texts` with `model`, in input order, in requests of at most
+    /// [`MAX_EMBEDDING_INPUTS`] texts.
+    pub async fn embed(&self, model: &str, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        let mut vectors = Vec::with_capacity(texts.len());
+        for batch in texts.chunks(MAX_EMBEDDING_INPUTS) {
+            let request = EmbeddingRequest {
+                model,
+                input: batch,
+                encoding_format: "float",
+            };
+            let response: EmbeddingResponse = self
+                .post("embeddings", &request)
+                .await
+                .map_err(|e| e.context(format!("OpenRouter embedding model `{model}`")))?
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter embeddings: {e}"))?;
+            vectors.extend(response.into_vectors(batch.len())?);
+        }
+        Ok(vectors)
+    }
+
+    /// Posts `body` to `{base_url}/{path}`, retrying transient failures.
+    async fn post<B: serde::Serialize + Sync>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> anyhow::Result<reqwest::Response> {
+        with_retry_hinted(&self.retry, "OpenRouter", classify_provider_error, || {
+            self.send_once(path, body)
+        })
+        .await
+    }
+
+    /// Posts `request` once and fails on a non-success status.
+    async fn send_once<B: serde::Serialize + Sync>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> anyhow::Result<reqwest::Response> {
+        let url = format!("{}/{path}", self.base_url.trim_end_matches('/'));
         let mut builder = self
             .http
             .post(&url)
             .bearer_auth(self.api_key.expose())
-            .json(request);
+            .json(body);
         for (name, value) in &self.headers {
             builder = builder.header(name, value);
         }
