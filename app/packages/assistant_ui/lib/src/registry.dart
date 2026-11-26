@@ -10,4 +10,5 @@ const List<String> kAssistantUiElements = [
   'StarterPrompts',
   'SuggestionChips',
   'ThreadDensityScope',
+  'TimelineEntryShell',
 ];

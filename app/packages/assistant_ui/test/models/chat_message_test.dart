@@ -158,6 +158,7 @@ void main() {
         'active',
         'complete',
         'stale',
+        'awaitingInput',
       ]);
     });
 

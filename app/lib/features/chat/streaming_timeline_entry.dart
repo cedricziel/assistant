@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:assistant_ui/assistant_ui.dart';
@@ -13,9 +12,10 @@ import 'markdown_link_handler.dart';
 /// A streaming-aware timeline entry for one thinking, tool call or subagent
 /// step in the chat timeline.
 ///
-/// Adapts its presentation based on the [ThreadDensityScope] density,
-/// [entryState], and whether the user has manually pinned it open.
-class StreamingTimelineEntry extends StatefulWidget {
+/// Builds a [TimelineEntryShell] around the entry's body; the shell owns
+/// expansion, pinning, auto-collapse and stale opacity. Density comes from the
+/// [ThreadDensityScope].
+class StreamingTimelineEntry extends StatelessWidget {
   const StreamingTimelineEntry({
     super.key,
     required this.message,
@@ -25,97 +25,16 @@ class StreamingTimelineEntry extends StatefulWidget {
   final ChatMessage message;
   final EntryState entryState;
 
-  @override
-  State<StreamingTimelineEntry> createState() => _StreamingTimelineEntryState();
-}
-
-class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
-  bool _expanded = false;
-  bool _userPinned = false;
-  Timer? _collapseTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    // Auto-expand if starting in active state (non-compact). `initState`
-    // cannot subscribe to the scope, so it reads the density once here.
-    final density =
-        context.getInheritedWidgetOfExactType<ThreadDensityScope>()?.density ??
-        TimelineDensity.normal;
-    if (widget.entryState == EntryState.active &&
-        density != TimelineDensity.compact) {
-      _expanded = true;
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant StreamingTimelineEntry oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    // Auto-expand when entry becomes active.
-    if (widget.entryState == EntryState.active &&
-        oldWidget.entryState != EntryState.active) {
-      if (!_userPinned && _density != TimelineDensity.compact) {
-        setState(() => _expanded = true);
-      }
-    }
-
-    // Auto-collapse when entry completes (with delay).
-    if (widget.entryState == EntryState.complete &&
-        oldWidget.entryState == EntryState.active) {
-      _scheduleAutoCollapse();
-    }
-
-    // Stale entries collapse immediately.
-    if (widget.entryState == EntryState.stale &&
-        oldWidget.entryState != EntryState.stale) {
-      if (!_userPinned) {
-        setState(() => _expanded = false);
-      }
-    }
-  }
-
-  void _scheduleAutoCollapse() {
-    _collapseTimer?.cancel();
-    if (_userPinned) return;
-
-    final reducedMotion = MediaQuery.of(context).disableAnimations;
-    if (reducedMotion) {
-      setState(() => _expanded = false);
-      return;
-    }
-
-    _collapseTimer = Timer(const Duration(milliseconds: 500), () {
-      if (mounted && !_userPinned) {
-        setState(() => _expanded = false);
-      }
-    });
-  }
-
-  TimelineDensity get _density => ThreadDensityScope.of(context);
-
-  @override
-  void dispose() {
-    _collapseTimer?.cancel();
-    super.dispose();
-  }
-
-  void _onTap() {
-    setState(() {
-      _expanded = !_expanded;
-      _userPinned = _expanded;
-    });
-  }
-
-  double _maxHeight(bool isSubagent) {
+  double _maxHeight(BuildContext context, bool isSubagent) {
+    final density = ThreadDensityScope.of(context);
     if (isSubagent) {
-      return switch (_density) {
+      return switch (density) {
         TimelineDensity.compact => 100,
         TimelineDensity.normal => 120,
         TimelineDensity.expanded => 150,
       };
     }
-    return switch (_density) {
+    return switch (density) {
       TimelineDensity.compact => 120,
       TimelineDensity.normal => 150,
       TimelineDensity.expanded => 200,
@@ -124,36 +43,31 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
 
   @override
   Widget build(BuildContext context) {
-    final opacity = widget.entryState == EntryState.stale ? 0.6 : 1.0;
-
-    return Opacity(
-      opacity: opacity,
-      child: switch (widget.message.timelineType) {
-        TimelineEntryType.toolCall => _buildToolCall(context),
-        TimelineEntryType.thinking => _buildThinking(context),
-        TimelineEntryType.subagent => _buildSubagent(context),
-        TimelineEntryType.command => const SizedBox.shrink(),
-        TimelineEntryType.interaction => const SizedBox.shrink(),
-        TimelineEntryType.message => const SizedBox.shrink(),
-      },
-    );
+    return switch (message.timelineType) {
+      TimelineEntryType.toolCall => _buildToolCall(context),
+      TimelineEntryType.thinking => _buildThinking(context),
+      TimelineEntryType.subagent => _buildSubagent(context),
+      TimelineEntryType.command => const SizedBox.shrink(),
+      TimelineEntryType.interaction => const SizedBox.shrink(),
+      TimelineEntryType.message => const SizedBox.shrink(),
+    };
   }
 
   // -- Thinking ---------------------------------------------------------------
 
   Widget _buildThinking(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final content = widget.message.thinkingContent;
-    final isActive = widget.entryState == EntryState.active;
-    final stream = widget.message.thinkingTokenStream;
+    final content = message.thinkingContent;
+    final isActive = entryState == EntryState.active;
+    final stream = message.thinkingTokenStream;
     final hasContent = content != null && content.isNotEmpty;
 
     // Build the expanded content based on state.
     Widget? expandedContent;
     if (isActive && stream != null) {
       // Live streaming thinking — render with StreamMarkdown.
-      expandedContent = _fadeContainer(
-        maxHeight: _maxHeight(false),
+      expandedContent = TimelineEntryShell.fadeContainer(
+        maxHeight: _maxHeight(context, false),
         isActive: true,
         child: StreamMarkdown(
           stream: stream,
@@ -170,8 +84,8 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
       );
     } else if (hasContent) {
       // Accumulated thinking content (complete or active without stream).
-      expandedContent = _fadeContainer(
-        maxHeight: _maxHeight(false),
+      expandedContent = TimelineEntryShell.fadeContainer(
+        maxHeight: _maxHeight(context, false),
         isActive: isActive,
         child: SelectableText(
           content,
@@ -205,18 +119,12 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
   // -- Tool call --------------------------------------------------------------
 
   Widget _buildToolCall(BuildContext context) {
-    final record = widget.message.toolCalls.isNotEmpty
-        ? widget.message.toolCalls.first
+    final record = message.toolCalls.isNotEmpty
+        ? message.toolCalls.first
         : null;
     if (record == null) return const SizedBox.shrink();
 
     final hasDetails = record.arguments != null || record.result != null;
-
-    // Density adaptation:
-    // compact: icon + name only (no args preview)
-    // normal: icon + name + status
-    // expanded: icon + name + args preview + status
-    final showArgs = _density == TimelineDensity.expanded && hasDetails;
 
     // Duration badge for completed tool calls.
     final durationLabel = record.duration != null
@@ -231,7 +139,6 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
       expandable: hasDetails,
       expandedContent: hasDetails ? _toolDetails(context, record) : null,
       forceExpand: record.status == ToolCallStatus.error,
-      showInline: showArgs,
     );
   }
 
@@ -251,7 +158,8 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     final colorScheme = Theme.of(context).colorScheme;
     final icon = _toolStatusIcon(context, record.status);
 
-    if (durationLabel == null || _density == TimelineDensity.compact) {
+    if (durationLabel == null ||
+        ThreadDensityScope.of(context) == TimelineDensity.compact) {
       return icon;
     }
 
@@ -366,13 +274,13 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
 
   Widget _buildSubagent(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final hasCompleted = widget.message.subagentSummary != null;
-    final isActive = widget.entryState == EntryState.active;
+    final hasCompleted = message.subagentSummary != null;
+    final isActive = entryState == EntryState.active;
 
     Widget? expandedContent;
     if (hasCompleted) {
       expandedContent = Text(
-        widget.message.subagentSummary!,
+        message.subagentSummary!,
         style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
       );
     } else if (isActive) {
@@ -383,7 +291,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     // Determine status icon: cancelled (stale+completed) → amber,
     // completed → green, active → spinner.
     final Widget statusIcon;
-    if (hasCompleted && widget.entryState == EntryState.stale) {
+    if (hasCompleted && entryState == EntryState.stale) {
       statusIcon = const Icon(
         Icons.cancel_outlined,
         size: 14,
@@ -406,7 +314,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     return _buildSection(
       context,
       icon: Icons.smart_toy_outlined,
-      label: widget.message.subagentTask ?? widget.message.subagentId ?? '',
+      label: message.subagentTask ?? message.subagentId ?? '',
       statusWidget: statusIcon,
       expandable: hasCompleted || isActive,
       expandedContent: expandedContent,
@@ -415,7 +323,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
 
   Widget _buildSubagentInnerTimeline(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final msg = widget.message;
+    final msg = message;
     final entries = <Widget>[];
 
     // Show subagent thinking if present.
@@ -453,7 +361,8 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     // Show subagent tool calls.
     // Density adaptation: normal shows last 2 entries, expanded shows all.
     var toolCalls = msg.subagentToolCalls;
-    if (_density == TimelineDensity.normal && toolCalls.length > 2) {
+    if (ThreadDensityScope.of(context) == TimelineDensity.normal &&
+        toolCalls.length > 2) {
       toolCalls = toolCalls.sublist(toolCalls.length - 2);
     }
 
@@ -495,8 +404,8 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
       );
     }
 
-    return _fadeContainer(
-      maxHeight: _maxHeight(true),
+    return TimelineEntryShell.fadeContainer(
+      maxHeight: _maxHeight(context, true),
       isActive: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -508,31 +417,6 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
 
   // -- Shared layout ----------------------------------------------------------
 
-  Widget _fadeContainer({
-    required double maxHeight,
-    required bool isActive,
-    required Widget child,
-  }) {
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      child: ShaderMask(
-        shaderCallback: (bounds) => LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          // Alpha mask values — not visible colors (used for blending).
-          colors: const [
-            Color(0xFFFFFFFF),
-            Color(0xFFFFFFFF),
-            Colors.transparent,
-          ],
-          stops: const [0.0, 0.8, 1.0],
-        ).createShader(bounds),
-        blendMode: BlendMode.dstIn,
-        child: SingleChildScrollView(reverse: isActive, child: child),
-      ),
-    );
-  }
-
   Widget _buildSection(
     BuildContext context, {
     required IconData icon,
@@ -541,105 +425,15 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
     bool expandable = false,
     Widget? expandedContent,
     bool forceExpand = false,
-    bool showInline = false,
   }) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isExpanded = forceExpand || _expanded;
-    final reducedMotion = MediaQuery.of(context).disableAnimations;
-
-    // In compact density, only show icon + name.
-    final showStatus =
-        _density != TimelineDensity.compact || statusWidget is! SizedBox;
-
-    return Semantics(
+    return TimelineEntryShell(
+      icon: icon,
       label: label,
-      button: expandable,
-      expanded: isExpanded,
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              GestureDetector(
-                onTap: expandable ? _onTap : null,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHighest.withAlpha(120),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(icon, size: 14, color: colorScheme.onSurfaceVariant),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (showStatus && statusWidget != null) ...[
-                        const SizedBox(width: 6),
-                        statusWidget,
-                      ],
-                      if (expandable) ...[
-                        const SizedBox(width: 4),
-                        Icon(
-                          isExpanded
-                              ? Icons.expand_less_rounded
-                              : Icons.expand_more_rounded,
-                          size: 14,
-                          color: colorScheme.onSurfaceVariant.withAlpha(150),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              AnimatedSize(
-                duration: reducedMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 200),
-                curve: Curves.easeInOut,
-                child: isExpanded && expandedContent != null
-                    ? Padding(
-                        padding: const EdgeInsets.only(
-                          left: 12,
-                          top: 4,
-                          bottom: 4,
-                        ),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: colorScheme.surfaceContainerLowest,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: colorScheme.outlineVariant.withAlpha(80),
-                              width: 0.5,
-                            ),
-                          ),
-                          child: expandedContent,
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
-          ),
-        ),
-      ),
+      status: statusWidget,
+      entryState: entryState,
+      expandable: expandable,
+      forceExpand: forceExpand,
+      body: expandedContent,
     );
   }
 

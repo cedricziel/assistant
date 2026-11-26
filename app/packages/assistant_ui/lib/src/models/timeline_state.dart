@@ -27,4 +27,8 @@ enum EntryState {
 
   /// A newer entry superseded this one — stays collapsed, reduced opacity.
   stale,
+
+  /// Paused until the user answers (a tool approval or a question). The entry
+  /// stays expanded, never auto-collapses and shows an attention accent.
+  awaitingInput,
 }
