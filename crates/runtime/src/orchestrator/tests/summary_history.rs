@@ -47,7 +47,6 @@ fn command_context(orch: &Arc<Orchestrator>, conversation_id: Uuid) -> CommandCo
         conversation_id,
         conversation_configs: Arc::new(Default::default()) as Arc<_>,
         orchestrator: orch.clone(),
-        active_turns: Default::default(),
         evict_conversation: None,
         default_model: "test".to_string(),
     }
