@@ -318,6 +318,7 @@ class ChatState {
     this.conversationId,
     this.messages = const [],
     this.isSending = false,
+    this.isStopping = false,
     this.isLoadingHistory = false,
     this.isReconnecting = false,
     this.streamingContent = '',
@@ -331,6 +332,10 @@ class ChatState {
   final String? conversationId;
   final List<ChatMessage> messages;
   final bool isSending;
+
+  /// True from a Stop request until the turn's terminal frame is processed.
+  /// Further Stop requests are ignored while set.
+  final bool isStopping;
   final bool isLoadingHistory;
 
   /// True while [ChatNotifier.attemptReconnect] is actively recovering an
@@ -366,6 +371,7 @@ class ChatState {
     String? conversationId,
     List<ChatMessage>? messages,
     bool? isSending,
+    bool? isStopping,
     bool? isLoadingHistory,
     bool? isReconnecting,
     String? streamingContent,
@@ -385,6 +391,7 @@ class ChatState {
           : (conversationId ?? this.conversationId),
       messages: messages ?? this.messages,
       isSending: isSending ?? this.isSending,
+      isStopping: isStopping ?? this.isStopping,
       isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
       isReconnecting: isReconnecting ?? this.isReconnecting,
       streamingContent: streamingContent ?? this.streamingContent,

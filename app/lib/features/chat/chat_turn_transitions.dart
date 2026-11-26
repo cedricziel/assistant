@@ -22,6 +22,7 @@ ChatState abortedTurnState(
   return from.copyWith(
     messages: msgs,
     isSending: false,
+    isStopping: false,
     streamingContent: '',
     error: error,
     clearStatusMessage: clearStatusMessage,
@@ -114,6 +115,7 @@ ChatState stoppedTurnState(
   return from.copyWith(
     messages: msgs,
     isSending: false,
+    isStopping: false,
     streamingContent: '',
     clearError: true,
     clearStatusMessage: true,
