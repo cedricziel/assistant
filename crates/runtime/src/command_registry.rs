@@ -14,7 +14,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::compaction;
-use crate::orchestrator::Orchestrator;
+use crate::orchestrator::{CancelOutcome, Orchestrator};
 
 // -- Execution context --------------------------------------------------------
 
@@ -200,17 +200,7 @@ impl CommandRegistry {
 
         match request_id {
             Some(rid) => {
-                // Find the cancellation token in the orchestrator.
-                let token = ctx
-                    .orchestrator
-                    .turn_cancellations
-                    .read()
-                    .await
-                    .get(&rid)
-                    .cloned();
-
-                if let Some(t) = token {
-                    t.cancel();
+                if ctx.orchestrator.cancel_turn(rid).await == CancelOutcome::Cancelled {
                     info!(conv_id = %ctx.conversation_id, request_id = %rid, "Turn cancelled via /stop");
                     CommandResult::ack("Stopped.")
                 } else {

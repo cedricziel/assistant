@@ -14,16 +14,16 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 - [x] 2.1 Write a failing test for `with_retry`: it waits at least `retry_after` when the error carries one, and does not retry non-transient errors. Confirm red.
 - [x] 2.2 Add a retry-aware error type to `retry.rs` and honor `retry_after`. Verify 2.1.
-- [ ] 2.3 Write failing tests: Anthropic and OpenAI responses fill `cached_input_tokens`, `cache_write_input_tokens` and `reasoning_tokens`; Ollama leaves `cost_usd` unset. Confirm red.
-- [ ] 2.4 Add the four `Option` fields to `LlmResponseMeta` and fill them in the Anthropic and OpenAI parsers. Verify 2.3.
-- [ ] 2.5 Write failing tests in `otel_spans.rs` and `metrics.rs` for the cache-read, cache-creation and reasoning attributes and `assistant.llm.cost_usd`. Confirm red. Implement, then verify.
+- [x] 2.3 Write failing tests: Anthropic and OpenAI responses fill `cached_input_tokens`, `cache_write_input_tokens` and `reasoning_tokens`; Ollama leaves `cost_usd` unset. Confirm red.
+- [x] 2.4 Add the four `Option` fields to `LlmResponseMeta` and fill them in the Anthropic and OpenAI parsers. Verify 2.3.
+- [x] 2.5 Write failing tests in `otel_spans.rs` and `metrics.rs` for the cache-read, cache-creation and reasoning attributes and `assistant.llm.cost_usd`. Confirm red. Implement, then verify.
 
 ## 3. Provider state refactor (no behavior change)
 
-- [ ] 3.1 Write a failing storage test: a message saved with `provider_state_json` round-trips, and older rows read back as `None`. Confirm red.
-- [ ] 3.2 Add the nullable `messages.provider_state_json` migration and the store field. Verify 3.1 with `cargo test -p assistant-storage`.
-- [ ] 3.3 Write a failing `history.rs` test: a stored provider state is restored onto `AssistantToolCalls`. Confirm red.
-- [ ] 3.4 Change `AssistantToolCalls` to `{ items, provider_state }`, add `provider_state` to `ToolCallResponse`, update all match sites, persist the state in the orchestrator, and restore it in `history.rs`. Verify with `cargo test --workspace`.
+- [x] 3.1 Write a failing storage test: a message saved with `provider_state_json` round-trips, and older rows read back as `None`. Confirm red.
+- [x] 3.2 Add the nullable `messages.provider_state_json` migration and the store field. Verify 3.1 with `cargo test -p assistant-storage`.
+- [x] 3.3 Write a failing `history.rs` test: a stored provider state is restored onto `AssistantToolCalls`. Confirm red.
+- [x] 3.4 Change `AssistantToolCalls` to `{ items, provider_state }`, add `provider_state` to `ToolCallResponse`, update all match sites, persist the state in the orchestrator, and restore it in `history.rs`. Verify with `cargo test --workspace`.
 
 ## 4. Per-call context and per-turn context window
 

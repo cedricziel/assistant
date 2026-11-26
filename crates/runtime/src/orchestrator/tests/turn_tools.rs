@@ -107,6 +107,7 @@ fn call(name: &str) -> LlmResponse {
         }],
         meta: LlmResponseMeta::default(),
         thinking: None,
+        provider_state: None,
     })
 }
 
