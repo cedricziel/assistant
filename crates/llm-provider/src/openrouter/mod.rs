@@ -8,6 +8,7 @@
 //! fallback models.
 
 mod catalog;
+mod citations;
 mod client;
 mod errors;
 mod reasoning;
@@ -21,9 +22,9 @@ use tracing::debug;
 
 use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, Clock, LlmProvider,
-    LlmResponse, ResponseFormat, StreamChunk, SystemClock, ToolChoice, ToolSpec, ToolSupport,
-    chat_with_fallback,
+    Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, Clock, HostedTool,
+    LlmProvider, LlmResponse, ResponseFormat, StreamChunk, SystemClock, ToolChoice, ToolSpec,
+    ToolSupport, chat_with_fallback,
 };
 
 use std::sync::Arc;
@@ -141,6 +142,8 @@ impl OpenRouterProvider {
                 fallback_models: cfg.openrouter.fallback_models.clone(),
                 routing: cfg.openrouter.provider.clone(),
                 reasoning: cfg.openrouter.reasoning.clone(),
+                cache: cfg.openrouter.cache.clone(),
+                web_search: cfg.openrouter.web_search.clone(),
             },
             base_url,
         })
@@ -160,7 +163,11 @@ impl LlmProvider for OpenRouterProvider {
             },
             streaming: true,
             vision: info.as_deref().is_some_and(|i| i.vision),
-            hosted_tools: vec![],
+            hosted_tools: if self.settings.web_search.enabled {
+                vec![HostedTool::WebSearch]
+            } else {
+                vec![]
+            },
             context_window_tokens: info.and_then(|i| i.context_window_tokens),
         }
     }
@@ -261,7 +268,9 @@ mod tests {
     use super::*;
     use assistant_core::types::llm::LlmProviderKind;
     use assistant_core::types::llm::OpenRouterOptions;
-    use assistant_core::{ChatOptions, ChatOptionsSupport, ResponseFormat, Secret, ToolChoice};
+    use assistant_core::{
+        ChatOptions, ChatOptionsSupport, HostedTool, ResponseFormat, Secret, ToolChoice,
+    };
     use serde_json::{Value, json};
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1190,6 +1199,15 @@ mod tests {
 
     // ── Wiremock: native chat options ───────────────────────────────────
 
+    /// The system prompt text, whether sent as a string or as text parts.
+    fn system_text(body: &Value) -> String {
+        let content = &body["messages"][0]["content"];
+        match content.as_array() {
+            Some(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect(),
+            None => content.as_str().unwrap_or_default().to_owned(),
+        }
+    }
+
     fn submit_tool() -> ToolSpec {
         ToolSpec {
             name: "submit".into(),
@@ -1296,10 +1314,7 @@ mod tests {
             json!({"data_collection": "deny", "require_parameters": true}),
             "configured routing is kept"
         );
-        assert_eq!(
-            body["messages"][0]["content"], "sys",
-            "no prompt instruction"
-        );
+        assert_eq!(system_text(&body), "sys", "no prompt instruction");
     }
 
     #[tokio::test]
@@ -1429,7 +1444,7 @@ mod tests {
         let body = sent_body(&server).await;
         assert!(body.get("tool_choice").is_none(), "{body}");
         assert!(body.get("provider").is_none(), "{body}");
-        let system = body["messages"][0]["content"].as_str().unwrap();
+        let system = system_text(&body);
         assert!(system.contains("`submit`"), "{system}");
     }
 
@@ -1778,6 +1793,300 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("token budget"), "{err}");
+    }
+
+    // ── Wiremock: reasoning continuity ──────────────────────────────────
+
+    fn stored_details() -> Value {
+        json!([
+            {"type": "reasoning.text", "text": "Checking the file first", "signature": "sig-a", "index": 0},
+            {"type": "reasoning.encrypted", "data": "c2VjcmV0", "index": 1},
+        ])
+    }
+
+    fn state(provider: &str, model: &str) -> assistant_core::ProviderState {
+        assistant_core::ProviderState {
+            provider: provider.into(),
+            model: model.into(),
+            data: json!({"reasoning_details": stored_details()}),
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_call_reasoning_details_become_provider_state() {
+        let server = MockServer::start().await;
+        let mut body = reasoning_tool_call();
+        body["choices"][0]["message"]["reasoning_details"] = stored_details();
+        mount_once(&server, body).await;
+
+        let response = provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &[], &[read_tool()])
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        assert_eq!(calls.provider_state, Some(state("openrouter", MODEL)));
+    }
+
+    #[tokio::test]
+    async fn streamed_reasoning_details_are_merged_by_index() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"Checking the ","index":0}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"file first","signature":"sig-a","index":0}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"c2VjcmV0","index":1}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"file-read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+
+        let response = provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat_streaming("sys", &[], &[read_tool()], None)
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        assert_eq!(calls.provider_state, Some(state("openrouter", MODEL)));
+    }
+
+    fn tool_loop_history(
+        provider_state: Option<assistant_core::ProviderState>,
+    ) -> Vec<ChatHistoryMessage> {
+        vec![
+            ChatHistoryMessage::Text {
+                role: assistant_core::ChatRole::User,
+                content: "read it".into(),
+            },
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![assistant_core::ToolCallItem {
+                    name: "file-read".into(),
+                    params: json!({}),
+                    id: Some("call_1".into()),
+                }],
+                provider_state,
+            },
+            ChatHistoryMessage::ToolResult {
+                name: "file-read".into(),
+                content: "contents".into(),
+            },
+        ]
+    }
+
+    async fn sent_assistant_message(state: Option<assistant_core::ProviderState>) -> Value {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &tool_loop_history(state), &[read_tool()])
+            .await
+            .unwrap();
+        let body = sent_body(&server).await;
+        body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "assistant")
+            .cloned()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stored_reasoning_details_are_sent_back_unchanged_and_in_order() {
+        let message = sent_assistant_message(Some(state("openrouter", MODEL))).await;
+        assert_eq!(message["reasoning_details"], stored_details());
+        assert_eq!(message["tool_calls"][0]["id"], "call_1");
+    }
+
+    #[tokio::test]
+    async fn reasoning_from_another_provider_or_model_is_not_sent() {
+        for foreign in [
+            state("anthropic", MODEL),
+            state("openrouter", "openai/gpt-4o"),
+        ] {
+            let message = sent_assistant_message(Some(foreign.clone())).await;
+            assert!(
+                message.get("reasoning_details").is_none(),
+                "{foreign:?}: {message}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn anthropic_requests_carry_cache_breakpoints() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let history = [ChatHistoryMessage::Text {
+            role: assistant_core::ChatRole::User,
+            content: "hi".into(),
+        }];
+
+        provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &history, &[])
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        let ephemeral = json!({"type": "ephemeral"});
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"],
+            ephemeral
+        );
+        assert_eq!(
+            body["messages"][1]["content"][0]["cache_control"],
+            ephemeral
+        );
+    }
+
+    // ── Wiremock: web search ────────────────────────────────────────────
+
+    fn web_search(search: assistant_core::types::llm::OpenRouterWebSearch) -> OpenRouterOptions {
+        OpenRouterOptions {
+            web_search: search,
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn enabled_web_search_sends_the_plugin_and_is_a_hosted_tool() {
+        use assistant_core::types::llm::{OpenRouterSearchEngine, OpenRouterWebSearch};
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = provider_with(
+            &server.uri(),
+            web_search(OpenRouterWebSearch {
+                enabled: true,
+                engine: Some(OpenRouterSearchEngine::Exa),
+                max_results: Some(3),
+                exclude_domains: Some(vec!["reddit.com".into()]),
+                ..OpenRouterWebSearch::default()
+            }),
+        );
+
+        assert_eq!(
+            provider.capabilities().hosted_tools,
+            [HostedTool::WebSearch]
+        );
+        provider.chat("sys", &[], &[]).await.unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(
+            body["plugins"],
+            json!([{"id": "web", "engine": "exa", "max_results": 3, "exclude_domains": ["reddit.com"]}])
+        );
+        assert!(body.get("web_search_options").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn search_context_size_is_sent_as_web_search_options() {
+        use assistant_core::types::llm::{OpenRouterSearchContextSize, OpenRouterWebSearch};
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+
+        provider_with(
+            &server.uri(),
+            web_search(OpenRouterWebSearch {
+                enabled: true,
+                search_context_size: Some(OpenRouterSearchContextSize::High),
+                ..OpenRouterWebSearch::default()
+            }),
+        )
+        .chat("sys", &[], &[])
+        .await
+        .unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(body["plugins"], json!([{"id": "web"}]));
+        assert_eq!(
+            body["web_search_options"],
+            json!({"search_context_size": "high"})
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_web_search_sends_no_plugin_and_hosts_nothing() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = provider_with(&server.uri(), OpenRouterOptions::default());
+
+        assert!(provider.capabilities().hosted_tools.is_empty());
+        provider.chat("sys", &[], &[]).await.unwrap();
+
+        let body = sent_body(&server).await;
+        assert!(body.get("plugins").is_none(), "{body}");
+        assert!(body.get("web_search_options").is_none(), "{body}");
+    }
+
+    // ── Wiremock: citations ─────────────────────────────────────────────
+
+    fn citation(url: &str, title: &str) -> Value {
+        json!({"type": "url_citation", "url_citation": {"url": url, "title": title}})
+    }
+
+    #[tokio::test]
+    async fn final_answer_ends_with_its_sources() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({
+                "id": "gen-c",
+                "model": MODEL,
+                "choices": [{"finish_reason": "stop", "message": {
+                    "role": "assistant",
+                    "content": "It rained.",
+                    "annotations": [citation("https://a.example", "A"), citation("https://a.example", "A")],
+                }}],
+            }),
+        )
+        .await;
+
+        let response = make_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+        let LlmResponse::FinalAnswer(text, _) = response else {
+            panic!("expected a final answer, got {response:?}");
+        };
+        assert_eq!(text, "It rained.\n\nSources:\n- [A](https://a.example)");
+    }
+
+    #[tokio::test]
+    async fn streamed_sources_arrive_as_the_last_chunk_and_match_the_answer() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"content":"It rained."}}]}"#,
+                r#"data: {"choices":[{"delta":{"annotations":[{"type":"url_citation","url_citation":{"url":"https://a.example","title":"A"}}]},"finish_reason":"stop"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        let response = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], Some(tx))
+            .await
+            .unwrap();
+
+        let LlmResponse::FinalAnswer(text, _) = response else {
+            panic!("expected a final answer, got {response:?}");
+        };
+        let streamed = drain(&mut rx);
+        assert_eq!(
+            streamed.last().unwrap(),
+            "\n\nSources:\n- [A](https://a.example)"
+        );
+        assert_eq!(
+            streamed.concat(),
+            text,
+            "the persisted answer equals what was streamed"
+        );
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────

@@ -7,4 +7,6 @@
 const List<String> kAssistantUiElements = [
   'MessageActionButton',
   'MessageActions',
+  'StarterPrompts',
+  'SuggestionChips',
 ];

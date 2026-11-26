@@ -46,7 +46,7 @@ impl OpenRouterClient {
             .map_err(|e| anyhow::anyhow!("Failed to read OpenRouter response: {e}"))?;
         let response: ChatResponse = serde_json::from_str(&body)
             .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter response: {e}"))?;
-        response.into_llm_response(shows_reasoning(request))
+        response.into_llm_response(&request.model, shows_reasoning(request))
     }
 
     /// Streams `request`, forwarding text deltas to `sink`.
@@ -57,7 +57,7 @@ impl OpenRouterClient {
     ) -> anyhow::Result<LlmResponse> {
         let mut bytes = self.send(request).await?.bytes_stream();
         let mut lines = LineBuffer::default();
-        let mut acc = StreamAccumulator::new(shows_reasoning(request));
+        let mut acc = StreamAccumulator::new(&request.model, shows_reasoning(request));
         while let Some(chunk) = bytes.next().await {
             let chunk = chunk.map_err(|e| anyhow::anyhow!("OpenRouter stream failed: {e}"))?;
             for line in lines.push(&chunk) {
@@ -67,11 +67,11 @@ impl OpenRouterClient {
                     }
                 }
                 if acc.is_done() {
-                    return acc.finish();
+                    return finish(acc, sink.as_ref()).await;
                 }
             }
         }
-        acc.finish()
+        finish(acc, sink.as_ref()).await
     }
 
     /// Posts `request`, retrying transient failures.
@@ -124,4 +124,15 @@ fn shows_reasoning(request: &ChatRequest) -> bool {
         .as_ref()
         .and_then(|r| r.exclude)
         .unwrap_or(false)
+}
+
+/// Streams the Sources block, if any, then returns the final response.
+async fn finish(
+    acc: StreamAccumulator,
+    sink: Option<&mpsc::Sender<StreamChunk>>,
+) -> anyhow::Result<LlmResponse> {
+    if let (Some(block), Some(sink)) = (acc.sources_block(), sink) {
+        let _ = sink.send(StreamChunk::Text(block)).await;
+    }
+    acc.finish()
 }

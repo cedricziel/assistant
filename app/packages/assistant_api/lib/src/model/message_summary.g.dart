@@ -14,6 +14,8 @@ class _$MessageSummary extends MessageSummary {
   @override
   final DateTime createdAt;
   @override
+  final String? finishReason;
+  @override
   final String id;
   @override
   final String role;
@@ -33,6 +35,7 @@ class _$MessageSummary extends MessageSummary {
       {this.attachments,
       required this.content,
       required this.createdAt,
+      this.finishReason,
       required this.id,
       required this.role,
       this.skillName,
@@ -54,6 +57,7 @@ class _$MessageSummary extends MessageSummary {
         attachments == other.attachments &&
         content == other.content &&
         createdAt == other.createdAt &&
+        finishReason == other.finishReason &&
         id == other.id &&
         role == other.role &&
         skillName == other.skillName &&
@@ -68,6 +72,7 @@ class _$MessageSummary extends MessageSummary {
     _$hash = $jc(_$hash, attachments.hashCode);
     _$hash = $jc(_$hash, content.hashCode);
     _$hash = $jc(_$hash, createdAt.hashCode);
+    _$hash = $jc(_$hash, finishReason.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, role.hashCode);
     _$hash = $jc(_$hash, skillName.hashCode);
@@ -84,6 +89,7 @@ class _$MessageSummary extends MessageSummary {
           ..add('attachments', attachments)
           ..add('content', content)
           ..add('createdAt', createdAt)
+          ..add('finishReason', finishReason)
           ..add('id', id)
           ..add('role', role)
           ..add('skillName', skillName)
@@ -111,6 +117,10 @@ class MessageSummaryBuilder
   DateTime? _createdAt;
   DateTime? get createdAt => _$this._createdAt;
   set createdAt(DateTime? createdAt) => _$this._createdAt = createdAt;
+
+  String? _finishReason;
+  String? get finishReason => _$this._finishReason;
+  set finishReason(String? finishReason) => _$this._finishReason = finishReason;
 
   String? _id;
   String? get id => _$this._id;
@@ -148,6 +158,7 @@ class MessageSummaryBuilder
       _attachments = $v.attachments?.toBuilder();
       _content = $v.content;
       _createdAt = $v.createdAt;
+      _finishReason = $v.finishReason;
       _id = $v.id;
       _role = $v.role;
       _skillName = $v.skillName;
@@ -182,6 +193,7 @@ class MessageSummaryBuilder
                 content, r'MessageSummary', 'content'),
             createdAt: BuiltValueNullFieldError.checkNotNull(
                 createdAt, r'MessageSummary', 'createdAt'),
+            finishReason: finishReason,
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'MessageSummary', 'id'),
             role: BuiltValueNullFieldError.checkNotNull(
