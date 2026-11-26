@@ -90,10 +90,10 @@ Layer: server
 Depends on: PR 3, PR 5
 Parallel with: 7b, 8 prep, 13, 14
 
-- [ ] 7.1 RED: `OrgConfig` parsing tests. `[ui] image_hosts = ["a.example"]` and `[ui] link_hosts = ["docs.example"]` load into `UiConfig`; an absent section yields `None`; an absent key yields an empty list (`image_hosts` empty means any `https:` host, `link_hosts` empty means every `openUrl` asks first); a non-string entry fails to load; hosts are lower-cased on load.
-- [ ] 7.2 Add `UiConfig { image_hosts, link_hosts }` to `OrgConfig` (`crates/core/src/types/agent.rs:45`). GREEN.
-- [ ] 7.3 RED: `RenderSurfaceHandler` unit tests with an in-memory attachment store. Valid create returns success with `data = {"surface": ValidSurface}`. Invalid draft returns `ToolOutput::error` with the JSON issue list. An attachment owned by another conversation fails. A host outside `image_hosts` fails. Update without `components`/`data_updates` fails. A context with `interactive = false` or a non-web interface returns the text-fallback observation with no `data`. `params_schema` ≤ 6 KiB, `components` is `array<object>` with a `component` enum, and **no `wait_for_action` property** yet.
-- [ ] 7.4 Implement `crates/tool-executor/src/builtins/render_surface.rs`: collect attachment ids, resolve ownership through the attachment store, build `UrlPolicy` from `UiConfig`, call the pure validator. `requires_rich_client() == true`. **Do not register it in `register_builtins`** (PR 19 does). GREEN.
+- [x] 7.1 RED: `OrgConfig` parsing tests. `[ui] image_hosts = ["a.example"]` and `[ui] link_hosts = ["docs.example"]` load into `UiConfig`; an absent section yields `None`; an absent key yields an empty list (`image_hosts` empty means any `https:` host, `link_hosts` empty means every `openUrl` asks first); a non-string entry fails to load; hosts are lower-cased on load.
+- [x] 7.2 Add `UiConfig { image_hosts, link_hosts }` to `OrgConfig` (`crates/core/src/types/agent.rs:45`). GREEN.
+- [x] 7.3 RED: `RenderSurfaceHandler` unit tests with an in-memory attachment store. Valid create returns success with `data = {"surface": ValidSurface}`. Invalid draft returns `ToolOutput::error` with the JSON issue list. An attachment owned by another conversation fails. A host outside `image_hosts` fails. Update without `components`/`data_updates` fails. A context with `interactive = false` or a non-web interface returns the text-fallback observation with no `data`. `params_schema` ≤ 6 KiB, `components` is `array<object>` with a `component` enum, and **no `wait_for_action` property** yet.
+- [x] 7.4 Implement `crates/tool-executor/src/builtins/render_surface.rs`: collect attachment ids, resolve ownership through the attachment store, build `UrlPolicy` from `UiConfig`, call the pure validator. `requires_rich_client() == true`. **Do not register it in `register_builtins`** (PR 19 does). GREEN.
 
 ## PR 7b — feat(web-ui): expose the link allowlist on /api/capabilities
 
