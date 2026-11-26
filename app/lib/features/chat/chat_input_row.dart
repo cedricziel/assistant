@@ -15,6 +15,7 @@ class ChatInputRow extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.isSending,
+    this.isStopping = false,
     required this.pendingQueueCount,
     required this.pendingAttachments,
     required this.capabilities,
@@ -30,6 +31,7 @@ class ChatInputRow extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isSending;
+  final bool isStopping;
   final int pendingQueueCount;
   final List<PendingAttachment> pendingAttachments;
   final ServerCapabilities capabilities;
@@ -280,7 +282,8 @@ class _ChatInputRowState extends State<ChatInputRow> {
               if (widget.isSending)
                 IconButton.filled(
                   key: const Key('stop_button'),
-                  onPressed: widget.onStop,
+                  onPressed: widget.isStopping ? null : widget.onStop,
+                  tooltip: widget.isStopping ? 'Stopping…' : null,
                   icon: const Icon(Icons.stop_rounded),
                 )
               else

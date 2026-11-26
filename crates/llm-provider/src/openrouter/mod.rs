@@ -10,6 +10,7 @@
 mod catalog;
 mod client;
 mod errors;
+mod reasoning;
 mod request;
 mod stream;
 mod wire;
@@ -125,6 +126,7 @@ impl OpenRouterProvider {
                 cfg.timeout_secs,
                 cfg.model.clone(),
                 cfg.openrouter.provider.clone(),
+                cfg.openrouter.reasoning.as_ref().and_then(|r| r.effort),
                 clock,
             )?,
             client: OpenRouterClient::new(
@@ -138,6 +140,8 @@ impl OpenRouterProvider {
                 max_tokens,
                 fallback_models: cfg.openrouter.fallback_models.clone(),
                 routing: cfg.openrouter.provider.clone(),
+                reasoning: cfg.openrouter.reasoning.clone(),
+                cache: cfg.openrouter.cache.clone(),
             },
             base_url,
         })
@@ -1187,6 +1191,15 @@ mod tests {
 
     // ── Wiremock: native chat options ───────────────────────────────────
 
+    /// The system prompt text, whether sent as a string or as text parts.
+    fn system_text(body: &Value) -> String {
+        let content = &body["messages"][0]["content"];
+        match content.as_array() {
+            Some(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect(),
+            None => content.as_str().unwrap_or_default().to_owned(),
+        }
+    }
+
     fn submit_tool() -> ToolSpec {
         ToolSpec {
             name: "submit".into(),
@@ -1293,10 +1306,7 @@ mod tests {
             json!({"data_collection": "deny", "require_parameters": true}),
             "configured routing is kept"
         );
-        assert_eq!(
-            body["messages"][0]["content"], "sys",
-            "no prompt instruction"
-        );
+        assert_eq!(system_text(&body), "sys", "no prompt instruction");
     }
 
     #[tokio::test]
@@ -1426,7 +1436,7 @@ mod tests {
         let body = sent_body(&server).await;
         assert!(body.get("tool_choice").is_none(), "{body}");
         assert!(body.get("provider").is_none(), "{body}");
-        let system = body["messages"][0]["content"].as_str().unwrap();
+        let system = system_text(&body);
         assert!(system.contains("`submit`"), "{system}");
     }
 
@@ -1481,6 +1491,448 @@ mod tests {
         let body = sent_body(&server).await;
         let parts = body["messages"][1]["content"].as_array().unwrap();
         assert!(parts.iter().any(|p| p["type"] == "image_url"), "{parts:?}");
+    }
+
+    // ── Wiremock: reasoning ─────────────────────────────────────────────
+
+    fn reasoning_options(
+        effort: assistant_core::types::llm::OpenRouterEffort,
+    ) -> OpenRouterOptions {
+        OpenRouterOptions {
+            reasoning: Some(assistant_core::types::llm::OpenRouterReasoning {
+                effort: Some(effort),
+                ..Default::default()
+            }),
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    async fn reasoning_provider(
+        server: &MockServer,
+        reasoning: Option<Value>,
+        options: OpenRouterOptions,
+    ) -> OpenRouterProvider {
+        let mut model = catalog_model(&["text"], &["tools", "reasoning"]);
+        if let Some(reasoning) = reasoning {
+            model["reasoning"] = reasoning;
+        }
+        mount_catalog(
+            server,
+            model,
+            json!([endpoint("Anthropic", "anthropic", 200_000)]),
+        )
+        .await;
+        provider_with(&server.uri(), options)
+    }
+
+    #[tokio::test]
+    async fn configured_reasoning_is_sent() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = reasoning_provider(
+            &server,
+            Some(json!({"supported_efforts": ["high", "medium", "low"]})),
+            reasoning_options(OpenRouterEffort::High),
+        )
+        .await;
+
+        provider.chat("sys", &[], &[]).await.unwrap();
+
+        assert_eq!(
+            sent_body(&server).await["reasoning"],
+            json!({"effort": "high"})
+        );
+    }
+
+    #[tokio::test]
+    async fn unsupported_effort_fails_every_call_with_the_supported_list() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        let provider = reasoning_provider(
+            &server,
+            Some(json!({"supported_efforts": ["high", "medium"]})),
+            reasoning_options(OpenRouterEffort::Xhigh),
+        )
+        .await;
+
+        for _ in 0..2 {
+            let err = provider
+                .chat("sys", &[], &[])
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("xhigh"), "{err}");
+            assert!(err.contains("high, medium"), "{err}");
+        }
+        assert_eq!(request_count(&server).await, 0, "nothing is sent upstream");
+    }
+
+    #[tokio::test]
+    async fn null_supported_efforts_accepts_any_effort() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = reasoning_provider(
+            &server,
+            Some(json!({"supported_efforts": null})),
+            reasoning_options(OpenRouterEffort::Max),
+        )
+        .await;
+
+        provider.chat("sys", &[], &[]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn effort_on_a_model_without_effort_selection_fails() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        let provider =
+            reasoning_provider(&server, None, reasoning_options(OpenRouterEffort::Low)).await;
+
+        let err = provider
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("does not support reasoning effort"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn effort_none_fails_when_reasoning_is_mandatory() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        let provider = reasoning_provider(
+            &server,
+            Some(json!({"supported_efforts": null, "mandatory": true})),
+            reasoning_options(OpenRouterEffort::None),
+        )
+        .await;
+
+        let err = provider
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("mandatory"), "{err}");
+    }
+
+    // ── Wiremock: reasoning output ──────────────────────────────────────
+
+    fn reasoning_tool_call() -> Value {
+        json!({
+            "id": "gen-r",
+            "model": MODEL,
+            "choices": [{"finish_reason": "tool_calls", "message": {
+                "role": "assistant",
+                "content": null,
+                "reasoning_details": [
+                    {"type": "reasoning.text", "text": "Checking the file first", "index": 0},
+                    {"type": "reasoning.summary", "summary": "Read it, then answer", "index": 1},
+                    {"type": "reasoning.encrypted", "data": "c2VjcmV0", "index": 2},
+                ],
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {
+                    "name": "file-read", "arguments": "{}"}}],
+            }}],
+        })
+    }
+
+    fn excluding() -> OpenRouterOptions {
+        OpenRouterOptions {
+            reasoning: Some(assistant_core::types::llm::OpenRouterReasoning {
+                exclude: Some(true),
+                ..Default::default()
+            }),
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_call_reasoning_is_returned_as_thinking_without_encrypted_entries() {
+        let server = MockServer::start().await;
+        mount_once(&server, reasoning_tool_call()).await;
+
+        let response = make_provider(&server.uri())
+            .chat("sys", &[], &[read_tool()])
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        let thinking = calls.thinking.unwrap();
+        assert!(thinking.contains("Checking the file first"), "{thinking}");
+        assert!(thinking.contains("Read it, then answer"), "{thinking}");
+        assert!(
+            !thinking.contains("c2VjcmV0"),
+            "encrypted entries are hidden: {thinking}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exclude_emits_no_thinking() {
+        let server = MockServer::start().await;
+        mount_once(&server, reasoning_tool_call()).await;
+
+        let response = provider_with(&server.uri(), excluding())
+            .chat("sys", &[], &[read_tool()])
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        assert_eq!(calls.thinking, None);
+    }
+
+    fn thinking_and_text(rx: &mut tokio::sync::mpsc::Receiver<StreamChunk>) -> Vec<String> {
+        let mut seen = Vec::new();
+        while let Ok(chunk) = rx.try_recv() {
+            match chunk {
+                StreamChunk::Thinking(t) => seen.push(format!("thinking:{t}")),
+                StreamChunk::Text(t) => seen.push(format!("text:{t}")),
+            }
+        }
+        seen
+    }
+
+    const REASONING_STREAM: [&str; 4] = [
+        r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"Checking the file first","index":0}]}}]}"#,
+        r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"c2VjcmV0","index":1}]}}]}"#,
+        r#"data: {"choices":[{"delta":{"content":"Done"},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+    ];
+
+    #[tokio::test]
+    async fn streamed_reasoning_comes_before_the_answer() {
+        let server = MockServer::start().await;
+        mount_sse(&server, &REASONING_STREAM).await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        let response = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], Some(tx))
+            .await
+            .unwrap();
+
+        assert!(matches!(response, LlmResponse::FinalAnswer(ref t, _) if t == "Done"));
+        assert_eq!(
+            thinking_and_text(&mut rx),
+            ["thinking:Checking the file first", "text:Done"],
+            "encrypted entries produce no chunk"
+        );
+    }
+
+    #[tokio::test]
+    async fn exclude_streams_no_thinking() {
+        let server = MockServer::start().await;
+        mount_sse(&server, &REASONING_STREAM).await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        provider_with(&server.uri(), excluding())
+            .chat_streaming("sys", &[], &[], Some(tx))
+            .await
+            .unwrap();
+
+        assert_eq!(thinking_and_text(&mut rx), ["text:Done"]);
+    }
+
+    #[tokio::test]
+    async fn budget_used_up_by_reasoning_is_an_error() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({
+                "id": "gen-l",
+                "model": MODEL,
+                "choices": [{"finish_reason": "length", "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning": "Thinking about it at great length",
+                }}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 4096,
+                          "completion_tokens_details": {"reasoning_tokens": 4096}},
+            }),
+        )
+        .await;
+
+        let err = make_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("token budget") && err.contains("reasoning"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_budget_exhaustion_is_an_error() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"reasoning":"thinking..."}}]}"#,
+                r#"data: {"choices":[{"delta":{"content":""},"finish_reason":"length"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+
+        let err = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("token budget"), "{err}");
+    }
+
+    // ── Wiremock: reasoning continuity ──────────────────────────────────
+
+    fn stored_details() -> Value {
+        json!([
+            {"type": "reasoning.text", "text": "Checking the file first", "signature": "sig-a", "index": 0},
+            {"type": "reasoning.encrypted", "data": "c2VjcmV0", "index": 1},
+        ])
+    }
+
+    fn state(provider: &str, model: &str) -> assistant_core::ProviderState {
+        assistant_core::ProviderState {
+            provider: provider.into(),
+            model: model.into(),
+            data: json!({"reasoning_details": stored_details()}),
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_call_reasoning_details_become_provider_state() {
+        let server = MockServer::start().await;
+        let mut body = reasoning_tool_call();
+        body["choices"][0]["message"]["reasoning_details"] = stored_details();
+        mount_once(&server, body).await;
+
+        let response = provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &[], &[read_tool()])
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        assert_eq!(calls.provider_state, Some(state("openrouter", MODEL)));
+    }
+
+    #[tokio::test]
+    async fn streamed_reasoning_details_are_merged_by_index() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"Checking the ","index":0}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"file first","signature":"sig-a","index":0}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"c2VjcmV0","index":1}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"file-read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+
+        let response = provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat_streaming("sys", &[], &[read_tool()], None)
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        assert_eq!(calls.provider_state, Some(state("openrouter", MODEL)));
+    }
+
+    fn tool_loop_history(
+        provider_state: Option<assistant_core::ProviderState>,
+    ) -> Vec<ChatHistoryMessage> {
+        vec![
+            ChatHistoryMessage::Text {
+                role: assistant_core::ChatRole::User,
+                content: "read it".into(),
+            },
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![assistant_core::ToolCallItem {
+                    name: "file-read".into(),
+                    params: json!({}),
+                    id: Some("call_1".into()),
+                }],
+                provider_state,
+            },
+            ChatHistoryMessage::ToolResult {
+                name: "file-read".into(),
+                content: "contents".into(),
+            },
+        ]
+    }
+
+    async fn sent_assistant_message(state: Option<assistant_core::ProviderState>) -> Value {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &tool_loop_history(state), &[read_tool()])
+            .await
+            .unwrap();
+        let body = sent_body(&server).await;
+        body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "assistant")
+            .cloned()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stored_reasoning_details_are_sent_back_unchanged_and_in_order() {
+        let message = sent_assistant_message(Some(state("openrouter", MODEL))).await;
+        assert_eq!(message["reasoning_details"], stored_details());
+        assert_eq!(message["tool_calls"][0]["id"], "call_1");
+    }
+
+    #[tokio::test]
+    async fn reasoning_from_another_provider_or_model_is_not_sent() {
+        for foreign in [
+            state("anthropic", MODEL),
+            state("openrouter", "openai/gpt-4o"),
+        ] {
+            let message = sent_assistant_message(Some(foreign.clone())).await;
+            assert!(
+                message.get("reasoning_details").is_none(),
+                "{foreign:?}: {message}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn anthropic_requests_carry_cache_breakpoints() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let history = [ChatHistoryMessage::Text {
+            role: assistant_core::ChatRole::User,
+            content: "hi".into(),
+        }];
+
+        provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &history, &[])
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        let ephemeral = json!({"type": "ephemeral"});
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"],
+            ephemeral
+        );
+        assert_eq!(
+            body["messages"][1]["content"][0]["cache_control"],
+            ephemeral
+        );
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────

@@ -7,7 +7,6 @@
 // Specified by: openspec/changes/chat-stream-progress-ux/specs/...
 //   "In-flight turn progress card"
 
-import 'package:assistant_api/assistant_api.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,7 +22,7 @@ class _FakeChatNotifier extends ChatNotifier {
   void push(ChatState s) => state = AsyncData(s);
 }
 
-/// A notifier that overrides [requestCancelTurn] to count invocations
+/// A notifier that overrides [stopTurn] to count invocations
 /// without performing any network I/O. Used by the Skip button widget
 /// test.
 class _SpyChatNotifier extends ChatNotifier {
@@ -35,10 +34,7 @@ class _SpyChatNotifier extends ChatNotifier {
   void push(ChatState s) => state = AsyncData(s);
 
   @override
-  Future<TurnState?> requestCancelTurn() async {
-    cancelCalls++;
-    return TurnState.errored;
-  }
+  void stopTurn() => cancelCalls++;
 }
 
 Future<_FakeChatNotifier> _pumpCard(WidgetTester tester) async {
@@ -263,10 +259,10 @@ void main() {
       expect(find.text('Skip'), findsOneWidget);
     });
 
-    testWidgets('Tapping Skip invokes requestCancelTurn on the notifier', (
+    testWidgets('Tapping Skip invokes stopTurn on the notifier', (
       tester,
     ) async {
-      // Spy on requestCancelTurn by counting invocations.
+      // Spy on stopTurn by counting invocations.
       final spy = _SpyChatNotifier();
       await tester.pumpWidget(
         ProviderScope(
@@ -287,7 +283,7 @@ void main() {
       expect(
         spy.cancelCalls,
         1,
-        reason: 'Tapping Skip must call requestCancelTurn exactly once',
+        reason: 'Tapping Skip must call stopTurn exactly once',
       );
     });
 

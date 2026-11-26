@@ -20,6 +20,7 @@ class MetaActionRow extends StatelessWidget {
     required this.fetchMessageAudio,
     this.onRetry,
     this.onStop,
+    this.isStopping = false,
   });
 
   final ChatMessage message;
@@ -28,6 +29,9 @@ class MetaActionRow extends StatelessWidget {
   fetchMessageAudio;
   final VoidCallback? onRetry;
   final VoidCallback? onStop;
+
+  /// A stop is in progress: the Stop action stays visible but disabled.
+  final bool isStopping;
 
   @override
   Widget build(BuildContext context) {
@@ -43,9 +47,9 @@ class MetaActionRow extends StatelessWidget {
         child: MetaActionButton(
           key: const Key('stop_action'),
           icon: Icons.stop_rounded,
-          label: 'Stop',
+          label: isStopping ? 'Stopping…' : 'Stop',
           color: mutedColor,
-          onTap: onStop!,
+          onTap: isStopping ? null : onStop,
         ),
       );
     }
@@ -188,7 +192,7 @@ class MetaActionButton extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Color color;
 
   @override

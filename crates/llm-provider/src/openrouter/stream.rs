@@ -3,9 +3,10 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
+use assistant_core::{LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse};
 
 use super::errors::{ErrorBody, body_error};
+use super::reasoning::{budget_exhausted, merge_detail, provider_state, visible_text};
 use super::wire::Usage;
 
 /// Splits a byte stream into lines, decoding each line only once it is
@@ -56,6 +57,10 @@ struct Delta {
     content: Option<String>,
     #[serde(default)]
     tool_calls: Vec<ToolCallDelta>,
+    #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default)]
+    reasoning_details: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,24 +95,39 @@ pub struct StreamAccumulator {
     tool_calls: Vec<PartialToolCall>,
     meta: LlmResponseMeta,
     done: bool,
+    show_reasoning: bool,
+    reasoned: bool,
+    model: String,
+    reasoning_details: Vec<Value>,
 }
 
 impl StreamAccumulator {
+    /// With `show_reasoning` off, reasoning produces no chunks. `model` is
+    /// the requested model, which stored reasoning is keyed by.
+    pub fn new(model: &str, show_reasoning: bool) -> Self {
+        Self {
+            show_reasoning,
+            model: model.to_owned(),
+            ..Self::default()
+        }
+    }
+
     /// Whether `[DONE]` has been seen; later lines are ignored.
     pub fn is_done(&self) -> bool {
         self.done
     }
 
-    /// Feeds one SSE line and returns the text delta it carried, if any.
-    /// Comments, blank lines and non-`data` fields are ignored.
-    pub fn feed_line(&mut self, line: &str) -> anyhow::Result<Option<String>> {
+    /// Feeds one SSE line and returns the chunks it carried: reasoning as
+    /// [`StreamChunk::Thinking`], then answer text. Comments, blank lines and
+    /// non-`data` fields are ignored.
+    pub fn feed_line(&mut self, line: &str) -> anyhow::Result<Vec<StreamChunk>> {
         let Some(payload) = line.strip_prefix("data:") else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
         let payload = payload.trim();
         if payload == "[DONE]" {
             self.done = true;
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let chunk: Chunk = serde_json::from_str(payload)
             .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter stream chunk: {e}"))?;
@@ -125,7 +145,19 @@ impl StreamAccumulator {
         }
 
         let mut text = String::new();
+        let mut thinking = String::new();
         for choice in chunk.choices {
+            let reasoning = visible_text(
+                &choice.delta.reasoning_details,
+                choice.delta.reasoning.as_deref(),
+            );
+            if !reasoning.is_empty() {
+                self.reasoned = true;
+                thinking.push_str(&reasoning);
+            }
+            for detail in choice.delta.reasoning_details {
+                merge_detail(&mut self.reasoning_details, detail);
+            }
             if let Some(reason) = choice.finish_reason {
                 if reason == "error" {
                     anyhow::bail!("OpenRouter stream finished with an error");
@@ -155,7 +187,14 @@ impl StreamAccumulator {
             }
         }
         self.text.push_str(&text);
-        Ok((!text.is_empty()).then_some(text))
+        let mut chunks = Vec::new();
+        if self.show_reasoning && !thinking.is_empty() {
+            chunks.push(StreamChunk::Thinking(thinking));
+        }
+        if !text.is_empty() {
+            chunks.push(StreamChunk::Text(text));
+        }
+        Ok(chunks)
     }
 
     /// The response, once the stream has ended. A stream that ends without
@@ -163,6 +202,16 @@ impl StreamAccumulator {
     pub fn finish(self) -> anyhow::Result<LlmResponse> {
         if !self.done && self.meta.finish_reason.is_none() {
             anyhow::bail!("OpenRouter stream ended before the response was complete");
+        }
+        let has_tool_calls = self.tool_calls.iter().any(|c| !c.name.is_empty());
+        let reasoned = self.reasoned || self.meta.reasoning_tokens.unwrap_or(0) > 0;
+        if let Some(error) = budget_exhausted(
+            self.meta.finish_reason.as_deref(),
+            &self.text,
+            has_tool_calls,
+            reasoned,
+        ) {
+            return Err(error);
         }
         let items: Vec<ToolCallItem> = self
             .tool_calls
@@ -180,7 +229,7 @@ impl StreamAccumulator {
                 items,
                 meta: self.meta,
                 thinking: None,
-                provider_state: None,
+                provider_state: provider_state(&self.model, self.reasoning_details),
             }));
         }
         Ok(LlmResponse::FinalAnswer(self.text, self.meta))
@@ -189,6 +238,8 @@ impl StreamAccumulator {
 
 #[cfg(test)]
 mod tests {
+    use assistant_core::StreamChunk;
+
     use super::{LineBuffer, StreamAccumulator};
 
     #[test]
@@ -220,8 +271,9 @@ mod tests {
     #[test]
     fn event_and_id_fields_are_ignored() {
         let mut acc = StreamAccumulator::default();
-        assert_eq!(acc.feed_line("event: message").unwrap(), None);
-        assert_eq!(acc.feed_line("id: 7").unwrap(), None);
-        assert_eq!(acc.feed_line(": OPENROUTER PROCESSING").unwrap(), None);
+        for line in ["event: message", "id: 7", ": OPENROUTER PROCESSING"] {
+            let chunks: Vec<StreamChunk> = acc.feed_line(line).unwrap();
+            assert!(chunks.is_empty(), "{line}");
+        }
     }
 }

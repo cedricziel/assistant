@@ -154,6 +154,20 @@ timeout_secs = 120
 # # sort          = "price"  # "price" | "throughput" | "latency"
 # # order         = ["anthropic", "openai"]
 #
+# # Reasoning, sent as the request's `reasoning` object. `effort` and
+# # `max_tokens` are exclusive; the effort is checked against the model's
+# # catalog entry. See docs/openrouter.md.
+# [llm.openrouter.reasoning]
+# effort        = "high"   # "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+# # max_tokens  = 4096     # reasoning token budget, instead of `effort`
+# # exclude     = true     # reason without returning the reasoning
+#
+# # Prompt caching breakpoints for anthropic/, google/ and qwen/ models;
+# # other models cache automatically. See docs/openrouter.md.
+# [llm.openrouter.cache]
+# enabled = true   # false sends no cache_control
+# ttl     = "5m"   # "5m" | "1h" (1h: Anthropic models only)
+#
 # Browse models at: https://openrouter.ai/models
 
 # ── Moonshot AI (Kimi) cloud provider ─────────────────────────────────────────

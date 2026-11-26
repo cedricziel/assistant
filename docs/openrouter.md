@@ -67,6 +67,38 @@ Only the keys you set are sent. An unknown key fails config load.
 | `quantizations`      | list                                              | Accepted quantization levels                          |
 | `max_price`          | table: `prompt`, `completion`, `request`, `image` | Highest acceptable prices; unknown keys fail load     |
 
+### `[llm.openrouter.reasoning]` section
+
+Reasoning settings, sent as the request's `reasoning` object. Only the
+keys you set are sent. An unknown key fails config load.
+
+| Key          | Type                                                                       | Description                            |
+| ------------ | -------------------------------------------------------------------------- | -------------------------------------- |
+| `effort`     | `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` or `"max"` | How hard the model reasons             |
+| `max_tokens` | integer                                                                    | Token budget for reasoning             |
+| `exclude`    | boolean                                                                    | Reason without returning the reasoning |
+| `enabled`    | boolean                                                                    | Turn reasoning on or off               |
+
+Setting both `effort` and `max_tokens` fails config load with
+`` `effort` and `max_tokens` cannot both be set ``.
+
+When `effort` is set, the provider checks it against the model's entry
+in the catalog (see [Capabilities](#capabilities)). If the model can't
+take that effort, the provider logs the reason followed by
+`; chat calls will fail`, and every chat call fails with that reason
+without contacting OpenRouter. See
+[Troubleshooting](#troubleshooting) for the messages.
+
+### `[llm.openrouter.cache]` section
+
+Prompt caching settings. An unknown key fails config load. See
+[Prompt caching](#prompt-caching).
+
+| Key       | Default | Description                                                               |
+| --------- | ------- | ------------------------------------------------------------------------- |
+| `enabled` | `true`  | Send `cache_control` breakpoints. `false` sends none                      |
+| `ttl`     | `"5m"`  | Cache lifetime, `"5m"` or `"1h"`. `"1h"` applies to Anthropic models only |
+
 ## Request identity
 
 During a conversation turn, each request carries:
@@ -76,6 +108,25 @@ During a conversation turn, each request carries:
   characters. The raw user ID and email are never sent.
 
 Background calls made outside a turn send neither field.
+
+## Prompt caching
+
+The model's author is the slug prefix before `/`. Only `anthropic`,
+`google` and `qwen` models need explicit breakpoints. For them the
+provider sends the system prompt as a text part with
+`cache_control: {"type": "ephemeral"}`. Anthropic models add
+`"ttl": "1h"` when `ttl = "1h"`; Google and Qwen caches always last 5
+minutes, so they get no `ttl`. Anthropic models also get the breakpoint on the last part
+of the last user message. Other models get no `cache_control`, because
+their upstreams cache automatically.
+
+Every request in a conversation carries the same `session_id` (see
+[Request identity](#request-identity)), which keeps it on the same
+upstream so the cache can hit.
+
+Usage reports cache reads as cached input tokens, from
+`prompt_tokens_details.cached_tokens`, and cache writes as cache-write
+input tokens, from `prompt_tokens_details.cache_write_tokens`.
 
 ## Errors and retries
 
@@ -93,6 +144,36 @@ OpenRouter's `metadata.error_type`. A 200 response that carries only an
 When streaming, the provider ignores keep-alive comments. An error in the
 middle of a stream fails the call. A stream that ends without `[DONE]` or
 a finish reason fails instead of returning partial text.
+
+## Reasoning
+
+### Output
+
+Reasoning entries of type `reasoning.text` and `reasoning.summary` are
+shown as thinking. Encrypted entries are never shown. A response without
+`reasoning_details` falls back to its plain `reasoning` text. With
+`exclude = true`, no thinking is shown.
+
+- Streaming: thinking is streamed as it arrives.
+- Non-streaming, tool calls: the thinking is attached to the tool calls.
+- Non-streaming, final answer: the thinking is dropped, because a final
+  answer has no slot for it.
+
+A response that stops at the token limit (`finish_reason: "length"`)
+with no answer text and no tool call fails. See
+[Troubleshooting](#openrouter-stopped-at-the-token-budget-before-answering).
+
+### Continuity
+
+When a tool-call response carries `reasoning_details`, they are stored
+unchanged with that assistant message, including encrypted entries and
+signatures. Streamed pieces are merged by their `index`. Later requests
+in the conversation send the details back on that message, in their
+original order. This holds after a server restart, because history is
+rebuilt from the database.
+
+Details are sent back only when they were stored by OpenRouter for the
+model configured now. Switching provider or model drops them.
 
 ## Authentication
 
@@ -258,6 +339,13 @@ model    = "anthropic/claude-sonnet-4-20250514"
 fallback_models = ["openai/gpt-4o"]
 ```
 
+### Reasoning
+
+```toml
+[llm.openrouter.reasoning]
+effort = "high"
+```
+
 ### Using a free model for testing
 
 ```toml
@@ -336,3 +424,40 @@ ones.
 
 The stream closed before `[DONE]` or a finish reason. The partial text is
 discarded; send the message again.
+
+### "OpenRouter stopped at the token budget before answering"
+
+The response hit the token limit before any answer or tool call. When
+the model reasoned, the message reads:
+
+```text
+OpenRouter stopped at the token budget before answering: the budget was used up by reasoning. Raise [llm.openrouter] max_tokens or lower the reasoning effort.
+```
+
+Otherwise:
+
+```text
+OpenRouter stopped at the token budget before answering. Raise [llm.openrouter] max_tokens.
+```
+
+Raise `[llm.openrouter] max_tokens`, or lower `effort` or
+`[llm.openrouter.reasoning] max_tokens`.
+
+### "`effort` and `max_tokens` cannot both be set"
+
+`[llm.openrouter.reasoning]` sets both. Keep one.
+
+### "OpenRouter model `<slug>` does not support reasoning effort; remove `effort` from [llm.openrouter.reasoning]"
+
+The model's catalog entry has no effort selection. Remove `effort`, or
+pick a reasoning model. Restart after the fix; the catalog is not
+fetched again.
+
+### "OpenRouter model `<slug>` does not support reasoning effort `<effort>`; it supports ..."
+
+The model lists `supported_efforts` and `effort` is not one of them.
+Set `effort` to one listed in the message, then restart.
+
+### "reasoning is mandatory for OpenRouter model `<slug>`, so effort `none` is not allowed"
+
+The model always reasons. Set another `effort`, then restart.

@@ -45,6 +45,12 @@ class _FakeConversationsApi extends ConversationsApi {
   final List<String> deletedIds = [];
   final List<CreateConversationRequest> createRequests = [];
 
+  /// `(id, body)` of every PATCH, in order.
+  final List<(String, UpdateConversationRequest)> updates = [];
+
+  /// When set, [updateConversation] throws it.
+  Object? updateError;
+
   @override
   Future<Response<ConversationSummary>> createConversation({
     required CreateConversationRequest createConversationRequest,
@@ -64,6 +70,34 @@ class _FakeConversationsApi extends ConversationsApi {
         (b) => b
           ..id = 'created-1'
           ..title = 'Untitled'
+          ..createdAt = DateTime(2024, 1, 1)
+          ..updatedAt = DateTime(2024, 1, 1),
+      ),
+    );
+  }
+
+  @override
+  Future<Response<ConversationSummary>> updateConversation({
+    required String id,
+    required UpdateConversationRequest updateConversationRequest,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    updates.add((id, updateConversationRequest));
+    final error = updateError;
+    if (error != null) throw error;
+    return Response(
+      requestOptions: RequestOptions(path: '/api/conversations/$id'),
+      statusCode: 200,
+      data: ConversationSummary(
+        (b) => b
+          ..id = id
+          ..title = updateConversationRequest.title ?? 'Test'
           ..createdAt = DateTime(2024, 1, 1)
           ..updatedAt = DateTime(2024, 1, 1),
       ),
@@ -882,6 +916,133 @@ void main() {
   // -------------------------------------------------------------------------
   // Space-scoping: rebuild on space change
   // -------------------------------------------------------------------------
+
+  group('metadata actions', () {
+    Future<
+      ({
+        ProviderContainer container,
+        _FakeConversationsApi api,
+        StreamController<ConversationListEvent> stream,
+      })
+    >
+    setUp() async {
+      final api = _FakeConversationsApi();
+      final stream = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(
+        streamController: stream,
+        conversationsApi: api,
+      );
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(stream.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+      await container.read(conversationListProvider.future);
+      stream.add(
+        ConversationSnapshotEvent([_makeEntry(id: 'c1', title: 'Original')]),
+      );
+      await Future<void>.delayed(Duration.zero);
+      return (container: container, api: api, stream: stream);
+    }
+
+    test('renameConversation PATCHes only the title', () async {
+      final t = await setUp();
+      final error = await t.container
+          .read(conversationListProvider.notifier)
+          .renameConversation('c1', 'Renamed');
+
+      expect(error, isNull);
+      expect(t.api.updates, hasLength(1));
+      expect(t.api.updates.single.$1, 'c1');
+      expect(t.api.updates.single.$2.title, 'Renamed');
+      expect(t.api.updates.single.$2.pinned, isNull);
+    });
+
+    test('setPinned PATCHes only the pinned flag', () async {
+      final t = await setUp();
+      final notifier = t.container.read(conversationListProvider.notifier);
+
+      expect(await notifier.setPinned('c1', true), isNull);
+      expect(await notifier.setPinned('c1', false), isNull);
+
+      expect(t.api.updates.map((u) => u.$2.pinned), [true, false]);
+      expect(t.api.updates.every((u) => u.$2.title == null), isTrue);
+    });
+
+    test('does not change the list optimistically', () async {
+      final t = await setUp();
+      await t.container
+          .read(conversationListProvider.notifier)
+          .renameConversation('c1', 'Renamed');
+      await _waitForDebounce();
+
+      final list = t.container.read(conversationListProvider).value!;
+      expect(list.conversations.single.title, 'Original');
+    });
+
+    test('the stream delivers the renamed title', () async {
+      final t = await setUp();
+      await t.container
+          .read(conversationListProvider.notifier)
+          .renameConversation('c1', 'Renamed');
+      t.stream.add(
+        ConversationUpsertedEvent(_makeEntry(id: 'c1', title: 'Renamed')),
+      );
+      await _waitForDebounce();
+
+      final list = t.container.read(conversationListProvider).value!;
+      expect(list.conversations.single.title, 'Renamed');
+    });
+
+    test('renameConversation returns the error and leaves state', () async {
+      final t = await setUp();
+      t.api.updateError = DioException(
+        requestOptions: RequestOptions(path: '/api/conversations/c1'),
+        response: Response(
+          requestOptions: RequestOptions(path: '/api/conversations/c1'),
+          statusCode: 400,
+          data: {'error': 'title too long'},
+        ),
+        message: 'Bad status',
+      );
+      final before = t.container.read(conversationListProvider).value!;
+
+      final error = await t.container
+          .read(conversationListProvider.notifier)
+          .renameConversation('c1', 'Renamed');
+
+      expect(error, 'title too long');
+      final after = t.container.read(conversationListProvider).value!;
+      expect(after.conversations, before.conversations);
+      expect(after.error, isNull, reason: 'list error banner is untouched');
+    });
+
+    test('setPinned returns a generic error for non-API failures', () async {
+      final t = await setUp();
+      t.api.updateError = StateError('boom');
+
+      final error = await t.container
+          .read(conversationListProvider.notifier)
+          .setPinned('c1', true);
+
+      expect(error, isNotNull);
+      expect(error, isNotEmpty);
+    });
+
+    test('returns an error when there is no API client', () async {
+      final container = _makeContainer();
+      addTearDown(container.dispose);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+      await container.read(conversationListProvider.future);
+
+      final error = await container
+          .read(conversationListProvider.notifier)
+          .setPinned('c1', true);
+
+      expect(error, isNotNull);
+    });
+  });
 
   group('space-scoping', () {
     test('rebuilds (re-subscribes) when space selection changes', () async {

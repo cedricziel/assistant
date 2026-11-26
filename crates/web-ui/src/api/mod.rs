@@ -17,6 +17,7 @@ pub mod capabilities;
 pub mod catalog;
 pub mod commands;
 pub mod conversations;
+pub mod feedback;
 pub mod integrations;
 pub mod interactions;
 pub mod interfaces;
@@ -115,7 +116,7 @@ use axum::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
 };
 use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
@@ -256,6 +257,10 @@ pub fn api_router() -> Router<ApiState> {
             patch(conversations::update_conversation),
         )
         .route("/conversations/{id}/messages", post(messages::send_message))
+        .route(
+            "/conversations/{id}/messages/{message_id}/feedback",
+            put(feedback::set_message_feedback).delete(feedback::delete_message_feedback),
+        )
         .route(
             "/conversations/{id}/voice",
             post(messages::send_voice_message),

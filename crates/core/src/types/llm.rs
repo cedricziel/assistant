@@ -400,6 +400,110 @@ pub struct OpenRouterOptions {
     pub fallback_models: Vec<String>,
     /// Provider routing, sent as the request's `provider` object.
     pub provider: Option<OpenRouterRouting>,
+    /// Reasoning controls, sent as the request's `reasoning` object.
+    pub reasoning: Option<OpenRouterReasoning>,
+    /// Prompt-cache breakpoints (`[llm.openrouter.cache]`).
+    #[serde(default)]
+    pub cache: OpenRouterCache,
+}
+
+/// `[llm.openrouter.cache]`: where models that need explicit breakpoints
+/// get `cache_control`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterCache {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub ttl: OpenRouterCacheTtl,
+}
+
+impl Default for OpenRouterCache {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl: OpenRouterCacheTtl::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpenRouterCacheTtl {
+    #[default]
+    #[serde(rename = "5m")]
+    FiveMinutes,
+    #[serde(rename = "1h")]
+    OneHour,
+}
+
+/// `[llm.openrouter.reasoning]`. `effort` and `max_tokens` are exclusive.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "RawOpenRouterReasoning")]
+pub struct OpenRouterReasoning {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<OpenRouterEffort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    /// Reason without returning the reasoning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOpenRouterReasoning {
+    #[serde(default)]
+    effort: Option<OpenRouterEffort>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
+    #[serde(default)]
+    exclude: Option<bool>,
+    #[serde(default)]
+    enabled: Option<bool>,
+}
+
+impl TryFrom<RawOpenRouterReasoning> for OpenRouterReasoning {
+    type Error = String;
+
+    fn try_from(raw: RawOpenRouterReasoning) -> Result<Self, Self::Error> {
+        if raw.effort.is_some() && raw.max_tokens.is_some() {
+            return Err("`effort` and `max_tokens` cannot both be set".to_owned());
+        }
+        Ok(Self {
+            effort: raw.effort,
+            max_tokens: raw.max_tokens,
+            exclude: raw.exclude,
+            enabled: raw.enabled,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl OpenRouterEffort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
 }
 
 fn at_most_two_categories<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -528,6 +632,47 @@ mod tests {
         fn more_than_two_categories_are_rejected() {
             let err = parse(r#"categories = ["a", "b", "c"]"#).unwrap_err();
             assert!(err.to_string().contains("at most two"), "{err}");
+        }
+
+        #[test]
+        fn reasoning_parses_and_serializes_only_set_fields() {
+            use super::super::OpenRouterEffort;
+
+            let options = parse("[reasoning]\neffort = \"high\"\nexclude = true").unwrap();
+            let reasoning = options.reasoning.unwrap();
+            assert_eq!(reasoning.effort, Some(OpenRouterEffort::High));
+            assert_eq!(
+                serde_json::to_value(reasoning).unwrap(),
+                serde_json::json!({"effort": "high", "exclude": true})
+            );
+        }
+
+        #[test]
+        fn cache_defaults_on_with_five_minutes() {
+            use super::super::{OpenRouterCache, OpenRouterCacheTtl};
+
+            assert_eq!(parse("").unwrap().cache, OpenRouterCache::default());
+            let cache = parse("[cache]\nttl = \"1h\"").unwrap().cache;
+            assert!(cache.enabled);
+            assert_eq!(cache.ttl, OpenRouterCacheTtl::OneHour);
+            assert!(parse("[cache]\nttl = \"2h\"").is_err());
+            assert!(!parse("[cache]\nenabled = false").unwrap().cache.enabled);
+        }
+
+        #[test]
+        fn effort_with_max_tokens_is_rejected() {
+            let err = parse("[reasoning]\neffort = \"low\"\nmax_tokens = 2000").unwrap_err();
+            let err = err.to_string();
+            assert!(
+                err.contains("effort") && err.contains("max_tokens"),
+                "{err}"
+            );
+        }
+
+        #[test]
+        fn unknown_reasoning_key_is_rejected() {
+            let err = parse("[reasoning]\nbudget = 1").unwrap_err();
+            assert!(err.to_string().contains("budget"), "{err}");
         }
 
         #[test]

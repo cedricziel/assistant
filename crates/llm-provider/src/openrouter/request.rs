@@ -1,13 +1,16 @@
 //! Builds OpenRouter chat requests.
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use assistant_core::llm::call_context::LlmCallContext;
-use assistant_core::types::llm::OpenRouterRouting;
+use assistant_core::types::llm::{
+    OpenRouterCache, OpenRouterCacheTtl, OpenRouterReasoning, OpenRouterRouting,
+};
 use assistant_core::{
     ChatHistoryMessage, ChatOptions, ContentBlock, ResponseFormat, ToolChoice, ToolSpec,
 };
 
+use super::reasoning::attach_details;
 use super::wire::ChatRequest;
 use crate::chat_completions::build_raw_messages;
 
@@ -18,6 +21,8 @@ pub struct RequestSettings {
     /// Fallback models after the primary one; empty when none are set.
     pub fallback_models: Vec<String>,
     pub routing: Option<OpenRouterRouting>,
+    pub reasoning: Option<OpenRouterReasoning>,
+    pub cache: OpenRouterCache,
 }
 
 /// Stands in for an image sent to a model that doesn't accept images.
@@ -50,7 +55,12 @@ pub fn build_chat_request(
     };
     ChatRequest {
         model: settings.model.clone(),
-        messages: build_raw_messages(system_prompt, history),
+        messages: {
+            let mut messages = build_raw_messages(system_prompt, history);
+            attach_details(&mut messages, history, &settings.model);
+            apply_cache_breakpoints(&mut messages, &settings.model, &settings.cache);
+            messages
+        },
         tools: tools
             .iter()
             .map(|t| {
@@ -68,6 +78,7 @@ pub fn build_chat_request(
         stream: false,
         models,
         provider: settings.routing.clone(),
+        reasoning: settings.reasoning.clone(),
         session_id: context.as_ref().map(|c| c.conversation_id.to_string()),
         user: context.and_then(|c| c.user_hash),
         tool_choice: None,
@@ -130,5 +141,174 @@ pub fn apply_options(request: &mut ChatRequest, options: &ChatOptions) {
             .provider
             .get_or_insert_with(Default::default)
             .require_parameters = Some(true);
+    }
+}
+
+/// Adds `cache_control` breakpoints for models whose author needs them:
+/// Anthropic, Google and Qwen get one on the system prompt, and Anthropic
+/// also on the last part of the last user message. Other upstreams cache
+/// automatically, so their requests get none.
+pub fn apply_cache_breakpoints(messages: &mut [Value], model: &str, cache: &OpenRouterCache) {
+    if !cache.enabled {
+        return;
+    }
+    let author = model.split('/').next().unwrap_or_default();
+    if !matches!(author, "anthropic" | "google" | "qwen") {
+        return;
+    }
+    let mut control = json!({"type": "ephemeral"});
+    // Only Claude caches take a TTL; Gemini and Qwen caches last 5 minutes.
+    if author == "anthropic" && cache.ttl == OpenRouterCacheTtl::OneHour {
+        control["ttl"] = json!("1h");
+    }
+    if let Some(system) = messages.iter_mut().find(|m| m["role"] == "system") {
+        mark_last_part(system, &control);
+    }
+    if author == "anthropic"
+        && let Some(user) = messages.iter_mut().rev().find(|m| m["role"] == "user")
+    {
+        mark_last_part(user, &control);
+    }
+}
+
+/// Sets `cache_control` on the last content part of `message`, turning
+/// string content into a single text part first.
+fn mark_last_part(message: &mut Value, control: &Value) {
+    if let Some(text) = message["content"].as_str() {
+        message["content"] = json!([{"type": "text", "text": text}]);
+    }
+    if let Some(part) = message["content"]
+        .as_array_mut()
+        .and_then(|parts| parts.last_mut())
+    {
+        part["cache_control"] = control.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use assistant_core::types::llm::{OpenRouterCache, OpenRouterCacheTtl};
+
+    use super::apply_cache_breakpoints;
+
+    fn messages() -> Vec<Value> {
+        vec![
+            json!({"role": "system", "content": "sys"}),
+            json!({"role": "user", "content": "first"}),
+            json!({"role": "assistant", "content": "ok"}),
+            json!({"role": "user", "content": [
+                {"type": "text", "text": "look"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}},
+            ]}),
+        ]
+    }
+
+    /// Indices of messages that carry a breakpoint, and the breakpoints.
+    fn breakpoints(messages: &[Value]) -> Vec<(usize, Value)> {
+        messages
+            .iter()
+            .enumerate()
+            .flat_map(|(i, m)| {
+                m["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(move |part| part.get("cache_control").map(|c| (i, c.clone())))
+            })
+            .collect()
+    }
+
+    fn placed(model: &str, cache: OpenRouterCache) -> (Vec<Value>, Vec<(usize, Value)>) {
+        let mut messages = messages();
+        apply_cache_breakpoints(&mut messages, model, &cache);
+        let found = breakpoints(&messages);
+        (messages, found)
+    }
+
+    #[test]
+    fn breakpoints_by_model_author() {
+        let ephemeral = json!({"type": "ephemeral"});
+        let cases: [(&str, Vec<usize>); 5] = [
+            ("anthropic/claude-sonnet-4.5", vec![0, 3]),
+            ("google/gemini-2.5-pro", vec![0]),
+            ("qwen/qwen3-max", vec![0]),
+            ("openai/gpt-4o", vec![]),
+            ("meta-llama/llama-3.3-70b", vec![]),
+        ];
+        for (model, expected) in cases {
+            let (_, found) = placed(model, OpenRouterCache::default());
+            let at: Vec<usize> = found.iter().map(|(i, _)| *i).collect();
+            assert_eq!(at, expected, "{model}");
+            assert!(
+                found.iter().all(|(_, c)| *c == ephemeral),
+                "{model}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn system_prompt_becomes_a_text_part_and_the_last_part_is_marked() {
+        let (messages, _) = placed("anthropic/claude-sonnet-4.5", OpenRouterCache::default());
+        assert_eq!(
+            messages[0]["content"],
+            json!([{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}])
+        );
+        let last_user = messages[3]["content"].as_array().unwrap();
+        assert!(last_user[0].get("cache_control").is_none());
+        assert!(
+            last_user[1].get("cache_control").is_some(),
+            "the last part carries it"
+        );
+        assert_eq!(
+            messages[1]["content"], "first",
+            "earlier user messages are untouched"
+        );
+    }
+
+    #[test]
+    fn one_hour_ttl_is_sent_to_anthropic_only() {
+        let cache = OpenRouterCache {
+            ttl: OpenRouterCacheTtl::OneHour,
+            ..OpenRouterCache::default()
+        };
+        let one_hour = json!({"type": "ephemeral", "ttl": "1h"});
+        let (_, found) = placed("anthropic/claude-sonnet-4.5", cache.clone());
+        assert_eq!(found, [(0, one_hour.clone()), (3, one_hour)]);
+
+        // Gemini and Qwen caches always last five minutes.
+        for model in ["google/gemini-2.5-pro", "qwen/qwen3-max"] {
+            let (_, found) = placed(model, cache.clone());
+            assert_eq!(found, [(0, json!({"type": "ephemeral"}))], "{model}");
+        }
+    }
+
+    #[test]
+    fn disabled_cache_sends_no_breakpoints() {
+        let cache = OpenRouterCache {
+            enabled: false,
+            ..OpenRouterCache::default()
+        };
+        let (messages, found) = placed("anthropic/claude-sonnet-4.5", cache);
+        assert!(found.is_empty(), "{found:?}");
+        assert_eq!(messages, self::messages(), "messages are unchanged");
+    }
+
+    #[test]
+    fn string_user_content_becomes_a_marked_text_part() {
+        let mut messages = vec![
+            json!({"role": "system", "content": "sys"}),
+            json!({"role": "user", "content": "hi"}),
+        ];
+        apply_cache_breakpoints(
+            &mut messages,
+            "anthropic/claude-sonnet-4.5",
+            &OpenRouterCache::default(),
+        );
+        assert_eq!(
+            messages[1]["content"],
+            json!([{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}])
+        );
     }
 }
