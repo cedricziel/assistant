@@ -4,6 +4,8 @@
 library;
 
 export 'src/registry.dart';
+export 'src/conversations/conversation_search_results_view.dart';
+export 'src/conversations/highlighted_segments.dart';
 export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
 export 'src/interactions/approval_card.dart';

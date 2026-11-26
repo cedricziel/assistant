@@ -115,7 +115,7 @@ Stay card · table reservation · order tracking · flight tracker · portfolio 
 
 ## Package-only elements (no catalogue row)
 
-`GenericToolResultView`, `ToolStatusIcon`, `MessageActionButton`, `TimelineEntryView` and the scopes (`ThreadDensityScope`, `ChatMarkdownScope`, `ToolResultRendererScope`) are seams or primitives with no assistant-ui counterpart. They are in `kAssistantUiElements` and the gallery, but they have no verdict row.
+`ConversationSearchResultsView`, `HighlightedSegments`, `GenericToolResultView`, `ToolStatusIcon`, `MessageActionButton`, `TimelineEntryView` and the scopes (`ThreadDensityScope`, `ChatMarkdownScope`, `ToolResultRendererScope`) are seams or primitives with no assistant-ui counterpart. They are in `kAssistantUiElements` and the gallery, but they have no verdict row.
 
 ## Tally
 
