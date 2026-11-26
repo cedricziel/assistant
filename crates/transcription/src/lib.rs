@@ -38,8 +38,9 @@ pub use provider::{
 };
 pub use whisper::WhisperProvider;
 
-/// MIME type prefixes recognised as audio attachments.
-pub const AUDIO_MIME_PREFIXES: &[&str] = &[
+/// MIME types transcribed as audio. Video containers are included because
+/// only their audio stream is used.
+pub const AUDIO_MIME_TYPES: &[&str] = &[
     "audio/ogg",
     "audio/opus",
     "audio/mpeg",
@@ -49,17 +50,35 @@ pub const AUDIO_MIME_PREFIXES: &[&str] = &[
     "audio/x-m4a",
     "audio/wav",
     "audio/x-wav",
+    "audio/wave",
     "audio/flac",
     "audio/x-flac",
     "audio/webm",
     "audio/aac",
+    "audio/amr",
+    "audio/amr-wb",
+    "audio/3gpp",
+    "audio/3gpp2",
+    "audio/x-caf",
+    "audio/aiff",
+    "audio/x-aiff",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
 ];
 
-/// Returns `true` if the given MIME type is a recognised audio format.
+/// `mime` lowercased, without parameters such as `; codecs=opus`.
+pub fn essence(mime: &str) -> String {
+    mime.split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase()
+}
+
+/// Returns `true` if `mime` is an audio (or video) type to transcribe.
 pub fn is_audio_mime(mime: &str) -> bool {
-    AUDIO_MIME_PREFIXES
-        .iter()
-        .any(|prefix| mime.starts_with(prefix))
+    AUDIO_MIME_TYPES.contains(&essence(mime).as_str())
 }
 
 /// Build a [`TtsProvider`] from the assistant TTS configuration.

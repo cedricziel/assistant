@@ -105,6 +105,31 @@ three ways:
 The `load-skill` call that activates a skill is not recorded. A tool that
 returns `Ok` with `success == false` counts as an error.
 
+### Amendment (2026-11-26): feedback events are parented through a stored traceparent
+
+Persisted domain rows may carry a W3C `traceparent`. The final-answer assistant
+message stores the traceparent of the `chat {model}` span that produced it
+(`messages.traceparent`), so an event that happens long after the turn, such as
+a user rating the reply, is emitted as a log record parented to that span.
+
+User feedback is the first such event: `gen_ai.evaluation.result`, labelled
+`positive`, `negative` or `cleared`, plus the counter
+`assistant.feedback.count`. Comment text never leaves the space database; the
+event carries only `assistant.feedback.has_comment`, whatever
+`[observability] trace_content` says. This still fits the decision above: the
+event goes over OTLP, and nothing is stored locally for telemetry. The stored
+traceparent is a pointer for correlation, not telemetry data.
+
+Alternatives considered:
+
+- A `user_feedback` span parented to the chat span. A child that starts hours
+  after its parent ended distorts waterfalls. Rejected.
+- A new root span with a span link. Not "parented" in the convention's sense,
+  and querying needs link support. Rejected.
+- Correlation by attribute only, with no stored traceparent. No schema change,
+  but it misses the convention's SHOULD and forces a join in every query.
+  Rejected.
+
 ## Consequences
 
 **Good**

@@ -155,6 +155,7 @@ mod tests {
                 result: Some("contents".into()),
                 tool_call_id: None,
                 data: None,
+                app: None,
             },
             OrchestratorEvent::SkillComplete {
                 skill_name: "tdd".into(),

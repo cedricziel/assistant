@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:assistant_app/api/api_client.dart';
@@ -11,7 +13,67 @@ Stream<List<int>> _sseBytes(String sseText) async* {
   yield utf8.encode(sseText);
 }
 
+/// Answers every request with an SSE body and the given response [headers].
+class _SseAdapter implements HttpClientAdapter {
+  _SseAdapter(this.body, {this.headers = const {}});
+
+  final String body;
+  final Map<String, List<String>> headers;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<dynamic>? cancelFuture,
+  ) async => ResponseBody.fromBytes(
+    utf8.encode(body),
+    200,
+    headers: {
+      'content-type': ['text/event-stream'],
+      ...headers,
+    },
+  );
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
+  group('sendVoiceMessage run id', () {
+    Future<List<StreamEvent>> voiceEvents({required bool withHeader}) async {
+      final client = ApiClient(baseUrl: 'http://fake', token: 'tok');
+      client.dioForTesting.httpClientAdapter = _SseAdapter(
+        'event:done\ndata:{"role":"assistant","content":"hi"}\n\n',
+        headers: withHeader
+            ? {
+                'x-run-id': ['run-v'],
+              }
+            : {},
+      );
+      return client
+          .sendVoiceMessage('conv-1', Uint8List.fromList([1, 2]), 'audio/webm')
+          .toList();
+    }
+
+    test(
+      'yields RunStartedEvent from X-Run-Id before any body frame',
+      () async {
+        final events = await voiceEvents(withHeader: true);
+
+        expect(events.first, isA<RunStartedEvent>());
+        expect((events.first as RunStartedEvent).runId, 'run-v');
+        expect(events[1], isA<DoneEvent>());
+      },
+    );
+
+    test('yields no RunStartedEvent when the header is absent', () async {
+      final events = await voiceEvents(withHeader: false);
+
+      expect(events.whereType<RunStartedEvent>(), isEmpty);
+      expect(events.single, isA<DoneEvent>());
+    });
+  });
+
   group('parseSseByteStream', () {
     test('emits RunStartedEvent from run_started SSE event', () async {
       const sse = 'event:run_started\ndata:{"run_id":"abc-123"}\n\n';

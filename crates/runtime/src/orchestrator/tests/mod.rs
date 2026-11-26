@@ -227,6 +227,7 @@ impl ToolHandler for MockExtTool {
 }
 
 mod active_skill;
+mod branch;
 mod bus_worker;
 mod call_context;
 mod chat_options;
@@ -243,6 +244,7 @@ mod skill_executions;
 mod streaming;
 mod subagent;
 mod summary_history;
+mod surfaces;
 mod tool_data;
 mod turn_options;
 mod turn_timing;
