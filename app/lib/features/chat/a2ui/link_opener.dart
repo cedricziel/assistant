@@ -46,7 +46,7 @@ LinkOpener confirmingLinkOpener({
       context: dialogContext,
       title: 'Open link?',
       content: target.toString(),
-      body: _Destination(target),
+      body: SingleChildScrollView(child: _Destination(target)),
       confirmLabel: 'Open',
     );
     if (!confirmed) return;
@@ -73,9 +73,16 @@ class _Destination extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = target.toString();
+    final authorityStart = text.indexOf('//') + 2;
+    // The user info comes first; a host repeated in it must not be the one
+    // emphasised.
     final hostStart = target.host.isEmpty
         ? -1
-        : text.indexOf(target.host, text.indexOf('//') + 2);
+        : text.indexOf(
+            target.host,
+            authorityStart +
+                (target.userInfo.isEmpty ? 0 : target.userInfo.length + 1),
+          );
     final style = DefaultTextStyle.of(context).style;
     if (hostStart < 0) {
       // mailto: has no host; the address is the destination.

@@ -102,6 +102,45 @@ void main() {
     expect(bold.map((s) => s.text), ['example.org']);
   });
 
+  testWidgets('the host after user info is emphasised, not the user name', (
+    tester,
+  ) async {
+    final launches = _Launches();
+    await tester.pumpWidget(_app('https://evil.test@evil.test/a', launches));
+    await _tapVisit(tester);
+
+    final rich = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .where((r) => r.text.toPlainText() == 'https://evil.test@evil.test/a')
+        .single;
+    final parts = <String>[];
+    rich.text.visitChildren((s) {
+      if (s is TextSpan && s.style?.fontWeight == FontWeight.bold) {
+        parts.add(s.text!);
+      }
+      return true;
+    });
+    expect(parts, ['evil.test']);
+    final spans = <String>[];
+    rich.text.visitChildren((s) {
+      if (s is TextSpan && s.text != null) spans.add(s.text!);
+      return true;
+    });
+    expect(spans.first, 'https://evil.test@', reason: 'bold is the real host');
+  });
+
+  testWidgets('a very long URL scrolls inside the dialog', (tester) async {
+    final launches = _Launches();
+    await tester.pumpWidget(
+      _app('https://example.org/${'a' * 3000}', launches),
+    );
+    await _tapVisit(tester);
+
+    expect(find.byType(SingleChildScrollView), findsWidgets);
+    expect(tester.takeException(), isNull);
+    expect(find.text('Open'), findsOneWidget);
+  });
+
   testWidgets('Cancel launches nothing', (tester) async {
     final launches = _Launches();
     await tester.pumpWidget(_app('https://example.org/a', launches));

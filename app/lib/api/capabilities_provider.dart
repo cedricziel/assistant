@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/connection/connection_provider.dart';
+import '../features/spaces/space_provider.dart';
 import 'models/server_capabilities.dart';
 
 /// Fetches and caches server capability flags.
@@ -11,6 +12,10 @@ import 'models/server_capabilities.dart';
 /// cancelled when the provider is disposed (prevents timer leaks in tests).
 final capabilitiesProvider = FutureProvider<ServerCapabilities>((ref) async {
   final api = ref.watch(apiClientProvider);
+  // The client reads the selected space per request, so a space change does
+  // not rebuild it. Capabilities (including `ui.link_hosts`) are per org, so
+  // refetch on every space change instead of keeping the previous org's.
+  ref.watch(spaceSelectionProvider.select((s) => s.spaceId));
   if (api == null) return ServerCapabilities.disabled;
   final cancelToken = CancelToken();
   ref.onDispose(cancelToken.cancel);
