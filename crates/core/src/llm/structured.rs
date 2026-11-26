@@ -64,6 +64,7 @@ pub async fn chat_structured(
                 params_schema: schema.clone(),
                 is_mutating: false,
                 requires_confirmation: false,
+                requires_rich_client: false,
             }],
             ChatOptions {
                 tool_choice: ToolChoice::Tool(RESPOND_TOOL.to_owned()),

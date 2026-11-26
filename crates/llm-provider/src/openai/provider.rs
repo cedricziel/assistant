@@ -937,6 +937,7 @@ mod tests {
             }),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         };
         let tool = tool_spec_to_responses(&spec);
         match tool {
@@ -1158,6 +1159,7 @@ mod tests {
                 params_schema: json!({"type": "object"}),
                 is_mutating: false,
                 requires_confirmation: false,
+                requires_rich_client: false,
             }
         }
 
