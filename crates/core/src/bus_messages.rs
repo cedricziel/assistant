@@ -85,6 +85,10 @@ pub struct TurnRequest {
     /// [`AttachmentStore`] at LLM-call time.
     #[serde(default)]
     pub attachment_ids: Vec<Uuid>,
+    /// Whether a human is waiting on this turn and can answer prompts. The
+    /// submitter decides; the worker copies it to `ExecutionContext`.
+    #[serde(default)]
+    pub interactive: bool,
 
     // -- Identity (multi-user) ------------------------------------------------
     /// The authenticated user who initiated this turn.
@@ -277,12 +281,14 @@ mod tests {
                 "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
             ),
             attachment_ids: vec![],
+            interactive: true,
             user_id: None,
             org_id: None,
             space_id: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         let back: TurnRequest = serde_json::from_value(json).unwrap();
+        assert!(back.interactive, "the interactive flag survives the bus");
         assert_eq!(back.prompt, req.prompt);
         assert_eq!(back.conversation_id, req.conversation_id);
         assert_eq!(back.extension_tools, req.extension_tools);
@@ -297,6 +303,10 @@ mod tests {
         });
         let req: TurnRequest = serde_json::from_value(json).unwrap();
         assert!(req.extension_tools.is_empty());
+        assert!(
+            !req.interactive,
+            "a request without the flag is not interactive"
+        );
     }
 
     #[test]

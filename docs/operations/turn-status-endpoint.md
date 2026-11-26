@@ -60,15 +60,26 @@ Cancelling a turn that is already `completed`, `errored`, or
 ```
 
 Source of truth: the `conversation_events` table (`assistant-storage`).
-The status endpoint derives state by reading the most recent event
-for the turn:
+The status endpoint derives state from which terminal rows exist for the
+turn, not from the kind of the last row:
 
-- last event `done` → `completed`
-- last event `agent_error` → `errored`
+- any `agent_error` row → `errored`
+- else any `done` row → `completed`
+- else → `running`
 - no events for the turn id → `unknown`
 - conversation id on the first row doesn't match the path → `unknown`
   (guards against turn-id collision across conversations)
-- anything else → `running`
+
+Terminal rows take precedence over non-terminal ones. A state added later for
+a non-terminal condition (such as `awaiting_input`) ranks below `completed`
+and above `running`: `errored` > `completed` > `awaiting_input` > `running`.
+
+`last_event_kind` and `last_event_at` describe the most recent row, and
+`done` is no longer always the last frame of a run. A completed turn can end
+with `last_event_kind: "suggestions"`, for example. The status stays
+`completed`. The POST stream still closes at `done`; the run's replay stream
+stays open until the run finishes (see
+[ADR-0021](../adr/adr-0021-run-bounds-replay-stream.md)).
 
 ## Cancel semantics
 

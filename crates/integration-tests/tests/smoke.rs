@@ -173,6 +173,7 @@ fn exec_ctx(f: &Fixture) -> ExecutionContext {
         turn: 0,
         interface: Interface::Cli,
         interactive: false,
+        run_id: None,
         allowed_tools: None,
         depth: 0,
         user_id: None,

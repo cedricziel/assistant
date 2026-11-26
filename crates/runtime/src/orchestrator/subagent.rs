@@ -142,6 +142,8 @@ impl SubagentRunner for Orchestrator {
         let tool_specs = Self::filter_tool_specs(
             self.executor.to_specs_filtered(&allowed_tools),
             &provider_caps,
+            // A subagent has no user attached, so it never sees rich-client tools.
+            false,
         );
 
         // Build the system prompt.  If the spawn request provides one, use it;
@@ -462,6 +464,7 @@ impl SubagentRunner for Orchestrator {
                                 turn: iteration as i64,
                                 interface: Interface::Scheduler,
                                 interactive: false,
+                                run_id: None,
                                 allowed_tools: allowed_tools.clone(),
                                 depth: new_depth,
                                 user_id: None,

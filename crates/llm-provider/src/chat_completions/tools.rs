@@ -96,6 +96,7 @@ mod tests {
             params_schema: serde_json::json!({"type": "object"}),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         };
         let tool = tool_spec_to_chat(&spec).unwrap();
         assert_eq!(tool.function.name, "echo");

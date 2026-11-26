@@ -1274,7 +1274,7 @@
           "conversations"
         ],
         "summary": "`GET /api/conversations/{id}/runs/{run_id}/events/stream`",
-        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active.  Closes automatically when the `done` or\n`error` event is reached.\n\nReturns:\n- `404` if no events exist for `run_id` (run never started or unknown)\n- `410` if the run existed but all events have been pruned (TTL elapsed)",
+        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active. Closes when the run finishes, not at the\n`done` or `agent_error` frame: events such as `suggestions` follow `done`.\nA client that disconnects stops the tail at once.\n\nReturns `404` if no events exist for `run_id` and the run is not active\n(never started, unknown, or pruned after the TTL elapsed).",
         "operationId": "stream_run_events",
         "parameters": [
           {
@@ -1323,10 +1323,7 @@
             }
           },
           "404": {
-            "description": "Run not found"
-          },
-          "410": {
-            "description": "Run events expired"
+            "description": "Run not found or its events expired"
           }
         },
         "security": [
@@ -13026,10 +13023,17 @@
         "properties": {
           "arguments": {
             "type": [
-              "string",
+              "object",
               "null"
             ],
-            "description": "The arguments passed to the tool (JSON string)."
+            "description": "The arguments passed to the tool, as a JSON object."
+          },
+          "data": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Structured output of the tool, a JSON object with a `kind` tag. Absent\nwhen the tool returned text only or the data exceeded the size limit.\nEach `kind` is defined by a JSON Schema in `schemas/tool-results/`."
           },
           "result": {
             "type": [
@@ -13041,6 +13045,13 @@
           "status": {
             "type": "string",
             "description": "Whether the tool call succeeded or failed."
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of the tool call this result answers, when the provider\nsupplied one."
           },
           "tool_name": {
             "type": "string",

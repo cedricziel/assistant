@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::orchestrator::{Orchestrator, TurnResult};
+use crate::orchestrator::{Orchestrator, SubmitOptions, TurnResult};
 
 /// Minimal interface required to drive a conversation turn.
 ///
@@ -83,6 +83,7 @@ pub trait AssistantInterface: Send + Sync {
         interface: Interface,
         timestamp: Option<chrono::DateTime<chrono::Utc>>,
         attachment_ids: Vec<Uuid>,
+        _options: SubmitOptions,
     ) -> Result<TurnResult> {
         self.submit_turn_with_attachments(
             auth,
@@ -151,6 +152,7 @@ impl AssistantInterface for Orchestrator {
         interface: Interface,
         timestamp: Option<chrono::DateTime<chrono::Utc>>,
         attachment_ids: Vec<Uuid>,
+        options: SubmitOptions,
     ) -> Result<TurnResult> {
         self.submit_turn_with_request_id(
             auth,
@@ -160,6 +162,7 @@ impl AssistantInterface for Orchestrator {
             interface,
             timestamp,
             attachment_ids,
+            options,
         )
         .await
     }
@@ -256,6 +259,7 @@ mod tests {
                 Interface::Cli,
                 None,
                 vec![],
+                SubmitOptions::default(),
             )
             .await
             .unwrap();
