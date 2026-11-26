@@ -14,6 +14,19 @@ ToolCallStatus parseToolStatus(String status) {
   };
 }
 
+/// Map a persisted feedback rating onto [MessageRating]; unknown values map
+/// to `null` so a newer server cannot break history rendering.
+MessageFeedback? _feedbackFromHistory(MessageFeedbackSummary? source) {
+  if (source == null) return null;
+  final rating = switch (source.rating) {
+    'positive' => MessageRating.positive,
+    'negative' => MessageRating.negative,
+    _ => null,
+  };
+  if (rating == null) return null;
+  return MessageFeedback(rating: rating, comment: source.comment);
+}
+
 /// Map a list of persisted [MessageSummary] history rows into the flat
 /// [ChatMessage] list the UI renders.
 ///
@@ -82,7 +95,7 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
               ),
             )
             .toList(),
-      ),
+      )..feedback = _feedbackFromHistory(m.feedback),
     );
   }
   return messages;

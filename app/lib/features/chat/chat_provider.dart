@@ -16,6 +16,7 @@ import 'chat_stream_session.dart';
 import 'chat_timeline_reducers.dart';
 import 'chat_turn_transitions.dart';
 import 'conversation_list_provider.dart';
+import 'message_feedback_provider.dart';
 
 export 'package:assistant_ui/models.dart';
 
@@ -409,7 +410,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         id: conversationId,
       );
       final detail = response.data!;
-      final messages = chatMessagesFromHistory(detail.messages);
+      final messages = _withPendingFeedback(
+        chatMessagesFromHistory(detail.messages),
+      );
 
       state = AsyncData(
         ChatState(conversationId: conversationId, messages: messages),
@@ -423,6 +426,115 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       );
     }
   }
+
+  // -- Message feedback ------------------------------------------------------
+
+  /// Let a message with queued or in-flight feedback calls keep its
+  /// optimistic value over the value a history load just seeded.
+  List<ChatMessage> _withPendingFeedback(List<ChatMessage> messages) {
+    final feedback = ref.read(messageFeedbackControllerProvider.notifier);
+    for (final m in messages) {
+      if (feedback.isPending(m.id)) m.feedback = feedback.pendingValue(m.id);
+    }
+    return messages;
+  }
+
+  ChatMessage? _messageById(String messageId) =>
+      state.value?.messages.where((m) => m.id == messageId).firstOrNull;
+
+  /// Show [feedback] on the message at once and send it to the server;
+  /// `null` clears the vote. Returns `false` when the message is not in the
+  /// current conversation.
+  bool setMessageFeedback(String messageId, MessageFeedback? feedback) {
+    final current = state.value;
+    final conversationId = current?.conversationId;
+    final message = _messageById(messageId);
+    if (current == null || conversationId == null || message == null) {
+      return false;
+    }
+    final comment = feedback?.comment?.trim();
+    final next = feedback == null
+        ? null
+        : MessageFeedback(
+            rating: feedback.rating,
+            comment: (comment == null || comment.isEmpty) ? null : comment,
+          );
+    final previous = message.feedback;
+    message.feedback = next;
+    state = AsyncData(
+      current.copyWith(messages: List<ChatMessage>.from(current.messages)),
+    );
+    ref
+        .read(messageFeedbackControllerProvider.notifier)
+        .enqueue(
+          conversationId: conversationId,
+          messageId: messageId,
+          previous: previous,
+          next: next,
+          onFailed: (confirmed) =>
+              _restoreFeedback(conversationId, messageId, confirmed),
+        );
+    return true;
+  }
+
+  /// Roll [messageId] back to [confirmed] after a failed call. Does nothing
+  /// visible when the user has since left the conversation the call belonged
+  /// to.
+  void _restoreFeedback(
+    String conversationId,
+    String messageId,
+    MessageFeedback? confirmed,
+  ) {
+    if (!ref.mounted) return;
+    final current = state.value;
+    final message = _messageById(messageId);
+    if (current == null ||
+        current.conversationId != conversationId ||
+        message == null) {
+      return;
+    }
+    message.feedback = confirmed;
+    state = AsyncData(
+      current.copyWith(
+        messages: List<ChatMessage>.from(current.messages),
+        error: 'Could not save your feedback. Please try again.',
+      ),
+    );
+  }
+
+  /// The user chose [rating] on a message (`null` clears it). A new rating
+  /// carries no comment and opens the comment field; clearing closes it.
+  void setMessageRating(String messageId, MessageRating? rating) {
+    final applied = setMessageFeedback(
+      messageId,
+      rating == null ? null : MessageFeedback(rating: rating),
+    );
+    if (!applied) return;
+    final feedback = ref.read(messageFeedbackControllerProvider.notifier);
+    if (rating == null) {
+      feedback.closeCommentField(messageId);
+    } else {
+      feedback.openCommentField(messageId, rating);
+    }
+  }
+
+  /// Send [comment] with the message's current rating and close the field.
+  /// Ignored while a feedback call for the message is still in flight.
+  void submitMessageFeedbackComment(String messageId, String comment) {
+    final feedback = ref.read(messageFeedbackControllerProvider.notifier);
+    final rating = _messageById(messageId)?.feedback?.rating;
+    if (rating == null || feedback.isPending(messageId)) return;
+    setMessageFeedback(
+      messageId,
+      MessageFeedback(rating: rating, comment: comment),
+    );
+    feedback.closeCommentField(messageId);
+  }
+
+  /// Close the comment field without sending anything.
+  void dismissMessageFeedbackComment(String messageId) => ref
+      .read(messageFeedbackControllerProvider.notifier)
+      .closeCommentField(messageId);
 
   /// Start a fresh conversation (no conversation ID set).
   void clearConversation() {
@@ -1135,7 +1247,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         id: conversationId,
       );
       if (!ref.mounted) return;
-      final messages = chatMessagesFromHistory(response.data!.messages);
+      final messages = _withPendingFeedback(
+        chatMessagesFromHistory(response.data!.messages),
+      );
       final latest = state.value ?? const ChatState();
       // While we were awaiting the conversation fetch, the queue-drain
       // loop may have advanced to the next pending message and started

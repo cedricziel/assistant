@@ -13,6 +13,7 @@ MessageSummary _msg({
   List<({String id, String filename, String mimeType, String url})>
       attachments =
       const [],
+  ({String rating, String? comment})? feedback,
 }) {
   return MessageSummary(
     (b) => b
@@ -22,6 +23,12 @@ MessageSummary _msg({
       ..turn = turn
       ..createdAt = DateTime.parse('2026-05-16T00:00:00Z')
       ..ttsAvailable = false
+      ..feedback = feedback == null
+          ? null
+          : (MessageFeedbackSummaryBuilder()
+              ..rating = feedback.rating
+              ..comment = feedback.comment
+              ..updatedAt = DateTime.parse('2026-05-16T00:00:00Z'))
       ..toolCalls = toolCalls.isEmpty
           ? null
           : ListBuilder<ToolCallSummary>(
@@ -316,6 +323,51 @@ void main() {
       expect(records[0].data, {'kind': 'terminal', 'exit_code': 0});
       expect(records[1].toolCallId, isNull);
       expect(records[1].data, isNull);
+    });
+  });
+
+  group('chatMessagesFromHistory — feedback', () {
+    test('maps rating and comment onto ChatMessage.feedback', () {
+      final messages = chatMessagesFromHistory([
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: 'Answer',
+          feedback: (rating: 'negative', comment: 'wrong file'),
+        ),
+        _msg(
+          id: 'a2',
+          role: 'assistant',
+          content: 'Answer',
+          feedback: (rating: 'positive', comment: null),
+        ),
+      ]);
+
+      expect(messages[0].feedback?.rating, MessageRating.negative);
+      expect(messages[0].feedback?.comment, 'wrong file');
+      expect(messages[1].feedback?.rating, MessageRating.positive);
+      expect(messages[1].feedback?.comment, isNull);
+    });
+
+    test('absent feedback maps to null', () {
+      final messages = chatMessagesFromHistory([
+        _msg(id: 'a1', role: 'assistant', content: 'Answer'),
+      ]);
+
+      expect(messages.single.feedback, isNull);
+    });
+
+    test('an unknown rating maps to null instead of failing', () {
+      final messages = chatMessagesFromHistory([
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: 'Answer',
+          feedback: (rating: 'sideways', comment: null),
+        ),
+      ]);
+
+      expect(messages.single.feedback, isNull);
     });
   });
 }
