@@ -1,0 +1,3 @@
+tags:
+  golden:
+    description: Pixel comparisons; baselines are generated on Linux (make update-goldens).
