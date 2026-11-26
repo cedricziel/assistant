@@ -77,6 +77,7 @@ mod tests {
             user_id: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            pinned_at: None,
         };
 
         broadcaster.emit(ConversationEvent::Upserted(record.clone()));
@@ -129,6 +130,7 @@ mod tests {
             user_id: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            pinned_at: None,
         };
 
         broadcaster.emit(ConversationEvent::Upserted(record.clone()));

@@ -6,7 +6,8 @@
 
 use assistant_core::types::conversation::{Message, MessageRole};
 use assistant_storage::{
-    ConversationStore, InMemoryConversationStore, SqliteConversationStore, StorageLayer,
+    ConversationPatch, ConversationStore, InMemoryConversationStore, MetadataUpdate,
+    SqliteConversationStore, StorageLayer,
 };
 use uuid::Uuid;
 
@@ -78,7 +79,10 @@ async fn list_orders_by_recency(store: Box<dyn ConversationStore>) {
     let _c = store.create_conversation(Some("C")).await.unwrap();
     // Touch `a` last so it becomes the most-recent.
     tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-    store.update_title(a.id, "A-updated").await.unwrap();
+    store
+        .save_message(&user_msg(a.id, "bump", 0))
+        .await
+        .unwrap();
 
     let list = store.list_conversations().await.unwrap();
     assert!(!list.is_empty());
@@ -93,6 +97,124 @@ async fn update_title_locks(store: Box<dyn ConversationStore>) {
     let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
     assert_eq!(loaded.title.as_deref(), Some("renamed"));
     assert!(loaded.title_locked, "explicit update_title must lock");
+}
+
+async fn update_title_does_not_bump_updated_at(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(None).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    store.update_title(conv.id, "renamed").await.unwrap();
+    let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert_eq!(
+        loaded.updated_at, conv.updated_at,
+        "renaming must not change updated_at"
+    );
+}
+
+fn patch(title: Option<&str>, pinned: Option<bool>) -> ConversationPatch {
+    ConversationPatch {
+        title: title.map(String::from),
+        pinned,
+    }
+}
+
+async fn expect_updated(
+    store: &dyn ConversationStore,
+    id: Uuid,
+    p: ConversationPatch,
+) -> assistant_storage::ConversationRecord {
+    match store.update_metadata(id, p).await.unwrap() {
+        MetadataUpdate::Updated(rec) => rec,
+        MetadataUpdate::NotFound => panic!("expected Updated, got NotFound"),
+    }
+}
+
+async fn update_metadata_title_and_pin(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(None).await.unwrap();
+    assert!(conv.pinned_at.is_none(), "new conversations are not pinned");
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+
+    let rec = expect_updated(&*store, conv.id, patch(Some("Renamed"), Some(true))).await;
+    assert_eq!(rec.title.as_deref(), Some("Renamed"));
+    assert!(rec.title_locked, "a title patch must lock the title");
+    assert!(rec.pinned_at.is_some(), "pinned: true must set pinned_at");
+    assert_eq!(
+        rec.updated_at, conv.updated_at,
+        "metadata edits must not change updated_at"
+    );
+
+    let reloaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert_eq!(reloaded.pinned_at, rec.pinned_at, "pin must be persisted");
+}
+
+async fn update_metadata_repin_keeps_pinned_at(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    let first = expect_updated(&*store, conv.id, patch(None, Some(true))).await;
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    let second = expect_updated(&*store, conv.id, patch(None, Some(true))).await;
+    assert_eq!(
+        first.pinned_at, second.pinned_at,
+        "re-pinning must keep the original pinned_at"
+    );
+}
+
+async fn update_metadata_unpin_clears_pinned_at(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    expect_updated(&*store, conv.id, patch(None, Some(true))).await;
+    let rec = expect_updated(&*store, conv.id, patch(None, Some(false))).await;
+    assert!(
+        rec.pinned_at.is_none(),
+        "pinned: false must clear pinned_at"
+    );
+    assert_eq!(
+        rec.title.as_deref(),
+        Some("A"),
+        "an absent title leaves the title unchanged"
+    );
+}
+
+async fn update_metadata_unknown_id_is_not_found(store: Box<dyn ConversationStore>) {
+    let res = store
+        .update_metadata(Uuid::new_v4(), patch(Some("x"), None))
+        .await
+        .unwrap();
+    assert!(matches!(res, MetadataUpdate::NotFound));
+}
+
+async fn update_metadata_overwrites_locked_title(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Locked")).await.unwrap();
+    assert!(conv.title_locked);
+    let rec = expect_updated(&*store, conv.id, patch(Some("Newer"), None)).await;
+    assert_eq!(rec.title.as_deref(), Some("Newer"));
+}
+
+async fn list_orders_pinned_first_newest_pin_first(store: Box<dyn ConversationStore>) {
+    let a = store.create_conversation(Some("A")).await.unwrap();
+    let b = store.create_conversation(Some("B")).await.unwrap();
+    let c = store.create_conversation(Some("C")).await.unwrap();
+    let d = store.create_conversation(Some("D")).await.unwrap();
+    // `d` is the most recently updated unpinned conversation.
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    store
+        .save_message(&user_msg(d.id, "bump", 0))
+        .await
+        .unwrap();
+
+    expect_updated(&*store, a.id, patch(None, Some(true))).await;
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    expect_updated(&*store, b.id, patch(None, Some(true))).await;
+
+    let ids: Vec<Uuid> = store
+        .list_conversations()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(
+        ids,
+        vec![b.id, a.id, d.id, c.id],
+        "pinned first (newest pin first), then by updated_at"
+    );
 }
 
 async fn set_generated_title_writes_unlocked_row(store: Box<dyn ConversationStore>) {
@@ -209,6 +331,104 @@ async fn replace_history_overwrites(store: Box<dyn ConversationStore>) {
     assert_eq!(loaded[1].content, "new2");
 }
 
+async fn sequential_saves_form_a_chain_ending_at_the_leaf(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Chain")).await.unwrap();
+    let a = user_msg(conv.id, "a", 0);
+    let b = assistant_msg(conv.id, "b", 1);
+    let c = user_msg(conv.id, "c", 2);
+    for m in [&a, &b, &c] {
+        store.save_message(m).await.unwrap();
+    }
+
+    let history = store.load_history(conv.id).await.unwrap();
+    let ids: Vec<Uuid> = history.iter().map(|m| m.id).collect();
+    assert_eq!(ids, vec![a.id, b.id, c.id], "history follows the chain");
+    assert_eq!(history[0].parent_id, None, "first message is a root");
+    assert_eq!(history[1].parent_id, Some(a.id), "b hangs under a");
+    assert_eq!(history[2].parent_id, Some(b.id), "c hangs under b");
+
+    let last = store.last_messages(conv.id, 2).await.unwrap();
+    let last_ids: Vec<Uuid> = last.iter().map(|m| m.id).collect();
+    assert_eq!(last_ids, vec![b.id, c.id], "last_messages is the path tail");
+}
+
+async fn empty_conversation_loads_no_history(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Empty")).await.unwrap();
+    assert!(store.load_history(conv.id).await.unwrap().is_empty());
+    assert!(store.last_messages(conv.id, 5).await.unwrap().is_empty());
+}
+
+async fn long_chain_loads_in_order(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Long")).await.unwrap();
+    let mut ids = Vec::new();
+    for i in 0..1000 {
+        let m = user_msg(conv.id, &format!("m{i}"), 0);
+        ids.push(m.id);
+        store.save_message(&m).await.unwrap();
+    }
+    let history = store.load_history(conv.id).await.unwrap();
+    let loaded: Vec<Uuid> = history.iter().map(|m| m.id).collect();
+    assert_eq!(loaded, ids, "1,000-row chain loads in save order");
+}
+
+async fn resaving_an_existing_id_keeps_the_leaf(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Idempotent")).await.unwrap();
+    let a = user_msg(conv.id, "a", 0);
+    let b = assistant_msg(conv.id, "b", 1);
+    store.save_message(&a).await.unwrap();
+    store.save_message(&b).await.unwrap();
+    store.save_message(&a).await.unwrap();
+
+    let c = user_msg(conv.id, "c", 2);
+    store.save_message(&c).await.unwrap();
+
+    let history = store.load_history(conv.id).await.unwrap();
+    let ids: Vec<Uuid> = history.iter().map(|m| m.id).collect();
+    assert_eq!(
+        ids,
+        vec![a.id, b.id, c.id],
+        "a re-save inserts nothing and does not move the leaf"
+    );
+    assert_eq!(history[2].parent_id, Some(b.id));
+}
+
+async fn deleting_a_long_chain_succeeds(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Big")).await.unwrap();
+    for i in 0..1500 {
+        store
+            .save_message(&user_msg(conv.id, &format!("m{i}"), 0))
+            .await
+            .unwrap();
+    }
+    store.delete_conversation(conv.id).await.unwrap();
+    assert!(store.get_conversation(conv.id).await.unwrap().is_none());
+    assert!(store.load_history(conv.id).await.unwrap().is_empty());
+}
+
+async fn replace_history_rechains_the_new_rows(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Rechain")).await.unwrap();
+    for i in 0..3 {
+        store
+            .save_message(&user_msg(conv.id, &format!("old{i}"), i))
+            .await
+            .unwrap();
+    }
+    let replacement = vec![
+        user_msg(conv.id, "new1", 0),
+        assistant_msg(conv.id, "new2", 0),
+        user_msg(conv.id, "new3", 0),
+    ];
+    store.replace_history(conv.id, &replacement).await.unwrap();
+
+    let loaded = store.load_history(conv.id).await.unwrap();
+    let ids: Vec<Uuid> = loaded.iter().map(|m| m.id).collect();
+    let expected: Vec<Uuid> = replacement.iter().map(|m| m.id).collect();
+    assert_eq!(ids, expected, "history equals the re-inserted rows");
+    assert_eq!(loaded[0].parent_id, None, "the first kept row is a root");
+    assert_eq!(loaded[1].parent_id, Some(replacement[0].id));
+    assert_eq!(loaded[2].parent_id, Some(replacement[1].id));
+}
+
 macro_rules! contract_tests {
     ($store_name:ident, $constructor:expr) => {
         mod $store_name {
@@ -237,6 +457,41 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_update_title_locks() {
                 update_title_locks($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_update_title_does_not_bump_updated_at() {
+                update_title_does_not_bump_updated_at($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_update_metadata_title_and_pin() {
+                update_metadata_title_and_pin($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_update_metadata_repin_keeps_pinned_at() {
+                update_metadata_repin_keeps_pinned_at($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_update_metadata_unpin_clears_pinned_at() {
+                update_metadata_unpin_clears_pinned_at($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_update_metadata_unknown_id_is_not_found() {
+                update_metadata_unknown_id_is_not_found($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_update_metadata_overwrites_locked_title() {
+                update_metadata_overwrites_locked_title($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_list_orders_pinned_first_newest_pin_first() {
+                list_orders_pinned_first_newest_pin_first($constructor).await;
             }
 
             #[tokio::test]
@@ -277,6 +532,36 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_replace_history_overwrites() {
                 replace_history_overwrites($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_sequential_saves_form_a_chain_ending_at_the_leaf() {
+                sequential_saves_form_a_chain_ending_at_the_leaf($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_empty_conversation_loads_no_history() {
+                empty_conversation_loads_no_history($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_long_chain_loads_in_order() {
+                long_chain_loads_in_order($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_resaving_an_existing_id_keeps_the_leaf() {
+                resaving_an_existing_id_keeps_the_leaf($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_deleting_a_long_chain_succeeds() {
+                deleting_a_long_chain_succeeds($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_replace_history_rechains_the_new_rows() {
+                replace_history_rechains_the_new_rows($constructor).await;
             }
         }
     };

@@ -1205,6 +1205,7 @@ mod tests {
                 user_id: Some("system".to_string()),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
+                pinned_at: None,
             },
         ));
 
@@ -1218,6 +1219,7 @@ mod tests {
                 user_id: Some("system".to_string()),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
+                pinned_at: None,
             },
         ));
 
@@ -1341,6 +1343,7 @@ mod tests {
             user_id: Some("system".to_string()),
             created_at,
             updated_at: created_at + chrono::Duration::hours(1),
+            pinned_at: None,
         }
     }
 
