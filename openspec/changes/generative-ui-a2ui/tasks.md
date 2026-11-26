@@ -132,8 +132,8 @@ Layer: server
 Depends on: message-branching PR 5 (`stream_turn_to_sse`)
 Parallel with: 2–9
 
-- [ ] 10.1 RED: runner test with a scripted turn that emits three frames; drop the SSE receiver after the first. Assert all frames and the terminal frame are in the event log with consecutive seq ids and reach a live-tail subscriber.
-- [ ] 10.2 In `stream_turn_to_sse`, a failed `sse_tx.send` sets a `client_gone` flag and stops forwarding only; the loop keeps draining `event_rx`, persisting and broadcasting until the turn ends (today it `break`s, `messages.rs:351–362`). GREEN. Coordinate with tool-approval PR 7.4 (`abandon_run` before the terminal frame) and follow-up-suggestions PR 3; they edit the same runner after this.
+- [x] 10.1 RED: runner test with a scripted turn that emits three frames; drop the SSE receiver after the first. Assert all frames and the terminal frame are in the event log with consecutive seq ids and reach a live-tail subscriber.
+- [x] 10.2 In `stream_turn_to_sse`, a failed `sse_tx.send` sets a `client_gone` flag and stops forwarding only; the loop keeps draining `event_rx`, persisting and broadcasting until the turn ends (today it `break`s, `messages.rs:351–362`). GREEN. Coordinate with tool-approval PR 7.4 (`abandon_run` before the terminal frame) and follow-up-suggestions PR 3; they edit the same runner after this.
 
 ## PR 11 — feat(web-ui): post-turn surface actions
 
