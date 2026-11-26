@@ -6,6 +6,7 @@
 import 'package:built_collection/built_collection.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/surface_summary.dart';
+import 'package:assistant_api/src/model/interaction_detail.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -16,6 +17,7 @@ part 'conversation_detail.g.dart';
 /// Properties:
 /// * [createdAt]
 /// * [id]
+/// * [interactions] - Every interaction of the conversation (tool approvals, questions), in creation order. Includes those of runs on inactive branches; the client decides what to show.
 /// * [messages]
 /// * [surfaces] - Generative UI surfaces anchored on the returned messages.
 /// * [title]
@@ -28,6 +30,10 @@ abstract class ConversationDetail
 
   @BuiltValueField(wireName: r'id')
   String get id;
+
+  /// Every interaction of the conversation (tool approvals, questions), in creation order. Includes those of runs on inactive branches; the client decides what to show.
+  @BuiltValueField(wireName: r'interactions')
+  BuiltList<InteractionDetail> get interactions;
 
   @BuiltValueField(wireName: r'messages')
   BuiltList<MessageSummary> get messages;
@@ -77,6 +83,11 @@ class _$ConversationDetailSerializer
     yield serializers.serialize(
       object.id,
       specifiedType: const FullType(String),
+    );
+    yield r'interactions';
+    yield serializers.serialize(
+      object.interactions,
+      specifiedType: const FullType(BuiltList, [FullType(InteractionDetail)]),
     );
     yield r'messages';
     yield serializers.serialize(
@@ -136,6 +147,14 @@ class _$ConversationDetailSerializer
             specifiedType: const FullType(String),
           ) as String;
           result.id = valueDes;
+          break;
+        case r'interactions':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType:
+                const FullType(BuiltList, [FullType(InteractionDetail)]),
+          ) as BuiltList<InteractionDetail>;
+          result.interactions.replace(valueDes);
           break;
         case r'messages':
           final valueDes = serializers.deserialize(

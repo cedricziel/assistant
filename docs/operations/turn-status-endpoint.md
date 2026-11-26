@@ -19,7 +19,7 @@ the `X-Run-Id` response header on the streaming send endpoint).
 {
   "turn_id": "8c1f5e0e-…",
   "conversation_id": "0a2b…",
-  "state": "running" | "completed" | "errored" | "unknown",
+  "state": "running" | "awaiting_input" | "completed" | "errored" | "unknown",
   "last_event_at": "2026-05-18T07:30:00Z" | null,
   "last_event_kind": "token" | "tool_result" | "done" | "agent_error" | … | null
 }
@@ -69,14 +69,17 @@ turn, not from the kind of the last row:
 
 - any `agent_error` row → `errored`
 - else any `done` row → `completed`
+- else any `interaction_requested` row without an `interaction_resolved` row
+  of the same `interaction_id` → `awaiting_input`
 - else → `running`
 - no events for the turn id → `unknown`
 - conversation id on the first row doesn't match the path → `unknown`
   (guards against turn-id collision across conversations)
 
-Terminal rows take precedence over non-terminal ones. A state added later for
-a non-terminal condition (such as `awaiting_input`) ranks below `completed`
-and above `running`: `errored` > `completed` > `awaiting_input` > `running`.
+Terminal rows take precedence over non-terminal ones:
+`errored` > `completed` > `awaiting_input` > `running`. `awaiting_input` depends
+on which rows exist, not on the last one, so a later `status` or
+`surface_update` row does not hide a pending interaction.
 
 `last_event_kind` and `last_event_at` describe the most recent row, and
 `done` is no longer always the last frame of a run. A completed turn can end
@@ -84,6 +87,25 @@ with `last_event_kind: "suggestions"`, for example. The status stays
 `completed`. The POST stream still closes at `done`; the run's replay stream
 stays open until the run finishes (see
 [ADR-0024](../adr/adr-0024-run-bounds-replay-stream.md)).
+
+## Voice turns
+
+`POST /api/conversations/{id}/voice` runs on the same turn runner as the
+text send endpoint, so a voice turn has a run id, is cancellable and is
+replayable:
+
+- The response carries the run id in `X-Run-Id`.
+- The SSE stream opens with `run_started` (sequence 0), then `transcript`
+  (sequence 1, `{"role":"user","content":"…"}`), then the reply frames.
+- Every frame, `transcript` included, is persisted under the run id, so
+  `GET .../runs/{run_id}/events/stream?since=0` replays the whole turn.
+- `POST .../turns/{run_id}/cancel` ends the stream with
+  `agent_error {"reason":"cancelled"}`. A failed turn ends with
+  `agent_error {"reason":"error"}`, never `done`.
+- Voice turns offer no follow-up suggestions.
+
+The run id only reaches the client once transcription has finished, because
+the response is not sent before then.
 
 ## Cancel semantics
 

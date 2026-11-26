@@ -459,12 +459,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     }
     final status = await api.turnStatus(conversationId, runId);
     if (!_stopStillPending(turn)) return;
-    if (status == TurnState.running || status == null) {
+    if (_isLive(status) || status == null) {
       await _detachTurn(error: _unconfirmedStopError);
     } else {
       await _detachTurn(refresh: true);
     }
   }
+
+  /// Whether [state] says the turn is still alive. A turn waiting for the
+  /// owner's answer is as alive as a running one, and is silent for as long.
+  static bool _isLive(TurnState? state) =>
+      state == TurnState.running || state == TurnState.awaitingInput;
 
   /// Retries of an unanswered cancel request, after the first attempt.
   static const _cancelRetries = 2;
@@ -1346,8 +1351,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     }
     final state = await api.turnStatus(conversationId, runId);
     if (sawProgress() || _session.detached) return;
-    if (state == TurnState.running) {
-      // Server says the turn is still in flight — leave the sink open.
+    if (_isLive(state)) {
+      // Server says the turn is still in flight (or waiting for the owner to
+      // answer an approval) — leave the sink open.
       // The chat-stream-progress-ux card already shows a stalled UI past
       // `kTurnStallThreshold`; the 90 s byte-watchdog is the final
       // safety net for genuinely dead connections.

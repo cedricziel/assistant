@@ -16,12 +16,13 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_storage::{
     InteractionRow, InteractionStatus, InteractionStore, NewInteraction, ResolveOutcome,
+    ToolPermissionRule, ToolPermissionRuleStore,
 };
 
 use crate::interaction::kinds::{InteractionKinds, InteractionOutcome};
@@ -93,6 +94,9 @@ pub struct InteractionBroker {
     kinds: Arc<InteractionKinds>,
     clock: Arc<dyn Clock>,
     timeout: Duration,
+    /// Where "always" answers save their rule. Without it they behave as the
+    /// matching once answer.
+    rules: Option<Arc<dyn ToolPermissionRuleStore>>,
     /// Same-process fast path: interaction id to the waiter's wake-up.
     waiters: Mutex<HashMap<String, oneshot::Sender<()>>>,
 }
@@ -116,6 +120,7 @@ impl InteractionBroker {
             kinds,
             clock: Arc::new(SystemClock),
             timeout: DEFAULT_TIMEOUT,
+            rules: None,
             waiters: Mutex::new(HashMap::new()),
         }
     }
@@ -128,6 +133,12 @@ impl InteractionBroker {
     /// How long an interaction stays open before it expires.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// Save the rule of an "always" answer in `rules` when it is answered.
+    pub fn with_rules(mut self, rules: Arc<dyn ToolPermissionRuleStore>) -> Self {
+        self.rules = Some(rules);
         self
     }
 
@@ -300,11 +311,29 @@ impl InteractionBroker {
             .validate_response(&row.kind, &row.request, &response)
             .map_err(RespondError::Invalid)?;
 
-        match self
+        // The rule is saved before the compare-and-set so the resolution the
+        // turn reads already carries its id.
+        let saved = self.save_rule(&row, &response).await?;
+        let rule_id = saved.as_ref().map(|r| r.id.to_string());
+
+        let outcome = self
             .store
-            .resolve_if_pending(&row.id, InteractionStatus::Resolved, Some(&response), None)
-            .await?
-        {
+            .resolve_if_pending(
+                &row.id,
+                InteractionStatus::Resolved,
+                Some(&response),
+                rule_id.as_deref(),
+            )
+            .await;
+        let won = match &outcome {
+            Ok(ResolveOutcome::Resolved(_)) => true,
+            Ok(ResolveOutcome::AlreadyResolved(stored)) => stored.rule_id == rule_id,
+            _ => false,
+        };
+        if !won {
+            self.discard_rule(&row, saved.as_ref()).await;
+        }
+        match outcome? {
             ResolveOutcome::Resolved(won) => {
                 if let Some(wake) = self.lock_waiters().remove(&won.id) {
                     let _ = wake.send(());
@@ -313,6 +342,46 @@ impl InteractionBroker {
             }
             ResolveOutcome::AlreadyResolved(lost) => Self::settled_reply(lost, &response),
             ResolveOutcome::NotFound => Err(RespondError::NotFound),
+        }
+    }
+
+    /// Save the rule `response` asks for, if the kind asks for one.
+    async fn save_rule(
+        &self,
+        row: &InteractionRow,
+        response: &Value,
+    ) -> Result<Option<ToolPermissionRule>> {
+        let Some(rule) = self
+            .kinds
+            .get(&row.kind)
+            .and_then(|handler| handler.saved_rule(&row.request, response))
+        else {
+            return Ok(None);
+        };
+        let Some(store) = &self.rules else {
+            warn!(
+                interaction = %row.id,
+                "no rule store; the 'always' answer is treated as a once answer"
+            );
+            return Ok(None);
+        };
+        let saved = store
+            .upsert(&row.user_id, rule.effect, &rule.rule, Some(&row.id))
+            .await?;
+        Ok(Some(saved))
+    }
+
+    /// Remove a rule saved for an answer that lost the compare-and-set. A rule
+    /// that already existed (saved from another interaction) stays.
+    async fn discard_rule(&self, row: &InteractionRow, saved: Option<&ToolPermissionRule>) {
+        let (Some(store), Some(saved)) = (&self.rules, saved) else {
+            return;
+        };
+        if saved.source_interaction_id.as_deref() != Some(row.id.as_str()) {
+            return;
+        }
+        if let Err(e) = store.delete(saved.id, Some(&row.user_id)).await {
+            warn!(interaction = %row.id, rule = %saved.id, error = %e, "failed to remove a rule saved for a losing answer");
         }
     }
 
@@ -369,7 +438,9 @@ mod tests {
     use serde_json::json;
     use tokio::task::JoinHandle;
 
-    use assistant_storage::InMemoryInteractionStore;
+    use assistant_storage::{
+        InMemoryInteractionStore, InMemoryToolPermissionRuleStore, RuleEffect,
+    };
 
     use super::*;
 
@@ -780,5 +851,176 @@ mod tests {
         req.kind = "future_thing".into();
         let err = f.broker.request(req, None).await.unwrap_err();
         assert!(err.to_string().contains("future_thing"), "{err}");
+    }
+
+    // -- saved rules (ADR-0017, D3) --
+
+    fn always_request() -> InteractionRequest {
+        let mut req = request();
+        req.request = json!({
+            "tool_name": "bash", "arguments": {"command": "git status --short"},
+            "arguments_truncated": false, "reason": "ask",
+            "options": ["allow_once", "allow_always", "reject_once", "reject_always"],
+            "suggested_rule": "bash(git status*)",
+        });
+        req
+    }
+
+    fn fixture_with_rules() -> (Fixture, Arc<InMemoryToolPermissionRuleStore>) {
+        let mut f = fixture();
+        let rules = Arc::new(InMemoryToolPermissionRuleStore::new());
+        f.broker = Arc::new(
+            InteractionBroker::new(f.store.clone(), Arc::new(InteractionKinds::with_builtin()))
+                .with_clock(f.clock.clone())
+                .with_rules(rules.clone()),
+        );
+        (f, rules)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn allow_always_saves_the_suggested_rule_and_reports_its_id() {
+        let (mut f, rules) = fixture_with_rules();
+        let (id, task) = start(&mut f, always_request()).await;
+
+        let row = f
+            .broker
+            .respond(&owner(), &id, json!({"decision": "allow_always"}))
+            .await
+            .unwrap();
+
+        let saved = rules.list_for_user("alice").await.unwrap();
+        assert_eq!(saved.len(), 1, "one rule saved");
+        assert_eq!(saved[0].effect, RuleEffect::Allow);
+        assert_eq!(saved[0].rule, "bash(git status*)");
+        assert_eq!(saved[0].source_interaction_id.as_deref(), Some(id.as_str()));
+        assert_eq!(row.rule_id, Some(saved[0].id.to_string()));
+        let (_, outcome) = task.await.unwrap().unwrap();
+        assert_eq!(
+            outcome,
+            InteractionOutcome::Resolved {
+                response: json!({"decision": "allow_always"}),
+                rule_id: Some(saved[0].id.to_string()),
+            }
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reject_always_saves_a_deny_rule() {
+        let (mut f, rules) = fixture_with_rules();
+        let (id, _task) = start(&mut f, always_request()).await;
+        f.broker
+            .respond(&owner(), &id, json!({"decision": "reject_always"}))
+            .await
+            .unwrap();
+        let saved = rules.list_for_user("alice").await.unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].effect, RuleEffect::Deny);
+        assert_eq!(saved[0].rule, "bash(git status*)");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn once_answers_save_nothing() {
+        for decision in ["allow_once", "reject_once"] {
+            let (mut f, rules) = fixture_with_rules();
+            let (id, _task) = start(&mut f, always_request()).await;
+            let row = f
+                .broker
+                .respond(&owner(), &id, json!({ "decision": decision }))
+                .await
+                .unwrap();
+            assert_eq!(row.rule_id, None, "{decision}");
+            assert!(
+                rules.list_for_space().await.unwrap().is_empty(),
+                "{decision}"
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_same_always_answer_twice_keeps_one_rule() {
+        let (mut f, rules) = fixture_with_rules();
+        let (id, _task) = start(&mut f, always_request()).await;
+        let answer = json!({"decision": "allow_always"});
+        let first = f
+            .broker
+            .respond(&owner(), &id, answer.clone())
+            .await
+            .unwrap();
+        let again = f.broker.respond(&owner(), &id, answer).await.unwrap();
+        assert_eq!(first, again);
+        assert_eq!(rules.list_for_space().await.unwrap().len(), 1);
+    }
+
+    /// Rule store that lets a competing answer win the interaction while the
+    /// rule is being saved.
+    struct RacingRules {
+        inner: InMemoryToolPermissionRuleStore,
+        interactions: Arc<InMemoryInteractionStore>,
+    }
+
+    #[async_trait::async_trait]
+    impl ToolPermissionRuleStore for RacingRules {
+        async fn upsert(
+            &self,
+            user_id: &str,
+            effect: RuleEffect,
+            rule: &str,
+            source: Option<&str>,
+        ) -> Result<assistant_storage::ToolPermissionRule> {
+            let saved = self.inner.upsert(user_id, effect, rule, source).await?;
+            if let Some(id) = source {
+                self.interactions
+                    .resolve_if_pending(
+                        id,
+                        InteractionStatus::Resolved,
+                        Some(&json!({"decision": "reject_once"})),
+                        None,
+                    )
+                    .await?;
+            }
+            Ok(saved)
+        }
+        async fn list_for_user(
+            &self,
+            u: &str,
+        ) -> Result<Vec<assistant_storage::ToolPermissionRule>> {
+            self.inner.list_for_user(u).await
+        }
+        async fn list_for_space(&self) -> Result<Vec<assistant_storage::ToolPermissionRule>> {
+            self.inner.list_for_space().await
+        }
+        async fn get(&self, id: Uuid) -> Result<Option<assistant_storage::ToolPermissionRule>> {
+            self.inner.get(id).await
+        }
+        async fn delete(&self, id: Uuid, owner: Option<&str>) -> Result<bool> {
+            self.inner.delete(id, owner).await
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_always_answer_that_loses_the_race_leaves_no_rule_behind() {
+        let mut f = fixture();
+        let rules = Arc::new(RacingRules {
+            inner: InMemoryToolPermissionRuleStore::new(),
+            interactions: f.store.clone(),
+        });
+        f.broker = Arc::new(
+            InteractionBroker::new(f.store.clone(), Arc::new(InteractionKinds::with_builtin()))
+                .with_clock(f.clock.clone())
+                .with_rules(rules.clone()),
+        );
+        let (id, _task) = start(&mut f, always_request()).await;
+
+        let err = f
+            .broker
+            .respond(&owner(), &id, json!({"decision": "allow_always"}))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, RespondError::Conflict(_)), "{err:?}");
+        assert!(
+            rules.list_for_space().await.unwrap().is_empty(),
+            "the losing answer must not widen permissions"
+        );
     }
 }

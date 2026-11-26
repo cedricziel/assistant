@@ -10,11 +10,16 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
+  'ChatMarkdownScope',
+  'ChatThreadLayout',
   'CodeBlock',
+  'CodeDiffResultView',
+  'CodeFileResultView',
   'CompactExpandable',
   'Composer',
   'ConversationListView',
   'ConversationSearchResultsView',
+  'DataTableResultView',
   'FeedbackButtons',
   'FeedbackCommentField',
   'GenericToolResultView',
@@ -32,9 +37,11 @@ const List<String> kAssistantUiElements = [
   'StarterPrompts',
   'SuggestionChips',
   'SurfaceFrame',
+  'ThinkingBody',
   'ThreadDensityScope',
   'ThreadEmptyState',
   'ThreadErrorBanner',
+  'ThreadViewport',
   'TimelineEntryShell',
   'ToolCallBody',
   'ToolResultRendererScope',
@@ -43,12 +50,8 @@ const List<String> kAssistantUiElements = [
   'UnknownInteractionCard',
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
-  // 'ChatThreadLayout', // slot: chat-element-library 10
-  // 'CodeDiffResultView', // slot: tool-result-renderers C7
-  // 'CodeFileResultView', // slot: tool-result-renderers C7
   // 'CommandBody', // slot: chat-element-library 7b
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
-  // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
   // 'LinkPreviewResultView', // slot: tool-result-renderers C5
@@ -60,8 +63,6 @@ const List<String> kAssistantUiElements = [
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
-  // 'ThinkingBody', // slot: chat-element-library 7a
-  // 'ThreadViewport', // slot: chat-element-library 10
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c
   // 'TypingIndicator', // slot: chat-element-library 8b

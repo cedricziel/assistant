@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use assistant_core::VOICE_PLACEHOLDER;
 use assistant_core::auth::AuthContext;
+use assistant_core::bus_messages::TurnAnchor;
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::llm::provider::LlmProvider;
@@ -32,12 +33,14 @@ use assistant_core::types::conversation::Interface;
 use assistant_core::types::features::SuggestionsConfig;
 use assistant_runtime::OrchestratorEvent;
 use assistant_runtime::SubmitTurn;
+use assistant_runtime::orchestrator::{TurnLease, TurnMode};
 use assistant_runtime::projection::{SseProjector, StreamProjector};
 use assistant_storage::{
     ConversationEventStore as _, ConversationStore, PushSubscriptionStore, SqliteConversationStore,
 };
 use assistant_transcription::TranscriptionRequest;
 
+use crate::errors::json_error;
 use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
@@ -112,6 +115,7 @@ pub struct QuickMessageResponse {
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
         (status = 404, description = "Conversation not found", body = ErrorBody),
+        (status = 409, description = "An edit or regenerate is running in this conversation", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -149,63 +153,147 @@ pub async fn send_message(
     // Generate a unique ID for this orchestrator run.
     let run_id = Uuid::new_v4();
 
-    let (event_tx, event_rx) = mpsc::channel::<OrchestratorEvent>(64);
-
     let orchestrator = match state.runtime(&ctx).await {
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    let user_attachment_ids = body.attachment_ids;
-    let user_message = content.clone();
+    // An edit or regenerate holds the conversation exclusively: an append
+    // would land its user row on a leaf that is about to move.
+    let Some(lease) = orchestrator
+        .turn_registry()
+        .try_begin(conv_id, run_id, TurnMode::Shared)
+    else {
+        return json_error(
+            StatusCode::CONFLICT,
+            "An edit or regenerate is running in this conversation",
+        );
+    };
+    let opts = RunOptions::web_turn(TurnAnchor::Append).with_user_message_id(Uuid::new_v4());
     // Use `run_id` as the orchestrator's `request_id` so external cancel
     // calls — `POST .../turns/{run_id}/cancel` — can find the matching
     // CancellationToken via `Orchestrator::cancel_turn`.
-    let turn_result_rx = {
-        let (tx, rx) =
-            tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
-        let submit_request_id = run_id;
-        tokio::spawn(async move {
-            let result = orchestrator
-                .submit_streaming(
-                    SubmitTurn::new(content, conv_id, Interface::Web)
-                        .with_auth(&auth)
-                        .with_request_id(submit_request_id)
-                        .with_attachments(user_attachment_ids)
-                        // The turn may run in another process, which relays
-                        // its events over the bus instead of into `event_tx`.
-                        .with_relay_events(true),
-                    event_tx,
-                )
-                .await;
-            let _ = tx.send(result);
-        });
-        rx
-    };
+    let turn = opts
+        .submit_turn(content.clone(), conv_id, &auth, run_id, lease)
+        .with_attachments(body.attachment_ids);
+    let (event_rx, turn_result_rx) = start_turn(orchestrator, turn);
 
     stream_turn_to_sse(
         &ctx,
         &state,
         run_id,
         conv_id,
-        RunOptions {
-            push: true,
-            suggestions: true,
-        },
-        user_message,
+        opts,
+        content,
         event_rx,
         turn_result_rx,
     )
     .await
 }
 
+/// Submit `turn` in the background and return the channels
+/// [`stream_turn_to_sse`] reads: its events and its outcome.
+pub(crate) fn start_turn(
+    orchestrator: std::sync::Arc<assistant_runtime::Orchestrator>,
+    turn: SubmitTurn,
+) -> (
+    mpsc::Receiver<OrchestratorEvent>,
+    tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+) {
+    let (event_tx, event_rx) = mpsc::channel::<OrchestratorEvent>(64);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let result = orchestrator.submit_streaming(turn, event_tx).await;
+        let _ = tx.send(result);
+    });
+    (event_rx, rx)
+}
+
+/// Whether web turns can answer prompts (tool approvals, questions).
+/// `tool-approval-prompts`' enabling PR flips it, once the client cards
+/// exist. Send, edit and regenerate all read it through
+/// [`RunOptions::web_turn`], so they flip together.
+const WEB_TURNS_INTERACTIVE: bool = false;
+
 /// Per-entry-point policy for [`stream_turn_to_sse`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct RunOptions {
     /// Send Web Push notifications for skill, error and completion events.
     pub push: bool,
     /// Offer follow-up suggestions after a completed turn (`[suggestions]`
     /// still has to be enabled for the org).
     pub suggestions: bool,
+    /// What the user said, when the turn answers a voice message. Emitted and
+    /// persisted as the `transcript` frame right after `run_started`.
+    pub transcript: Option<String>,
+    /// A human is waiting on the turn and can answer prompts.
+    pub interactive: bool,
+    /// Where the turn's rows attach in the message tree.
+    pub anchor: TurnAnchor,
+    /// The id the run persists its user row under (the answered message for a
+    /// regenerate). Announced in `run_started`.
+    pub user_message_id: Option<Uuid>,
+}
+
+impl RunOptions {
+    /// The options of a streaming web turn. Send, edit and regenerate all
+    /// build theirs here, so a policy change applies to the three together.
+    pub(crate) const fn web_turn(anchor: TurnAnchor) -> Self {
+        Self {
+            push: true,
+            suggestions: true,
+            transcript: None,
+            interactive: WEB_TURNS_INTERACTIVE,
+            anchor,
+            user_message_id: None,
+        }
+    }
+
+    pub(crate) const fn with_user_message_id(mut self, id: Uuid) -> Self {
+        self.user_message_id = Some(id);
+        self
+    }
+
+    /// A voice turn: it answers what the user said, offers no suggestions and
+    /// opens with that transcript.
+    pub(crate) fn voice_turn(transcript: String) -> Self {
+        Self {
+            suggestions: false,
+            transcript: Some(transcript),
+            ..Self::web_turn(TurnAnchor::Append)
+        }
+    }
+
+    /// Tests use it to flip the flag the enabling PR will flip.
+    #[cfg(test)]
+    pub(crate) const fn with_interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
+        self
+    }
+
+    /// The turn to submit under `lease`, a web turn identified by `run_id`.
+    pub(crate) fn submit_turn(
+        &self,
+        prompt: String,
+        conversation_id: Uuid,
+        auth: &AuthContext,
+        run_id: Uuid,
+        lease: TurnLease,
+    ) -> SubmitTurn {
+        let mut turn = SubmitTurn::new(prompt, conversation_id, Interface::Web)
+            .with_auth(auth)
+            .with_request_id(run_id)
+            .with_lease(lease)
+            .with_interactive(self.interactive)
+            // The turn may run in another process, which relays its events
+            // over the bus instead of into the local sink.
+            .with_relay_events(true);
+        turn.anchor = self.anchor.clone();
+        // A regenerate persists no user row, so it has no id to pre-assign.
+        if !matches!(self.anchor, TurnAnchor::Regenerate { .. }) {
+            turn.user_message_id = self.user_message_id;
+        }
+        turn
+    }
 }
 
 /// Drive one turn to its SSE response: emit `run_started` (sequence 0), forward
@@ -275,7 +363,10 @@ pub(crate) async fn stream_turn_to_sse(
 
     // Emit run_started event (sequence 0) to the durable log.
     let run_id_str = run_id.to_string();
-    let run_started_payload = serde_json::json!({"run_id": run_id_str});
+    let run_started_payload = match opts.user_message_id {
+        Some(id) => serde_json::json!({"run_id": run_id_str, "user_message_id": id}),
+        None => serde_json::json!({"run_id": run_id_str}),
+    };
     if let Err(e) = event_store
         .append_event(
             &run_id_str,
@@ -302,9 +393,38 @@ pub(crate) async fn stream_turn_to_sse(
         return sse_response(sse_rx);
     }
 
+    // A voice turn's transcript is the first frame after `run_started`.
+    let mut seq: i64 = 1; // sequence 0 was run_started
+    if let Some(text) = &opts.transcript {
+        let payload = serde_json::json!({ "role": "user", "content": text });
+        if let Err(e) = event_store
+            .append_event(
+                &run_id_str,
+                &conv_id.to_string(),
+                seq,
+                "transcript",
+                &payload,
+            )
+            .await
+        {
+            warn!("Failed to persist transcript event for run {run_id}: {e}");
+        }
+        let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+            sequence: seq,
+            event_type: "transcript".to_string(),
+            payload: payload.clone(),
+        });
+        let transcript_sse = Event::default()
+            .event("transcript")
+            .data(payload.to_string())
+            .id(seq.to_string());
+        // A client that is already gone only stops receiving frames.
+        let _ = sse_tx.send(Ok(transcript_sse)).await;
+        seq += 1;
+    }
+
     tokio::spawn(async move {
         let mut full_text = String::new();
-        let mut seq: i64 = 1; // sequence 0 was run_started
         let conv_id_str = conv_id.to_string();
 
         // Throttle thinking persistence: accumulate tokens, flush every 20 tokens
@@ -1307,6 +1427,12 @@ struct VoiceUploadForm {
 ///
 /// The message text is the transcript, or `[Voice message]` when no
 /// transcription provider is configured or transcription fails.
+///
+/// The turn runs like `POST /api/conversations/{id}/messages`: the response
+/// carries the run id in `X-Run-Id`, the stream opens with `run_started` and
+/// the `transcript` frame, every frame is persisted for replay through
+/// `GET .../runs/{run_id}/events/stream`, `POST .../turns/{run_id}/cancel`
+/// stops it, and it ends in `done` or `agent_error`.
 #[utoipa::path(
     post,
     path = "/api/conversations/{id}/voice",
@@ -1438,100 +1564,39 @@ pub async fn send_voice_message(
         None => VOICE_PLACEHOLDER.to_string(),
     };
 
-    // Run through orchestrator (same flow as send_message).
-    let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
-    let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(64);
-
+    // Run through the same lifecycle as `send_message`: the run id is the
+    // orchestrator's request id, so the turn can be cancelled and replayed.
+    let run_id = Uuid::new_v4();
     let orchestrator = match state.runtime(&ctx).await {
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    let content = transcript.clone();
-    let recording_id = meta.id;
-    let turn_result_rx = {
-        let (tx, rx) =
-            tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
-        tokio::spawn(async move {
-            let result = orchestrator
-                .submit_streaming(
-                    SubmitTurn::new(content, conv_id, Interface::Web)
-                        .with_auth(&auth)
-                        .with_attachments(vec![recording_id]),
-                    event_tx,
-                )
-                .await;
-            let _ = tx.send(result);
-        });
-        rx
+    let Some(lease) = orchestrator
+        .turn_registry()
+        .try_begin(conv_id, run_id, TurnMode::Shared)
+    else {
+        return json_error(
+            StatusCode::CONFLICT,
+            "An edit or regenerate is running in this conversation",
+        );
     };
+    let opts = RunOptions::voice_turn(transcript.clone()).with_user_message_id(Uuid::new_v4());
+    let turn = opts
+        .submit_turn(transcript.clone(), conv_id, &auth, run_id, lease)
+        .with_attachments(vec![meta.id]);
+    let (event_rx, turn_result_rx) = start_turn(orchestrator, turn);
 
-    // Emit the user transcript as the first SSE event so the UI can display it.
-    let transcript_event = serde_json::json!({ "role": "user", "content": transcript });
-    let _ = sse_tx
-        .send(Ok(Event::default()
-            .event("transcript")
-            .data(transcript_event.to_string())))
-        .await;
-
-    let push_dispatcher_for_sse = state.push_dispatcher.clone();
-    let push_store: std::sync::Arc<dyn PushSubscriptionStore> =
-        std::sync::Arc::new(ctx.storage.push_subscription_store());
-    let conv_id_for_push = conv_id;
-    tokio::spawn(async move {
-        let mut full_text = String::new();
-
-        while let Some(orch_event) = event_rx.recv().await {
-            // Shared projection layer owns serialization — unified with the main
-            // streaming handler. The voice path neither persists nor batches, so
-            // every frame (including thinking) streams straight through.
-            let Some(frame) = SseProjector.project(&orch_event).into_iter().next() else {
-                continue;
-            };
-            if frame.event == "token" {
-                full_text.push_str(&frame.sse_data);
-            }
-            let sse_event = Event::default().event(frame.event).data(frame.sse_data);
-            if sse_tx.send(Ok(sse_event)).await.is_err() {
-                return;
-            }
-        }
-
-        let (reply_text, reply_message_id, reply_attachment_ids) = match turn_result_rx.await {
-            Ok(Ok(result)) => (result.answer, result.message_id, result.attachment_ids),
-            Ok(Err(_)) | Err(_) => (full_text, None, vec![]),
-        };
-
-        let mut done_data = serde_json::json!({
-            "role": "assistant",
-            "content": reply_text,
-        });
-        if let Some(mid) = reply_message_id {
-            done_data["message_id"] = serde_json::Value::String(mid.to_string());
-        }
-        if !reply_attachment_ids.is_empty() {
-            done_data["attachment_ids"] = serde_json::json!(
-                reply_attachment_ids
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-            );
-        }
-        let done = Event::default().event("done").data(done_data.to_string());
-        let _ = sse_tx.send(Ok(done)).await;
-
-        if let Some(dispatcher) = push_dispatcher_for_sse {
-            let body = reply_text.chars().take(80).collect::<String>();
-            let conv_id_str = conv_id_for_push.to_string();
-            if let Err(e) = dispatcher
-                .send_to_all(&*push_store, "New message", &body, Some(&conv_id_str))
-                .await
-            {
-                warn!("Push dispatch failed: {e}");
-            }
-        }
-    });
-
-    sse_response(sse_rx)
+    stream_turn_to_sse(
+        &ctx,
+        &state,
+        run_id,
+        conv_id,
+        opts,
+        transcript,
+        event_rx,
+        turn_result_rx,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -1831,6 +1896,85 @@ mod tests {
             uuid::Uuid::parse_str(mid).is_ok(),
             "message_id should be a valid UUID, got: {mid}"
         );
+    }
+
+    // -- RunOptions::web_turn ---------------------------------------------------
+
+    fn web_anchors() -> [TurnAnchor; 3] {
+        let (parent, edited, user) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        [
+            TurnAnchor::Append,
+            TurnAnchor::Edit {
+                parent_message_id: Some(parent),
+                edited_message_id: edited,
+            },
+            TurnAnchor::Regenerate {
+                user_message_id: user,
+            },
+        ]
+    }
+
+    fn submitted(opts: &RunOptions) -> assistant_runtime::SubmitTurn {
+        let conv = Uuid::new_v4();
+        let run = Uuid::new_v4();
+        let lease = assistant_runtime::orchestrator::TurnRegistry::default()
+            .try_begin(
+                conv,
+                run,
+                assistant_runtime::orchestrator::TurnMode::Exclusive,
+            )
+            .unwrap();
+        opts.submit_turn(
+            "text".into(),
+            conv,
+            &assistant_core::auth::AuthContext::system(),
+            run,
+            lease,
+        )
+    }
+
+    #[test]
+    fn send_edit_and_regenerate_submit_the_same_web_turn_policy() {
+        for interactive in [false, true] {
+            let submitted: Vec<_> = web_anchors()
+                .into_iter()
+                .map(|anchor| {
+                    let opts = RunOptions::web_turn(anchor).with_interactive(interactive);
+                    assert!(opts.push && opts.suggestions, "{:?}", opts.anchor);
+                    let turn = submitted(&opts);
+                    (turn.interactive, turn.relay_events)
+                })
+                .collect();
+            assert_eq!(
+                submitted,
+                vec![(interactive, true); 3],
+                "the flag reaches all three entry points alike"
+            );
+        }
+    }
+
+    #[test]
+    fn web_turns_are_not_interactive_until_the_approvals_pr_enables_them() {
+        for anchor in web_anchors() {
+            let opts = RunOptions::web_turn(anchor);
+            assert!(!opts.interactive, "{:?}", opts.anchor);
+            assert!(!submitted(&opts).interactive, "{:?}", opts.anchor);
+        }
+    }
+
+    #[test]
+    fn a_regenerate_pre_assigns_no_user_row_id() {
+        let id = Uuid::new_v4();
+        for anchor in web_anchors() {
+            let regenerates = matches!(anchor, TurnAnchor::Regenerate { .. });
+            let turn = submitted(&RunOptions::web_turn(anchor.clone()).with_user_message_id(id));
+            assert_eq!(turn.anchor, anchor);
+            assert_eq!(
+                turn.user_message_id,
+                (!regenerates).then_some(id),
+                "{anchor:?}"
+            );
+        }
     }
 
     // -- send_message frame sequence (characterisation of the streamed runner) --
@@ -2173,6 +2317,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             tokens,
             Some(Ok(turn_result("done text"))),
@@ -2336,7 +2481,9 @@ mod tests {
 
     // -- stream_turn_to_sse driven directly -----------------------------------
 
-    use super::{RunOptions, stream_turn_to_sse};
+    use assistant_core::bus_messages::TurnAnchor;
+
+    use super::{RunOptions, WEB_TURNS_INTERACTIVE, stream_turn_to_sse};
 
     fn system_ctx(storage: &Arc<StorageLayer>) -> crate::space::SpaceCtx {
         crate::space::SpaceCtx {
@@ -2353,6 +2500,10 @@ mod tests {
     const NO_SUGGESTIONS: RunOptions = RunOptions {
         push: true,
         suggestions: false,
+        transcript: None,
+        interactive: WEB_TURNS_INTERACTIVE,
+        anchor: TurnAnchor::Append,
+        user_message_id: None,
     };
 
     /// Run the shared runner over hand-fed channels; returns the run id and SSE frames.
@@ -2469,6 +2620,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             "hi".to_string(),
             event_rx,
@@ -2978,6 +3130,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             vec![],
             Some(Ok(turn_result("quiet"))),
@@ -2997,6 +3150,10 @@ mod tests {
     const SUGGEST: RunOptions = RunOptions {
         push: true,
         suggestions: true,
+        transcript: None,
+        interactive: WEB_TURNS_INTERACTIVE,
+        anchor: TurnAnchor::Append,
+        user_message_id: None,
     };
 
     /// State over `llm` whose org has `[suggestions]` set as given.
@@ -3492,9 +3649,8 @@ mod tests {
 
     // -- POST /conversations/{id}/voice — MIME validation & size limit ---------
 
-    /// Post a `fakeaudio` webm recording to the voice endpoint and return the
-    /// SSE body.
-    async fn post_voice(state: ApiState, conv_id: uuid::Uuid) -> String {
+    /// Post a `fakeaudio` webm recording to the voice endpoint.
+    async fn post_voice_response(state: ApiState, conv_id: uuid::Uuid) -> axum::response::Response {
         let boundary = "testboundary";
         let body = format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.webm\"\r\nContent-Type: audio/webm\r\n\r\nfakeaudio\r\n--{boundary}--\r\n",
@@ -3514,7 +3670,144 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+        resp
+    }
+
+    /// Post a recording to the voice endpoint and return the SSE body.
+    async fn post_voice(state: ApiState, conv_id: uuid::Uuid) -> String {
+        let resp = post_voice_response(state, conv_id).await;
         String::from_utf8_lossy(&body_bytes(resp.into_body()).await).into_owned()
+    }
+
+    // -- voice turns share the run lifecycle --
+
+    #[tokio::test]
+    async fn voice_stream_opens_with_run_started_then_transcript() {
+        let llm = MockServer::start().await;
+        mount_llm_reply(&llm, "Voice reply").await;
+        let (state, storage) = test_state(&llm.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_voice_response(state, conv_id).await;
+        let run_id = run_id_of(&resp);
+        let frames = sse_frames(resp).await;
+
+        assert!(Uuid::parse_str(&run_id).is_ok(), "X-Run-Id is a run id");
+        assert_eq!(frames[0].0, "run_started");
+        assert_eq!(frames[0].2, Some(0), "run_started has sequence 0");
+        assert_eq!(frames[1].0, "transcript", "the transcript follows at once");
+        assert_eq!(frames[1].2, Some(1), "the transcript has sequence 1");
+        let started: serde_json::Value = serde_json::from_str(&frames[0].1).unwrap();
+        assert_eq!(started["run_id"], run_id.as_str());
+    }
+
+    #[tokio::test]
+    async fn voice_frames_persist_under_the_run_id_and_replay_with_the_transcript() {
+        let llm = MockServer::start().await;
+        mount_llm_reply(&llm, "Voice reply").await;
+        let (state, storage) = test_state(&llm.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_voice_response(state.clone(), conv_id).await;
+        let run_id = run_id_of(&resp);
+        let _ = sse_frames(resp).await;
+        wait_run_finished(&state, &run_id, std::time::Duration::from_secs(5)).await;
+
+        let log = event_log(&storage, &run_id).await;
+        assert_eq!(
+            kinds_of(&log).first_chunk::<2>(),
+            Some(&["run_started", "transcript"])
+        );
+        assert_eq!(log[1].0, 1, "the transcript is persisted with a sequence");
+        assert_eq!(log[1].2["role"], "user");
+        assert_eq!(log[1].2["content"], assistant_core::VOICE_PLACEHOLDER);
+        assert_eq!(kinds_of(&log).last(), Some(&"done"));
+
+        let replayed = replay_frames(state, conv_id, &run_id, 0).await;
+        assert_eq!(
+            replayed.iter().map(|f| f.0.as_str()).next_back(),
+            Some("done")
+        );
+        assert!(
+            replayed.iter().any(|f| f.0 == "transcript"),
+            "replay carries the transcript: {replayed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_voice_turn_ends_the_stream_with_a_cancelled_agent_error() {
+        let llm = MockServer::start().await;
+        mount_llm_hang(&llm).await;
+        let (state, storage) = test_state(&llm.uri()).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_voice_response(state, conv_id).await;
+        let run_id = run_id_of(&resp);
+        cancel_when_running(&orchestrator, &llm, Uuid::parse_str(&run_id).unwrap()).await;
+        let frames = sse_frames(resp).await;
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(
+            event, "agent_error",
+            "a cancelled voice turn ends in agent_error"
+        );
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "cancelled");
+        assert!(
+            frames.iter().all(|f| f.0 != "done"),
+            "never done: {frames:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_voice_turn_ends_with_an_error_agent_error_not_done() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+
+        let llm = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+            .mount(&llm)
+            .await;
+        let (state, storage) = test_state(&llm.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let frames = sse_frames(post_voice_response(state, conv_id).await).await;
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(
+            event, "agent_error",
+            "a failed voice turn ends in agent_error"
+        );
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "error");
+        assert!(
+            frames.iter().all(|f| f.0 != "done"),
+            "never done: {frames:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_voice_turn_offers_no_suggestions() {
+        let llm = MockServer::start().await;
+        mount_llm_replies(&llm, &["Voice answer", "1. Never asked"]).await;
+        let (state, storage) = suggestions_state(&llm, true, true, 10).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_voice_response(state.clone(), conv_id).await;
+        let run_id = run_id_of(&resp);
+        let _ = sse_frames(resp).await;
+        wait_run_finished(&state, &run_id, std::time::Duration::from_secs(5)).await;
+
+        assert_eq!(chat_calls(&llm).await, 1, "only the turn's own call");
+        assert!(
+            event_log(&storage, &run_id)
+                .await
+                .iter()
+                .all(|e| e.1 != "suggestions")
+        );
     }
 
     /// The text of the SSE `transcript` event.

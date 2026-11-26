@@ -2,6 +2,7 @@
 //! question the turn put to them, such as a tool approval.
 //!
 //! - `POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond`
+//! - `GET /api/conversations/{conversation_id}/interactions`
 //!
 //! The answer is validated by the kind's handler in the runtime's
 //! `InteractionKinds` registry, so this module never matches on a kind except
@@ -12,8 +13,8 @@
 use std::sync::Arc;
 
 use axum::Extension;
-use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, State};
+use axum::extract::rejection::{JsonRejection, QueryRejection};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
@@ -27,7 +28,7 @@ use assistant_core::auth::AuthContext;
 use assistant_runtime::interaction::{
     InteractionBroker, InteractionKinds, InteractionOutcome, RespondError, Responder,
 };
-use assistant_storage::{InteractionRow, InteractionStatus};
+use assistant_storage::{InteractionRow, InteractionStatus, InteractionStore as _};
 
 use super::ApiState;
 use super::conversations::{caller_store, owned_conversation};
@@ -132,7 +133,7 @@ impl RespondToInteractionRequest {
 // -- Response --
 
 /// Lifecycle state of an interaction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InteractionStatusView {
     Pending,
@@ -204,6 +205,17 @@ impl InteractionDetail {
             created_at: row.created_at,
             expires_at: row.expires_at,
             resolved_at: row.resolved_at,
+        }
+    }
+}
+
+impl From<InteractionStatusView> for InteractionStatus {
+    fn from(view: InteractionStatusView) -> Self {
+        match view {
+            InteractionStatusView::Pending => Self::Pending,
+            InteractionStatusView::Resolved => Self::Resolved,
+            InteractionStatusView::Cancelled => Self::Cancelled,
+            InteractionStatusView::Expired => Self::Expired,
         }
     }
 }
@@ -291,11 +303,106 @@ pub(crate) fn broker_or_store_only(
     ctx: &SpaceCtx,
 ) -> Arc<InteractionBroker> {
     broker.unwrap_or_else(|| {
-        Arc::new(InteractionBroker::new(
-            Arc::new(ctx.storage.interaction_store()),
-            Arc::new(InteractionKinds::with_builtin()),
-        ))
+        Arc::new(
+            InteractionBroker::new(
+                Arc::new(ctx.storage.interaction_store()),
+                Arc::new(InteractionKinds::with_builtin()),
+            )
+            .with_rules(Arc::new(ctx.storage.tool_permission_rule_store())),
+        )
     })
+}
+
+/// Query of `GET /api/conversations/{conversation_id}/interactions`.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+pub struct ListInteractionsQuery {
+    /// Only interactions in this state, such as `pending`.
+    pub status: Option<InteractionStatusView>,
+}
+
+/// The kinds registry of the space's runtime, or the built-in kinds when the
+/// runtime has no broker or is unavailable.
+async fn space_kinds(state: &ApiState, ctx: &SpaceCtx) -> Arc<InteractionKinds> {
+    match state.runtime(ctx).await {
+        Ok(runtime) => runtime
+            .interactions
+            .as_ref()
+            .map(|broker| broker.kinds().clone())
+            .unwrap_or_else(|| Arc::new(InteractionKinds::with_builtin())),
+        Err(_) => Arc::new(InteractionKinds::with_builtin()),
+    }
+}
+
+/// All interactions of a conversation, in creation order, optionally of one
+/// status. Includes those of runs on inactive branches.
+pub(crate) async fn conversation_interactions(
+    ctx: &SpaceCtx,
+    state: &ApiState,
+    conversation_id: Uuid,
+    status: Option<InteractionStatusView>,
+) -> anyhow::Result<Vec<InteractionDetail>> {
+    let rows = ctx
+        .storage
+        .interaction_store()
+        .list_for_conversation(&conversation_id.to_string(), status.map(Into::into))
+        .await?;
+    let kinds = space_kinds(state, ctx).await;
+    Ok(rows
+        .into_iter()
+        .map(|row| InteractionDetail::from_row(row, &kinds))
+        .collect())
+}
+
+/// `GET /api/conversations/{conversation_id}/interactions`
+///
+/// The interactions of one of the caller's conversations, oldest first, as a
+/// bare array. `?status=pending` narrows it to those still waiting, which is
+/// how a client that opens a conversation finds a run to attach to.
+#[utoipa::path(
+    get,
+    path = "/api/conversations/{conversation_id}/interactions",
+    params(
+        ("conversation_id" = Uuid, Path, description = "Conversation UUID"),
+        ListInteractionsQuery,
+    ),
+    responses(
+        (status = 200, description = "Interactions in creation order", body = Vec<InteractionDetail>),
+        (status = 400, description = "Invalid conversation ID or status", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Conversation not found, or not the caller's", body = ErrorBody),
+        (status = 500, description = "Database error", body = ErrorBody),
+    ),
+    operation_id = "list_conversation_interactions",
+    tag = "conversations",
+    security(("bearer_token" = [])),
+)]
+pub async fn list_conversation_interactions(
+    ctx: SpaceCtx,
+    State(state): State<ApiState>,
+    Path(conversation_id): Path<String>,
+    query: Result<Query<ListInteractionsQuery>, QueryRejection>,
+) -> Response {
+    if let Err(denied) = ctx.require(Access::Read) {
+        return denied.into_response();
+    }
+    let Ok(conversation_id) = Uuid::parse_str(&conversation_id) else {
+        return json_error(StatusCode::BAD_REQUEST, "Invalid conversation ID");
+    };
+    let status = match query {
+        Ok(Query(query)) => query.status,
+        Err(rejection) => return json_error(StatusCode::BAD_REQUEST, rejection.body_text()),
+    };
+    if let Err(response) =
+        owned_conversation(&caller_store(&ctx, &state).await, conversation_id).await
+    {
+        return response;
+    }
+    match conversation_interactions(&ctx, &state, conversation_id, status).await {
+        Ok(interactions) => Json(interactions).into_response(),
+        Err(e) => internal(&e),
+    }
 }
 
 /// `POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond`
@@ -897,5 +1004,115 @@ mod tests {
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{resp}");
         assert_error_body(&resp);
         assert_eq!(f.status(&id).await, InteractionStatus::Pending);
+    }
+
+    // -- list --
+
+    impl Fx {
+        async fn get_list(
+            &self,
+            router: axum::Router,
+            conv: Uuid,
+            query: &str,
+        ) -> (StatusCode, Value) {
+            let resp = router
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/conversations/{conv}/interactions{query}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = resp.status();
+            (status, body_json(resp.into_body()).await)
+        }
+
+        async fn resolve(&self, id: &str) {
+            self.storage
+                .interaction_store()
+                .resolve_if_pending(
+                    id,
+                    InteractionStatus::Resolved,
+                    Some(&json!({"decision": "allow_once"})),
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn list_returns_a_bare_array_in_creation_order() {
+        let f = fx().await;
+        let first = f.seed("tool_approval", approval_request()).await;
+        let mut other_run = f.new_interaction("question", question_request());
+        other_run.run_id = Uuid::new_v4().to_string();
+        let second = f.seed_row(other_run).await;
+
+        let (status, body) = f.get_list(app(f.state.clone()), f.conv, "").await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let ids: Vec<&str> = body
+            .as_array()
+            .unwrap_or_else(|| panic!("a bare array, got {body}"))
+            .iter()
+            .map(|i| i["interaction_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            [first.as_str(), second.as_str()],
+            "interactions of every run, including inactive branches, in creation order"
+        );
+        assert_eq!(body[0]["kind"], "tool_approval");
+        assert_eq!(body[0]["run_id"], f.run.to_string());
+        assert_eq!(body[0]["renders_card"], true);
+        assert_eq!(body[0]["request"]["tool_name"], "bash");
+    }
+
+    #[tokio::test]
+    async fn list_filters_by_pending_status() {
+        let f = fx().await;
+        let answered = f.seed("tool_approval", approval_request()).await;
+        f.resolve(&answered).await;
+        let pending = f.seed("question", question_request()).await;
+
+        let (status, body) = f
+            .get_list(app(f.state.clone()), f.conv, "?status=pending")
+            .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body.as_array().map(Vec::len), Some(1), "{body}");
+        assert_eq!(body[0]["interaction_id"], pending);
+        assert_eq!(body[0]["status"], "pending");
+    }
+
+    #[tokio::test]
+    async fn list_rejects_an_unknown_status() {
+        let f = fx().await;
+
+        let (status, body) = f
+            .get_list(app(f.state.clone()), f.conv, "?status=bogus")
+            .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_error_body(&body);
+    }
+
+    #[tokio::test]
+    async fn list_only_serves_the_callers_conversation() {
+        let f = fx().await;
+        f.seed("tool_approval", approval_request()).await;
+        let other = auth("other", Role::Member, write_scope());
+
+        let (status, body) = f
+            .get_list(app_with_auth(f.state.clone(), other), f.conv, "")
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        assert_error_body(&body);
+
+        let (status, body) = f.get_list(app(f.state.clone()), Uuid::new_v4(), "").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        assert_error_body(&body);
     }
 }

@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **createdAt** | [**DateTime**](DateTime.md) |  | 
 **id** | **String** |  | 
+**interactions** | [**BuiltList&lt;InteractionDetail&gt;**](InteractionDetail.md) | Every interaction of the conversation (tool approvals, questions), in creation order. Includes those of runs on inactive branches; the client decides what to show. | 
 **messages** | [**BuiltList&lt;MessageSummary&gt;**](MessageSummary.md) |  | 
 **surfaces** | [**BuiltList&lt;SurfaceSummary&gt;**](SurfaceSummary.md) | Generative UI surfaces anchored on the returned messages. | 
 **title** | **String** |  | 

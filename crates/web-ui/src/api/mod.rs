@@ -13,6 +13,7 @@ pub mod api_keys;
 pub mod attachments;
 pub mod audio;
 pub mod bindings;
+pub mod branch_turns;
 pub mod branches;
 pub mod capabilities;
 pub mod catalog;
@@ -39,6 +40,8 @@ pub mod users;
 pub mod webhooks;
 pub mod workflows;
 
+#[cfg(test)]
+mod approval_flow_tests;
 #[cfg(test)]
 mod space_turn_tests;
 #[cfg(test)]
@@ -276,6 +279,14 @@ pub fn api_router() -> Router<ApiState> {
         )
         .route("/conversations/{id}/messages", post(messages::send_message))
         .route(
+            "/conversations/{id}/messages/{message_id}/edit",
+            post(branch_turns::edit_message),
+        )
+        .route(
+            "/conversations/{id}/messages/{message_id}/regenerate",
+            post(branch_turns::regenerate_message),
+        )
+        .route(
             "/conversations/{id}/switch-branch",
             post(branches::switch_conversation_branch),
         )
@@ -306,6 +317,10 @@ pub fn api_router() -> Router<ApiState> {
             post(turns::cancel_turn),
         )
         .merge(tool_permission_rules::tool_permission_rules_router())
+        .route(
+            "/conversations/{conversation_id}/interactions",
+            get(interactions::list_conversation_interactions),
+        )
         .route(
             "/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond",
             post(interactions::respond_to_interaction)

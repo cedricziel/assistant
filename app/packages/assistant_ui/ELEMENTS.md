@@ -53,7 +53,7 @@ The list keeps the old numbering. Three prerequisites are now owned by siblings.
 | 11  | Tool call      | Adopt (have)                        | `ToolCallBody`, `GenericToolResultView`   | `ToolCallBody(record, entryState, footer)`; details come from `ToolResultRendererScope`, else `GenericToolResultView`. The app passes its MCP App frame as `footer`. PR 6.                                                                         |
 | 12  | Tool timeline  | Adopt (have)                        | `TimelineEntryShell`, `TimelineEntryView` | `TimelineEntryShell` (PR 5b): header, collapsible `body`, `footer` below it, `EntryState.awaitingInput`. `TimelineEntryView`: PR 7c.                                                                                                                                  |
 | 13  | Terminal block | **Adopt via tool-result-renderers** | `TerminalResultView` (sibling)            | `terminal` contract over `bash` `.data`, resolved through `ToolResultRendererScope`.                                                                |
-| 14  | Code diff      | **Adopt via tool-result-renderers** | `CodeDiffResultView` (sibling)            | `code_diff` contract; that change makes `file-edit` / `file-write` populate `.data`. Highlighting comes from chat-a11y-and-code-blocks `CodeBlock`, whose highlighter is available. |
+| 14  | Code diff      | Adopt (have)                        | `CodeDiffResultView`, `CodeFileResultView` | `code_diff` and `code_file` contracts over `file-edit` / `file-write` / `file-read` `.data`, resolved through `ToolResultRendererScope`. `CodeFileResultView` renders through `CodeBlock`; `CodeDiffResultView` marks lines with a `+`/`−` gutter as well as a tint. C7. |
 
 ## Knowledge (4)
 
@@ -68,7 +68,7 @@ The list keeps the old numbering. Three prerequisites are now owned by siblings.
 
 | #   | Element       | Verdict                             | Flutter element                 | Note                                                                       |
 | --- | ------------- | ----------------------------------- | ------------------------------- | -------------------------------------------------------------------------- |
-| 19  | Data table    | **Adopt via tool-result-renderers** | `DataTableResultView` (sibling) | Generic `data_table` contract; first producers `list-tasks` and `process`. |
+| 19  | Data table    | Adopt (have)                        | `DataTableResultView`           | Generic `data_table` contract; first producers `list-tasks` and `process`. |
 | 20  | Number ticker | **Decline**                         | —                               | Animation with nothing to animate.                                         |
 
 ## Agents (6)
@@ -124,9 +124,9 @@ Stay card · table reservation · order tracking · flight tracker · portfolio 
 
 | Verdict                                       | Count  |
 | --------------------------------------------- | ------ |
-| Adopt (have), packaged by this change         | 20     |
+| Adopt (have), packaged by this change         | 21     |
 | Adopt (scoped)                                | 1      |
-| Adopt via sibling change, individual elements | 10     |
+| Adopt via sibling change, individual elements | 9      |
 | Adopt via generative-ui-a2ui, category        | 22     |
 | Defer                                         | 2      |
 | Decline                                       | 4      |

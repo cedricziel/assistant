@@ -2,11 +2,16 @@ import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
+import 'components/chat_markdown_scope.dart';
+import 'components/chat_thread_layout.dart';
 import 'components/code_block.dart';
+import 'components/code_diff_result_view.dart';
+import 'components/code_file_result_view.dart';
 import 'components/compact_expandable.dart';
 import 'components/composer.dart';
 import 'components/conversation_list_view.dart';
 import 'components/conversation_search_results_view.dart';
+import 'components/data_table_result_view.dart';
 import 'components/feedback_buttons.dart';
 import 'components/feedback_comment_field.dart';
 import 'components/generic_tool_result_view.dart';
@@ -24,17 +29,17 @@ import 'components/slash_command_menu.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/surface_frame.dart';
+import 'components/thinking_body.dart';
 import 'components/thread_density_scope.dart';
 import 'components/thread_empty_state.dart';
 import 'components/thread_error_banner.dart';
+import 'components/thread_viewport.dart';
 import 'components/timeline_entry_shell.dart';
 import 'components/tool_call_body.dart';
 import 'components/tool_result_renderer_scope.dart';
 import 'components/tool_status_icon.dart';
 import 'components/turn_progress_card.dart';
 import 'components/unknown_interaction_card.dart';
-
-// import 'components/thread_viewport.dart'; // slot: chat-element-library 10
 
 // import 'components/timeline_entry_shell.dart'; // slot: chat-element-library 5b
 
@@ -52,12 +57,8 @@ import 'components/unknown_interaction_card.dart';
 final List<WidgetbookComponent> kComponents = [
   // attachmentTrayComponent, // slot: chat-element-library 11b
   // branchPickerComponent, // slot: message-branching 9
-  // chatThreadLayoutComponent, // slot: chat-element-library 10
-  // codeDiffResultViewComponent, // slot: tool-result-renderers C7
-  // codeFileResultViewComponent, // slot: tool-result-renderers C7
   // commandBodyComponent, // slot: chat-element-library 7b
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
-  // dataTableResultViewComponent, // slot: tool-result-renderers C6
   // feedbackButtonsComponent, // slot: message-feedback 5
   // feedbackCommentFieldComponent, // slot: message-feedback 5
   // linkPreviewResultViewComponent, // slot: tool-result-renderers C5
@@ -69,19 +70,22 @@ final List<WidgetbookComponent> kComponents = [
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
   // subagentBodyComponent, // slot: chat-element-library 7b
   // terminalResultViewComponent, // slot: tool-result-renderers C4
-  // thinkingBodyComponent, // slot: chat-element-library 7a
-  // threadViewportComponent, // slot: chat-element-library 10
   // timelineEntryShellComponent, // slot: chat-element-library 5b
   // timelineEntryViewComponent, // slot: chat-element-library 7c
   // typingIndicatorComponent, // slot: chat-element-library 8b
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   branchPickerComponent,
+  chatMarkdownScopeComponent,
+  chatThreadLayoutComponent,
   codeBlockComponent,
+  codeDiffResultViewComponent,
+  codeFileResultViewComponent,
   compactExpandableComponent,
   composerComponent,
   conversationListViewComponent,
   conversationSearchResultsViewComponent,
+  dataTableResultViewComponent,
   feedbackButtonsComponent,
   feedbackCommentFieldComponent,
   genericToolResultViewComponent,
@@ -99,9 +103,11 @@ final List<WidgetbookComponent> kComponents = [
   starterPromptsComponent,
   suggestionChipsComponent,
   surfaceFrameComponent,
+  thinkingBodyComponent,
   threadDensityScopeComponent,
   threadEmptyStateComponent,
   threadErrorBannerComponent,
+  threadViewportComponent,
   timelineEntryShellComponent,
   toolCallBodyComponent,
   toolResultRendererScopeComponent,
