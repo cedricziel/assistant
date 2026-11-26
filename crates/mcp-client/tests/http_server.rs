@@ -90,6 +90,8 @@ impl Respond for Script {
             }
             "tools/call" => match body["params"]["name"].as_str() {
                 Some("fail") => rpc_error(&id, "tool exploded"),
+                Some("slow") => rpc_result(&id, json!({"content": []}))
+                    .set_delay(Duration::from_secs(3600)),
                 Some(name) => rpc_result(
                     &id,
                     json!({"content": [{"type": "text", "text": format!("ran {name}")}]}),
@@ -259,6 +261,25 @@ async fn server_side_call_error_becomes_error_output_naming_the_tool() {
     assert!(!out.success, "an RPC error must not be reported as success");
     assert!(
         out.content.contains("'fail'") && out.content.contains("tool exploded"),
+        "content was: {}",
+        out.content
+    );
+}
+
+#[tokio::test]
+async fn configured_tool_timeout_ends_a_slow_call() {
+    let server = serve(&Script::new(&["slow"])).await;
+    let mut e = entry("remote", &server.uri(), McpTrustLevel::Trust);
+    e.tool_timeout_secs = Some(5);
+    let mgr = McpClientManager::start(&[e]).await.unwrap();
+    let handler = mgr.tool_handlers().await.remove(0);
+
+    tokio::time::pause();
+    let out = handler.run(HashMap::new(), &ctx()).await.unwrap();
+
+    assert!(!out.success, "a timed-out call must not succeed");
+    assert!(
+        out.content.contains("timed out after 5s"),
         "content was: {}",
         out.content
     );
