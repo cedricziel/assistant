@@ -72,6 +72,10 @@ pub struct Message {
     /// that produced the reply. `None` when tracing was off or for legacy rows.
     #[serde(default)]
     pub traceparent: Option<String>,
+    /// For final assistant answers: the model that produced the reply.
+    /// `None` for user and tool rows and for legacy rows.
+    #[serde(default)]
+    pub model: Option<String>,
     /// Why this persisted reply ended early. `None` for an ordinary message.
     #[serde(default)]
     pub finish_reason: Option<MessageFinishReason>,
@@ -128,6 +132,7 @@ impl Message {
             tool_status: None,
             tool_data_json: None,
             traceparent: None,
+            model: None,
             finish_reason: None,
         }
     }
@@ -212,6 +217,9 @@ pub struct TurnIdentity {
     pub interactive: bool,
     /// The run id (see [`ExecutionContext::run_id`]).
     pub run_id: Option<Uuid>,
+    /// Model for this turn only. Beats the conversation's `/model` override
+    /// and the default, and is never stored on the conversation.
+    pub model_override: Option<String>,
 }
 
 impl TurnIdentity {

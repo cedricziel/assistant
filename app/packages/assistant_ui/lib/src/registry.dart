@@ -5,6 +5,8 @@
 /// `ELEMENTS.md`; the gallery's `coverage_test.dart` requires a use-case and a
 /// `golden` test for each entry.
 const List<String> kAssistantUiElements = [
+  'ApprovalCard',
+  'MessageTimingIndicator',
   'StarterPrompts',
   'SuggestionChips',
   'ThreadDensityScope',

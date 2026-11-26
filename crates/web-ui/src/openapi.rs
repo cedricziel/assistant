@@ -290,6 +290,7 @@ pub struct ApiErrorResponse {
         crate::api::messages::stream_run_events,
         crate::api::turns::get_turn_status,
         crate::api::turns::cancel_turn,
+        crate::api::interactions::respond_to_interaction,
         crate::api::audio::get_message_audio,
         crate::api::audio::get_audio,
         crate::api::attachments::upload_attachment,
@@ -368,6 +369,7 @@ pub struct ApiErrorResponse {
         crate::oauth::complete::complete,
         crate::oauth::revoke::revoke,
         crate::oauth::revoke::metadata,
+        crate::mcp::protected_resource_metadata,
         // Organization management
         crate::api::orgs::list_orgs,
         crate::api::orgs::create_org,
@@ -561,6 +563,15 @@ pub struct ApiErrorResponse {
             // Turn status types
             crate::api::turns::TurnState,
             crate::api::turns::TurnStatusResponse,
+            // Turn interaction types
+            crate::api::interactions::RespondToInteractionRequest,
+            crate::api::interactions::ToolDecision,
+            crate::api::interactions::QuestionAnswer,
+            crate::api::interactions::InteractionDetail,
+            crate::api::interactions::InteractionStatusView,
+            crate::api::interactions::InteractionOutcomeView,
+            crate::api::interactions::SseInteractionRequestedEvent,
+            crate::api::interactions::SseInteractionResolvedEvent,
             // OAuth2 types
             crate::oauth::OAuthErrorResponse,
             crate::oauth::token::TokenRequest,
@@ -571,6 +582,7 @@ pub struct ApiErrorResponse {
             crate::oauth::device::DeviceVerifyForm,
             crate::oauth::revoke::RevokeRequest,
             crate::oauth::revoke::ServerMetadata,
+            crate::mcp::ProtectedResourceMetadata,
             crate::oauth::complete::CompleteResponse,
             crate::oauth::DeviceCodeResponseSchema,
             crate::oauth::ClientRegistrationSchema,

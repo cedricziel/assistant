@@ -363,7 +363,11 @@ fn check_embeddings(config: &OrgConfig) -> CheckResult {
                 "Embeddings",
                 format!(
                     "Using main LLM provider (model: {})",
-                    config.llm.embedding_model
+                    config
+                        .llm
+                        .embedding_model
+                        .as_deref()
+                        .unwrap_or("provider default")
                 ),
             )
         }

@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'message_timing.dart';
+
 // -- Chat messages -----------------------------------------------------------
 
 /// Id of the in-flight assistant message while a reply is streaming.
@@ -66,7 +68,18 @@ class ToolCallRecord {
 }
 
 /// The kind of entry shown in the chat timeline.
-enum TimelineEntryType { message, thinking, toolCall, subagent, command }
+enum TimelineEntryType {
+  message,
+  thinking,
+  toolCall,
+  subagent,
+  command,
+
+  /// An interaction request that has no tool call to attach to. Only the
+  /// fallback: a request with a `tool_call_id` renders in that tool call's
+  /// footer.
+  interaction,
+}
 
 /// Metadata for an image attachment on a message.
 class ChatAttachment {
@@ -103,6 +116,7 @@ class ChatMessage {
     this.subagentSummary,
     this.commandName,
     this.commandAckText,
+    this.timing,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -179,6 +193,11 @@ class ChatMessage {
   /// Acknowledgement text for [TimelineEntryType.command] entries.
   final String? commandAckText;
 
+  /// Server-measured response timing, set from the `done` frame or history.
+  ///
+  /// Mutable like [content], so a finished stream can attach it in place.
+  MessageTiming? timing;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -199,6 +218,7 @@ class ChatMessage {
     String? subagentId,
     String? subagentTask,
     String? subagentSummary,
+    MessageTiming? timing,
   }) {
     return ChatMessage(
       id: id,
@@ -218,6 +238,7 @@ class ChatMessage {
       subagentId: subagentId ?? this.subagentId,
       subagentTask: subagentTask ?? this.subagentTask,
       subagentSummary: subagentSummary ?? this.subagentSummary,
+      timing: timing ?? this.timing,
     );
   }
 }

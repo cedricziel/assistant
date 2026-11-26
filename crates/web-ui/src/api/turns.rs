@@ -269,6 +269,27 @@ mod tests {
         format!("/conversations/{conv}/turns/{turn}/status")
     }
 
+    /// Conversation lookup failures use the `{"error": …}` envelope, like every
+    /// other error of the turn routes.
+    #[tokio::test]
+    async fn unknown_conversation_is_a_404_with_the_error_envelope() {
+        let (state, _storage) = event_log_state().await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(url(&Uuid::new_v4(), &Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = body_json(resp.into_body()).await;
+        assert_eq!(body["error"], "Conversation not found");
+    }
+
     /// A run with only intermediate events (run_started + a token) → `running`.
     #[tokio::test]
     async fn returns_running_for_in_flight_turn() {
