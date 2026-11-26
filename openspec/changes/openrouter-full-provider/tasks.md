@@ -153,5 +153,5 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 ## 21. Doctor and final docs
 
 - [x] 21.1 Write failing tests for doctor: every OpenRouter-backed feature is listed with its key source and no key material; one `/key` call is made per distinct key; valid, invalid (401) and unreachable outcomes are reported. Confirm red. Implement, then verify.
-- [ ] 21.2 Final pass on `docs/openrouter.md`: a "one key for everything" example and a full configuration reference. Check every claim against the code.
+- [x] 21.2 Final pass on `docs/openrouter.md`: a "one key for everything" example and a full configuration reference. Check every claim against the code.
 - [ ] 21.3 Run `make lint && make format && make test` and `openspec validate openrouter-full-provider --strict`. All must be clean.
