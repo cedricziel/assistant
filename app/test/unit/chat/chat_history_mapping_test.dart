@@ -380,5 +380,63 @@ void main() {
         });
       }
     });
+
+    test('the MCP App of a tool call reaches the ToolCallRecord', () {
+      final history = [
+        MessageSummary(
+          (b) => b
+            ..id = 'a1'
+            ..role = 'assistant'
+            ..content = ''
+            ..turn = 1
+            ..createdAt = DateTime.parse('2026-05-16T00:00:00Z')
+            ..ttsAvailable = false
+            ..toolCalls = ListBuilder<ToolCallSummary>([
+              ToolCallSummary(
+                (t) => t
+                  ..name = 'mcp__weather__forecast'
+                  ..status = 'ok'
+                  ..toolCallId = 'call_8'
+                  ..app.replace(
+                    McpAppView(
+                      (a) => a
+                        ..server = 'weather'
+                        ..resourceUri = 'ui://weather/forecast'
+                        ..html = '<p>Sunny</p>'
+                        ..prefersBorder = true
+                        ..csp.connectDomains = ListBuilder([
+                          'https://api.example.com',
+                        ])
+                        ..permissions.camera = false
+                        ..permissions.microphone = false
+                        ..permissions.geolocation = true
+                        ..permissions.clipboardWrite = false,
+                    ),
+                  ),
+              ),
+              ToolCallSummary(
+                (t) => t
+                  ..name = 'bash'
+                  ..status = 'ok',
+              ),
+            ]),
+        ),
+      ];
+
+      final records = chatMessagesFromHistory(history)
+          .map((m) => m.toolCalls.single)
+          .toList();
+
+      final app = records[0].app!;
+      expect(app.server, 'weather');
+      expect(app.resourceUri, 'ui://weather/forecast');
+      expect(app.html, '<p>Sunny</p>');
+      expect(app.prefersBorder, isTrue);
+      expect(app.csp.connectDomains, ['https://api.example.com']);
+      expect(app.csp.resourceDomains, isEmpty);
+      expect(app.permissions.geolocation, isTrue);
+      expect(app.permissions.camera, isFalse);
+      expect(records[1].app, isNull);
+    });
   });
 }

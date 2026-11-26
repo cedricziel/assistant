@@ -17,7 +17,7 @@ The system SHALL accept `provider = "openrouter"` in `[tts]`. Synthesis SHALL po
 
 ### Requirement: Output formats
 
-The TTS output format SHALL be one of `mp3` (`audio/mpeg`), `wav` (`audio/wav`), `ogg` (Opus in Ogg, `audio/ogg`) or `pcm` (16-bit little-endian mono, `audio/pcm`). It is taken from the request's format, then from `[tts] format`, and defaults to `mp3`. Other values SHALL be rejected. The result's MIME type SHALL always match the delivered format.
+The TTS output format SHALL be one of `mp3` (`audio/mpeg`), `wav` (`audio/wav`), `ogg` (Opus in Ogg, `audio/ogg`) or `pcm` (16-bit little-endian mono, `audio/pcm`). It is taken from the request's format, then from `[tts] format`, and defaults to `mp3`. Other values SHALL be rejected. `[tts] format = "pcm"` SHALL fail at startup, because clients play the configured audio and raw PCM carries no sample rate; a request MAY still ask for `pcm`. The result's MIME type SHALL always match the delivered format.
 
 #### Scenario: Ogg for a voice note
 

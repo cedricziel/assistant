@@ -65,4 +65,80 @@ void main() {
       expect(msgs.single.toolCalls.single.data, isNull);
     });
   });
+
+  group('applyToolResultEvent app', () {
+    const appJson = {
+      'server': 'weather',
+      'resource_uri': 'ui://weather/forecast',
+      'html': '<p>Sunny</p>',
+      'csp': {
+        'resource_domains': ['https://cdn.example.com'],
+      },
+      'permissions': {'clipboard_write': true},
+    };
+
+    test('parses the app of a tool_result frame', () {
+      final event = ToolResultEvent.fromJson({
+        'tool_name': 'mcp__weather__forecast',
+        'status': 'ok',
+        'tool_call_id': 'call_1',
+        'app': appJson,
+      });
+
+      expect(event.app?.server, 'weather');
+      expect(event.app?.csp.resourceDomains, ['https://cdn.example.com']);
+      expect(event.app?.permissions.clipboardWrite, isTrue);
+    });
+
+    test('copies the app onto the pending record', () {
+      final msgs = <ChatMessage>[
+        ChatMessage(
+          id: 'tc1',
+          role: 'assistant',
+          content: '',
+          timelineType: TimelineEntryType.toolCall,
+          toolCalls: [
+            ToolCallRecord(
+              toolName: 'mcp__weather__forecast',
+              status: ToolCallStatus.pending,
+              toolCallId: 'call_1',
+            ),
+          ],
+        ),
+      ];
+
+      applyToolResultEvent(
+        msgs,
+        ToolResultEvent.fromJson({
+          'tool_name': 'mcp__weather__forecast',
+          'status': 'ok',
+          'tool_call_id': 'call_1',
+          'app': appJson,
+        }),
+      );
+
+      expect(
+        msgs.single.toolCalls.single.app?.resourceUri,
+        'ui://weather/forecast',
+      );
+    });
+
+    test('keeps the app and call id on a freshly inserted record', () {
+      final msgs = <ChatMessage>[];
+
+      applyToolResultEvent(
+        msgs,
+        ToolResultEvent.fromJson({
+          'tool_name': 'mcp__weather__forecast',
+          'status': 'ok',
+          'tool_call_id': 'call_2',
+          'app': appJson,
+        }),
+      );
+
+      final record = msgs.single.toolCalls.single;
+      expect(record.app?.server, 'weather');
+      expect(record.toolCallId, 'call_2', reason: 'app calls route by it');
+    });
+  });
 }
