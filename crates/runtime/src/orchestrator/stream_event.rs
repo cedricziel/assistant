@@ -5,6 +5,10 @@
 //! doing — not just the text being produced — which enables UIs to render
 //! live tool-call indicators, status messages, and completion badges.
 
+use chrono::{DateTime, Utc};
+
+use crate::interaction::InteractionOutcome;
+
 /// A single event emitted by the orchestrator during a streaming turn.
 ///
 /// Events flow through an `mpsc::Sender<OrchestratorEvent>` registered via
@@ -138,6 +142,27 @@ pub enum OrchestratorEvent {
         status: String,
         /// A2UI v1.0 messages; empty for a status-only update.
         messages: Vec<serde_json::Value>,
+    },
+
+    /// The turn asked its owner a question and is now waiting for the answer
+    /// (ADR-0017). `request` holds the kind-specific fields.
+    InteractionRequested {
+        interaction_id: String,
+        kind: String,
+        tool_call_id: Option<String>,
+        created_at: DateTime<Utc>,
+        expires_at: DateTime<Utc>,
+        /// Whether the kind renders a card in the timeline.
+        renders_card: bool,
+        request: serde_json::Value,
+    },
+
+    /// An interaction ended: answered, cancelled or expired.
+    InteractionResolved {
+        interaction_id: String,
+        kind: String,
+        resolved_at: DateTime<Utc>,
+        outcome: InteractionOutcome,
     },
 }
 

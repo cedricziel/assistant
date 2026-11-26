@@ -13,6 +13,8 @@ use assistant_core::types::conversation::MessageRole;
 use assistant_storage::ConversationStore as _;
 use assistant_transcription::TtsRequest;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::ApiState;
@@ -29,7 +31,7 @@ use super::conversations::{caller_store, owned_conversation};
         (status = 200, description = "MP3 audio bytes", content_type = "audio/mpeg"),
         (status = 400, description = "Invalid ID or non-assistant message"),
         (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Message not found"),
+        (status = 404, description = "Message not found", body = ErrorBody),
         (status = 503, description = "TTS not configured"),
     ),
     security(("bearer_token" = []))
@@ -58,10 +60,10 @@ pub async fn get_message_audio(
 
     let msg = match store.get_message(msg_id).await {
         Ok(Some(m)) => m,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Message not found").into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "Message not found"),
         Err(e) => {
             warn!("Failed to fetch message {msg_id}: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
         }
     };
     // The message is readable only through a conversation the caller owns.
@@ -69,7 +71,7 @@ pub async fn get_message_audio(
         .await
         .is_err()
     {
-        return (StatusCode::NOT_FOUND, "Message not found").into_response();
+        return json_error(StatusCode::NOT_FOUND, "Message not found");
     }
 
     if !matches!(msg.role, MessageRole::Assistant) {

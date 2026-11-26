@@ -98,14 +98,17 @@ pub trait LlmProvider: Send + Sync {
         ChatOptionsSupport::default()
     }
 
+    /// Waits until [`capabilities`](Self::capabilities) and
+    /// [`chat_options_support`](Self::chat_options_support) are known, for
+    /// providers that look them up after construction. Callers that read
+    /// them before the first call await this first.
+    async fn ready(&self) {}
+
     /// Like [`chat_streaming`](Self::chat_streaming), with per-call options.
     /// Without a sink this calls [`chat`](Self::chat).
     ///
-    /// This default serves providers without native options:
-    /// `parallel_tool_calls` is ignored, `ToolChoice::None` sends no tools, and
-    /// `Required` or `Tool` asks for the call in the system prompt, retries
-    /// once with the request repeated as the last user message, then fails.
-    /// Providers with native support override this method.
+    /// The default is [`chat_with_fallback`], for providers without native
+    /// options. Providers with native support override this method.
     async fn chat_with(
         &self,
         system_prompt: &str,
@@ -114,61 +117,7 @@ pub trait LlmProvider: Send + Sync {
         options: &ChatOptions,
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        let call = |system: String, history: Vec<ChatHistoryMessage>, tools: Vec<ToolSpec>| {
-            let sink = chunk_sink.clone();
-            async move {
-                match sink {
-                    Some(sink) => {
-                        self.chat_streaming(&system, &history, &tools, Some(sink))
-                            .await
-                    }
-                    None => self.chat(&system, &history, &tools).await,
-                }
-            }
-        };
-
-        let (instruction, offered) = match &options.tool_choice {
-            ToolChoice::Auto => {
-                return call(system_prompt.to_owned(), history.to_vec(), tools.to_vec()).await;
-            }
-            ToolChoice::None => {
-                return call(system_prompt.to_owned(), history.to_vec(), Vec::new()).await;
-            }
-            ToolChoice::Required => (
-                "You must answer by calling one of the available tools.".to_owned(),
-                tools.to_vec(),
-            ),
-            ToolChoice::Tool(name) => (
-                format!("You must answer by calling the tool `{name}`."),
-                tools.iter().filter(|t| &t.name == name).cloned().collect(),
-            ),
-        };
-        let satisfied = |response: &LlmResponse| match (response, &options.tool_choice) {
-            (LlmResponse::ToolCalls(calls), ToolChoice::Tool(name)) => {
-                calls.items.iter().any(|c| &c.name == name)
-            }
-            (LlmResponse::ToolCalls(calls), _) => !calls.items.is_empty(),
-            _ => false,
-        };
-
-        let system = format!("{system_prompt}\n\n{instruction}");
-        let first = call(system.clone(), history.to_vec(), offered.clone()).await?;
-        if satisfied(&first) {
-            return Ok(first);
-        }
-        let mut retry_history = history.to_vec();
-        retry_history.push(ChatHistoryMessage::Text {
-            role: ChatRole::User,
-            content: instruction.clone(),
-        });
-        let second = call(system, retry_history, offered).await?;
-        if satisfied(&second) {
-            return Ok(second);
-        }
-        anyhow::bail!(
-            "{} did not follow the tool choice: {instruction}",
-            self.provider_name()
-        )
+        chat_with_fallback(self, system_prompt, history, tools, options, chunk_sink).await
     }
 
     /// Compute a dense vector embedding for `text`.
@@ -216,6 +165,77 @@ pub trait LlmProvider: Send + Sync {
     fn server_address(&self) -> &str {
         ""
     }
+}
+
+/// [`LlmProvider::chat_with`] for providers without native options:
+/// `parallel_tool_calls` and `response_format` are ignored, `ToolChoice::None`
+/// sends no tools, and `Required` or `Tool` asks for the call in the system
+/// prompt, retries once with the request repeated as the last user message,
+/// then fails. Providers that support options for some models only call this
+/// for the others.
+pub async fn chat_with_fallback<L: LlmProvider + ?Sized>(
+    llm: &L,
+    system_prompt: &str,
+    history: &[ChatHistoryMessage],
+    tools: &[ToolSpec],
+    options: &ChatOptions,
+    chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+) -> anyhow::Result<LlmResponse> {
+    let call = |system: String, history: Vec<ChatHistoryMessage>, tools: Vec<ToolSpec>| {
+        let sink = chunk_sink.clone();
+        async move {
+            match sink {
+                Some(sink) => {
+                    llm.chat_streaming(&system, &history, &tools, Some(sink))
+                        .await
+                }
+                None => llm.chat(&system, &history, &tools).await,
+            }
+        }
+    };
+
+    let (instruction, offered) = match &options.tool_choice {
+        ToolChoice::Auto => {
+            return call(system_prompt.to_owned(), history.to_vec(), tools.to_vec()).await;
+        }
+        ToolChoice::None => {
+            return call(system_prompt.to_owned(), history.to_vec(), Vec::new()).await;
+        }
+        ToolChoice::Required => (
+            "You must answer by calling one of the available tools.".to_owned(),
+            tools.to_vec(),
+        ),
+        ToolChoice::Tool(name) => (
+            format!("You must answer by calling the tool `{name}`."),
+            tools.iter().filter(|t| &t.name == name).cloned().collect(),
+        ),
+    };
+    let satisfied = |response: &LlmResponse| match (response, &options.tool_choice) {
+        (LlmResponse::ToolCalls(calls), ToolChoice::Tool(name)) => {
+            calls.items.iter().any(|c| &c.name == name)
+        }
+        (LlmResponse::ToolCalls(calls), _) => !calls.items.is_empty(),
+        _ => false,
+    };
+
+    let system = format!("{system_prompt}\n\n{instruction}");
+    let first = call(system.clone(), history.to_vec(), offered.clone()).await?;
+    if satisfied(&first) {
+        return Ok(first);
+    }
+    let mut retry_history = history.to_vec();
+    retry_history.push(ChatHistoryMessage::Text {
+        role: ChatRole::User,
+        content: instruction.clone(),
+    });
+    let second = call(system, retry_history, offered).await?;
+    if satisfied(&second) {
+        return Ok(second);
+    }
+    anyhow::bail!(
+        "{} did not follow the tool choice: {instruction}",
+        llm.provider_name()
+    )
 }
 
 #[cfg(test)]

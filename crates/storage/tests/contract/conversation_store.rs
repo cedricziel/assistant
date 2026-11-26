@@ -460,6 +460,34 @@ async fn tool_result_metadata_roundtrips(store: Box<dyn ConversationStore>) {
     assert!(plain[0].tool_call_id.is_none() && plain[0].tool_data_json.is_none());
 }
 
+async fn traceparent_roundtrips(store: Box<dyn ConversationStore>) {
+    const TRACEPARENT: &str = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+    let conv = store.create_conversation(Some("Trace")).await.unwrap();
+    store
+        .save_message(&user_msg(conv.id, "question", 0))
+        .await
+        .unwrap();
+    let mut reply = Message::assistant(conv.id, "answer");
+    reply.traceparent = Some(TRACEPARENT.into());
+    store.save_message(&reply).await.unwrap();
+
+    let history = store.load_history(conv.id).await.unwrap();
+    assert_eq!(history[0].traceparent, None, "plain rows carry none");
+    assert_eq!(history[1].traceparent.as_deref(), Some(TRACEPARENT));
+
+    let by_id = store.get_message(reply.id).await.unwrap().unwrap();
+    assert_eq!(by_id.traceparent.as_deref(), Some(TRACEPARENT));
+
+    let children = store
+        .children_of(conv.id, Some(history[0].id))
+        .await
+        .unwrap();
+    assert_eq!(children[0].traceparent.as_deref(), Some(TRACEPARENT));
+
+    let chain = store.ancestors(conv.id, reply.id).await.unwrap().unwrap();
+    assert_eq!(chain[1].traceparent.as_deref(), Some(TRACEPARENT));
+}
+
 // -- Branching --
 
 fn ids(messages: &[Message]) -> Vec<Uuid> {
@@ -927,6 +955,11 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_tool_result_metadata_roundtrips() {
                 tool_result_metadata_roundtrips($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_traceparent_roundtrips() {
+                traceparent_roundtrips($constructor).await;
             }
 
             #[tokio::test]

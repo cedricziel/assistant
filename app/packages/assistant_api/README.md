@@ -110,7 +110,7 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
-[*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**clearCredential**](doc/IntegrationsApi.md#clearcredential) | **DELETE** /api/integrations/{id}/credential | &#x60;DELETE /api/integrations/{id}/credential&#x60; — remove the header credential.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**createIntegration**](doc/IntegrationsApi.md#createintegration) | **POST** /api/integrations | &#x60;POST /api/integrations&#x60; — install an integration.
 [*IntegrationsApi*](doc/IntegrationsApi.md) | [**deleteIntegration**](doc/IntegrationsApi.md#deleteintegration) | **DELETE** /api/integrations/{id} | &#x60;DELETE /api/integrations/{id}&#x60; — remove an integration and its credentials.
@@ -163,6 +163,7 @@ Class | Method | HTTP request | Description
 [*PersonasApi*](doc/PersonasApi.md) | [**patchSkillAccessMode**](doc/PersonasApi.md#patchskillaccessmode) | **PATCH** /api/personas/{id}/skill-access | &#x60;PATCH /api/personas/{id}/skill-access&#x60; — set skill access mode.
 [*PersonasApi*](doc/PersonasApi.md) | [**putPersonaFile**](doc/PersonasApi.md#putpersonafile) | **PUT** /api/personas/{id}/files/{filename} | &#x60;PUT /api/personas/{id}/files/{filename}&#x60; — write a persona file slot.
 [*PersonasApi*](doc/PersonasApi.md) | [**setActivePersona**](doc/PersonasApi.md#setactivepersona) | **POST** /api/personas/active | &#x60;POST /api/personas/active&#x60; — switch the active persona for the session.
+[*PersonasApi*](doc/PersonasApi.md) | [**updatePersona**](doc/PersonasApi.md#updatepersona) | **PATCH** /api/personas/{id} | &#x60;PATCH /api/personas/{id}&#x60; — update a persona&#39;s starter prompts.
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**createPushNotificationConfig**](doc/PushNotificationsApi.md#createpushnotificationconfig) | **POST** /tasks/{task_id}/pushNotificationConfigs | &#x60;POST /tasks/:task_id/pushNotificationConfigs&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**deletePushNotificationConfig**](doc/PushNotificationsApi.md#deletepushnotificationconfig) | **DELETE** /tasks/{task_id}/pushNotificationConfigs/{config_id} | &#x60;DELETE /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**getPushNotificationConfig**](doc/PushNotificationsApi.md#getpushnotificationconfig) | **GET** /tasks/{task_id}/pushNotificationConfigs/{config_id} | &#x60;GET /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
@@ -369,6 +370,7 @@ Class | Method | HTTP request | Description
  - [UpdateIntegrationRequest](doc/UpdateIntegrationRequest.md)
  - [UpdateMemberRequest](doc/UpdateMemberRequest.md)
  - [UpdateOrgRequest](doc/UpdateOrgRequest.md)
+ - [UpdatePersonaRequest](doc/UpdatePersonaRequest.md)
  - [UpdateSkillRequest](doc/UpdateSkillRequest.md)
  - [UpdateSpaceRequest](doc/UpdateSpaceRequest.md)
  - [UpdateUserRequest](doc/UpdateUserRequest.md)

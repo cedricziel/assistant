@@ -764,6 +764,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -832,6 +842,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -887,7 +907,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Not found"
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -947,7 +974,8 @@
         "tags": [
           "conversations"
         ],
-        "summary": "`PATCH /api/conversations/{id}` — update a conversation's title.",
+        "summary": "`PATCH /api/conversations/{id}` — update a conversation's title and/or pin state.",
+        "description": "Neither change moves the conversation in the list: only new messages bump\n`updated_at`.",
         "operationId": "update_conversation",
         "parameters": [
           {
@@ -992,16 +1020,47 @@
             }
           },
           "400": {
-            "description": "Invalid ID"
+            "description": "Invalid ID or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "Read-only access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Not found"
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "500": {
-            "description": "Internal server error"
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1079,7 +1138,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Conversation not found"
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1140,6 +1206,16 @@
           },
           "400": {
             "description": "Unknown command"
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1193,6 +1269,16 @@
           },
           "400": {
             "description": "Invalid ID"
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1258,7 +1344,14 @@
             "description": "Missing conversations:write scope"
           },
           "404": {
-            "description": "Conversation not found"
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1323,7 +1416,14 @@
             }
           },
           "404": {
-            "description": "Run not found or its events expired"
+            "description": "Conversation or run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1402,6 +1502,16 @@
           },
           "403": {
             "description": "Missing conversations:write scope"
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "503": {
             "description": "Voice not configured"
@@ -2583,7 +2693,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Message not found"
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "503": {
             "description": "TTS not configured"
@@ -5625,6 +5742,72 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Persona not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "personas"
+        ],
+        "summary": "`PATCH /api/personas/{id}` — update a persona's starter prompts.",
+        "operationId": "update_persona",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Persona ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePersonaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated persona",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID or starter prompts"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Caller may not edit this persona's starter prompts"
           },
           "404": {
             "description": "Persona not found"
@@ -10520,6 +10703,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "pinned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the conversation was pinned; absent when it is not pinned."
+          },
           "title": {
             "type": "string"
           },
@@ -12080,9 +12271,15 @@
           "skill_access_mode",
           "created_at",
           "updated_at",
-          "files"
+          "files",
+          "starter_prompts",
+          "can_edit_starter_prompts"
         ],
         "properties": {
+          "can_edit_starter_prompts": {
+            "type": "boolean",
+            "description": "True when the caller may `PATCH` this Persona's starter prompts."
+          },
           "created_at": {
             "type": "string"
           },
@@ -12100,6 +12297,13 @@
           },
           "skill_access_mode": {
             "type": "string"
+          },
+          "starter_prompts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Up to 4 prompts shown as suggestions in an empty chat. Always present."
           },
           "turn_timeout_secs": {
             "type": [
@@ -13628,14 +13832,21 @@
       },
       "UpdateConversationRequest": {
         "type": "object",
-        "description": "Body for `PATCH /api/conversations/{id}`.",
-        "required": [
-          "title"
-        ],
+        "description": "Body for `PATCH /api/conversations/{id}`. At least one field is required.",
         "properties": {
+          "pinned": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`true` pins the conversation, `false` unpins it."
+          },
           "title": {
-            "type": "string",
-            "description": "New title for the conversation."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New title. Trimmed; must be 1 to 200 characters after trimming."
           }
         }
       },
@@ -13784,6 +13995,22 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "UpdatePersonaRequest": {
+        "type": "object",
+        "description": "Body for `PATCH /api/personas/{id}`.",
+        "properties": {
+          "starter_prompts": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Replaces the starter prompts: at most 4, each 1 to 200 characters\nafter trimming. Absent leaves them unchanged; `[]` clears them."
           }
         }
       },

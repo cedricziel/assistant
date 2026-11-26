@@ -12,6 +12,8 @@ class _$ConversationSummary extends ConversationSummary {
   @override
   final String id;
   @override
+  final DateTime? pinnedAt;
+  @override
   final String title;
   @override
   final DateTime updatedAt;
@@ -23,6 +25,7 @@ class _$ConversationSummary extends ConversationSummary {
   _$ConversationSummary._(
       {required this.createdAt,
       required this.id,
+      this.pinnedAt,
       required this.title,
       required this.updatedAt})
       : super._();
@@ -41,6 +44,7 @@ class _$ConversationSummary extends ConversationSummary {
     return other is ConversationSummary &&
         createdAt == other.createdAt &&
         id == other.id &&
+        pinnedAt == other.pinnedAt &&
         title == other.title &&
         updatedAt == other.updatedAt;
   }
@@ -50,6 +54,7 @@ class _$ConversationSummary extends ConversationSummary {
     var _$hash = 0;
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
+    _$hash = $jc(_$hash, pinnedAt.hashCode);
     _$hash = $jc(_$hash, title.hashCode);
     _$hash = $jc(_$hash, updatedAt.hashCode);
     _$hash = $jf(_$hash);
@@ -61,6 +66,7 @@ class _$ConversationSummary extends ConversationSummary {
     return (newBuiltValueToStringHelper(r'ConversationSummary')
           ..add('createdAt', createdAt)
           ..add('id', id)
+          ..add('pinnedAt', pinnedAt)
           ..add('title', title)
           ..add('updatedAt', updatedAt))
         .toString();
@@ -79,6 +85,10 @@ class ConversationSummaryBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
+  DateTime? _pinnedAt;
+  DateTime? get pinnedAt => _$this._pinnedAt;
+  set pinnedAt(DateTime? pinnedAt) => _$this._pinnedAt = pinnedAt;
+
   String? _title;
   String? get title => _$this._title;
   set title(String? title) => _$this._title = title;
@@ -96,6 +106,7 @@ class ConversationSummaryBuilder
     if ($v != null) {
       _createdAt = $v.createdAt;
       _id = $v.id;
+      _pinnedAt = $v.pinnedAt;
       _title = $v.title;
       _updatedAt = $v.updatedAt;
       _$v = null;
@@ -123,6 +134,7 @@ class ConversationSummaryBuilder
               createdAt, r'ConversationSummary', 'createdAt'),
           id: BuiltValueNullFieldError.checkNotNull(
               id, r'ConversationSummary', 'id'),
+          pinnedAt: pinnedAt,
           title: BuiltValueNullFieldError.checkNotNull(
               title, r'ConversationSummary', 'title'),
           updatedAt: BuiltValueNullFieldError.checkNotNull(

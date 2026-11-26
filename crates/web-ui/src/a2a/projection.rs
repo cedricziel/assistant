@@ -122,6 +122,10 @@ impl StreamProjector for A2aProjector {
                 TaskState::TaskStateWorking,
                 Some(self.agent_message(format!("Audio ready: {audio_id}"))),
             ),
+            // Interactions are answered through the web respond route, which
+            // A2A clients do not use.
+            OrchestratorEvent::InteractionRequested { .. }
+            | OrchestratorEvent::InteractionResolved { .. } => return Vec::new(),
             // Totality only: surfaces are gated to interactive web turns, so
             // this arm is unreachable in practice.
             OrchestratorEvent::SurfaceUpdate { fallback_text, .. } => {

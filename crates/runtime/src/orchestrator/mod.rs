@@ -12,8 +12,8 @@ use assistant_core::types::conversation::{ExecutionContext, Interface, Message, 
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
     LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec, TurnScope,
-    TurnToolSource, context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type,
-    is_text_mime_type, strip_html_comments,
+    TurnTiming, TurnToolSource, context::agent_base_dir, is_resizable_mime_type,
+    is_supported_mime_type, is_text_mime_type, strip_html_comments,
 };
 use assistant_storage::{
     AttachmentStore as _AttachmentStoreTrait, SkillRegistry, StorageLayer,
@@ -30,6 +30,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
+
+use crate::history::{FinalAnswerMeta, persist_final_answer};
 
 // ── Submodules ────────────────────────────────────────────────────────────────
 
@@ -172,6 +174,8 @@ pub struct TurnResult {
     /// `true` if any tool dispatch in this turn returned an `Err(...)`.
     /// Used to gate post-turn skill-learner evaluation.
     pub had_errors: bool,
+    /// How long the turn took. `None` when the turn was not measured.
+    pub timing: Option<TurnTiming>,
 }
 
 // ── Internal enums ────────────────────────────────────────────────────────────
@@ -953,6 +957,7 @@ impl Orchestrator {
                 &history,
                 &all_specs,
             );
+            let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
@@ -1044,6 +1049,9 @@ impl Orchestrator {
                         &ext_map,
                         &conv_store,
                         turn_had_errors,
+                        FinalAnswerMeta {
+                            traceparent: llm_traceparent,
+                        },
                     )
                     .await?;
                     match outcome {
@@ -1213,6 +1221,7 @@ impl Orchestrator {
                             attachment_ids: turn_attachment_ids,
                             message_id: None,
                             had_errors: turn_had_errors,
+                            timing: None,
                         });
                     }
                 }
@@ -1367,6 +1376,7 @@ impl Orchestrator {
                 &history,
                 &tool_specs,
             );
+            let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
@@ -1463,10 +1473,15 @@ impl Orchestrator {
                             m
                         };
                         let msg_id = assistant_msg.id;
-                        conv_store
-                            .save_message(&assistant_msg)
-                            .instrument(iteration_span.clone())
-                            .await?;
+                        persist_final_answer(
+                            &conv_store,
+                            assistant_msg,
+                            FinalAnswerMeta {
+                                traceparent: llm_traceparent,
+                            },
+                        )
+                        .instrument(iteration_span.clone())
+                        .await?;
                         Some(msg_id)
                     } else {
                         None
@@ -1503,6 +1518,7 @@ impl Orchestrator {
                         attachment_ids: turn_attachment_ids,
                         message_id: saved_message_id,
                         had_errors: turn_had_errors,
+                        timing: None,
                     });
                 }
 

@@ -10,6 +10,7 @@ import 'package:dio/dio.dart';
 
 import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/attachment_meta_response.dart';
+import 'package:assistant_api/src/model/error_body.dart';
 
 class AttachmentsApi {
   final Dio _dio;

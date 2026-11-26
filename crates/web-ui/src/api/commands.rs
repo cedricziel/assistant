@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::ApiState;
@@ -148,6 +149,7 @@ pub async fn list_commands(space: SpaceCtx, State(state): State<ApiState>) -> Re
     responses(
         (status = 200, description = "Command executed successfully", body = CommandEventResponse),
         (status = 400, description = "Unknown command"),
+        (status = 404, description = "Conversation not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -237,6 +239,7 @@ pub async fn execute_command(
     responses(
         (status = 200, description = "List of command events", body = Vec<CommandEventResponse>),
         (status = 400, description = "Invalid ID"),
+        (status = 404, description = "Conversation not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]

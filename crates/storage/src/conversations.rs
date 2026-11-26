@@ -315,8 +315,8 @@ impl SqliteConversationStore {
 
         let insert = sqlx::query(
             "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json, tool_call_id, tool_status, tool_data_json, finish_reason) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16) \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json, tool_call_id, tool_status, tool_data_json, traceparent, finish_reason) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -334,6 +334,7 @@ impl SqliteConversationStore {
         .bind(&msg.tool_call_id)
         .bind(&msg.tool_status)
         .bind(&msg.tool_data_json)
+        .bind(&msg.traceparent)
         .bind(msg.finish_reason.map(MessageFinishReason::as_str))
         .execute(&mut *tx)
         .await?;
@@ -765,7 +766,7 @@ impl ConversationStore for SqliteConversationStore {
     /// Fetch a single message by its ID (agent-scoped via the conversation join).
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.finish_reason, m.tool_call_id, m.tool_status, m.tool_data_json \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
@@ -806,7 +807,7 @@ impl ConversationStore for SqliteConversationStore {
         parent_id: Option<Uuid>,
     ) -> Result<Vec<Message>> {
         let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.finish_reason, m.tool_call_id, m.tool_status, m.tool_data_json \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.conversation_id = ?1 AND c.agent_id = ?2 AND m.parent_id IS ?3 \
@@ -858,7 +859,7 @@ impl ConversationStore for SqliteConversationStore {
                  SELECT m.id, m.parent_id, ch.depth + 1 \
                  FROM chain ch INNER JOIN messages m ON m.id = ch.parent_id \
              ) \
-             SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.finish_reason, m.tool_call_id, m.tool_status, m.tool_data_json \
+             SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason \
              FROM chain INNER JOIN messages m ON m.id = chain.id \
              ORDER BY chain.depth DESC",
         )
@@ -1421,7 +1422,7 @@ const ACTIVE_PATH_SQL: &str = "\
         FROM path p \
         INNER JOIN messages m ON m.id = p.parent_id \
     ) \
-    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.finish_reason, m.tool_call_id, m.tool_status, m.tool_data_json \
+    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason \
     FROM path \
     INNER JOIN messages m ON m.id = path.id \
     ORDER BY path.depth ASC \
@@ -1450,6 +1451,7 @@ fn message_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Message> {
         tool_call_id: r.get("tool_call_id"),
         tool_status: r.get("tool_status"),
         tool_data_json: r.get("tool_data_json"),
+        traceparent: r.get("traceparent"),
         finish_reason: finish_str
             .as_deref()
             .and_then(MessageFinishReason::from_stored),

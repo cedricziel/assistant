@@ -38,6 +38,7 @@ pub async fn chat_structured(
     let validator = jsonschema::validator_for(schema)
         .map_err(|e| anyhow::anyhow!("invalid schema for `{name}`: {e}"))?;
 
+    llm.ready().await;
     let support = llm.chat_options_support();
     let strategy = if support.json_schema {
         Strategy::Native
@@ -181,6 +182,9 @@ mod tests {
     /// Replays queued responses and records what each call was sent.
     struct Fake {
         support: ChatOptionsSupport,
+        /// When set, `support` is reported only after `ready()`.
+        needs_ready: bool,
+        is_ready: std::sync::atomic::AtomicBool,
         replies: Mutex<VecDeque<LlmResponse>>,
         calls: Mutex<Vec<Sent>>,
     }
@@ -189,8 +193,17 @@ mod tests {
         fn new(support: ChatOptionsSupport, replies: Vec<LlmResponse>) -> Self {
             Self {
                 support,
+                needs_ready: false,
+                is_ready: std::sync::atomic::AtomicBool::new(false),
                 replies: Mutex::new(replies.into()),
                 calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn loading(support: ChatOptionsSupport, replies: Vec<LlmResponse>) -> Self {
+            Self {
+                needs_ready: true,
+                ..Self::new(support, replies)
             }
         }
 
@@ -212,7 +225,15 @@ mod tests {
         }
 
         fn chat_options_support(&self) -> ChatOptionsSupport {
+            if self.needs_ready && !self.is_ready.load(std::sync::atomic::Ordering::SeqCst) {
+                return ChatOptionsSupport::default();
+            }
             self.support
+        }
+
+        async fn ready(&self) {
+            self.is_ready
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
 
         async fn chat(
@@ -371,6 +392,20 @@ mod tests {
         );
 
         assert_eq!(run(&fake).await.unwrap(), json!({"verdict": "keep"}));
+    }
+
+    #[tokio::test]
+    async fn support_is_read_after_the_provider_is_ready() {
+        let fake = Fake::loading(native(), vec![text(r#"{"verdict": "keep"}"#)]);
+
+        run(&fake).await.unwrap();
+        assert!(
+            matches!(
+                fake.sent()[0].options.response_format,
+                ResponseFormat::JsonSchema { .. }
+            ),
+            "the native schema is used once the provider is ready"
+        );
     }
 
     // -- Validation and repair --

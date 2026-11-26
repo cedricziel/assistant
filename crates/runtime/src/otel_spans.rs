@@ -95,6 +95,25 @@ pub fn traceparent_from_context(cx: &OtelContext) -> Option<String> {
     carrier.get("traceparent").cloned()
 }
 
+/// Format a span's context as a W3C `traceparent` value
+/// (`00-{trace_id}-{span_id}-{flags}`).
+///
+/// Reads `span.span_context()` directly instead of going through the global
+/// propagator, which is a no-op until OTLP export is enabled. Returns `None`
+/// for an invalid context (a no-op span), so nothing is recorded when tracing
+/// is off.
+pub fn traceparent_from_span(span: &impl opentelemetry::trace::Span) -> Option<String> {
+    let ctx = span.span_context();
+    ctx.is_valid().then(|| {
+        format!(
+            "00-{}-{}-{:02x}",
+            ctx.trace_id(),
+            ctx.span_id(),
+            ctx.trace_flags().to_u8()
+        )
+    })
+}
+
 /// Rebuild an OpenTelemetry context from a W3C `traceparent` value.
 pub fn context_from_traceparent(traceparent: &str) -> OtelContext {
     global::get_text_map_propagator(|prop| {
@@ -471,6 +490,25 @@ mod tests {
             .iter()
             .map(|kv| (kv.key.as_str().to_string(), kv.value.clone()))
             .collect()
+    }
+
+    #[test]
+    fn traceparent_from_span_formats_a_sampled_span_context() {
+        use opentelemetry::trace::{Tracer, TracerProvider};
+
+        let provider = SdkTracerProvider::builder().build();
+        let tracer = provider.tracer("test");
+        let span = tracer.start("chat");
+        let ctx = span.span_context().clone();
+
+        let expected = format!("00-{}-{}-01", ctx.trace_id(), ctx.span_id());
+        assert_eq!(traceparent_from_span(&span), Some(expected));
+    }
+
+    #[test]
+    fn traceparent_from_span_is_none_for_a_noop_span() {
+        let span = opentelemetry::trace::noop::NoopSpan::DEFAULT;
+        assert_eq!(traceparent_from_span(&span), None);
     }
 
     #[test]
