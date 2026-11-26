@@ -1,6 +1,10 @@
 import 'dart:async';
 
+import 'package:assistant_ui/models.dart';
+import 'package:material_ui/material_ui.dart';
+
 import 'package:assistant_app/features/chat/mcp_app/mcp_app_bridge.dart';
+import 'package:assistant_app/features/chat/mcp_app/mcp_app_surface.dart';
 
 /// An app frame's port that records what the host sends.
 class FakeMcpAppPort implements McpAppPort {
@@ -56,4 +60,35 @@ class FakeMcpAppBackend implements McpAppBackend {
     if (refusal case final refusal?) throw refusal;
     return resourceResult;
   }
+}
+
+/// Key of the placeholder a [FakeMcpAppSurface] renders.
+const fakeMcpAppViewKey = ValueKey('fake-mcp-app-view');
+
+/// A platform view stand-in that renders a placeholder over a fake port.
+class FakeMcpAppSurface implements McpAppSurface {
+  FakeMcpAppSurface(this.app);
+
+  /// Every surface created, most recent last.
+  static final created = <FakeMcpAppSurface>[];
+
+  /// Creates surfaces and records them in [created].
+  static McpAppSurface factory(McpApp app) {
+    final surface = FakeMcpAppSurface(app);
+    created.add(surface);
+    return surface;
+  }
+
+  final McpApp app;
+  bool disposed = false;
+
+  @override
+  final FakeMcpAppPort port = FakeMcpAppPort();
+
+  @override
+  Widget build(BuildContext context) =>
+      const SizedBox.expand(key: fakeMcpAppViewKey);
+
+  @override
+  void dispose() => disposed = true;
 }

@@ -120,7 +120,7 @@ class McpAppBridge {
     } finally {
       _closed = true;
       _pending.clear();
-      await _subscription.cancel();
+      unawaited(_subscription.cancel());
     }
   }
 
