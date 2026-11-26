@@ -6,6 +6,7 @@ use serde_json::Value;
 use assistant_core::types::llm::{OpenRouterReasoning, OpenRouterRouting};
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
 
+use super::citations::sources_block;
 use super::errors::{ErrorBody, body_error};
 use super::reasoning::{budget_exhausted, provider_state, visible_text};
 
@@ -72,6 +73,8 @@ pub struct Message {
     pub reasoning: Option<String>,
     #[serde(default)]
     pub reasoning_details: Vec<Value>,
+    #[serde(default)]
+    pub annotations: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,7 +186,8 @@ impl ChatResponse {
                 provider_state: provider_state(model, message.reasoning_details),
             }));
         }
-        Ok(LlmResponse::FinalAnswer(answer, meta))
+        let sources = sources_block(&answer, &message.annotations).unwrap_or_default();
+        Ok(LlmResponse::FinalAnswer(answer + &sources, meta))
     }
 }
 

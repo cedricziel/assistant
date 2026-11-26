@@ -145,6 +145,7 @@ timeout_secs = 120
 # categories      = ["cli-agent"]                  # X-OpenRouter-Categories header, at most two
 # max_tokens      = 8192                           # sent as max_completion_tokens
 # fallback_models = ["openai/gpt-4o"]              # tried in order after `model`
+# pdf_engine      = "mistral-ocr"                  # "native" | "cloudflare-ai" | "mistral-ocr"
 #
 # # Provider routing, sent as the request's `provider` object. Only set keys
 # # are sent; unknown keys fail config load. See docs/openrouter.md.
@@ -167,6 +168,14 @@ timeout_secs = 120
 # [llm.openrouter.cache]
 # enabled = true   # false sends no cache_control
 # ttl     = "5m"   # "5m" | "1h" (1h: Anthropic models only)
+#
+# # OpenRouter's `web` plugin. When enabled, the local `web-search` tool is
+# # not offered. See docs/openrouter.md.
+# [llm.openrouter.web_search]
+# enabled     = true
+# # engine      = "exa"   # "native" | "exa" | "firecrawl" | "parallel" | "perplexity"
+# # max_results = 5
+# # search_context_size = "high"   # "low" | "medium" | "high"; native engine only
 #
 # Browse models at: https://openrouter.ai/models
 

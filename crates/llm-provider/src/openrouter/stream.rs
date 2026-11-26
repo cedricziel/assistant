@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use assistant_core::{LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse};
 
+use super::citations::sources_block;
 use super::errors::{ErrorBody, body_error};
 use super::reasoning::{budget_exhausted, merge_detail, provider_state, visible_text};
 use super::wire::Usage;
@@ -61,6 +62,8 @@ struct Delta {
     reasoning: Option<String>,
     #[serde(default)]
     reasoning_details: Vec<Value>,
+    #[serde(default)]
+    annotations: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +102,7 @@ pub struct StreamAccumulator {
     reasoned: bool,
     model: String,
     reasoning_details: Vec<Value>,
+    annotations: Vec<Value>,
 }
 
 impl StreamAccumulator {
@@ -158,6 +162,7 @@ impl StreamAccumulator {
             for detail in choice.delta.reasoning_details {
                 merge_detail(&mut self.reasoning_details, detail);
             }
+            self.annotations.extend(choice.delta.annotations);
             if let Some(reason) = choice.finish_reason {
                 if reason == "error" {
                     anyhow::bail!("OpenRouter stream finished with an error");
@@ -197,9 +202,19 @@ impl StreamAccumulator {
         Ok(chunks)
     }
 
+    /// The Sources block a final answer ends with, to stream as its last
+    /// chunk; [`finish`](Self::finish) appends the same block.
+    pub fn sources_block(&self) -> Option<String> {
+        if self.tool_calls.iter().any(|c| !c.name.is_empty()) {
+            return None;
+        }
+        sources_block(&self.text, &self.annotations)
+    }
+
     /// The response, once the stream has ended. A stream that ends without
     /// `[DONE]` or a finish reason was cut off.
     pub fn finish(self) -> anyhow::Result<LlmResponse> {
+        let sources = self.sources_block().unwrap_or_default();
         if !self.done && self.meta.finish_reason.is_none() {
             anyhow::bail!("OpenRouter stream ended before the response was complete");
         }
@@ -232,7 +247,7 @@ impl StreamAccumulator {
                 provider_state: provider_state(&self.model, self.reasoning_details),
             }));
         }
-        Ok(LlmResponse::FinalAnswer(self.text, self.meta))
+        Ok(LlmResponse::FinalAnswer(self.text + &sources, self.meta))
     }
 }
 

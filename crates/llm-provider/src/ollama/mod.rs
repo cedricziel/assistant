@@ -34,10 +34,13 @@ impl Default for OllamaConfig {
             model: "qwen2.5:7b".to_string(),
             base_url: "http://localhost:11434".to_string(),
             timeout_secs: 120,
-            embedding_model: "nomic-embed-text".to_string(),
+            embedding_model: DEFAULT_EMBEDDING_MODEL.to_string(),
         }
     }
 }
+
+/// Embedding model used when `[llm] embedding_model` is unset.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "nomic-embed-text";
 
 impl From<&LlmConfig> for OllamaConfig {
     fn from(cfg: &LlmConfig) -> Self {
@@ -45,7 +48,10 @@ impl From<&LlmConfig> for OllamaConfig {
             model: cfg.model.clone(),
             base_url: cfg.base_url.clone(),
             timeout_secs: cfg.timeout_secs,
-            embedding_model: cfg.embedding_model.clone(),
+            embedding_model: cfg
+                .embedding_model
+                .clone()
+                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
         }
     }
 }
@@ -198,6 +204,17 @@ mod tests {
     use assistant_core::LlmProvider;
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn embedding_model_defaults_to_nomic_and_honors_config() {
+        let unset = OllamaConfig::from(&LlmConfig::default());
+        assert_eq!(unset.embedding_model, "nomic-embed-text");
+        let set = OllamaConfig::from(&LlmConfig {
+            embedding_model: Some("mxbai-embed-large".into()),
+            ..LlmConfig::default()
+        });
+        assert_eq!(set.embedding_model, "mxbai-embed-large");
+    }
 
     fn provider_pointed_at(base_url: &str) -> OllamaProvider {
         OllamaProvider::new(OllamaConfig {
