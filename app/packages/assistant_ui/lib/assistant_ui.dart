@@ -22,6 +22,7 @@ export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
 export 'src/interactions/approval_card.dart';
 export 'src/interactions/permission_rule_tile.dart';
+export 'src/interactions/question_card.dart';
 export 'src/interactions/unknown_interaction_card.dart';
 export 'src/message_actions.dart';
 export 'src/message_editor.dart';

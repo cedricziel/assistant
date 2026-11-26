@@ -17,6 +17,7 @@ const List<String> kAssistantUiElements = [
   'MessageEditor',
   'MessageTimingIndicator',
   'PermissionRuleTile',
+  'QuestionCard',
   'QueuedMessageBubble',
   'StarterPrompts',
   'SuggestionChips',
@@ -47,7 +48,6 @@ const List<String> kAssistantUiElements = [
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
-  // 'QuestionCard', // slot: tool-approval-prompts 14a
   // 'RegenerateMenuButton', // slot: message-branching 10
   // 'SlashCommandMenu', // slot: chat-element-library 11a
   // 'SourcesResultView', // slot: tool-result-renderers C4
