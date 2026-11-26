@@ -1192,6 +1192,7 @@ async fn worker_touches_the_claimed_message_while_a_turn_runs() {
         timestamp: None,
         traceparent: None,
         attachment_ids: vec![],
+        interactive: false,
         user_id: None,
         org_id: None,
         space_id: None,
