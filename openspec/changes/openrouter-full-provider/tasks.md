@@ -81,9 +81,9 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 11. Web search
 
-- [ ] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
-- [ ] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
-- [ ] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
+- [x] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
+- [x] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
+- [x] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
 
 ## 12. PDFs
 

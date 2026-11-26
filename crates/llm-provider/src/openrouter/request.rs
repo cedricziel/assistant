@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use assistant_core::llm::call_context::LlmCallContext;
 use assistant_core::types::llm::{
     OpenRouterCache, OpenRouterCacheTtl, OpenRouterReasoning, OpenRouterRouting,
+    OpenRouterWebSearch,
 };
 use assistant_core::{
     ChatHistoryMessage, ChatOptions, ContentBlock, ResponseFormat, ToolChoice, ToolSpec,
@@ -23,6 +24,31 @@ pub struct RequestSettings {
     pub routing: Option<OpenRouterRouting>,
     pub reasoning: Option<OpenRouterReasoning>,
     pub cache: OpenRouterCache,
+    pub web_search: OpenRouterWebSearch,
+}
+
+/// OpenRouter's `web` plugin with the configured options, when enabled.
+fn web_plugin(search: &OpenRouterWebSearch) -> Option<Value> {
+    if !search.enabled {
+        return None;
+    }
+    let mut plugin = json!({"id": "web"});
+    if let Some(engine) = search.engine {
+        plugin["engine"] = json!(engine);
+    }
+    if let Some(max_results) = search.max_results {
+        plugin["max_results"] = json!(max_results);
+    }
+    if let Some(prompt) = &search.search_prompt {
+        plugin["search_prompt"] = json!(prompt);
+    }
+    if let Some(domains) = &search.include_domains {
+        plugin["include_domains"] = json!(domains);
+    }
+    if let Some(domains) = &search.exclude_domains {
+        plugin["exclude_domains"] = json!(domains);
+    }
+    Some(plugin)
 }
 
 /// Stands in for an image sent to a model that doesn't accept images.
@@ -84,7 +110,12 @@ pub fn build_chat_request(
         tool_choice: None,
         parallel_tool_calls: None,
         response_format: None,
-        plugins: Vec::new(),
+        plugins: web_plugin(&settings.web_search).into_iter().collect(),
+        web_search_options: settings
+            .web_search
+            .search_context_size
+            .filter(|_| settings.web_search.enabled)
+            .map(|size| json!({ "search_context_size": size })),
     }
 }
 
