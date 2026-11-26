@@ -85,6 +85,9 @@ enum TimelineEntryType {
   /// fallback: a request with a `tool_call_id` renders in that tool call's
   /// footer.
   interaction,
+
+  /// An agent-composed UI surface, rendered by `SurfaceFrame`.
+  surface,
 }
 
 /// Metadata for an image attachment on a message.

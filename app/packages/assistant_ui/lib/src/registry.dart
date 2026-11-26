@@ -24,6 +24,7 @@ const List<String> kAssistantUiElements = [
   'QueuedMessageBubble',
   'StarterPrompts',
   'SuggestionChips',
+  'SurfaceFrame',
   'ThreadDensityScope',
   'TimelineEntryShell',
   'ToolCallBody',
@@ -55,7 +56,6 @@ const List<String> kAssistantUiElements = [
   // 'SlashCommandMenu', // slot: chat-element-library 11a
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'SubagentBody', // slot: chat-element-library 7b
-  // 'SurfaceFrame', // slot: generative-ui-a2ui 13
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'ThinkingBody', // slot: chat-element-library 7a
   // 'ThreadEmptyState', // slot: chat-element-library 9

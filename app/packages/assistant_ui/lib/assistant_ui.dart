@@ -33,6 +33,7 @@ export 'src/scopes/thread_density_scope.dart';
 export 'src/scopes/tool_result_renderer_scope.dart';
 export 'src/suggestions/starter_prompts.dart';
 export 'src/suggestions/suggestion_chips.dart';
+export 'src/surface_frame.dart';
 export 'src/theme/assistant_ui_colors.dart';
 export 'src/theme/assistant_ui_spacing.dart';
 export 'src/theme/code_theme.dart';
