@@ -3,6 +3,7 @@
 /// See `README.md` for the purity, injection and composition rules.
 library;
 
+export 'src/branch_picker.dart';
 export 'src/composer/queued_message_bubble.dart';
 export 'src/feedback/feedback_buttons.dart';
 export 'src/feedback/feedback_comment_field.dart';
@@ -11,6 +12,7 @@ export 'src/highlight/highlight_code.dart';
 export 'src/interactions/approval_card.dart';
 export 'src/interactions/unknown_interaction_card.dart';
 export 'src/message_actions.dart';
+export 'src/message_editor.dart';
 export 'src/registry.dart';
 export 'src/scopes/thread_density_scope.dart';
 export 'src/suggestions/starter_prompts.dart';
