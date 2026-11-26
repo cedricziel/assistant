@@ -2,6 +2,7 @@ import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
 import 'components/message_timing_indicator.dart';
+import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 
@@ -10,6 +11,7 @@ import 'components/suggestion_chips.dart';
 final List<WidgetbookComponent> kComponents = [
   approvalCardComponent,
   messageTimingIndicatorComponent,
+  queuedMessageBubbleComponent,
   starterPromptsComponent,
   suggestionChipsComponent,
 ];

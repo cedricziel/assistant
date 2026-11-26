@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
@@ -26,7 +27,7 @@ import 'conversation_list.dart';
 import 'empty_chat.dart';
 import 'message_bubble.dart';
 import 'image_utils.dart';
-import 'queued_message_bubble.dart';
+import 'queued_message_remove_sheet.dart';
 import 'reconnect_banner.dart';
 import 'streaming_timeline_entry.dart';
 import 'turn_progress_card.dart';
@@ -489,7 +490,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                           chatState.pendingQueue[queueIdx];
                                       return QueuedMessageBubble(
                                         message: pending,
-                                        index: queueIdx,
+                                        onLongPress: () =>
+                                            showQueuedMessageRemoveSheet(
+                                              context,
+                                              ref,
+                                              pending,
+                                              queueIdx,
+                                            ),
                                       );
                                     }
 
