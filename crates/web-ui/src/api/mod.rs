@@ -18,6 +18,7 @@ pub mod catalog;
 pub mod commands;
 pub mod conversations;
 pub mod integrations;
+pub mod interactions;
 pub mod interfaces;
 pub mod members;
 pub mod messages;
@@ -276,6 +277,11 @@ pub fn api_router() -> Router<ApiState> {
         .route(
             "/conversations/{conversation_id}/turns/{turn_id}/cancel",
             post(turns::cancel_turn),
+        )
+        .route(
+            "/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond",
+            post(interactions::respond_to_interaction)
+                .layer(DefaultBodyLimit::max(interactions::MAX_RESPOND_BODY_BYTES)),
         )
         .route("/messages/{id}/audio", get(audio::get_message_audio))
         .route("/audio/{id}", get(audio::get_audio))

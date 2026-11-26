@@ -28,6 +28,7 @@ use assistant_storage::{
     SqliteConversationStore,
 };
 
+use crate::errors::json_error;
 use crate::space::{Access, SpaceCtx};
 
 use super::attachments::AttachmentMetaResponse;
@@ -43,7 +44,8 @@ pub(crate) async fn caller_store(ctx: &SpaceCtx, state: &ApiState) -> SqliteConv
         .with_user_id(ctx.auth.user_id.0.clone())
 }
 
-/// Load a conversation the caller owns, or the `404` response to return.
+/// Load a conversation the caller owns, or the enveloped `404`/`500` response
+/// to return.
 ///
 /// A conversation owned by someone else is reported as missing, so the
 /// response does not confirm that the id exists.
@@ -53,10 +55,13 @@ pub(crate) async fn owned_conversation(
 ) -> Result<ConversationRecord, Response> {
     match store.get_conversation(id).await {
         Ok(Some(conv)) => Ok(conv),
-        Ok(None) => Err((StatusCode::NOT_FOUND, "Conversation not found").into_response()),
+        Ok(None) => Err(json_error(StatusCode::NOT_FOUND, "Conversation not found")),
         Err(e) => {
             warn!("Failed to load conversation {id}: {e}");
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error",
+            ))
         }
     }
 }
