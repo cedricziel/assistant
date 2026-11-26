@@ -58,8 +58,8 @@ fn is_audio_mime_rejects_non_audio() {
 
 // ── build_tts_provider ─────────────────────────────────────────────────────
 
-#[test]
-fn build_tts_openai_uses_api_key_from_config() {
+#[tokio::test]
+async fn build_tts_openai_uses_api_key_from_config() {
     let config = TtsConfig {
         provider: TtsProviderKind::OpenAI,
         api_key: Some("sk-test".into()),
@@ -72,7 +72,9 @@ fn build_tts_openai_uses_api_key_from_config() {
         instructions: None,
         pcm_sample_rate: None,
     };
-    let provider = build_tts_provider(&config).ok();
+    let provider = build_tts_provider(&config, &LlmConfig::default())
+        .await
+        .ok();
     assert!(provider.is_some());
     assert!(!provider.unwrap().name().is_empty());
 }
@@ -84,8 +86,8 @@ fn build_tts_openai_uses_api_key_from_config() {
 // parallel runner. The happy-path test above exercises the bulk of the
 // branch; the env-fallback line is intentionally not asserted here.
 
-#[test]
-fn build_tts_deepgram_uses_api_key_from_config() {
+#[tokio::test]
+async fn build_tts_deepgram_uses_api_key_from_config() {
     let mut voices = HashMap::new();
     voices.insert("en".to_string(), "aura-asteria-en".to_string());
     let config = TtsConfig {
@@ -100,13 +102,91 @@ fn build_tts_deepgram_uses_api_key_from_config() {
         instructions: None,
         pcm_sample_rate: None,
     };
-    let provider = build_tts_provider(&config).ok();
+    let provider = build_tts_provider(&config, &LlmConfig::default())
+        .await
+        .ok();
     assert!(provider.is_some());
     assert!(!provider.unwrap().name().is_empty());
 }
 
 // Deepgram env-fallback path intentionally not asserted (same env-race
 // constraint as the OpenAI variant above).
+
+fn tts(provider: TtsProviderKind) -> TtsConfig {
+    TtsConfig {
+        provider,
+        api_key: None,
+        base_url: None,
+        model: None,
+        voice: None,
+        voices: HashMap::new(),
+        format: None,
+        speed: None,
+        instructions: None,
+        pcm_sample_rate: None,
+    }
+}
+
+#[tokio::test]
+async fn build_tts_openrouter_reuses_the_llm_key_and_reads_the_catalog() {
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/audio/speech/models/openai/gpt-4o-mini-tts"))
+        .and(header("authorization", "Bearer sk-or-chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "output_modalities": [{"type": "speech", "supported_parameters": {
+                "response_format": {"type": "enum", "values": ["mp3"]},
+                "voice": {"type": "enum", "values": ["alloy"]},
+            }}],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let config = TtsConfig {
+        base_url: Some(server.uri()),
+        ..tts(TtsProviderKind::OpenRouter)
+    };
+    let llm = LlmConfig {
+        provider: LlmProviderKind::OpenRouter,
+        api_key: Some(Secret::new("sk-or-chat")),
+        ..LlmConfig::default()
+    };
+
+    let provider = build_tts_provider(&config, &llm).await.unwrap();
+    assert_eq!(provider.name(), "openrouter");
+}
+
+#[tokio::test]
+async fn build_tts_openrouter_without_a_key_names_openrouter() {
+    // SAFETY: test-only env mutation.
+    let prev = std::env::var("OPENROUTER_API_KEY").ok();
+    unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
+    let err = build_tts_provider(&tts(TtsProviderKind::OpenRouter), &LlmConfig::default())
+        .await
+        .err()
+        .expect("must error");
+    assert!(err.to_string().contains("OpenRouter"), "{err}");
+    if let Some(v) = prev {
+        unsafe { std::env::set_var("OPENROUTER_API_KEY", v) };
+    }
+}
+
+#[tokio::test]
+async fn build_tts_deepgram_rejects_formats_other_than_mp3() {
+    let config = TtsConfig {
+        api_key: Some("dg-test".into()),
+        format: Some(assistant_core::types::transcription::TtsFormat::Ogg),
+        ..tts(TtsProviderKind::Deepgram)
+    };
+    let err = build_tts_provider(&config, &LlmConfig::default())
+        .await
+        .err()
+        .expect("must error");
+    assert!(err.to_string().contains("format"), "{err}");
+}
 
 // ── build_provider (transcription) ─────────────────────────────────────────
 

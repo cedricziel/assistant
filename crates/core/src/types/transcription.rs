@@ -83,6 +83,8 @@ pub enum TtsProviderKind {
     OpenAI,
     /// Deepgram TTS API (`POST /v1/speak`).
     Deepgram,
+    /// OpenRouter TTS (`POST /audio/speech`).
+    OpenRouter,
 }
 
 /// Configuration for text-to-speech synthesis.
