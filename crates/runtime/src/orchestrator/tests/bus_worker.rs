@@ -782,6 +782,15 @@ async fn cancel_turn_aborts_inflight_submit() {
         crate::orchestrator::CancelOutcome::NotFound,
         "request_id should be deregistered after submit_turn returns"
     );
+
+    // A cancelled turn leaves no timing behind.
+    let timings = assistant_storage::MessageTimingStore::get_for_conversation(
+        &storage.message_timing_store(),
+        conv_id,
+    )
+    .await
+    .unwrap();
+    assert!(timings.is_empty(), "cancelled turn must not store timing");
 }
 
 // -- Cancel before a worker claims the turn --

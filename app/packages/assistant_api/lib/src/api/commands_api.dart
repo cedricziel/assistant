@@ -11,6 +11,7 @@ import 'package:dio/dio.dart';
 import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/command_def_response.dart';
 import 'package:assistant_api/src/model/command_event_response.dart';
+import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/execute_command_request.dart';
 import 'package:built_collection/built_collection.dart';
 

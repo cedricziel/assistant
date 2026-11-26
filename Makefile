@@ -67,6 +67,7 @@ GOLDEN_FLAGS := $(if $(or $(CI),$(filter Linux,$(shell uname))),,--exclude-tags 
 test-flutter:
 	cd app && flutter test $(GOLDEN_FLAGS)
 	cd app/packages/assistant_ui && flutter test $(GOLDEN_FLAGS)
+	cd app/widgetbook && flutter test
 
 # Regenerate golden baselines on Linux, in the Flutter image pinned to the
 # version in app/pubspec.yaml, so they match what CI compares against.
