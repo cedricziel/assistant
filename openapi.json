@@ -13737,6 +13737,13 @@
           "arguments": {
             "description": "The JSON arguments passed to the tool."
           },
+          "data": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Structured output of the tool, a JSON object with a `kind` tag. Absent\nwhen the tool returned text only, the data exceeded the size limit, or\nthe call predates structured data. Each `kind` is defined by a JSON\nSchema in `schemas/tool-results/`."
+          },
           "name": {
             "type": "string",
             "description": "The tool that was called."
@@ -13751,6 +13758,13 @@
           "status": {
             "type": "string",
             "description": "`\"ok\"`, `\"error\"`, or `\"denied\"`."
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider-assigned id of the call, when the provider supplied one."
           }
         }
       },
