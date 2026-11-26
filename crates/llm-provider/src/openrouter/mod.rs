@@ -10,6 +10,7 @@
 mod catalog;
 mod client;
 mod errors;
+mod reasoning;
 mod request;
 mod stream;
 mod wire;
@@ -1607,6 +1608,176 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("mandatory"), "{err}");
+    }
+
+    // ── Wiremock: reasoning output ──────────────────────────────────────
+
+    fn reasoning_tool_call() -> Value {
+        json!({
+            "id": "gen-r",
+            "model": MODEL,
+            "choices": [{"finish_reason": "tool_calls", "message": {
+                "role": "assistant",
+                "content": null,
+                "reasoning_details": [
+                    {"type": "reasoning.text", "text": "Checking the file first", "index": 0},
+                    {"type": "reasoning.summary", "summary": "Read it, then answer", "index": 1},
+                    {"type": "reasoning.encrypted", "data": "c2VjcmV0", "index": 2},
+                ],
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {
+                    "name": "file-read", "arguments": "{}"}}],
+            }}],
+        })
+    }
+
+    fn excluding() -> OpenRouterOptions {
+        OpenRouterOptions {
+            reasoning: Some(assistant_core::types::llm::OpenRouterReasoning {
+                exclude: Some(true),
+                ..Default::default()
+            }),
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_call_reasoning_is_returned_as_thinking_without_encrypted_entries() {
+        let server = MockServer::start().await;
+        mount_once(&server, reasoning_tool_call()).await;
+
+        let response = make_provider(&server.uri())
+            .chat("sys", &[], &[read_tool()])
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        let thinking = calls.thinking.unwrap();
+        assert!(thinking.contains("Checking the file first"), "{thinking}");
+        assert!(thinking.contains("Read it, then answer"), "{thinking}");
+        assert!(
+            !thinking.contains("c2VjcmV0"),
+            "encrypted entries are hidden: {thinking}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exclude_emits_no_thinking() {
+        let server = MockServer::start().await;
+        mount_once(&server, reasoning_tool_call()).await;
+
+        let response = provider_with(&server.uri(), excluding())
+            .chat("sys", &[], &[read_tool()])
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        assert_eq!(calls.thinking, None);
+    }
+
+    fn thinking_and_text(rx: &mut tokio::sync::mpsc::Receiver<StreamChunk>) -> Vec<String> {
+        let mut seen = Vec::new();
+        while let Ok(chunk) = rx.try_recv() {
+            match chunk {
+                StreamChunk::Thinking(t) => seen.push(format!("thinking:{t}")),
+                StreamChunk::Text(t) => seen.push(format!("text:{t}")),
+            }
+        }
+        seen
+    }
+
+    const REASONING_STREAM: [&str; 4] = [
+        r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"Checking the file first","index":0}]}}]}"#,
+        r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"c2VjcmV0","index":1}]}}]}"#,
+        r#"data: {"choices":[{"delta":{"content":"Done"},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+    ];
+
+    #[tokio::test]
+    async fn streamed_reasoning_comes_before_the_answer() {
+        let server = MockServer::start().await;
+        mount_sse(&server, &REASONING_STREAM).await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        let response = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], Some(tx))
+            .await
+            .unwrap();
+
+        assert!(matches!(response, LlmResponse::FinalAnswer(ref t, _) if t == "Done"));
+        assert_eq!(
+            thinking_and_text(&mut rx),
+            ["thinking:Checking the file first", "text:Done"],
+            "encrypted entries produce no chunk"
+        );
+    }
+
+    #[tokio::test]
+    async fn exclude_streams_no_thinking() {
+        let server = MockServer::start().await;
+        mount_sse(&server, &REASONING_STREAM).await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        provider_with(&server.uri(), excluding())
+            .chat_streaming("sys", &[], &[], Some(tx))
+            .await
+            .unwrap();
+
+        assert_eq!(thinking_and_text(&mut rx), ["text:Done"]);
+    }
+
+    #[tokio::test]
+    async fn budget_used_up_by_reasoning_is_an_error() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({
+                "id": "gen-l",
+                "model": MODEL,
+                "choices": [{"finish_reason": "length", "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning": "Thinking about it at great length",
+                }}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 4096,
+                          "completion_tokens_details": {"reasoning_tokens": 4096}},
+            }),
+        )
+        .await;
+
+        let err = make_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("token budget") && err.contains("reasoning"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_budget_exhaustion_is_an_error() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"reasoning":"thinking..."}}]}"#,
+                r#"data: {"choices":[{"delta":{"content":""},"finish_reason":"length"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+
+        let err = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("token budget"), "{err}");
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────
