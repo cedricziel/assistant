@@ -1,11 +1,18 @@
 import { defineConfig, devices } from "@playwright/test";
+import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-const runTag = process.env.GITHUB_RUN_ID || `${process.pid}`;
 // The server keeps all state under $HOME/.assistant, so a throwaway HOME
-// isolates each run.
-const homeDir = path.join(os.tmpdir(), `assistant-e2e-home-${runTag}`);
+// isolates each run. Playwright loads this file in the runner and again in
+// every worker; workers inherit the runner's environment, so only the runner
+// creates the directory, and it removes it when it exits.
+if (!process.env.ASSISTANT_E2E_HOME) {
+  const created = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-e2e-home-"));
+  process.env.ASSISTANT_E2E_HOME = created;
+  process.on("exit", () => fs.rmSync(created, { recursive: true, force: true }));
+}
+const homeDir = process.env.ASSISTANT_E2E_HOME;
 const assistant =
   process.env.ASSISTANT_BIN || "cargo run -q -p assistant-cli --";
 const MOCK_LLM_PORT = 18788;
@@ -103,7 +110,7 @@ export default defineConfig({
       timeout: 10_000,
     },
     {
-      command: `node tests/support/e2e-server.mjs ${homeDir} ${MOCK_LLM_PORT} ${assistant}`,
+      command: `node tests/support/e2e-server.mjs ${JSON.stringify(homeDir)} ${MOCK_LLM_PORT} ${assistant}`,
       url: "http://127.0.0.1:8787/login",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
