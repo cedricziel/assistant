@@ -514,6 +514,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "unicode-normalization",
  "uuid",
 ]
 
