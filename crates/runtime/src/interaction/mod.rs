@@ -3,7 +3,7 @@
 //!
 //! - [`broker`] persists interactions and waits for their answers.
 //! - [`kinds`] is the registry of interaction kinds (`tool_approval`,
-//!   `question`, and whatever siblings add).
+//!   `question`, `surface_action`, and whatever siblings add).
 
 pub mod broker;
 pub mod kinds;
@@ -14,5 +14,6 @@ pub use broker::{
 };
 pub use kinds::{
     InteractionKindHandler, InteractionKinds, InteractionOutcome, MAX_ANSWER_CHARS,
-    MAX_ARGUMENTS_BYTES, PushCopy, QuestionKind, ToolApprovalKind, cap_arguments,
+    MAX_ARGUMENTS_BYTES, MAX_SURFACE_ACTION_BYTES, PushCopy, QuestionKind, SurfaceActionKind,
+    ToolApprovalKind, cap_arguments,
 };

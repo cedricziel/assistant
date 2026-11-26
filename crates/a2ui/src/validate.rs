@@ -85,17 +85,21 @@ impl ValidSurface {
 
     /// The `event.name` of every Button action, for the action routes.
     pub fn declared_action_names(&self) -> BTreeSet<String> {
-        self.draft
-            .components
+        self.draft.declared_action_names()
+    }
+}
+
+impl SurfaceDraft {
+    /// The `event.name` of every Button action.
+    pub fn declared_action_names(&self) -> BTreeSet<String> {
+        self.components
             .iter()
             .filter(|c| c.component == "Button")
             .filter_map(|c| c.props.get("action")?.pointer("/event/name")?.as_str())
             .map(str::to_owned)
             .collect()
     }
-}
 
-impl SurfaceDraft {
     /// Attachment ids the draft references, for the caller's ownership lookup.
     pub fn attachment_ids(&self) -> HashSet<Uuid> {
         let mut ids = literal_attachment_ids(&self.components);

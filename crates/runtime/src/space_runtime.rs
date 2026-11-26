@@ -305,6 +305,18 @@ impl SpaceRuntimes {
             .ok()
             .flatten()
             .and_then(|p| p.turn_timeout_secs);
+        let interactions = self.interactions.then(|| {
+            Arc::new(
+                InteractionBroker::new(
+                    Arc::new(storage.interaction_store()),
+                    Arc::new(InteractionKinds::with_builtin()),
+                )
+                .with_timeout(Duration::from_secs(
+                    config.permissions.interaction_timeout_secs,
+                )),
+            )
+        });
+
         let mut orchestrator = Orchestrator::new(
             llm.clone(),
             storage.clone(),
@@ -313,6 +325,9 @@ impl SpaceRuntimes {
             bus.clone(),
             &config,
         );
+        if let Some(broker) = &interactions {
+            orchestrator = orchestrator.with_interaction_broker(broker.clone());
+        }
         if let Some(callback) = &self.confirmation {
             orchestrator = orchestrator.with_confirmation_callback(callback.clone());
         }
@@ -357,18 +372,6 @@ impl SpaceRuntimes {
                 ),
             }
         }
-
-        let interactions = self.interactions.then(|| {
-            Arc::new(
-                InteractionBroker::new(
-                    Arc::new(storage.interaction_store()),
-                    Arc::new(InteractionKinds::with_builtin()),
-                )
-                .with_timeout(Duration::from_secs(
-                    config.permissions.interaction_timeout_secs,
-                )),
-            )
-        });
 
         info!(org = org_slug, space = space_slug, "built space runtime");
         Ok(Arc::new(SpaceRuntime {
