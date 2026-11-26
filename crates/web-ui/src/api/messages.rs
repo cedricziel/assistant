@@ -2061,7 +2061,11 @@ mod tests {
             run_id,
             conv_id,
             RunOptions { push: false },
-            event_rx,
+            TurnEvents {
+                rx: event_rx,
+                sink: event_tx.downgrade(),
+                orchestrator: default_orchestrator(&state).await,
+            },
             turn_rx,
         )
         .await;
