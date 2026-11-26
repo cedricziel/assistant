@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::{Message, MessageRole};
+use assistant_runtime::{FeedbackLabel, FeedbackTelemetry};
 use assistant_storage::{
     ConversationStore as _, MessageFeedbackRating, MessageFeedbackRow, MessageFeedbackStore as _,
 };
@@ -128,6 +129,33 @@ async fn authorize_target(
     Ok((conv_id, message))
 }
 
+/// Report a stored or cleared vote to the telemetry sink.
+///
+/// Carries only whether a comment exists, never its text. A sink failure is
+/// logged and otherwise ignored: telemetry must not fail the request.
+async fn emit_feedback(
+    state: &ApiState,
+    label: FeedbackLabel,
+    conv_id: Uuid,
+    message: &Message,
+    has_comment: bool,
+) {
+    let event = FeedbackTelemetry {
+        label,
+        conversation_id: conv_id,
+        agent_id: state.agent_id.read().await.clone(),
+        message_id: message.id,
+        has_comment,
+        traceparent: message.traceparent.clone(),
+    };
+    if let Err(e) = state.feedback_telemetry.record(&event) {
+        warn!(
+            "Failed to record feedback telemetry for message {}: {e}",
+            message.id
+        );
+    }
+}
+
 /// Whether a message is a final answer the user can rate.
 fn is_rateable(message: &Message) -> bool {
     let content = message.content.trim();
@@ -204,7 +232,14 @@ pub async fn set_message_feedback(
         )
         .await;
     match result {
-        Ok(row) => Json(MessageFeedbackResponse::from(row)).into_response(),
+        Ok(row) => {
+            let label = match row.rating {
+                MessageFeedbackRating::Positive => FeedbackLabel::Positive,
+                MessageFeedbackRating::Negative => FeedbackLabel::Negative,
+            };
+            emit_feedback(&state, label, conv_id, &message, row.comment.is_some()).await;
+            Json(MessageFeedbackResponse::from(row)).into_response()
+        }
         Err(e) => {
             warn!("Failed to store feedback on message {}: {e}", message.id);
             json_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
@@ -239,17 +274,34 @@ pub async fn delete_message_feedback(
     axum::Extension(auth): axum::Extension<AuthContext>,
     Path((id, message_id)): Path<(String, String)>,
 ) -> Response {
-    let (_, message) = match authorize_target(&ctx, &state, &auth, &id, &message_id).await {
+    let (conv_id, message) = match authorize_target(&ctx, &state, &auth, &id, &message_id).await {
         Ok(target) => target,
         Err(response) => return response,
     };
-    match ctx
-        .storage
-        .message_feedback_store()
-        .clear(message.id, &auth.user_id.0)
-        .await
-    {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+    let store = ctx.storage.message_feedback_store();
+    // Read before clearing so the event can say whether the withdrawn vote had
+    // a comment. `clear` decides whether anything is emitted.
+    let had_comment = match store.get(message.id, &auth.user_id.0).await {
+        Ok(row) => row.is_some_and(|r| r.comment.is_some()),
+        Err(e) => {
+            warn!("Failed to read feedback on message {}: {e}", message.id);
+            false
+        }
+    };
+    match store.clear(message.id, &auth.user_id.0).await {
+        Ok(removed) => {
+            if removed {
+                emit_feedback(
+                    &state,
+                    FeedbackLabel::Cleared,
+                    conv_id,
+                    &message,
+                    had_comment,
+                )
+                .await;
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => {
             warn!("Failed to clear feedback on message {}: {e}", message.id);
             json_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
@@ -270,13 +322,34 @@ mod tests {
     use assistant_core::auth::AuthContext;
     use assistant_core::identity::{Role, SpaceId};
     use assistant_core::types::conversation::Message;
+    use assistant_runtime::{FeedbackLabel, FeedbackTelemetry, FeedbackTelemetrySink};
     use assistant_storage::{
         ConversationStore as _, MessageFeedbackStore as _, SqliteConversationStore, StorageLayer,
     };
 
     use super::super::test_helpers::*;
 
+    /// Records every event; fails each call when `fail` is set.
+    #[derive(Default)]
+    struct RecordingSink {
+        events: std::sync::Mutex<Vec<FeedbackTelemetry>>,
+        fail: bool,
+    }
+
+    impl FeedbackTelemetrySink for RecordingSink {
+        fn record(&self, feedback: &FeedbackTelemetry) -> anyhow::Result<()> {
+            self.events.lock().unwrap().push(feedback.clone());
+            if self.fail {
+                anyhow::bail!("exporter down");
+            }
+            Ok(())
+        }
+    }
+
+    const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
     struct Fixture {
+        sink: std::sync::Arc<RecordingSink>,
         storage: std::sync::Arc<StorageLayer>,
         state: super::super::ApiState,
         conv: Uuid,
@@ -288,10 +361,19 @@ mod tests {
     }
 
     async fn fixture() -> Fixture {
-        let (state, storage) = test_state("http://127.0.0.1:1").await;
+        fixture_with_sink(RecordingSink::default()).await
+    }
+
+    async fn fixture_with_sink(sink: RecordingSink) -> Fixture {
+        let sink = std::sync::Arc::new(sink);
+        let (mut state, storage) = test_state("http://127.0.0.1:1").await;
+        state.feedback_telemetry = sink.clone();
         let conv = seed_conversation(&storage).await;
-        let answer = add(&storage, Message::assistant(conv, "Paris.")).await;
+        let mut reply = Message::assistant(conv, "Paris.");
+        reply.traceparent = Some(TRACEPARENT.into());
+        let answer = add(&storage, reply).await;
         Fixture {
+            sink,
             storage,
             state,
             conv,
@@ -590,5 +672,110 @@ mod tests {
             assert_eq!(s, StatusCode::NO_CONTENT);
         }
         assert!(stored(&f).await.is_none());
+    }
+
+    fn events(f: &Fixture) -> Vec<FeedbackTelemetry> {
+        f.sink.events.lock().unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn put_emits_the_rating_with_the_stored_traceparent() {
+        let f = fixture().await;
+        let uri = feedback_uri(f.conv, f.answer);
+        put(&f, &uri, json!({"rating": "positive"})).await;
+        put(&f, &uri, json!({"rating": "negative"})).await;
+
+        let got = events(&f);
+        let labels: Vec<_> = got.iter().map(|e| e.label).collect();
+        assert_eq!(labels, [FeedbackLabel::Positive, FeedbackLabel::Negative]);
+        for e in &got {
+            assert_eq!(e.traceparent.as_deref(), Some(TRACEPARENT));
+            assert_eq!(e.conversation_id, f.conv);
+            assert_eq!(e.message_id, f.answer);
+            assert_eq!(e.agent_id, "default");
+            assert!(!e.has_comment);
+        }
+    }
+
+    #[tokio::test]
+    async fn emitted_events_carry_has_comment_but_never_the_text() {
+        let f = fixture().await;
+        let uri = feedback_uri(f.conv, f.answer);
+        for rating in ["positive", "negative"] {
+            put(
+                &f,
+                &uri,
+                json!({"rating": rating, "comment": "secret-token-123"}),
+            )
+            .await;
+        }
+        put(&f, &uri, json!({"rating": "negative", "comment": "  "})).await;
+
+        let got = events(&f);
+        let has_comment: Vec<_> = got.iter().map(|e| e.has_comment).collect();
+        assert_eq!(has_comment, [true, true, false]);
+        assert!(
+            !format!("{got:?}").contains("secret-token-123"),
+            "comment text must not reach telemetry"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_of_a_vote_emits_cleared() {
+        let f = fixture().await;
+        let uri = feedback_uri(f.conv, f.answer);
+        put(&f, &uri, json!({"rating": "negative", "comment": "wrong"})).await;
+        let (s, _) = call(app(f.state.clone()), "DELETE", &uri, None, "").await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+
+        let got = events(&f);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1].label, FeedbackLabel::Cleared);
+        assert_eq!(got[1].traceparent.as_deref(), Some(TRACEPARENT));
+        assert!(got[1].has_comment, "the withdrawn vote had a comment");
+    }
+
+    #[tokio::test]
+    async fn delete_with_nothing_stored_emits_nothing() {
+        let f = fixture().await;
+        let (s, _) = call(
+            app(f.state.clone()),
+            "DELETE",
+            &feedback_uri(f.conv, f.answer),
+            None,
+            "",
+        )
+        .await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        assert!(events(&f).is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejected_requests_emit_nothing() {
+        let f = fixture().await;
+        let uri = feedback_uri(f.conv, f.answer);
+        put(&f, &uri, json!({"rating": "meh"})).await;
+        put(
+            &f,
+            &uri,
+            json!({"rating": "negative", "comment": "a".repeat(2001)}),
+        )
+        .await;
+        assert!(events(&f).is_empty());
+    }
+
+    #[tokio::test]
+    async fn sink_failure_does_not_fail_the_request() {
+        let f = fixture_with_sink(RecordingSink {
+            fail: true,
+            ..Default::default()
+        })
+        .await;
+        let uri = feedback_uri(f.conv, f.answer);
+        let (s, b) = put(&f, &uri, json!({"rating": "positive"})).await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+        let (s, _) = call(app(f.state.clone()), "DELETE", &uri, None, "").await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        assert_eq!(events(&f).len(), 2, "both events were attempted");
     }
 }

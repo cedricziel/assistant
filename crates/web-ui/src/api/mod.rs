@@ -105,7 +105,9 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use assistant_runtime::{CommandRegistry, SpaceRuntime, SpaceRuntimes};
+use assistant_runtime::{
+    CommandRegistry, FeedbackTelemetrySink, OtelFeedbackTelemetrySink, SpaceRuntime, SpaceRuntimes,
+};
 use assistant_storage::{ConversationBroadcast, InMemoryConversationBroadcaster, RunBroadcaster};
 use assistant_transcription::{TranscriptionProvider, TtsProvider};
 use axum::{
@@ -149,6 +151,8 @@ pub struct ApiState {
     pub command_registry: Arc<CommandRegistry>,
     /// Per-space conversation-list broadcasters for reactive SSE streaming.
     pub conversation_broadcasters: ConversationBroadcasters,
+    /// Receives an event for every stored or cleared message vote.
+    pub feedback_telemetry: Arc<dyn FeedbackTelemetrySink>,
 }
 
 impl ApiState {
@@ -168,6 +172,7 @@ impl ApiState {
             run_broadcaster: RunBroadcaster::new(),
             command_registry: Arc::new(CommandRegistry::new()),
             conversation_broadcasters: ConversationBroadcasters::default(),
+            feedback_telemetry: Arc::new(OtelFeedbackTelemetrySink::new()),
         }
     }
 
