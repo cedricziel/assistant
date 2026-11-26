@@ -166,7 +166,7 @@ timeout_secs = 120
 # # other models cache automatically. See docs/openrouter.md.
 # [llm.openrouter.cache]
 # enabled = true   # false sends no cache_control
-# ttl     = "5m"   # "5m" | "1h"
+# ttl     = "5m"   # "5m" | "1h" (1h: Anthropic models only)
 #
 # Browse models at: https://openrouter.ai/models
 

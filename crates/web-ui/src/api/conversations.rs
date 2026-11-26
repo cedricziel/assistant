@@ -260,6 +260,10 @@ pub struct MessageSummary {
     /// Attachments linked to this message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AttachmentMetaResponse>,
+    /// Why the reply ended early; `"cancelled"` for a reply the user stopped.
+    /// Omitted for every other message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
 }
 
 // -- Request types -----------------------------------------------------------
@@ -611,6 +615,7 @@ pub async fn get_conversation(
                 skill_name: m.skill_name,
                 tts_available,
                 attachments,
+                finish_reason: m.finish_reason.map(|r| r.as_str().to_string()),
             }
         })
         .collect();
@@ -1074,6 +1079,51 @@ mod tests {
         let rows = vec![tool_row("bash", "ok", Some("call_7"), Some("ok"), None)];
         let tc = history_tool_calls(calls, rows).await;
         assert_eq!(tc[0]["tool_call_id"], "call_7");
+    }
+
+    #[tokio::test]
+    async fn get_conversation_exposes_finish_reason_only_when_set() {
+        use assistant_core::types::conversation::{Message, MessageFinishReason};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Test")).await.unwrap();
+        let user = Message::user(conv.id, "hi");
+        let mut stopped = Message::assistant(conv.id, "Partial answer");
+        stopped.turn = 1;
+        stopped.finish_reason = Some(MessageFinishReason::Cancelled);
+        let mut plain = Message::assistant(conv.id, "Full answer");
+        plain.turn = 2;
+        for m in [&user, &stopped, &plain] {
+            store.save_message(m).await.unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let messages = json["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert!(
+            messages[0].get("finish_reason").is_none(),
+            "user message omits finish_reason"
+        );
+        assert_eq!(messages[1]["finish_reason"], "cancelled");
+        assert!(
+            messages[2].get("finish_reason").is_none(),
+            "ordinary assistant message omits finish_reason"
+        );
     }
 
     #[tokio::test]

@@ -94,10 +94,10 @@ without contacting OpenRouter. See
 Prompt caching settings. An unknown key fails config load. See
 [Prompt caching](#prompt-caching).
 
-| Key       | Default | Description                                          |
-| --------- | ------- | ---------------------------------------------------- |
-| `enabled` | `true`  | Send `cache_control` breakpoints. `false` sends none |
-| `ttl`     | `"5m"`  | Cache lifetime, `"5m"` or `"1h"`                     |
+| Key       | Default | Description                                                               |
+| --------- | ------- | ------------------------------------------------------------------------- |
+| `enabled` | `true`  | Send `cache_control` breakpoints. `false` sends none                      |
+| `ttl`     | `"5m"`  | Cache lifetime, `"5m"` or `"1h"`. `"1h"` applies to Anthropic models only |
 
 ## Request identity
 
@@ -114,8 +114,9 @@ Background calls made outside a turn send neither field.
 The model's author is the slug prefix before `/`. Only `anthropic`,
 `google` and `qwen` models need explicit breakpoints. For them the
 provider sends the system prompt as a text part with
-`cache_control: {"type": "ephemeral"}`, adding `"ttl": "1h"` when
-`ttl = "1h"`. Anthropic models also get the breakpoint on the last part
+`cache_control: {"type": "ephemeral"}`. Anthropic models add
+`"ttl": "1h"` when `ttl = "1h"`; Google and Qwen caches always last 5
+minutes, so they get no `ttl`. Anthropic models also get the breakpoint on the last part
 of the last user message. Other models get no `cache_control`, because
 their upstreams cache automatically.
 
