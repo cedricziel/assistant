@@ -43,6 +43,7 @@ use turn_timing::{CallMarks, TurnTimer};
 mod branch;
 mod dispatch;
 mod prompt;
+mod relay;
 mod surface_hook;
 use self::surface_hook::{SurfaceCall, SurfaceTurn};
 pub mod stream_event;
@@ -61,6 +62,7 @@ mod worker;
 mod tests;
 
 pub use branch::{BRANCH_CANCEL_WAIT, BranchConflict};
+pub use relay::RunEventRelay;
 pub use stream_event::OrchestratorEvent;
 pub use submit::SubmitTurn;
 pub use turn_registry::{TurnLease, TurnMode, TurnRegistry};
@@ -527,6 +529,12 @@ impl Orchestrator {
     /// Return a reference to the message bus.
     pub fn bus(&self) -> &Arc<dyn MessageBus> {
         &self.bus
+    }
+
+    /// Reader for the events a worker in another process relays for the run
+    /// `run_id` of `conversation_id` (see [`SubmitTurn::relay_events`]).
+    pub fn run_event_relay(&self, conversation_id: Uuid, run_id: Uuid) -> RunEventRelay {
+        RunEventRelay::new(self.bus.clone(), &self.agent_id, conversation_id, run_id)
     }
 
     /// Cancel an in-flight turn by `request_id` (the same UUID `submit`
