@@ -248,6 +248,15 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(IntegrationSummary)]),
           () => ListBuilder<IntegrationSummary>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(InteractionDetail)]),
+          () => ListBuilder<InteractionDetail>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(MessageSummary)]),
+          () => ListBuilder<MessageSummary>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SurfaceSummary)]),
+          () => ListBuilder<SurfaceSummary>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(JsonObject)]),
           () => ListBuilder<JsonObject>())
       ..addBuilderFactory(
@@ -256,12 +265,6 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SearchSegment)]),
           () => ListBuilder<SearchSegment>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(MessageSummary)]),
-          () => ListBuilder<MessageSummary>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(SurfaceSummary)]),
-          () => ListBuilder<SurfaceSummary>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
           () => ListBuilder<PersonaFileSlot>())

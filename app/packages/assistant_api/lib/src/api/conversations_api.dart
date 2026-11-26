@@ -18,6 +18,7 @@ import 'package:assistant_api/src/model/create_conversation_request.dart';
 import 'package:assistant_api/src/model/edit_message_request.dart';
 import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/interaction_detail.dart';
+import 'package:assistant_api/src/model/interaction_status_view.dart';
 import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
@@ -969,6 +970,106 @@ class ConversationsApi {
     }
 
     return Response<TurnStatusResponse>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
+  }
+
+  /// &#x60;GET /api/conversations/{conversation_id}/interactions&#x60;
+  /// The interactions of one of the caller&#39;s conversations, oldest first, as a bare array. &#x60;?status&#x3D;pending&#x60; narrows it to those still waiting, which is how a client that opens a conversation finds a run to attach to.
+  ///
+  /// Parameters:
+  /// * [conversationId] - Conversation UUID
+  /// * [status] - Only interactions in this state, such as `pending`.
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [BuiltList<InteractionDetail>] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<BuiltList<InteractionDetail>>> listConversationInteractions({
+    required String conversationId,
+    InteractionStatusView? status,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/api/conversations/{conversation_id}/interactions'
+        .replaceAll(
+            '{' r'conversation_id' '}',
+            encodeQueryParameter(
+                    _serializers, conversationId, const FullType(String))
+                .toString());
+    final _options = Options(
+      method: r'GET',
+      headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      validateStatus: validateStatus,
+    );
+
+    final _queryParameters = <String, dynamic>{
+      if (status != null)
+        r'status': encodeQueryParameter(
+            _serializers, status, const FullType(InteractionStatusView)),
+    };
+
+    final _response = await _dio.request<Object>(
+      _path,
+      options: _options,
+      queryParameters: _queryParameters,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    BuiltList<InteractionDetail>? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType:
+                  const FullType(BuiltList, [FullType(InteractionDetail)]),
+            ) as BuiltList<InteractionDetail>;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<BuiltList<InteractionDetail>>(
       data: _responseData,
       headers: _response.headers,
       isRedirect: _response.isRedirect,
