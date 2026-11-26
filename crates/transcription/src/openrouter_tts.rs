@@ -9,9 +9,9 @@ use assistant_core::Secret;
 use assistant_core::types::transcription::TtsFormat;
 use assistant_llm_provider::retry::RetryConfig;
 
-use crate::converter::AudioFormat;
-use crate::pipeline::{AudioInput, AudioPipeline};
 use crate::provider::{TtsProvider, TtsRequest, TtsResult};
+use assistant_audio::AudioFormat;
+use assistant_audio::{AudioInput, AudioPipeline};
 
 /// OpenRouter's default text-to-speech model.
 pub const DEFAULT_MODEL: &str = "openai/gpt-4o-mini-tts";
@@ -337,8 +337,8 @@ mod tests {
     use assistant_core::types::transcription::TtsFormat;
 
     use super::{OpenRouterTts, OpenRouterTtsSettings};
-    use crate::pipeline::AudioPipeline;
     use crate::provider::{TtsProvider, TtsRequest};
+    use assistant_audio::AudioPipeline;
 
     fn settings(server: &MockServer, model: &str, format: TtsFormat) -> OpenRouterTtsSettings {
         OpenRouterTtsSettings {
@@ -499,8 +499,8 @@ mod tests {
             .pipeline
             .transcode(
                 &result.audio_data,
-                crate::pipeline::AudioInput::Encoded(crate::converter::AudioFormat::Mp3),
-                crate::converter::AudioFormat::Wav,
+                assistant_audio::AudioInput::Encoded(assistant_audio::AudioFormat::Mp3),
+                assistant_audio::AudioFormat::Wav,
             )
             .await
             .unwrap();

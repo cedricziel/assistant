@@ -11,6 +11,7 @@ workspace = true
 
 [workspace]
 members = [
+    "crates/audio",
     "crates/auth",
     "crates/core",
     "crates/skills",
