@@ -13,6 +13,7 @@ mod contract {
     pub mod integration_credential_store;
     pub mod integration_health_store;
     pub mod integration_store;
+    pub mod interaction_store;
     pub mod message_feedback_store;
     pub mod message_timing_store;
     pub mod push_subscription_store;

@@ -59,7 +59,6 @@ impl MoonshotProvider {
             api_key: Secret::new(api_key),
             timeout_secs,
             max_tokens,
-            extra_headers: vec![],
         };
 
         debug!(

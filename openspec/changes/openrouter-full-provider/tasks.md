@@ -47,14 +47,14 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 7. OpenRouter wire client
 
-- [ ] 7.1 Write failing wiremock tests for non-streaming chat: request shape (messages, tools, `max_completion_tokens`), served model in meta, tool-call parsing, text answer, and usage including `cost`. Confirm red.
-- [ ] 7.2 Implement `wire.rs`, `request.rs` and non-streaming `chat`. Verify 5.1.
-- [ ] 7.3 Write failing SSE tests covering comment lines, text deltas, tool-call deltas, the final usage chunk, mid-stream `error` with `finish_reason: "error"`, and `[DONE]`. Confirm red. Implement `stream.rs`, then verify.
+- [x] 7.1 Write failing wiremock tests for non-streaming chat: request shape (messages, tools, `max_completion_tokens`), served model in meta, tool-call parsing, text answer, and usage including `cost`. Confirm red.
+- [x] 7.2 Implement `wire.rs`, `request.rs` and non-streaming `chat`. Verify 5.1.
+- [x] 7.3 Write failing SSE tests covering comment lines, text deltas, tool-call deltas, the final usage chunk, mid-stream `error` with `finish_reason: "error"`, and `[DONE]`. Confirm red. Implement `stream.rs`, then verify.
 - [ ] 7.4 Write failing error tests for the 402, 403 moderation reasons, 429 with `Retry-After`, 503 retried, 400 not retried, and a 200 body with `error`. Confirm red. Implement `errors.rs` on top of task 2, then verify.
 - [ ] 7.5 Write failing tests for the `HTTP-Referer`, `X-OpenRouter-Title` and `X-OpenRouter-Categories` headers, and config rejection of more than two categories. Confirm red. Implement, then verify.
 - [ ] 7.6 Write failing tests: `[llm.openrouter.provider]` is sent as `provider`, unknown keys are rejected, and `fallback_models` is sent as `models` with the primary first. Confirm red. Implement, then verify.
 - [ ] 7.7 Write failing tests: `session_id` and `user` come from `LlmCallContext` and are omitted without it. Confirm red. Implement, then verify.
-- [ ] 7.8 Switch `OpenRouterProvider` from `ChatCompletionsProvider` to the new client, delete the dead code, and verify the existing OpenRouter tests still pass.
+- [x] 7.8 Switch `OpenRouterProvider` from `ChatCompletionsProvider` to the new client, delete the dead code, and verify the existing OpenRouter tests still pass.
 - [ ] 7.9 Rewrite the chat, routing, identity and errors sections of `docs/openrouter.md`.
 - [ ] 7.10 Write failing wiremock tests for OpenRouter native `tool_choice`, `parallel_tool_calls` and JSON schema, each adding `provider.require_parameters: true`, plus the `response-healing` plugin on native non-streaming structured calls. Confirm red. Implement, then verify.
 
