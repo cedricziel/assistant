@@ -8,6 +8,7 @@
 //! fallback models.
 
 mod catalog;
+mod citations;
 mod client;
 mod errors;
 mod reasoning;
@@ -2019,6 +2020,73 @@ mod tests {
         let body = sent_body(&server).await;
         assert!(body.get("plugins").is_none(), "{body}");
         assert!(body.get("web_search_options").is_none(), "{body}");
+    }
+
+    // ── Wiremock: citations ─────────────────────────────────────────────
+
+    fn citation(url: &str, title: &str) -> Value {
+        json!({"type": "url_citation", "url_citation": {"url": url, "title": title}})
+    }
+
+    #[tokio::test]
+    async fn final_answer_ends_with_its_sources() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({
+                "id": "gen-c",
+                "model": MODEL,
+                "choices": [{"finish_reason": "stop", "message": {
+                    "role": "assistant",
+                    "content": "It rained.",
+                    "annotations": [citation("https://a.example", "A"), citation("https://a.example", "A")],
+                }}],
+            }),
+        )
+        .await;
+
+        let response = make_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+        let LlmResponse::FinalAnswer(text, _) = response else {
+            panic!("expected a final answer, got {response:?}");
+        };
+        assert_eq!(text, "It rained.\n\nSources:\n- [A](https://a.example)");
+    }
+
+    #[tokio::test]
+    async fn streamed_sources_arrive_as_the_last_chunk_and_match_the_answer() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"content":"It rained."}}]}"#,
+                r#"data: {"choices":[{"delta":{"annotations":[{"type":"url_citation","url_citation":{"url":"https://a.example","title":"A"}}]},"finish_reason":"stop"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        let response = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], Some(tx))
+            .await
+            .unwrap();
+
+        let LlmResponse::FinalAnswer(text, _) = response else {
+            panic!("expected a final answer, got {response:?}");
+        };
+        let streamed = drain(&mut rx);
+        assert_eq!(
+            streamed.last().unwrap(),
+            "\n\nSources:\n- [A](https://a.example)"
+        );
+        assert_eq!(
+            streamed.concat(),
+            text,
+            "the persisted answer equals what was streamed"
+        );
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────
