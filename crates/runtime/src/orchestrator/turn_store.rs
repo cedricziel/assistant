@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use assistant_core::types::conversation::Message;
 use assistant_storage::conversations::{
-    ConversationPatch, ConversationRecord, ConversationStore, MetadataUpdate,
+    ConversationPatch, ConversationRecord, ConversationSearchHit, ConversationStore, MetadataUpdate,
 };
 
 /// Wraps a [`ConversationStore`] for the duration of one turn.
@@ -105,6 +105,14 @@ impl ConversationStore for TurnStore {
 
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
         self.inner.list_conversations().await
+    }
+
+    async fn search_conversations(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationSearchHit>> {
+        self.inner.search_conversations(query, limit).await
     }
 
     async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {

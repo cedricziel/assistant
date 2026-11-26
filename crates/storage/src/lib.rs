@@ -78,8 +78,9 @@ pub use conversation_summaries::{
     SqliteConversationSummaryStore,
 };
 pub use conversations::{
-    ConversationPatch, ConversationRecord, ConversationStore, InMemoryConversationStore,
-    MetadataUpdate, SqliteConversationStore,
+    ConversationPatch, ConversationRecord, ConversationSearchHit, ConversationStore,
+    InMemoryConversationStore, MAX_MATCHES_PER_CONVERSATION, MessageHit, MetadataUpdate,
+    SqliteConversationStore,
 };
 pub use integration_store::{
     SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
