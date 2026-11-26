@@ -25,6 +25,7 @@ pub mod command_events;
 pub mod conversation_broadcaster;
 pub mod conversation_events;
 pub mod conversation_search;
+pub mod conversation_summaries;
 pub mod conversations;
 pub mod integration_store;
 pub mod interactions;
@@ -71,6 +72,10 @@ pub use conversation_broadcaster::{
 pub use conversation_events::{
     ConversationEventRow, ConversationEventStore, InMemoryConversationEventStore, LiveEvent,
     RunBroadcaster, SqliteConversationEventStore,
+};
+pub use conversation_summaries::{
+    ConversationSummary, ConversationSummaryStore, InMemoryConversationSummaryStore,
+    SqliteConversationSummaryStore,
 };
 pub use conversations::{
     ConversationPatch, ConversationRecord, ConversationStore, InMemoryConversationStore,
@@ -231,6 +236,11 @@ impl StorageLayer {
     /// Convenience: build an `InteractionStore` backed by this pool.
     pub fn interaction_store(&self) -> SqliteInteractionStore {
         SqliteInteractionStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `ConversationSummaryStore` backed by this pool.
+    pub fn conversation_summary_store(&self) -> SqliteConversationSummaryStore {
+        SqliteConversationSummaryStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `MessageTimingStore` backed by this pool.

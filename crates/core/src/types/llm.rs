@@ -413,6 +413,17 @@ pub struct OpenRouterOptions {
     /// OpenRouter's `web` plugin (`[llm.openrouter.web_search]`).
     #[serde(default)]
     pub web_search: OpenRouterWebSearch,
+    /// Parser for PDF attachments. Unset: models with native file input read
+    /// PDFs themselves, others use `cloudflare-ai`.
+    pub pdf_engine: Option<OpenRouterPdfEngine>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OpenRouterPdfEngine {
+    Native,
+    CloudflareAi,
+    MistralOcr,
 }
 
 /// `[llm.openrouter.web_search]`. `search_context_size` needs the native
@@ -773,6 +784,18 @@ mod tests {
                 parse("[web_search]\nengin = \"exa\"").is_err(),
                 "unknown keys are rejected"
             );
+        }
+
+        #[test]
+        fn pdf_engine_parses_kebab_case() {
+            use super::super::OpenRouterPdfEngine;
+
+            assert_eq!(parse("").unwrap().pdf_engine, None);
+            assert_eq!(
+                parse("pdf_engine = \"mistral-ocr\"").unwrap().pdf_engine,
+                Some(OpenRouterPdfEngine::MistralOcr)
+            );
+            assert!(parse("pdf_engine = \"tesseract\"").is_err());
         }
 
         #[test]

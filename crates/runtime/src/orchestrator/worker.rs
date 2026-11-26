@@ -23,7 +23,10 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::turn_cancellations::Claim;
-use super::{ExtensionRegistration, Orchestrator, SubmitTurn, TurnResult, parse_interface};
+use super::{
+    ExtensionRegistration, Orchestrator, SubmitTurn, TurnLease, TurnMode, TurnResult,
+    parse_interface,
+};
 use crate::webhook_dispatch;
 
 /// Periodically refreshes the claim of a bus message while a turn runs.
@@ -179,6 +182,27 @@ impl Orchestrator {
                         .unwrap_or(Interface::Cli);
 
                     let conv_id = turn_req.conversation_id;
+
+                    // Register turns nobody registered (the scheduler publishes
+                    // straight to the bus). A conversation held by an exclusive
+                    // turn defers them instead.
+                    let run_id = msg.batch_id.unwrap_or(msg.id);
+                    let _lease = if self.turn_registry.is_registered(run_id) {
+                        None
+                    } else if let Some(lease) =
+                        self.turn_registry
+                            .try_begin(conv_id, run_id, TurnMode::Shared)
+                    {
+                        Some(lease)
+                    } else {
+                        debug!(
+                            conversation_id = %conv_id,
+                            worker_id,
+                            "Conversation is held by a branching turn; deferring"
+                        );
+                        let _ = self.bus.nack_delayed(msg.id, self.turn_defer_delay).await;
+                        continue;
+                    };
                     let trace_cx = turn_req
                         .traceparent
                         .as_deref()
@@ -679,9 +703,19 @@ impl Orchestrator {
     /// Streaming HTTP handlers set [`SubmitTurn::request_id`] so the SSE
     /// `run_id` doubles as the request id, letting clients call
     /// [`Self::cancel_turn`] with the id they already observe in `run_started`.
-    pub async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult> {
-        let request_id = turn.request_id.unwrap_or_else(Uuid::new_v4);
+    pub async fn submit(&self, mut turn: SubmitTurn) -> Result<TurnResult> {
+        let request_id = turn
+            .request_id
+            .or_else(|| turn.lease.as_ref().map(TurnLease::request_id))
+            .unwrap_or_else(Uuid::new_v4);
         let conversation_id = turn.conversation_id;
+        // Hold a lease for as long as `submit` waits. A conversation held by an
+        // exclusive turn refuses the shared lease; the turn is then published
+        // unregistered and the worker defers it until the branch turn ends.
+        let _lease = turn.lease.take().or_else(|| {
+            self.turn_registry
+                .try_begin(conversation_id, request_id, TurnMode::Shared)
+        });
         let interface = turn.interface.clone();
         // Register a cancellation token so the worker can be interrupted if
         // submit_turn times out before the turn finishes.

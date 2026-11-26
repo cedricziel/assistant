@@ -1,6 +1,6 @@
 //! Persistent attachment storage.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -23,8 +23,15 @@ pub trait AttachmentStore: Send + Sync {
     /// Fetch attachment metadata by ID.
     async fn get_meta(&self, id: Uuid) -> Result<AttachmentMeta>;
 
-    /// List attachments linked to a message.
+    /// List attachments of a message: those bound to it directly plus those
+    /// reached through [`carry_forward`](Self::carry_forward), in creation order.
     async fn list_for_message(&self, message_id: Uuid) -> Result<Vec<AttachmentMeta>>;
+
+    /// Attach every attachment of `from_message_id` to `to_message_id` as well.
+    ///
+    /// Nothing is copied: both messages share the same bytes. Idempotent, so a
+    /// redelivered edit leaves each attachment linked once.
+    async fn carry_forward(&self, from_message_id: Uuid, to_message_id: Uuid) -> Result<()>;
 
     /// List attachments for a conversation.
     async fn list_for_conversation(&self, conversation_id: Uuid) -> Result<Vec<AttachmentMeta>>;
@@ -102,11 +109,14 @@ impl AttachmentStore for SqliteAttachmentStore {
         row_to_meta(&row)
     }
 
-    /// List attachments linked to a message.
+    /// List attachments bound to a message or linked to it.
     async fn list_for_message(&self, message_id: Uuid) -> Result<Vec<AttachmentMeta>> {
         let rows = sqlx::query(
             "SELECT id, message_id, conversation_id, agent_id, filename, mime_type, size_bytes, created_at
-             FROM message_attachments WHERE message_id = ? ORDER BY created_at",
+             FROM message_attachments
+             WHERE message_id = ?1
+                OR id IN (SELECT attachment_id FROM message_attachment_links WHERE message_id = ?1)
+             ORDER BY created_at, rowid",
         )
         .bind(message_id.to_string())
         .fetch_all(&self.pool)
@@ -114,6 +124,22 @@ impl AttachmentStore for SqliteAttachmentStore {
         .context("listing attachments for message")?;
 
         rows.iter().map(row_to_meta).collect()
+    }
+
+    /// Link every attachment of `from_message_id` to `to_message_id`.
+    async fn carry_forward(&self, from_message_id: Uuid, to_message_id: Uuid) -> Result<()> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO message_attachment_links (message_id, attachment_id)
+             SELECT ?2, id FROM message_attachments
+             WHERE message_id = ?1
+                OR id IN (SELECT attachment_id FROM message_attachment_links WHERE message_id = ?1)",
+        )
+        .bind(from_message_id.to_string())
+        .bind(to_message_id.to_string())
+        .execute(&self.pool)
+        .await
+        .context("carrying attachments forward")?;
+        Ok(())
     }
 
     /// List attachments in a conversation.
@@ -194,6 +220,8 @@ pub struct InMemoryAttachmentStore {
 struct MemoryAttachmentState {
     bytes: HashMap<Uuid, Vec<u8>>,
     metas: HashMap<Uuid, AttachmentMeta>,
+    /// `(message_id, attachment_id)` pairs added by `carry_forward`.
+    links: HashSet<(Uuid, Uuid)>,
 }
 
 impl InMemoryAttachmentStore {
@@ -249,11 +277,30 @@ impl AttachmentStore for InMemoryAttachmentStore {
         let mut out: Vec<AttachmentMeta> = state
             .metas
             .values()
-            .filter(|m| m.message_id == Some(message_id))
+            .filter(|m| {
+                m.message_id == Some(message_id) || state.links.contains(&(message_id, m.id))
+            })
             .cloned()
             .collect();
         out.sort_by_key(|m| m.created_at);
         Ok(out)
+    }
+
+    async fn carry_forward(&self, from_message_id: Uuid, to_message_id: Uuid) -> Result<()> {
+        let mut state = self.lock();
+        let carried: Vec<Uuid> = state
+            .metas
+            .values()
+            .filter(|m| {
+                m.message_id == Some(from_message_id)
+                    || state.links.contains(&(from_message_id, m.id))
+            })
+            .map(|m| m.id)
+            .collect();
+        state
+            .links
+            .extend(carried.into_iter().map(|id| (to_message_id, id)));
+        Ok(())
     }
 
     async fn list_for_conversation(&self, conversation_id: Uuid) -> Result<Vec<AttachmentMeta>> {

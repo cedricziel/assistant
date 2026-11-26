@@ -1244,3 +1244,221 @@ async fn worker_touches_the_claimed_message_while_a_turn_runs() {
         "the heartbeat must stop when the turn finishes"
     );
 }
+
+// -- Turn registry --
+
+/// Publish a turn straight to the bus, as the scheduler does: no `submit`
+/// call, no request id.
+async fn publish_turn_directly(orch: &Orchestrator, conv_id: Uuid, prompt: &str) {
+    let turn_req = bus_messages::TurnRequest {
+        prompt: prompt.to_string(),
+        conversation_id: conv_id,
+        extension_tools: vec![],
+        timestamp: None,
+        traceparent: None,
+        attachment_ids: vec![],
+        interactive: false,
+        anchor: bus_messages::TurnAnchor::Append,
+        user_message_id: None,
+        model_override: None,
+        user_id: None,
+        org_id: None,
+        space_id: None,
+    };
+    orch.bus()
+        .publish(
+            PublishRequest::new(
+                topic::TURN_REQUEST,
+                serde_json::to_value(&turn_req).unwrap(),
+            )
+            .with_agent_id("default")
+            .with_conversation_id(conv_id)
+            .with_interface("Cli"),
+        )
+        .await
+        .unwrap();
+}
+
+async fn mount_slow_answer(server: &MockServer, delay: Duration) {
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(delay)
+                .set_body_json(ollama_answer("slow answer")),
+        )
+        .mount(server)
+        .await;
+}
+
+/// A turn that bypasses `submit` is registered for as long as the worker runs
+/// it, so `/stop`, `/status` and branching see it.
+#[tokio::test]
+async fn a_turn_published_straight_to_the_bus_is_registered_while_the_worker_runs_it() {
+    let server = MockServer::start().await;
+    mount_slow_answer(&server, Duration::from_millis(500)).await;
+    let (orch, _storage) = build(&server.uri()).await;
+    spawn_worker(&orch);
+
+    let conv_id = Uuid::new_v4();
+    assert!(!orch.conversation_turn_in_flight(conv_id));
+    publish_turn_directly(&orch, conv_id, "scheduled").await;
+
+    wait_until("the worker to register the turn", || async {
+        orch.conversation_turn_in_flight(conv_id)
+    })
+    .await;
+    assert_eq!(
+        orch.turn_registry().request_ids(conv_id).len(),
+        1,
+        "one turn is registered"
+    );
+
+    wait_until("the turn to finish", || async {
+        bus_count(&orch, topic::TURN_REQUEST, MessageStatus::Done).await == 1
+    })
+    .await;
+    wait_until("the lease to be released", || async {
+        !orch.conversation_turn_in_flight(conv_id)
+    })
+    .await;
+}
+
+/// A worker that claims a turn while a branching turn holds the conversation
+/// defers it, and runs it once the lease is released.
+#[tokio::test]
+async fn a_worker_defers_a_turn_while_an_exclusive_lease_is_held() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "deferred answer").await;
+    let (orch, _storage) = super::build_customized(&server.uri(), OrgConfig::default(), |o| {
+        o.with_turn_defer_delay(Duration::from_millis(100))
+    })
+    .await;
+    spawn_worker(&orch);
+
+    let conv_id = Uuid::new_v4();
+    let lease = orch
+        .turn_registry()
+        .try_begin(conv_id, Uuid::new_v4(), crate::TurnMode::Exclusive)
+        .expect("the conversation is idle");
+    publish_turn_directly(&orch, conv_id, "while editing").await;
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(
+        llm_request_count(&server).await,
+        0,
+        "the turn must not run under an exclusive lease"
+    );
+    assert_eq!(
+        bus_count(&orch, topic::TURN_REQUEST, MessageStatus::Done).await,
+        0,
+        "the deferred turn is not acked"
+    );
+
+    drop(lease);
+    wait_until("the deferred turn to run", || async {
+        bus_count(&orch, topic::TURN_REQUEST, MessageStatus::Done).await == 1
+    })
+    .await;
+    assert_eq!(llm_request_count(&server).await, 1);
+}
+
+/// `submit` without a caller lease registers the turn under its request id.
+#[tokio::test]
+async fn submit_registers_the_turn_under_its_request_id() {
+    let server = MockServer::start().await;
+    mount_slow_answer(&server, Duration::from_millis(500)).await;
+    let (orch, _storage) = build(&server.uri()).await;
+    spawn_worker(&orch);
+
+    let conv_id = Uuid::new_v4();
+    let request_id = Uuid::new_v4();
+    let submit_orch = orch.clone();
+    let handle = tokio::spawn(async move {
+        submit_orch
+            .submit(
+                SubmitTurn::new("hello", conv_id, Interface::Web)
+                    .with_auth(&AuthContext::system())
+                    .with_request_id(request_id),
+            )
+            .await
+    });
+
+    wait_until("the turn to register", || async {
+        orch.turn_registry().request_ids(conv_id) == vec![request_id]
+    })
+    .await;
+    assert!(handle.await.unwrap().is_ok());
+    assert!(
+        !orch.conversation_turn_in_flight(conv_id),
+        "the lease is released when submit returns"
+    );
+}
+
+/// A lease the caller already holds is the turn's lease: `submit` does not
+/// take a second one, and the worker does not defer the turn.
+#[tokio::test]
+async fn submit_uses_the_callers_lease_and_releases_it_afterwards() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "branch answer").await;
+    let (orch, _storage) = build(&server.uri()).await;
+    spawn_worker(&orch);
+
+    let conv_id = Uuid::new_v4();
+    let request_id = Uuid::new_v4();
+    let lease = orch
+        .turn_registry()
+        .try_begin(conv_id, request_id, crate::TurnMode::Exclusive)
+        .expect("the conversation is idle");
+    let result = orch
+        .submit(
+            SubmitTurn::new("edited", conv_id, Interface::Web)
+                .with_auth(&AuthContext::system())
+                .with_request_id(request_id)
+                .with_lease(lease),
+        )
+        .await;
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        !orch.conversation_turn_in_flight(conv_id),
+        "the caller's lease is released when the turn ends"
+    );
+}
+
+/// A `/stop` for a turn that is running finds it through the registry.
+#[tokio::test]
+async fn stop_finds_a_running_turn_through_the_registry() {
+    let server = MockServer::start().await;
+    mount_slow_answer(&server, Duration::from_secs(5)).await;
+    let (orch, _storage) = build(&server.uri()).await;
+    spawn_worker(&orch);
+
+    let conv_id = Uuid::new_v4();
+    let submit_orch = orch.clone();
+    let handle = tokio::spawn(async move {
+        submit_orch
+            .submit(
+                SubmitTurn::new("long task", conv_id, Interface::Web)
+                    .with_auth(&AuthContext::system()),
+            )
+            .await
+    });
+    wait_until("the turn to register", || async {
+        orch.conversation_turn_in_flight(conv_id)
+    })
+    .await;
+
+    let ctx = crate::CommandContext {
+        conversation_id: conv_id,
+        conversation_configs: orch.conversation_configs(),
+        orchestrator: orch.clone(),
+        evict_conversation: None,
+        default_model: "test".to_string(),
+    };
+    let result = crate::CommandRegistry::new()
+        .execute("stop", &[], ctx)
+        .await;
+    assert_eq!(result.ack_text, "Stopped.");
+    assert!(handle.await.unwrap().is_err(), "the cancelled turn errors");
+    assert!(!orch.conversation_turn_in_flight(conv_id));
+}
