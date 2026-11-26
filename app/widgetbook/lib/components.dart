@@ -2,8 +2,8 @@ import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
-import 'components/compact_expandable.dart';
 import 'components/code_block.dart';
+import 'components/compact_expandable.dart';
 import 'components/conversation_list_view.dart';
 import 'components/feedback_buttons.dart';
 import 'components/feedback_comment_field.dart';
@@ -86,8 +86,8 @@ final List<WidgetbookComponent> kComponents = [
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   branchPickerComponent,
-  compactExpandableComponent,
   codeBlockComponent,
+  compactExpandableComponent,
   conversationListViewComponent,
   feedbackButtonsComponent,
   feedbackCommentFieldComponent,
