@@ -106,6 +106,10 @@ pub struct LlmConfig {
     pub max_iterations: usize,
     #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
+    /// Whether the model may request several tool calls at once. Unset keeps
+    /// the provider's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
     /// Embedding model for vector search (default: `nomic-embed-text`).
     #[serde(default = "default_embedding_model")]
     pub embedding_model: String,
@@ -143,6 +147,7 @@ impl Default for LlmConfig {
             base_url: default_llm_base_url(),
             max_iterations: default_llm_max_iterations(),
             timeout_secs: default_llm_timeout_secs(),
+            parallel_tool_calls: None,
             embedding_model: default_embedding_model(),
             api_key: None,
             anthropic: AnthropicOptions::default(),
@@ -416,6 +421,17 @@ mod tests {
         let section = section.map(Secret::new);
         resolve_openrouter_key(section.as_ref(), llm, OPENROUTER_API_KEY_ENV, env)
             .map(|s| s.expose().to_string())
+    }
+
+    #[test]
+    fn parallel_tool_calls_is_optional() {
+        let unset: LlmConfig = toml::from_str("").unwrap();
+        assert_eq!(
+            unset.parallel_tool_calls, None,
+            "unset keeps the provider default"
+        );
+        let off: LlmConfig = toml::from_str("parallel_tool_calls = false").unwrap();
+        assert_eq!(off.parallel_tool_calls, Some(false));
     }
 
     #[test]

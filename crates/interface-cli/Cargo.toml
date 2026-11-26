@@ -40,6 +40,8 @@ chrono = { workspace = true }
 serde = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
+# Async `ConfirmationCallback` implementation
+async-trait = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

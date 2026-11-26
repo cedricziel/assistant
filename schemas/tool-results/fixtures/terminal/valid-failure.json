@@ -1,0 +1,11 @@
+{
+  "kind": "terminal",
+  "command": "cargo test",
+  "exit_code": 101,
+  "stdout": "running 2 tests\n",
+  "stderr": "error: test failed\n",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "duration_ms": 4210,
+  "timed_out": false
+}

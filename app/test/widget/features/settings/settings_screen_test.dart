@@ -1,5 +1,7 @@
 import 'package:assistant_app/features/notifications/notification_service.dart';
+import 'package:assistant_app/features/settings/response_timing_preference.dart';
 import 'package:assistant_app/features/settings/settings_screen.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -36,10 +38,21 @@ void main() {
       await tester.pumpWidget(buildUnderTest());
       await tester.pump();
 
-      final switches = tester.widgetList<Switch>(find.byType(Switch)).toList();
-      expect(switches, hasLength(3));
-      for (final sw in switches) {
-        expect(sw.value, isTrue, reason: 'All toggles should default to true');
+      for (final title in [
+        'New chat messages',
+        'Skill completions',
+        'Agent errors',
+      ]) {
+        final sw = tester.widget<Switch>(
+          find.descendant(
+            of: find.ancestor(
+              of: find.text(title),
+              matching: find.byType(SwitchListTile),
+            ),
+            matching: find.byType(Switch),
+          ),
+        );
+        expect(sw.value, isTrue, reason: '$title should default to true');
       }
     });
 
@@ -60,6 +73,99 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('notifications.chat_messages'), isFalse);
     });
+  });
+
+  group('SettingsScreen – Show response timing', () {
+    final timingTile = find.ancestor(
+      of: find.text('Show response timing'),
+      matching: find.byType(SwitchListTile),
+    );
+
+    ProviderContainer containerOf(WidgetTester tester) =>
+        ProviderScope.containerOf(tester.element(find.byType(SettingsScreen)));
+
+    testWidgets('shows the switch row with its subtitle, off by default', (
+      tester,
+    ) async {
+      await tester.pumpWidget(buildUnderTest());
+      await tester.pump();
+
+      expect(timingTile, findsOneWidget);
+      expect(
+        find.text(
+          'Show first-token time, total time and tokens per second under '
+          'finished replies.',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.widget<SwitchListTile>(timingTile).value, isFalse);
+      expect(containerOf(tester).read(showResponseTimingProvider).value, false);
+    });
+
+    testWidgets('tapping the row turns the provider on', (tester) async {
+      await tester.pumpWidget(buildUnderTest());
+      await tester.pump();
+
+      await tester.tap(timingTile);
+      await tester.pump();
+
+      expect(containerOf(tester).read(showResponseTimingProvider).value, true);
+      expect(tester.widget<SwitchListTile>(timingTile).value, isTrue);
+    });
+
+    testWidgets('is a focusable, tappable node labelled with the title', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(buildUnderTest());
+      await tester.pump();
+
+      final node = tester.getSemantics(timingTile);
+      expect(node.label, startsWith('Show response timing'));
+      expect(
+        node,
+        matchesSemantics(
+          label: node.label,
+          hasEnabledState: true,
+          isEnabled: true,
+          isFocusable: true,
+          hasSelectedState: true,
+          hasToggledState: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+        ),
+      );
+      handle.dispose();
+    });
+
+    for (final key in [LogicalKeyboardKey.space, LogicalKeyboardKey.enter]) {
+      testWidgets('toggles on ${key.debugName}', (tester) async {
+        await tester.pumpWidget(buildUnderTest());
+        await tester.pump();
+
+        // Tab until the focused node sits inside the timing row.
+        bool timingRowFocused() {
+          final tile = FocusManager.instance.primaryFocus?.context
+              ?.findAncestorWidgetOfExactType<SwitchListTile>();
+          final title = tile?.title;
+          return title is Text && title.data == 'Show response timing';
+        }
+
+        for (var i = 0; i < 10 && !timingRowFocused(); i++) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+        }
+        expect(timingRowFocused(), isTrue, reason: 'row must be reachable');
+
+        await tester.sendKeyEvent(key);
+        await tester.pump();
+
+        expect(
+          containerOf(tester).read(showResponseTimingProvider).value,
+          true,
+        );
+      });
+    }
   });
 }
 

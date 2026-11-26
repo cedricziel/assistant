@@ -29,8 +29,6 @@ lib/features/chat/markdown_link_handler.dart
 lib/features/chat/streaming_timeline_entry.dart
 lib/features/chat/svg_builder.dart
 lib/features/chat/theme_aware_mermaid.dart
-lib/features/chat/timeline_section.dart
-lib/features/chat/tool_call_chip.dart
 lib/features/chat/voice_recorder_button.dart
 lib/features/connection/connection_screen.dart
 lib/features/contexts/screens/edit_context_screen.dart

@@ -1,4 +1,4 @@
-.PHONY: all build build-web build-release test lint lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-macos-binary build-macos-bundle test-flutter precommit icons coverage
+.PHONY: all build build-web build-release test lint lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-macos-binary build-macos-bundle test-flutter precommit icons coverage update-goldens
 
 all: build
 
@@ -59,9 +59,26 @@ lint-flutter:
 	cd app && ./scripts/check_no_raw_colors.sh
 	cd app && ./scripts/check_facade_imports.sh
 
-# Run Flutter unit and widget tests.
+# Golden baselines are generated on Linux and compared there (CI). Elsewhere
+# (macOS dev machines) text renders differently, so goldens are skipped.
+GOLDEN_FLAGS := $(if $(or $(CI),$(filter Linux,$(shell uname))),,--exclude-tags golden)
+
+# Run Flutter unit and widget tests for the app and the assistant_ui package.
 test-flutter:
-	cd app && flutter test
+	cd app && flutter test $(GOLDEN_FLAGS)
+	cd app/packages/assistant_ui && flutter test $(GOLDEN_FLAGS)
+
+# Regenerate golden baselines on Linux, in the Flutter image pinned to the
+# version in app/pubspec.yaml, so they match what CI compares against.
+FLUTTER_VERSION := $(shell sed -n 's/^  flutter: //p' app/pubspec.yaml)
+update-goldens:
+	docker run --rm -v "$(CURDIR)":/work -w /work/app \
+	  ghcr.io/cirruslabs/flutter:$(FLUTTER_VERSION) sh -c ' \
+	  set -e; \
+	  trap "chown -R $(shell id -u):$(shell id -g) /work/app" EXIT; \
+	  flutter pub get; \
+	  (cd packages/assistant_ui && flutter test --update-goldens --tags golden); \
+	  if grep -rqF "@Tags(" test; then flutter test --update-goldens --tags golden; fi'
 
 # Run all pre-commit checks manually (mirrors .githooks/pre-commit).
 precommit:
@@ -69,7 +86,7 @@ precommit:
 	cd app && flutter pub run dart_pre_commit
 	cargo clippy --workspace -- -D warnings
 	cargo machete --with-metadata
-	cd app && flutter test
+	$(MAKE) test-flutter
 
 # Run the interactive REPL (Slack/Mattermost start in background if configured)
 run:

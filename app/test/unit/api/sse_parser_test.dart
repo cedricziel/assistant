@@ -148,6 +148,57 @@ void main() {
     });
 
     // -----------------------------------------------------------------------
+    // Follow-up suggestions
+    // -----------------------------------------------------------------------
+
+    test('parses a suggestions frame with its sequence id', () async {
+      const raw =
+          'id: 41\n'
+          'event: suggestions\n'
+          'data: {"message_id":"m-1","suggestions":'
+          '[{"prompt":"Show me an example"},{"prompt":"Why?"}]}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      final event = events.single as SuggestionsEvent;
+      expect(event.messageId, equals('m-1'));
+      expect(event.prompts, equals(['Show me an example', 'Why?']));
+      expect(event.sequenceId, equals(41));
+    });
+
+    test('skips suggestion items without a prompt string', () async {
+      const raw =
+          'event: suggestions\n'
+          'data: {"message_id":"m-1","suggestions":'
+          '[{"prompt":"Keep"},{"title":"no prompt"},{"prompt":7},"bare"]}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect((events.single as SuggestionsEvent).prompts, equals(['Keep']));
+    });
+
+    test('drops a suggestions frame with malformed JSON', () async {
+      const raw = 'event: suggestions\ndata: {not json\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, isEmpty);
+    });
+
+    test('drops a suggestions frame without a message_id', () async {
+      const raw =
+          'event: suggestions\n'
+          'data: {"suggestions":[{"prompt":"Hi"}]}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, isEmpty);
+    });
+
+    test('ignores an unknown event and still parses later frames', () async {
+      const raw =
+          'event: future_thing\ndata: {"a":1}\n\n'
+          'event: suggestions\n'
+          'data: {"message_id":"m-1","suggestions":[{"prompt":"Hi"}]}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      expect(events.single, isA<SuggestionsEvent>());
+    });
+
+    // -----------------------------------------------------------------------
     // Status event with tool_call_id
     // -----------------------------------------------------------------------
 
