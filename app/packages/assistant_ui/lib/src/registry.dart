@@ -6,6 +6,7 @@
 /// `golden` test for each entry.
 const List<String> kAssistantUiElements = [
   'CodeBlock',
+  'MessageTimingIndicator',
   'StarterPrompts',
   'SuggestionChips',
 ];
