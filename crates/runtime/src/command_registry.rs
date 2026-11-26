@@ -4,7 +4,7 @@
 //! and dispatches execution.  All messenger interfaces and the CLI share the
 //! same registry instance.
 
-use assistant_storage::ConversationStore;
+use assistant_storage::{ConversationStore, StorageLayer};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -254,10 +254,11 @@ impl CommandRegistry {
             format!("Turn active: {}", if is_active { "yes" } else { "no" }),
         ];
 
-        // Estimate token usage from history if possible.
-        let conv_store = ctx.orchestrator.storage.conversation_store();
-        if let Ok(messages) = conv_store.load_history(ctx.conversation_id).await {
-            let history = crate::history::messages_to_chat_history(messages, &Default::default());
+        // Estimate token usage over what the model actually sees: the
+        // summary-applied history, not the whole path.
+        if let Ok(history) =
+            Self::load_turn_history(&ctx.orchestrator.storage, ctx.conversation_id).await
+        {
             let tokens = compaction::estimate_tokens(&history);
             lines.push(format!("Estimated tokens: ~{tokens}"));
         }
@@ -265,19 +266,37 @@ impl CommandRegistry {
         CommandResult::ack(lines.join("\n"))
     }
 
+    /// The history the model sees for `conversation_id`.
+    async fn load_turn_history(
+        storage: &StorageLayer,
+        conversation_id: Uuid,
+    ) -> anyhow::Result<crate::history::TurnHistory> {
+        let path = storage
+            .conversation_store()
+            .load_history(conversation_id)
+            .await?;
+        crate::history::build_turn_history(
+            path,
+            conversation_id,
+            &storage.conversation_summary_store(),
+            &Default::default(),
+        )
+        .await
+    }
+
     async fn cmd_compact(&self, ctx: CommandContext) -> CommandResult {
         let conv_store = ctx.orchestrator.storage.conversation_store();
 
-        // Load conversation history.
-        let messages = match conv_store.load_history(ctx.conversation_id).await {
-            Ok(m) => m,
-            Err(e) => {
-                warn!(error = %e, "Failed to load messages for /compact");
-                return CommandResult::ack("Failed to load conversation history.");
-            }
-        };
-
-        let mut history = crate::history::messages_to_chat_history(messages, &Default::default());
+        // Compact the summary-applied history, so an existing summary is
+        // folded into the new one rather than the whole path re-summarised.
+        let mut history =
+            match Self::load_turn_history(&ctx.orchestrator.storage, ctx.conversation_id).await {
+                Ok(h) => h,
+                Err(e) => {
+                    warn!(error = %e, "Failed to load messages for /compact");
+                    return CommandResult::ack("Failed to load conversation history.");
+                }
+            };
 
         if history.is_empty() {
             return CommandResult::ack("Nothing to compact.");

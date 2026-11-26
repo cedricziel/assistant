@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
-use crate::history::{FinalAnswerMeta, persist_final_answer};
+use crate::history::{FinalAnswerMeta, TurnHistory, persist_final_answer};
 use turn_timing::{CallMarks, TurnTimer};
 
 // ── Submodules ────────────────────────────────────────────────────────────────
@@ -1287,10 +1287,13 @@ impl Orchestrator {
                     if let Err(e) = conv_store.save_message(&thinking_msg).await {
                         warn!("Failed to persist thinking step: {e}");
                     }
-                    history.push(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: text,
-                    });
+                    history.push(
+                        ChatHistoryMessage::Text {
+                            role: ChatRole::Assistant,
+                            content: text,
+                        },
+                        Some(thinking_msg.id),
+                    );
                 }
             }
         }
@@ -1571,7 +1574,7 @@ impl Orchestrator {
                                 tool_count: turn_tool_count,
                                 had_errors: turn_had_errors,
                                 active_skill: active_skill.clone(),
-                                history: history.clone(),
+                                history: history.to_vec(),
                             },
                             self.learning_config.clone(),
                             Arc::clone(&self.storage),
@@ -1675,10 +1678,13 @@ impl Orchestrator {
                     if let Err(e) = conv_store.save_message(&thinking_msg).await {
                         warn!("Failed to persist thinking step: {e}");
                     }
-                    history.push(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: text,
-                    });
+                    history.push(
+                        ChatHistoryMessage::Text {
+                            role: ChatRole::Assistant,
+                            content: text,
+                        },
+                        Some(thinking_msg.id),
+                    );
                 }
             }
         }
@@ -1755,7 +1761,7 @@ impl Orchestrator {
         attachments: Vec<ContentBlock>,
         attachment_ids: &[Uuid],
         agent_id: &str,
-    ) -> Result<(SqliteConversationStore, Vec<ChatHistoryMessage>, i64)> {
+    ) -> Result<(SqliteConversationStore, TurnHistory, i64)> {
         // Note: returns the concrete SqliteConversationStore because the
         // function is an internal helper called only from this impl. External
         // consumer signatures (helper fns in dispatch.rs, turn_control.rs,
@@ -1804,7 +1810,10 @@ impl Orchestrator {
             .await
             .unwrap_or_default();
 
-        let mut history = crate::history::messages_to_chat_history(prior, &att_map);
+        let summaries = self.storage.conversation_summary_store();
+        let mut history =
+            crate::history::build_turn_history(prior, conversation_id, &summaries, &att_map)
+                .await?;
         crate::history::sanitize_history(&mut history);
 
         // Load stored attachments by ID and convert to the appropriate ContentBlock.
@@ -1839,14 +1848,20 @@ impl Orchestrator {
         }
 
         if all_attachments.is_empty() {
-            history.push(ChatHistoryMessage::Text {
-                role: ChatRole::User,
-                content: user_message.to_string(),
-            });
+            history.push(
+                ChatHistoryMessage::Text {
+                    role: ChatRole::User,
+                    content: user_message.to_string(),
+                },
+                Some(user_msg.id),
+            );
         } else {
             let mut blocks = vec![ContentBlock::Text(user_message.to_string())];
             blocks.extend(all_attachments);
-            history.push(ChatHistoryMessage::MultimodalUser { content: blocks });
+            history.push(
+                ChatHistoryMessage::MultimodalUser { content: blocks },
+                Some(user_msg.id),
+            );
         }
 
         Ok((conv_store, history, base_turn))
