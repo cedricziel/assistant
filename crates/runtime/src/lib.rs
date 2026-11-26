@@ -7,6 +7,7 @@ pub(crate) mod conversation_indexer;
 pub mod decision_model;
 pub mod follow_ups;
 pub(crate) mod history;
+pub mod interaction;
 pub mod interface_runner;
 pub mod interface_trait;
 pub mod memory_indexer;
