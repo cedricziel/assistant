@@ -3,6 +3,7 @@ import 'package:widgetbook/widgetbook.dart';
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
 import 'components/chat_markdown_scope.dart';
+import 'components/chat_thread_layout.dart';
 import 'components/code_block.dart';
 import 'components/code_diff_result_view.dart';
 import 'components/code_file_result_view.dart';
@@ -30,14 +31,13 @@ import 'components/thinking_body.dart';
 import 'components/thread_density_scope.dart';
 import 'components/thread_empty_state.dart';
 import 'components/thread_error_banner.dart';
+import 'components/thread_viewport.dart';
 import 'components/timeline_entry_shell.dart';
 import 'components/tool_call_body.dart';
 import 'components/tool_result_renderer_scope.dart';
 import 'components/tool_status_icon.dart';
 import 'components/turn_progress_card.dart';
 import 'components/unknown_interaction_card.dart';
-
-// import 'components/thread_viewport.dart'; // slot: chat-element-library 10
 
 // import 'components/timeline_entry_shell.dart'; // slot: chat-element-library 5b
 
@@ -55,7 +55,6 @@ import 'components/unknown_interaction_card.dart';
 final List<WidgetbookComponent> kComponents = [
   // attachmentTrayComponent, // slot: chat-element-library 11b
   // branchPickerComponent, // slot: message-branching 9
-  // chatThreadLayoutComponent, // slot: chat-element-library 10
   // commandBodyComponent, // slot: chat-element-library 7b
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
   // dataTableResultViewComponent, // slot: tool-result-renderers C6
@@ -71,7 +70,6 @@ final List<WidgetbookComponent> kComponents = [
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
   // subagentBodyComponent, // slot: chat-element-library 7b
   // terminalResultViewComponent, // slot: tool-result-renderers C4
-  // threadViewportComponent, // slot: chat-element-library 10
   // timelineEntryShellComponent, // slot: chat-element-library 5b
   // timelineEntryViewComponent, // slot: chat-element-library 7c
   // typingIndicatorComponent, // slot: chat-element-library 8b
@@ -79,6 +77,7 @@ final List<WidgetbookComponent> kComponents = [
   approvalCardComponent,
   branchPickerComponent,
   chatMarkdownScopeComponent,
+  chatThreadLayoutComponent,
   codeBlockComponent,
   codeDiffResultViewComponent,
   codeFileResultViewComponent,
@@ -106,6 +105,7 @@ final List<WidgetbookComponent> kComponents = [
   threadDensityScopeComponent,
   threadEmptyStateComponent,
   threadErrorBannerComponent,
+  threadViewportComponent,
   timelineEntryShellComponent,
   toolCallBodyComponent,
   toolResultRendererScopeComponent,
