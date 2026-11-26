@@ -11,9 +11,12 @@ use assistant_storage::{
 };
 
 use crate::args::PersonaCommand;
-use crate::home_agent_root;
 
-pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
+pub async fn cmd_persona(
+    install_root: &Path,
+    db_path: &Path,
+    command: &PersonaCommand,
+) -> Result<()> {
     let storage = StorageLayer::new(db_path).await?;
     let store = storage.persona_store();
     store.ensure_exists("default").await?;
@@ -39,10 +42,7 @@ pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()>
             }
             store.ensure_exists(id).await?;
 
-            let root = home_agent_root(id)?;
-            let workspace = default_workspace_dir(id);
-            tokio::fs::create_dir_all(&root).await?;
-            tokio::fs::create_dir_all(&workspace).await?;
+            tokio::fs::create_dir_all(default_workspace_dir(install_root, id)).await?;
             println!("Persona '{}' is ready.", id);
         }
         PersonaCommand::Use { id } => {
@@ -53,10 +53,7 @@ pub async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()>
                 );
             }
             store.ensure_exists(id).await?;
-            let root = home_agent_root(id)?;
-            let workspace = default_workspace_dir(id);
-            tokio::fs::create_dir_all(&root).await?;
-            tokio::fs::create_dir_all(&workspace).await?;
+            tokio::fs::create_dir_all(default_workspace_dir(install_root, id)).await?;
             println!(
                 "Persona '{}' activated. Use --agent {} on next run.",
                 id, id
@@ -148,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn list_runs_against_fresh_db() {
         let dir = tempfile::tempdir().unwrap();
-        cmd_persona(&db(dir.path()), &PersonaCommand::List)
+        cmd_persona(dir.path(), &db(dir.path()), &PersonaCommand::List)
             .await
             .unwrap();
     }
@@ -161,6 +158,7 @@ mod tests {
         // Set whitelist mode on default persona (ensure_exists is called at
         // the top of cmd_persona).
         cmd_persona(
+            dir.path(),
             &dbp,
             &PersonaCommand::SkillMode {
                 persona_id: "default".to_string(),
@@ -171,6 +169,7 @@ mod tests {
         .unwrap();
 
         cmd_persona(
+            dir.path(),
             &dbp,
             &PersonaCommand::SkillAdd {
                 persona_id: "default".to_string(),
@@ -181,6 +180,7 @@ mod tests {
         .unwrap();
 
         cmd_persona(
+            dir.path(),
             &dbp,
             &PersonaCommand::SkillRemove {
                 persona_id: "default".to_string(),
@@ -195,6 +195,7 @@ mod tests {
     async fn skill_remove_errors_for_unknown_persona() {
         let dir = tempfile::tempdir().unwrap();
         let res = cmd_persona(
+            dir.path(),
             &db(dir.path()),
             &PersonaCommand::SkillRemove {
                 persona_id: "no-such-persona".to_string(),
@@ -211,6 +212,7 @@ mod tests {
         let dbp = db(dir.path());
 
         cmd_persona(
+            dir.path(),
             &dbp,
             &PersonaCommand::TimeoutSet {
                 persona_id: "default".to_string(),
@@ -221,6 +223,7 @@ mod tests {
         .unwrap();
 
         cmd_persona(
+            dir.path(),
             &dbp,
             &PersonaCommand::TimeoutClear {
                 persona_id: "default".to_string(),
@@ -234,6 +237,7 @@ mod tests {
     async fn create_with_invalid_id_bails() {
         let dir = tempfile::tempdir().unwrap();
         let res = cmd_persona(
+            dir.path(),
             &db(dir.path()),
             &PersonaCommand::Create {
                 id: "bad id with spaces".to_string(),
@@ -248,6 +252,7 @@ mod tests {
     async fn use_with_invalid_id_bails() {
         let dir = tempfile::tempdir().unwrap();
         let res = cmd_persona(
+            dir.path(),
             &db(dir.path()),
             &PersonaCommand::Use {
                 id: "bad id".to_string(),

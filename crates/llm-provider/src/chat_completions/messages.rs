@@ -82,7 +82,7 @@ pub fn build_chat_messages(
                                 "image_url": { "url": data_uri }
                             }))
                         }
-                        ContentBlock::Document { .. } => None,
+                        ContentBlock::Document { .. } | ContentBlock::Audio { .. } => None,
                     })
                     .collect();
 
@@ -196,7 +196,7 @@ pub fn build_raw_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -
                             let data_uri = format!("data:{media_type};base64,{data}");
                             Some(json!({"type": "image_url", "image_url": {"url": data_uri}}))
                         }
-                        ContentBlock::Document { .. } => None,
+                        ContentBlock::Document { .. } | ContentBlock::Audio { .. } => None,
                     })
                     .collect();
                 messages.push(json!({"role": "user", "content": parts}));
@@ -502,6 +502,27 @@ mod tests {
                 .unwrap()
                 .contains("iVBORw==")
         );
+    }
+
+    #[test]
+    fn audio_blocks_are_dropped() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("[Voice message]: hi".into()),
+                ContentBlock::Audio {
+                    media_type: "audio/ogg".into(),
+                    data: "T2dnUw==".into(),
+                },
+            ],
+        }];
+        let raw = build_raw_messages("", &history);
+        let parts = raw[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 1, "only the text: {parts:?}");
+        assert_eq!(parts[0]["type"], "text");
+        let (typed, _) = build_chat_messages("", &history);
+        let typed = serde_json::to_string(&typed).unwrap();
+        assert!(!typed.contains("T2dnUw=="), "{typed}");
+        assert!(typed.contains("[Voice message]: hi"), "{typed}");
     }
 
     #[test]

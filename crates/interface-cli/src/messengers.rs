@@ -25,6 +25,8 @@ use crate::wiring::{Messenger, RunMode};
 /// Shared inputs every messenger is built from.
 pub struct MessengerDeps<'a> {
     pub config: &'a assistant_core::types::agent::OrgConfig,
+    /// The install root (`~/.assistant`); messengers keep their state there.
+    pub install_root: &'a std::path::Path,
     pub runtimes: Arc<SpaceRuntimes>,
     pub org_storage: Arc<OrgStorageLayer>,
     pub default_space: DefaultSpace,
@@ -118,7 +120,10 @@ fn build(
         }
         Messenger::Matrix => {
             let cfg = deps.config.matrix.clone().with_context(missing)?;
-            let iface = with_transcription!(MatrixInterface::new(cfg, orch), deps);
+            let iface = with_transcription!(
+                MatrixInterface::new(cfg, orch, deps.install_root.to_path_buf()),
+                deps
+            );
             Built {
                 runner: Box::new(iface),
                 ambient_tools: Vec::new(),

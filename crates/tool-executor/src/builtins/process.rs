@@ -29,6 +29,17 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::debug;
 use uuid::Uuid;
 
+use crate::builtins::render_table::{Column, data_table};
+
+/// Columns of the `data_table` published by `action: list`.
+const LIST_COLUMNS: &[Column] = &[
+    ("session_id", "Session"),
+    ("pid", "PID"),
+    ("command", "Command"),
+    ("started_at", "Started"),
+    ("running", "Running"),
+];
+
 const MAX_LINES: usize = 1000;
 
 // -- ProcessHandle -------------------------------------------------------------
@@ -542,25 +553,22 @@ impl ProcessHandler {
     async fn action_list(&self) -> Result<ToolOutput> {
         let sessions = self.sessions.lock().await;
 
-        let mut list: Vec<serde_json::Value> = sessions
+        let mut list: Vec<(&String, &Arc<ProcessHandle>)> = sessions.iter().collect();
+        list.sort_by(|a, b| a.1.started_at.cmp(&b.1.started_at));
+        let rows: Vec<serde_json::Map<String, serde_json::Value>> = list
             .iter()
-            .map(|(session_id, handle)| {
-                let running = handle.running.load(Ordering::SeqCst);
+            .filter_map(|(session_id, handle)| {
                 serde_json::json!({
                     "session_id": session_id,
                     "pid": handle.pid,
                     "command": handle.command,
                     "started_at": handle.started_at,
-                    "running": running,
+                    "running": handle.running.load(Ordering::SeqCst),
                 })
+                .as_object()
+                .cloned()
             })
             .collect();
-
-        list.sort_by(|a, b| {
-            let a_time = a.get("started_at").and_then(|v| v.as_str()).unwrap_or("");
-            let b_time = b.get("started_at").and_then(|v| v.as_str()).unwrap_or("");
-            a_time.cmp(b_time)
-        });
 
         let msg = if list.is_empty() {
             "No active process sessions".to_string()
@@ -568,7 +576,7 @@ impl ProcessHandler {
             format!("{} process session(s)", list.len())
         };
 
-        Ok(ToolOutput::success(msg).with_data(serde_json::json!(list)))
+        Ok(ToolOutput::success(msg).with_render(data_table(LIST_COLUMNS, rows)))
     }
 }
 
@@ -757,7 +765,7 @@ mod tests {
             .unwrap();
         assert!(out.success);
         assert_eq!(
-            out.data.unwrap().as_array().unwrap().len(),
+            out.data.unwrap()["rows"].as_array().unwrap().len(),
             0,
             "should start with no sessions"
         );
@@ -781,7 +789,7 @@ mod tests {
             .unwrap();
         assert!(out.success);
         assert_eq!(
-            out.data.unwrap().as_array().unwrap().len(),
+            out.data.unwrap()["rows"].as_array().unwrap().len(),
             1,
             "should have one session"
         );

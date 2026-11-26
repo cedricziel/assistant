@@ -1,19 +1,24 @@
-// Starts the e2e server: a fresh HOME, then `webui serve` and, once it is up,
-// the `orchestrator run` that executes its turns. The HOME lists the
-// examples/mcp-apps-demo MCP server under [mcp] and uses the scripted model
-// from mock-ollama.mjs. Stopping this process stops both.
+// Starts the e2e server: `webui serve` with HOME set to $ASSISTANT_E2E_HOME
+// and, once it is up, the `orchestrator run` that executes its turns. The
+// HOME lists the examples/mcp-apps-demo MCP server under [mcp] and uses the
+// scripted model from mock-ollama.mjs. Stopping this process stops both.
 //
-// Usage: node e2e-server.mjs <home> <mock LLM port> <assistant command...>
+// Usage: ASSISTANT_E2E_HOME=<dir> node e2e-server.mjs <mock LLM port> <assistant command...>
+//
+// The directory comes through the environment so the shell that Playwright
+// runs this command in never parses it. Its config files are overwritten;
+// nothing else in it is removed.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const [home, llmPort, ...assistant] = process.argv.slice(2);
+const home = process.env.ASSISTANT_E2E_HOME;
+const [llmPort, ...assistant] = process.argv.slice(2);
 if (!home || !llmPort || assistant.length === 0) {
   throw new Error(
-    "usage: e2e-server.mjs <home> <mock LLM port> <assistant command...>",
+    "usage: ASSISTANT_E2E_HOME=<dir> e2e-server.mjs <mock LLM port> <assistant command...>",
   );
 }
 
@@ -29,7 +34,6 @@ if (!existsSync(path.join(demo, "dist", "app.html"))) {
 }
 
 const config = path.join(home, ".assistant");
-rmSync(home, { recursive: true, force: true });
 mkdirSync(path.join(config, "orgs", "default"), { recursive: true });
 writeFileSync(
   path.join(config, "server.toml"),

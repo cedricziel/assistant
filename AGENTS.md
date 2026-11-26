@@ -153,6 +153,9 @@ Prefixes: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.
 - Helper functions for fixtures: `make_skill()`, `build()`, `mount_answer()`.
 - Use `assert_eq!` with descriptive messages as the third argument.
 - Per-crate coverage floor is 80%; see the `test-coverage` skill.
+- Tests never touch the real `~/.assistant`. Library code takes the install root as a
+  parameter; tests pass a `tempfile::tempdir()`. `tests/workspace_home_dir_lint.rs` bans
+  `home_dir()` outside the entry points.
 
 ### Choosing fakes
 

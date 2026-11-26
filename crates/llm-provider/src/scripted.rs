@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    ChatHistoryMessage, FakeClock, LlmProvider, LlmResponse, LlmResponseMeta, StreamChunk,
-    ToolSpec,
+    ChatHistoryMessage, ChatOptionsSupport, FakeClock, LlmProvider, LlmResponse, LlmResponseMeta,
+    StreamChunk, ToolSpec,
     llm::provider::{Capabilities, ToolSupport},
 };
 use async_trait::async_trait;
@@ -80,6 +80,7 @@ pub struct ScriptedLlmProvider {
     state: Arc<Mutex<ScriptedData>>,
     clock: Option<FakeClock>,
     capabilities: Capabilities,
+    chat_options_support: ChatOptionsSupport,
     provider_name: String,
     model_name: String,
 }
@@ -97,6 +98,7 @@ impl ScriptedLlmProvider {
                 hosted_tools: Vec::new(),
                 context_window_tokens: None,
             },
+            chat_options_support: ChatOptionsSupport::default(),
             provider_name: "scripted".to_string(),
             model_name: "scripted-model".to_string(),
         }
@@ -163,6 +165,11 @@ impl ScriptedLlmProvider {
     }
 
     /// Override the capability flags (defaults: tools=Native, streaming=true).
+    pub fn with_chat_options_support(mut self, support: ChatOptionsSupport) -> Self {
+        self.chat_options_support = support;
+        self
+    }
+
     pub fn with_capabilities(mut self, capabilities: Capabilities) -> Self {
         self.capabilities = capabilities;
         self
@@ -252,6 +259,10 @@ impl Default for ScriptedLlmProvider {
 impl LlmProvider for ScriptedLlmProvider {
     fn capabilities(&self) -> Capabilities {
         self.capabilities.clone()
+    }
+
+    fn chat_options_support(&self) -> ChatOptionsSupport {
+        self.chat_options_support
     }
 
     async fn chat(

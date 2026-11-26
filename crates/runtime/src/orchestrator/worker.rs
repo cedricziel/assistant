@@ -61,13 +61,29 @@ impl Drop for ClaimHeartbeat {
 impl Orchestrator {
     // ── Bus-based turn processing ────────────────────────────────────────────
 
-    /// Register an event sink for a streaming turn.
+    /// [`submit`](Self::submit) a turn whose [`OrchestratorEvent`](super::OrchestratorEvent)s
+    /// stream through `sink`.
     ///
-    /// Call this *before* publishing the [`TurnRequest`](bus_messages::TurnRequest)
-    /// to the bus.  The worker will consume (remove) the sink when it processes
-    /// the request, routing [`OrchestratorEvent`]s through it via
-    /// [`run_turn_streaming`](Self::run_turn_streaming).
-    pub async fn register_token_sink(
+    /// Only a worker of this orchestrator can take the sink; a turn claimed by
+    /// an orchestrator in another process streams no events. Either way the
+    /// sink is released when the turn result arrives, so its receiver closes
+    /// once the turn has ended.
+    pub async fn submit_streaming(
+        &self,
+        turn: SubmitTurn,
+        sink: mpsc::Sender<super::OrchestratorEvent>,
+    ) -> Result<TurnResult> {
+        let conversation_id = turn.conversation_id;
+        self.register_token_sink(conversation_id, sink.clone())
+            .await;
+        let result = self.submit(turn).await;
+        self.release_token_sink(conversation_id, &sink).await;
+        result
+    }
+
+    /// Register an event sink for `conversation_id`'s next turn. A worker of
+    /// this orchestrator that claims the turn takes it and streams through it.
+    pub(crate) async fn register_token_sink(
         &self,
         conversation_id: Uuid,
         sink: mpsc::Sender<super::OrchestratorEvent>,
@@ -78,7 +94,7 @@ impl Orchestrator {
     /// Remove `conversation_id`'s event sink, but only if it is `sink`'s
     /// channel. A runner can release its own sink without touching the one a
     /// newer turn of the same conversation registered.
-    pub async fn release_token_sink(
+    pub(crate) async fn release_token_sink(
         &self,
         conversation_id: Uuid,
         sink: &mpsc::Sender<super::OrchestratorEvent>,

@@ -128,9 +128,9 @@ fn message_estimated_chars(msg: &ChatHistoryMessage) -> usize {
             .iter()
             .map(|b| match b {
                 ContentBlock::Text(t) => t.len(),
-                ContentBlock::Image { data, .. } | ContentBlock::Document { data, .. } => {
-                    data.len()
-                }
+                ContentBlock::Image { data, .. }
+                | ContentBlock::Document { data, .. }
+                | ContentBlock::Audio { data, .. } => data.len(),
             })
             .sum(),
         _ => message_text(msg).len(),
@@ -181,7 +181,9 @@ fn message_text(msg: &ChatHistoryMessage) -> String {
             .iter()
             .filter_map(|b| match b {
                 ContentBlock::Text(t) => Some(t.as_str()),
-                ContentBlock::Image { .. } | ContentBlock::Document { .. } => None,
+                ContentBlock::Image { .. }
+                | ContentBlock::Document { .. }
+                | ContentBlock::Audio { .. } => None,
             })
             .collect::<Vec<_>>()
             .join(" "),

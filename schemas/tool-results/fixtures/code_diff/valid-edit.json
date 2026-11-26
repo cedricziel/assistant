@@ -1,0 +1,1 @@
+{"kind":"code_diff","path":"src/lib.rs","language":"rust","operation":"edit","hunks":[{"old_start":3,"old_lines":3,"new_start":3,"new_lines":3,"lines":[{"op":"context","text":"fn a() {"},{"op":"remove","text":"    1"},{"op":"add","text":"    2"},{"op":"context","text":"}"}]}],"added":1,"removed":1,"truncated":false}

@@ -130,20 +130,20 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 - [x] 18.1 Write failing tests for `[images]` config parsing, including key reuse and routing keys. Confirm red. Implement, then verify.
 - [x] 18.2 Write failing wiremock tests for the OpenRouter images provider: request shape with `b64_json`; `url` entries downloaded; `session_id` and `user` from `LlmCallContext`; 402 and 429 handling; cost recorded. Confirm red. Implement `images/`, then verify.
-- [ ] 18.3 Write failing tests for `/images/models` validation: unknown model fails the build; enum, range and unlisted parameters are rejected without an upstream call; reference images are rejected for models without image input. Confirm red. Implement, then verify.
-- [ ] 18.4 Write failing tests for the `image-generate` tool: parameter schema; `reference_attachment_ids` resolved to data URIs, non-images rejected, at most 16; attachments returned; fewer images than requested reported; the tool is absent when `[images]` is unset. Confirm red. Implement and register it in `space_runtime`, then verify.
-- [ ] 18.5 Write `docs/images.md` and link it from `docs/openrouter.md`.
+- [x] 18.3 Write failing tests for `/images/models` validation: unknown model fails the build; enum, range and unlisted parameters are rejected without an upstream call; reference images are rejected for models without image input. Confirm red. Implement, then verify.
+- [x] 18.4 Write failing tests for the `image-generate` tool: parameter schema; `reference_attachment_ids` resolved to data URIs, non-images rejected, at most 16; attachments returned; fewer images than requested reported; the tool is absent when `[images]` is unset. Confirm red. Implement and register it in `space_runtime`, then verify.
+- [x] 18.5 Write `docs/images.md` and link it from `docs/openrouter.md`.
 
 ## 19. Chat image output
 
-- [ ] 19.1 Write failing tests: `image_output` with a catalog-capable model sends `modalities` and `image_config`; a model without image output fails each call and logs the error at startup. Confirm red. Implement, then verify.
-- [ ] 19.2 Write failing tests: `message.images` data URIs are decoded, HTTPS URLs are downloaded, and images from deltas and the final message are collected without duplicates into `GeneratedMedia`. Confirm red. Implement, then verify.
-- [ ] 19.3 Document chat image output in `docs/openrouter.md`.
+- [x] 19.1 Write failing tests: `image_output` with a catalog-capable model sends `modalities` and `image_config`; a model without image output fails each call and logs the error at startup. Confirm red. Implement, then verify.
+- [x] 19.2 Write failing tests: `message.images` data URIs are decoded, HTTPS URLs are downloaded, and images from deltas and the final message are collected without duplicates into `GeneratedMedia`. Confirm red. Implement, then verify.
+- [x] 19.3 Document chat image output in `docs/openrouter.md`.
 
 ## 20. Voice-native chat (audio input and replies)
 
 - [ ] 20.1 Write failing tests: the web-ui voice send path and the Signal, Matrix, Mattermost and Nextcloud voice handlers attach the recording as `ContentBlock::Audio`, with the transcript as text, or `[Voice message]` when `[transcription]` is absent (no longer dropped). Confirm red. Add the `Audio` variant, implement, then verify.
-- [ ] 20.1a Write failing tests: the orchestrator keeps audio only for the current turn and only for providers with audio input support; `history.rs` drops `Audio` from past messages; the Anthropic, OpenAI, Moonshot and Ollama builders drop `Audio`. Confirm red. Implement, then verify.
+- [x] 20.1a Write failing tests: the orchestrator keeps audio only for the current turn and only for providers with audio input support; `history.rs` drops `Audio` from past messages; the Anthropic, OpenAI, Moonshot and Ollama builders drop `Audio`. Confirm red. Implement, then verify.
 - [ ] 20.1b Write failing tests for OpenRouter audio input: `audio_input` config parsing; an `input_audio` part with conversion to WAV for formats outside `formats`; the transcript part prefixed "Transcript (may contain errors):"; `max_secs` cutoff; a 400 on `input_audio` leads to one repeat without audio, then disabled. Confirm red. Implement, then verify.
 - [ ] 20.2 Write failing tests: a voice turn with audio-capable provider support requests audio options; a non-voice turn does not. Confirm red. Implement in the orchestrator, then verify.
 - [ ] 20.3 Write failing SSE fixture tests for the OpenRouter client: `delta.audio.data` concatenated, transcript used when there is no content, PCM read at `pcm_sample_rate` and transcoded to `[tts] format`, attached as `GeneratedMedia::Audio`. Confirm red. Implement, then verify.

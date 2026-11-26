@@ -17,6 +17,7 @@ assistant-web-ui = { path = "../web-ui", default-features = false }
 axum = { workspace = true }
 tower = { workspace = true }
 chrono = { workspace = true }
+tempfile = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }

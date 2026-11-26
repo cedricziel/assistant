@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assistant.invalid/schemas/tool-results/plan.schema.json",
+  "title": "plan",
+  "description": "A Persona's working plan: an ordered list of steps with statuses.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["kind", "steps"],
+  "properties": {
+    "kind": { "const": "plan" },
+    "title": { "type": "string", "maxLength": 120 },
+    "steps": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["title", "status"],
+        "properties": {
+          "title": { "type": "string", "maxLength": 200 },
+          "status": {
+            "enum": ["pending", "in_progress", "completed", "failed", "skipped"]
+          }
+        }
+      }
+    }
+  }
+}

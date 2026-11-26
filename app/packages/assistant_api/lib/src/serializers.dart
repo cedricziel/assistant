@@ -34,6 +34,7 @@ import 'package:assistant_api/src/model/attachment_meta_response.dart';
 import 'package:assistant_api/src/model/authentication_info.dart';
 import 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/binding_response.dart';
+import 'package:assistant_api/src/model/branch_info.dart';
 import 'package:assistant_api/src/model/call_mcp_app_tool_request.dart';
 import 'package:assistant_api/src/model/cancel_task_request.dart';
 import 'package:assistant_api/src/model/catalog_auth_kind_response.dart';
@@ -167,6 +168,7 @@ import 'package:assistant_api/src/model/string_list.dart';
 import 'package:assistant_api/src/model/subscribe_request.dart';
 import 'package:assistant_api/src/model/subscription_response.dart';
 import 'package:assistant_api/src/model/surface_summary.dart';
+import 'package:assistant_api/src/model/switch_branch_request.dart';
 import 'package:assistant_api/src/model/task.dart';
 import 'package:assistant_api/src/model/task_artifact_update_event.dart';
 import 'package:assistant_api/src/model/task_push_notification_config.dart';
@@ -235,6 +237,7 @@ part 'serializers.g.dart';
   AuthenticationInfo,
   AuthorizationCodeOAuthFlow,
   BindingResponse,
+  BranchInfo,
   CallMcpAppToolRequest,
   CancelTaskRequest,
   CatalogAuthKindResponse,
@@ -368,6 +371,7 @@ part 'serializers.g.dart';
   SubscribeRequest,
   SubscriptionResponse,
   SurfaceSummary,
+  SwitchBranchRequest,
   Task,
   TaskArtifactUpdateEvent,
   TaskPushNotificationConfig,

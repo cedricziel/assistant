@@ -1,7 +1,9 @@
 // A scripted stand-in for Ollama's /api/chat, so e2e turns run without a
 // model. A user question about the weather gets a call to the demo MCP
 // server's get-forecast tool; the tool's result gets a one-line answer; any
-// other request (such as the conversation title) gets a short title.
+// other request (such as the conversation title) gets a short title. A
+// message containing "hold this turn" gets no answer for a minute, so a client
+// can cancel the turn while it runs.
 //
 // Usage: node mock-ollama.mjs <port>
 
@@ -9,6 +11,8 @@ import { createServer } from "node:http";
 
 const port = Number(process.argv[2] ?? 18788);
 const FORECAST_TOOL = "mcp__demo__get-forecast";
+const HOLD = /hold this turn/i;
+const HOLD_MS = 60_000;
 
 function reply(body) {
   const messages = body.messages ?? [];
@@ -37,6 +41,11 @@ createServer((req, res) => {
   req.on("end", () => {
     if (req.url === "/api/chat" && req.method === "POST") {
       const body = JSON.parse(raw || "{}");
+      const last = (body.messages ?? []).at(-1) ?? {};
+      if (HOLD.test(last.content ?? "")) {
+        setTimeout(() => res.writeHead(503).end(), HOLD_MS);
+        return;
+      }
       const chunk = {
         model: body.model,
         message: reply(body),
