@@ -43,5 +43,20 @@ final genericToolResultViewComponent = WidgetbookComponent(
         ),
       ),
     ),
+    WidgetbookUseCase(
+      name: 'with structured data',
+      builder: (context) => _view(
+        ToolCallRecord(
+          toolName: 'file-glob',
+          status: ToolCallStatus.ok,
+          arguments: const {'pattern': 'lib/**/*.dart'},
+          result: '3 files',
+          data: const {
+            'paths': ['lib/main.dart', 'lib/app.dart', 'test/app_test.dart'],
+            'truncated': false,
+          },
+        ),
+      ),
+    ),
   ],
 );
