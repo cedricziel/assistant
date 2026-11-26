@@ -14,6 +14,8 @@ class _$ConversationDetail extends ConversationDetail {
   @override
   final BuiltList<MessageSummary> messages;
   @override
+  final BuiltList<SurfaceSummary> surfaces;
+  @override
   final String title;
   @override
   final DateTime updatedAt;
@@ -26,6 +28,7 @@ class _$ConversationDetail extends ConversationDetail {
       {required this.createdAt,
       required this.id,
       required this.messages,
+      required this.surfaces,
       required this.title,
       required this.updatedAt})
       : super._();
@@ -45,6 +48,7 @@ class _$ConversationDetail extends ConversationDetail {
         createdAt == other.createdAt &&
         id == other.id &&
         messages == other.messages &&
+        surfaces == other.surfaces &&
         title == other.title &&
         updatedAt == other.updatedAt;
   }
@@ -55,6 +59,7 @@ class _$ConversationDetail extends ConversationDetail {
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, messages.hashCode);
+    _$hash = $jc(_$hash, surfaces.hashCode);
     _$hash = $jc(_$hash, title.hashCode);
     _$hash = $jc(_$hash, updatedAt.hashCode);
     _$hash = $jf(_$hash);
@@ -67,6 +72,7 @@ class _$ConversationDetail extends ConversationDetail {
           ..add('createdAt', createdAt)
           ..add('id', id)
           ..add('messages', messages)
+          ..add('surfaces', surfaces)
           ..add('title', title)
           ..add('updatedAt', updatedAt))
         .toString();
@@ -91,6 +97,12 @@ class ConversationDetailBuilder
   set messages(ListBuilder<MessageSummary>? messages) =>
       _$this._messages = messages;
 
+  ListBuilder<SurfaceSummary>? _surfaces;
+  ListBuilder<SurfaceSummary> get surfaces =>
+      _$this._surfaces ??= ListBuilder<SurfaceSummary>();
+  set surfaces(ListBuilder<SurfaceSummary>? surfaces) =>
+      _$this._surfaces = surfaces;
+
   String? _title;
   String? get title => _$this._title;
   set title(String? title) => _$this._title = title;
@@ -109,6 +121,7 @@ class ConversationDetailBuilder
       _createdAt = $v.createdAt;
       _id = $v.id;
       _messages = $v.messages.toBuilder();
+      _surfaces = $v.surfaces.toBuilder();
       _title = $v.title;
       _updatedAt = $v.updatedAt;
       _$v = null;
@@ -139,6 +152,7 @@ class ConversationDetailBuilder
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'ConversationDetail', 'id'),
             messages: messages.build(),
+            surfaces: surfaces.build(),
             title: BuiltValueNullFieldError.checkNotNull(
                 title, r'ConversationDetail', 'title'),
             updatedAt: BuiltValueNullFieldError.checkNotNull(
@@ -149,6 +163,8 @@ class ConversationDetailBuilder
       try {
         _$failedField = 'messages';
         messages.build();
+        _$failedField = 'surfaces';
+        surfaces.build();
       } catch (e) {
         throw BuiltValueNestedFieldError(
             r'ConversationDetail', _$failedField, e.toString());

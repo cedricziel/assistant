@@ -6,6 +6,9 @@ const runTag = process.env.GITHUB_RUN_ID || `${process.pid}`;
 // The server keeps all state under $HOME/.assistant, so a throwaway HOME
 // isolates each run.
 const homeDir = path.join(os.tmpdir(), `assistant-e2e-home-${runTag}`);
+const assistant =
+  process.env.ASSISTANT_BIN || "cargo run -q -p assistant-cli --";
+const MOCK_LLM_PORT = 18788;
 
 /**
  * Playwright configuration for visual regression tests.
@@ -78,15 +81,24 @@ export default defineConfig({
     },
   ],
 
-  /* Auto-start the server if not already running */
-  webServer: {
-    command: process.env.ASSISTANT_BIN
-      ? `rm -rf ${homeDir} && mkdir -p ${homeDir} && HOME=${homeDir} ${process.env.ASSISTANT_BIN} webui serve --auth-token test-token --listen 127.0.0.1:8787`
-      : `rm -rf ${homeDir} && mkdir -p ${homeDir} && HOME=${homeDir} cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787`,
-    url: "http://127.0.0.1:8787/login",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+  /* Auto-start the servers if not already running: a scripted Ollama
+   * stand-in, then the assistant web UI and orchestrator with the
+   * examples/mcp-apps-demo MCP server under [mcp] and the stand-in as their
+   * LLM (see tests/support/e2e-server.mjs). */
+  webServer: [
+    {
+      command: `node tests/support/mock-ollama.mjs ${MOCK_LLM_PORT}`,
+      url: `http://127.0.0.1:${MOCK_LLM_PORT}/api/tags`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 10_000,
+    },
+    {
+      command: `node tests/support/e2e-server.mjs ${homeDir} ${MOCK_LLM_PORT} ${assistant}`,
+      url: "http://127.0.0.1:8787/login",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  ],
 });

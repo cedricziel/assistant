@@ -16,6 +16,7 @@ assistant-transcription = { path = "../transcription" }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
@@ -41,6 +42,7 @@ base64 = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]
+bytes = { workspace = true }
 # Installs the ring TLS provider before tests run (reqwest uses `rustls-no-provider`)
 assistant-core = { path = "../core", features = ["test-tls"] }
 sqlx = { workspace = true }

@@ -481,9 +481,9 @@
         ],
         "responses": {
           "200": {
-            "description": "MP3 audio bytes",
+            "description": "Audio in the configured [tts] format: audio/mpeg, audio/wav, audio/ogg or audio/pcm",
             "content": {
-              "audio/mpeg": {}
+              "audio/*": {}
             }
           },
           "400": {
@@ -3308,7 +3308,7 @@
         "tags": [
           "conversations"
         ],
-        "summary": "`GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant\nmessage and return it as `audio/mpeg`.",
+        "summary": "`GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant\nmessage and return it in the configured `[tts] format`.",
         "operationId": "get_message_audio",
         "parameters": [
           {
@@ -3333,9 +3333,9 @@
         ],
         "responses": {
           "200": {
-            "description": "MP3 audio bytes",
+            "description": "Audio in the configured [tts] format: audio/mpeg, audio/wav, audio/ogg or audio/pcm",
             "content": {
-              "audio/mpeg": {}
+              "audio/*": {}
             }
           },
           "400": {
@@ -11499,7 +11499,8 @@
           "title",
           "created_at",
           "updated_at",
-          "messages"
+          "messages",
+          "surfaces"
         ],
         "properties": {
           "created_at": {
@@ -11515,6 +11516,13 @@
             "items": {
               "$ref": "#/components/schemas/MessageSummary"
             }
+          },
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SurfaceSummary"
+            },
+            "description": "Generative UI surfaces anchored on the returned messages."
           },
           "title": {
             "type": "string"
@@ -14059,9 +14067,14 @@
         "description": "Server capability flags.",
         "required": [
           "voice_send",
-          "voice_receive"
+          "voice_receive",
+          "ui"
         ],
         "properties": {
+          "ui": {
+            "$ref": "#/components/schemas/UiCapabilities",
+            "description": "Generative-UI settings of the selected space's org."
+          },
           "voice_receive": {
             "type": "boolean",
             "description": "Whether the server can serve TTS audio for messages (TTS configured)."
@@ -14757,6 +14770,90 @@
           }
         }
       },
+      "SurfaceSummary": {
+        "type": "object",
+        "description": "One surface of a conversation, as the client needs to render it again.",
+        "required": [
+          "surface_id",
+          "turn",
+          "anchor_message_id",
+          "anchor_call_index",
+          "title",
+          "fallback_text",
+          "status",
+          "answerable",
+          "created_at",
+          "messages"
+        ],
+        "properties": {
+          "action_message_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The user message that carried the submitting action."
+          },
+          "anchor_call_index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Index of the creating call inside that message's tool calls.",
+            "minimum": 0
+          },
+          "anchor_message_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tool-call message the surface hangs off."
+          },
+          "answerable": {
+            "type": "boolean",
+            "description": "Whether the user can still answer the surface: it is `active` and no\nuser message follows its anchor on the returned path."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fallback_text": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "A single synthesized A2UI `createSurface` holding the current\ncomponents and data model."
+          },
+          "status": {
+            "type": "string",
+            "description": "`\"active\"` or `\"submitted\"`."
+          },
+          "submitted_action": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The action that submitted the surface."
+          },
+          "surface_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider id of the creating tool call, when the provider supplied one."
+          },
+          "turn": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "Task": {
         "type": "object",
         "description": "`Task` is the core unit of action for A2A. It has a current status and when\nresults are created they are stored in artifacts. Multi-turn interactions\nare stored in history.",
@@ -15243,6 +15340,22 @@
           },
           "turn_id": {
             "type": "string"
+          }
+        }
+      },
+      "UiCapabilities": {
+        "type": "object",
+        "description": "The part of the org's `[ui]` settings a client needs.\n\n`image_hosts` is deliberately absent: the server enforces it.",
+        "required": [
+          "link_hosts"
+        ],
+        "properties": {
+          "link_hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lower-case hosts whose `openUrl` targets open without a confirmation\nprompt. Empty means every link asks first."
           }
         }
       },
