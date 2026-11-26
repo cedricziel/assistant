@@ -147,6 +147,15 @@ impl TurnHistory {
         self.row_ids.insert(index, None);
     }
 
+    /// Whether a user message carries a recording, which makes the turn a
+    /// voice turn.
+    pub(crate) fn has_audio(&self) -> bool {
+        self.messages.iter().any(|m| {
+            matches!(m, ChatHistoryMessage::MultimodalUser { content }
+                if content.iter().any(|b| matches!(b, ContentBlock::Audio { .. })))
+        })
+    }
+
     /// Removes recordings, for a model that doesn't hear them. A user
     /// message left with only its text becomes a plain text message.
     pub(crate) fn drop_audio(&mut self) {

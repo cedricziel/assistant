@@ -125,6 +125,7 @@ pub fn build_chat_request(
             .image_config
             .clone()
             .filter(|_| settings.image_output),
+        audio: None,
     }
 }
 

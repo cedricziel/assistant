@@ -10,6 +10,7 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
+  'CodeBlock',
   'ConversationListView',
   'ConversationSearchResultsView',
   'FeedbackButtons',
@@ -30,7 +31,6 @@ const List<String> kAssistantUiElements = [
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
   // 'ChatThreadLayout', // slot: chat-element-library 10
-  // 'CodeBlock', // slot: chat-a11y-and-code-blocks C4
   // 'CodeDiffResultView', // slot: tool-result-renderers C7
   // 'CodeFileResultView', // slot: tool-result-renderers C7
   // 'CommandBody', // slot: chat-element-library 7b
