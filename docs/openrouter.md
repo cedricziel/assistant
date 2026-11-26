@@ -295,8 +295,37 @@ fetch is retried on a chat call, no sooner than 10 minutes later. Once a
 fetch succeeds, the catalog is not fetched again for the life of the
 provider.
 
-Embeddings for vector search use OpenRouter's embeddings endpoint with
-`[llm] embedding_model`, or `openai/text-embedding-3-small` when it is unset.
+## Embeddings
+
+With `[llm] provider = "openrouter"` and no `[llm.embeddings]` section,
+vector search embeds through OpenRouter's `/embeddings` endpoint, using
+the chat key and `base_url`. The model is `[llm] embedding_model`, or
+`openai/text-embedding-3-small` when it is unset.
+
+To embed through OpenRouter while chatting with any provider, set
+`[llm.embeddings] provider = "openrouter"`:
+
+```toml
+[llm.embeddings]
+provider = "openrouter"
+model    = "openai/text-embedding-3-small" # default
+# base_url = "https://openrouter.ai/api/v1" # default
+# api_key  = "sk-or-..."
+
+[llm.embeddings.openrouter.provider]
+data_collection = "deny"
+```
+
+The key is `[llm.embeddings] api_key`, else the `[llm]` key when
+`[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`.
+`[llm.embeddings.openrouter.provider]` takes the same keys as
+`[llm.openrouter.provider]` and is sent as the request's `provider`.
+Chat routing does not apply to embeddings.
+
+Each request posts `model`, `input` and `encoding_format = "float"`.
+More than 2048 texts are split across requests. Vectors come back in
+input order, and a response with the wrong number of vectors is an
+error. Errors and retries work as for chat, and errors name the model.
 
 ## Models
 

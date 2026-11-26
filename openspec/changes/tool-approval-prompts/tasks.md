@@ -80,8 +80,8 @@ ADR-0019 (generative-ui-a2ui)
       interactivity flag and removal of `AutoDenyConfirmation` (D3); where
       saved rules sit in the pipeline, their scope and admin management
       (D4, D4a); and the dormant-until-client-ready rollout with no feature
-      flag (D9). Cross-link `adr-0011-tool-permission-decision-model.md` by
-      filename (there are two ADR-0011 files) and
+      flag (D9). Cross-link `adr-0023-tool-permission-decision-model.md` by
+      filename and
       `adr-0013-per-space-runtimes.md`. Note that `generative-ui-a2ui`
       (ADR-0019) adds the `surface_action` kind.
 - [ ] 1.2 Add "Interaction" to `docs/glossary.md`.

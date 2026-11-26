@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:assistant_app/features/auth/auth_provider.dart';
 import 'package:assistant_app/features/contexts/data/context_repository.dart';
 import 'package:assistant_app/features/contexts/providers/context_providers.dart';
 import 'package:assistant_app/features/login/login_screen.dart';
@@ -40,6 +41,11 @@ Widget _buildSubject(ContextRepository repo) {
   );
 }
 
+class _FailedLoginNotifier extends OAuthLoginNotifier {
+  @override
+  OAuthLoginState build() => const OAuthLoginError('Server took too long');
+}
+
 /// Switches the login screen to legacy token mode by tapping the mode toggle.
 Future<void> _switchToLegacyMode(WidgetTester tester) async {
   await tester.tap(find.text('Use token authentication instead'));
@@ -56,6 +62,35 @@ Future<void> _enterServerUrl(
 
 void main() {
   group('LoginScreen', () {
+    testWidgets('lets the user select and copy the error text', (tester) async {
+      final repo = await _makeRepo();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            contextRepositoryProvider.overrideWithValue(repo),
+            oauthLoginProvider.overrideWith(_FailedLoginNotifier.new),
+          ],
+          child: MaterialApp.router(
+            routerConfig: GoRouter(
+              initialLocation: '/login',
+              routes: [
+                GoRoute(
+                  path: '/login',
+                  builder: (ctx, s) => const LoginScreen(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(SelectableText, 'Server took too long'),
+        findsOneWidget,
+      );
+    });
+
     group('OAuth2 mode (default)', () {
       testWidgets('renders Sign in heading', (tester) async {
         final repo = await _makeRepo();

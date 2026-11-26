@@ -211,6 +211,8 @@ pub struct EmbeddingRequest<'a> {
     pub model: &'a str,
     pub input: &'a [&'a str],
     pub encoding_format: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<&'a OpenRouterRouting>,
 }
 
 #[derive(Debug, Deserialize)]

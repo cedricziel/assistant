@@ -8,18 +8,21 @@
 
 use std::sync::Arc;
 
+use anyhow::Result;
 use async_trait::async_trait;
 use tracing::warn;
 
 use assistant_core::clock::Clock;
 use assistant_core::identity::{OrgId, SpaceId};
 use assistant_core::integrations::{
-    EffectiveIntegrations, IntegrationCredentialStore, IntegrationHealthStore, IntegrationStore,
-    IntegrationTrust, SecretBox,
+    EffectiveIntegrations, Integration, IntegrationCredentialStore, IntegrationHealthStore,
+    IntegrationStore, IntegrationTrust, SecretBox,
 };
+use assistant_core::mcp_app::{McpAppServer, McpAppServers};
 use assistant_core::store::{OrgStore, SpaceStore};
 use assistant_core::tool::{ToolHandler, TurnScope, TurnToolSource};
 
+use crate::apps::ClientAppServer;
 use crate::bridge::model_visible_handlers;
 use crate::connections::IntegrationConnections;
 
@@ -141,18 +144,49 @@ impl TurnToolSource for IntegrationToolSource {
                     continue;
                 }
             };
-            let namespace = format!("{}_{}", integration.layer, integration.slug);
-            let requires_confirmation = integration.trust != IntegrationTrust::Trust;
             handlers.extend(
                 model_visible_handlers(
-                    &namespace,
+                    &namespace(integration),
                     &connected.tools,
                     &connected.client,
-                    requires_confirmation,
+                    integration.trust != IntegrationTrust::Trust,
                 )
                 .map(|handler| Arc::new(handler) as Arc<dyn ToolHandler>),
             );
         }
         handlers
+    }
+}
+
+/// The server namespace of an integration's tools, as in `mcp__{namespace}__{tool}`.
+fn namespace(integration: &Integration) -> String {
+    format!("{}_{}", integration.layer, integration.slug)
+}
+
+#[async_trait]
+impl McpAppServers for IntegrationToolSource {
+    /// The integration whose tools are named `server`, connected with the
+    /// caller's own credential.
+    async fn server(
+        &self,
+        scope: &TurnScope<'_>,
+        server: &str,
+    ) -> Result<Option<Arc<dyn McpAppServer>>> {
+        let Some((org, space)) = self.locate(scope).await else {
+            return Ok(None);
+        };
+        let effective = self.effective.resolve(&org, &space, scope.user_id).await?;
+        let Some(found) = effective
+            .iter()
+            .find(|e| namespace(&e.integration) == server)
+        else {
+            return Ok(None);
+        };
+        let connected = self.connections.connect(found).await?;
+        Ok(Some(Arc::new(ClientAppServer::new(
+            connected.client,
+            connected.tools,
+            found.integration.trust != IntegrationTrust::Trust,
+        ))))
     }
 }

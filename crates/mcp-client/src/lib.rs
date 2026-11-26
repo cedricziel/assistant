@@ -15,6 +15,7 @@
 //! Each [`McpToolHandler`] implements `assistant_core::ToolHandler` and
 //! forwards `run()` calls to the remote MCP server via the rmcp `Peer`.
 
+pub mod apps;
 pub mod bridge;
 pub mod client;
 pub mod connections;

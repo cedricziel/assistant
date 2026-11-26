@@ -79,7 +79,7 @@ None (no existing spec covers tool execution).
   `orchestrator/subagent.rs`; decision-model client.
 - `crates/tool-executor`: file tools, `web-fetch`, `bash`, `process`.
 - `crates/workflow-http`: destination context for the decision model.
-- Docs: `docs/tool-permissions.md`, `docs/adr/adr-0011-tool-permission-decision-model.md`.
+- Docs: `docs/tool-permissions.md`, `docs/adr/adr-0023-tool-permission-decision-model.md`.
 - Out of scope: `crates/web-ui` (separate rework in flight); the MCP server's
   direct `executor.execute` path is hardened only by the tool-level guards
   (confinement, limits), not by the decision pipeline — tracked as
