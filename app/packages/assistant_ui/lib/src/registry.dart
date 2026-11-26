@@ -30,6 +30,8 @@ const List<String> kAssistantUiElements = [
   'JsonTreeView',
   'MessageActionButton',
   'MessageActions',
+  'MessageBody',
+  'MessageBubble',
   'MessageEditor',
   'MessageTimingIndicator',
   'PermissionRuleTile',
@@ -50,14 +52,13 @@ const List<String> kAssistantUiElements = [
   'ToolResultRendererScope',
   'ToolStatusIcon',
   'TurnProgressCard',
+  'TypingIndicator',
   'UnknownInteractionCard',
   // 'BranchPicker', // slot: message-branching 9
   // 'CommandBody', // slot: chat-element-library 7b
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
   // 'LinkPreviewResultView', // slot: tool-result-renderers C5
-  // 'MessageBody', // slot: chat-element-library 8b
-  // 'MessageBubble', // slot: chat-element-library 8b
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
@@ -66,6 +67,5 @@ const List<String> kAssistantUiElements = [
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c
-  // 'TypingIndicator', // slot: chat-element-library 8b
   // 'UnknownInteractionCard', // slot: tool-approval-prompts 13b
 ];
