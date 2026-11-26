@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::llm::call_context::LlmCallContext;
@@ -141,6 +142,13 @@ pub const TURN_CANCELLED_MARKER: &str = "turn_cancelled";
 /// when the turn was cancelled before any worker claimed it. Nothing of such a
 /// turn ran: the user message was never added to the conversation history.
 pub const TURN_CANCELLED_BEFORE_START_MARKER: &str = "cancelled_before_start";
+
+/// How often a worker refreshes the bus claim of the turn it is running.
+///
+/// Bus claims are reaped, and NATS `ack_wait` expires, after 5 minutes; a
+/// 60 second heartbeat keeps a long tool run or a turn waiting on a human
+/// from being redelivered to a second worker.
+pub const DEFAULT_BUS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The result of a single orchestrator turn.
 pub struct TurnResult {
@@ -310,6 +318,10 @@ pub struct Orchestrator {
     /// timing out. Defaults to 10 800 s (3 h). Configurable per persona via
     /// `with_submit_timeout`.
     pub(crate) submit_timeout_secs: u64,
+    /// How often the worker refreshes the bus claim of the turn it is
+    /// running. Must stay well below the bus reap / `ack_wait` timeout
+    /// (5 min). Tests shorten it with `with_bus_heartbeat_interval`.
+    pub(crate) bus_heartbeat_interval: Duration,
     /// Optional audio store for retrieving TTS blobs produced by the
     /// `voice-response` tool.  When present, synthesised audio is appended
     /// to `TurnResult::attachments` so channel adapters can deliver it.
@@ -379,6 +391,7 @@ impl Orchestrator {
             agent_id: config.agent.id.clone(),
             compaction_config,
             submit_timeout_secs: 10_800,
+            bus_heartbeat_interval: DEFAULT_BUS_HEARTBEAT_INTERVAL,
             adapter_registry: crate::AdapterRegistry::new(),
             audio_store: None,
             conversation_configs: Arc::default(),
@@ -427,6 +440,12 @@ impl Orchestrator {
     /// loaded from the database.  The value must be > 0.
     pub fn with_submit_timeout(mut self, secs: u64) -> Self {
         self.submit_timeout_secs = secs.max(1);
+        self
+    }
+
+    /// Override how often the worker refreshes the bus claim of a running turn.
+    pub fn with_bus_heartbeat_interval(mut self, interval: Duration) -> Self {
+        self.bus_heartbeat_interval = interval;
         self
     }
 
