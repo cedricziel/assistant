@@ -14,7 +14,10 @@ const { outputFiles } = await build({
   write: false,
 });
 const script = outputFiles[0].text.replaceAll("</script", "<\\/script");
-const template = await readFile(new URL("./src/app.html", import.meta.url), "utf8");
+const template = await readFile(
+  new URL("./src/app.html", import.meta.url),
+  "utf8",
+);
 const html = template.replace(
   "<script>\n      /* APP_SCRIPT */\n    </script>",
   () => `<script type="module">${script}</script>`,
