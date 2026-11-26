@@ -89,6 +89,16 @@ take that effort, the provider logs the reason followed by
 without contacting OpenRouter. See
 [Troubleshooting](#troubleshooting) for the messages.
 
+### `[llm.openrouter.cache]` section
+
+Prompt caching settings. An unknown key fails config load. See
+[Prompt caching](#prompt-caching).
+
+| Key       | Default | Description                                          |
+| --------- | ------- | ---------------------------------------------------- |
+| `enabled` | `true`  | Send `cache_control` breakpoints. `false` sends none |
+| `ttl`     | `"5m"`  | Cache lifetime, `"5m"` or `"1h"`                     |
+
 ## Request identity
 
 During a conversation turn, each request carries:
@@ -98,6 +108,24 @@ During a conversation turn, each request carries:
   characters. The raw user ID and email are never sent.
 
 Background calls made outside a turn send neither field.
+
+## Prompt caching
+
+The model's author is the slug prefix before `/`. Only `anthropic`,
+`google` and `qwen` models need explicit breakpoints. For them the
+provider sends the system prompt as a text part with
+`cache_control: {"type": "ephemeral"}`, adding `"ttl": "1h"` when
+`ttl = "1h"`. Anthropic models also get the breakpoint on the last part
+of the last user message. Other models get no `cache_control`, because
+their upstreams cache automatically.
+
+Every request in a conversation carries the same `session_id` (see
+[Request identity](#request-identity)), which keeps it on the same
+upstream so the cache can hit.
+
+Usage reports cache reads as cached input tokens, from
+`prompt_tokens_details.cached_tokens`, and cache writes as cache-write
+input tokens, from `prompt_tokens_details.cache_write_tokens`.
 
 ## Errors and retries
 
