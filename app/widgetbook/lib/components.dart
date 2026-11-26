@@ -6,6 +6,7 @@ import 'components/code_block.dart';
 import 'components/compact_expandable.dart';
 import 'components/conversation_list_view.dart';
 import 'components/conversation_search_results_view.dart';
+import 'components/data_table_result_view.dart';
 import 'components/feedback_buttons.dart';
 import 'components/feedback_comment_field.dart';
 import 'components/generic_tool_result_view.dart';
@@ -55,7 +56,6 @@ final List<WidgetbookComponent> kComponents = [
   // commandBodyComponent, // slot: chat-element-library 7b
   // composerComponent, // slot: chat-element-library 11a
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
-  // dataTableResultViewComponent, // slot: tool-result-renderers C6
   // feedbackButtonsComponent, // slot: message-feedback 5
   // feedbackCommentFieldComponent, // slot: message-feedback 5
   // jsonTreeViewComponent, // slot: tool-result-renderers C2b
@@ -81,6 +81,7 @@ final List<WidgetbookComponent> kComponents = [
   compactExpandableComponent,
   conversationListViewComponent,
   conversationSearchResultsViewComponent,
+  dataTableResultViewComponent,
   feedbackButtonsComponent,
   feedbackCommentFieldComponent,
   genericToolResultViewComponent,

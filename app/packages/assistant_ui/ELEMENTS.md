@@ -68,7 +68,7 @@ The list keeps the old numbering. Three prerequisites are now owned by siblings.
 
 | #   | Element       | Verdict                             | Flutter element                 | Note                                                                       |
 | --- | ------------- | ----------------------------------- | ------------------------------- | -------------------------------------------------------------------------- |
-| 19  | Data table    | **Adopt via tool-result-renderers** | `DataTableResultView` (sibling) | Generic `data_table` contract; first producers `list-tasks` and `process`. |
+| 19  | Data table    | Adopt (have)                        | `DataTableResultView`           | Generic `data_table` contract; first producers `list-tasks` and `process`. |
 | 20  | Number ticker | **Decline**                         | —                               | Animation with nothing to animate.                                         |
 
 ## Agents (6)

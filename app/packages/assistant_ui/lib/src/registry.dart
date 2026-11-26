@@ -14,6 +14,7 @@ const List<String> kAssistantUiElements = [
   'CompactExpandable',
   'ConversationListView',
   'ConversationSearchResultsView',
+  'DataTableResultView',
   'FeedbackButtons',
   'FeedbackCommentField',
   'GenericToolResultView',
@@ -46,7 +47,6 @@ const List<String> kAssistantUiElements = [
   // 'CommandBody', // slot: chat-element-library 7b
   // 'Composer', // slot: chat-element-library 11a
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
-  // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
   // 'JsonTreeView', // slot: tool-result-renderers C2b

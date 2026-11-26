@@ -12,7 +12,6 @@ const pendingKinds = <String>{
   'link_preview',
   'code_file',
   'code_diff',
-  'data_table',
   'plan',
 };
 
