@@ -3,13 +3,12 @@
 /// See `README.md` for the purity, injection and composition rules.
 library;
 
-// export 'src/bodies/command_body.dart'; // slot: chat-element-library 7b
-
-// export 'src/bodies/subagent_body.dart'; // slot: chat-element-library 7b
 // export 'src/branch_picker.dart'; // slot: message-branching 9
 // export 'src/code/code_block.dart'; // slot: chat-a11y-and-code-blocks C4
 // export 'src/composer/attachment_tray.dart'; // slot: chat-element-library 11b
 // export 'src/composer/composer_voice_button.dart'; // slot: chat-element-library 11b
+export 'src/bodies/command_body.dart';
+export 'src/bodies/subagent_body.dart';
 export 'src/bodies/thinking_body.dart';
 export 'src/bodies/tool_call_body.dart';
 export 'src/bodies/tool_status_icon.dart';

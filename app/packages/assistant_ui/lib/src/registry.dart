@@ -14,6 +14,7 @@ const List<String> kAssistantUiElements = [
   'CodeBlock',
   'CodeDiffResultView',
   'CodeFileResultView',
+  'CommandBody',
   'CompactExpandable',
   'Composer',
   'ConversationListView',
@@ -32,6 +33,7 @@ const List<String> kAssistantUiElements = [
   'RegenerateMenuButton',
   'SlashCommandMenu',
   'StarterPrompts',
+  'SubagentBody',
   'SuggestionChips',
   'SurfaceFrame',
   'ThinkingBody',
@@ -47,7 +49,6 @@ const List<String> kAssistantUiElements = [
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
   // 'ChatThreadLayout', // slot: chat-element-library 10
-  // 'CommandBody', // slot: chat-element-library 7b
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
   // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
@@ -60,7 +61,6 @@ const List<String> kAssistantUiElements = [
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
   // 'SourcesResultView', // slot: tool-result-renderers C4
-  // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'ThreadViewport', // slot: chat-element-library 10
   // 'TimelineEntryShell', // slot: chat-element-library 5b

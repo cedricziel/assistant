@@ -6,6 +6,7 @@ import 'components/chat_markdown_scope.dart';
 import 'components/code_block.dart';
 import 'components/code_diff_result_view.dart';
 import 'components/code_file_result_view.dart';
+import 'components/command_body.dart';
 import 'components/compact_expandable.dart';
 import 'components/composer.dart';
 import 'components/conversation_list_view.dart';
@@ -24,6 +25,7 @@ import 'components/queued_message_bubble.dart';
 import 'components/regenerate_menu_button.dart';
 import 'components/slash_command_menu.dart';
 import 'components/starter_prompts.dart';
+import 'components/subagent_body.dart';
 import 'components/suggestion_chips.dart';
 import 'components/surface_frame.dart';
 import 'components/thinking_body.dart';
@@ -56,7 +58,6 @@ final List<WidgetbookComponent> kComponents = [
   // attachmentTrayComponent, // slot: chat-element-library 11b
   // branchPickerComponent, // slot: message-branching 9
   // chatThreadLayoutComponent, // slot: chat-element-library 10
-  // commandBodyComponent, // slot: chat-element-library 7b
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
   // dataTableResultViewComponent, // slot: tool-result-renderers C6
   // feedbackButtonsComponent, // slot: message-feedback 5
@@ -69,7 +70,6 @@ final List<WidgetbookComponent> kComponents = [
   // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
   // planResultViewComponent, // slot: tool-result-renderers C5
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
-  // subagentBodyComponent, // slot: chat-element-library 7b
   // terminalResultViewComponent, // slot: tool-result-renderers C4
   // threadViewportComponent, // slot: chat-element-library 10
   // timelineEntryShellComponent, // slot: chat-element-library 5b
@@ -82,6 +82,7 @@ final List<WidgetbookComponent> kComponents = [
   codeBlockComponent,
   codeDiffResultViewComponent,
   codeFileResultViewComponent,
+  commandBodyComponent,
   compactExpandableComponent,
   composerComponent,
   conversationListViewComponent,
@@ -100,6 +101,7 @@ final List<WidgetbookComponent> kComponents = [
   regenerateMenuButtonComponent,
   slashCommandMenuComponent,
   starterPromptsComponent,
+  subagentBodyComponent,
   suggestionChipsComponent,
   surfaceFrameComponent,
   thinkingBodyComponent,

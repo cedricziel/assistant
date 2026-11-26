@@ -24,7 +24,6 @@ import 'chat_announcer.dart';
 import 'chat_empty_starters.dart';
 import 'chat_markdown_config.dart';
 import 'chat_provider.dart';
-import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'message_bubble.dart';
@@ -515,8 +514,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                           // system-event tiles.
                                           if (msg.timelineType ==
                                               TimelineEntryType.command) {
-                                            return CommandEventTile(
-                                              message: msg,
+                                            return CommandBody(
+                                              name: msg.commandName ?? '',
+                                              ack:
+                                                  msg.commandAckText ??
+                                                  msg.content,
                                             );
                                           }
 
