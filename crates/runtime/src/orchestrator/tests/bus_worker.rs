@@ -5,6 +5,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -12,7 +14,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use assistant_core::auth::AuthContext;
 use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{Interface, TurnIdentity};
-use assistant_core::{LlmProvider, MessageBus, PublishRequest, bus_messages, topic};
+use assistant_core::{
+    BusMessage, ClaimFilter, LlmProvider, MessageBus, MessageStatus, PublishRequest, bus_messages,
+    topic,
+};
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
@@ -60,6 +65,7 @@ async fn run_worker_processes_turn_request() {
         timestamp: None,
         traceparent: None,
         attachment_ids: vec![],
+        interactive: false,
         user_id: None,
         org_id: None,
         space_id: None,
@@ -134,6 +140,7 @@ async fn submit_turn_publishes_and_waits_for_result() {
             conv_id,
             Interface::Cli,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await
         .unwrap();
@@ -161,6 +168,7 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
         timestamp: None,
         traceparent: None,
         attachment_ids: vec![],
+        interactive: false,
         user_id: None,
         org_id: None,
         space_id: None,
@@ -226,9 +234,16 @@ async fn a_completed_turn_is_announced_on_turn_completed() {
     let _worker = tokio::spawn(async move { worker_orch.run_worker("test-worker").await });
     let conv_id = Uuid::new_v4();
 
-    orch.submit_turn(&AuthContext::system(), "hi", conv_id, Interface::Web, None)
-        .await
-        .unwrap();
+    orch.submit_turn(
+        &AuthContext::system(),
+        "hi",
+        conv_id,
+        Interface::Web,
+        None,
+        crate::orchestrator::SubmitOptions::default(),
+    )
+    .await
+    .unwrap();
 
     let announced = orch
         .bus()
@@ -269,6 +284,7 @@ async fn submit_turn_with_worker_returns_result() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await;
 
@@ -298,6 +314,7 @@ async fn submit_turn_without_worker_times_out() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         ),
     )
     .await;
@@ -357,6 +374,7 @@ async fn with_submit_timeout_respected() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         ),
     )
     .await;
@@ -435,6 +453,7 @@ async fn persistent_transient_error_stops_at_redelivery_cap() {
             Uuid::new_v4(),
             Interface::Cli,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await;
     worker.abort();
@@ -558,6 +577,7 @@ async fn timeout_cancels_in_flight_worker_turn() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await;
     let elapsed = start.elapsed();
@@ -745,6 +765,7 @@ async fn cancel_turn_aborts_inflight_submit() {
                 Interface::Web,
                 None,
                 vec![],
+                crate::orchestrator::SubmitOptions::default(),
             )
             .await
     });
@@ -814,6 +835,7 @@ async fn submit_unclaimed(
                 Interface::Web,
                 None,
                 vec![],
+                crate::orchestrator::SubmitOptions::default(),
             )
             .await
     });
@@ -1059,4 +1081,155 @@ async fn release_token_sink_keeps_a_newer_turns_sender() {
         .get(&conversation_id)
         .expect("a different turn's sink must stay registered");
     assert!(kept.same_channel(&newer_tx));
+}
+
+// -- Bus claim heartbeat --
+
+/// A [`MessageBus`] that records which message ids were touched.
+struct TouchRecordingBus {
+    inner: Arc<dyn MessageBus>,
+    touched: std::sync::Mutex<Vec<Uuid>>,
+}
+
+impl TouchRecordingBus {
+    fn touches(&self) -> Vec<Uuid> {
+        self.touched.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl MessageBus for TouchRecordingBus {
+    async fn publish(&self, request: PublishRequest) -> anyhow::Result<Uuid> {
+        self.inner.publish(request).await
+    }
+
+    async fn claim_filtered(
+        &self,
+        topic: &str,
+        worker_id: &str,
+        filter: &ClaimFilter,
+    ) -> anyhow::Result<Option<BusMessage>> {
+        self.inner.claim_filtered(topic, worker_id, filter).await
+    }
+
+    async fn ack(&self, message_id: Uuid) -> anyhow::Result<()> {
+        self.inner.ack(message_id).await
+    }
+
+    async fn nack(&self, message_id: Uuid) -> anyhow::Result<()> {
+        self.inner.nack(message_id).await
+    }
+
+    async fn touch(&self, message_id: Uuid) -> anyhow::Result<()> {
+        self.touched.lock().unwrap().push(message_id);
+        self.inner.touch(message_id).await
+    }
+
+    async fn fail(&self, message_id: Uuid) -> anyhow::Result<()> {
+        self.inner.fail(message_id).await
+    }
+
+    async fn list(
+        &self,
+        topic: &str,
+        status: Option<MessageStatus>,
+        limit: u32,
+    ) -> anyhow::Result<Vec<BusMessage>> {
+        self.inner.list(topic, status, limit).await
+    }
+
+    async fn reap_stale(&self, timeout: Duration) -> anyhow::Result<u64> {
+        self.inner.reap_stale(timeout).await
+    }
+
+    async fn purge(&self, older_than: DateTime<Utc>) -> anyhow::Result<u64> {
+        self.inner.purge(older_than).await
+    }
+
+    async fn has_active_message(&self, conversation_id: &str, topic: &str) -> anyhow::Result<bool> {
+        self.inner.has_active_message(conversation_id, topic).await
+    }
+}
+
+/// A turn that outlives the heartbeat interval refreshes the claim of the bus
+/// message it is running, and stops once the turn is done.
+#[tokio::test]
+async fn worker_touches_the_claimed_message_while_a_turn_runs() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(600))
+                .set_body_json(ollama_answer("slow answer")),
+        )
+        .mount(&server)
+        .await;
+
+    let recording: Arc<std::sync::OnceLock<Arc<TouchRecordingBus>>> = Arc::default();
+    let slot = recording.clone();
+    let mut config = OrgConfig::default();
+    config.memory.enabled = false;
+    let (orch, _storage) = super::build_customized(&server.uri(), config, |o| {
+        let bus = Arc::new(TouchRecordingBus {
+            inner: o.bus.clone(),
+            touched: Default::default(),
+        });
+        let _ = slot.set(bus.clone());
+        let mut o = o.with_bus_heartbeat_interval(Duration::from_millis(100));
+        o.bus = bus;
+        o
+    })
+    .await;
+    let recording = recording.get().cloned().unwrap();
+    spawn_worker(&orch);
+
+    let conv_id = Uuid::new_v4();
+    let turn_req = bus_messages::TurnRequest {
+        prompt: "take your time".to_string(),
+        conversation_id: conv_id,
+        extension_tools: vec![],
+        timestamp: None,
+        traceparent: None,
+        attachment_ids: vec![],
+        interactive: false,
+        user_id: None,
+        org_id: None,
+        space_id: None,
+    };
+    let message_id = orch
+        .bus()
+        .publish(
+            PublishRequest::new(
+                topic::TURN_REQUEST,
+                serde_json::to_value(&turn_req).unwrap(),
+            )
+            .with_agent_id("default")
+            .with_conversation_id(conv_id)
+            .with_interface("Cli"),
+        )
+        .await
+        .unwrap();
+
+    wait_until("turn to finish", || async {
+        bus_count(&orch, topic::TURN_REQUEST, MessageStatus::Done).await == 1
+    })
+    .await;
+
+    let touches = recording.touches();
+    assert!(
+        !touches.is_empty(),
+        "a turn running past the heartbeat interval must touch its claim"
+    );
+    assert!(
+        touches.iter().all(|id| *id == message_id),
+        "only the claimed message may be touched, got {touches:?}"
+    );
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        recording.touches().len(),
+        touches.len(),
+        "the heartbeat must stop when the turn finishes"
+    );
 }

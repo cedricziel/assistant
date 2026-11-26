@@ -8,6 +8,7 @@ description = "Core types, skill definitions, and shared traits for the assistan
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+jsonschema = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }

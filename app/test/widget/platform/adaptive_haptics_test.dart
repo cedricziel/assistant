@@ -57,7 +57,7 @@ void main() {
 
       // Tap the first switch tile (CupertinoSwitch on iOS).
       final switches = find.byType(CupertinoSwitch);
-      expect(switches, findsNWidgets(3));
+      expect(switches, findsNWidgets(4));
       await tester.tap(switches.first);
       await tester.pumpAndSettle();
 
@@ -99,7 +99,7 @@ void main() {
 
       // Tap the first switch tile on macOS.
       final switches = find.byType(SwitchListTile);
-      expect(switches, findsNWidgets(3));
+      expect(switches, findsNWidgets(4));
       await tester.tap(switches.first);
       await tester.pumpAndSettle();
 

@@ -937,6 +937,7 @@ mod tools_tests {
             turn: 0,
             interface: Interface::Slack,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,

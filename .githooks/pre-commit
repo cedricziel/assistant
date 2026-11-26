@@ -74,7 +74,7 @@ cargo machete --with-metadata \
 
 if [ "$FLUTTER_CHANGED" = true ]; then
     step "Running Flutter tests..."
-    (cd app && flutter test) \
+    make test-flutter \
         || fail "flutter test failed — fix failing tests before committing"
 else
     step "Skipping Flutter tests (no app/ or openapi.json changes)"

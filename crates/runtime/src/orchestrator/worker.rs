@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    ClaimFilter, ContentBlock, MAX_TURN_REDELIVERIES, OrgId, PublishRequest, SpaceId, ToolHandler,
-    UserId, auth::AuthContext, bus_messages, topic, types::conversation::Interface,
+    ClaimFilter, ContentBlock, MAX_TURN_REDELIVERIES, MessageBus, OrgId, PublishRequest, SpaceId,
+    ToolHandler, UserId, auth::AuthContext, bus_messages, topic, types::conversation::Interface,
     types::conversation::TurnIdentity,
 };
 use chrono::{DateTime, Local, Utc};
@@ -26,6 +26,46 @@ use uuid::Uuid;
 use super::turn_cancellations::Claim;
 use super::{ExtensionRegistration, Orchestrator, TurnResult, parse_interface};
 use crate::webhook_dispatch;
+
+/// Periodically refreshes the claim of a bus message while a turn runs.
+///
+/// The background task is aborted when the guard is dropped.
+struct ClaimHeartbeat(tokio::task::JoinHandle<()>);
+
+impl ClaimHeartbeat {
+    fn spawn(bus: Arc<dyn MessageBus>, message_id: Uuid, interval: Duration) -> Self {
+        Self(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // The first tick completes immediately; the claim is fresh then.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                if let Err(e) = bus.touch(message_id).await {
+                    warn!(%message_id, error = %e, "failed to refresh bus claim");
+                }
+            }
+        }))
+    }
+}
+
+impl Drop for ClaimHeartbeat {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Per-submit flags for [`Orchestrator::submit_turn`] and
+/// [`Orchestrator::submit_turn_with_request_id`].
+///
+/// The default is a non-interactive turn: tools that need a human's answer are
+/// denied instead of prompting.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SubmitOptions {
+    /// A human is waiting on this turn and can answer prompts (tool approvals,
+    /// questions). Reaches tools as `ExecutionContext::interactive`.
+    pub interactive: bool,
+}
 
 impl Orchestrator {
     // ── Bus-based turn processing ────────────────────────────────────────────
@@ -241,7 +281,18 @@ impl Orchestrator {
                         user_id: turn_req.user_id.map(UserId::from),
                         org_id: turn_req.org_id.map(OrgId::from),
                         space_id: turn_req.space_id.map(SpaceId::from),
+                        interactive: turn_req.interactive,
+                        run_id: msg.batch_id,
                     };
+
+                    // Keep the bus claim alive for as long as the turn runs so
+                    // it is not reaped (or redelivered by the broker) and run
+                    // twice. Dropped, and thereby aborted, on every exit path.
+                    let _heartbeat = ClaimHeartbeat::spawn(
+                        self.bus.clone(),
+                        msg.id,
+                        self.bus_heartbeat_interval,
+                    );
 
                     // Dispatch to the appropriate processing method, racing
                     // against the per-turn cancellation token so an expired
@@ -649,6 +700,7 @@ impl Orchestrator {
     /// * `interface` — originating interface
     /// * `timestamp` — when the message was received (injected as a prefix into
     ///   the prompt by the worker)
+    /// * `options` — per-submit flags, see [`SubmitOptions`]
     pub async fn submit_turn(
         &self,
         auth: &AuthContext,
@@ -656,6 +708,7 @@ impl Orchestrator {
         conversation_id: Uuid,
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
+        options: SubmitOptions,
     ) -> Result<TurnResult> {
         self.submit_turn_internal(
             prompt,
@@ -666,6 +719,7 @@ impl Orchestrator {
             vec![],
             TurnIdentity::from_auth(auth),
             None,
+            options,
         )
         .await
     }
@@ -689,6 +743,7 @@ impl Orchestrator {
             attachment_ids,
             TurnIdentity::from_auth(auth),
             None,
+            SubmitOptions::default(),
         )
         .await
     }
@@ -712,6 +767,7 @@ impl Orchestrator {
             attachment_ids,
             identity,
             None,
+            SubmitOptions::default(),
         )
         .await
     }
@@ -733,6 +789,7 @@ impl Orchestrator {
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
         attachment_ids: Vec<Uuid>,
+        options: SubmitOptions,
     ) -> Result<TurnResult> {
         self.submit_turn_internal(
             prompt,
@@ -743,6 +800,7 @@ impl Orchestrator {
             attachment_ids,
             TurnIdentity::from_auth(auth),
             Some(request_id),
+            options,
         )
         .await
     }
@@ -760,6 +818,7 @@ impl Orchestrator {
         attachment_ids: Vec<Uuid>,
         identity: TurnIdentity,
         request_id_override: Option<Uuid>,
+        options: SubmitOptions,
     ) -> Result<TurnResult> {
         let request_id = request_id_override.unwrap_or_else(Uuid::new_v4);
         // Register a cancellation token so the worker can be interrupted if
@@ -800,6 +859,7 @@ impl Orchestrator {
             timestamp,
             traceparent: crate::otel_spans::traceparent_from_context(&interface_cx),
             attachment_ids,
+            interactive: options.interactive,
             user_id: identity.user_id.as_ref().map(|u| u.to_string()),
             org_id: identity.org_id.as_ref().map(|o| o.to_string()),
             space_id: identity.space_id.as_ref().map(|s| s.to_string()),

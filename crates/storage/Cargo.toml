@@ -21,6 +21,9 @@ serde = { workspace = true }
 cron = { workspace = true }
 unicode-normalization = { workspace = true }
 
+[build-dependencies]
+anyhow = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true }
 tempfile = { workspace = true }

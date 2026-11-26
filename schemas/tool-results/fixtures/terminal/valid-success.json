@@ -1,0 +1,11 @@
+{
+  "kind": "terminal",
+  "command": "echo hi",
+  "exit_code": 0,
+  "stdout": "hi\n",
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "duration_ms": 12,
+  "timed_out": false
+}

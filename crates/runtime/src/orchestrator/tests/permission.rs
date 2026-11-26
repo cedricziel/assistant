@@ -151,6 +151,7 @@ fn ctx(interactive: bool) -> ExecutionContext {
             Interface::Slack
         },
         interactive,
+        run_id: None,
         allowed_tools: None,
         depth: 0,
         user_id: None,

@@ -172,6 +172,34 @@ impl StreamProjector for SseProjector {
                     log_payload: p,
                 }
             }
+            OrchestratorEvent::SurfaceUpdate {
+                surface_id,
+                tool_call_id,
+                anchor_message_id,
+                anchor_call_index,
+                title,
+                fallback_text,
+                status,
+                messages,
+            } => {
+                let mut p = json!({
+                    "surface_id": surface_id,
+                    "anchor_message_id": anchor_message_id,
+                    "anchor_call_index": anchor_call_index,
+                    "title": title,
+                    "fallback_text": fallback_text,
+                    "status": status,
+                    "messages": messages,
+                });
+                if let Some(id) = tool_call_id {
+                    p["tool_call_id"] = Value::String(id.clone());
+                }
+                SseFrame {
+                    event: "surface_update".to_string(),
+                    sse_data: p.to_string(),
+                    log_payload: p,
+                }
+            }
         };
         vec![frame]
     }
@@ -244,6 +272,11 @@ impl StreamProjector for CliProjector {
             | OrchestratorEvent::SubagentCompleted { .. }
             | OrchestratorEvent::SubagentEvent { .. }
             | OrchestratorEvent::AudioReady { .. } => Vec::new(),
+            // Totality only: surfaces are gated to interactive web turns, so
+            // this arm is unreachable in practice.
+            OrchestratorEvent::SurfaceUpdate { fallback_text, .. } => {
+                vec![fallback_text.clone()]
+            }
         }
     }
 }
@@ -294,7 +327,21 @@ mod tests {
             OrchestratorEvent::AudioReady {
                 audio_id: "audio-1".into(),
             },
+            surface_update_sample(),
         ]
+    }
+
+    fn surface_update_sample() -> OrchestratorEvent {
+        OrchestratorEvent::SurfaceUpdate {
+            surface_id: "s-1".into(),
+            tool_call_id: Some("call_9".into()),
+            anchor_message_id: "m-1".into(),
+            anchor_call_index: 2,
+            title: "Trip form".into(),
+            fallback_text: "Trip form: choose a date".into(),
+            status: "active".into(),
+            messages: vec![json!({"version": "v1.0", "createSurface": {"surfaceId": "s-1"}})],
+        }
     }
 
     /// Frames of a representative turn: a token, a top-level tool result and a
@@ -521,6 +568,7 @@ mod tests {
                 },
                 "audio_ready",
             ),
+            (surface_update_sample(), "surface_update"),
         ];
         for (event, expected) in cases {
             assert_eq!(only(event).event, expected);
@@ -572,6 +620,54 @@ mod tests {
                 .is_some_and(|s| s.contains("AudioReady")),
             "unknown inner event should be debug-formatted, got {:?}",
             frame.log_payload
+        );
+    }
+
+    #[test]
+    fn surface_update_projects_exact_snake_case_payload() {
+        let frame = only(surface_update_sample());
+        assert_eq!(frame.event, "surface_update");
+        assert_eq!(
+            frame.log_payload,
+            json!({
+                "surface_id": "s-1",
+                "tool_call_id": "call_9",
+                "anchor_message_id": "m-1",
+                "anchor_call_index": 2,
+                "title": "Trip form",
+                "fallback_text": "Trip form: choose a date",
+                "status": "active",
+                "messages": [{"version": "v1.0", "createSurface": {"surfaceId": "s-1"}}],
+            })
+        );
+        assert_eq!(frame.sse_data, frame.log_payload.to_string());
+    }
+
+    #[test]
+    fn surface_update_omits_absent_tool_call_id_and_keeps_empty_messages() {
+        let frame = only(OrchestratorEvent::SurfaceUpdate {
+            surface_id: "s-1".into(),
+            tool_call_id: None,
+            anchor_message_id: "m-1".into(),
+            anchor_call_index: 0,
+            title: "t".into(),
+            fallback_text: "f".into(),
+            status: "submitted".into(),
+            messages: Vec::new(),
+        });
+        assert!(
+            frame.log_payload.get("tool_call_id").is_none(),
+            "absent tool_call_id must be omitted"
+        );
+        assert_eq!(frame.log_payload["messages"], json!([]));
+        assert_eq!(frame.log_payload["status"], "submitted");
+    }
+
+    #[test]
+    fn cli_projector_prints_surface_fallback_text() {
+        assert_eq!(
+            CliProjector.project(&surface_update_sample()),
+            vec!["Trip form: choose a date".to_string()]
         );
     }
 }

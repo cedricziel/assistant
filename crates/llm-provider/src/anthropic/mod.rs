@@ -11,8 +11,9 @@ use assistant_core::types::llm::{
     AnthropicUserLocation, AnthropicWebFetchOptions, AnthropicWebSearchOptions, LlmConfig,
 };
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, ChatRole, ContentBlock,
+    HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem,
+    ToolCallResponse, ToolChoice, ToolSpec, ToolSupport,
 };
 
 // ── AnthropicConfig ───────────────────────────────────────────────────────────
@@ -260,6 +261,23 @@ fn tool_spec_to_anthropic_json(tool: &ToolSpec) -> Value {
 ///
 /// Returns `(system_prompt_or_empty, messages_vec)`.
 /// The system prompt is passed separately at the top level; it is not a message.
+/// The `tool_choice` object for `options`, or `None` to send the default.
+fn anthropic_tool_choice(options: &ChatOptions) -> Option<Value> {
+    let mut choice = match &options.tool_choice {
+        ToolChoice::Auto if options.parallel_tool_calls.is_none() => return None,
+        ToolChoice::Auto => json!({"type": "auto"}),
+        ToolChoice::None => json!({"type": "none"}),
+        ToolChoice::Required => json!({"type": "any"}),
+        ToolChoice::Tool(name) => json!({"type": "tool", "name": name}),
+    };
+    if let Some(parallel) = options.parallel_tool_calls
+        && options.tool_choice != ToolChoice::None
+    {
+        choice["disable_parallel_tool_use"] = json!(!parallel);
+    }
+    Some(choice)
+}
+
 fn build_anthropic_messages(history: &[ChatHistoryMessage]) -> (Vec<Value>, Vec<(String, String)>) {
     // Maps tool_use id → name, built as we process AssistantToolCalls.
     // Used by ToolResult to look up the tool_use_id.
@@ -381,7 +399,8 @@ impl LlmProvider for AnthropicProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_non_streaming(system_prompt, history, tools).await
+        self.chat_non_streaming(system_prompt, history, tools, &ChatOptions::default())
+            .await
     }
 
     async fn chat_streaming(
@@ -391,8 +410,42 @@ impl LlmProvider for AnthropicProvider {
         tools: &[ToolSpec],
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_sse(system_prompt, history, tools, chunk_sink)
-            .await
+        self.chat_sse(
+            system_prompt,
+            history,
+            tools,
+            &ChatOptions::default(),
+            chunk_sink,
+        )
+        .await
+    }
+
+    fn chat_options_support(&self) -> ChatOptionsSupport {
+        ChatOptionsSupport {
+            tool_choice: true,
+            parallel_tool_calls: true,
+            json_schema: false,
+        }
+    }
+
+    async fn chat_with(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+    ) -> anyhow::Result<LlmResponse> {
+        match chunk_sink {
+            Some(sink) => {
+                self.chat_sse(system_prompt, history, tools, options, Some(sink))
+                    .await
+            }
+            None => {
+                self.chat_non_streaming(system_prompt, history, tools, options)
+                    .await
+            }
+        }
     }
 
     async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
@@ -415,16 +468,14 @@ impl LlmProvider for AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    // ── Non-streaming ─────────────────────────────────────────────────────────
-
-    async fn chat_non_streaming(
+    fn request_body(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-    ) -> anyhow::Result<LlmResponse> {
-        debug!(model = %self.config.model, tools = tools.len(), "Sending request to Anthropic");
-
+        options: &ChatOptions,
+        stream: bool,
+    ) -> Value {
         let (messages, _) = build_anthropic_messages(history);
         let mut request_tools: Vec<Value> = tools.iter().map(tool_spec_to_anthropic_json).collect();
         request_tools.extend(self.server_tool_specs());
@@ -434,13 +485,33 @@ impl AnthropicProvider {
             "max_tokens": self.config.max_tokens,
             "messages": messages,
         });
-
+        if stream {
+            body["stream"] = json!(true);
+        }
         if !system_prompt.is_empty() {
             body["system"] = json!(system_prompt);
         }
         if !request_tools.is_empty() {
             body["tools"] = json!(request_tools);
+            if let Some(choice) = anthropic_tool_choice(options) {
+                body["tool_choice"] = choice;
+            }
         }
+        body
+    }
+
+    // ── Non-streaming ─────────────────────────────────────────────────────────
+
+    async fn chat_non_streaming(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+    ) -> anyhow::Result<LlmResponse> {
+        debug!(model = %self.config.model, tools = tools.len(), "Sending request to Anthropic");
+
+        let body = self.request_body(system_prompt, history, tools, options, false);
 
         let url = format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'));
 
@@ -479,6 +550,7 @@ impl AnthropicProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
+        options: &ChatOptions,
         token_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         debug!(
@@ -486,23 +558,7 @@ impl AnthropicProvider {
             "Sending streaming request to Anthropic"
         );
 
-        let (messages, _) = build_anthropic_messages(history);
-        let mut request_tools: Vec<Value> = tools.iter().map(tool_spec_to_anthropic_json).collect();
-        request_tools.extend(self.server_tool_specs());
-
-        let mut body = json!({
-            "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
-            "messages": messages,
-            "stream": true,
-        });
-
-        if !system_prompt.is_empty() {
-            body["system"] = json!(system_prompt);
-        }
-        if !request_tools.is_empty() {
-            body["tools"] = json!(request_tools);
-        }
+        let body = self.request_body(system_prompt, history, tools, options, true);
 
         let url = format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'));
 
@@ -1772,5 +1828,158 @@ mod tests {
         assert!(text.is_empty());
         assert!(thinking.is_empty());
         assert!(blocks.is_empty());
+    }
+
+    mod chat_options {
+        use serde_json::json;
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use assistant_core::{
+            ChatHistoryMessage, ChatOptions, ChatRole, LlmProvider, ToolChoice, ToolSpec,
+        };
+
+        use super::super::{AnthropicConfig, AnthropicProvider};
+
+        fn provider(base_url: &str) -> AnthropicProvider {
+            AnthropicProvider::new(AnthropicConfig {
+                api_key: assistant_core::Secret::new("test"),
+                base_url: base_url.to_string(),
+                ..AnthropicConfig::default()
+            })
+            .unwrap()
+        }
+
+        fn tool() -> ToolSpec {
+            ToolSpec {
+                name: "submit".into(),
+                description: "Submit".into(),
+                params_schema: json!({"type": "object"}),
+                is_mutating: false,
+                requires_confirmation: false,
+            }
+        }
+
+        fn history() -> Vec<ChatHistoryMessage> {
+            vec![ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "hi".into(),
+            }]
+        }
+
+        fn body(options: ChatOptions) -> serde_json::Value {
+            provider("http://unused").request_body("sys", &history(), &[tool()], &options, false)
+        }
+
+        fn choose(tool_choice: ToolChoice) -> ChatOptions {
+            ChatOptions {
+                tool_choice,
+                ..ChatOptions::default()
+            }
+        }
+
+        #[test]
+        fn default_options_send_no_tool_choice() {
+            assert!(body(ChatOptions::default()).get("tool_choice").is_none());
+        }
+
+        #[test]
+        fn tool_choices_map_to_anthropic_types() {
+            let cases = [
+                (ToolChoice::None, json!({"type": "none"})),
+                (ToolChoice::Required, json!({"type": "any"})),
+                (
+                    ToolChoice::Tool("submit".into()),
+                    json!({"type": "tool", "name": "submit"}),
+                ),
+            ];
+            for (choice, expected) in cases {
+                assert_eq!(
+                    body(choose(choice.clone()))["tool_choice"],
+                    expected,
+                    "{choice:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn parallel_tool_calls_false_disables_parallel_use() {
+            let options = ChatOptions {
+                parallel_tool_calls: Some(false),
+                ..ChatOptions::default()
+            };
+            assert_eq!(
+                body(options)["tool_choice"],
+                json!({"type": "auto", "disable_parallel_tool_use": true})
+            );
+            let forced = ChatOptions {
+                tool_choice: ToolChoice::Required,
+                parallel_tool_calls: Some(true),
+                ..ChatOptions::default()
+            };
+            assert_eq!(
+                body(forced)["tool_choice"],
+                json!({"type": "any", "disable_parallel_tool_use": false})
+            );
+            let none = ChatOptions {
+                tool_choice: ToolChoice::None,
+                parallel_tool_calls: Some(false),
+                ..ChatOptions::default()
+            };
+            assert_eq!(
+                body(none)["tool_choice"],
+                json!({"type": "none"}),
+                "the none choice takes no parallel flag"
+            );
+        }
+
+        #[test]
+        fn no_tool_choice_without_tools() {
+            let body = provider("http://unused").request_body(
+                "sys",
+                &history(),
+                &[],
+                &choose(ToolChoice::Required),
+                false,
+            );
+            assert!(
+                body.get("tool_choice").is_none(),
+                "tool_choice needs tools: {body}"
+            );
+        }
+
+        #[tokio::test]
+        async fn chat_with_sends_tool_choice() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1/messages"))
+                .and(body_partial_json(
+                    json!({"tool_choice": {"type": "tool", "name": "submit"}}),
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "id": "msg_1",
+                    "model": "claude",
+                    "stop_reason": "tool_use",
+                    "content": [{"type": "tool_use", "id": "t1", "name": "submit", "input": {}}],
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let response = provider(&server.uri())
+                .chat_with(
+                    "sys",
+                    &history(),
+                    &[tool()],
+                    &choose(ToolChoice::Tool("submit".into())),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert!(
+                matches!(response, assistant_core::LlmResponse::ToolCalls(_)),
+                "{response:?}"
+            );
+        }
     }
 }

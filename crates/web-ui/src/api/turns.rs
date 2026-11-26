@@ -174,10 +174,17 @@ async fn turn_status(
     let last_kind = last.event_type.clone();
     let last_at = last.created_at.to_rfc3339();
 
-    let derived_state = match last_kind.as_str() {
-        "done" => TurnState::Completed,
-        "agent_error" => TurnState::Errored,
-        _ => TurnState::Running,
+    // Terminal rows decide the state, not the last row: events such as
+    // `suggestions` are persisted after `done`. Precedence, highest first:
+    // `errored` > `completed` > `running`. A later non-terminal state
+    // (`awaiting_input`) ranks below `completed` and above `running`.
+    let has_kind = |kind: &str| events.iter().any(|e| e.event_type == kind);
+    let derived_state = if has_kind("agent_error") {
+        TurnState::Errored
+    } else if has_kind("done") {
+        TurnState::Completed
+    } else {
+        TurnState::Running
     };
 
     Ok(TurnStatusResponse {
@@ -379,6 +386,79 @@ mod tests {
         let body = body_json(resp.into_body()).await;
         assert_eq!(body["state"], "errored");
         assert_eq!(body["last_event_kind"], "agent_error");
+    }
+
+    /// Rows after `done` (such as `suggestions`) must not turn a finished
+    /// turn back into `running`.
+    #[tokio::test]
+    async fn returns_completed_when_suggestions_follow_done() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
+        let turn_id = Uuid::new_v4();
+
+        for (seq, kind) in [(0, "run_started"), (1, "done"), (2, "suggestions")] {
+            storage
+                .conversation_event_store()
+                .append_event(
+                    &turn_id.to_string(),
+                    &conv_id.to_string(),
+                    seq,
+                    kind,
+                    &serde_json::json!({}),
+                )
+                .await
+                .unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(url(&conv_id, &turn_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp.into_body()).await;
+        assert_eq!(body["state"], "completed");
+        assert_eq!(body["last_event_kind"], "suggestions");
+    }
+
+    /// `agent_error` outranks every other row, including one written later.
+    #[tokio::test]
+    async fn returns_errored_when_a_row_follows_agent_error() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
+        let turn_id = Uuid::new_v4();
+
+        for (seq, kind) in [(0, "run_started"), (1, "agent_error"), (2, "suggestions")] {
+            storage
+                .conversation_event_store()
+                .append_event(
+                    &turn_id.to_string(),
+                    &conv_id.to_string(),
+                    seq,
+                    kind,
+                    &serde_json::json!({}),
+                )
+                .await
+                .unwrap();
+        }
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(url(&conv_id, &turn_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_json(resp.into_body()).await;
+        assert_eq!(body["state"], "errored");
+        assert_eq!(body["last_event_kind"], "suggestions");
     }
 
     /// A turn id that was never seeded → `unknown`. The endpoint returns 200,

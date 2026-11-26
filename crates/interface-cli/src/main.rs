@@ -197,6 +197,7 @@ async fn main() -> Result<()> {
                 conversation_id,
                 Interface::Cli,
                 None,
+                wiring::cli_submit_options(cli.command.as_ref(), orchestrator_no_repl),
             )
             .await?;
         println!("{}", result.answer);
@@ -327,6 +328,7 @@ async fn main() -> Result<()> {
     }
 
     // 11. One conversation per session.
+    let repl_options = wiring::cli_submit_options(cli.command.as_ref(), orchestrator_no_repl);
     let conversation_id = Uuid::new_v4();
     let _conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
     info!(conversation_id = %conversation_id, "Starting CLI session");
@@ -505,6 +507,7 @@ async fn main() -> Result<()> {
                         conversation_id,
                         Interface::Cli,
                         Some(msg_ts),
+                        repl_options,
                     )
                     .await
                 });

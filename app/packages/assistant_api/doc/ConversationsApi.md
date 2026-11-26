@@ -556,7 +556,7 @@ void (empty response body)
 
 `GET /api/conversations/{id}/runs/{run_id}/events/stream`
 
-Replays stored events from `?since` (default 0), then tails live events if the run is still active.  Closes automatically when the `done` or `error` event is reached.  Returns: - `404` if no events exist for `run_id` (run never started or unknown) - `410` if the run existed but all events have been pruned (TTL elapsed)
+Replays stored events from `?since` (default 0), then tails live events if the run is still active. Closes when the run finishes, not at the `done` or `agent_error` frame: events such as `suggestions` follow `done`. A client that disconnects stops the tail at once.  Returns `404` if no events exist for `run_id` and the run is not active (never started, unknown, or pruned after the TTL elapsed).
 
 ### Example
 ```dart

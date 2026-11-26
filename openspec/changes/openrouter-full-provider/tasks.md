@@ -27,21 +27,21 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 4. Per-call context and per-turn context window
 
-- [ ] 4.1 Write failing tests for `LlmCallContext::scope` and `try_current`, and for `user_hash` (stable, org-scoped, not equal to the raw ID). Confirm red. Implement in core, then verify.
-- [ ] 4.2 Write a failing orchestrator test: a scripted provider observes the conversation ID inside a turn and none in a background job. Confirm red. Wrap the turn LLM calls in `scope`, then verify.
-- [ ] 4.3 Write a failing test: a provider whose `context_window_tokens` changes after construction affects compaction on the next turn. Confirm red. Move the adjustment into per-turn setup, then verify.
+- [x] 4.1 Write failing tests for `LlmCallContext::scope` and `try_current`, and for `user_hash` (stable, org-scoped, not equal to the raw ID). Confirm red. Implement in core, then verify.
+- [x] 4.2 Write a failing orchestrator test: a scripted provider observes the conversation ID inside a turn and none in a background job. Confirm red. Wrap the turn LLM calls in `scope`, then verify.
+- [x] 4.3 Write a failing test: a provider whose `context_window_tokens` changes after construction affects compaction on the next turn. Confirm red. Move the adjustment into per-turn setup, then verify.
 
 ## 5. Chat options (all providers)
 
-- [ ] 5.1 Write failing tests for `ChatOptions` defaults: `chat_with` with default options produces the same request as today for every provider (wiremock or scripted). Confirm red. Add `ChatOptions`, `ChatOptionsSupport`, the default `chat_with`, and `chat`/`chat_streaming` as wrappers. Verify.
-- [ ] 5.2 Write failing wiremock tests for native `tool_choice` and `parallel_tool_calls` mapping on Anthropic (`any`/`tool`, `disable_parallel_tool_use`), OpenAI and Moonshot. Confirm red. Implement, then verify.
-- [ ] 5.3 Write failing tests for the prompt fallback on Ollama: a forced tool not called leads to one retry and then an error naming the tool; `none` sends no tools. Confirm red. Implement, then verify.
-- [ ] 5.4 Write failing tests: `[llm] parallel_tool_calls` parses, and the orchestrator passes it on agent-loop calls. Confirm red. Implement, then verify. Document in `docs/operations/configuration.md`.
+- [x] 5.1 Write failing tests for `ChatOptions` defaults: `chat_with` with default options produces the same request as today for every provider (wiremock or scripted). Confirm red. Add `ChatOptions`, `ChatOptionsSupport`, the default `chat_with`, and `chat`/`chat_streaming` as wrappers. Verify.
+- [x] 5.2 Write failing tests for native `tool_choice` and `parallel_tool_calls` mapping on Anthropic (`any`/`tool`, `disable_parallel_tool_use`) and OpenAI. Confirm red. Implement, then verify. Moonshot keeps the prompt fallback (see D13).
+- [x] 5.3 Write failing tests for the prompt fallback on Ollama: a forced tool not called leads to one retry and then an error naming the tool; `none` sends no tools. Confirm red. Implement, then verify.
+- [x] 5.4 Write failing tests: `[llm] parallel_tool_calls` parses, and the orchestrator passes it on agent-loop calls. Confirm red. Implement, then verify. Document in `docs/operations/configuration.md`.
 
 ## 6. Structured output (all providers)
 
-- [ ] 6.1 Write failing tests for `chat_structured` strategy selection: native schema, forced `respond` tool, then prompt embedding; driven by `ChatOptionsSupport` on a scripted provider. Confirm red. Implement, then verify.
-- [ ] 6.2 Write failing tests: validation through `jsonschema`, fenced JSON stripped, one repair retry carrying the errors, and a final error containing the errors and the raw output. Confirm red. Implement, then verify.
+- [x] 6.1 Write failing tests for `chat_structured` strategy selection: native schema, forced `respond` tool, then prompt embedding; driven by `ChatOptionsSupport` on a scripted provider. Confirm red. Implement, then verify.
+- [x] 6.2 Write failing tests: validation through `jsonschema`, fenced JSON stripped, one repair retry carrying the errors, and a final error containing the errors and the raw output. Confirm red. Implement, then verify.
 - [ ] 6.3 Write failing wiremock tests for native JSON schema on OpenAI, and for the forced tool on Anthropic. Confirm red. Implement, then verify.
 - [ ] 6.4 Write failing tests: the skill learner and skill improver send schemas and accept fenced or chatty model output that the fallback path repairs. Confirm red. Migrate both judges, then verify.
 
