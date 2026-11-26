@@ -12,6 +12,7 @@ use serde_json::Value;
 use super::path::{WorkspaceRoots, glob_literal_dir, resolve_real_path};
 use super::rule::wildcard_match;
 use super::{Decision, PermissionRequest, Rule, Verdict};
+use crate::home::expand_tilde;
 use crate::types::permissions::PermissionsConfig;
 
 const DECIDER: &str = "static-rules";
@@ -265,9 +266,9 @@ fn str_param<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
 
 /// Expand `<workspace>` (once per root) and a leading `~/`.
 fn expand_pattern(pattern: &str, roots: &LazyRoots<'_>) -> Vec<String> {
-    let home_expanded = match (pattern.strip_prefix("~/"), dirs::home_dir()) {
-        (Some(rest), Some(home)) => format!("{}/{rest}", escape(&home)),
-        _ => pattern.to_string(),
+    let home_expanded = match pattern.strip_prefix("~/") {
+        Some(rest) => format!("{}/{rest}", escape(&expand_tilde("~"))),
+        None => pattern.to_string(),
     };
     if !home_expanded.contains(WORKSPACE_TOKEN) {
         return vec![home_expanded];

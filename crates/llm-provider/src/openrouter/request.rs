@@ -158,7 +158,7 @@ fn user_parts(content: &[ContentBlock], vision: bool) -> Vec<Value> {
                     "file_data": format!("data:{PDF};base64,{data}"),
                 },
             })),
-            ContentBlock::Document { .. } => None,
+            ContentBlock::Document { .. } | ContentBlock::Audio { .. } => None,
         })
         .collect()
 }
@@ -283,6 +283,25 @@ mod tests {
     use assistant_core::types::llm::{OpenRouterCache, OpenRouterCacheTtl};
 
     use super::apply_cache_breakpoints;
+
+    #[test]
+    fn audio_blocks_are_dropped_until_audio_input_exists() {
+        use assistant_core::ContentBlock;
+        let parts = super::user_parts(
+            &[
+                ContentBlock::Text("[Voice message]: hi".into()),
+                ContentBlock::Audio {
+                    media_type: "audio/ogg".into(),
+                    data: "T2dnUw==".into(),
+                },
+            ],
+            true,
+        );
+        assert_eq!(
+            parts,
+            [json!({"type": "text", "text": "[Voice message]: hi"})]
+        );
+    }
 
     fn messages() -> Vec<Value> {
         vec![

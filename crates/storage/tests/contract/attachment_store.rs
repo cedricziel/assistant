@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
+use assistant_core::AttachmentMeta;
 use assistant_core::types::conversation::Message;
-use assistant_core::{AttachmentMeta, agent_base_dir};
 use assistant_storage::{
     AttachmentStore, ConversationStore, InMemoryAttachmentStore, StorageLayer,
 };
@@ -103,17 +103,9 @@ struct Env {
     conv: Uuid,
     from: Uuid,
     to: Uuid,
-    /// Per-test agent id, so attachment bytes land in a directory of our own.
     agent_id: String,
     /// Kept alive so the SQLite pool outlives the store.
     storage: Option<StorageLayer>,
-}
-
-impl Drop for Env {
-    fn drop(&mut self) {
-        // The SQLite store writes bytes under `~/.assistant/agents/{agent_id}`.
-        let _ = std::fs::remove_dir_all(agent_base_dir(&self.agent_id));
-    }
 }
 
 fn unique_agent() -> String {

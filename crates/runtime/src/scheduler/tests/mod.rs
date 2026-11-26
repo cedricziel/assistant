@@ -86,36 +86,32 @@ pub(crate) async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLaye
     (orch, storage)
 }
 
-/// RAII guard that removes the agent directory when dropped.
-pub(crate) struct AgentDirGuard(pub(crate) std::path::PathBuf);
-
-impl Drop for AgentDirGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+/// A Persona directory in a temporary install root, removed when dropped.
+pub(crate) struct AgentDirGuard {
+    _install_root: tempfile::TempDir,
+    dir: std::path::PathBuf,
 }
 
 impl std::ops::Deref for AgentDirGuard {
     type Target = std::path::Path;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.dir
     }
 }
 
-/// Build an orchestrator whose `agent_id` maps to a unique on-disk agent
-/// dir so heartbeat-style tests can stage `HEARTBEAT.md` without touching
-/// `~/.assistant`.  The returned `AgentDirGuard` removes the directory
-/// when it's dropped.
+/// Build an orchestrator whose Persona lives in a temporary install root, so
+/// heartbeat-style tests can stage `HEARTBEAT.md` there.
 pub(crate) async fn build_with_agent_dir(
     base_url: &str,
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>, AgentDirGuard, String) {
     let agent_id = Uuid::new_v4().to_string();
-    let agent_dir = assistant_core::context::agent_base_dir(&agent_id);
+    let install_root = tempfile::tempdir().unwrap();
+    let agent_dir = assistant_core::context::agent_base_dir(install_root.path(), &agent_id);
     std::fs::create_dir_all(&agent_dir).unwrap();
 
     let mut config = OrgConfig::default();
+    assistant_core::apply_agent_context(&mut config, install_root.path(), &agent_id);
     config.memory.enabled = false;
-    config.agent.id = agent_id.clone();
 
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
@@ -143,5 +139,9 @@ pub(crate) async fn build_with_agent_dir(
         bus_arc,
         &config,
     ));
-    (orch, storage, AgentDirGuard(agent_dir), agent_id)
+    let guard = AgentDirGuard {
+        _install_root: install_root,
+        dir: agent_dir,
+    };
+    (orch, storage, guard, agent_id)
 }

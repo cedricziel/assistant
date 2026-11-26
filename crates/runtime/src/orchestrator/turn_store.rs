@@ -107,6 +107,14 @@ impl ConversationStore for TurnStore {
         self.inner.list_conversations().await
     }
 
+    async fn list_archived_conversations(&self) -> Result<Vec<ConversationRecord>> {
+        self.inner.list_archived_conversations().await
+    }
+
+    async fn list_owned_ids(&self) -> Result<Vec<Uuid>> {
+        self.inner.list_owned_ids().await
+    }
+
     async fn search_conversations(
         &self,
         query: &str,

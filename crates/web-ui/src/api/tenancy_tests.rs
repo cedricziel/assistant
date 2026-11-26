@@ -269,6 +269,7 @@ impl Tenancy {
             .merge(personas_router().with_state(PersonaApiState {
                 spaces: api_state.spaces.clone(),
                 agent_id,
+                agents_dir: root.path().join("agents"),
             }))
             .merge(push_api_router().with_state(PushApiState {
                 spaces: api_state.spaces.clone(),

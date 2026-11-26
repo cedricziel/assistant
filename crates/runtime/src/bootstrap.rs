@@ -22,21 +22,11 @@ use assistant_storage::StorageLayer;
 /// for runtime-discovered skills:
 ///
 /// * Entries from `skills.extra_dirs` (home-relative, absolute, or project-relative)
-/// * `~/.assistant/skills/` — user-installed skills
+/// * `<install_root>/skills/` — user-installed skills
 /// * `<project>/.assistant/skills/` — project-scoped skills (if available)
 /// * `<exe_dir>/skills/` — optional sidecar skills shipped alongside the binary
-pub fn skill_dirs(config: &OrgConfig, project_root: Option<&Path>) -> Vec<(PathBuf, SkillSource)> {
-    skill_dirs_in(
-        dirs::home_dir().map(|h| h.join(".assistant")).as_deref(),
-        config,
-        project_root,
-    )
-}
-
-/// [`skill_dirs`] with the install root named explicitly, so its `skills/`
-/// directory is the user skill directory.
-pub fn skill_dirs_in(
-    install_root: Option<&Path>,
+pub fn skill_dirs(
+    install_root: &Path,
     config: &OrgConfig,
     project_root: Option<&Path>,
 ) -> Vec<(PathBuf, SkillSource)> {
@@ -62,9 +52,7 @@ pub fn skill_dirs_in(
         push_dir(resolved, SkillSource::Installed);
     }
 
-    if let Some(root) = install_root {
-        push_dir(root.join("skills"), SkillSource::User);
-    }
+    push_dir(install_root.join("skills"), SkillSource::User);
 
     if let Some(project) = resolved_project_root.as_ref() {
         push_dir(
@@ -141,20 +129,15 @@ mod tests {
     // ── skill_dirs ────────────────────────────────────────────────────────
 
     #[test]
-    fn skill_dirs_returns_empty_when_nothing_resolves() {
-        // No extra dirs configured, no ~/.assistant/skills present, and a
-        // non-existent project root → no dirs should be returned (existence
-        // check filters them out).
-        let mut cfg = OrgConfig::default();
-        cfg.skills.extra_dirs.clear();
+    fn skill_dirs_includes_the_install_roots_skills_dir() {
+        let install_root = TempDir::new().unwrap();
+        let user_skills = install_root.path().join("skills");
+        std::fs::create_dir_all(&user_skills).unwrap();
 
-        let project_root = std::path::Path::new("/definitely/does/not/exist");
-        let dirs = skill_dirs(&cfg, Some(project_root));
-        // Some directories may still resolve (e.g. ~/.assistant/skills if it
-        // exists on the test host), so we only assert the function doesn't
-        // panic. The important branches — extra_dirs and project-relative —
-        // are inactive here.
-        let _ = dirs;
+        let dirs = skill_dirs(install_root.path(), &OrgConfig::default(), None);
+        let user = dirs.iter().find(|(p, _)| p == &user_skills);
+        assert!(user.is_some(), "user skills dir must appear: {dirs:?}");
+        assert!(matches!(user.unwrap().1, SkillSource::User));
     }
 
     #[test]
@@ -164,7 +147,7 @@ mod tests {
         std::fs::create_dir_all(&project_skills).unwrap();
 
         let cfg = OrgConfig::default();
-        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        let dirs = skill_dirs(tmp.path(), &cfg, Some(tmp.path()));
         let project = dirs.iter().find(|(p, _)| p == &project_skills);
         assert!(
             project.is_some(),
@@ -182,7 +165,7 @@ mod tests {
         let mut cfg = OrgConfig::default();
         cfg.skills.extra_dirs = vec!["./extra-skills".to_string()];
 
-        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        let dirs = skill_dirs(tmp.path(), &cfg, Some(tmp.path()));
         let entry = dirs
             .iter()
             .find(|(p, _)| p.ends_with("extra-skills"))
@@ -202,7 +185,7 @@ mod tests {
             extra.to_string_lossy().to_string(),
         ];
 
-        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        let dirs = skill_dirs(tmp.path(), &cfg, Some(tmp.path()));
         let count = dirs.iter().filter(|(p, _)| p == &extra).count();
         assert_eq!(count, 1, "duplicate extra dir must be deduplicated");
     }
@@ -213,7 +196,7 @@ mod tests {
         let mut cfg = OrgConfig::default();
         cfg.skills.extra_dirs = vec!["".to_string(), "   ".to_string()];
 
-        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        let dirs = skill_dirs(tmp.path(), &cfg, Some(tmp.path()));
         // Empty strings should not produce any entries.
         for (p, _) in &dirs {
             assert!(!p.as_os_str().is_empty());
@@ -227,7 +210,7 @@ mod tests {
         // Point at a directory that does NOT exist.
         cfg.skills.extra_dirs = vec![tmp.path().join("not-here").to_string_lossy().to_string()];
 
-        let dirs = skill_dirs(&cfg, Some(tmp.path()));
+        let dirs = skill_dirs(tmp.path(), &cfg, Some(tmp.path()));
         // Non-existent extra_dirs are filtered out by the .is_dir() check.
         for (p, source) in &dirs {
             if matches!(source, SkillSource::Installed) {

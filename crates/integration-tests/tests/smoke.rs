@@ -96,6 +96,8 @@ struct Fixture {
     orchestrator: Arc<Orchestrator>,
     executor: Arc<ToolExecutor>,
     conversation_id: Uuid,
+    /// Holds the Persona's memory files.
+    _install_root: tempfile::TempDir,
 }
 
 async fn build_fixture(base_url: &str) -> Result<Fixture> {
@@ -132,7 +134,9 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
 
+    let install_root = tempfile::tempdir()?;
     let mut config = OrgConfig::default();
+    assistant_core::apply_agent_context(&mut config, install_root.path(), "default");
     // Disable learning so background skill-eval LLM calls don't compete with
     // the test's own LLM calls on the CPU-only CI Ollama instance.
     config.learning.enabled = false;
@@ -163,6 +167,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
         orchestrator,
         executor,
         conversation_id: Uuid::new_v4(),
+        _install_root: install_root,
     })
 }
 

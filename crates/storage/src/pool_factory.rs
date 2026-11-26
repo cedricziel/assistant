@@ -63,12 +63,6 @@ impl OrgPoolFactory {
         }
     }
 
-    /// Create a factory using the default base directory (`~/.assistant`).
-    pub fn default_base() -> Result<Self> {
-        let home = dirs::home_dir().context("could not determine home directory")?;
-        Ok(Self::new(home.join(".assistant")))
-    }
-
     /// Return the org.db path (at the install root).
     pub fn org_db_path(&self) -> PathBuf {
         self.base_dir.join("org.db")
@@ -121,7 +115,7 @@ impl OrgPoolFactory {
                 let db_path = self.space_db_path(org_slug, space_slug);
                 StorageLayer::new(&db_path)
                     .await
-                    .map(Arc::new)
+                    .map(|storage| Arc::new(storage.with_install_root(self.base_dir.clone())))
                     .with_context(|| format!("opening space.db at {}", db_path.display()))
             })
             .await?;

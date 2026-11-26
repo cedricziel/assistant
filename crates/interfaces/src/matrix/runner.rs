@@ -2,6 +2,7 @@
 //!
 //! Thin entry point — all dispatch logic lives in [`ChannelRunner`].
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -18,15 +19,18 @@ pub use assistant_core::types::channels::MatrixConfig;
 pub struct MatrixInterface {
     config: MatrixConfig,
     orchestrator: Arc<Orchestrator>,
+    /// Directory for the persisted sync token (the install root).
+    state_dir: PathBuf,
     transcription: Option<Arc<dyn TranscriptionProvider>>,
     transcription_language: Option<String>,
 }
 
 impl MatrixInterface {
-    pub fn new(config: MatrixConfig, orchestrator: Arc<Orchestrator>) -> Self {
+    pub fn new(config: MatrixConfig, orchestrator: Arc<Orchestrator>, state_dir: PathBuf) -> Self {
         Self {
             config,
             orchestrator,
+            state_dir,
             transcription: None,
             transcription_language: None,
         }
@@ -81,6 +85,7 @@ impl MatrixInterface {
             client,
             self.config.allowed_rooms.clone(),
             self.config.allowed_users.clone(),
+            self.state_dir.clone(),
         );
         if let Some(ref provider) = self.transcription {
             adapter =
@@ -158,10 +163,15 @@ mod tests {
         ))
     }
 
+    /// These tests fail before the first sync, so nothing is written here.
+    fn unused_state_dir() -> PathBuf {
+        PathBuf::from("/nonexistent/matrix-state")
+    }
+
     #[tokio::test]
     async fn new_starts_without_transcription() {
         let orch = make_orchestrator().await;
-        let iface = MatrixInterface::new(MatrixConfig::default(), orch);
+        let iface = MatrixInterface::new(MatrixConfig::default(), orch, unused_state_dir());
         assert!(iface.transcription.is_none());
         assert!(iface.transcription_language.is_none());
     }
@@ -190,7 +200,7 @@ mod tests {
             }
         }
         let orch = make_orchestrator().await;
-        let iface = MatrixInterface::new(MatrixConfig::default(), orch)
+        let iface = MatrixInterface::new(MatrixConfig::default(), orch, unused_state_dir())
             .with_transcription(Arc::new(DummyProvider), Some("en".into()));
         assert!(iface.transcription.is_some());
         assert_eq!(iface.transcription_language.as_deref(), Some("en"));
@@ -205,6 +215,7 @@ mod tests {
                 ..Default::default()
             },
             orch,
+            unused_state_dir(),
         );
         let err = iface.run().await.unwrap_err();
         assert!(err.to_string().contains("homeserver URL"));
@@ -221,6 +232,7 @@ mod tests {
                 ..Default::default()
             },
             orch,
+            unused_state_dir(),
         );
         let err = iface.run().await.unwrap_err();
         assert!(err.to_string().contains("username"));
@@ -238,6 +250,7 @@ mod tests {
                 ..Default::default()
             },
             orch,
+            unused_state_dir(),
         );
         let err = iface.run().await.unwrap_err();
         assert!(err.to_string().contains("credentials"));

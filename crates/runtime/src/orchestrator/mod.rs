@@ -15,8 +15,8 @@ use assistant_core::types::conversation::{
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
     LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec, TurnScope,
-    TurnTiming, TurnToolSource, context::agent_base_dir, is_resizable_mime_type,
-    is_supported_mime_type, is_text_mime_type, strip_html_comments,
+    TurnTiming, TurnToolSource, is_resizable_mime_type, is_supported_mime_type, is_text_mime_type,
+    strip_html_comments,
 };
 use assistant_storage::{
     AttachmentStore as _AttachmentStoreTrait, SkillRegistry, StorageLayer,
@@ -715,13 +715,8 @@ impl Orchestrator {
     }
 
     /// Return the path to this persona's HEARTBEAT.md.
-    ///
-    /// Always derived from `agent_id` so it stays consistent even if the
-    /// `MemoryLoader` was constructed from a config that didn't explicitly set
-    /// `heartbeat_path` (e.g. in tests or when `apply_agent_context` wasn't
-    /// called).
     pub fn heartbeat_path(&self) -> std::path::PathBuf {
-        agent_base_dir(&self.agent_id).join("HEARTBEAT.md")
+        self.memory_loader.heartbeat_path().to_path_buf()
     }
 
     /// Return the path to BOOT.md (per-session startup hook).
@@ -2029,6 +2024,10 @@ impl Orchestrator {
             }
         }
 
+        if !self.llm.chat_options_support().audio_input {
+            all_attachments.retain(|b| !matches!(b, ContentBlock::Audio { .. }));
+        }
+
         let user_row_id = user.as_ref().or(regenerated.as_ref()).map(|m| m.id);
         if all_attachments.is_empty() {
             history.push(
@@ -2171,6 +2170,7 @@ fn resize_and_encode(raw: &[u8], mime_type: &str, provider: &str) -> String {
 ///
 /// - **Images** → `ContentBlock::Image` (resized + base64 encoded)
 /// - **PDF** → `ContentBlock::Document` (base64 encoded, no resize)
+/// - **Audio** → `ContentBlock::Audio` (base64 encoded)
 /// - **Text files** (plain, markdown, CSV, JSON) → `ContentBlock::Text`
 ///   (UTF-8 decoded, wrapped with filename delimiters)
 fn attachment_to_content_block(
@@ -2210,6 +2210,13 @@ fn attachment_to_content_block(
             "--- file: {} ---\n{}{}\n--- end file ---",
             meta.filename, text, suffix
         ));
+    }
+
+    if meta.mime_type.starts_with("audio/") {
+        return ContentBlock::Audio {
+            media_type: meta.mime_type.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        };
     }
 
     if meta.mime_type == "application/pdf" {

@@ -9,8 +9,9 @@ use assistant_tool_executor::builtins::bash::BashHandler;
 use assistant_tool_executor::builtins::file_edit::FileEditHandler;
 use assistant_tool_executor::builtins::file_read::FileReadHandler;
 use assistant_tool_executor::builtins::file_write::FileWriteHandler;
-
+use assistant_tool_executor::builtins::list_tasks::ListTasksHandler;
 use assistant_tool_executor::builtins::plan_update::PlanUpdateHandler;
+use assistant_tool_executor::builtins::process::ProcessHandler;
 use assistant_tool_executor::builtins::web_fetch::WebFetchHandler;
 use assistant_tool_executor::builtins::web_search::WebSearchHandler;
 use serde_json::{Value, json};
@@ -371,6 +372,337 @@ async fn file_read_huge_limit_stays_within_the_render_budget() {
         out.content.matches('é').count() == 100_000,
         "the observation must still honour the limit"
     );
+}
+
+// -- plan-update -------------------------------------------------------------
+
+async fn run_plan(args: &[(&str, Value)]) -> (PlanUpdateHandler, ToolOutput) {
+    let handler = PlanUpdateHandler::new();
+    let out = handler.run(params(args), &ctx()).await.unwrap();
+    (handler, out)
+}
+
+fn steps(statuses: &[&str]) -> Value {
+    Value::Array(
+        statuses
+            .iter()
+            .enumerate()
+            .map(|(i, s)| json!({"title": format!("Step {i}"), "status": s}))
+            .collect(),
+    )
+}
+
+#[tokio::test]
+async fn plan_update_publishes_plan_data() {
+    let (handler, out) = run_plan(&[
+        ("title", json!("Ship it")),
+        (
+            "steps",
+            steps(&[
+                "completed",
+                "completed",
+                "completed",
+                "in_progress",
+                "pending",
+            ]),
+        ),
+    ])
+    .await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(out.content, "Plan updated: 3/5 steps completed");
+    assert_eq!(data["kind"], "plan");
+    assert_eq!(data["title"], "Ship it");
+    assert_eq!(data["steps"].as_array().unwrap().len(), 5);
+    assert_eq!(data["steps"][3]["status"], "in_progress");
+}
+
+#[tokio::test]
+async fn plan_update_without_title_omits_it() {
+    let (handler, out) = run_plan(&[("steps", steps(&["pending"]))]).await;
+    let data = validated_data(&handler, &out);
+    assert!(data.get("title").is_none());
+}
+
+#[tokio::test]
+async fn plan_update_accepts_an_empty_plan() {
+    let (handler, out) = run_plan(&[("steps", json!([]))]).await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(out.content, "Plan updated: 0/0 steps completed");
+    assert_eq!(data["steps"], json!([]));
+}
+
+#[tokio::test]
+async fn plan_update_rejects_an_unknown_status() {
+    let (_, out) = run_plan(&[("steps", steps(&["done"]))]).await;
+    assert!(!out.success);
+    assert!(out.data.is_none());
+    assert!(
+        out.content.contains("status"),
+        "error should name the field: {}",
+        out.content
+    );
+}
+
+#[tokio::test]
+async fn plan_update_rejects_missing_or_malformed_steps() {
+    for args in [
+        vec![],
+        vec![("steps", json!("nope"))],
+        vec![("steps", json!([{"title": "no status"}]))],
+        vec![("steps", json!([{"status": "pending"}]))],
+        vec![("title", json!(5)), ("steps", json!([]))],
+    ] {
+        let (_, out) = run_plan(&args).await;
+        assert!(!out.success, "{args:?} should be rejected");
+        assert!(out.data.is_none());
+    }
+}
+
+#[tokio::test]
+async fn plan_update_enforces_the_size_budgets() {
+    let too_many = steps(&vec!["pending"; 51]);
+    let long_step = json!([{"title": "x".repeat(201), "status": "pending"}]);
+    for (args, field) in [
+        (vec![("steps", too_many)], "steps"),
+        (vec![("steps", long_step)], "title"),
+        (
+            vec![("title", json!("y".repeat(121))), ("steps", json!([]))],
+            "title",
+        ),
+    ] {
+        let (_, out) = run_plan(&args).await;
+        assert!(!out.success, "{field} budget violation must be rejected");
+        assert!(out.data.is_none());
+        assert!(out.content.contains(field), "{}", out.content);
+    }
+}
+
+#[tokio::test]
+async fn plan_update_accepts_the_budget_limits() {
+    let max_steps: Vec<Value> = (0..50)
+        .map(|_| json!({"title": "x".repeat(200), "status": "skipped"}))
+        .collect();
+    let (handler, out) = run_plan(&[
+        ("title", json!("y".repeat(120))),
+        ("steps", Value::Array(max_steps)),
+    ])
+    .await;
+    let data = validated_data(&handler, &out);
+    let size = serde_json::to_vec(&data).unwrap().len();
+    assert!(size < 32 * 1024, "plan data is {size} bytes");
+}
+
+#[tokio::test]
+async fn plan_update_is_registered_by_the_executor() {
+    use std::sync::Arc;
+
+    use assistant_core::types::agent::OrgConfig;
+    use assistant_llm_provider::ScriptedLlmProvider;
+    use assistant_storage::StorageLayer;
+    use assistant_storage::registry::SkillRegistry;
+    use assistant_tool_executor::ToolExecutor;
+
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let executor = ToolExecutor::new(
+        storage,
+        Arc::new(ScriptedLlmProvider::new()),
+        registry,
+        Arc::new(OrgConfig::default()),
+    );
+    assert!(executor.handler("plan-update").is_some());
+    assert!(
+        executor.to_specs().iter().any(|s| s.name == "plan-update"),
+        "plan-update missing from tool definitions"
+    );
+}
+
+// -- data_table: list-tasks and process list ---------------------------------
+
+/// The `data` of `out`, validated against the `data_table` schema. `process`
+/// has no single output schema (poll and log data carry no `kind`), so its
+/// list rows are checked against the contract directly.
+fn validated_table(out: &ToolOutput) -> Value {
+    let data = out.data.clone().expect("tool output carries render data");
+    let schema = assistant_core::tool_render::ToolRenderData::schema("data_table")
+        .expect("data_table schema exists");
+    let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+    let errors: Vec<String> = validator
+        .iter_errors(&data)
+        .map(|e| e.to_string())
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "data fails data_table schema: {errors:?}"
+    );
+    assert_eq!(data["kind"], "data_table");
+    data
+}
+
+async fn tasks_handler() -> (
+    std::sync::Arc<assistant_storage::StorageLayer>,
+    ListTasksHandler,
+) {
+    let storage = std::sync::Arc::new(
+        assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .unwrap(),
+    );
+    let handler = ListTasksHandler::new(storage.clone());
+    (storage, handler)
+}
+
+#[tokio::test]
+async fn list_tasks_publishes_a_data_table() {
+    use assistant_storage::ScheduledTaskStore as _;
+
+    let (storage, handler) = tasks_handler().await;
+    let next = chrono::Utc::now() + chrono::Duration::hours(1);
+    let store = storage.scheduled_task_store();
+    store
+        .insert("task-a", "0 * * * *", "prompt-a", false, Some(next))
+        .await
+        .unwrap();
+    store
+        .insert("task-b", "", "prompt-b", true, Some(next))
+        .await
+        .unwrap();
+
+    let out = handler.run(params(&[]), &ctx()).await.unwrap();
+    assert_eq!(
+        handler.output_schema(),
+        assistant_core::tool_render::ToolRenderData::schema("data_table")
+    );
+    let data = validated_table(&out);
+    let keys: Vec<&str> = data["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        keys,
+        ["name", "status", "mode", "schedule", "next_run", "last_run"]
+    );
+    assert_eq!(data["total_rows"], 2);
+    assert_eq!(data["truncated"], false);
+    let rows = data["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let a = rows.iter().find(|r| r["name"] == "task-a").unwrap();
+    assert_eq!(a["status"], "enabled");
+    assert_eq!(a["mode"], "recurring");
+    assert_eq!(a["schedule"], "cron: 0 * * * *");
+    assert_eq!(a["last_run"], "never");
+    let b = rows.iter().find(|r| r["name"] == "task-b").unwrap();
+    assert_eq!(b["mode"], "once");
+    assert_eq!(b["schedule"], "one-shot (run_at)");
+}
+
+#[tokio::test]
+async fn list_tasks_with_no_tasks_publishes_an_empty_table() {
+    let (_storage, handler) = tasks_handler().await;
+    let out = handler.run(params(&[]), &ctx()).await.unwrap();
+    assert_eq!(out.content, "No scheduled tasks found.");
+    let data = validated_table(&out);
+    assert_eq!(data["rows"], json!([]));
+    assert_eq!(data["total_rows"], 0);
+    assert_eq!(data["truncated"], false);
+    assert_eq!(data["columns"].as_array().unwrap().len(), 6);
+}
+
+#[tokio::test]
+async fn list_tasks_over_200_rows_is_truncated_with_full_total() {
+    use assistant_storage::ScheduledTaskStore as _;
+
+    let (storage, handler) = tasks_handler().await;
+    let store = storage.scheduled_task_store();
+    for i in 0..205 {
+        store
+            .insert(&format!("task-{i}"), "0 * * * *", "p", false, None)
+            .await
+            .unwrap();
+    }
+    let out = handler.run(params(&[]), &ctx()).await.unwrap();
+    let data = validated_table(&out);
+    assert_eq!(data["rows"].as_array().unwrap().len(), 200);
+    assert_eq!(data["total_rows"], 205);
+    assert_eq!(data["truncated"], true);
+    let size = serde_json::to_vec(&data).unwrap().len();
+    assert!(size < 32 * 1024, "data_table is {size} bytes");
+}
+
+#[tokio::test]
+async fn list_tasks_cuts_long_cells_on_a_char_boundary() {
+    use assistant_storage::ScheduledTaskStore as _;
+
+    let (storage, handler) = tasks_handler().await;
+    storage
+        .scheduled_task_store()
+        .insert(&"é".repeat(1000), "0 * * * *", "p", false, None)
+        .await
+        .unwrap();
+    let out = handler.run(params(&[]), &ctx()).await.unwrap();
+    let data = validated_table(&out);
+    let name = data["rows"][0]["name"].as_str().unwrap();
+    assert!(
+        name.chars().count() <= 256,
+        "cell has {} chars",
+        name.chars().count()
+    );
+    assert!(name.ends_with('…'));
+    assert_eq!(data["truncated"], true);
+}
+
+#[tokio::test]
+async fn process_list_publishes_a_data_table() {
+    let handler = ProcessHandler::new();
+    let list = || params(&[("action", json!("list"))]);
+
+    let out = handler.run(list(), &ctx()).await.unwrap();
+    let data = validated_table(&out);
+    assert_eq!(data["rows"], json!([]));
+    assert_eq!(data["total_rows"], 0);
+
+    let start = handler
+        .run(
+            params(&[("action", json!("start")), ("command", json!("sleep 10"))]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
+    let session_id = start.data.unwrap()["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let out = handler.run(list(), &ctx()).await.unwrap();
+    let data = validated_table(&out);
+    assert_eq!(data["total_rows"], 1);
+    let keys: Vec<&str> = data["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        keys,
+        ["session_id", "pid", "command", "started_at", "running"]
+    );
+    let row = &data["rows"][0];
+    assert_eq!(row["session_id"], session_id.as_str());
+    assert_eq!(row["command"], "sleep 10");
+    assert_eq!(row["running"], true);
+    assert!(row["pid"].is_number());
+
+    handler
+        .run(
+            params(&[("action", json!("kill")), ("session_id", json!(session_id))]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
 }
 
 // -- file-edit / file-write ---------------------------------------------------
