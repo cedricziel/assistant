@@ -10,6 +10,8 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
+  'FeedbackButtons',
+  'FeedbackCommentField',
   'MessageActionButton',
   'MessageActions',
   'MessageEditor',
