@@ -8,6 +8,8 @@ part of 'conversation_search_summary.dart';
 
 class _$ConversationSearchSummary extends ConversationSearchSummary {
   @override
+  final DateTime? archivedAt;
+  @override
   final DateTime createdAt;
   @override
   final String id;
@@ -27,7 +29,8 @@ class _$ConversationSearchSummary extends ConversationSearchSummary {
       (ConversationSearchSummaryBuilder()..update(updates))._build();
 
   _$ConversationSearchSummary._(
-      {required this.createdAt,
+      {this.archivedAt,
+      required this.createdAt,
       required this.id,
       required this.matches,
       this.pinnedAt,
@@ -48,6 +51,7 @@ class _$ConversationSearchSummary extends ConversationSearchSummary {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is ConversationSearchSummary &&
+        archivedAt == other.archivedAt &&
         createdAt == other.createdAt &&
         id == other.id &&
         matches == other.matches &&
@@ -60,6 +64,7 @@ class _$ConversationSearchSummary extends ConversationSearchSummary {
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, archivedAt.hashCode);
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, matches.hashCode);
@@ -74,6 +79,7 @@ class _$ConversationSearchSummary extends ConversationSearchSummary {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'ConversationSearchSummary')
+          ..add('archivedAt', archivedAt)
           ..add('createdAt', createdAt)
           ..add('id', id)
           ..add('matches', matches)
@@ -89,6 +95,10 @@ class ConversationSearchSummaryBuilder
     implements
         Builder<ConversationSearchSummary, ConversationSearchSummaryBuilder> {
   _$ConversationSearchSummary? _$v;
+
+  DateTime? _archivedAt;
+  DateTime? get archivedAt => _$this._archivedAt;
+  set archivedAt(DateTime? archivedAt) => _$this._archivedAt = archivedAt;
 
   DateTime? _createdAt;
   DateTime? get createdAt => _$this._createdAt;
@@ -129,6 +139,7 @@ class ConversationSearchSummaryBuilder
   ConversationSearchSummaryBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _archivedAt = $v.archivedAt;
       _createdAt = $v.createdAt;
       _id = $v.id;
       _matches = $v.matches.toBuilder();
@@ -159,6 +170,7 @@ class ConversationSearchSummaryBuilder
     try {
       _$result = _$v ??
           _$ConversationSearchSummary._(
+            archivedAt: archivedAt,
             createdAt: BuiltValueNullFieldError.checkNotNull(
                 createdAt, r'ConversationSearchSummary', 'createdAt'),
             id: BuiltValueNullFieldError.checkNotNull(
