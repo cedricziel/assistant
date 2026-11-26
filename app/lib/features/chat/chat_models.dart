@@ -31,6 +31,7 @@ class ChatState {
     this.error,
     this.pendingQueue = const [],
     this.currentTurnStatus,
+    this.suggestions = const [],
   });
 
   final String? conversationId;
@@ -73,6 +74,11 @@ class ChatState {
   /// turn is in flight (between `done` and the next `run_started`).
   final TurnStatusSnapshot? currentTurnStatus;
 
+  /// Follow-up prompts offered for the last assistant message. Only live and
+  /// reconnected runs fill it; loading a conversation from history leaves it
+  /// empty.
+  final List<String> suggestions;
+
   bool get isStreaming => isSending && streamingContent.isNotEmpty;
 
   ChatState copyWith({
@@ -93,6 +99,8 @@ class ChatState {
     List<PendingMessage>? pendingQueue,
     TurnStatusSnapshot? currentTurnStatus,
     bool clearCurrentTurnStatus = false,
+    List<String>? suggestions,
+    bool clearSuggestions = false,
   }) {
     return ChatState(
       conversationId: clearConversation
@@ -114,6 +122,9 @@ class ChatState {
       currentTurnStatus: clearCurrentTurnStatus
           ? null
           : (currentTurnStatus ?? this.currentTurnStatus),
+      suggestions: clearSuggestions
+          ? const []
+          : (suggestions ?? this.suggestions),
     );
   }
 }
