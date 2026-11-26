@@ -584,6 +584,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "similar",
  "stop-words",
  "tempfile",
  "tokio",
