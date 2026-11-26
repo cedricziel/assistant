@@ -1005,7 +1005,7 @@ class ConversationsApi {
   }
 
   /// &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
-  /// Replays stored events from &#x60;?since&#x60; (default 0), then tails live events if the run is still active.  Closes automatically when the &#x60;done&#x60; or &#x60;error&#x60; event is reached.  Returns: - &#x60;404&#x60; if no events exist for &#x60;run_id&#x60; (run never started or unknown) - &#x60;410&#x60; if the run existed but all events have been pruned (TTL elapsed)
+  /// Replays stored events from &#x60;?since&#x60; (default 0), then tails live events if the run is still active. Closes when the run finishes, not at the &#x60;done&#x60; or &#x60;agent_error&#x60; frame: events such as &#x60;suggestions&#x60; follow &#x60;done&#x60;. A client that disconnects stops the tail at once.  Returns &#x60;404&#x60; if no events exist for &#x60;run_id&#x60; and the run is not active (never started, unknown, or pruned after the TTL elapsed).
   ///
   /// Parameters:
   /// * [id] - Conversation UUID
