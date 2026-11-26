@@ -1,6 +1,7 @@
 /// Render models shared by the elements.
 library;
 
+export 'src/models/branch_info.dart';
 export 'src/models/chat_message.dart';
 export 'src/models/command_entry.dart';
 export 'src/models/interaction_record.dart';

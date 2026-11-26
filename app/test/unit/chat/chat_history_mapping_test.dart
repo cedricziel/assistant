@@ -1,5 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
-import 'package:assistant_app/features/chat/chat_provider.dart';
+import 'package:assistant_app/features/chat/chat_provider.dart' hide BranchInfo;
 import 'package:assistant_app/features/chat/chat_turn_transitions.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:built_value/json_object.dart';
@@ -57,6 +57,74 @@ MessageSummary _msg({
 
 void main() {
   group('chatMessagesFromHistory', () {
+    test('carries parentId, branch and replyBranch onto ChatMessage', () {
+      final rows = [
+        MessageSummary(
+          (b) => b
+            ..id = 'u2'
+            ..role = 'user'
+            ..content = 'edited'
+            ..turn = 1
+            ..createdAt = DateTime.parse('2026-05-16T00:00:00Z')
+            ..ttsAvailable = false
+            ..parentId = 'a1'
+            ..branch.replace(
+              BranchInfo(
+                (x) => x
+                  ..count = 2
+                  ..index = 1
+                  ..siblingIds.replace(['u2-old', 'u2']),
+              ),
+            )
+            ..replyBranch.replace(
+              BranchInfo(
+                (x) => x
+                  ..count = 3
+                  ..index = 2
+                  ..siblingIds.replace(['r1', 'r2', 'r3']),
+              ),
+            ),
+        ),
+      ];
+
+      final out = chatMessagesFromHistory(rows).single;
+
+      expect(out.parentId, 'a1');
+      expect(out.branch?.count, 2);
+      expect(out.branch?.index, 1);
+      expect(out.branch?.siblingIds, ['u2-old', 'u2']);
+      expect(out.replyBranch?.count, 3);
+      expect(out.replyBranch?.index, 2);
+      expect(out.replyBranch?.siblingIds, ['r1', 'r2', 'r3']);
+    });
+
+    test('rows without branch metadata map to nulls', () {
+      final out = chatMessagesFromHistory([
+        _msg(id: 'm', role: 'user', content: 'hi'),
+      ]).single;
+
+      expect(out.parentId, isNull);
+      expect(out.branch, isNull);
+      expect(out.replyBranch, isNull);
+    });
+
+    test('tool-only rows are still skipped when they carry branch data', () {
+      final toolOnly = _msg(
+        id: 'a2',
+        role: 'assistant',
+        content: '',
+        toolCalls: [(name: 'web-search', status: 'ok', result: 'r')],
+      ).rebuild((b) => b..parentId = 'u1');
+
+      final out = chatMessagesFromHistory([toolOnly]);
+
+      expect(
+        out.where((m) => m.timelineType == TimelineEntryType.message),
+        isEmpty,
+      );
+      expect(out.single.timelineType, TimelineEntryType.toolCall);
+    });
+
     test(
       'assistant tool-call-only turns render as chips, not empty bubbles',
       () {
