@@ -21,6 +21,8 @@ pub enum TranscriptionProviderKind {
     Ollama,
     /// Deepgram hosted speech-to-text API.
     Deepgram,
+    /// OpenRouter speech-to-text (`POST /audio/transcriptions`).
+    OpenRouter,
 }
 
 /// Configuration for audio transcription.
@@ -115,6 +117,65 @@ pub struct TtsConfig {
     /// ```
     #[serde(default)]
     pub voices: HashMap<String, String>,
+    /// Audio format to deliver (default `mp3`).
+    #[serde(default)]
+    pub format: Option<TtsFormat>,
+    /// Playback speed multiplier, sent when set (OpenRouter).
+    #[serde(default)]
+    pub speed: Option<f32>,
+    /// Delivery instructions such as tone or pacing (OpenRouter).
+    #[serde(default)]
+    pub instructions: Option<String>,
+    /// Sample rate of the model's raw PCM output, when it differs from the
+    /// documented rate for its family (OpenRouter).
+    #[serde(default)]
+    pub pcm_sample_rate: Option<u32>,
+}
+
+/// A TTS output format.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TtsFormat {
+    #[default]
+    Mp3,
+    Wav,
+    /// Opus in Ogg, as messenger voice notes use.
+    Ogg,
+    /// 16-bit little-endian mono PCM.
+    Pcm,
+}
+
+impl TtsFormat {
+    /// The format's name, as config and APIs spell it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mp3 => "mp3",
+            Self::Wav => "wav",
+            Self::Ogg => "ogg",
+            Self::Pcm => "pcm",
+        }
+    }
+
+    /// The MIME type of audio in this format.
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            Self::Mp3 => "audio/mpeg",
+            Self::Wav => "audio/wav",
+            Self::Ogg => "audio/ogg",
+            Self::Pcm => "audio/pcm",
+        }
+    }
+
+    /// Parses a format name, failing with the supported ones.
+    pub fn parse(name: &str) -> anyhow::Result<Self> {
+        match name.trim().to_lowercase().as_str() {
+            "mp3" => Ok(Self::Mp3),
+            "wav" => Ok(Self::Wav),
+            "ogg" => Ok(Self::Ogg),
+            "pcm" => Ok(Self::Pcm),
+            other => anyhow::bail!("unsupported TTS format `{other}`; use mp3, wav, ogg or pcm"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -131,6 +192,33 @@ mod tests {
             prompt: None,
             max_chunk_secs,
         }
+    }
+
+    #[test]
+    fn tts_format_parses_the_four_formats_and_rejects_others() {
+        use super::{TtsConfig, TtsFormat};
+
+        for (name, format, mime) in [
+            ("mp3", TtsFormat::Mp3, "audio/mpeg"),
+            ("wav", TtsFormat::Wav, "audio/wav"),
+            ("ogg", TtsFormat::Ogg, "audio/ogg"),
+            ("pcm", TtsFormat::Pcm, "audio/pcm"),
+        ] {
+            let cfg: TtsConfig =
+                toml::from_str(&format!("provider = \"openai\"\nformat = \"{name}\"")).unwrap();
+            assert_eq!(cfg.format, Some(format));
+            assert_eq!(format.mime_type(), mime);
+            assert_eq!(TtsFormat::parse(name).unwrap(), format);
+        }
+        let err = toml::from_str::<TtsConfig>("provider = \"openai\"\nformat = \"aac\"")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("mp3") && err.contains("ogg"),
+            "lists the formats: {err}"
+        );
+        let err = TtsFormat::parse("aac").unwrap_err().to_string();
+        assert!(err.contains("mp3, wav, ogg or pcm"), "{err}");
     }
 
     #[test]

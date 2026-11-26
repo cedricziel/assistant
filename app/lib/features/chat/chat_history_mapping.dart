@@ -14,6 +14,15 @@ ToolCallStatus parseToolStatus(String status) {
   };
 }
 
+/// Map a persisted `finish_reason` onto [MessageStatus]: `"cancelled"` is a
+/// reply the user stopped; anything else (including unknown values) is `ok`.
+MessageStatus parseFinishReason(String? reason) {
+  return switch (reason) {
+    'cancelled' => MessageStatus.stopped,
+    _ => MessageStatus.ok,
+  };
+}
+
 /// Map a list of persisted [MessageSummary] history rows into the flat
 /// [ChatMessage] list the UI renders.
 ///
@@ -71,6 +80,7 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
         id: m.id,
         role: m.role,
         content: m.content,
+        status: parseFinishReason(m.finishReason),
         ttsAvailable: m.ttsAvailable,
         attachments: attachments
             ?.map(

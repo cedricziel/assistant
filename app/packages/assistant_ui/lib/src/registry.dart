@@ -10,6 +10,7 @@ const List<String> kAssistantUiElements = [
   'MessageActions',
   'MessageTimingIndicator',
   'QuestionCard',
+  'QueuedMessageBubble',
   'StarterPrompts',
   'SuggestionChips',
   'ThreadDensityScope',
