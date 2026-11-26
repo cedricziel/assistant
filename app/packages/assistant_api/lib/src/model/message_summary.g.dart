@@ -10,6 +10,8 @@ class _$MessageSummary extends MessageSummary {
   @override
   final BuiltList<AttachmentMetaResponse>? attachments;
   @override
+  final BranchInfo? branch;
+  @override
   final String content;
   @override
   final DateTime createdAt;
@@ -17,6 +19,10 @@ class _$MessageSummary extends MessageSummary {
   final String? finishReason;
   @override
   final String id;
+  @override
+  final String? parentId;
+  @override
+  final BranchInfo? replyBranch;
   @override
   final String role;
   @override
@@ -33,10 +39,13 @@ class _$MessageSummary extends MessageSummary {
 
   _$MessageSummary._(
       {this.attachments,
+      this.branch,
       required this.content,
       required this.createdAt,
       this.finishReason,
       required this.id,
+      this.parentId,
+      this.replyBranch,
       required this.role,
       this.skillName,
       this.toolCalls,
@@ -55,10 +64,13 @@ class _$MessageSummary extends MessageSummary {
     if (identical(other, this)) return true;
     return other is MessageSummary &&
         attachments == other.attachments &&
+        branch == other.branch &&
         content == other.content &&
         createdAt == other.createdAt &&
         finishReason == other.finishReason &&
         id == other.id &&
+        parentId == other.parentId &&
+        replyBranch == other.replyBranch &&
         role == other.role &&
         skillName == other.skillName &&
         toolCalls == other.toolCalls &&
@@ -70,10 +82,13 @@ class _$MessageSummary extends MessageSummary {
   int get hashCode {
     var _$hash = 0;
     _$hash = $jc(_$hash, attachments.hashCode);
+    _$hash = $jc(_$hash, branch.hashCode);
     _$hash = $jc(_$hash, content.hashCode);
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, finishReason.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
+    _$hash = $jc(_$hash, parentId.hashCode);
+    _$hash = $jc(_$hash, replyBranch.hashCode);
     _$hash = $jc(_$hash, role.hashCode);
     _$hash = $jc(_$hash, skillName.hashCode);
     _$hash = $jc(_$hash, toolCalls.hashCode);
@@ -87,10 +102,13 @@ class _$MessageSummary extends MessageSummary {
   String toString() {
     return (newBuiltValueToStringHelper(r'MessageSummary')
           ..add('attachments', attachments)
+          ..add('branch', branch)
           ..add('content', content)
           ..add('createdAt', createdAt)
           ..add('finishReason', finishReason)
           ..add('id', id)
+          ..add('parentId', parentId)
+          ..add('replyBranch', replyBranch)
           ..add('role', role)
           ..add('skillName', skillName)
           ..add('toolCalls', toolCalls)
@@ -110,6 +128,10 @@ class MessageSummaryBuilder
   set attachments(ListBuilder<AttachmentMetaResponse>? attachments) =>
       _$this._attachments = attachments;
 
+  BranchInfoBuilder? _branch;
+  BranchInfoBuilder get branch => _$this._branch ??= BranchInfoBuilder();
+  set branch(BranchInfoBuilder? branch) => _$this._branch = branch;
+
   String? _content;
   String? get content => _$this._content;
   set content(String? content) => _$this._content = content;
@@ -125,6 +147,16 @@ class MessageSummaryBuilder
   String? _id;
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
+
+  String? _parentId;
+  String? get parentId => _$this._parentId;
+  set parentId(String? parentId) => _$this._parentId = parentId;
+
+  BranchInfoBuilder? _replyBranch;
+  BranchInfoBuilder get replyBranch =>
+      _$this._replyBranch ??= BranchInfoBuilder();
+  set replyBranch(BranchInfoBuilder? replyBranch) =>
+      _$this._replyBranch = replyBranch;
 
   String? _role;
   String? get role => _$this._role;
@@ -156,10 +188,13 @@ class MessageSummaryBuilder
     final $v = _$v;
     if ($v != null) {
       _attachments = $v.attachments?.toBuilder();
+      _branch = $v.branch?.toBuilder();
       _content = $v.content;
       _createdAt = $v.createdAt;
       _finishReason = $v.finishReason;
       _id = $v.id;
+      _parentId = $v.parentId;
+      _replyBranch = $v.replyBranch?.toBuilder();
       _role = $v.role;
       _skillName = $v.skillName;
       _toolCalls = $v.toolCalls?.toBuilder();
@@ -189,6 +224,7 @@ class MessageSummaryBuilder
       _$result = _$v ??
           _$MessageSummary._(
             attachments: _attachments?.build(),
+            branch: _branch?.build(),
             content: BuiltValueNullFieldError.checkNotNull(
                 content, r'MessageSummary', 'content'),
             createdAt: BuiltValueNullFieldError.checkNotNull(
@@ -196,6 +232,8 @@ class MessageSummaryBuilder
             finishReason: finishReason,
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'MessageSummary', 'id'),
+            parentId: parentId,
+            replyBranch: _replyBranch?.build(),
             role: BuiltValueNullFieldError.checkNotNull(
                 role, r'MessageSummary', 'role'),
             skillName: skillName,
@@ -210,6 +248,11 @@ class MessageSummaryBuilder
       try {
         _$failedField = 'attachments';
         _attachments?.build();
+        _$failedField = 'branch';
+        _branch?.build();
+
+        _$failedField = 'replyBranch';
+        _replyBranch?.build();
 
         _$failedField = 'toolCalls';
         _toolCalls?.build();

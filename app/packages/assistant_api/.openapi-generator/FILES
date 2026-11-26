@@ -27,6 +27,7 @@ doc/AuthenticationInfo.md
 doc/AuthorizationCodeOAuthFlow.md
 doc/BindingResponse.md
 doc/BindingsApi.md
+doc/BranchInfo.md
 doc/CancelTaskRequest.md
 doc/CapabilitiesApi.md
 doc/CatalogApi.md
@@ -166,6 +167,7 @@ doc/StreamRunEventsQuery.md
 doc/StringList.md
 doc/SubscribeRequest.md
 doc/SubscriptionResponse.md
+doc/SwitchBranchRequest.md
 doc/Task.md
 doc/TaskArtifactUpdateEvent.md
 doc/TaskPushNotificationConfig.md
@@ -269,6 +271,7 @@ lib/src/model/attachment_meta_response.dart
 lib/src/model/authentication_info.dart
 lib/src/model/authorization_code_o_auth_flow.dart
 lib/src/model/binding_response.dart
+lib/src/model/branch_info.dart
 lib/src/model/cancel_task_request.dart
 lib/src/model/catalog_auth_kind_response.dart
 lib/src/model/catalog_auth_response.dart
@@ -395,6 +398,7 @@ lib/src/model/stream_run_events_query.dart
 lib/src/model/string_list.dart
 lib/src/model/subscribe_request.dart
 lib/src/model/subscription_response.dart
+lib/src/model/switch_branch_request.dart
 lib/src/model/task.dart
 lib/src/model/task_artifact_update_event.dart
 lib/src/model/task_push_notification_config.dart

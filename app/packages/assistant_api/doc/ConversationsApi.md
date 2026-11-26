@@ -25,6 +25,7 @@ Method | HTTP request | Description
 [**setMessageFeedback**](ConversationsApi.md#setmessagefeedback) | **PUT** /api/conversations/{id}/messages/{message_id}/feedback | &#x60;PUT /api/conversations/{id}/messages/{message_id}/feedback&#x60; — rate a reply.
 [**streamConversations**](ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [**streamRunEvents**](ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
+[**switchConversationBranch**](ConversationsApi.md#switchconversationbranch) | **POST** /api/conversations/{id}/switch-branch | &#x60;POST /api/conversations/{id}/switch-branch&#x60; — make another version of a message the active one.
 [**updateConversation**](ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
 
 
@@ -745,6 +746,53 @@ void (empty response body)
 
  - **Content-Type**: Not defined
  - **Accept**: text/event-stream, application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **switchConversationBranch**
+> ConversationDetail switchConversationBranch(id, switchBranchRequest, xSpaceId)
+
+`POST /api/conversations/{id}/switch-branch` — make another version of a message the active one.
+
+Lands on the most recently created leaf below `message_id`. Does not change `updated_at`. While a turn is working it returns `409`; while a turn only waits for an approval or an answer, that wait is cancelled first.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final SwitchBranchRequest switchBranchRequest = ; // SwitchBranchRequest | 
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.switchConversationBranch(id, switchBranchRequest, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->switchConversationBranch: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Conversation ID | 
+ **switchBranchRequest** | [**SwitchBranchRequest**](SwitchBranchRequest.md)|  | 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**ConversationDetail**](ConversationDetail.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
