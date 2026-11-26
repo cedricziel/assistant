@@ -5,6 +5,8 @@ use serde_json::Value;
 
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
 
+use super::errors::{ErrorBody, body_error};
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatRequest {
     pub model: String,
@@ -26,6 +28,8 @@ pub struct ChatResponse {
     pub choices: Vec<Choice>,
     #[serde(default)]
     pub usage: Option<Usage>,
+    #[serde(default)]
+    pub error: Option<ErrorBody>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,6 +108,11 @@ impl Usage {
 
 impl ChatResponse {
     pub fn into_llm_response(self) -> anyhow::Result<LlmResponse> {
+        if let Some(error) = &self.error
+            && self.choices.is_empty()
+        {
+            return Err(body_error(error));
+        }
         let mut meta = LlmResponseMeta {
             model: self.model,
             response_id: self.id,
