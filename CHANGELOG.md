@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.3.1](https://github.com/cedricziel/assistant/compare/v0.3.0...v0.3.1) (2026-11-25)
+
+
+### Features
+
+* **auth:** issue MCP-audience tokens with the mcp:execute scope ([60f298b](https://github.com/cedricziel/assistant/commit/60f298b6a5cae613a0256c1ef272b88d957806ff))
+* **core:** ask before running anything from a remote MCP skill ([b59f0c5](https://github.com/cedricziel/assistant/commit/b59f0c55103843900a23566bd9aa8d623fc677a9))
+* **llm-provider:** honor Retry-After when retrying provider calls ([3d0e74e](https://github.com/cedricziel/assistant/commit/3d0e74efb4bdab931fc0780a0efd43ca85eb01bf))
+* **llm-provider:** honor Retry-After when retrying provider calls ([ff94d65](https://github.com/cedricziel/assistant/commit/ff94d65531f5bcb6d490fe2c301a5ab59f8efcd8))
+* **llm-provider:** report cached, reasoning and cost usage ([edf7ed9](https://github.com/cedricziel/assistant/commit/edf7ed92b69f04fa979be88bf306fb475c40bdb1))
+* **llm-provider:** report cached, reasoning and cost usage ([1f52abb](https://github.com/cedricziel/assistant/commit/1f52abb2404c3a6ad922707a806edbf8c8a6f632))
+* **mcp-client:** convert every tool result content type ([8555579](https://github.com/cedricziel/assistant/commit/85555799694d97e9b6c0aff2c34905a8d86b067a))
+* **mcp-client:** handle server notifications and convert all content types ([ae45e3e](https://github.com/cedricziel/assistant/commit/ae45e3e6744f3379e478c0fe42521221ade205c2))
+* **mcp-client:** handle server notifications and hide app-only tools ([79fcfa6](https://github.com/cedricziel/assistant/commit/79fcfa646eccb7e75f3f701c0562671e4169c4f6))
+* **mcp-client:** offer skills that external MCP servers publish ([4df303a](https://github.com/cedricziel/assistant/commit/4df303a2d2266405bdbd8c0598632f708e7c70e8))
+* **mcp-client:** poll tasks that external tools return ([c497828](https://github.com/cedricziel/assistant/commit/c49782807f38867b083db0276f70daeab23bb671))
+* **mcp-client:** poll tasks that external tools return ([aa9900c](https://github.com/cedricziel/assistant/commit/aa9900cd89562752e2dda6801ed4dc4eb6faaea0))
+* **mcp-client:** verify and cache skills that MCP servers publish ([27a2068](https://github.com/cedricziel/assistant/commit/27a2068da388f6fd48824192958554e31af6b0b7))
+* **mcp-server:** run tool calls as the calling identity ([41818df](https://github.com/cedricziel/assistant/commit/41818dff558b97d87b18cecb6c86378005c326c5))
+* **mcp-server:** run tool calls as the calling identity ([69e9abb](https://github.com/cedricziel/assistant/commit/69e9abb46971645b63857e652ab11c4ca37fdbc3))
+* **runtime:** offer the skills MCP servers publish in every space ([50c011c](https://github.com/cedricziel/assistant/commit/50c011c0ffb36788d3582ab8672fa70ad8b804b0))
+* **runtime:** reuse the OpenRouter key for the decision model ([2bcc3d4](https://github.com/cedricziel/assistant/commit/2bcc3d4e2d6ff2b96c074c30fdb25f86356d680e))
+* **runtime:** reuse the OpenRouter key for the decision model ([75ec779](https://github.com/cedricziel/assistant/commit/75ec779054e3279e4c3d6f4474e9f20a9cf74be1))
+
+
+### Bug Fixes
+
+* **app:** sign in from the native apps through the system sign-in sheet ([3996dfe](https://github.com/cedricziel/assistant/commit/3996dfe1b1e6575f25b6232020e60880a23038eb))
+* **app:** sign in from the native apps through the system sign-in sheet ([960b61d](https://github.com/cedricziel/assistant/commit/960b61d805d377739e2d95ff310af26dc45818ff))
+* **app:** sign in on the web through the server's sign-in page ([bcb827d](https://github.com/cedricziel/assistant/commit/bcb827d56ed16e81db16d40e45cb5176a6b3d656))
+* **app:** sign in on the web through the server's sign-in page ([f0b7eec](https://github.com/cedricziel/assistant/commit/f0b7eec6a425355a8e21f017a3f16e1314d39a07))
+* **app:** upgrade cupertino_http to 3.x for Swift Package Manager support ([3c4c5d3](https://github.com/cedricziel/assistant/commit/3c4c5d36490621186582944d2e64ecf24550a25c))
+* **release:** drop the bundle_id option from notarize ([dd0542d](https://github.com/cedricziel/assistant/commit/dd0542d06a55878a9831989fd8c71d0914822a9b))
+* **release:** drop the bundle_id option from notarize ([125d166](https://github.com/cedricziel/assistant/commit/125d1663e40a1ed0b9530fced52d516cdf521308))
+
 ## [0.3.0](https://github.com/cedricziel/assistant/compare/v0.2.0...v0.3.0) (2026-11-25)
 
 

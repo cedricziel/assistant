@@ -483,6 +483,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             include_str!("../../../migrations/045_skill_executions.sql"),
         ),
         (
+            "046_message_provider_state",
+            include_str!("../../../migrations/046_message_provider_state.sql"),
+        ),
+        (
             "049_ui_surfaces",
             include_str!("../../../migrations/049_ui_surfaces.sql"),
         ),

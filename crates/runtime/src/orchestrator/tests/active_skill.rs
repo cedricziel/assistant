@@ -82,6 +82,7 @@ impl TaggedLlm {
                 }],
                 meta: LlmResponseMeta::default(),
                 thinking: None,
+                provider_state: None,
             }),
             None => LlmResponse::FinalAnswer("done".to_string(), LlmResponseMeta::default()),
         }

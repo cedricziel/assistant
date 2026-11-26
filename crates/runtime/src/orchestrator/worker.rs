@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use super::turn_cancellations::Claim;
 use super::{ExtensionRegistration, Orchestrator, TurnResult, parse_interface};
 use crate::webhook_dispatch;
 
@@ -41,6 +42,23 @@ impl Orchestrator {
         sink: mpsc::Sender<super::OrchestratorEvent>,
     ) {
         self.token_sinks.write().await.insert(conversation_id, sink);
+    }
+
+    /// Remove `conversation_id`'s event sink, but only if it is `sink`'s
+    /// channel. A runner can release its own sink without touching the one a
+    /// newer turn of the same conversation registered.
+    pub async fn release_token_sink(
+        &self,
+        conversation_id: Uuid,
+        sink: &mpsc::Sender<super::OrchestratorEvent>,
+    ) {
+        let mut sinks = self.token_sinks.write().await;
+        if sinks
+            .get(&conversation_id)
+            .is_some_and(|registered| registered.same_channel(sink))
+        {
+            sinks.remove(&conversation_id);
+        }
     }
 
     /// Register extension tools and attachments for an interface-specific turn.
@@ -183,6 +201,31 @@ impl Orchestrator {
                         turn_req.prompt.clone()
                     };
 
+                    // Claim the request before touching the per-conversation
+                    // maps: a request cancelled before any worker claimed it
+                    // is stale, and those maps may already belong to a newer
+                    // turn of the same conversation. Turns dispatched outside
+                    // of submit_turn (e.g. the scheduler) have no entry and
+                    // run to completion regardless.
+                    let claim = match msg.batch_id {
+                        Some(bid) => self.turn_cancellations.write().await.claim(bid),
+                        None => Claim::Untracked,
+                    };
+                    let turn_cancel = match claim {
+                        Claim::Cancelled => {
+                            info!(
+                                conversation_id = %conv_id,
+                                worker_id,
+                                submit_state = "cancelled_before_claim",
+                                "Skipping turn cancelled before a worker claimed it"
+                            );
+                            let _ = self.bus.ack(msg.id).await;
+                            continue;
+                        }
+                        Claim::Claimed(token) => token,
+                        Claim::Untracked => CancellationToken::new(),
+                    };
+
                     // Check for registered side-channel resources.
                     let ext = self.extension_registrations.write().await.remove(&conv_id);
                     let token_sink = self.token_sinks.write().await.remove(&conv_id);
@@ -191,23 +234,6 @@ impl Orchestrator {
                     // re-register them if this turn fails transiently and
                     // needs to be nacked for NATS redelivery.
                     let ext_for_retry = ext.clone();
-
-                    // Look up the cancellation token registered by submit_turn
-                    // for this specific request.  Turns dispatched outside of
-                    // submit_turn (e.g. the scheduler) won't have one, which is
-                    // fine — they run to completion regardless.
-                    let turn_cancel = msg
-                        .batch_id
-                        .and_then(|bid| {
-                            // Use try_read so we don't deadlock in the common
-                            // path; if the lock is contended we skip and the
-                            // turn runs without cancellation support (safe).
-                            self.turn_cancellations
-                                .try_read()
-                                .ok()
-                                .and_then(|g| g.get(&bid).cloned())
-                        })
-                        .unwrap_or_else(CancellationToken::new);
 
                     // Extract identity from the bus message so tools see who
                     // initiated this turn.
@@ -742,7 +768,7 @@ impl Orchestrator {
         self.turn_cancellations
             .write()
             .await
-            .insert(request_id, cancel_token.clone());
+            .register(request_id, cancel_token.clone());
         let interface_label = format!("{interface:?}");
         let interface_cx = crate::otel_spans::start_interface_root_context(
             &interface,
@@ -838,16 +864,29 @@ impl Orchestrator {
             // `submit_turn` return promptly instead of waiting for the bus
             // result that will never arrive.
             if cancel_token.is_cancelled() {
-                self.turn_cancellations.write().await.remove(&request_id);
+                let claimed = self
+                    .turn_cancellations
+                    .write()
+                    .await
+                    .remove(request_id)
+                    .unwrap_or(true);
                 info!(
                     conversation_id = %conversation_id,
                     request_id = %request_id,
                     interface = %interface_label,
-                    submit_state = "cancelled",
+                    submit_state = if claimed { "cancelled" } else { "cancelled_before_claim" },
                     "submit_turn waiter state"
                 );
+                let before_start = if claimed {
+                    String::new()
+                } else {
+                    format!(
+                        " before it started ({})",
+                        crate::orchestrator::TURN_CANCELLED_BEFORE_START_MARKER
+                    )
+                };
                 anyhow::bail!(
-                    "{}: submit_turn aborted by cancel_turn \
+                    "{}{before_start}: submit_turn aborted by cancel_turn \
                      (conversation_id={conversation_id}, request_id={request_id})",
                     crate::orchestrator::TURN_CANCELLED_MARKER
                 );
@@ -866,7 +905,7 @@ impl Orchestrator {
                 );
                 // Signal the worker to abort the in-flight turn, then clean up.
                 cancel_token.cancel();
-                self.turn_cancellations.write().await.remove(&request_id);
+                self.turn_cancellations.write().await.remove(request_id);
                 anyhow::bail!(
                     "submit_turn timed out waiting for result \
                      (conversation_id={conversation_id}, request_id={request_id})"
@@ -932,7 +971,7 @@ impl Orchestrator {
                     continue;
                 }
                 self.bus.ack(msg.id).await?;
-                self.turn_cancellations.write().await.remove(&request_id);
+                self.turn_cancellations.write().await.remove(request_id);
                 consume_result_span.set_attribute(KeyValue::new("bus.status", "ok"));
                 consume_result_span.end();
                 if now > deadline {

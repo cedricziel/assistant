@@ -78,18 +78,21 @@ fn sanitize_history_orphaned_tool_calls_get_synthetic_results() {
             role: ChatRole::User,
             content: "do stuff".into(),
         },
-        ChatHistoryMessage::AssistantToolCalls(vec![
-            ToolCallItem {
-                name: "tool-a".into(),
-                params: serde_json::json!({}),
-                id: None,
-            },
-            ToolCallItem {
-                name: "tool-b".into(),
-                params: serde_json::json!({}),
-                id: None,
-            },
-        ]),
+        ChatHistoryMessage::AssistantToolCalls {
+            items: vec![
+                ToolCallItem {
+                    name: "tool-a".into(),
+                    params: serde_json::json!({}),
+                    id: None,
+                },
+                ToolCallItem {
+                    name: "tool-b".into(),
+                    params: serde_json::json!({}),
+                    id: None,
+                },
+            ],
+            provider_state: None,
+        },
         // Only one ToolResult — tool-b is missing.
         ChatHistoryMessage::ToolResult {
             name: "tool-a".into(),
@@ -118,18 +121,21 @@ fn sanitize_history_fully_orphaned_tool_calls_all_results_inserted() {
             role: ChatRole::User,
             content: "run tools".into(),
         },
-        ChatHistoryMessage::AssistantToolCalls(vec![
-            ToolCallItem {
-                name: "alpha".into(),
-                params: serde_json::json!({}),
-                id: None,
-            },
-            ToolCallItem {
-                name: "beta".into(),
-                params: serde_json::json!({}),
-                id: None,
-            },
-        ]),
+        ChatHistoryMessage::AssistantToolCalls {
+            items: vec![
+                ToolCallItem {
+                    name: "alpha".into(),
+                    params: serde_json::json!({}),
+                    id: None,
+                },
+                ToolCallItem {
+                    name: "beta".into(),
+                    params: serde_json::json!({}),
+                    id: None,
+                },
+            ],
+            provider_state: None,
+        },
         // No ToolResult at all — process crashed right after persisting tool calls.
     ];
     crate::history::sanitize_history(&mut history);
@@ -152,11 +158,14 @@ fn sanitize_history_combined_orphaned_tools_and_trailing_user() {
             role: ChatRole::User,
             content: "turn 1".into(),
         },
-        ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-            name: "my-tool".into(),
-            params: serde_json::json!({}),
-            id: None,
-        }]),
+        ChatHistoryMessage::AssistantToolCalls {
+            items: vec![ToolCallItem {
+                name: "my-tool".into(),
+                params: serde_json::json!({}),
+                id: None,
+            }],
+            provider_state: None,
+        },
         // Missing ToolResult, then orphaned user from turn 2:
         ChatHistoryMessage::Text {
             role: ChatRole::User,
@@ -219,11 +228,14 @@ fn sanitize_history_orphaned_tool_result_dropped() {
 fn sanitize_history_tool_result_after_matched_calls_dropped() {
     // Extra ToolResult beyond what the tool calls declared should be dropped.
     let mut history = vec![
-        ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-            name: "my-tool".into(),
-            params: serde_json::json!({}),
-            id: Some("call_1".into()),
-        }]),
+        ChatHistoryMessage::AssistantToolCalls {
+            items: vec![ToolCallItem {
+                name: "my-tool".into(),
+                params: serde_json::json!({}),
+                id: Some("call_1".into()),
+            }],
+            provider_state: None,
+        },
         ChatHistoryMessage::ToolResult {
             name: "my-tool".into(),
             content: "result".into(),
@@ -243,7 +255,7 @@ fn sanitize_history_tool_result_after_matched_calls_dropped() {
     assert_eq!(history.len(), 3);
     assert!(matches!(
         &history[0],
-        ChatHistoryMessage::AssistantToolCalls(_)
+        ChatHistoryMessage::AssistantToolCalls { .. }
     ));
     assert!(matches!(
         &history[1],

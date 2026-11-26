@@ -2,7 +2,12 @@
 //! `filter_tool_specs`, `make_tool_call_message`, `make_tool_result_message`.
 
 use assistant_core::types::conversation::MessageRole;
-use assistant_core::{Capabilities, HostedTool, ToolCallItem, ToolSpec, ToolSupport};
+use assistant_core::{
+    Capabilities, ChatHistoryMessage, HostedTool, ProviderState, ToolCallItem, ToolSpec,
+    ToolSupport,
+};
+use assistant_storage::InMemoryConversationStore;
+use assistant_storage::conversations::ConversationStore;
 use uuid::Uuid;
 
 use crate::orchestrator::Orchestrator;
@@ -122,6 +127,49 @@ fn make_tool_call_message_with_empty_items_emits_empty_json_array() {
     let msg = Orchestrator::make_tool_call_message(Uuid::new_v4(), 0, &[]);
     let json = msg.tool_calls_json.expect("tool_calls_json must be set");
     assert_eq!(json, "[]");
+}
+
+// ── persist_tool_calls ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn persist_tool_calls_keeps_provider_state_in_history_and_storage() {
+    let store = InMemoryConversationStore::new();
+    let conv = store.create_conversation(None).await.unwrap();
+    let items = vec![ToolCallItem {
+        name: "bash".to_string(),
+        params: serde_json::json!({"command": "ls"}),
+        id: Some("c1".to_string()),
+    }];
+    let state = ProviderState {
+        provider: "openrouter".to_string(),
+        model: "anthropic/claude-sonnet-5.5".to_string(),
+        data: serde_json::json!({"reasoning_details": [{"type": "reasoning.encrypted", "data": "x"}]}),
+    };
+    let mut history = Vec::new();
+
+    Orchestrator::persist_tool_calls(&mut history, &store, conv.id, 1, &items, Some(&state)).await;
+
+    assert!(
+        matches!(
+            &history[0],
+            ChatHistoryMessage::AssistantToolCalls { provider_state: Some(s), .. } if *s == state
+        ),
+        "the in-memory history carries the state for the next call: {history:?}"
+    );
+    let saved = store.load_history(conv.id).await.unwrap();
+    let stored: ProviderState =
+        serde_json::from_str(saved[0].provider_state_json.as_deref().unwrap()).unwrap();
+    assert_eq!(stored, state, "the state is persisted for history rebuilds");
+}
+
+#[tokio::test]
+async fn persist_tool_calls_without_provider_state_stores_none() {
+    let store = InMemoryConversationStore::new();
+    let conv = store.create_conversation(None).await.unwrap();
+    let mut history = Vec::new();
+    Orchestrator::persist_tool_calls(&mut history, &store, conv.id, 1, &[], None).await;
+    let saved = store.load_history(conv.id).await.unwrap();
+    assert!(saved[0].provider_state_json.is_none());
 }
 
 // ── make_tool_result_message ──────────────────────────────────────────────
