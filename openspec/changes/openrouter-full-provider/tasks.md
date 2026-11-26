@@ -128,8 +128,8 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 18. Image generation
 
-- [ ] 18.1 Write failing tests for `[images]` config parsing, including key reuse and routing keys. Confirm red. Implement, then verify.
-- [ ] 18.2 Write failing wiremock tests for the OpenRouter images provider: request shape with `b64_json`; `url` entries downloaded; `session_id` and `user` from `LlmCallContext`; 402 and 429 handling; cost recorded. Confirm red. Implement `images/`, then verify.
+- [x] 18.1 Write failing tests for `[images]` config parsing, including key reuse and routing keys. Confirm red. Implement, then verify.
+- [x] 18.2 Write failing wiremock tests for the OpenRouter images provider: request shape with `b64_json`; `url` entries downloaded; `session_id` and `user` from `LlmCallContext`; 402 and 429 handling; cost recorded. Confirm red. Implement `images/`, then verify.
 - [ ] 18.3 Write failing tests for `/images/models` validation: unknown model fails the build; enum, range and unlisted parameters are rejected without an upstream call; reference images are rejected for models without image input. Confirm red. Implement, then verify.
 - [ ] 18.4 Write failing tests for the `image-generate` tool: parameter schema; `reference_attachment_ids` resolved to data URIs, non-images rejected, at most 16; attachments returned; fewer images than requested reported; the tool is absent when `[images]` is unset. Confirm red. Implement and register it in `space_runtime`, then verify.
 - [ ] 18.5 Write `docs/images.md` and link it from `docs/openrouter.md`.
