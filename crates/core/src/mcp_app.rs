@@ -79,7 +79,7 @@ impl McpApp {
     /// a value under the key that is not an app stays where it is.
     pub fn take_from(data: &mut Option<Value>) -> Option<Self> {
         let object = data.as_mut()?.as_object_mut()?;
-        let app = serde_json::from_value(object.get(Self::DATA_KEY)?.clone()).ok()?;
+        let app = Self::deserialize(object.get(Self::DATA_KEY)?).ok()?;
         object.remove(Self::DATA_KEY);
         if object.is_empty() {
             *data = None;
@@ -95,11 +95,9 @@ impl McpApp {
 pub struct McpAppTool {
     /// The tool's `_meta.ui.visibility` includes `app`.
     pub visible_to_app: bool,
-    /// The tool declares `readOnlyHint: true`.
-    pub read_only: bool,
-    /// The server's tools need confirmation whatever they do, as for an
-    /// integration that is not trusted.
-    pub requires_confirmation: bool,
+    /// The user must confirm a call: the tool lacks `readOnlyHint: true`, or
+    /// its server is not trusted.
+    pub needs_confirmation: bool,
 }
 
 /// One server, connected for the caller, that an app talks to.

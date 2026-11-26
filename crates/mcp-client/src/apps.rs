@@ -16,7 +16,7 @@ use assistant_core::mcp_app::{
 use assistant_core::tool::TurnScope;
 use assistant_core::types::skills_mcp::McpTrustLevel;
 
-use crate::client::McpClient;
+use crate::client::{McpClient, content_bytes};
 
 /// The only MIME type an app resource may have.
 pub const APP_MIME_TYPE: &str = "text/html;profile=mcp-app";
@@ -46,13 +46,11 @@ pub(crate) fn ui_field<'a>(meta: &'a MetaObject, field: &str) -> Option<&'a Valu
 /// MCP Apps visibility lives in `_meta.ui.visibility` and defaults to
 /// `["model", "app"]`.
 pub(crate) fn visible_to(tool: &Tool, audience: &str) -> bool {
-    let Some(meta) = &tool.meta else {
-        return true;
-    };
-    match ui_field(meta, "visibility").and_then(Value::as_array) {
-        Some(audiences) => audiences.iter().any(|a| a.as_str() == Some(audience)),
-        None => true,
-    }
+    tool.meta
+        .as_ref()
+        .and_then(|meta| ui_field(meta, "visibility"))
+        .and_then(Value::as_array)
+        .is_none_or(|audiences| audiences.iter().any(|a| a.as_str() == Some(audience)))
 }
 
 /// The app at `uri` on `client`'s server, or `None` (with a warning) when it
@@ -77,26 +75,16 @@ async fn read_app(client: &McpClient, server: &str, uri: &str) -> Result<McpApp>
     let Some(contents) = result.contents.into_iter().next() else {
         bail!("the resource has no content");
     };
-    let (mime_type, html, meta) = match contents {
+    let (mime_type, meta) = match &contents {
         ResourceContents::TextResourceContents {
-            mime_type,
-            text,
-            meta,
-            ..
-        } => (mime_type, text, meta),
-        ResourceContents::BlobResourceContents {
-            mime_type,
-            blob,
-            meta,
-            ..
-        } => {
-            let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, blob)
-                .context("the blob is not valid base64")?;
-            let html = String::from_utf8(bytes).context("the blob is not UTF-8")?;
-            (mime_type, html, meta)
+            mime_type, meta, ..
         }
-        _ => bail!("the resource content is of an unknown kind"),
+        | ResourceContents::BlobResourceContents {
+            mime_type, meta, ..
+        } => (mime_type.clone(), meta.clone()),
+        _ => (None, None),
     };
+    let html = String::from_utf8(content_bytes(contents)?).context("the resource is not UTF-8")?;
     if mime_type.as_deref() != Some(APP_MIME_TYPE) {
         bail!("served as {mime_type:?}, not {APP_MIME_TYPE}");
     }
@@ -107,11 +95,10 @@ async fn read_app(client: &McpClient, server: &str, uri: &str) -> Result<McpApp>
         );
     }
     // The metadata of the read wins; the listing's is the fallback.
-    let ui = match meta.as_ref().and_then(|meta| meta.0.get("ui")) {
-        Some(ui) => Some(ui.clone()),
-        None => listed_ui(client, uri).await,
+    let ui = match meta.and_then(|mut meta| meta.0.remove("ui")) {
+        Some(ui) => ui,
+        None => listed_ui(client, uri).await.unwrap_or(Value::Null),
     };
-    let ui = ui.unwrap_or(Value::Null);
     Ok(McpApp {
         server: server.to_string(),
         resource_uri: uri.to_string(),
@@ -180,14 +167,14 @@ fn permissions(permissions: &Value) -> McpAppPermissions {
 /// What an app may do with `tool` on a server whose tools need confirmation
 /// when `requires_confirmation` is set.
 fn app_tool(tool: &Tool, requires_confirmation: bool) -> McpAppTool {
+    let read_only = tool
+        .annotations
+        .as_ref()
+        .and_then(|annotations| annotations.read_only_hint)
+        == Some(true);
     McpAppTool {
         visible_to_app: visible_to(tool, "app"),
-        read_only: tool
-            .annotations
-            .as_ref()
-            .and_then(|annotations| annotations.read_only_hint)
-            == Some(true),
-        requires_confirmation,
+        needs_confirmation: requires_confirmation || !read_only,
     }
 }
 
@@ -283,9 +270,16 @@ mod tests {
     }
 
     #[test]
-    fn read_only_comes_from_the_hint() {
+    fn only_a_read_only_tool_on_a_trusted_server_runs_unconfirmed() {
         let hinted = tool(Value::Null).with_annotations(ToolAnnotations::new().read_only(true));
-        assert!(app_tool(&hinted, false).read_only);
-        assert!(!app_tool(&tool(Value::Null), false).read_only);
+        assert!(!app_tool(&hinted, false).needs_confirmation);
+        assert!(
+            app_tool(&hinted, true).needs_confirmation,
+            "untrusted server"
+        );
+        assert!(
+            app_tool(&tool(Value::Null), false).needs_confirmation,
+            "no hint"
+        );
     }
 }

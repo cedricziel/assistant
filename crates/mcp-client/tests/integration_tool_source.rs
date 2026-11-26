@@ -363,8 +363,7 @@ async fn an_app_reaches_its_integration_with_the_callers_own_access() {
         found.tool("widget"),
         Some(McpAppTool {
             visible_to_app: true,
-            read_only: false,
-            requires_confirmation: true,
+            needs_confirmation: true,
         }),
         "an app-only tool is listed for the app, and trust decides confirmation"
     );

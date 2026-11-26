@@ -194,14 +194,10 @@ impl McpClient {
     /// binary one's decoded content.
     pub async fn read_resource_bytes(&self, uri: &str) -> Result<Vec<u8>> {
         let result = self.read_resource(uri).await?;
-        match result.contents.into_iter().next() {
-            Some(ResourceContents::TextResourceContents { text, .. }) => Ok(text.into_bytes()),
-            Some(ResourceContents::BlobResourceContents { blob, .. }) => {
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, blob)
-                    .with_context(|| format!("'{uri}' is not valid base64"))
-            }
-            _ => anyhow::bail!("resources/read '{uri}' returned no content"),
-        }
+        let Some(contents) = result.contents.into_iter().next() else {
+            anyhow::bail!("resources/read '{uri}' returned no content");
+        };
+        content_bytes(contents).with_context(|| format!("'{uri}' could not be read"))
     }
 
     /// Read the resource at `uri`.
@@ -258,6 +254,19 @@ impl Drop for McpClient {
         if let Some(listener) = &self.listener {
             listener.abort();
         }
+    }
+}
+
+/// The bytes of one resource content: a text resource's UTF-8 or a binary
+/// one's decoded blob.
+pub(crate) fn content_bytes(contents: ResourceContents) -> Result<Vec<u8>> {
+    match contents {
+        ResourceContents::TextResourceContents { text, .. } => Ok(text.into_bytes()),
+        ResourceContents::BlobResourceContents { blob, .. } => {
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, blob)
+                .context("the blob is not valid base64")
+        }
+        _ => anyhow::bail!("the resource content is of an unknown kind"),
     }
 }
 

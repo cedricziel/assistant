@@ -305,8 +305,7 @@ async fn app_server_describes_its_tools() {
         server.tool("forecast"),
         Some(McpAppTool {
             visible_to_app: true,
-            read_only: false,
-            requires_confirmation: true,
+            needs_confirmation: true,
         })
     );
     assert_eq!(server.tool("nope"), None);
