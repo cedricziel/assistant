@@ -57,7 +57,9 @@ pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore, InMemoryAgentStore, SqliteAgentStore};
 pub use api_key_store::SqliteApiKeyStore;
-pub use attachments::{AttachmentStore, InMemoryAttachmentStore, SqliteAttachmentStore};
+pub use attachments::{
+    AttachmentBlobs, AttachmentStore, InMemoryAttachmentStore, SqliteAttachmentStore,
+};
 pub use auth_state_store::{
     SqliteAuthCodeStore, SqliteClientStore, SqliteDeviceCodeStore, SqliteRefreshTokenStore,
 };
@@ -160,26 +162,7 @@ use tracing::info;
 /// The top-level storage layer — owns the SQLite connection pool and runs migrations.
 pub struct StorageLayer {
     pub pool: SqlitePool,
-    attachments_root: AttachmentsRoot,
-}
-
-/// Install root that attachment bytes are kept under.
-enum AttachmentsRoot {
-    /// Storing an attachment fails.
-    None,
-    Dir(PathBuf),
-    /// In-memory storage: a temporary directory removed with the layer.
-    Scratch(tempfile::TempDir),
-}
-
-impl AttachmentsRoot {
-    fn path(&self) -> Option<PathBuf> {
-        match self {
-            Self::None => None,
-            Self::Dir(dir) => Some(dir.clone()),
-            Self::Scratch(dir) => Some(dir.path().to_path_buf()),
-        }
-    }
+    attachment_blobs: AttachmentBlobs,
 }
 
 impl StorageLayer {
@@ -198,13 +181,13 @@ impl StorageLayer {
 
         Ok(Self {
             pool,
-            attachments_root: AttachmentsRoot::None,
+            attachment_blobs: AttachmentBlobs::Unconfigured,
         })
     }
 
     /// Keep attachment bytes under `install_root`.
     pub fn with_install_root(mut self, install_root: PathBuf) -> Self {
-        self.attachments_root = AttachmentsRoot::Dir(install_root);
+        self.attachment_blobs = AttachmentBlobs::InstallRoot(install_root);
         self
     }
 
@@ -217,7 +200,7 @@ impl StorageLayer {
     /// This avoids data loss when a connection is invalidated (e.g. after a
     /// `tokio::task::abort`) and the pool opens a replacement.
     ///
-    /// Attachment bytes go to a temporary directory removed with the layer.
+    /// Attachment bytes are kept in memory too.
     pub async fn new_in_memory() -> Result<Self> {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -229,7 +212,7 @@ impl StorageLayer {
         run_migrations(&pool).await?;
         Ok(Self {
             pool,
-            attachments_root: AttachmentsRoot::Scratch(tempfile::tempdir()?),
+            attachment_blobs: AttachmentBlobs::in_memory(),
         })
     }
 
@@ -340,7 +323,7 @@ impl StorageLayer {
 
     /// Convenience: build a [`SqliteAttachmentStore`] backed by this pool.
     pub fn attachment_store(&self) -> SqliteAttachmentStore {
-        SqliteAttachmentStore::new(self.pool.clone(), self.attachments_root.path())
+        SqliteAttachmentStore::new(self.pool.clone(), self.attachment_blobs.clone())
     }
 
     /// Convenience: build a [`MessageFeedbackStore`] backed by this pool.

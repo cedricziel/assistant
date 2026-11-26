@@ -19,14 +19,13 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 cron = { workspace = true }
 unicode-normalization = { workspace = true }
-# In-memory storage keeps attachment bytes in a temporary directory.
-tempfile = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+tempfile = { workspace = true }
 toml = { workspace = true }
 
 # Storage is panic-free by contract: all production paths propagate errors

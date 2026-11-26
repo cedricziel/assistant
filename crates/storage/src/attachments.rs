@@ -1,7 +1,7 @@
 //! Persistent attachment storage.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -40,45 +40,94 @@ pub trait AttachmentStore: Send + Sync {
     async fn link_to_message(&self, attachment_id: Uuid, message_id: Uuid) -> Result<()>;
 }
 
-/// SQLite + filesystem attachment store.
+/// Where a [`SqliteAttachmentStore`] keeps attachment bytes.
+#[derive(Clone, Default)]
+pub enum AttachmentBlobs {
+    /// Nowhere: storing an attachment fails.
+    #[default]
+    Unconfigured,
+    /// Files under `<install_root>/agents/<id>/attachments/`.
+    InstallRoot(PathBuf),
+    /// In memory, shared by every store cloned from the same value.
+    Memory(Arc<tokio::sync::Mutex<HashMap<Uuid, Vec<u8>>>>),
+}
+
+impl AttachmentBlobs {
+    /// Bytes kept in memory, for in-memory storage.
+    pub fn in_memory() -> Self {
+        Self::Memory(Arc::default())
+    }
+}
+
+/// SQLite metadata plus [`AttachmentBlobs`] for the bytes.
 #[derive(Clone)]
 pub struct SqliteAttachmentStore {
     pool: SqlitePool,
-    /// Bytes live under `<install_root>/agents/<id>/attachments/`.
-    install_root: Option<PathBuf>,
+    blobs: AttachmentBlobs,
 }
 
 impl SqliteAttachmentStore {
-    pub fn new(pool: SqlitePool, install_root: Option<PathBuf>) -> Self {
-        Self { pool, install_root }
+    pub fn new(pool: SqlitePool, blobs: AttachmentBlobs) -> Self {
+        Self { pool, blobs }
     }
 
-    /// Resolve the filesystem path for an attachment's bytes.
-    fn attachment_path(&self, meta: &AttachmentMeta) -> Result<PathBuf> {
-        let root = self
-            .install_root
-            .as_deref()
-            .context("this storage has no attachment directory")?;
-        Ok(agent_base_dir(root, &meta.agent_id)
-            .join("attachments")
-            .join(meta.conversation_id.to_string())
-            .join(format!("{}.{}", meta.id, meta.extension())))
+    async fn write_bytes(&self, meta: &AttachmentMeta, data: &[u8]) -> Result<()> {
+        match &self.blobs {
+            AttachmentBlobs::Unconfigured => {
+                anyhow::bail!("this storage has no attachment directory")
+            }
+            AttachmentBlobs::InstallRoot(root) => {
+                let path = attachment_path(root, meta);
+                if let Some(parent) = path.parent() {
+                    tokio::fs::create_dir_all(parent).await.with_context(|| {
+                        format!("creating attachment directory {}", parent.display())
+                    })?;
+                }
+                tokio::fs::write(&path, data)
+                    .await
+                    .with_context(|| format!("writing attachment to {}", path.display()))
+            }
+            AttachmentBlobs::Memory(bytes) => {
+                bytes.lock().await.insert(meta.id, data.to_vec());
+                Ok(())
+            }
+        }
     }
+
+    async fn read_bytes(&self, meta: &AttachmentMeta) -> Result<Vec<u8>> {
+        match &self.blobs {
+            AttachmentBlobs::Unconfigured => {
+                anyhow::bail!("this storage has no attachment directory")
+            }
+            AttachmentBlobs::InstallRoot(root) => {
+                let path = attachment_path(root, meta);
+                tokio::fs::read(&path)
+                    .await
+                    .with_context(|| format!("reading attachment from {}", path.display()))
+            }
+            AttachmentBlobs::Memory(bytes) => bytes
+                .lock()
+                .await
+                .get(&meta.id)
+                .cloned()
+                .with_context(|| format!("attachment {} has no bytes", meta.id)),
+        }
+    }
+}
+
+/// Filesystem path for an attachment's bytes under `install_root`.
+fn attachment_path(install_root: &Path, meta: &AttachmentMeta) -> PathBuf {
+    agent_base_dir(install_root, &meta.agent_id)
+        .join("attachments")
+        .join(meta.conversation_id.to_string())
+        .join(format!("{}.{}", meta.id, meta.extension()))
 }
 
 #[async_trait]
 impl AttachmentStore for SqliteAttachmentStore {
     /// Persist an attachment: write bytes to disk and insert a metadata row.
     async fn store(&self, meta: &AttachmentMeta, data: &[u8]) -> Result<()> {
-        let path = self.attachment_path(meta)?;
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("creating attachment directory {}", parent.display()))?;
-        }
-        tokio::fs::write(&path, data)
-            .await
-            .with_context(|| format!("writing attachment to {}", path.display()))?;
+        self.write_bytes(meta, data).await?;
 
         sqlx::query(
             "INSERT INTO message_attachments (id, message_id, conversation_id, agent_id, filename, mime_type, size_bytes, created_at)
@@ -99,13 +148,10 @@ impl AttachmentStore for SqliteAttachmentStore {
         Ok(())
     }
 
-    /// Read raw bytes from disk for the given attachment.
+    /// Read the raw bytes of the given attachment.
     async fn load_bytes(&self, id: Uuid) -> Result<Vec<u8>> {
         let meta = self.get_meta(id).await?;
-        let path = self.attachment_path(&meta)?;
-        tokio::fs::read(&path)
-            .await
-            .with_context(|| format!("reading attachment from {}", path.display()))
+        self.read_bytes(&meta).await
     }
 
     /// Look up attachment metadata by ID.
