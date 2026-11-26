@@ -215,7 +215,8 @@ subtle = "2"
 similar = "3.1"
 
 [dev-dependencies]
-# Used by the workspace-lint-policy enforcement test in `tests/`.
+# Used by the workspace lint tests in `tests/`.
+tempfile = { workspace = true }
 toml = { workspace = true }
 
 [profile.dev]
