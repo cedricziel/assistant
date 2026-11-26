@@ -14,6 +14,7 @@
 //! - Lines inside `#[cfg(test)] mod tests { ... }` blocks (heuristic:
 //!   any line whose number is greater than the first `#[cfg(test)]`
 //!   attribute in the file).
+//! - Files a parent module declares with `#[cfg(test)] mod name;`.
 //! - The documented `EXEMPT_TYPE_NAMES` list below (production fallbacks
 //!   that happen to share the `InMemory` naming convention because they
 //!   are legitimately non-persistent).
@@ -23,8 +24,11 @@
 //! keeping their construction inside test code or by adding documented
 //! production fallbacks to `EXEMPT_TYPE_NAMES`.
 
-use std::fs;
 use std::path::{Path, PathBuf};
+
+use common::{first_cfg_test_line, production_sources};
+
+mod common;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -54,24 +58,7 @@ const EXEMPT_CRATES: &[&str] = &[
 
 #[test]
 fn no_test_only_impls_in_production_code() {
-    let root = workspace_root().join("crates");
-    let mut violations: Vec<String> = Vec::new();
-
-    for entry in fs::read_dir(&root).expect("read crates/") {
-        let entry = entry.expect("dir entry");
-        if !entry.path().is_dir() {
-            continue;
-        }
-        let crate_dir_name = entry.file_name().to_string_lossy().into_owned();
-        if EXEMPT_CRATES.contains(&crate_dir_name.as_str()) {
-            continue;
-        }
-        let src_dir = entry.path().join("src");
-        if !src_dir.is_dir() {
-            continue;
-        }
-        scan_dir(&src_dir, &mut violations);
-    }
+    let violations = scan_crates(&workspace_root().join("crates"));
 
     assert!(
         violations.is_empty(),
@@ -80,46 +67,16 @@ fn no_test_only_impls_in_production_code() {
     );
 }
 
-fn scan_dir(dir: &Path, violations: &mut Vec<String>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            // Skip in-tree `tests/` directories (some crates colocate them).
-            if path.file_name().and_then(|n| n.to_str()) == Some("tests") {
-                continue;
-            }
-            scan_dir(&path, violations);
-            continue;
-        }
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        scan_file(&path, violations);
+fn scan_crates(crates_dir: &Path) -> Vec<String> {
+    let mut violations = Vec::new();
+    for source in production_sources(crates_dir, EXEMPT_CRATES) {
+        scan_file(&source.path, &source.content, &mut violations);
     }
+    violations
 }
 
-fn scan_file(path: &Path, violations: &mut Vec<String>) {
-    let Ok(content) = fs::read_to_string(path) else {
-        return;
-    };
-
-    // Compute the line number of the first `#[cfg(test)]` attribute, if any.
-    // Lines at or after this number are treated as test code by the
-    // heuristic. This is an approximation: it works for the common pattern
-    // of `#[cfg(test)] mod tests { ... }` at the bottom of a file, but
-    // would over-exempt files that gate a single `use` statement with
-    // `#[cfg(test)]` near the top. Refine if false negatives appear.
-    let first_cfg_test_line: Option<usize> = content.lines().enumerate().find_map(|(idx, line)| {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("#[cfg(test)]") {
-            Some(idx + 1)
-        } else {
-            None
-        }
-    });
+fn scan_file(path: &Path, content: &str, violations: &mut Vec<String>) {
+    let first_cfg_test_line = first_cfg_test_line(content);
 
     // The file is permitted to construct types it defines.
     let defines_type = |type_name: &str| -> bool {
