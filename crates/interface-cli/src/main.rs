@@ -23,7 +23,7 @@ mod wiring;
 use args::{Cli, Command, OrchestratorCommand, SkillCommand};
 use cli_helpers::{CliConfirmation, normalize_worker_interface, parse_interface_selection};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -353,8 +353,6 @@ async fn main() -> Result<()> {
     // 13. Shared command registry and per-conversation state.
     let command_registry = CommandRegistry::new();
     let conversation_configs = bs.orchestrator.conversation_configs();
-    let active_turns: Arc<tokio::sync::RwLock<HashMap<Uuid, Uuid>>> =
-        Arc::new(tokio::sync::RwLock::new(HashMap::new()));
     let default_model = bs.config.llm.model.clone();
 
     // 14. Build the reedline editor and prompt.
@@ -467,7 +465,6 @@ async fn main() -> Result<()> {
                                     conversation_id,
                                     conversation_configs: conversation_configs.clone(),
                                     orchestrator: bs.orchestrator.clone(),
-                                    active_turns: active_turns.clone(),
                                     evict_conversation: None,
                                     default_model: default_model.clone(),
                                 };

@@ -23,9 +23,6 @@ fn default_llm_timeout_secs() -> u64 {
 fn default_llm_provider() -> LlmProviderKind {
     LlmProviderKind::Ollama
 }
-fn default_embedding_model() -> String {
-    "nomic-embed-text".to_string()
-}
 
 // ── Provider kinds ────────────────────────────────────────────────────────────
 
@@ -110,9 +107,10 @@ pub struct LlmConfig {
     /// the provider's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
-    /// Embedding model for vector search (default: `nomic-embed-text`).
-    #[serde(default = "default_embedding_model")]
-    pub embedding_model: String,
+    /// Embedding model for vector search. Unset, each provider uses its
+    /// own default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
     /// API key for cloud providers (Anthropic, OpenAI, …).
     /// For Anthropic, also checked via `ANTHROPIC_API_KEY` env var.
     /// For OpenAI, also checked via `OPENAI_API_KEY` env var.
@@ -130,6 +128,10 @@ pub struct LlmConfig {
     /// Provider-specific OpenRouter options.
     #[serde(default)]
     pub openrouter: OpenRouterOptions,
+    /// Models a member may pick for one regenerated reply, besides the
+    /// default. Empty: only the default model is offered.
+    #[serde(default)]
+    pub available_models: Vec<String>,
     /// Optional dedicated embedding provider override.
     ///
     /// When set, embeddings are served by this provider instead of the main
@@ -148,12 +150,13 @@ impl Default for LlmConfig {
             max_iterations: default_llm_max_iterations(),
             timeout_secs: default_llm_timeout_secs(),
             parallel_tool_calls: None,
-            embedding_model: default_embedding_model(),
+            embedding_model: None,
             api_key: None,
             anthropic: AnthropicOptions::default(),
             openai: OpenAIOptions::default(),
             moonshot: MoonshotOptions::default(),
             openrouter: OpenRouterOptions::default(),
+            available_models: Vec::new(),
             embeddings: None,
         }
     }
@@ -408,6 +411,17 @@ pub struct OpenRouterOptions {
     /// OpenRouter's `web` plugin (`[llm.openrouter.web_search]`).
     #[serde(default)]
     pub web_search: OpenRouterWebSearch,
+    /// Parser for PDF attachments. Unset: models with native file input read
+    /// PDFs themselves, others use `cloudflare-ai`.
+    pub pdf_engine: Option<OpenRouterPdfEngine>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OpenRouterPdfEngine {
+    Native,
+    CloudflareAi,
+    MistralOcr,
 }
 
 /// `[llm.openrouter.web_search]`. `search_context_size` needs the native
@@ -771,6 +785,18 @@ mod tests {
         }
 
         #[test]
+        fn pdf_engine_parses_kebab_case() {
+            use super::super::OpenRouterPdfEngine;
+
+            assert_eq!(parse("").unwrap().pdf_engine, None);
+            assert_eq!(
+                parse("pdf_engine = \"mistral-ocr\"").unwrap().pdf_engine,
+                Some(OpenRouterPdfEngine::MistralOcr)
+            );
+            assert!(parse("pdf_engine = \"tesseract\"").is_err());
+        }
+
+        #[test]
         fn effort_with_max_tokens_is_rejected() {
             let err = parse("[reasoning]\neffort = \"low\"\nmax_tokens = 2000").unwrap_err();
             let err = err.to_string();
@@ -825,6 +851,20 @@ mod tests {
         let section = section.map(Secret::new);
         resolve_openrouter_key(section.as_ref(), llm, OPENROUTER_API_KEY_ENV, env)
             .map(|s| s.expose().to_string())
+    }
+
+    #[test]
+    fn available_models_defaults_to_empty() {
+        let unset: LlmConfig = toml::from_str("").unwrap();
+        assert!(unset.available_models.is_empty(), "no allowlist by default");
+        assert!(LlmConfig::default().available_models.is_empty());
+    }
+
+    #[test]
+    fn available_models_parses_the_allowlist() {
+        let cfg: LlmConfig =
+            toml::from_str(r#"available_models = ["claude-opus-4", "gpt-5"]"#).unwrap();
+        assert_eq!(cfg.available_models, vec!["claude-opus-4", "gpt-5"]);
     }
 
     #[test]
