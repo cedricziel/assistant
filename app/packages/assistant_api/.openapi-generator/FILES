@@ -413,6 +413,3 @@ lib/src/model/workflow_webhook_trigger_accepted.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/feedback_rating_test.dart
-test/message_feedback_response_test.dart
-test/set_message_feedback_request_test.dart
