@@ -155,6 +155,7 @@ fn entry(name: &str, url: &str, trust: McpTrustLevel) -> McpServerEntry {
         env: HashMap::new(),
         enabled: true,
         trust,
+        tool_timeout_secs: None,
     }
 }
 
