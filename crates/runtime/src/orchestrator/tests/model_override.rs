@@ -84,7 +84,6 @@ async fn the_model_command_switches_the_next_turn() {
         conversation_id,
         conversation_configs: orch.conversation_configs(),
         orchestrator: orch.clone(),
-        active_turns: Default::default(),
         evict_conversation: None,
         default_model: "test".to_string(),
     };

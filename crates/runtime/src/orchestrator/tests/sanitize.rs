@@ -8,14 +8,15 @@ use assistant_core::{ChatHistoryMessage, ChatRole, ContentBlock, ToolCallItem};
 
 #[test]
 fn sanitize_history_empty_is_noop() {
-    let mut history = vec![];
+    let history = vec![];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     assert!(history.is_empty());
 }
 
 #[test]
 fn sanitize_history_valid_alternation_is_noop() {
-    let mut history = vec![
+    let history = vec![
         ChatHistoryMessage::Text {
             role: ChatRole::User,
             content: "hello".into(),
@@ -25,16 +26,18 @@ fn sanitize_history_valid_alternation_is_noop() {
             content: "hi".into(),
         },
     ];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     assert_eq!(history.len(), 2, "valid alternation should not be modified");
 }
 
 #[test]
 fn sanitize_history_trailing_user_inserts_assistant() {
-    let mut history = vec![ChatHistoryMessage::Text {
+    let history = vec![ChatHistoryMessage::Text {
         role: ChatRole::User,
         content: "orphaned".into(),
     }];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     assert_eq!(
         history.len(),
@@ -57,9 +60,10 @@ fn sanitize_history_trailing_user_inserts_assistant() {
 
 #[test]
 fn sanitize_history_trailing_multimodal_user_inserts_assistant() {
-    let mut history = vec![ChatHistoryMessage::MultimodalUser {
+    let history = vec![ChatHistoryMessage::MultimodalUser {
         content: vec![ContentBlock::Text("image msg".into())],
     }];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     assert_eq!(history.len(), 2);
     assert!(matches!(
@@ -73,7 +77,7 @@ fn sanitize_history_trailing_multimodal_user_inserts_assistant() {
 
 #[test]
 fn sanitize_history_orphaned_tool_calls_get_synthetic_results() {
-    let mut history = vec![
+    let history = vec![
         ChatHistoryMessage::Text {
             role: ChatRole::User,
             content: "do stuff".into(),
@@ -99,6 +103,7 @@ fn sanitize_history_orphaned_tool_calls_get_synthetic_results() {
             content: "ok".into(),
         },
     ];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     // Should have: User, AssistantToolCalls, ToolResult(a), ToolResult(b-synthetic)
     assert_eq!(history.len(), 4, "missing tool result should be inserted");
@@ -116,7 +121,7 @@ fn sanitize_history_orphaned_tool_calls_get_synthetic_results() {
 
 #[test]
 fn sanitize_history_fully_orphaned_tool_calls_all_results_inserted() {
-    let mut history = vec![
+    let history = vec![
         ChatHistoryMessage::Text {
             role: ChatRole::User,
             content: "run tools".into(),
@@ -138,6 +143,7 @@ fn sanitize_history_fully_orphaned_tool_calls_all_results_inserted() {
         },
         // No ToolResult at all — process crashed right after persisting tool calls.
     ];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     // Should have: User, AssistantToolCalls, ToolResult(alpha), ToolResult(beta)
     assert_eq!(
@@ -153,7 +159,7 @@ fn sanitize_history_fully_orphaned_tool_calls_all_results_inserted() {
 fn sanitize_history_combined_orphaned_tools_and_trailing_user() {
     // Simulates: process crashed during tool execution on turn 1,
     // then on turn 2 the user message was persisted but LLM failed.
-    let mut history = vec![
+    let history = vec![
         ChatHistoryMessage::Text {
             role: ChatRole::User,
             content: "turn 1".into(),
@@ -172,6 +178,7 @@ fn sanitize_history_combined_orphaned_tools_and_trailing_user() {
             content: "turn 2".into(),
         },
     ];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     // Should have: User, AssistantToolCalls, ToolResult(synthetic), User, Assistant(synthetic)
     assert_eq!(history.len(), 5);
@@ -191,7 +198,7 @@ fn sanitize_history_combined_orphaned_tools_and_trailing_user() {
 fn sanitize_history_orphaned_tool_result_dropped() {
     // Simulates: a system-injected tool result (e.g. skill-learner) appears
     // at the start of history with no preceding AssistantToolCalls.
-    let mut history = vec![
+    let history = vec![
         ChatHistoryMessage::Text {
             role: ChatRole::User,
             content: "hello".into(),
@@ -205,6 +212,7 @@ fn sanitize_history_orphaned_tool_result_dropped() {
             content: "hi".into(),
         },
     ];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     // The orphaned ToolResult should be dropped
     assert_eq!(history.len(), 2);
@@ -227,7 +235,7 @@ fn sanitize_history_orphaned_tool_result_dropped() {
 #[test]
 fn sanitize_history_tool_result_after_matched_calls_dropped() {
     // Extra ToolResult beyond what the tool calls declared should be dropped.
-    let mut history = vec![
+    let history = vec![
         ChatHistoryMessage::AssistantToolCalls {
             items: vec![ToolCallItem {
                 name: "my-tool".into(),
@@ -250,6 +258,7 @@ fn sanitize_history_tool_result_after_matched_calls_dropped() {
             content: "done".into(),
         },
     ];
+    let mut history = crate::history::TurnHistory::unmapped(history);
     crate::history::sanitize_history(&mut history);
     // The extra ToolResult should be dropped
     assert_eq!(history.len(), 3);

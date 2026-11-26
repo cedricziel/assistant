@@ -81,15 +81,15 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 11. Web search
 
-- [ ] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
-- [ ] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
-- [ ] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
+- [x] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
+- [x] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
+- [x] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
 
 ## 12. PDFs
 
-- [ ] 12.1 Write failing tests: a PDF becomes a `file` part with a data URI, and the default filename is `document.pdf`. Confirm red. Implement, then verify.
-- [ ] 12.2 Write failing tests for the `pdf_engine` plugin, the `cloudflare-ai` default for models without native file input, no plugin for native models, and coexistence with the web plugin. Confirm red. Implement, then verify.
-- [ ] 12.3 Document PDFs in `docs/openrouter.md`.
+- [x] 12.1 Write failing tests: a PDF becomes a `file` part with a data URI, and the default filename is `document.pdf`. Confirm red. Implement, then verify.
+- [x] 12.2 Write failing tests for the `pdf_engine` plugin, the `cloudflare-ai` default for models without native file input, no plugin for native models, and coexistence with the web plugin. Confirm red. Implement, then verify.
+- [x] 12.3 Document PDFs in `docs/openrouter.md`.
 
 ## 13. Embeddings
 

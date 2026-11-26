@@ -48,6 +48,7 @@ sections in `~/.assistant/orgs/default/org.toml`.
 | `categories`      | `[]`     | `X-OpenRouter-Categories` header, comma-joined. At most two; more fails config load                |
 | `max_tokens`      | `8192`   | Maximum completion tokens per response, sent as `max_completion_tokens`                            |
 | `fallback_models` | `[]`     | Models to try in order when `model` fails. Sent as `models` with `model` first; omitted when empty |
+| `pdf_engine`      | unset    | PDF parser: `"native"`, `"cloudflare-ai"` or `"mistral-ocr"`. See [PDFs](#pdfs)                    |
 
 ### `[llm.openrouter.provider]` section
 
@@ -98,6 +99,72 @@ Prompt caching settings. An unknown key fails config load. See
 | --------- | ------- | ------------------------------------------------------------------------- |
 | `enabled` | `true`  | Send `cache_control` breakpoints. `false` sends none                      |
 | `ttl`     | `"5m"`  | Cache lifetime, `"5m"` or `"1h"`. `"1h"` applies to Anthropic models only |
+
+### `[llm.openrouter.web_search]` section
+
+OpenRouter's `web` plugin. Only set keys are sent. An unknown key fails
+config load. See [Web search](#web-search).
+
+| Key                   | Default | Description                                                                                      |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `enabled`             | `false` | Send the `web` plugin                                                                            |
+| `engine`              | unset   | `"native"`, `"exa"`, `"firecrawl"`, `"parallel"` or `"perplexity"`. Unset lets OpenRouter choose |
+| `max_results`         | unset   | Maximum search results                                                                           |
+| `search_prompt`       | unset   | Prompt that introduces the results to the model                                                  |
+| `include_domains`     | unset   | Domains to search                                                                                |
+| `exclude_domains`     | unset   | Domains to skip                                                                                  |
+| `search_context_size` | unset   | `"low"`, `"medium"` or `"high"`. Needs `engine = "native"` or no `engine`                        |
+
+Which domain filters each engine honours is up to OpenRouter; see
+[OpenRouter's web search docs](https://openrouter.ai/docs/features/web-search).
+
+## Web search
+
+With `enabled = true`, every request carries
+`plugins: [{"id": "web", ...}]` with the options you set.
+`search_context_size` goes in the top-level
+`web_search_options: {"search_context_size": ...}` instead. The provider
+reports web search as a hosted tool, so the model is not offered the
+local `web-search` tool. With `enabled = false`, no plugin is sent and
+the local tool stays available.
+
+When a final answer carries `url_citation` annotations, it ends with a
+`Sources:` list. Each cited URL appears once, in order of first
+citation, as a markdown link labelled with its title, or the URL when
+there is no title. Brackets in titles are escaped. URLs the answer
+already links inline are not listed again. Responses that call tools
+get no list. When streaming, the list is the last text chunk, so the
+saved answer matches what was streamed.
+
+## PDFs
+
+A PDF attachment goes in the user message as a `file` part:
+
+```json
+{
+  "type": "file",
+  "file": {
+    "filename": "document.pdf",
+    "file_data": "data:application/pdf;base64,..."
+  }
+}
+```
+
+Attachments carry no filename, so it is always `document.pdf`. Other
+document types are not sent.
+
+A request with a PDF carries
+`plugins: [{"id": "file-parser", "pdf": {"engine": ...}}]`:
+
+- With `pdf_engine` set, that engine is used for every model. Use
+  `"mistral-ocr"` for scanned PDFs.
+- With `pdf_engine` unset, a model whose catalog entry lists `file` in
+  its input modalities reads the PDF itself and gets no plugin. Other
+  models get `"cloudflare-ai"`. Until the catalog loads, or when it
+  can't be reached, every model counts as having no `file` input.
+
+Requests without a PDF get no parser plugin. With web search on, both
+plugins are sent, `web` first.
 
 ## Request identity
 
@@ -205,6 +272,7 @@ chat call waits for that fetch for at most 5 seconds.
 | Tool calling   | Native when the model lists `tools` in `supported_parameters`, else none                                                                                                                                                           |
 | Streaming      | Yes                                                                                                                                                                                                                                |
 | Vision         | Yes when the model lists `image` in its input modalities; otherwise each image is replaced by a short text note                                                                                                                    |
+| PDF input      | Native when the model lists `file` in its input modalities; otherwise parsed by the `file-parser` plugin. See [PDFs](#pdfs)                                                                                                        |
 | Context window | Smallest `context_length` among the endpoints routing can select                                                                                                                                                                   |
 | Chat options   | `tool_choice`, `parallel_tool_calls` and JSON schemas are sent natively when the model lists them in `supported_parameters`, with `provider.require_parameters = true`; otherwise `tool_choice` falls back to a prompt instruction |
 | Embeddings     | No                                                                                                                                                                                                                                 |
@@ -346,6 +414,16 @@ fallback_models = ["openai/gpt-4o"]
 effort = "high"
 ```
 
+### Web search
+
+```toml
+[llm.openrouter.web_search]
+enabled         = true
+engine          = "exa"
+max_results     = 5
+exclude_domains = ["example.com"]
+```
+
 ### Using a free model for testing
 
 ```toml
@@ -419,6 +497,12 @@ without that moderation. The call is not retried.
 
 `[llm.openrouter] categories` has more than two entries. Remove the extra
 ones.
+
+### "`search_context_size` works only with `engine = "native"`"
+
+`[llm.openrouter.web_search]` sets `search_context_size` with an `engine`
+other than `"native"`, so config load fails. Set `engine = "native"`,
+remove `engine`, or remove `search_context_size`.
 
 ### "OpenRouter stream ended before the response was complete"
 
