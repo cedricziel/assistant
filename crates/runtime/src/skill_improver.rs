@@ -488,7 +488,13 @@ mod tests {
     #[tokio::test]
     async fn test_improvement_cycle_skips_below_min_executions() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let skills_dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(
+            SkillRegistry::new(storage.pool.clone())
+                .await
+                .unwrap()
+                .with_user_skills_dir(skills_dir.path().to_path_buf()),
+        );
 
         // Create a skill in the registry.
         registry
@@ -547,7 +553,13 @@ mod tests {
     #[tokio::test]
     async fn test_improvement_cycle_generates_refinement_for_high_error_rate() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let skills_dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(
+            SkillRegistry::new(storage.pool.clone())
+                .await
+                .unwrap()
+                .with_user_skills_dir(skills_dir.path().to_path_buf()),
+        );
 
         // Create a skill in the registry.
         registry
@@ -610,7 +622,13 @@ mod tests {
     #[tokio::test]
     async fn test_check_regressions_reverts_on_high_error_rate() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let skills_dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(
+            SkillRegistry::new(storage.pool.clone())
+                .await
+                .unwrap()
+                .with_user_skills_dir(skills_dir.path().to_path_buf()),
+        );
 
         // Create a skill with the "improved" body.
         registry
@@ -667,7 +685,13 @@ mod tests {
     #[tokio::test]
     async fn test_check_regressions_confirms_when_no_regression() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let skills_dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(
+            SkillRegistry::new(storage.pool.clone())
+                .await
+                .unwrap()
+                .with_user_skills_dir(skills_dir.path().to_path_buf()),
+        );
 
         // Create a skill.
         registry

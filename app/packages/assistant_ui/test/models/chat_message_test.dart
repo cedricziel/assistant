@@ -91,6 +91,19 @@ void main() {
       expect(some.hasArgs, isTrue);
     });
 
+    test('density thresholds are the named package constants', () {
+      expect(kTimelineCompactMaxWidth, 400);
+      expect(kTimelineExpandedMinWidth, 700);
+      expect(
+        TimelineDensity.fromWidth(kTimelineCompactMaxWidth - 1),
+        TimelineDensity.compact,
+      );
+      expect(
+        TimelineDensity.fromWidth(kTimelineExpandedMinWidth + 1),
+        TimelineDensity.expanded,
+      );
+    });
+
     test('TimelineDensity.fromWidth uses the 400 and 700 breakpoints', () {
       expect(TimelineDensity.fromWidth(399), TimelineDensity.compact);
       expect(TimelineDensity.fromWidth(400), TimelineDensity.normal);
@@ -158,6 +171,7 @@ void main() {
         'active',
         'complete',
         'stale',
+        'awaitingInput',
       ]);
     });
 

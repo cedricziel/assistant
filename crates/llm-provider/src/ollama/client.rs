@@ -518,10 +518,11 @@ fn build_json_messages(
                             images.push(json!(data));
                         }
                         ContentBlock::Image { .. } => { /* vision disabled — skip */ }
-                        ContentBlock::Document { .. } => {
-                            // Ollama/OpenAI do not support native document blocks.
-                            // The orchestrator should have converted these to Text
-                            // before reaching the provider; skip if not.
+                        ContentBlock::Document { .. } | ContentBlock::Audio { .. } => {
+                            // Ollama/OpenAI do not support native document or
+                            // audio blocks. The orchestrator should have
+                            // removed these before reaching the provider;
+                            // skip if not.
                         }
                     }
                 }
@@ -850,6 +851,23 @@ mod tests {
             msgs[0].get("images").is_none(),
             "images must be stripped when vision is false"
         );
+    }
+
+    #[test]
+    fn audio_blocks_are_dropped() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("[Voice message]: hi".into()),
+                ContentBlock::Audio {
+                    media_type: "audio/ogg".into(),
+                    data: "T2dnUw==".into(),
+                },
+            ],
+        }];
+        let msgs = build_json_messages("", &history, true);
+        assert_eq!(msgs[0]["content"], "[Voice message]: hi");
+        assert!(msgs[0].get("images").is_none());
+        assert!(!msgs[0].to_string().contains("T2dnUw=="));
     }
 
     #[test]

@@ -19,6 +19,9 @@ use crate::types::conversation::{ChannelType, Interface};
 
 // -- Types --
 
+/// Text that stands for a voice message that has no transcript.
+pub const VOICE_PLACEHOLDER: &str = "[Voice message]";
+
 /// A user on a messaging platform.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelUser {
@@ -45,9 +48,12 @@ pub enum ChannelContent {
         filename: String,
         mime_type: String,
     },
+    /// A voice message: the recording, and the text that stands for it,
+    /// which is the transcript or `[Voice message]` without transcription.
     Voice {
-        url: String,
-        duration_seconds: Option<u32>,
+        data: Vec<u8>,
+        mime_type: String,
+        text: String,
     },
 }
 

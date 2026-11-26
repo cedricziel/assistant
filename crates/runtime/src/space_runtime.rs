@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio::sync::OnceCell;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use assistant_core::tool::{ToolHandler, TurnToolSource};
 use assistant_core::types::agent::OrgConfig;
@@ -339,6 +339,21 @@ impl SpaceRuntimes {
         if let (Some(tts), Some(store)) = (&self.voice, &self.audio_store) {
             executor.register_voice_response(tts.clone(), store.clone());
         }
+        if let Some(images) = &config.images {
+            // A broken [images] section disables the tool, not the space.
+            match assistant_llm_provider::images::build_image_provider(images, &config.llm).await {
+                Ok(Some(provider)) => {
+                    executor.register_image_generate(provider, Arc::new(storage.attachment_store()))
+                }
+                Ok(None) => {}
+                Err(e) => error!(
+                    org = org_slug,
+                    space = space_slug,
+                    error = %e,
+                    "Image generation is unavailable; image-generate is not offered"
+                ),
+            }
+        }
 
         let interactions = self.interactions.then(|| {
             Arc::new(
@@ -383,11 +398,8 @@ impl SpaceRuntimes {
         self.sync_builtins_once(&registry);
 
         let project_root = std::env::current_dir().ok();
-        let dirs = crate::bootstrap::skill_dirs_in(
-            Some(self.pools.base_dir()),
-            config,
-            project_root.as_deref(),
-        );
+        let dirs =
+            crate::bootstrap::skill_dirs(self.pools.base_dir(), config, project_root.as_deref());
         let dirs: Vec<(&Path, SkillSource)> =
             dirs.iter().map(|(p, s)| (p.as_path(), s.clone())).collect();
         registry
@@ -494,6 +506,55 @@ mod tests {
         assert_eq!(acme.config.agent.id, "ops");
         assert_eq!(globex.llm.model_name(), "globex-model");
         assert_eq!(globex.config.agent.id, "dev");
+    }
+
+    #[tokio::test]
+    async fn image_generate_is_offered_only_with_images_configured() {
+        use assistant_core::types::images::{ImagesConfig, ImagesProviderKind};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let plain = runtimes(tmp.path()).get("acme", "main").await.unwrap();
+        assert!(
+            plain.executor.handler("image-generate").is_none(),
+            "absent without [images]"
+        );
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/images/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": [
+                {"id": "openai/gpt-image-2.6-flare", "architecture": {"input_modalities": ["text", "image"]}, "supported_parameters": {}}
+            ]})))
+            .mount(&server)
+            .await;
+        let mut config = OrgConfig::default();
+        config.memory.enabled = false;
+        config.images = Some(ImagesConfig {
+            provider: ImagesProviderKind::OpenRouter,
+            enabled: true,
+            model: None,
+            base_url: Some(server.uri()),
+            api_key: Some("sk-or-img".into()),
+            output_format: Default::default(),
+            quality: None,
+            openrouter: Default::default(),
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let runtimes = SpaceRuntimes::new(
+            Arc::new(OrgPoolFactory::new(tmp.path())),
+            Arc::new(OrgContexts::fixed(
+                config,
+                Arc::new(ScriptedLlmProvider::new()),
+            )),
+            None,
+        );
+        let space = runtimes.get("acme", "main").await.unwrap();
+        assert!(
+            space.executor.handler("image-generate").is_some(),
+            "offered with [images]"
+        );
     }
 
     #[tokio::test]

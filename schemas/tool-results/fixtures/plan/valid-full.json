@@ -1,0 +1,1 @@
+{"kind":"plan","title":"Ship the feature","steps":[{"title":"Write tests","status":"completed"},{"title":"Implement","status":"in_progress"},{"title":"Review","status":"pending"},{"title":"Deploy","status":"failed"},{"title":"Announce","status":"skipped"}]}

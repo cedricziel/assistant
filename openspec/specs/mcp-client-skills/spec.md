@@ -1,12 +1,12 @@
-# Spec Delta
+# mcp-client-skills Specification
 
 ## Purpose
 Define how the assistant discovers and uses skills that external MCP servers publish through the Skills extension.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Skill discovery
-For each connected server that advertises the Skills extension, the client SHALL list its skills and make them available to Personas that can use that server, named with the server's prefix so they cannot shadow local skills.
+For each connected server configured under `[mcp]` in `server.toml` that advertises the Skills extension, the client SHALL list its skills and make them available to Personas that can use that server, named with the server's prefix so they cannot shadow local skills.
 
 #### Scenario: Server publishes a skill
 - **WHEN** a connected server lists a skill `deploy`
@@ -15,6 +15,10 @@ For each connected server that advertises the Skills extension, the client SHALL
 #### Scenario: Server without the extension
 - **WHEN** a server does not advertise the Skills extension
 - **THEN** the client does not call `skills/list` on it
+
+#### Scenario: Integration-pool server
+- **WHEN** a server connected through the integration pool advertises the Skills extension
+- **THEN** the client does not list its skills, and Personas see none of them
 
 ### Requirement: Manifest verification
 Before a remote skill is used, the client SHALL fetch its files and verify each file's size and digest against the manifest, and SHALL reject the skill when any check fails or its frontmatter does not match the manifest.

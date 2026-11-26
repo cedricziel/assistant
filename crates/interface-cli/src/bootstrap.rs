@@ -53,13 +53,13 @@ async fn shared_nats_bus(config: &ServerConfig) -> Result<Option<Arc<dyn Message
 }
 
 pub async fn bootstrap(
-    home: &Path,
+    install_root: &Path,
     confirmation_cb: Option<Arc<dyn ConfirmationCallback>>,
     pools: Arc<OrgPoolFactory>,
     server: ServerConfig,
     orgs: Arc<OrgContexts>,
 ) -> Result<Bootstrap> {
-    let user_skills_dir = home.join(".assistant").join("skills");
+    let user_skills_dir = install_root.join("skills");
 
     // With the `nats` feature and `[bus] kind = "nats"`, turns travel over NATS
     // JetStream (namespaced per space) to avoid SQLite write-lock contention

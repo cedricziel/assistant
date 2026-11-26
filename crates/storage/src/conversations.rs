@@ -9,7 +9,8 @@
 //! relocated there. The trait currently lives alongside the record types
 //! to keep the migration tractable.
 
-use std::collections::HashMap;
+use std::cmp::{Ordering, Reverse};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -18,9 +19,14 @@ use assistant_core::types::conversation::{Message, MessageFinishReason, MessageR
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
+use unicode_normalization::char::is_combining_mark;
 use uuid::Uuid;
 
 use crate::conversation_broadcaster::{ConversationBroadcast, ConversationEvent};
+use crate::conversation_search::{
+    HIGHLIGHT_END, HIGHLIGHT_START, SearchSegment, TitleMatch, fold, fts_query, is_short_token,
+    satisfied_conversations, segments_from_snippet, title_segments, tokenize_query,
+};
 
 /// A stored conversation record (metadata only — messages are loaded separately).
 #[derive(Debug, Clone)]
@@ -40,6 +46,21 @@ pub struct ConversationRecord {
     /// When the owner pinned this conversation; `None` when not pinned.
     /// Pinned conversations list first, newest pin first.
     pub pinned_at: Option<DateTime<Utc>>,
+    /// When the owner archived this conversation; `None` when not archived.
+    /// Archived conversations leave the main list but stay searchable. Never
+    /// set together with `pinned_at`.
+    pub archived_at: Option<DateTime<Utc>>,
+}
+
+/// Which of the caller's conversations a SQLite listing returns.
+#[derive(Debug, Clone, Copy)]
+enum ListScope {
+    /// Unarchived, pinned first.
+    Live,
+    /// Archived only, newest archive first.
+    Archived,
+    /// Everything, in list order (used by search).
+    All,
 }
 
 /// A partial update of conversation metadata. `None` fields are left unchanged.
@@ -50,6 +71,9 @@ pub struct ConversationPatch {
     pub title: Option<String>,
     /// `Some(true)` pins (keeping an existing `pinned_at`), `Some(false)` unpins.
     pub pinned: Option<bool>,
+    /// `Some(true)` archives (clearing the pin), `Some(false)` unarchives.
+    /// Pinning an archived conversation unarchives it.
+    pub archived: Option<bool>,
 }
 
 /// Outcome of [`ConversationStore::update_metadata`].
@@ -59,7 +83,33 @@ pub enum MetadataUpdate {
     Updated(ConversationRecord),
     /// No conversation with that id exists for this store's scope.
     NotFound,
+    /// The patch asked to pin and archive at once; nothing was changed.
+    Invalid,
 }
+
+/// One conversation matched by [`ConversationStore::search_conversations`].
+#[derive(Debug, Clone)]
+pub struct ConversationSearchHit {
+    pub record: ConversationRecord,
+    /// The title split into highlighted and plain runs; empty for an
+    /// untitled conversation.
+    pub title_segments: Vec<SearchSegment>,
+    /// Up to [`MAX_MATCHES_PER_CONVERSATION`] matching messages, best first.
+    /// Empty when the conversation matched by title alone.
+    pub matches: Vec<MessageHit>,
+}
+
+/// A message that matched a search query, with its highlighted snippet.
+#[derive(Debug, Clone)]
+pub struct MessageHit {
+    pub message_id: Uuid,
+    pub role: MessageRole,
+    pub created_at: DateTime<Utc>,
+    pub segments: Vec<SearchSegment>,
+}
+
+/// Most message matches returned for one conversation.
+pub const MAX_MATCHES_PER_CONVERSATION: usize = 3;
 
 /// Trait-based interface for conversation + message persistence.
 ///
@@ -82,9 +132,30 @@ pub trait ConversationStore: Send + Sync {
     /// Fetch a conversation by ID. Returns `None` if not found.
     async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>>;
 
-    /// List all conversations for the configured agent: pinned first (newest
-    /// pin first), then most-recently-updated first.
+    /// List the unarchived conversations for the configured agent: pinned
+    /// first (newest pin first), then most-recently-updated first.
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>>;
+
+    /// List the caller's archived conversations, most recently archived first.
+    async fn list_archived_conversations(&self) -> Result<Vec<ConversationRecord>>;
+
+    /// The ids of every conversation the caller owns, archived ones included.
+    async fn list_owned_ids(&self) -> Result<Vec<Uuid>>;
+
+    /// Search the caller's conversations by title and message text.
+    ///
+    /// The query is split on whitespace; every required token must be
+    /// satisfied by the title or by some message of the conversation (not
+    /// necessarily the same one). Titles match tokens as substrings, messages
+    /// as word prefixes, both ignoring case and diacritics. Thinking steps and
+    /// tool rows are never searched. Each conversation appears at most once,
+    /// title hits first, then by message relevance. A blank query returns no
+    /// hits; more than eight tokens is an error.
+    async fn search_conversations(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationSearchHit>>;
 
     /// Set a conversation's title and lock it from auto-titling.
     ///
@@ -93,6 +164,10 @@ pub trait ConversationStore: Send + Sync {
 
     /// Apply a partial metadata update in one step and emit one `Upserted`
     /// event. Does not change `updated_at`.
+    ///
+    /// Pinned and archived are exclusive: pinning clears `archived_at`,
+    /// archiving clears `pinned_at`, and asking for both is
+    /// [`MetadataUpdate::Invalid`].
     async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate>;
 
     /// Write an auto-generated title, only while the conversation is unlocked.
@@ -105,7 +180,8 @@ pub trait ConversationStore: Send + Sync {
     /// Delete a conversation (and its messages).
     async fn delete_conversation(&self, id: Uuid) -> Result<()>;
 
-    /// Persist a single message.
+    /// Persist a single message. A `user` message unarchives the
+    /// conversation; other roles leave it archived.
     async fn save_message(&self, msg: &Message) -> Result<()>;
 
     /// Load the full message history for a conversation.
@@ -260,6 +336,7 @@ fn conversation_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<ConversationReco
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
         pinned_at: r.get("pinned_at"),
+        archived_at: r.get("archived_at"),
     })
 }
 
@@ -341,13 +418,15 @@ impl SqliteConversationStore {
 
         if inserted {
             sqlx::query(
-                "UPDATE conversations SET active_leaf_id = ?1, updated_at = ?2 \
+                "UPDATE conversations SET active_leaf_id = ?1, updated_at = ?2, \
+                 archived_at = CASE WHEN ?5 THEN NULL ELSE archived_at END \
                  WHERE id = ?3 AND agent_id = ?4",
             )
             .bind(&id)
             .bind(self.clock.now())
             .bind(&conversation_id)
             .bind(&self.agent_id)
+            .bind(msg.role == MessageRole::User)
             .execute(&mut *tx)
             .await?;
         }
@@ -407,6 +486,41 @@ impl SqliteConversationStore {
             .await?;
         tx.commit().await?;
         Ok(Some(leaf))
+    }
+
+    /// The conversations visible to this store's agent and user scope, in
+    /// `scope`'s order.
+    async fn scoped_conversations(&self, scope: ListScope) -> Result<Vec<ConversationRecord>> {
+        macro_rules! scoped_sql {
+            ($filter:literal, $order:literal) => {
+                concat!(
+                    "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at, archived_at \
+                     FROM conversations \
+                     WHERE agent_id = ?1 AND (?2 IS NULL OR user_id = ?2) ",
+                    $filter,
+                    " ORDER BY ",
+                    $order
+                )
+            };
+        }
+        let sql = match scope {
+            ListScope::Live => scoped_sql!(
+                "AND archived_at IS NULL",
+                "pinned_at IS NULL, pinned_at DESC, updated_at DESC"
+            ),
+            ListScope::Archived => scoped_sql!(
+                "AND archived_at IS NOT NULL",
+                "archived_at DESC, updated_at DESC"
+            ),
+            ListScope::All => scoped_sql!("", "pinned_at IS NULL, pinned_at DESC, updated_at DESC"),
+        };
+        let rows = sqlx::query(sql)
+            .bind(&self.agent_id)
+            .bind(&self.user_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        rows.iter().map(conversation_from_row).collect()
     }
 
     /// Broadcast the conversation's current record, when a broadcaster is set.
@@ -511,6 +625,7 @@ impl ConversationStore for SqliteConversationStore {
             created_at: now,
             updated_at: now,
             pinned_at: None,
+            archived_at: None,
         };
 
         if let Some(b) = &self.broadcaster {
@@ -526,7 +641,7 @@ impl ConversationStore for SqliteConversationStore {
 
         let row = if self.user_id.is_some() {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at, archived_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2 AND user_id = ?3",
             )
@@ -537,7 +652,7 @@ impl ConversationStore for SqliteConversationStore {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at, archived_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2",
             )
@@ -552,30 +667,192 @@ impl ConversationStore for SqliteConversationStore {
 
     /// List all conversations, most-recently updated first.
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
-        let rows = if self.user_id.is_some() {
-            sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
-                 FROM conversations \
-                 WHERE agent_id = ?1 AND user_id = ?2 \
-                 ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC",
-            )
-            .bind(&self.agent_id)
-            .bind(&self.user_id)
-            .fetch_all(&self.pool)
-            .await?
-        } else {
-            sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
-                 FROM conversations \
-                 WHERE agent_id = ?1 \
-                 ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC",
-            )
-            .bind(&self.agent_id)
-            .fetch_all(&self.pool)
-            .await?
-        };
+        self.scoped_conversations(ListScope::Live).await
+    }
 
-        rows.iter().map(conversation_from_row).collect()
+    async fn list_archived_conversations(&self) -> Result<Vec<ConversationRecord>> {
+        self.scoped_conversations(ListScope::Archived).await
+    }
+
+    async fn list_owned_ids(&self) -> Result<Vec<Uuid>> {
+        let ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM conversations WHERE agent_id = ?1 AND (?2 IS NULL OR user_id = ?2)",
+        )
+        .bind(&self.agent_id)
+        .bind(&self.user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        ids.iter()
+            .map(|id| Uuid::parse_str(id).map_err(Into::into))
+            .collect()
+    }
+
+    async fn search_conversations(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationSearchHit>> {
+        let tokens = tokenize_query(query)?;
+        if tokens.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let records: HashMap<Uuid, ConversationRecord> = self
+            .scoped_conversations(ListScope::All)
+            .await?
+            .into_iter()
+            .map(|r| (r.id, r))
+            .collect();
+
+        // Titles are matched in Rust so they fold like the message index.
+        let mut title_matches: HashMap<Uuid, TitleMatch> = HashMap::new();
+        for record in records.values() {
+            if let Some(m) = record
+                .title
+                .as_deref()
+                .and_then(|title| title_segments(title, &tokens))
+            {
+                title_matches.insert(record.id, m);
+            }
+        }
+
+        // Phase 1: which conversations have a message for each token.
+        let mut message_tokens: HashMap<String, HashSet<String>> = HashMap::new();
+        let long_tokens: HashSet<&String> = tokens.iter().filter(|t| !is_short_token(t)).collect();
+        for token in long_tokens {
+            let Some(expr) = fts_query(std::slice::from_ref(token)) else {
+                continue;
+            };
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT conversation_id FROM messages_fts WHERE messages_fts MATCH ?1",
+            )
+            .bind(expr)
+            .fetch_all(&self.pool)
+            .await?;
+            for id in ids {
+                // Other users' and agents' conversations are not in `records`.
+                if Uuid::parse_str(&id).is_ok_and(|u| records.contains_key(&u)) {
+                    message_tokens.entry(id).or_default().insert(token.clone());
+                }
+            }
+        }
+        let title_tokens: HashMap<String, HashSet<String>> = title_matches
+            .iter()
+            .map(|(id, m)| (id.to_string(), m.satisfied.iter().cloned().collect()))
+            .collect();
+        let candidates: Vec<Uuid> =
+            satisfied_conversations(&tokens, &title_tokens, &message_tokens)
+                .iter()
+                .filter_map(|id| Uuid::parse_str(id).ok())
+                .collect();
+
+        // Phase 2: best three messages per candidate, ranked by bm25.
+        let expr = fts_query(&tokens);
+        let mut ranked: HashMap<Uuid, Vec<RankedMessage>> = HashMap::new();
+        if let (Some(expr), false) = (&expr, candidates.is_empty()) {
+            let ids =
+                serde_json::to_string(&candidates.iter().map(Uuid::to_string).collect::<Vec<_>>())?;
+            let rows = sqlx::query(
+                "WITH hits AS ( \
+                     SELECT rowid AS rid, conversation_id AS cid, bm25(messages_fts) AS score \
+                     FROM messages_fts \
+                     WHERE messages_fts MATCH ?1 \
+                       AND conversation_id IN (SELECT value FROM json_each(?2)) \
+                 ), ordered AS ( \
+                     SELECT rid, cid, score, \
+                            ROW_NUMBER() OVER (PARTITION BY cid ORDER BY score, rid) AS rn \
+                     FROM hits \
+                 ) \
+                 SELECT rid, cid, score FROM ordered WHERE rn <= ?3 ORDER BY cid, rn",
+            )
+            .bind(expr)
+            .bind(ids)
+            .bind(MAX_MATCHES_PER_CONVERSATION as i64)
+            .fetch_all(&self.pool)
+            .await?;
+            for row in &rows {
+                let cid: String = row.get("cid");
+                if let Ok(cid) = Uuid::parse_str(&cid) {
+                    ranked.entry(cid).or_default().push(RankedMessage {
+                        rowid: row.get("rid"),
+                        score: row.get("score"),
+                    });
+                }
+            }
+        }
+
+        let mut keys: Vec<RankKey> = candidates
+            .iter()
+            .filter_map(|id| {
+                let record = records.get(id)?;
+                Some(RankKey {
+                    id: *id,
+                    title_hits: title_matches.get(id).map_or(0, |m| m.satisfied.len()),
+                    score: ranked.get(id).and_then(|m| m.first()).map(|m| m.score),
+                    updated_at: record.updated_at,
+                })
+            })
+            .collect();
+        keys.sort_by(RankKey::compare);
+        keys.truncate(limit);
+
+        // Snippets only for the rows that survive, at most 3 x limit.
+        let mut snippets: HashMap<i64, MessageHit> = HashMap::new();
+        if let Some(expr) = &expr {
+            let rowids: Vec<i64> = keys
+                .iter()
+                .filter_map(|k| ranked.get(&k.id))
+                .flatten()
+                .map(|m| m.rowid)
+                .collect();
+            if !rowids.is_empty() {
+                let rows = sqlx::query(
+                    "SELECT messages_fts.rowid AS rid, \
+                            snippet(messages_fts, 0, char(57344), char(57345), '…', 12) AS snip, \
+                            m.id AS id, m.role AS role, m.created_at AS created_at \
+                     FROM json_each(?2) AS picked \
+                     JOIN messages_fts ON messages_fts.rowid = picked.value \
+                     JOIN messages m ON m.id = messages_fts.message_id \
+                     WHERE messages_fts MATCH ?1",
+                )
+                .bind(expr)
+                .bind(serde_json::to_string(&rowids)?)
+                .fetch_all(&self.pool)
+                .await?;
+                for row in &rows {
+                    let id: String = row.get("id");
+                    let role: String = row.get("role");
+                    let snip: String = row.get("snip");
+                    snippets.insert(
+                        row.get("rid"),
+                        MessageHit {
+                            message_id: Uuid::parse_str(&id)?,
+                            role: parse_role(&role)?,
+                            created_at: row.get("created_at"),
+                            segments: segments_from_snippet(&snip),
+                        },
+                    );
+                }
+            }
+        }
+
+        let mut hits = Vec::with_capacity(keys.len());
+        for key in keys {
+            let Some(record) = records.get(&key.id) else {
+                continue;
+            };
+            let matches = ranked
+                .get(&key.id)
+                .into_iter()
+                .flatten()
+                .filter_map(|m| snippets.get(&m.rowid).cloned())
+                .collect();
+            hits.push(ConversationSearchHit {
+                record: record.clone(),
+                title_segments: title_segments_for(record, title_matches.get(&key.id)),
+                matches,
+            });
+        }
+        Ok(hits)
     }
 
     /// Update the title of an existing conversation.
@@ -611,6 +888,9 @@ impl ConversationStore for SqliteConversationStore {
     }
 
     async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate> {
+        if patch.pinned == Some(true) && patch.archived == Some(true) {
+            return Ok(MetadataUpdate::Invalid);
+        }
         let id_str = id.to_string();
         let mut tx = self
             .pool
@@ -622,16 +902,24 @@ impl ConversationStore for SqliteConversationStore {
             "UPDATE conversations
                  SET title = COALESCE(?1, title),
                      title_locked = CASE WHEN ?1 IS NULL THEN title_locked ELSE 1 END,
-                     pinned_at = CASE ?2
-                         WHEN 1 THEN COALESCE(pinned_at, ?3)
-                         WHEN 0 THEN NULL
+                     pinned_at = CASE
+                         WHEN ?4 = 1 THEN NULL
+                         WHEN ?2 = 1 THEN COALESCE(pinned_at, ?3)
+                         WHEN ?2 = 0 THEN NULL
                          ELSE pinned_at
+                     END,
+                     archived_at = CASE
+                         WHEN ?2 = 1 THEN NULL
+                         WHEN ?4 = 1 THEN COALESCE(archived_at, ?3)
+                         WHEN ?4 = 0 THEN NULL
+                         ELSE archived_at
                      END
-                 WHERE id = ?4 AND agent_id = ?5 AND (?6 IS NULL OR user_id = ?6)",
+                 WHERE id = ?5 AND agent_id = ?6 AND (?7 IS NULL OR user_id = ?7)",
         )
         .bind(&patch.title)
         .bind(patch.pinned)
         .bind(self.clock.now())
+        .bind(patch.archived)
         .bind(&id_str)
         .bind(&self.agent_id)
         .bind(&self.user_id)
@@ -953,6 +1241,21 @@ impl InMemoryConversationStore {
 }
 
 impl InMemoryConversationStore {
+    /// Every conversation in this store's agent and user scope, unordered.
+    fn owned_records(&self) -> Vec<ConversationRecord> {
+        self.lock_state()
+            .conversations
+            .values()
+            .filter(|c| c.agent_id == self.agent_id)
+            .filter(|c| {
+                self.user_id
+                    .as_ref()
+                    .is_none_or(|u| c.user_id.as_ref() == Some(u))
+            })
+            .cloned()
+            .collect()
+    }
+
     /// Insert `msg` and make it the active leaf. `parent` is `None` to append
     /// under the current leaf, or `Some(explicit_parent)` to branch.
     fn insert_message(&self, msg: &Message, parent: Option<Option<Uuid>>) -> Result<()> {
@@ -985,6 +1288,9 @@ impl InMemoryConversationStore {
         state.leaves.insert(msg.conversation_id, msg.id);
         if let Some(conv) = state.conversations.get_mut(&msg.conversation_id) {
             conv.updated_at = self.clock.now();
+            if msg.role == MessageRole::User {
+                conv.archived_at = None;
+            }
         }
         Ok(())
     }
@@ -1049,6 +1355,7 @@ impl ConversationStore for InMemoryConversationStore {
                     created_at: now,
                     updated_at: now,
                     pinned_at: None,
+                    archived_at: None,
                 });
             if entry.agent_id != self.agent_id {
                 anyhow::bail!(
@@ -1087,8 +1394,39 @@ impl ConversationStore for InMemoryConversationStore {
     }
 
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
+        let mut out = self.owned_records();
+        out.retain(|c| c.archived_at.is_none());
+        out.sort_by_key(|c| {
+            (
+                c.pinned_at.is_none(),
+                std::cmp::Reverse((c.pinned_at, c.updated_at)),
+            )
+        });
+        Ok(out)
+    }
+
+    async fn list_archived_conversations(&self) -> Result<Vec<ConversationRecord>> {
+        let mut out = self.owned_records();
+        out.retain(|c| c.archived_at.is_some());
+        out.sort_by_key(|c| Reverse((c.archived_at, c.updated_at)));
+        Ok(out)
+    }
+
+    async fn list_owned_ids(&self) -> Result<Vec<Uuid>> {
+        Ok(self.owned_records().iter().map(|c| c.id).collect())
+    }
+
+    async fn search_conversations(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationSearchHit>> {
+        let tokens = tokenize_query(query)?;
+        if tokens.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
         let state = self.lock_state();
-        let mut out: Vec<ConversationRecord> = state
+        let records: Vec<&ConversationRecord> = state
             .conversations
             .values()
             .filter(|c| c.agent_id == self.agent_id)
@@ -1097,15 +1435,98 @@ impl ConversationStore for InMemoryConversationStore {
                     .as_ref()
                     .is_none_or(|u| c.user_id.as_ref() == Some(u))
             })
-            .cloned()
             .collect();
-        out.sort_by_key(|c| {
-            (
-                c.pinned_at.is_none(),
-                std::cmp::Reverse((c.pinned_at, c.updated_at)),
-            )
-        });
-        Ok(out)
+
+        let long_tokens: Vec<&String> = tokens.iter().filter(|t| !is_short_token(t)).collect();
+        let phrases: Vec<(&String, Vec<String>)> = long_tokens
+            .iter()
+            .map(|t| (*t, token_words(&fold(t).0)))
+            .collect();
+
+        let mut title_matches: HashMap<Uuid, TitleMatch> = HashMap::new();
+        let mut title_tokens: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut message_tokens: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut message_hits: HashMap<Uuid, Vec<(MessageHit, usize)>> = HashMap::new();
+        for record in &records {
+            if let Some(m) = record
+                .title
+                .as_deref()
+                .and_then(|title| title_segments(title, &tokens))
+            {
+                title_tokens.insert(record.id.to_string(), m.satisfied.iter().cloned().collect());
+                title_matches.insert(record.id, m);
+            }
+            let messages = state.messages.get(&record.id).into_iter().flatten();
+            for msg in messages.filter(|m| is_indexed(m)) {
+                let text = msg.content.replace([HIGHLIGHT_START, HIGHLIGHT_END], " ");
+                let words = message_words(&text);
+                let matched: Vec<&String> = phrases
+                    .iter()
+                    .filter(|(_, phrase)| !phrase_positions(&words, phrase).is_empty())
+                    .map(|(token, _)| *token)
+                    .collect();
+                if matched.is_empty() {
+                    continue;
+                }
+                message_tokens
+                    .entry(record.id.to_string())
+                    .or_default()
+                    .extend(matched.iter().map(|t| (*t).clone()));
+                message_hits.entry(record.id).or_default().push((
+                    MessageHit {
+                        message_id: msg.id,
+                        role: msg.role.clone(),
+                        created_at: msg.created_at,
+                        segments: snippet_segments(&text, &words, &phrases),
+                    },
+                    matched.len(),
+                ));
+            }
+        }
+
+        let candidates = satisfied_conversations(&tokens, &title_tokens, &message_tokens);
+        let by_id: HashMap<String, &ConversationRecord> =
+            records.iter().map(|r| (r.id.to_string(), *r)).collect();
+        let mut keys: Vec<RankKey> = candidates
+            .iter()
+            .filter_map(|id| {
+                let record = by_id.get(id)?;
+                let best = message_hits
+                    .get(&record.id)
+                    .and_then(|hits| hits.iter().map(|(_, n)| *n).max());
+                Some(RankKey {
+                    id: record.id,
+                    title_hits: title_matches
+                        .get(&record.id)
+                        .map_or(0, |m| m.satisfied.len()),
+                    score: best.map(|n| -(n as f64)),
+                    updated_at: record.updated_at,
+                })
+            })
+            .collect();
+        keys.sort_by(RankKey::compare);
+        keys.truncate(limit);
+
+        let mut hits = Vec::with_capacity(keys.len());
+        for key in keys {
+            let Some(record) = state.conversations.get(&key.id) else {
+                continue;
+            };
+            let mut matches = message_hits.remove(&key.id).unwrap_or_default();
+            // Most matched tokens first; the sort is stable, so ties keep
+            // message order.
+            matches.sort_by_key(|m| Reverse(m.1));
+            hits.push(ConversationSearchHit {
+                record: record.clone(),
+                title_segments: title_segments_for(record, title_matches.get(&key.id)),
+                matches: matches
+                    .into_iter()
+                    .take(MAX_MATCHES_PER_CONVERSATION)
+                    .map(|(hit, _)| hit)
+                    .collect(),
+            });
+        }
+        Ok(hits)
     }
 
     async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
@@ -1130,6 +1551,9 @@ impl ConversationStore for InMemoryConversationStore {
     }
 
     async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate> {
+        if patch.pinned == Some(true) && patch.archived == Some(true) {
+            return Ok(MetadataUpdate::Invalid);
+        }
         let now = self.clock.now();
         let updated = {
             let mut state = self.lock_state();
@@ -1147,8 +1571,19 @@ impl ConversationStore for InMemoryConversationStore {
                         c.title = Some(title);
                         c.title_locked = true;
                     }
+                    match patch.archived {
+                        Some(true) => {
+                            c.archived_at = c.archived_at.or(Some(now));
+                            c.pinned_at = None;
+                        }
+                        Some(false) => c.archived_at = None,
+                        None => {}
+                    }
                     match patch.pinned {
-                        Some(true) => c.pinned_at = c.pinned_at.or(Some(now)),
+                        Some(true) => {
+                            c.pinned_at = c.pinned_at.or(Some(now));
+                            c.archived_at = None;
+                        }
                         Some(false) => c.pinned_at = None,
                         None => {}
                     }
@@ -1381,6 +1816,189 @@ const ACTIVE_PATH_SQL: &str = "\
     INNER JOIN messages m ON m.id = path.id \
     ORDER BY path.depth ASC \
     LIMIT ?3";
+
+// -- in-memory search text matching (mirrors the FTS5 index) --
+
+/// Whether the message is in the SQLite index: user or assistant prose that
+/// is not blank and not a thinking step.
+fn is_indexed(msg: &Message) -> bool {
+    matches!(msg.role, MessageRole::User | MessageRole::Assistant)
+        && !msg.content.trim().is_empty()
+        && !msg
+            .content
+            .get(..7)
+            .is_some_and(|p| p.eq_ignore_ascii_case("<think>"))
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || is_combining_mark(c)
+}
+
+/// The folded words of a query token (`foo-bar` is two words).
+fn token_words(folded: &str) -> Vec<String> {
+    folded
+        .split(|c: char| !is_word_char(c))
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// A word of a message: its char range and folded form.
+struct Word {
+    start: usize,
+    end: usize,
+    folded: String,
+}
+
+/// Splits text into words on non-alphanumeric chars, like the FTS5 tokenizer.
+fn message_words(text: &str) -> Vec<Word> {
+    let mut words = Vec::new();
+    let mut start = None;
+    let mut count = 0;
+    for (i, c) in text.chars().enumerate() {
+        count = i + 1;
+        match (is_word_char(c), start) {
+            (true, None) => start = Some(i),
+            (false, Some(s)) => {
+                words.push(word(text, s, i));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        words.push(word(text, s, count));
+    }
+    words
+}
+
+fn word(text: &str, start: usize, end: usize) -> Word {
+    let slice: String = text.chars().skip(start).take(end - start).collect();
+    Word {
+        start,
+        end,
+        folded: fold(&slice).0,
+    }
+}
+
+/// Word indexes at which `phrase` matches: every word exactly, the last as a
+/// prefix (`"foo bar"*`).
+fn phrase_positions(words: &[Word], phrase: &[String]) -> Vec<usize> {
+    let Some((last, init)) = phrase.split_last() else {
+        return Vec::new();
+    };
+    (0..words.len())
+        .filter(|&i| {
+            i + phrase.len() <= words.len()
+                && init
+                    .iter()
+                    .enumerate()
+                    .all(|(k, w)| words[i + k].folded == *w)
+                && words[i + init.len()].folded.starts_with(last.as_str())
+        })
+        .collect()
+}
+
+/// A window of at most 12 words around the first hit, with the matched words
+/// highlighted and `…` marking elided text, like FTS5 `snippet()`.
+fn snippet_segments(
+    text: &str,
+    words: &[Word],
+    phrases: &[(&String, Vec<String>)],
+) -> Vec<SearchSegment> {
+    let mut hit_words: Vec<usize> = Vec::new();
+    for (_, phrase) in phrases {
+        for pos in phrase_positions(words, phrase) {
+            hit_words.extend(pos..pos + phrase.len());
+        }
+    }
+    hit_words.sort_unstable();
+    hit_words.dedup();
+    let Some(&first) = hit_words.first() else {
+        return Vec::new();
+    };
+    const WINDOW: usize = 12;
+    let from = first
+        .saturating_sub(2)
+        .min(words.len().saturating_sub(WINDOW));
+    let to = (from + WINDOW).min(words.len());
+    let chars: Vec<char> = text.chars().collect();
+    let begin = if from == 0 { 0 } else { words[from].start };
+    let finish = if to == words.len() {
+        chars.len()
+    } else {
+        words[to - 1].end
+    };
+
+    let mut marked = String::new();
+    if from > 0 {
+        marked.push('…');
+    }
+    let mut cursor = begin;
+    for &w in hit_words.iter().filter(|&&w| w >= from && w < to) {
+        let (s, e) = (words[w].start, words[w].end);
+        marked.extend(&chars[cursor..s]);
+        marked.push(HIGHLIGHT_START);
+        marked.extend(&chars[s..e]);
+        marked.push(HIGHLIGHT_END);
+        cursor = e;
+    }
+    marked.extend(&chars[cursor..finish]);
+    if to < words.len() {
+        marked.push('…');
+    }
+    segments_from_snippet(&marked)
+}
+
+// -- search ranking shared by both stores --
+
+/// One ranked message row of a candidate conversation.
+struct RankedMessage {
+    rowid: i64,
+    score: f64,
+}
+
+/// What orders search hits: title hits first (more matched tokens first),
+/// then the best message score (lower is better; none sorts last), then
+/// recency.
+struct RankKey {
+    id: Uuid,
+    title_hits: usize,
+    score: Option<f64>,
+    updated_at: DateTime<Utc>,
+}
+
+impl RankKey {
+    fn compare(a: &Self, b: &Self) -> Ordering {
+        let by_score = match (a.score, b.score) {
+            (Some(x), Some(y)) => x.total_cmp(&y),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        };
+        b.title_hits
+            .cmp(&a.title_hits)
+            .then(by_score)
+            .then(b.updated_at.cmp(&a.updated_at))
+            .then(a.id.cmp(&b.id))
+    }
+}
+
+/// The title as highlight segments: the matched runs when the title matched,
+/// else the plain title (empty for an untitled conversation).
+fn title_segments_for(
+    record: &ConversationRecord,
+    matched: Option<&TitleMatch>,
+) -> Vec<SearchSegment> {
+    match (matched, record.title.as_deref()) {
+        (Some(m), _) => m.segments.clone(),
+        (None, Some(title)) if !title.is_empty() => vec![SearchSegment {
+            text: title.to_string(),
+            highlighted: false,
+        }],
+        _ => Vec::new(),
+    }
+}
 
 fn message_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Message> {
     let id_str: String = r.get("id");
@@ -1785,6 +2403,7 @@ mod tests {
 
         let mut rx = broadcaster.subscribe();
         let patch = ConversationPatch {
+            archived: None,
             title: Some("Pinned".to_string()),
             pinned: Some(true),
         };
@@ -1815,6 +2434,7 @@ mod tests {
         let conv = alice.create_conversation(Some("Mine")).await.unwrap();
 
         let patch = ConversationPatch {
+            archived: None,
             title: None,
             pinned: Some(true),
         };
@@ -1888,6 +2508,117 @@ mod tests {
     // -----------------------------------------------------------------------
     // User-scoping tests
     // -----------------------------------------------------------------------
+
+    // -- search_conversations --
+
+    #[tokio::test]
+    async fn test_search_is_scoped_to_agent_and_user() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let pool = storage.pool.clone();
+        let alice = SqliteConversationStore::new(pool.clone()).with_user_id("alice");
+        let bob = SqliteConversationStore::new(pool.clone()).with_user_id("bob");
+        let other_agent =
+            SqliteConversationStore::for_agent(pool.clone(), "other").with_user_id("alice");
+
+        let mut mine = Vec::new();
+        for store in [&alice, &bob, &other_agent] {
+            let conv = store
+                .create_conversation(Some("Lisbon trip"))
+                .await
+                .unwrap();
+            store
+                .save_message(&Message::user(conv.id, "hotel in Lisbon"))
+                .await
+                .unwrap();
+            mine.push(conv.id);
+        }
+
+        for (store, expected) in [(&alice, mine[0]), (&bob, mine[1]), (&other_agent, mine[2])] {
+            for q in ["lisbon", "lisbon hotel", "hotel"] {
+                let hits = store.search_conversations(q, 20).await.unwrap();
+                let ids: Vec<Uuid> = hits.iter().map(|h| h.record.id).collect();
+                assert_eq!(ids, vec![expected], "query {q:?} stays in its own scope");
+            }
+        }
+    }
+
+    /// Task 6b.4 measurement, run on demand:
+    /// `cargo test -p assistant-storage --release search_latency -- --ignored --nocapture`.
+    /// Prints min, median and p95 latency over 50 runs on a 10k-message space
+    /// for 1-, 2- and 4-character queries and an 8-token query of
+    /// two-character prefixes. Run it on an idle host: wall-clock p95 is
+    /// dominated by load otherwise, and min is the figure to compare.
+    #[tokio::test]
+    #[ignore = "measurement, not a regression test"]
+    async fn search_latency_on_a_10k_message_space() {
+        use std::time::Instant;
+
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let words = [
+            "lisbon",
+            "hotel",
+            "budget",
+            "flight",
+            "kubernetes",
+            "recipe",
+            "invoice",
+            "meeting",
+            "design",
+            "database",
+            "weather",
+            "garden",
+            "python",
+            "travel",
+            "summary",
+            "plan",
+        ];
+        let mut tx = storage.pool.begin().await.unwrap();
+        for c in 0..50 {
+            let conversation_id = Uuid::new_v4().to_string();
+            sqlx::query("INSERT INTO conversations (id, title, agent_id) VALUES (?, ?, 'default')")
+                .bind(&conversation_id)
+                .bind(format!("Conversation {c} about {}", words[c % 16]))
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            for m in 0..200 {
+                let text: Vec<&str> = (0..60).map(|k| words[(c * 7 + m * 3 + k) % 16]).collect();
+                sqlx::query(
+                    "INSERT INTO messages (id, conversation_id, role, content, turn) \
+                     VALUES (?, ?, ?, ?, ?)",
+                )
+                .bind(Uuid::new_v4().to_string())
+                .bind(&conversation_id)
+                .bind(if m % 2 == 0 { "user" } else { "assistant" })
+                .bind(text.join(" "))
+                .bind(m as i64)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            }
+        }
+        tx.commit().await.unwrap();
+
+        let store = SqliteConversationStore::new(storage.pool.clone());
+        for (label, query) in [
+            ("1 char", "p"),
+            ("2 chars", "pl"),
+            ("4 chars", "plan"),
+            ("8 tokens x 2 chars", "li ho bu fl ku re in me"),
+        ] {
+            let mut millis = Vec::new();
+            for _ in 0..50 {
+                let started = Instant::now();
+                store.search_conversations(query, 20).await.unwrap();
+                millis.push(started.elapsed().as_secs_f64() * 1000.0);
+            }
+            millis.sort_by(f64::total_cmp);
+            println!(
+                "search {label:>20}: min {:.1} ms, median {:.1} ms, p95 {:.1} ms",
+                millis[0], millis[25], millis[47]
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_user_scoped_conversation_isolation() {

@@ -18,7 +18,7 @@ use assistant_core::{
     types::conversation::MessageRole,
 };
 use assistant_storage::{ConversationStore, SlackActiveThreadStore, StorageLayer};
-use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
+use assistant_transcription::{TranscriptionProvider, is_audio_mime};
 use async_trait::async_trait;
 use futures::SinkExt;
 use futures::stream::Stream;
@@ -32,7 +32,7 @@ use uuid::Uuid;
 use super::client::SlackApiClient;
 use super::config::SlackConfigExt;
 
-use crate::common::{Reconnect, pending_cache};
+use crate::common::{Reconnect, VoiceCapture, pending_cache};
 
 /// Maximum audio file size downloaded for transcription (25 MB — Whisper API limit).
 /// LRU capacity for the in-process cache of Slack thread roots that the bot
@@ -44,6 +44,9 @@ const ACTIVE_THREAD_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(1024)
 };
 
 const MAX_AUDIO_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+
+/// Prefix of the transcript in a voice message's text.
+const VOICE_TRANSCRIPT_LABEL: &str = "[Voice transcription]";
 /// Maximum image file size downloaded for vision (10 MB).
 const MAX_IMAGE_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
 
@@ -351,26 +354,21 @@ impl ChannelAdapter for SlackAdapter {
                                             ShouldProcessResult::Accept => {}
                                         }
 
-                                        // Transcribe audio attachments on file_share events.
-                                        if let Some(ref provider) = transcription {
-                                            let transcript = transcribe_audio_from_event(
-                                                &inner,
-                                                &client,
-                                                provider.as_ref(),
-                                                transcription_language.as_deref(),
-                                            )
-                                            .await;
-                                            if !transcript.is_empty()
-                                                && let ChannelContent::Text(ref mut text) =
-                                                    msg.content
-                                                {
-                                                    if text.is_empty() {
-                                                        *text = transcript;
-                                                    } else {
-                                                        *text =
-                                                            format!("{transcript}\n{text}");
-                                                    }
-                                                }
+                                        // Keep audio attachments on file_share events.
+                                        let typed = match &msg.content {
+                                            ChannelContent::Text(t) => t.as_str(),
+                                            _ => "",
+                                        };
+                                        if let Some(voice) = voice_from_event(
+                                            &inner,
+                                            &client,
+                                            transcription.as_deref(),
+                                            transcription_language.as_deref(),
+                                            typed,
+                                        )
+                                        .await
+                                        {
+                                            msg.content = voice;
                                         }
 
                                         // Download image attachments from file_share events.
@@ -379,8 +377,10 @@ impl ChannelAdapter for SlackAdapter {
                                         {
                                             // Preserve any text (caption) from the original message.
                                             let caption = match &msg.content {
-                                                ChannelContent::Text(t) if !t.is_empty() => {
-                                                    Some(t.clone())
+                                                ChannelContent::Text(t) if t.is_empty() => None,
+                                                ChannelContent::Text(_)
+                                                | ChannelContent::Voice { .. } => {
+                                                    Some(msg.content.clone())
                                                 }
                                                 _ => None,
                                             };
@@ -390,7 +390,7 @@ impl ChannelAdapter for SlackAdapter {
                                             // message before the image so the LLM sees both.
                                             if let Some(cap) = caption {
                                                 let text_msg = ChannelMessage {
-                                                    content: ChannelContent::Text(cap),
+                                                    content: cap,
                                                     ..msg.clone()
                                                 };
                                                 if tx.send(text_msg).await.is_err() {
@@ -708,24 +708,23 @@ fn parse_event(
     })
 }
 
-/// Download and transcribe audio files attached to a Slack `file_share` event.
+/// Download the audio files attached to a Slack `file_share` event and build
+/// the voice message.
 ///
-/// Returns a combined transcript string (one `[Voice transcription]` block per
-/// audio file) to be prepended to the message text.  Returns an empty string
-/// when no audio files are found or transcription is not possible.
-async fn transcribe_audio_from_event(
+/// Returns `None` when the event has no usable audio file. `typed` is the
+/// message's own text, which follows the voice text.
+async fn voice_from_event(
     event: &serde_json::Value,
     client: &SlackApiClient,
-    provider: &dyn TranscriptionProvider,
+    transcription: Option<&dyn TranscriptionProvider>,
     language: Option<&str>,
-) -> String {
-    let files = match event.get("files").and_then(|f| f.as_array()) {
-        Some(f) if !f.is_empty() => f.clone(),
-        _ => return String::new(),
-    };
+    typed: &str,
+) -> Option<ChannelContent> {
+    let files = event.get("files").and_then(|f| f.as_array())?;
 
-    let mut transcripts = Vec::new();
-    for file in &files {
+    let mut capture =
+        VoiceCapture::new(transcription, language, "slack").with_label(VOICE_TRANSCRIPT_LABEL);
+    for file in files {
         let mime = match file.get("mimetype").and_then(|v| v.as_str()) {
             Some(m) => m,
             None => continue,
@@ -745,8 +744,7 @@ async fn transcribe_audio_from_event(
         let filename = file
             .get("name")
             .or_else(|| file.get("title"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .and_then(|v| v.as_str());
 
         let audio_data = match client
             .download_private_file(url, MAX_AUDIO_ATTACHMENT_BYTES)
@@ -759,29 +757,10 @@ async fn transcribe_audio_from_event(
             }
         };
 
-        let request = TranscriptionRequest {
-            audio_data,
-            mime_type: mime.to_string(),
-            filename,
-            language: language.map(|s| s.to_string()),
-        };
-
-        match provider.transcribe(request).await {
-            Ok(result) => {
-                info!(
-                    text_len = result.text.len(),
-                    "slack: audio transcription successful"
-                );
-                transcripts.push(format!("[Voice transcription]: {}", result.text));
-            }
-            Err(e) => {
-                warn!(error = %e, "slack: audio transcription failed");
-                transcripts.push("[Voice message: transcription failed]".to_string());
-            }
-        }
+        capture.add(audio_data, mime, filename).await;
     }
 
-    transcripts.join("\n")
+    capture.into_content(typed)
 }
 
 /// Download image files attached to a Slack `file_share` event.
@@ -951,6 +930,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+    use crate::common::test_support::StubTranscriber;
     use crate::slack::client::SlackApiClient;
 
     fn make_adapter(server: &MockServer) -> SlackAdapter {
@@ -1006,6 +986,90 @@ mod tests {
             timestamp: chrono::Utc::now(),
             metadata,
         }
+    }
+
+    fn voice_event(server: &MockServer) -> serde_json::Value {
+        serde_json::json!({
+            "files": [{
+                "name": "voice.ogg",
+                "mimetype": "audio/ogg",
+                "url_private_download": format!("{}/files/voice.ogg", server.uri()),
+            }]
+        })
+    }
+
+    async fn server_with_voice_file() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/files/voice.ogg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"OggS".as_ref()))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn voice_with_provider_carries_transcript_and_recording() {
+        let server = server_with_voice_file().await;
+        let adapter = make_adapter(&server);
+        let provider = StubTranscriber::saying("hello");
+        let content = voice_from_event(
+            &voice_event(&server),
+            &adapter.client,
+            Some(&provider),
+            None,
+            "",
+        )
+        .await
+        .expect("audio file yields voice content");
+        match content {
+            ChannelContent::Voice {
+                data,
+                mime_type,
+                text,
+            } => {
+                assert_eq!(data, b"OggS");
+                assert_eq!(mime_type, "audio/ogg");
+                assert_eq!(text, "[Voice transcription]: hello");
+            }
+            other => panic!("expected Voice, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_without_provider_is_kept_with_placeholder_text() {
+        let server = server_with_voice_file().await;
+        let adapter = make_adapter(&server);
+        let content = voice_from_event(&voice_event(&server), &adapter.client, None, None, "hi")
+            .await
+            .expect("a voice message is kept without a provider");
+        match content {
+            ChannelContent::Voice { data, text, .. } => {
+                assert_eq!(data, b"OggS");
+                assert_eq!(text, "[Voice message]\nhi");
+            }
+            other => panic!("expected Voice, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_is_kept_when_transcription_fails() {
+        let server = server_with_voice_file().await;
+        let adapter = make_adapter(&server);
+        let provider = StubTranscriber::failing();
+        let content = voice_from_event(
+            &voice_event(&server),
+            &adapter.client,
+            Some(&provider),
+            None,
+            "",
+        )
+        .await
+        .expect("the recording survives a transcription failure");
+        assert!(matches!(
+            content,
+            ChannelContent::Voice { ref text, .. } if text == "[Voice message]"
+        ));
     }
 
     #[tokio::test]

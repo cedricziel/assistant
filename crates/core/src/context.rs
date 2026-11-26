@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
 use crate::types::agent::OrgConfig;
@@ -14,13 +14,28 @@ pub fn validate_agent_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-pub fn agent_base_dir(agent_id: &str) -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".assistant").join("agents").join(agent_id)
+/// A Persona's directory under the install root: `<install_root>/agents/<id>`.
+pub fn agent_base_dir(install_root: &Path, agent_id: &str) -> PathBuf {
+    install_root.join("agents").join(agent_id)
 }
 
-pub fn default_workspace_dir(agent_id: &str) -> PathBuf {
-    agent_base_dir(agent_id).join("workspace")
+pub fn default_workspace_dir(install_root: &Path, agent_id: &str) -> PathBuf {
+    agent_base_dir(install_root, agent_id).join("workspace")
+}
+
+/// Record the install root for code that has no caller to pass it down.
+/// Each entry point sets it once at startup.
+pub fn set_runtime_install_root(path: PathBuf) {
+    let lock = RUNTIME_INSTALL_ROOT.get_or_init(|| RwLock::new(None));
+    if let Ok(mut guard) = lock.write() {
+        *guard = Some(path);
+    }
+}
+
+/// The install root an entry point recorded, if any.
+pub fn runtime_install_root() -> Option<PathBuf> {
+    let lock = RUNTIME_INSTALL_ROOT.get_or_init(|| RwLock::new(None));
+    lock.read().ok().and_then(|guard| guard.clone())
 }
 
 pub fn set_runtime_agent_root(path: PathBuf) {
@@ -47,8 +62,8 @@ pub fn runtime_workspace_dir() -> Option<PathBuf> {
     lock.read().ok().and_then(|guard| guard.clone())
 }
 
-pub fn apply_agent_context(config: &mut OrgConfig, agent_id: &str) {
-    let root = agent_base_dir(agent_id);
+pub fn apply_agent_context(config: &mut OrgConfig, install_root: &Path, agent_id: &str) {
+    let root = agent_base_dir(install_root, agent_id);
     config.agent.id = agent_id.to_string();
 
     config.memory.agents_path = Some(root.join("AGENTS.md").to_string_lossy().to_string());
@@ -63,5 +78,27 @@ pub fn apply_agent_context(config: &mut OrgConfig, agent_id: &str) {
     config.memory.boot_path = Some(root.join("BOOT.md").to_string_lossy().to_string());
 }
 
+static RUNTIME_INSTALL_ROOT: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static RUNTIME_AGENT_ROOT: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static RUNTIME_WORKSPACE_DIR: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_agent_context_points_memory_at_the_install_root() {
+        let mut config = OrgConfig::default();
+        apply_agent_context(&mut config, Path::new("/srv/assistant"), "writer");
+
+        assert_eq!(config.agent.id, "writer");
+        assert_eq!(
+            config.memory.soul_path.as_deref(),
+            Some("/srv/assistant/agents/writer/SOUL.md")
+        );
+        assert_eq!(
+            config.memory.notes_dir.as_deref(),
+            Some("/srv/assistant/agents/writer/memory")
+        );
+    }
+}

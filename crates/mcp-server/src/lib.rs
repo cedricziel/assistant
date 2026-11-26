@@ -25,7 +25,7 @@ use rmcp::{RoleServer, ServiceExt};
 use tracing::info;
 
 pub use http::{RequestBoundServer, streamable_http_service};
-pub use identity::with_identity;
+pub use identity::{Caller, with_identity};
 pub use listeners::ListChangeListeners;
 pub use server::AssistantMcpServer;
 pub use tasks::TaskStore;

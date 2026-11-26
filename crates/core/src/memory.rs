@@ -17,6 +17,7 @@ use tracing::{debug, warn};
 use crate::clock::{Clock, SystemClock};
 
 use crate::context::runtime_agent_root;
+use crate::home::expand_tilde;
 use crate::types::agent::OrgConfig;
 use crate::types::features::MemoryConfig;
 
@@ -59,31 +60,46 @@ pub struct MemoryLoader {
 impl MemoryLoader {
     /// Create a MemoryLoader from the assistant configuration.
     pub fn new(config: &OrgConfig) -> Self {
-        let base = base_dir();
-        let mem = &config.memory;
-        Self::from_parts(mem, &base)
+        Self::from_memory_config(&config.memory)
     }
 
     /// Create a MemoryLoader directly from a `MemoryConfig` (useful when you
     /// don't have the full `OrgConfig` available).
+    ///
+    /// A file the config leaves unset lives under the runtime agent root.
+    /// Without that root there is nowhere to keep it, so memory is disabled.
     pub fn from_memory_config(mem: &MemoryConfig) -> Self {
         let base = base_dir();
-        Self::from_parts(mem, &base)
-    }
-
-    fn from_parts(mem: &MemoryConfig, base: &Path) -> Self {
+        let base = base.as_deref();
+        let mut complete = true;
+        let mut path = |configured: &Option<String>, name: &str| {
+            resolve(configured, base, name).unwrap_or_else(|| {
+                complete = false;
+                PathBuf::new()
+            })
+        };
+        let agents_path = path(&mem.agents_path, "AGENTS.md");
+        let soul_path = path(&mem.soul_path, "SOUL.md");
+        let identity_path = path(&mem.identity_path, "IDENTITY.md");
+        let user_path = path(&mem.user_path, "USER.md");
+        let tools_path = path(&mem.tools_path, "TOOLS.md");
+        let memory_path = path(&mem.memory_path, "MEMORY.md");
+        let notes_dir = path(&mem.notes_dir, "memory");
+        let bootstrap_path = path(&mem.bootstrap_path, "BOOTSTRAP.md");
+        let heartbeat_path = path(&mem.heartbeat_path, "HEARTBEAT.md");
+        let boot_path = path(&mem.boot_path, "BOOT.md");
         Self {
-            agents_path: resolve_path(&mem.agents_path, base, "AGENTS.md"),
-            soul_path: resolve_path(&mem.soul_path, base, "SOUL.md"),
-            identity_path: resolve_path(&mem.identity_path, base, "IDENTITY.md"),
-            user_path: resolve_path(&mem.user_path, base, "USER.md"),
-            tools_path: resolve_path(&mem.tools_path, base, "TOOLS.md"),
-            memory_path: resolve_path(&mem.memory_path, base, "MEMORY.md"),
-            notes_dir: resolve_dir(&mem.notes_dir, base, "memory"),
-            bootstrap_path: resolve_path(&mem.bootstrap_path, base, "BOOTSTRAP.md"),
-            heartbeat_path: resolve_path(&mem.heartbeat_path, base, "HEARTBEAT.md"),
-            boot_path: resolve_path(&mem.boot_path, base, "BOOT.md"),
-            enabled: mem.enabled,
+            agents_path,
+            soul_path,
+            identity_path,
+            user_path,
+            tools_path,
+            memory_path,
+            notes_dir,
+            bootstrap_path,
+            heartbeat_path,
+            boot_path,
+            enabled: mem.enabled && complete,
         }
     }
 
@@ -467,42 +483,19 @@ Read the file first with `memory-get` if unsure what text is there.\n\
 
 // -- Helpers -----------------------------------------------------------------
 
-/// Return the default `~/.assistant/agents/default/` base directory.
-pub fn base_dir() -> PathBuf {
-    if let Some(configured) = runtime_agent_root() {
-        return configured;
-    }
-    dirs::home_dir()
-        .map(|h| h.join(".assistant").join("agents").join("default"))
-        .unwrap_or_else(|| PathBuf::from(".assistant/agents/default"))
+/// The running Persona's directory, as the entry point recorded it with
+/// [`crate::set_runtime_agent_root`].
+pub fn base_dir() -> Option<PathBuf> {
+    runtime_agent_root()
 }
 
-/// Resolve a memory file path from an optional config override, falling back
-/// to `base / filename`.
-pub fn resolve_path(opt: &Option<String>, base: &Path, filename: &str) -> PathBuf {
+/// Resolve a memory file or directory from an optional config override,
+/// else `base / name`. `None` when neither is available.
+pub fn resolve(opt: &Option<String>, base: Option<&Path>, name: &str) -> Option<PathBuf> {
     match opt {
-        Some(p) => expand_tilde(p),
-        None => base.join(filename),
+        Some(p) => Some(expand_tilde(p)),
+        None => base.map(|b| b.join(name)),
     }
-}
-
-/// Resolve a memory directory path from an optional config override, falling
-/// back to `base / dirname`.
-pub fn resolve_dir(opt: &Option<String>, base: &Path, dirname: &str) -> PathBuf {
-    match opt {
-        Some(p) => expand_tilde(p),
-        None => base.join(dirname),
-    }
-}
-
-/// Expand a leading `~/` to the current user's home directory.
-pub fn expand_tilde(s: &str) -> PathBuf {
-    if let Some(rest) = s.strip_prefix("~/")
-        && let Some(home) = dirs::home_dir()
-    {
-        return home.join(rest);
-    }
-    PathBuf::from(s)
 }
 
 /// Return the largest byte index ≤ `index` that falls on a UTF-8 char boundary.
@@ -573,6 +566,30 @@ pub fn strip_html_comments(input: &str) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn loader_without_a_memory_root_is_disabled() {
+        // No paths configured and no runtime agent root: nothing to write to.
+        let loader = MemoryLoader::from_memory_config(&MemoryConfig::default());
+        loader.ensure_defaults();
+
+        assert_eq!(
+            loader.load_system_prompt(),
+            "You are a helpful AI assistant.",
+            "memory falls back to the disabled prompt"
+        );
+    }
+
+    #[test]
+    fn loader_writes_defaults_under_configured_paths() {
+        let root = tempdir().unwrap();
+        let mut config = crate::types::agent::OrgConfig::default();
+        crate::apply_agent_context(&mut config, root.path(), "default");
+
+        MemoryLoader::new(&config).ensure_defaults();
+
+        assert!(root.path().join("agents/default/SOUL.md").exists());
+    }
 
     #[test]
     fn strip_comments_empty_input() {

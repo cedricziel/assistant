@@ -3,11 +3,16 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use assistant_core::tool_render::{LinkPreviewData, ToolRenderData};
 use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionContext};
 use async_trait::async_trait;
 use scraper::Html;
 
 const DEFAULT_MAX_CHARS: usize = 8000;
+
+/// Render budget for the `link_preview` view (design D4).
+const MAX_RENDER_TITLE_CHARS: usize = 200;
+const MAX_RENDER_EXCERPT_CHARS: usize = 280;
 
 pub struct WebFetchHandler {
     client: reqwest::Client,
@@ -51,6 +56,10 @@ impl ToolHandler for WebFetchHandler {
         })
     }
 
+    fn output_schema(&self) -> Option<serde_json::Value> {
+        ToolRenderData::schema("link_preview")
+    }
+
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
@@ -90,11 +99,24 @@ impl ToolHandler for WebFetchHandler {
 
         let final_url = response.url().to_string();
         let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let preview = LinkPreviewData {
+            url: url.clone(),
+            final_url: final_url.clone(),
+            status: status.as_u16(),
+            title: None,
+            content_type,
+            excerpt: None,
+        };
         if !status.is_success() {
-            return Ok(ToolOutput::error(format!(
-                "HTTP {} fetching '{}'",
-                status, url
-            )));
+            return Ok(
+                ToolOutput::error(format!("HTTP {} fetching '{}'", status, url))
+                    .with_render(ToolRenderData::LinkPreview(preview)),
+            );
         }
 
         let html_body = match response.text().await {
@@ -115,6 +137,19 @@ impl ToolHandler for WebFetchHandler {
 
         // Extract visible text content
         let text = extract_text(&document);
+
+        let preview = LinkPreviewData {
+            title: title
+                .as_deref()
+                .map(|t| t.chars().take(MAX_RENDER_TITLE_CHARS).collect()),
+            excerpt: Some(
+                text.chars()
+                    .take(MAX_RENDER_EXCERPT_CHARS)
+                    .collect::<String>(),
+            )
+            .filter(|e| !e.is_empty()),
+            ..preview
+        };
 
         // Truncate to max_chars
         let truncated = if text.len() > max_chars {
@@ -142,7 +177,7 @@ impl ToolHandler for WebFetchHandler {
             format!("URL: {}\n\n{}", final_url, truncated)
         };
 
-        Ok(ToolOutput::success(output))
+        Ok(ToolOutput::success(output).with_render(ToolRenderData::LinkPreview(preview)))
     }
 }
 

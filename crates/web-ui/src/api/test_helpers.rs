@@ -136,6 +136,23 @@ impl TranscriptionProvider for StubTranscriptionProvider {
     }
 }
 
+/// Stub transcription provider whose every call fails.
+pub(crate) struct FailingTranscriptionProvider;
+
+#[async_trait]
+impl TranscriptionProvider for FailingTranscriptionProvider {
+    fn name(&self) -> &str {
+        "failing-stub"
+    }
+
+    async fn transcribe(
+        &self,
+        _request: TranscriptionRequest,
+    ) -> anyhow::Result<TranscriptionResult> {
+        anyhow::bail!("stub transcription failure")
+    }
+}
+
 // -- HTTP / LLM fixtures -------------------------------------------------------
 
 /// Minimal LLM mock: returns a static assistant reply.
@@ -223,6 +240,18 @@ pub(crate) async fn state_over_config(
         Arc::new(RwLock::new("default".to_string())),
     );
     (state, resolver)
+}
+
+/// The documented split deployment: the returned `ApiState` runs no turn
+/// worker, and a separate set of runtimes over the same databases (and so the
+/// same SQLite bus) claims and runs every turn, as `assistant orchestrator
+/// run` does in its own process.
+pub(crate) async fn split_process_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let spaces = [default_space(&storage)];
+    let (state, _) = state_over(llm_url, &spaces, false).await;
+    let _orchestrator_process = state_over(llm_url, &spaces, true).await;
+    (state, storage)
 }
 
 pub(crate) fn default_space(storage: &Arc<StorageLayer>) -> TestSpace {

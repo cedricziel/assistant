@@ -23,7 +23,7 @@ use assistant_auth::middleware::{AuthState, SessionError};
 use assistant_core::auth::AuthContext;
 use assistant_core::identity::{Action, ResourceKind};
 use assistant_mcp_server::{
-    AssistantMcpServer, ListChangeListeners, TaskStore, streamable_http_service,
+    AssistantMcpServer, Caller, ListChangeListeners, TaskStore, streamable_http_service,
 };
 use assistant_runtime::SpaceRuntimes;
 
@@ -104,7 +104,7 @@ pub async fn protected_resource_metadata(
 // -- Access ----------------------------------------------------------------------
 
 /// Checks `Origin`, the credential and its scope, binds the request to a space
-/// and attaches the caller's [`AuthContext`] and that space's
+/// and attaches the [`Caller`] bound to that space and the space's
 /// [`AssistantMcpServer`] to the request extensions.
 async fn require_mcp_access(
     State(state): State<McpState>,
@@ -161,7 +161,11 @@ async fn require_mcp_access(
         state.tasks.clone(),
     ));
 
-    request.extensions_mut().insert(auth);
+    request.extensions_mut().insert(Caller {
+        auth,
+        space_id: space.space_id,
+        role: space.role,
+    });
     request.extensions_mut().insert(server);
     next.run(request).await
 }
@@ -224,7 +228,10 @@ mod tests {
     use axum::http::{HeaderValue, Method, Request, StatusCode, header};
     use http_body_util::BodyExt;
     use rmcp::ServiceExt;
-    use rmcp::model::{ErrorCode, GetPromptRequestParams, ProtocolVersion, SubscriptionFilter};
+    use rmcp::model::{
+        ClientCapabilities, ClientConfig, ErrorCode, GetPromptRequestParams, GetTaskParams,
+        ProtocolVersion, SubscriptionFilter,
+    };
     use rmcp::service::{ClientLifecycleMode, ServiceError, serve_client_with_lifecycle};
     use rmcp::transport::StreamableHttpClientTransport;
     use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -688,6 +695,31 @@ mod tests {
             .await;
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn the_server_runs_in_the_space_the_middleware_bound() {
+        let fx = Fixture::new().await;
+        // adam holds no role in A2; only the middleware grants org admins entry.
+        let mut task_aware = ClientConfig::default();
+        task_aware.capabilities = ClientCapabilities::builder().enable_tasks().build();
+        let client = task_aware
+            .serve(fx.transport(&fx.mcp_token("adam"), Some(A2)).await)
+            .await
+            .unwrap();
+
+        let error = client
+            .get_task(GetTaskParams::new("no-such-task"))
+            .await
+            .unwrap_err();
+        let ServiceError::McpError(error) = error else {
+            panic!("expected a protocol error, got {error:?}");
+        };
+        assert_eq!(
+            error.code,
+            ErrorCode::INVALID_PARAMS,
+            "the caller is resolved and the task store answers: {error:?}"
+        );
     }
 
     // -- Protected resource metadata -----------------------------------------------

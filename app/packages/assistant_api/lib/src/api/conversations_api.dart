@@ -22,6 +22,7 @@ import 'package:assistant_api/src/model/quick_message_response.dart';
 import 'package:assistant_api/src/model/read_mcp_app_resource_request.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request.dart';
 import 'package:assistant_api/src/model/set_message_feedback_request.dart';
+import 'package:assistant_api/src/model/switch_branch_request.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
 import 'package:built_collection/built_collection.dart';
@@ -1300,8 +1301,8 @@ class ConversationsApi {
     return _response;
   }
 
-  /// &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
-  ///
+  /// &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, keep it as the user message&#39;s attachment, transcribe it, run through the orchestrator, and stream the response as SSE.
+  /// The message text is the transcript, or &#x60;[Voice message]&#x60; when no transcription provider is configured or transcription fails.
   ///
   /// Parameters:
   /// * [id] - Conversation ID
@@ -1636,6 +1637,116 @@ class ConversationsApi {
     );
 
     return _response;
+  }
+
+  /// &#x60;POST /api/conversations/{id}/switch-branch&#x60; — make another version of a message the active one.
+  /// Lands on the most recently created leaf below &#x60;message_id&#x60;. Does not change &#x60;updated_at&#x60;. While a turn is working it returns &#x60;409&#x60;; while a turn only waits for an approval or an answer, that wait is cancelled first.
+  ///
+  /// Parameters:
+  /// * [id] - Conversation ID
+  /// * [switchBranchRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [ConversationDetail] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<ConversationDetail>> switchConversationBranch({
+    required String id,
+    required SwitchBranchRequest switchBranchRequest,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/api/conversations/{id}/switch-branch'.replaceAll(
+        '{' r'id' '}',
+        encodeQueryParameter(_serializers, id, const FullType(String))
+            .toString());
+    final _options = Options(
+      method: r'POST',
+      headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      contentType: 'application/json',
+      validateStatus: validateStatus,
+    );
+
+    dynamic _bodyData;
+
+    try {
+      const _type = FullType(SwitchBranchRequest);
+      _bodyData =
+          _serializers.serialize(switchBranchRequest, specifiedType: _type);
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final _response = await _dio.request<Object>(
+      _path,
+      data: _bodyData,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    ConversationDetail? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(ConversationDetail),
+            ) as ConversationDetail;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<ConversationDetail>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
   }
 
   /// &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.

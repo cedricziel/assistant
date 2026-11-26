@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assistant.invalid/schemas/tool-results/code_diff.schema.json",
+  "title": "code_diff",
+  "description": "Unified-diff style change made to one file.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["kind", "path", "operation", "hunks", "added", "removed", "truncated"],
+  "properties": {
+    "kind": { "const": "code_diff" },
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "operation": { "enum": ["edit", "create", "overwrite"] },
+    "hunks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["old_start", "old_lines", "new_start", "new_lines", "lines"],
+        "properties": {
+          "old_start": { "type": "integer", "minimum": 0 },
+          "old_lines": { "type": "integer", "minimum": 0 },
+          "new_start": { "type": "integer", "minimum": 0 },
+          "new_lines": { "type": "integer", "minimum": 0 },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["op", "text"],
+              "properties": {
+                "op": { "enum": ["context", "add", "remove"] },
+                "text": { "type": "string", "maxLength": 512 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "added": { "type": "integer", "minimum": 0 },
+    "removed": { "type": "integer", "minimum": 0 },
+    "truncated": { "type": "boolean" }
+  }
+}

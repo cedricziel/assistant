@@ -4,11 +4,25 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
+use assistant_core::tool_render::ToolRenderData;
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{ToolHandler, ToolOutput};
 use assistant_storage::ScheduledTaskStore as _;
 use assistant_storage::StorageLayer;
 use async_trait::async_trait;
+use serde_json::{Map, Value, json};
+
+use crate::builtins::render_table::{Column, data_table};
+
+/// Columns of the `data_table` published by `list-tasks`.
+const COLUMNS: &[Column] = &[
+    ("name", "Name"),
+    ("status", "Status"),
+    ("mode", "Mode"),
+    ("schedule", "Schedule"),
+    ("next_run", "Next run"),
+    ("last_run", "Last run"),
+];
 
 pub struct ListTasksHandler {
     storage: Arc<StorageLayer>,
@@ -46,6 +60,10 @@ impl ToolHandler for ListTasksHandler {
         false
     }
 
+    fn output_schema(&self) -> Option<Value> {
+        ToolRenderData::schema("data_table")
+    }
+
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
@@ -66,10 +84,12 @@ impl ToolHandler for ListTasksHandler {
         };
 
         if tasks.is_empty() {
-            return Ok(ToolOutput::success("No scheduled tasks found.".to_string()));
+            return Ok(ToolOutput::success("No scheduled tasks found.".to_string())
+                .with_render(data_table(COLUMNS, Vec::new())));
         }
 
         let mut lines = Vec::with_capacity(tasks.len() + 1);
+        let mut rows: Vec<Map<String, Value>> = Vec::with_capacity(tasks.len());
         lines.push(format!("Found {} scheduled task(s):\n", tasks.len()));
 
         for t in &tasks {
@@ -91,13 +111,27 @@ impl ToolHandler for ListTasksHandler {
                 .map(|dt| dt.to_rfc3339())
                 .unwrap_or_else(|| "never".to_string());
 
+            rows.push(
+                json!({
+                    "name": t.name,
+                    "status": status,
+                    "mode": mode,
+                    "schedule": schedule,
+                    "next_run": next,
+                    "last_run": last,
+                })
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+            );
+
             lines.push(format!(
                 "- **{}** (id: {})\n  Status: {} | Mode: {} | {}\n  Next run: {} | Last run: {}\n  Prompt: {}",
                 t.name, t.id, status, mode, schedule, next, last, t.prompt
             ));
         }
 
-        Ok(ToolOutput::success(lines.join("\n")))
+        Ok(ToolOutput::success(lines.join("\n")).with_render(data_table(COLUMNS, rows)))
     }
 }
 

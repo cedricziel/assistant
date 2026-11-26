@@ -297,24 +297,25 @@ fn build_anthropic_messages(history: &[ChatHistoryMessage]) -> (Vec<Value>, Vec<
             ChatHistoryMessage::MultimodalUser { content } => {
                 let blocks: Vec<Value> = content
                     .iter()
-                    .map(|block| match block {
-                        ContentBlock::Text(text) => json!({"type": "text", "text": text}),
-                        ContentBlock::Image { media_type, data } => json!({
+                    .filter_map(|block| match block {
+                        ContentBlock::Text(text) => Some(json!({"type": "text", "text": text})),
+                        ContentBlock::Image { media_type, data } => Some(json!({
                             "type": "image",
                             "source": {
                                 "type": "base64",
                                 "media_type": media_type,
                                 "data": data,
                             }
-                        }),
-                        ContentBlock::Document { media_type, data } => json!({
+                        })),
+                        ContentBlock::Document { media_type, data } => Some(json!({
                             "type": "document",
                             "source": {
                                 "type": "base64",
                                 "media_type": media_type,
                                 "data": data,
                             }
-                        }),
+                        })),
+                        ContentBlock::Audio { .. } => None,
                     })
                     .collect();
                 messages.push(json!({"role": "user", "content": blocks}));
@@ -425,6 +426,7 @@ impl LlmProvider for AnthropicProvider {
             tool_choice: true,
             parallel_tool_calls: true,
             json_schema: false,
+            audio_input: false,
         }
     }
 
@@ -1077,6 +1079,23 @@ mod tests {
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "just text");
+    }
+
+    #[test]
+    fn audio_blocks_are_dropped() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("[Voice message]: hi".into()),
+                ContentBlock::Audio {
+                    media_type: "audio/ogg".into(),
+                    data: "T2dnUw==".into(),
+                },
+            ],
+        }];
+        let (messages, _) = build_anthropic_messages(&history);
+        let content = messages[0]["content"].as_array().expect("content array");
+        assert_eq!(content.len(), 1, "only the text: {content:?}");
+        assert_eq!(content[0]["type"], "text");
     }
 
     #[test]
