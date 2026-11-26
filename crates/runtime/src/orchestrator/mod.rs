@@ -39,6 +39,8 @@ use turn_timing::{CallMarks, TurnTimer};
 mod branch;
 mod dispatch;
 mod prompt;
+mod surface_hook;
+use self::surface_hook::{SurfaceCall, SurfaceTurn};
 pub mod stream_event;
 mod turn_cancellations;
 mod turn_control;
@@ -373,6 +375,8 @@ pub struct Orchestrator {
     /// Where each turn gets the tools only it may see, with the space it is
     /// asked for.
     pub(crate) turn_tool_source: Option<TurnToolBinding>,
+    /// Where `render-surface` results are persisted (see `surface_hook`).
+    pub(crate) surface_store: Arc<dyn assistant_storage::SurfaceStore>,
 }
 
 /// A [`TurnToolSource`] bound to the space this orchestrator runs.
@@ -399,6 +403,7 @@ impl Orchestrator {
 
         let skill_executions = Arc::new(storage.skill_execution_store());
         let interactions = Arc::new(storage.interaction_store());
+        let surface_store = Arc::new(storage.surface_store());
 
         Self {
             llm,
@@ -432,7 +437,15 @@ impl Orchestrator {
             learning_config: config.learning.clone(),
             clock: Arc::new(assistant_core::clock::SystemClock),
             turn_tool_source: None,
+            surface_store,
         }
+    }
+
+    /// Persist surfaces in `store` instead of the space database. Tests use
+    /// this to inspect rows without SQLite.
+    pub fn with_surface_store(mut self, store: Arc<dyn assistant_storage::SurfaceStore>) -> Self {
+        self.surface_store = store;
+        self
     }
 
     /// Give every turn the tools `source` returns for `(org_slug, space_slug)`
@@ -975,6 +988,7 @@ impl Orchestrator {
         let mut turn_attachment_ids: Vec<Uuid> = Vec::new();
         let mut turn_had_errors = false;
         let mut active_skill: Option<String> = None;
+        let mut surface_turn = SurfaceTurn::new(base_turn);
 
         // 5. Tool-calling loop.
         for iteration in 0..self.max_iterations {
@@ -1155,7 +1169,7 @@ impl Orchestrator {
                         iteration, "LLM requested tool execution(s)"
                     );
 
-                    Self::persist_tool_calls(
+                    let anchor_message_id = Self::persist_tool_calls(
                         &mut history,
                         &conv_store,
                         conversation_id,
@@ -1167,7 +1181,7 @@ impl Orchestrator {
 
                     let has_real_calls = tool_call_items.iter().any(|t| t.name != "end_turn");
 
-                    for tool_call_item in tool_call_items {
+                    for (call_index, tool_call_item) in tool_call_items.into_iter().enumerate() {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
                         let tool_call_id = tool_call_item.id;
@@ -1241,6 +1255,7 @@ impl Orchestrator {
                                     &mut active_skill,
                                     token_sink.as_ref(),
                                     tool_call_id.as_deref(),
+                                    None,
                                 )
                                 .await;
                             turn_had_errors |= finalized.had_error;
@@ -1268,6 +1283,11 @@ impl Orchestrator {
                                     &builtin_span,
                                     token_sink.as_ref(),
                                     tool_call_id.as_deref(),
+                                    Some(SurfaceCall {
+                                        turn: &mut surface_turn,
+                                        anchor_message_id,
+                                        call_index,
+                                    }),
                                 )
                                 .await;
                             match outcome {
@@ -1403,6 +1423,7 @@ impl Orchestrator {
         let mut turn_tool_count: usize = 0;
         let mut turn_had_errors = false;
         let mut active_skill: Option<String> = None;
+        let mut surface_turn = SurfaceTurn::new(base_turn);
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
@@ -1642,7 +1663,7 @@ impl Orchestrator {
                         iteration, "LLM requested tool execution(s)"
                     );
 
-                    Self::persist_tool_calls(
+                    let anchor_message_id = Self::persist_tool_calls(
                         &mut history,
                         &conv_store,
                         conversation_id,
@@ -1653,7 +1674,7 @@ impl Orchestrator {
                     .instrument(iteration_span.clone())
                     .await;
 
-                    for tool_call_item in tool_call_items {
+                    for (call_index, tool_call_item) in tool_call_items.into_iter().enumerate() {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
                         let tool_call_id = tool_call_item.id;
@@ -1686,6 +1707,11 @@ impl Orchestrator {
                                 &iteration_span,
                                 token_sink.as_ref(),
                                 tool_call_id.as_deref(),
+                                Some(SurfaceCall {
+                                    turn: &mut surface_turn,
+                                    anchor_message_id,
+                                    call_index,
+                                }),
                             )
                             .await;
                         match outcome {
