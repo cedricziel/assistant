@@ -37,6 +37,13 @@ pub struct SubmitTurn {
     /// `false`, tools that need a human's answer are denied instead of
     /// prompting.
     pub interactive: bool,
+    /// The submitter streams the turn from another process than the one that
+    /// runs it. When the worker finds no local event sink it relays each event
+    /// over the bus ([`topic::TURN_EVENT`](assistant_core::bus_messages::topic::TURN_EVENT)),
+    /// and the submitter reads them with [`Orchestrator::run_event_relay`].
+    ///
+    /// [`Orchestrator::run_event_relay`]: super::Orchestrator::run_event_relay
+    pub relay_events: bool,
     /// Where the turn's rows attach in the message tree.
     pub anchor: TurnAnchor,
     /// The id to persist the user row under, when the producer pre-assigns one.
@@ -62,6 +69,7 @@ impl SubmitTurn {
             identity: TurnIdentity::default(),
             request_id: None,
             interactive: false,
+            relay_events: false,
             anchor: TurnAnchor::default(),
             user_message_id: None,
             model_override: None,
@@ -107,6 +115,13 @@ impl SubmitTurn {
         self
     }
 
+    /// Ask the worker to relay the turn's events over the bus when it has no
+    /// local sink.
+    pub fn with_relay_events(mut self, relay_events: bool) -> Self {
+        self.relay_events = relay_events;
+        self
+    }
+
     /// The bus envelope for this turn.
     pub(super) fn to_request(&self, traceparent: Option<String>) -> TurnRequest {
         TurnRequest {
@@ -117,6 +132,7 @@ impl SubmitTurn {
             traceparent,
             attachment_ids: self.attachment_ids.clone(),
             interactive: self.interactive,
+            relay_events: self.relay_events,
             anchor: self.anchor.clone(),
             user_message_id: self.user_message_id,
             model_override: self.model_override.clone(),
@@ -149,6 +165,10 @@ mod tests {
         assert_eq!(turn.identity.org_id, None);
         assert_eq!(turn.request_id, None);
         assert!(!turn.interactive, "a turn is not interactive by default");
+        assert!(
+            !turn.relay_events,
+            "a turn does not relay events by default"
+        );
         assert_eq!(turn.anchor, TurnAnchor::Append);
         assert_eq!(turn.user_message_id, None);
         assert_eq!(turn.model_override, None);
@@ -160,7 +180,8 @@ mod tests {
         let user_message_id = Uuid::new_v4();
         let mut turn = SubmitTurn::new("hi", Uuid::new_v4(), Interface::Web)
             .with_attachments(vec![attachment])
-            .with_interactive(true);
+            .with_interactive(true)
+            .with_relay_events(true);
         turn.anchor = TurnAnchor::Regenerate { user_message_id };
         turn.user_message_id = Some(user_message_id);
         turn.model_override = Some("m".into());
@@ -170,6 +191,7 @@ mod tests {
         assert_eq!(request.conversation_id, turn.conversation_id);
         assert_eq!(request.attachment_ids, vec![attachment]);
         assert!(request.interactive);
+        assert!(request.relay_events);
         assert_eq!(request.traceparent.as_deref(), Some("tp"));
         assert_eq!(request.anchor, TurnAnchor::Regenerate { user_message_id });
         assert_eq!(request.user_message_id, Some(user_message_id));

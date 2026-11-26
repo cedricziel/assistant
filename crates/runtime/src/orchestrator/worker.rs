@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use super::relay::{COALESCE_WINDOW, RelayTarget, spawn_relay_sink};
 use super::turn_cancellations::Claim;
 use super::{
     ExtensionRegistration, Orchestrator, SubmitTurn, TurnLease, TurnMode, TurnResult,
@@ -279,7 +280,24 @@ impl Orchestrator {
 
                     // Check for registered side-channel resources.
                     let ext = self.extension_registrations.write().await.remove(&conv_id);
-                    let token_sink = self.token_sinks.write().await.remove(&conv_id);
+                    let mut token_sink = self.token_sinks.write().await.remove(&conv_id);
+
+                    // A turn whose submitter streams from another process has
+                    // no local sink: relay its events over the bus instead.
+                    let relay = (token_sink.is_none() && turn_req.relay_events).then(|| {
+                        spawn_relay_sink(
+                            RelayTarget {
+                                bus: self.bus.clone(),
+                                agent_id: self.agent_id.clone(),
+                                conversation_id: conv_id,
+                                run_id,
+                            },
+                            COALESCE_WINDOW,
+                        )
+                    });
+                    if let Some(relay) = &relay {
+                        token_sink = relay.sender();
+                    }
 
                     // Keep a clone of extension registrations so we can
                     // re-register them if this turn fails transiently and
@@ -378,6 +396,11 @@ impl Orchestrator {
                             continue;
                         }
                     };
+
+                    // The relayed events go out before the result does.
+                    if let Some(relay) = relay {
+                        relay.finish().await;
+                    }
 
                     match result {
                         Ok(turn_result) => {
