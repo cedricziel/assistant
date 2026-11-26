@@ -20,3 +20,12 @@ final capabilitiesProvider = FutureProvider<ServerCapabilities>((ref) async {
     return ServerCapabilities.disabled;
   }
 });
+
+/// Hosts whose A2UI `openUrl` targets open without a confirmation prompt
+/// (`ui.link_hosts`).
+///
+/// Empty while capabilities load and when the call fails or returns no list,
+/// so the failure mode is more prompts, never fewer.
+final uiLinkHostsProvider = Provider<List<String>>(
+  (ref) => ref.watch(capabilitiesProvider).asData?.value.linkHosts ?? const [],
+);

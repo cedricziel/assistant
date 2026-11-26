@@ -1,6 +1,4 @@
 // RED→GREEN: openspec/changes/generative-ui-a2ui PR 14.4.
-import 'dart:io';
-
 import 'package:assistant_app/features/chat/a2ui/a2ui_surface_view.dart';
 import 'package:assistant_app/features/chat/a2ui/assistant_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -67,15 +65,5 @@ void main() {
 
     expect(errors, isEmpty);
     expect(tester.takeException(), isNull);
-  });
-
-  test('no a2ui adapter file imports url_launcher before PR 14b', () {
-    final offenders = [
-      for (final f in Directory('lib/features/chat/a2ui').listSync())
-        if (f is File && f.readAsStringSync().contains("package:url_launcher"))
-          f.path,
-    ];
-
-    expect(offenders, isEmpty);
   });
 }
