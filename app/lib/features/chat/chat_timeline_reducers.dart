@@ -133,6 +133,7 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
     record.status = resolvedStatus;
     record.arguments = event.arguments;
     record.result = event.result;
+    record.data = event.data;
     record.duration = DateTime.now().difference(record.startedAt);
     msgs[entryIdx].isStreaming = false;
   } else {
@@ -151,6 +152,7 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
             status: resolvedStatus,
             arguments: event.arguments,
             result: event.result,
+            data: event.data,
           ),
         ],
       ),
