@@ -1,6 +1,5 @@
+import 'package:assistant_ui/models.dart';
 import 'package:material_ui/material_ui.dart';
-
-import 'commands_provider.dart';
 
 /// Floating autocomplete popup for slash commands.
 ///

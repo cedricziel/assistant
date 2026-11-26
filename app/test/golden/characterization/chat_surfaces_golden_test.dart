@@ -5,10 +5,8 @@ import 'dart:typed_data';
 
 import 'package:assistant_app/api/models/server_capabilities.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
-import 'package:assistant_app/features/chat/attachment_provider.dart';
 import 'package:assistant_app/features/chat/chat_input_row.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
-import 'package:assistant_app/features/chat/commands_provider.dart';
 import 'package:assistant_app/features/chat/conversation_list.dart';
 import 'package:assistant_app/features/chat/empty_chat.dart';
 import 'package:assistant_app/features/chat/turn_progress_card.dart';

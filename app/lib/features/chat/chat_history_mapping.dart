@@ -1,6 +1,5 @@
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
-
-import 'chat_models.dart';
+import 'package:assistant_ui/models.dart';
 
 /// Map a server tool-status string onto [ToolCallStatus]; unknown values
 /// are treated as [ToolCallStatus.ok].
