@@ -5,6 +5,7 @@ use reqwest_middleware::ClientWithMiddleware;
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use assistant_core::types::llm::OpenRouterRouting;
 use assistant_core::{LlmResponse, Secret, StreamChunk};
 
 use super::errors::http_error;
@@ -89,14 +90,20 @@ impl OpenRouterClient {
     }
 
     /// Embeds `texts` with `model`, in input order, in requests of at most
-    /// [`MAX_EMBEDDING_INPUTS`] texts.
-    pub async fn embed(&self, model: &str, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+    /// [`MAX_EMBEDDING_INPUTS`] texts, sending `routing` as `provider`.
+    pub async fn embed(
+        &self,
+        model: &str,
+        texts: &[&str],
+        routing: Option<&OpenRouterRouting>,
+    ) -> anyhow::Result<Vec<Vec<f32>>> {
         let mut vectors = Vec::with_capacity(texts.len());
         for batch in texts.chunks(MAX_EMBEDDING_INPUTS) {
             let request = EmbeddingRequest {
                 model,
                 input: batch,
                 encoding_format: "float",
+                provider: routing,
             };
             let response: EmbeddingResponse = self
                 .post("embeddings", &request)

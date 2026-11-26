@@ -10,6 +10,7 @@
 mod catalog;
 mod citations;
 mod client;
+mod embedder;
 mod errors;
 mod reasoning;
 mod request;
@@ -31,11 +32,13 @@ use std::sync::Arc;
 
 use self::catalog::OpenRouterCatalog;
 use self::client::OpenRouterClient;
+pub use self::embedder::OpenRouterEmbedder;
 use self::request::{ModelInputs, RequestSettings, apply_options, build_chat_request};
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
-const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
+/// OpenRouter API base URL used when none is configured.
+pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const DEFAULT_MAX_TOKENS: u32 = 8192;
 /// Embedding model used when `[llm] embedding_model` is unset.
 pub const DEFAULT_EMBEDDING_MODEL: &str = "openai/text-embedding-3-small";
@@ -257,14 +260,14 @@ impl LlmProvider for OpenRouterProvider {
 
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         self.client
-            .embed(&self.embedding_model, &[text])
+            .embed(&self.embedding_model, &[text], None)
             .await?
             .pop()
             .ok_or_else(|| anyhow::anyhow!("OpenRouter returned no embedding"))
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
-        self.client.embed(&self.embedding_model, texts).await
+        self.client.embed(&self.embedding_model, texts, None).await
     }
 
     fn provider_name(&self) -> &str {
