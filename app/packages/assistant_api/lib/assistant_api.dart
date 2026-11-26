@@ -97,6 +97,7 @@ export 'package:assistant_api/src/model/credential_mode.dart';
 export 'package:assistant_api/src/model/credential_response.dart';
 export 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
 export 'package:assistant_api/src/model/device_code_response_schema.dart';
+export 'package:assistant_api/src/model/edit_message_request.dart';
 export 'package:assistant_api/src/model/error_body.dart';
 export 'package:assistant_api/src/model/execute_command_request.dart';
 export 'package:assistant_api/src/model/feedback_rating.dart';
