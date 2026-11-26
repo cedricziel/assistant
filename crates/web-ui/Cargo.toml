@@ -68,6 +68,7 @@ wiremock = { workspace = true }
 uuid = { workspace = true }
 jsonwebtoken = { workspace = true }
 serde_json = { workspace = true }
+tracing-subscriber = { workspace = true }
 rmcp = { workspace = true, features = [
     "client",
     "transport-streamable-http-client-reqwest",

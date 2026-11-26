@@ -156,6 +156,28 @@ All unmatched paths are handled by the embedded Flutter web app (SPA
 fallback). The app uses the REST API below to drive the chat,
 persona switching, and skills views.
 
+### Persona starter prompts
+
+A Persona can carry up to 4 starter prompts that the app shows as suggestions
+in an empty chat. The Persona detail screen has a "Starter prompts" section
+that lists them, and an editor (`/personas/{id}/starters`) to add, edit,
+reorder and remove them. The editor saves through
+`PATCH /api/personas/{id}` and checks the same limits as the API first: at
+most 4 prompts, each non-blank and at most 200 characters after trimming
+(characters are Unicode scalar values, not bytes).
+
+Who may edit starters:
+
+- Personal Persona: its owner.
+- Org-owned Persona: a space admin.
+
+Everyone else sees the prompts read-only; the section offers no edit action
+(`can_edit_starter_prompts` is false on `GET /api/personas/{id}`).
+
+There are no org-level fallback starters. A Persona without starters shows the
+default empty-chat copy; an admin who wants starters everywhere sets them on
+the org-owned Personas.
+
 ## REST API (`/api/*`)
 
 These endpoints power the Flutter app and are also consumable directly:
@@ -170,6 +192,7 @@ These endpoints power the Flutter app and are also consumable directly:
 | `/api/conversations/{id}/messages`     | POST   | Send message (SSE streaming response)          |
 | `/api/personas`                        | GET    | List personas                                  |
 | `/api/personas/active`                 | POST   | Switch active persona                          |
+| `/api/personas/{id}`                   | PATCH  | Update a persona's starter prompts             |
 | `/api/personas/{id}/skills`            | GET    | List skills for a persona                      |
 | `/api/orgs`                            | GET    | List organizations (filtered by user access)   |
 | `/api/orgs`                            | POST   | Create organization                            |

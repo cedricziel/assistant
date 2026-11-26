@@ -20,6 +20,7 @@ import '../features/spaces/space_selector_screen.dart';
 import '../features/personas/persona_create_screen.dart';
 import '../features/personas/persona_detail_screen.dart';
 import '../features/personas/persona_file_editor_screen.dart';
+import '../features/personas/persona_starters_editor_screen.dart';
 import '../features/personas/personas_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/integrations/catalog_browser_screen.dart';
@@ -272,6 +273,12 @@ final routerProvider = Provider<GoRouter>((ref) {
                   return PersonaDetailScreen(personaId: id);
                 },
                 routes: [
+                  GoRoute(
+                    path: 'starters',
+                    builder: (context, state) => PersonaStartersEditorScreen(
+                      personaId: state.pathParameters['id']!,
+                    ),
+                  ),
                   GoRoute(
                     path: 'files/:filename',
                     builder: (context, state) {

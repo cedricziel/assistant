@@ -6,6 +6,7 @@ import 'package:assistant_api/assistant_api.dart';
 
 import 'persona_constants.dart';
 import 'persona_detail_provider.dart';
+import 'persona_starters_section.dart';
 
 /// Screen that shows the full detail of a single persona.
 class PersonaDetailScreen extends ConsumerWidget {
@@ -122,6 +123,10 @@ class _PersonaDetailBody extends StatelessWidget {
             ),
           ),
         ),
+
+        const SizedBox(height: 16),
+
+        PersonaStartersSection(personaId: detail.id),
 
         const SizedBox(height: 16),
 

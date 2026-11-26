@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -213,6 +214,53 @@ void main() {
         expect((states.first as OAuthLoginLoading).message, 'Connecting...');
         expect(states.last, isA<OAuthLoginSuccess>());
       });
+    });
+  });
+
+  group('loginErrorMessage', () {
+    DioException dioError(DioExceptionType type, {int? status}) {
+      final options = RequestOptions(path: '/oauth/register');
+      return DioException(
+        requestOptions: options,
+        type: type,
+        response: status == null
+            ? null
+            : Response(requestOptions: options, statusCode: status),
+      );
+    }
+
+    test('explains a receive timeout without the raw exception', () {
+      final message = loginErrorMessage(
+        dioError(DioExceptionType.receiveTimeout),
+      );
+
+      expect(message, contains('took too long to respond'));
+      expect(message, isNot(contains('DioException')));
+    });
+
+    test('explains a connect timeout the same way', () {
+      expect(
+        loginErrorMessage(dioError(DioExceptionType.connectionTimeout)),
+        contains('took too long to respond'),
+      );
+    });
+
+    test('explains an unreachable server', () {
+      expect(
+        loginErrorMessage(dioError(DioExceptionType.connectionError)),
+        contains("Couldn't reach the server"),
+      );
+    });
+
+    test('names the HTTP status of a bad response', () {
+      expect(
+        loginErrorMessage(dioError(DioExceptionType.badResponse, status: 503)),
+        contains('HTTP 503'),
+      );
+    });
+
+    test('falls back to the error text for anything else', () {
+      expect(loginErrorMessage(StateError('boom')), contains('boom'));
     });
   });
 }
