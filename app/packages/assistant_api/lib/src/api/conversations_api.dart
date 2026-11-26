@@ -1079,8 +1079,8 @@ class ConversationsApi {
     return _response;
   }
 
-  /// &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
-  ///
+  /// &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
+  /// Neither change moves the conversation in the list: only new messages bump &#x60;updated_at&#x60;.
   ///
   /// Parameters:
   /// * [id] - Conversation ID

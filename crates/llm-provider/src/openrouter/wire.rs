@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use assistant_core::types::llm::OpenRouterRouting;
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
 
 use super::errors::{ErrorBody, body_error};
@@ -16,6 +17,23 @@ pub struct ChatRequest {
     pub max_completion_tokens: u32,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stream: bool,
+    /// The primary model followed by fallbacks; empty when none are set.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<OpenRouterRouting>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plugins: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]

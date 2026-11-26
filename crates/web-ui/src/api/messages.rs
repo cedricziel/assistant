@@ -26,13 +26,14 @@ use assistant_core::auth::AuthContext;
 use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::types::conversation::Interface;
 use assistant_runtime::OrchestratorEvent;
-use assistant_runtime::SubmitOptions;
+use assistant_runtime::SubmitTurn;
 use assistant_runtime::projection::{SseProjector, StreamProjector};
 use assistant_storage::{
     ConversationEventStore as _, ConversationStore, PushSubscriptionStore, SqliteConversationStore,
 };
 use assistant_transcription::TranscriptionRequest;
 
+use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
 use super::conversations::{caller_store, owned_conversation};
@@ -105,7 +106,7 @@ pub struct QuickMessageResponse {
         (status = 400, description = "Invalid ID or empty message"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
-        (status = 404, description = "Conversation not found"),
+        (status = 404, description = "Conversation not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -161,15 +162,11 @@ pub async fn send_message(
         let submit_request_id = run_id;
         tokio::spawn(async move {
             let result = orchestrator
-                .submit_turn_with_request_id(
-                    &auth,
-                    submit_request_id,
-                    &content,
-                    conv_id,
-                    Interface::Web,
-                    None,
-                    user_attachment_ids,
-                    SubmitOptions::default(),
+                .submit(
+                    SubmitTurn::new(content, conv_id, Interface::Web)
+                        .with_auth(&auth)
+                        .with_request_id(submit_request_id)
+                        .with_attachments(user_attachment_ids),
                 )
                 .await;
             let _ = tx.send(result);
@@ -625,7 +622,7 @@ pub struct SseSubagentStatusEvent {
     ),
     responses(
         (status = 200, description = "SSE stream of run events", content_type = "text/event-stream"),
-        (status = 404, description = "Run not found or its events expired"),
+        (status = 404, description = "Conversation or run not found", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -868,14 +865,7 @@ pub async fn quick_message(
 
     // Submit the turn and await the full result (synchronous).
     let result = orchestrator
-        .submit_turn(
-            &auth,
-            &prompt,
-            conv.id,
-            Interface::Web,
-            None,
-            SubmitOptions::default(),
-        )
+        .submit(SubmitTurn::new(prompt, conv.id, Interface::Web).with_auth(&auth))
         .await;
 
     match result {
@@ -933,6 +923,7 @@ struct VoiceUploadForm {
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
+        (status = 404, description = "Conversation not found", body = ErrorBody),
         (status = 503, description = "Voice not configured"),
     ),
     security(("bearer_token" = []))
@@ -1047,14 +1038,7 @@ pub async fn send_voice_message(
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
             let result = orchestrator
-                .submit_turn(
-                    &auth,
-                    &content,
-                    conv_id,
-                    Interface::Web,
-                    None,
-                    SubmitOptions::default(),
-                )
+                .submit(SubmitTurn::new(content, conv_id, Interface::Web).with_auth(&auth))
                 .await;
             let _ = tx.send(result);
         });

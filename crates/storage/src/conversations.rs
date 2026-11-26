@@ -119,6 +119,61 @@ pub trait ConversationStore: Send + Sync {
 
     /// Return the last N messages for a conversation, oldest first.
     async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>>;
+
+    /// Persist `msg` as a child of `parent_id` (`None` creates a new root)
+    /// and make it the active leaf.
+    ///
+    /// Errors when `parent_id` is not a message of the same conversation.
+    /// Like [`save_message`](Self::save_message), a conflicting message id
+    /// inserts nothing and leaves the active leaf where it is.
+    async fn branch_message(&self, msg: &Message, parent_id: Option<Uuid>) -> Result<()>;
+
+    /// The children of `parent_id` in creation order; `None` lists the roots.
+    async fn children_of(
+        &self,
+        conversation_id: Uuid,
+        parent_id: Option<Uuid>,
+    ) -> Result<Vec<Message>>;
+
+    /// `message_id` and its siblings (same parent, or all roots) in creation
+    /// order. `None` when the message is not in the conversation.
+    async fn list_siblings(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>>;
+
+    /// The chain from the root down to and including `message_id`.
+    /// `None` when the message is not in the conversation.
+    async fn ancestors(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>>;
+
+    /// Switch the active path to the branch through `message_id`: descend
+    /// from it through the most recently created child at each level and make
+    /// the reached message the active leaf. Returns the new leaf, or `None`
+    /// when the message is not in the conversation.
+    ///
+    /// Leaves `updated_at` unchanged and emits [`ConversationEvent::Upserted`].
+    async fn switch_to(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>>;
+
+    /// Make `message_id` the active leaf exactly, without descending.
+    /// Returns it, or `None` when the message is not in the conversation.
+    async fn set_leaf(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>>;
+
+    /// Delete the rows written by turn run `run_id`, except `keep`, in one
+    /// statement. Returns how many rows were removed. Errors, deleting
+    /// nothing, when a surviving row has a deleted row as its parent. Does
+    /// not move the active leaf; callers reset it with
+    /// [`set_leaf`](Self::set_leaf).
+    async fn delete_run_rows(
+        &self,
+        conversation_id: Uuid,
+        run_id: Uuid,
+        keep: Option<Uuid>,
+    ) -> Result<u64>;
 }
 
 /// SQLite-backed store for conversations and messages.
@@ -214,6 +269,176 @@ fn conversation_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<ConversationReco
 // -----------------------------------------------------------------------
 // ConversationStore trait impl for SqliteConversationStore
 // -----------------------------------------------------------------------
+
+impl SqliteConversationStore {
+    /// Insert `msg` and make it the active leaf in one `BEGIN IMMEDIATE`
+    /// transaction. `parent` is `None` to append under the current leaf, or
+    /// `Some(explicit_parent)` to branch (the inner `None` is a new root).
+    async fn insert_message(&self, msg: &Message, parent: Option<Option<Uuid>>) -> Result<()> {
+        let id = msg.id.to_string();
+        let conversation_id = msg.conversation_id.to_string();
+        let role = msg.role.to_string();
+
+        self.ensure_conversation_agent(msg.conversation_id).await?;
+
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        let parent_id: Option<String> = match parent {
+            None => {
+                sqlx::query_scalar(
+                    "SELECT active_leaf_id FROM conversations WHERE id = ?1 AND agent_id = ?2",
+                )
+                .bind(&conversation_id)
+                .bind(&self.agent_id)
+                .fetch_one(&mut *tx)
+                .await?
+            }
+            Some(explicit) => {
+                if let Some(parent) = explicit {
+                    let in_conversation: bool = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?1 AND conversation_id = ?2)",
+                    )
+                    .bind(parent.to_string())
+                    .bind(&conversation_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    if !in_conversation {
+                        anyhow::bail!(
+                            "parent message {parent} is not in conversation {}",
+                            msg.conversation_id
+                        );
+                    }
+                }
+                explicit.map(|p| p.to_string())
+            }
+        };
+
+        let insert = sqlx::query(
+            "INSERT INTO messages \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json, tool_call_id, tool_status, tool_data_json, traceparent) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16) \
+             ON CONFLICT(id) DO NOTHING",
+        )
+        .bind(&id)
+        .bind(&conversation_id)
+        .bind(&role)
+        .bind(&msg.content)
+        .bind(&msg.skill_name)
+        .bind(&msg.tool_calls_json)
+        .bind(msg.turn)
+        .bind(msg.created_at)
+        .bind(&msg.sender_user_id)
+        .bind(&parent_id)
+        .bind(msg.run_id.map(|r| r.to_string()))
+        .bind(&msg.provider_state_json)
+        .bind(&msg.tool_call_id)
+        .bind(&msg.tool_status)
+        .bind(&msg.tool_data_json)
+        .bind(&msg.traceparent)
+        .execute(&mut *tx)
+        .await?;
+        let inserted = insert.rows_affected() > 0;
+
+        if inserted {
+            sqlx::query(
+                "UPDATE conversations SET active_leaf_id = ?1, updated_at = ?2 \
+                 WHERE id = ?3 AND agent_id = ?4",
+            )
+            .bind(&id)
+            .bind(self.clock.now())
+            .bind(&conversation_id)
+            .bind(&self.agent_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        if inserted {
+            self.emit_upserted(msg.conversation_id).await;
+        }
+
+        Ok(())
+    }
+
+    /// Set the active leaf to `message_id`, or to the leaf reached by
+    /// descending through the newest child at each level when `descend`.
+    /// Never touches `updated_at`.
+    async fn point_leaf_at(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        descend: bool,
+    ) -> Result<Option<Uuid>> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if !self
+            .owns_message(&mut *tx, conversation_id, message_id)
+            .await?
+        {
+            return Ok(None);
+        }
+        let leaf = if descend {
+            let leaf: String = sqlx::query_scalar(
+                "WITH RECURSIVE descent(id, depth) AS ( \
+                     SELECT ?1, 0 \
+                     UNION ALL \
+                     SELECT c.id, d.depth + 1 \
+                     FROM descent d \
+                     INNER JOIN messages c ON c.id = ( \
+                         SELECT m.id FROM messages m \
+                         WHERE m.conversation_id = ?2 AND m.parent_id = d.id \
+                         ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) \
+                 ) \
+                 SELECT id FROM descent ORDER BY depth DESC LIMIT 1",
+            )
+            .bind(message_id.to_string())
+            .bind(conversation_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            Uuid::parse_str(&leaf)?
+        } else {
+            message_id
+        };
+        sqlx::query("UPDATE conversations SET active_leaf_id = ?1 WHERE id = ?2 AND agent_id = ?3")
+            .bind(leaf.to_string())
+            .bind(conversation_id.to_string())
+            .bind(&self.agent_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(Some(leaf))
+    }
+
+    /// Broadcast the conversation's current record, when a broadcaster is set.
+    async fn emit_upserted(&self, conversation_id: Uuid) {
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(conversation_id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
+        }
+    }
+
+    /// Whether `message_id` is a message of `conversation_id` that this
+    /// store's agent owns.
+    async fn owns_message(
+        &self,
+        executor: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<bool> {
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS( \
+                SELECT 1 FROM messages m \
+                INNER JOIN conversations c ON c.id = m.conversation_id \
+                WHERE m.id = ?1 AND m.conversation_id = ?2 AND c.agent_id = ?3)",
+        )
+        .bind(message_id.to_string())
+        .bind(conversation_id.to_string())
+        .bind(&self.agent_id)
+        .fetch_one(executor)
+        .await?)
+    }
+}
 
 #[async_trait]
 impl ConversationStore for SqliteConversationStore {
@@ -517,67 +742,7 @@ impl ConversationStore for SqliteConversationStore {
     /// chain. Re-saving an existing id inserts nothing and leaves the leaf
     /// where it is.
     async fn save_message(&self, msg: &Message) -> Result<()> {
-        let id = msg.id.to_string();
-        let conversation_id = msg.conversation_id.to_string();
-        let role = msg.role.to_string();
-
-        self.ensure_conversation_agent(msg.conversation_id).await?;
-
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-
-        let leaf: Option<String> = sqlx::query_scalar(
-            "SELECT active_leaf_id FROM conversations WHERE id = ?1 AND agent_id = ?2",
-        )
-        .bind(&conversation_id)
-        .bind(&self.agent_id)
-        .fetch_one(&mut *tx)
-        .await?;
-
-        let insert = sqlx::query(
-            "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
-             ON CONFLICT(id) DO NOTHING",
-        )
-        .bind(&id)
-        .bind(&conversation_id)
-        .bind(&role)
-        .bind(&msg.content)
-        .bind(&msg.skill_name)
-        .bind(&msg.tool_calls_json)
-        .bind(msg.turn)
-        .bind(msg.created_at)
-        .bind(&msg.sender_user_id)
-        .bind(&leaf)
-        .bind(msg.run_id.map(|r| r.to_string()))
-        .bind(&msg.provider_state_json)
-        .execute(&mut *tx)
-        .await?;
-        let inserted = insert.rows_affected() > 0;
-
-        if inserted {
-            sqlx::query(
-                "UPDATE conversations SET active_leaf_id = ?1, updated_at = ?2 \
-                 WHERE id = ?3 AND agent_id = ?4",
-            )
-            .bind(&id)
-            .bind(self.clock.now())
-            .bind(&conversation_id)
-            .bind(&self.agent_id)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        tx.commit().await?;
-
-        if inserted
-            && let Some(b) = &self.broadcaster
-            && let Ok(Some(conv)) = self.get_conversation(msg.conversation_id).await
-        {
-            b.emit(ConversationEvent::Upserted(conv));
-        }
-
-        Ok(())
+        self.insert_message(msg, None).await
     }
 
     /// Load the active path of a conversation, root first.
@@ -600,7 +765,7 @@ impl ConversationStore for SqliteConversationStore {
     /// Fetch a single message by its ID (agent-scoped via the conversation join).
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
@@ -629,6 +794,114 @@ impl ConversationStore for SqliteConversationStore {
             .collect::<Result<Vec<_>>>()?;
         messages.reverse();
         Ok(messages)
+    }
+
+    async fn branch_message(&self, msg: &Message, parent_id: Option<Uuid>) -> Result<()> {
+        self.insert_message(msg, Some(parent_id)).await
+    }
+
+    async fn children_of(
+        &self,
+        conversation_id: Uuid,
+        parent_id: Option<Uuid>,
+    ) -> Result<Vec<Message>> {
+        let rows = sqlx::query(
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent \
+             FROM messages m \
+             INNER JOIN conversations c ON c.id = m.conversation_id \
+             WHERE m.conversation_id = ?1 AND c.agent_id = ?2 AND m.parent_id IS ?3 \
+             ORDER BY m.created_at ASC, m.rowid ASC",
+        )
+        .bind(conversation_id.to_string())
+        .bind(&self.agent_id)
+        .bind(parent_id.map(|p| p.to_string()))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(message_from_row).collect()
+    }
+
+    async fn list_siblings(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>> {
+        if !self
+            .owns_message(&self.pool, conversation_id, message_id)
+            .await?
+        {
+            return Ok(None);
+        }
+        let parent: Option<String> =
+            sqlx::query_scalar("SELECT parent_id FROM messages WHERE id = ?1")
+                .bind(message_id.to_string())
+                .fetch_one(&self.pool)
+                .await?;
+        let parent = parent.as_deref().map(Uuid::parse_str).transpose()?;
+        Ok(Some(self.children_of(conversation_id, parent).await?))
+    }
+
+    async fn ancestors(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>> {
+        if !self
+            .owns_message(&self.pool, conversation_id, message_id)
+            .await?
+        {
+            return Ok(None);
+        }
+        let rows = sqlx::query(
+            "WITH RECURSIVE chain(id, parent_id, depth) AS ( \
+                 SELECT id, parent_id, 0 FROM messages WHERE id = ?1 \
+                 UNION ALL \
+                 SELECT m.id, m.parent_id, ch.depth + 1 \
+                 FROM chain ch INNER JOIN messages m ON m.id = ch.parent_id \
+             ) \
+             SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent \
+             FROM chain INNER JOIN messages m ON m.id = chain.id \
+             ORDER BY chain.depth DESC",
+        )
+        .bind(message_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(Some(
+            rows.iter().map(message_from_row).collect::<Result<_>>()?,
+        ))
+    }
+
+    async fn switch_to(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>> {
+        let leaf = self
+            .point_leaf_at(conversation_id, message_id, true)
+            .await?;
+        if leaf.is_some() {
+            self.emit_upserted(conversation_id).await;
+        }
+        Ok(leaf)
+    }
+
+    async fn set_leaf(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>> {
+        self.point_leaf_at(conversation_id, message_id, false).await
+    }
+
+    async fn delete_run_rows(
+        &self,
+        conversation_id: Uuid,
+        run_id: Uuid,
+        keep: Option<Uuid>,
+    ) -> Result<u64> {
+        self.ensure_conversation_agent(conversation_id).await?;
+        let result = sqlx::query(
+            "DELETE FROM messages \
+             WHERE conversation_id = ?1 AND run_id = ?2 AND (?3 IS NULL OR id <> ?3)",
+        )
+        .bind(conversation_id.to_string())
+        .bind(run_id.to_string())
+        .bind(keep.map(|k| k.to_string()))
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("deleting rows of run {run_id}"))?;
+        Ok(result.rows_affected())
     }
 }
 
@@ -708,6 +981,74 @@ impl InMemoryConversationStore {
         match self.state.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
+impl InMemoryConversationStore {
+    /// Insert `msg` and make it the active leaf. `parent` is `None` to append
+    /// under the current leaf, or `Some(explicit_parent)` to branch.
+    fn insert_message(&self, msg: &Message, parent: Option<Option<Uuid>>) -> Result<()> {
+        let mut state = self.lock_state();
+        let rows = state.messages.get(&msg.conversation_id);
+        let parent_id = match parent {
+            None => state.leaves.get(&msg.conversation_id).copied(),
+            Some(explicit) => {
+                if let Some(p) = explicit
+                    && !rows.is_some_and(|rows| rows.iter().any(|m| m.id == p))
+                {
+                    anyhow::bail!(
+                        "parent message {p} is not in conversation {}",
+                        msg.conversation_id
+                    );
+                }
+                explicit
+            }
+        };
+        if rows.is_some_and(|rows| rows.iter().any(|m| m.id == msg.id)) {
+            return Ok(());
+        }
+        let mut stored = msg.clone();
+        stored.parent_id = parent_id;
+        state
+            .messages
+            .entry(msg.conversation_id)
+            .or_default()
+            .push(stored);
+        state.leaves.insert(msg.conversation_id, msg.id);
+        if let Some(conv) = state.conversations.get_mut(&msg.conversation_id) {
+            conv.updated_at = self.clock.now();
+        }
+        Ok(())
+    }
+
+    /// Set the active leaf to `message_id`, descending through the newest
+    /// child at each level when `descend`. Never touches `updated_at`.
+    fn point_leaf_at(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        descend: bool,
+    ) -> Option<Uuid> {
+        let mut state = self.lock_state();
+        let rows = state.messages.get(&conversation_id)?;
+        rows.iter().find(|m| m.id == message_id)?;
+        let mut leaf = message_id;
+        while descend && let Some(child) = rows.iter().rev().find(|m| m.parent_id == Some(leaf)) {
+            leaf = child.id;
+        }
+        state.leaves.insert(conversation_id, leaf);
+        Some(leaf)
+    }
+
+    fn emit_upserted(&self, conversation_id: Uuid) {
+        let record = self
+            .lock_state()
+            .conversations
+            .get(&conversation_id)
+            .cloned();
+        if let (Some(b), Some(rec)) = (&self.broadcaster, record) {
+            b.emit(ConversationEvent::Upserted(rec));
         }
     }
 }
@@ -904,26 +1245,7 @@ impl ConversationStore for InMemoryConversationStore {
     }
 
     async fn save_message(&self, msg: &Message) -> Result<()> {
-        let mut state = self.lock_state();
-        if state
-            .messages
-            .get(&msg.conversation_id)
-            .is_some_and(|rows| rows.iter().any(|m| m.id == msg.id))
-        {
-            return Ok(());
-        }
-        let mut stored = msg.clone();
-        stored.parent_id = state.leaves.get(&msg.conversation_id).copied();
-        state
-            .messages
-            .entry(msg.conversation_id)
-            .or_default()
-            .push(stored);
-        state.leaves.insert(msg.conversation_id, msg.id);
-        if let Some(conv) = state.conversations.get_mut(&msg.conversation_id) {
-            conv.updated_at = self.clock.now();
-        }
-        Ok(())
+        self.insert_message(msg, None)
     }
 
     async fn load_history(&self, conversation_id: Uuid) -> Result<Vec<Message>> {
@@ -953,6 +1275,115 @@ impl ConversationStore for InMemoryConversationStore {
         }
         Ok(out)
     }
+
+    async fn branch_message(&self, msg: &Message, parent_id: Option<Uuid>) -> Result<()> {
+        self.insert_message(msg, Some(parent_id))
+    }
+
+    async fn children_of(
+        &self,
+        conversation_id: Uuid,
+        parent_id: Option<Uuid>,
+    ) -> Result<Vec<Message>> {
+        let state = self.lock_state();
+        Ok(children(&state, conversation_id, parent_id))
+    }
+
+    async fn list_siblings(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>> {
+        let state = self.lock_state();
+        let Some(msg) = find_message(&state, conversation_id, message_id) else {
+            return Ok(None);
+        };
+        Ok(Some(children(&state, conversation_id, msg.parent_id)))
+    }
+
+    async fn ancestors(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<Vec<Message>>> {
+        let state = self.lock_state();
+        let Some(start) = find_message(&state, conversation_id, message_id) else {
+            return Ok(None);
+        };
+        let mut chain = vec![start.clone()];
+        let mut cursor = start.parent_id;
+        while let Some(id) = cursor {
+            let Some(parent) = find_message(&state, conversation_id, id) else {
+                break;
+            };
+            chain.push(parent.clone());
+            cursor = parent.parent_id;
+        }
+        chain.reverse();
+        Ok(Some(chain))
+    }
+
+    async fn switch_to(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>> {
+        let leaf = self.point_leaf_at(conversation_id, message_id, true);
+        if leaf.is_some() {
+            self.emit_upserted(conversation_id);
+        }
+        Ok(leaf)
+    }
+
+    async fn set_leaf(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Option<Uuid>> {
+        Ok(self.point_leaf_at(conversation_id, message_id, false))
+    }
+
+    async fn delete_run_rows(
+        &self,
+        conversation_id: Uuid,
+        run_id: Uuid,
+        keep: Option<Uuid>,
+    ) -> Result<u64> {
+        let mut state = self.lock_state();
+        let Some(rows) = state.messages.get_mut(&conversation_id) else {
+            return Ok(0);
+        };
+        let doomed: Vec<Uuid> = rows
+            .iter()
+            .filter(|m| m.run_id == Some(run_id) && Some(m.id) != keep)
+            .map(|m| m.id)
+            .collect();
+        if let Some(orphan) = rows
+            .iter()
+            .find(|m| !doomed.contains(&m.id) && m.parent_id.is_some_and(|p| doomed.contains(&p)))
+        {
+            anyhow::bail!(
+                "message {} still hangs under a row of run {run_id}",
+                orphan.id
+            );
+        }
+        rows.retain(|m| !doomed.contains(&m.id));
+        Ok(doomed.len() as u64)
+    }
+}
+
+fn find_message(state: &MemoryState, conversation_id: Uuid, id: Uuid) -> Option<&Message> {
+    state
+        .messages
+        .get(&conversation_id)?
+        .iter()
+        .find(|m| m.id == id)
+}
+
+/// The children of `parent` (the roots for `None`) in insertion order.
+fn children(state: &MemoryState, conversation_id: Uuid, parent: Option<Uuid>) -> Vec<Message> {
+    state
+        .messages
+        .get(&conversation_id)
+        .map(|rows| {
+            rows.iter()
+                .filter(|m| m.parent_id == parent)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Walk from the conversation's active leaf up the parent chain, root first.
@@ -990,7 +1421,7 @@ const ACTIVE_PATH_SQL: &str = "\
         FROM path p \
         INNER JOIN messages m ON m.id = p.parent_id \
     ) \
-    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json \
+    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent \
     FROM path \
     INNER JOIN messages m ON m.id = path.id \
     ORDER BY path.depth ASC \
@@ -1015,6 +1446,10 @@ fn message_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Message> {
         sender_user_id: r.get("sender_user_id"),
         parent_id: parent_str.as_deref().map(Uuid::parse_str).transpose()?,
         run_id: run_str.as_deref().map(Uuid::parse_str).transpose()?,
+        tool_call_id: r.get("tool_call_id"),
+        tool_status: r.get("tool_status"),
+        tool_data_json: r.get("tool_data_json"),
+        traceparent: r.get("traceparent"),
     })
 }
 
@@ -1659,5 +2094,37 @@ mod tests {
             }
             _ => panic!("expected Upserted event"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_switch_to_emits_upserted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+        let conv = store.create_conversation(None).await.unwrap();
+        let a = Message::user(conv.id, "a");
+        store.save_message(&a).await.unwrap();
+        store
+            .branch_message(&Message::assistant(conv.id, "b"), Some(a.id))
+            .await
+            .unwrap();
+
+        let mut rx = broadcaster.subscribe();
+        store.switch_to(conv.id, a.id).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => assert_eq!(record.id, conv.id),
+            _ => panic!("expected Upserted event"),
+        }
+        assert_no_event(&mut rx);
+
+        store.set_leaf(conv.id, a.id).await.unwrap();
+        assert_no_event(&mut rx);
     }
 }

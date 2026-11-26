@@ -7,6 +7,7 @@ pub(crate) mod conversation_indexer;
 pub mod decision_model;
 pub mod follow_ups;
 pub(crate) mod history;
+pub mod interaction;
 pub mod interface_runner;
 pub mod interface_trait;
 pub mod memory_indexer;
@@ -35,8 +36,8 @@ pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;
 pub use orchestration::{OrchestrationEngine, RecordedSubmitTurn, StubOrchestrationEngine};
 pub use orchestrator::{
-    CancelOutcome, Orchestrator, OrchestratorEvent, SubmitOptions,
-    TURN_CANCELLED_BEFORE_START_MARKER, TURN_CANCELLED_MARKER, TurnResult,
+    CancelOutcome, Orchestrator, OrchestratorEvent, SubmitTurn, TURN_CANCELLED_BEFORE_START_MARKER,
+    TURN_CANCELLED_MARKER, TurnResult,
 };
 pub use org_context::{OrgConfigAdjust, OrgContext, OrgContexts, build_llm};
 pub use otel_spans::start_conversation_context;

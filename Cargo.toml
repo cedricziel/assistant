@@ -65,6 +65,8 @@ repository = "https://github.com/cedricziel/assistant"
 # Async runtime
 tokio = { version = "1.52", features = ["full"] }
 tokio-util = "0.7"
+# Lock-free snapshots read from sync code (OpenRouter model catalog)
+arc-swap = "1.9"
 # Model Context Protocol SDK; crates pick their own feature sets
 rmcp = { version = "3.11", default-features = false }
 # Serialization

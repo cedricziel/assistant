@@ -8,13 +8,15 @@ part of 'update_conversation_request.dart';
 
 class _$UpdateConversationRequest extends UpdateConversationRequest {
   @override
-  final String title;
+  final bool? pinned;
+  @override
+  final String? title;
 
   factory _$UpdateConversationRequest(
           [void Function(UpdateConversationRequestBuilder)? updates]) =>
       (UpdateConversationRequestBuilder()..update(updates))._build();
 
-  _$UpdateConversationRequest._({required this.title}) : super._();
+  _$UpdateConversationRequest._({this.pinned, this.title}) : super._();
   @override
   UpdateConversationRequest rebuild(
           void Function(UpdateConversationRequestBuilder) updates) =>
@@ -27,12 +29,15 @@ class _$UpdateConversationRequest extends UpdateConversationRequest {
   @override
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
-    return other is UpdateConversationRequest && title == other.title;
+    return other is UpdateConversationRequest &&
+        pinned == other.pinned &&
+        title == other.title;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, pinned.hashCode);
     _$hash = $jc(_$hash, title.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -41,6 +46,7 @@ class _$UpdateConversationRequest extends UpdateConversationRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'UpdateConversationRequest')
+          ..add('pinned', pinned)
           ..add('title', title))
         .toString();
   }
@@ -50,6 +56,10 @@ class UpdateConversationRequestBuilder
     implements
         Builder<UpdateConversationRequest, UpdateConversationRequestBuilder> {
   _$UpdateConversationRequest? _$v;
+
+  bool? _pinned;
+  bool? get pinned => _$this._pinned;
+  set pinned(bool? pinned) => _$this._pinned = pinned;
 
   String? _title;
   String? get title => _$this._title;
@@ -62,6 +72,7 @@ class UpdateConversationRequestBuilder
   UpdateConversationRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _pinned = $v.pinned;
       _title = $v.title;
       _$v = null;
     }
@@ -84,8 +95,8 @@ class UpdateConversationRequestBuilder
   _$UpdateConversationRequest _build() {
     final _$result = _$v ??
         _$UpdateConversationRequest._(
-          title: BuiltValueNullFieldError.checkNotNull(
-              title, r'UpdateConversationRequest', 'title'),
+          pinned: pinned,
+          title: title,
         );
     replace(_$result);
     return _$result;

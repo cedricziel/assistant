@@ -375,17 +375,101 @@ impl Default for MoonshotWebSearchOptions {
 /// [llm.openrouter]
 /// referer = "https://my-app.example.com"
 /// title = "My App"
+/// categories = ["cli-agent"]
 /// max_tokens = 8192
+/// fallback_models = ["openai/gpt-4o"]
+///
+/// [llm.openrouter.provider]
+/// data_collection = "deny"
+/// zdr = true
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OpenRouterOptions {
-    /// `HTTP-Referer` header sent with every request.
-    /// Required by OpenRouter TOS for rankings/attribution.
+    /// `HTTP-Referer` header, used by OpenRouter for app attribution.
     pub referer: Option<String>,
-    /// `X-Title` header — shown in the OpenRouter dashboard.
+    /// `X-OpenRouter-Title` header, shown in the OpenRouter dashboard.
     pub title: Option<String>,
+    /// `X-OpenRouter-Categories` header; at most two.
+    #[serde(default, deserialize_with = "at_most_two_categories")]
+    pub categories: Vec<String>,
     /// Maximum completion tokens per response (default: 8192).
     pub max_tokens: Option<u32>,
+    /// Models to try, in order, when the primary model fails. Sent as
+    /// `models` after the primary model.
+    #[serde(default)]
+    pub fallback_models: Vec<String>,
+    /// Provider routing, sent as the request's `provider` object.
+    pub provider: Option<OpenRouterRouting>,
+}
+
+fn at_most_two_categories<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let categories = Vec::<String>::deserialize(deserializer)?;
+    if categories.len() > 2 {
+        return Err(serde::de::Error::custom(format!(
+            "`categories` takes at most two values, got {}",
+            categories.len()
+        )));
+    }
+    Ok(categories)
+}
+
+/// OpenRouter provider routing preferences (`[llm.openrouter.provider]`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterRouting {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_fallbacks: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_parameters: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_collection: Option<OpenRouterDataCollection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zdr: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<OpenRouterSort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantizations: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_price: Option<OpenRouterMaxPrice>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterDataCollection {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterSort {
+    Price,
+    Throughput,
+    Latency,
+}
+
+/// Highest acceptable prices, in US dollars per million tokens (or per
+/// request or image).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterMaxPrice {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<f64>,
 }
 
 #[cfg(test)]
@@ -395,6 +479,70 @@ mod tests {
         resolve_openrouter_key,
     };
     use crate::secret::Secret;
+
+    // -- OpenRouter options ----------------------------------------------------
+
+    mod openrouter_options {
+        use super::super::{
+            OpenRouterDataCollection, OpenRouterOptions, OpenRouterRouting, OpenRouterSort,
+        };
+
+        fn parse(toml: &str) -> Result<OpenRouterOptions, toml::de::Error> {
+            toml::from_str(toml)
+        }
+
+        #[test]
+        fn provider_routing_parses() {
+            let options = parse(
+                r#"
+                fallback_models = ["openai/gpt-4o"]
+                categories = ["cli-agent", "chat"]
+                [provider]
+                order = ["anthropic"]
+                data_collection = "deny"
+                zdr = true
+                sort = "price"
+                max_price = { prompt = 1.0 }
+                "#,
+            )
+            .unwrap();
+            assert_eq!(options.fallback_models, ["openai/gpt-4o"]);
+            assert_eq!(options.categories, ["cli-agent", "chat"]);
+            let routing = options.provider.unwrap();
+            assert_eq!(
+                routing.data_collection,
+                Some(OpenRouterDataCollection::Deny)
+            );
+            assert_eq!(routing.zdr, Some(true));
+            assert_eq!(routing.sort, Some(OpenRouterSort::Price));
+            assert_eq!(routing.max_price.unwrap().prompt, Some(1.0));
+        }
+
+        #[test]
+        fn unknown_provider_key_is_rejected() {
+            let err = parse("[provider]\nprefer = [\"x\"]").unwrap_err();
+            assert!(err.to_string().contains("prefer"), "{err}");
+        }
+
+        #[test]
+        fn more_than_two_categories_are_rejected() {
+            let err = parse(r#"categories = ["a", "b", "c"]"#).unwrap_err();
+            assert!(err.to_string().contains("at most two"), "{err}");
+        }
+
+        #[test]
+        fn routing_serializes_only_set_fields() {
+            let routing = OpenRouterRouting {
+                data_collection: Some(OpenRouterDataCollection::Deny),
+                zdr: Some(true),
+                ..OpenRouterRouting::default()
+            };
+            assert_eq!(
+                serde_json::to_value(routing).unwrap(),
+                serde_json::json!({"data_collection": "deny", "zdr": true})
+            );
+        }
+    }
 
     // -- OpenRouter key resolution --------------------------------------------
 

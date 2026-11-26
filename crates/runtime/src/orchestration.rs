@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::orchestrator::{CancelOutcome, SubmitOptions, TurnResult};
+use crate::orchestrator::{CancelOutcome, SubmitTurn, TurnResult};
 
 /// Trait-based interface for submitting and cancelling assistant turns.
 #[async_trait]
@@ -47,14 +47,10 @@ impl OrchestrationEngine for crate::Orchestrator {
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
-        crate::Orchestrator::submit_turn(
-            self,
-            auth,
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            SubmitOptions::default(),
+        self.submit(
+            SubmitTurn::new(prompt, conversation_id, interface)
+                .with_auth(auth)
+                .with_timestamp(timestamp),
         )
         .await
     }
@@ -166,6 +162,7 @@ impl OrchestrationEngine for StubOrchestrationEngine {
                 attachment_ids: Vec::new(),
                 message_id: None,
                 had_errors: false,
+                timing: None,
             });
         }
         state.responses.remove(0)
@@ -197,6 +194,7 @@ mod tests {
             attachment_ids: Vec::new(),
             message_id: None,
             had_errors: false,
+            timing: None,
         }));
         let r = stub
             .submit_turn(

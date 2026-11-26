@@ -1,3 +1,5 @@
+import 'package:assistant_ui/models.dart';
+
 import 'chat_models.dart';
 import 'chat_timeline_reducers.dart';
 

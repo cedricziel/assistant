@@ -166,6 +166,7 @@ import 'package:assistant_api/src/model/update_integration_policy_request.dart';
 import 'package:assistant_api/src/model/update_integration_request.dart';
 import 'package:assistant_api/src/model/update_member_request.dart';
 import 'package:assistant_api/src/model/update_org_request.dart';
+import 'package:assistant_api/src/model/update_persona_request.dart';
 import 'package:assistant_api/src/model/update_skill_request.dart';
 import 'package:assistant_api/src/model/update_space_request.dart';
 import 'package:assistant_api/src/model/update_user_request.dart';
@@ -341,6 +342,7 @@ part 'serializers.g.dart';
   UpdateIntegrationRequest,
   UpdateMemberRequest,
   UpdateOrgRequest,
+  UpdatePersonaRequest,
   UpdateSkillRequest,
   UpdateSpaceRequest,
   UpdateUserRequest,

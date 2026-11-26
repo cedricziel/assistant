@@ -1,10 +1,9 @@
+import 'package:assistant_ui/models.dart';
 import 'package:flutter/services.dart';
 
 import '../../shared/platform/widgets.dart';
 import '../../api/models/server_capabilities.dart';
-import 'attachment_provider.dart';
 import 'command_autocomplete.dart';
-import 'commands_provider.dart';
 import '../../shared/theme/assistant_colors.dart';
 import '../../shared/theme/assistant_spacing.dart';
 import 'image_utils.dart';

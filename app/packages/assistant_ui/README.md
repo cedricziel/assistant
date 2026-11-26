@@ -69,6 +69,17 @@ boundary test in the same PR. Otherwise the adapter stays in `app/lib`.
 - Run the Playwright visual suite against the current baselines, with no
   baseline update.
 
+## Gallery
+
+`app/widgetbook/` is a Widgetbook gallery of every element in
+`kAssistantUiElements` (`lib/src/registry.dart`). Run it with
+`cd app/widgetbook && flutter run -d chrome`. Add a `WidgetbookComponent` named
+after the element to `kComponents` in `app/widgetbook/lib/components.dart`; use
+`enumKnob` from `lib/knobs.dart` for state and density knobs. The gallery is its
+own entry point, so `flutter build web` in `app/` never compiles it.
+`app/widgetbook/test/coverage_test.dart` fails when a registered element lacks a
+component or a `golden`-tagged test.
+
 ## Goldens
 
 Baselines are generated on Linux. `make test-flutter` skips the `golden` tag

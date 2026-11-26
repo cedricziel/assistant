@@ -17,6 +17,9 @@ use opentelemetry::trace::Span as _;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::history::{FinalAnswerMeta, persist_final_answer};
+
+use super::dispatch::ToolResultMeta;
 use super::{EndTurnOutcome, FinalAnswerOutcome, Orchestrator, TurnResult};
 
 impl Orchestrator {
@@ -39,6 +42,7 @@ impl Orchestrator {
         ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
         conv_store: &dyn ConversationStore,
         turn_had_errors: bool,
+        meta: FinalAnswerMeta,
     ) -> Result<FinalAnswerOutcome> {
         let turn_index = base_turn + iteration as i64 + 1;
 
@@ -46,7 +50,7 @@ impl Orchestrator {
             if !text.trim().is_empty() {
                 let mut m = Message::assistant(conversation_id, text);
                 m.turn = turn_index;
-                if let Err(e) = conv_store.save_message(&m).await {
+                if let Err(e) = persist_final_answer(conv_store, m, meta).await {
                     warn!("Failed to persist post-reply assistant message: {e}");
                 }
             }
@@ -56,6 +60,7 @@ impl Orchestrator {
                 attachment_ids: Vec::new(),
                 message_id: None,
                 had_errors: turn_had_errors,
+                timing: None,
             }));
         }
 
@@ -69,7 +74,7 @@ impl Orchestrator {
 
         let mut m = Message::assistant(conversation_id, text);
         m.turn = turn_index;
-        conv_store.save_message(&m).await?;
+        persist_final_answer(conv_store, m, meta).await?;
 
         // Collect candidates and sort deterministically so the chosen tool
         // doesn't depend on HashMap iteration order.
@@ -149,6 +154,7 @@ impl Orchestrator {
             attachment_ids: Vec::new(),
             message_id: None,
             had_errors: turn_had_errors,
+            timing: None,
         }))
     }
 
@@ -183,7 +189,13 @@ impl Orchestrator {
             otel_span.set_attribute(KeyValue::new("tool_status", "deferred"));
             otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
             crate::history::append_tool_result(history, "end_turn", msg);
-            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
+            let tr = Self::make_tool_result_message(
+                conversation_id,
+                turn_index,
+                "end_turn",
+                msg,
+                ToolResultMeta::ok(),
+            );
             if let Err(e) = conv_store.save_message(&tr).await {
                 warn!("Failed to persist deferred end_turn tool-result: {e}");
             }
@@ -210,7 +222,13 @@ impl Orchestrator {
             otel_span.set_attribute(KeyValue::new("tool_status", "rejected"));
             otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
             crate::history::append_tool_result(history, "end_turn", msg);
-            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
+            let tr = Self::make_tool_result_message(
+                conversation_id,
+                turn_index,
+                "end_turn",
+                msg,
+                ToolResultMeta::ok(),
+            );
             if let Err(e) = conv_store.save_message(&tr).await {
                 warn!("Failed to persist rejected end_turn tool-result: {e}");
             }
@@ -223,8 +241,13 @@ impl Orchestrator {
         otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
         otel_span.set_attribute(KeyValue::new("tool_observation", result_text.clone()));
         crate::history::append_tool_result(history, "end_turn", &result_text);
-        let tr =
-            Self::make_tool_result_message(conversation_id, turn_index, "end_turn", &result_text);
+        let tr = Self::make_tool_result_message(
+            conversation_id,
+            turn_index,
+            "end_turn",
+            &result_text,
+            ToolResultMeta::ok(),
+        );
         if let Err(e) = conv_store.save_message(&tr).await {
             warn!("Failed to persist end_turn tool-result: {e}");
         }
