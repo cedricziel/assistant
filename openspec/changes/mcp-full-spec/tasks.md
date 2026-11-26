@@ -90,5 +90,5 @@ Each numbered group is one PR in the stack, in order.
 ## 14. Verification
 
 - [ ] 14.1 Run `make lint && make format && make test && make lint-flutter && make test-flutter` and verify all pass
-- [ ] 14.2 Create `.claude/skills/verify/SKILL.md` describing how to start an isolated instance (temp `HOME`, free ports, test credentials) and clean it up, and verify it by running it once
+- [x] 14.2 Create `.claude/skills/verify/SKILL.md` describing how to start an isolated instance (temp `HOME`, free ports, test credentials) and clean it up, and verify it by running it once
 - [ ] 14.3 Run the project `verify` skill against an isolated instance: connect an MCP client over stdio and over `/mcp` with a DCR-registered client, call a tool, poll a `run-prompt` task, and render a fixture MCP App
