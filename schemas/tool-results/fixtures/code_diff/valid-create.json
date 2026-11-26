@@ -1,0 +1,1 @@
+{"kind":"code_diff","path":"new.txt","operation":"create","hunks":[{"old_start":0,"old_lines":0,"new_start":1,"new_lines":2,"lines":[{"op":"add","text":"one"},{"op":"add","text":"two"}]}],"added":2,"removed":0,"truncated":false}

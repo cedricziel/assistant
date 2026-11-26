@@ -80,5 +80,9 @@ pub use secret::Secret;
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput, TurnScope, TurnToolSource};
-pub use tool_render::{SourceResult, SourcesData, TerminalData, ToolRenderData};
+pub use tool_render::{
+    CodeDiffData, CodeFileData, DataTableData, DiffHunk, DiffLine, DiffOp, DiffOperation,
+    LinkPreviewData, PlanData, PlanStep, PlanStepStatus, SourceResult, SourcesData, TableColumn,
+    TerminalData, ToolRenderData,
+};
 pub use upload::resolve_upload_bytes;

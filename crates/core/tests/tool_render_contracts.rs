@@ -56,6 +56,26 @@ fn every_kind_has_a_schema_and_fixtures() {
 }
 
 #[test]
+fn every_fixture_directory_is_a_registered_kind() {
+    let mut dirs: Vec<String> = fs::read_dir(schemas_dir().join("fixtures"))
+        .expect("fixtures dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    dirs.sort();
+    let mut kinds: Vec<String> = ToolRenderData::KINDS
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
+    kinds.sort();
+    assert_eq!(
+        dirs, kinds,
+        "fixture directories must match ToolRenderData::KINDS"
+    );
+}
+
+#[test]
 fn valid_fixtures_pass_the_schema_and_deserialize_into_the_variant() {
     for kind in ToolRenderData::KINDS {
         let schema = ToolRenderData::schema(kind)
