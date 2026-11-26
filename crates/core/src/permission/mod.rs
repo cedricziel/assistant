@@ -15,6 +15,7 @@ mod path;
 mod policy;
 mod rule;
 mod static_rules;
+mod suggest;
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -27,6 +28,7 @@ pub use path::{
 pub use policy::PermissionPolicy;
 pub use rule::{Rule, wildcard_match};
 pub use static_rules::StaticRules;
+pub use suggest::suggest_rule;
 
 /// Everything a decider may look at for one tool call.
 #[derive(Debug, Clone, Copy)]
