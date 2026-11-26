@@ -21,6 +21,7 @@ import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
 import 'attachment_provider.dart';
 import 'chat_announcer.dart';
+import 'chat_empty_starters.dart';
 import 'chat_provider.dart';
 import 'chat_input_row.dart';
 import 'command_event_tile.dart';
@@ -467,7 +468,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               children: [
                                 chatState.messages.isEmpty &&
                                         chatState.pendingQueue.isEmpty
-                                    ? const ThreadEmptyState()
+                                    ? const ChatEmptyStarters()
                                     : ListView.builder(
                                         controller: _scrollController,
                                         padding: const EdgeInsets.symmetric(
