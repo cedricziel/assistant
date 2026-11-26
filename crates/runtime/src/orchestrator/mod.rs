@@ -12,8 +12,8 @@ use assistant_core::types::conversation::{ExecutionContext, Interface, Message, 
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
     LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec, TurnScope,
-    TurnToolSource, context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type,
-    is_text_mime_type, strip_html_comments,
+    TurnTiming, TurnToolSource, context::agent_base_dir, is_resizable_mime_type,
+    is_supported_mime_type, is_text_mime_type, strip_html_comments,
 };
 use assistant_storage::{
     AttachmentStore as _AttachmentStoreTrait, SkillRegistry, StorageLayer,
@@ -174,6 +174,8 @@ pub struct TurnResult {
     /// `true` if any tool dispatch in this turn returned an `Err(...)`.
     /// Used to gate post-turn skill-learner evaluation.
     pub had_errors: bool,
+    /// How long the turn took. `None` when the turn was not measured.
+    pub timing: Option<TurnTiming>,
 }
 
 // ── Internal enums ────────────────────────────────────────────────────────────
@@ -1219,6 +1221,7 @@ impl Orchestrator {
                             attachment_ids: turn_attachment_ids,
                             message_id: None,
                             had_errors: turn_had_errors,
+                            timing: None,
                         });
                     }
                 }
@@ -1515,6 +1518,7 @@ impl Orchestrator {
                         attachment_ids: turn_attachment_ids,
                         message_id: saved_message_id,
                         had_errors: turn_had_errors,
+                        timing: None,
                     });
                 }
 

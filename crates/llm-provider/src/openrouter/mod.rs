@@ -20,7 +20,8 @@ use tracing::debug;
 
 use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, LlmProvider, LlmResponse, StreamChunk, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, Clock, LlmProvider, LlmResponse, StreamChunk, SystemClock,
+    ToolSpec, ToolSupport,
 };
 
 use std::sync::Arc;
@@ -52,6 +53,12 @@ impl OpenRouterProvider {
     /// var.  Falls back to `DEFAULT_BASE_URL` when the base URL is the Ollama
     /// default (i.e. not explicitly configured).
     pub fn from_llm_config(cfg: &LlmConfig) -> anyhow::Result<Self> {
+        Self::with_clock(cfg, Arc::new(SystemClock))
+    }
+
+    /// Like [`from_llm_config`](Self::from_llm_config), timing catalog
+    /// retries with `clock`.
+    fn with_clock(cfg: &LlmConfig, clock: Arc<dyn Clock>) -> anyhow::Result<Self> {
         let api_key = resolve_openrouter_key(None, cfg, OPENROUTER_API_KEY_ENV, |name| {
             std::env::var(name).ok()
         })
@@ -95,6 +102,7 @@ impl OpenRouterProvider {
                 cfg.timeout_secs,
                 cfg.model.clone(),
                 cfg.openrouter.provider.clone(),
+                clock,
             )?,
             client: OpenRouterClient::new(
                 base_url.clone(),
@@ -138,6 +146,7 @@ impl LlmProvider for OpenRouterProvider {
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
         self.catalog.wait_ready().await;
+        self.catalog.check_model()?;
         let request = build_chat_request(&self.settings, system_prompt, history, tools);
         self.client.chat(&request).await
     }
@@ -150,6 +159,7 @@ impl LlmProvider for OpenRouterProvider {
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         self.catalog.wait_ready().await;
+        self.catalog.check_model()?;
         let mut request = build_chat_request(&self.settings, system_prompt, history, tools);
         request.stream = true;
         self.client.chat_stream(&request, chunk_sink).await
@@ -996,6 +1006,115 @@ mod tests {
         assert_eq!(caps.tools, ToolSupport::Native);
         assert!(!caps.vision);
         assert_eq!(caps.context_window_tokens, None);
+    }
+
+    async fn catalog_fetches(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/models")
+            .count()
+    }
+
+    #[tokio::test]
+    async fn unknown_model_fails_every_call_without_an_upstream_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                {"id": "other/model"}
+            ]})))
+            .mount(&server)
+            .await;
+        let provider = provider_with(&server.uri(), OpenRouterOptions::default());
+
+        for _ in 0..2 {
+            let err = provider
+                .chat("sys", &[], &[])
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("no model `anthropic/claude-sonnet-4.5`"),
+                "{err}"
+            );
+        }
+        let err = provider
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no model"), "{err}");
+        assert_eq!(request_count(&server).await, 0, "nothing is sent upstream");
+        assert_eq!(
+            catalog_fetches(&server).await,
+            1,
+            "an unknown model is not refetched"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_outage_is_retried_after_ten_minutes() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text", "image"], &["tools"]),
+            json!([endpoint("Anthropic", "anthropic", 64_000)]),
+        )
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(chat_response("OK")))
+            .mount(&server)
+            .await;
+        let clock = assistant_core::FakeClock::new_at_seed();
+        let cfg = LlmConfig {
+            provider: LlmProviderKind::OpenRouter,
+            model: MODEL.to_string(),
+            api_key: Some(Secret::new("test-key")),
+            base_url: server.uri(),
+            ..LlmConfig::default()
+        };
+        let provider =
+            OpenRouterProvider::with_clock(&cfg, std::sync::Arc::new(clock.clone())).unwrap();
+
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert!(
+            !provider.capabilities().vision,
+            "conservative during the outage"
+        );
+        assert_eq!(catalog_fetches(&server).await, 1);
+
+        clock.advance(std::time::Duration::from_secs(9 * 60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(
+            catalog_fetches(&server).await,
+            1,
+            "no retry before ten minutes"
+        );
+
+        clock.advance(std::time::Duration::from_secs(60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(catalog_fetches(&server).await, 2);
+        let caps = provider.capabilities();
+        assert!(caps.vision, "capabilities update once a fetch succeeds");
+        assert_eq!(caps.context_window_tokens, Some(64_000));
+
+        clock.advance(std::time::Duration::from_secs(60 * 60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(
+            catalog_fetches(&server).await,
+            2,
+            "a loaded catalog is not refetched"
+        );
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────

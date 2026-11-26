@@ -5,23 +5,26 @@
 //! that it can read without blocking. The first chat call waits for the fetch
 //! for at most [`READY_TIMEOUT`].
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwapOption;
 use reqwest_middleware::ClientWithMiddleware;
 use serde::Deserialize;
 use tokio::sync::watch;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
-use assistant_core::Secret;
 use assistant_core::types::llm::OpenRouterRouting;
+use assistant_core::{Clock, Secret};
 
 use crate::retry::RetryConfig;
 
 /// How long the first chat call waits for the catalog.
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The shortest wait before a failed fetch is retried.
+const RETRY_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// The configured model's capabilities.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,9 +41,15 @@ pub struct OpenRouterCatalog {
     api_key: Secret,
     model: String,
     routing: Option<OpenRouterRouting>,
+    clock: Arc<dyn Clock>,
     info: ArcSwapOption<ModelInfo>,
+    /// Set when the catalog does not list the model; calls then fail.
+    unknown_model: AtomicBool,
+    /// When a failed fetch may be retried.
+    retry_at: Mutex<Option<Instant>>,
+    in_flight: AtomicBool,
+    /// `false` while a fetch runs.
     ready: watch::Sender<bool>,
-    started: AtomicBool,
 }
 
 impl OpenRouterCatalog {
@@ -54,6 +63,7 @@ impl OpenRouterCatalog {
         timeout_secs: u64,
         model: String,
         routing: Option<OpenRouterRouting>,
+        clock: Arc<dyn Clock>,
     ) -> anyhow::Result<Arc<Self>> {
         let catalog = Arc::new(Self {
             http: crate::http::build_http_client(timeout_secs, &RetryConfig::disabled())?,
@@ -61,11 +71,14 @@ impl OpenRouterCatalog {
             api_key,
             model,
             routing,
+            clock,
             info: ArcSwapOption::empty(),
+            unknown_model: AtomicBool::new(false),
+            retry_at: Mutex::new(None),
+            in_flight: AtomicBool::new(false),
             ready: watch::Sender::new(false),
-            started: AtomicBool::new(false),
         });
-        catalog.start();
+        catalog.refresh_if_due();
         Ok(catalog)
     }
 
@@ -74,9 +87,18 @@ impl OpenRouterCatalog {
         self.info.load_full()
     }
 
-    /// Waits until the first fetch has finished, for at most [`READY_TIMEOUT`].
+    /// Fails when the catalog does not list the configured model.
+    pub fn check_model(&self) -> anyhow::Result<()> {
+        if self.unknown_model.load(Ordering::SeqCst) {
+            anyhow::bail!("OpenRouter has no model `{}`", self.model);
+        }
+        Ok(())
+    }
+
+    /// Starts a fetch when one is due, then waits for any running fetch for
+    /// at most [`READY_TIMEOUT`].
     pub async fn wait_ready(self: &Arc<Self>) {
-        self.start();
+        self.refresh_if_due();
         let mut ready = self.ready.subscribe();
         if tokio::time::timeout(READY_TIMEOUT, ready.wait_for(|done| *done))
             .await
@@ -86,39 +108,63 @@ impl OpenRouterCatalog {
         }
     }
 
-    fn start(self: &Arc<Self>) {
+    /// A fetch is due until one succeeds or finds the model missing, and
+    /// after a failure only once [`RETRY_INTERVAL`] has passed.
+    fn refresh_if_due(self: &Arc<Self>) {
         if tokio::runtime::Handle::try_current().is_err()
-            || self.started.swap(true, Ordering::SeqCst)
+            || self.info.load().is_some()
+            || self.unknown_model.load(Ordering::SeqCst)
         {
             return;
         }
+        let now = self.clock.now_instant();
+        let due = self
+            .retry_at
+            .lock()
+            .map(|at| at.is_none_or(|at| now >= at))
+            .unwrap_or(true);
+        if !due || self.in_flight.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.ready.send_replace(false);
         let catalog = Arc::clone(self);
-        tokio::spawn(async move { catalog.refresh().await });
+        tokio::spawn(async move {
+            catalog.refresh().await;
+            catalog.in_flight.store(false, Ordering::SeqCst);
+            catalog.ready.send_replace(true);
+        });
     }
 
     async fn refresh(&self) {
         match self.fetch().await {
-            Ok(info) => {
+            Ok(Some(info)) => {
                 debug!(model = %self.model, ?info, "OpenRouter model catalog loaded");
                 self.info.store(Some(Arc::new(info)));
             }
-            Err(e) => warn!(
-                model = %self.model,
-                error = %e,
-                "OpenRouter model catalog unavailable; using conservative capabilities"
-            ),
+            Ok(None) => {
+                error!(model = %self.model, "OpenRouter has no such model; chat calls will fail");
+                self.unknown_model.store(true, Ordering::SeqCst);
+            }
+            Err(e) => {
+                warn!(
+                    model = %self.model,
+                    error = %e,
+                    "OpenRouter model catalog unavailable; using conservative capabilities"
+                );
+                if let Ok(mut at) = self.retry_at.lock() {
+                    *at = Some(self.clock.now_instant() + RETRY_INTERVAL);
+                }
+            }
         }
-        self.ready.send_replace(true);
     }
 
-    async fn fetch(&self) -> anyhow::Result<ModelInfo> {
+    /// The model's capabilities, or `None` when the catalog does not list it.
+    async fn fetch(&self) -> anyhow::Result<Option<ModelInfo>> {
         let base = self.base_url.trim_end_matches('/');
         let models: ModelList = self.get_json(&format!("{base}/models")).await?;
-        let entry = models
-            .data
-            .into_iter()
-            .find(|m| m.id == self.model)
-            .ok_or_else(|| anyhow::anyhow!("OpenRouter has no model `{}`", self.model))?;
+        let Some(entry) = models.data.into_iter().find(|m| m.id == self.model) else {
+            return Ok(None);
+        };
         let endpoints = match self
             .get_json::<EndpointList>(&format!("{base}/models/{}/endpoints", self.model))
             .await
@@ -129,7 +175,7 @@ impl OpenRouterCatalog {
                 Vec::new()
             }
         };
-        Ok(model_info(&entry, &endpoints, self.routing.as_ref()))
+        Ok(Some(model_info(&entry, &endpoints, self.routing.as_ref())))
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> anyhow::Result<T> {
