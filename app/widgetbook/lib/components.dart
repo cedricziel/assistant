@@ -1,84 +1,14 @@
 import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
-
-// import 'components/attachment_tray.dart'; // slot: chat-element-library 11b
-
-// import 'components/branch_picker.dart'; // slot: message-branching 9
-
-// import 'components/chat_thread_layout.dart'; // slot: chat-element-library 10
-
-// import 'components/code_block.dart'; // slot: chat-a11y-and-code-blocks C4
-
-// import 'components/code_diff_result_view.dart'; // slot: tool-result-renderers C7
-
-// import 'components/code_file_result_view.dart'; // slot: tool-result-renderers C7
-
-// import 'components/command_body.dart'; // slot: chat-element-library 7b
-
-// import 'components/compact_expandable.dart'; // slot: tool-result-renderers C2
-
-// import 'components/composer.dart'; // slot: chat-element-library 11a
-
-// import 'components/composer_voice_button.dart'; // slot: chat-element-library 11b
-
-// import 'components/conversation_list_view.dart'; // slot: chat-element-library 12
-
-// import 'components/conversation_search_results_view.dart'; // slot: conversation-list-management 14
-
-// import 'components/data_table_result_view.dart'; // slot: tool-result-renderers C6
-
-// import 'components/feedback_buttons.dart'; // slot: message-feedback 5
-
-// import 'components/feedback_comment_field.dart'; // slot: message-feedback 5
-
-// import 'components/generic_tool_result_view.dart'; // slot: chat-element-library 6
-
-// import 'components/highlighted_segments.dart'; // slot: conversation-list-management 14
-
-// import 'components/json_tree_view.dart'; // slot: tool-result-renderers C2b
-
-// import 'components/link_preview_result_view.dart'; // slot: tool-result-renderers C5
-
 import 'components/message_action_button.dart';
-
 import 'components/message_actions.dart';
-
-// import 'components/message_body.dart'; // slot: chat-element-library 8b
-
-// import 'components/message_bubble.dart'; // slot: chat-element-library 8b
-
-// import 'components/message_editor.dart'; // slot: message-branching 9
-
 import 'components/message_timing_indicator.dart';
-
-// import 'components/permission_rule_tile.dart'; // slot: tool-approval-prompts 14b
-
-// import 'components/plan_result_view.dart'; // slot: tool-result-renderers C5
-
-// import 'components/question_card.dart'; // slot: tool-approval-prompts 14a
-
 import 'components/queued_message_bubble.dart';
-
-// import 'components/regenerate_menu_button.dart'; // slot: message-branching 10
-
-// import 'components/slash_command_menu.dart'; // slot: chat-element-library 11a
-
-// import 'components/sources_result_view.dart'; // slot: tool-result-renderers C4
-
 import 'components/starter_prompts.dart';
-
-// import 'components/subagent_body.dart'; // slot: chat-element-library 7b
-
 import 'components/suggestion_chips.dart';
-
-// import 'components/surface_frame.dart'; // slot: generative-ui-a2ui 13
-
-// import 'components/terminal_result_view.dart'; // slot: tool-result-renderers C4
-
-// import 'components/thinking_body.dart'; // slot: chat-element-library 7a
-
 import 'components/thread_density_scope.dart';
+import 'components/unknown_interaction_card.dart';
 
 // import 'components/thread_empty_state.dart'; // slot: chat-element-library 9
 
@@ -106,97 +36,55 @@ import 'components/thread_density_scope.dart';
 /// To add an element, uncomment its slot line (and add a slot if missing).
 /// Keep one blank line between entries so parallel PRs don't conflict.
 final List<WidgetbookComponent> kComponents = [
-  approvalCardComponent,
-
   // attachmentTrayComponent, // slot: chat-element-library 11b
-
   // branchPickerComponent, // slot: message-branching 9
-
   // chatThreadLayoutComponent, // slot: chat-element-library 10
-
   // codeBlockComponent, // slot: chat-a11y-and-code-blocks C4
-
   // codeDiffResultViewComponent, // slot: tool-result-renderers C7
-
   // codeFileResultViewComponent, // slot: tool-result-renderers C7
-
   // commandBodyComponent, // slot: chat-element-library 7b
-
   // compactExpandableComponent, // slot: tool-result-renderers C2
-
   // composerComponent, // slot: chat-element-library 11a
-
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
-
   // conversationListViewComponent, // slot: chat-element-library 12
-
   // conversationSearchResultsViewComponent, // slot: conversation-list-management 14
-
   // dataTableResultViewComponent, // slot: tool-result-renderers C6
-
   // feedbackButtonsComponent, // slot: message-feedback 5
-
   // feedbackCommentFieldComponent, // slot: message-feedback 5
-
   // genericToolResultViewComponent, // slot: chat-element-library 6
-
   // highlightedSegmentsComponent, // slot: conversation-list-management 14
-
   // jsonTreeViewComponent, // slot: tool-result-renderers C2b
-
   // linkPreviewResultViewComponent, // slot: tool-result-renderers C5
-  messageActionButtonComponent,
-
-  messageActionsComponent,
-
   // messageBodyComponent, // slot: chat-element-library 8b
-
   // messageBubbleComponent, // slot: chat-element-library 8b
-
   // messageEditorComponent, // slot: message-branching 9
-  messageTimingIndicatorComponent,
-
   // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
-
   // planResultViewComponent, // slot: tool-result-renderers C5
-
   // questionCardComponent, // slot: tool-approval-prompts 14a
-  queuedMessageBubbleComponent,
-
   // regenerateMenuButtonComponent, // slot: message-branching 10
-
   // slashCommandMenuComponent, // slot: chat-element-library 11a
-
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
-  starterPromptsComponent,
-
   // subagentBodyComponent, // slot: chat-element-library 7b
-  suggestionChipsComponent,
-
   // surfaceFrameComponent, // slot: generative-ui-a2ui 13
-
   // terminalResultViewComponent, // slot: tool-result-renderers C4
-
   // thinkingBodyComponent, // slot: chat-element-library 7a
-  threadDensityScopeComponent,
-
   // threadEmptyStateComponent, // slot: chat-element-library 9
-
   // threadErrorBannerComponent, // slot: chat-element-library 9
-
   // threadViewportComponent, // slot: chat-element-library 10
-
   // timelineEntryShellComponent, // slot: chat-element-library 5b
-
   // timelineEntryViewComponent, // slot: chat-element-library 7c
-
   // toolCallBodyComponent, // slot: chat-element-library 6
-
   // toolStatusIconComponent, // slot: chat-element-library 6
-
   // turnProgressCardComponent, // slot: chat-element-library 9
-
   // typingIndicatorComponent, // slot: chat-element-library 8b
-
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
+  approvalCardComponent,
+  messageActionButtonComponent,
+  messageActionsComponent,
+  messageTimingIndicatorComponent,
+  queuedMessageBubbleComponent,
+  starterPromptsComponent,
+  suggestionChipsComponent,
+  threadDensityScopeComponent,
+  unknownInteractionCardComponent,
 ];
