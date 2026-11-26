@@ -25,6 +25,9 @@ base_url = "http://localhost:11434"
 max_iterations = 80
 # Timeout for LLM calls (seconds)
 timeout_secs = 120
+# Whether the model may request several tool calls at once. Unset keeps the
+# provider's default (usually true). Set false to run tools one at a time.
+# parallel_tool_calls = false
 
 # ── Anthropic cloud provider ──────────────────────────────────────────────────
 # To use Claude instead of a local Ollama model, replace the [llm] block above

@@ -21,7 +21,10 @@ use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info, warn};
 use uuid::Uuid;
 
-use super::{DispatchOutcome, Orchestrator, OrchestratorEvent, value_to_params_map};
+use super::{
+    ApprovalOptions, ConfirmationAnswer, ConfirmationRequest, DispatchOutcome, Orchestrator,
+    OrchestratorEvent, value_to_params_map,
+};
 use crate::webhook_dispatch;
 
 /// Result of [`Orchestrator::finalize_tool_result`].
@@ -115,6 +118,11 @@ impl Orchestrator {
     /// context.
     const TOOL_RESULT_DISPLAY_LIMIT: usize = 512;
 
+    /// Maximum serialized size of the structured `data` carried on a
+    /// `ToolResult` event. Larger payloads are dropped whole: cutting JSON
+    /// generically would produce half-valid shapes.
+    pub(crate) const TOOL_RESULT_DATA_LIMIT_BYTES: usize = 32 * 1024;
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn finalize_tool_result(
         &self,
@@ -181,11 +189,21 @@ impl Orchestrator {
         };
 
         let mut had_error = false;
+        let mut data = None;
         let observation = match exec_result {
-            Ok(output) => {
+            Ok(mut output) => {
                 debug!(tool = %tool_name, duration_ms, "Tool execution completed");
+                // Structured render data goes to the event only: take it before
+                // anything else sees the output so it cannot leak into the LLM
+                // history, the persisted observation or the webhook payload.
+                data = Self::cap_tool_data(tool_name, output.data.take());
+                // A tool-level failure (`ToolOutput::error`, non-zero bash
+                // exit) is an error even though the call itself returned `Ok`.
+                if !output.success {
+                    tool_status = "error";
+                }
                 otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                otel_span.set_attribute(KeyValue::new("tool_status", tool_status));
                 otel_span.set_attribute(KeyValue::new("tool_observation", output.content.clone()));
                 if !output.attachments.is_empty() {
                     // Persist each tool-produced attachment to the store.
@@ -277,7 +295,8 @@ impl Orchestrator {
 
         if let Some(sink) = event_sink {
             let truncated_result = if observation.len() > Self::TOOL_RESULT_DISPLAY_LIMIT {
-                let mut s = observation[..Self::TOOL_RESULT_DISPLAY_LIMIT].to_string();
+                let cut = observation.floor_char_boundary(Self::TOOL_RESULT_DISPLAY_LIMIT);
+                let mut s = observation[..cut].to_string();
                 s.push('…');
                 Some(s)
             } else {
@@ -290,6 +309,7 @@ impl Orchestrator {
                     arguments: tool_arguments.cloned(),
                     result: truncated_result,
                     tool_call_id: tool_call_id.map(|s| s.to_string()),
+                    data,
                 })
                 .await;
 
@@ -337,6 +357,26 @@ impl Orchestrator {
         FinalizedTool { had_error }
     }
 
+    /// Drop `data` whole when its serialized form exceeds
+    /// [`Self::TOOL_RESULT_DATA_LIMIT_BYTES`].
+    fn cap_tool_data(
+        tool_name: &str,
+        data: Option<serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        let value = data?;
+        let size = value.to_string().len();
+        if size > Self::TOOL_RESULT_DATA_LIMIT_BYTES {
+            warn!(
+                tool = %tool_name,
+                size,
+                limit = Self::TOOL_RESULT_DATA_LIMIT_BYTES,
+                "Dropping tool result data over the size cap"
+            );
+            return None;
+        }
+        Some(value)
+    }
+
     /// Append one tool call to the skill execution log.
     async fn record_skill_execution(
         &self,
@@ -371,6 +411,7 @@ impl Orchestrator {
     /// text to return to the LLM in place of a tool result. Undecided calls
     /// defer to the confirmation callback on interactive turns and are denied
     /// on every other turn.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn authorize_tool_call(
         &self,
         name: &str,
@@ -378,6 +419,8 @@ impl Orchestrator {
         ctx: &ExecutionContext,
         requires_confirmation: bool,
         task_context: Option<&str>,
+        event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
+        tool_call_id: Option<&str>,
     ) -> Result<(), String> {
         let resolution = self
             .permission_policy
@@ -394,10 +437,27 @@ impl Orchestrator {
             && ctx.interactive
             && let Some(cb) = &self.confirmation_callback
         {
-            return if cb.confirm(name, params) {
-                Ok(())
-            } else {
-                Err(format!("User denied execution of '{name}'."))
+            let answer = cb
+                .confirm(ConfirmationRequest {
+                    tool_name: name,
+                    params,
+                    ctx,
+                    tool_call_id,
+                    reason: &resolution.decision.reason,
+                    options: ApprovalOptions::once_only(),
+                    event_sink,
+                })
+                .await;
+            return match answer {
+                ConfirmationAnswer::AllowOnce | ConfirmationAnswer::AllowAlways => Ok(()),
+                ConfirmationAnswer::RejectOnce
+                | ConfirmationAnswer::RejectAlways
+                | ConfirmationAnswer::Cancelled => {
+                    Err(format!("User denied execution of '{name}'."))
+                }
+                ConfirmationAnswer::Expired => Err(format!(
+                    "The approval request for '{name}' expired before the user answered, so it was not run."
+                )),
             };
         }
         resolution.refusal(name).map_or(Ok(()), Err)
@@ -434,7 +494,15 @@ impl Orchestrator {
             .is_some_and(|h| h.requires_confirmation());
 
         let authorization = self
-            .authorize_tool_call(name, params, ctx, requires_confirm, task_context(history))
+            .authorize_tool_call(
+                name,
+                params,
+                ctx,
+                requires_confirm,
+                task_context(history),
+                event_sink,
+                tool_call_id,
+            )
             .await;
         if let Err(observation) = authorization {
             info!(%observation);
@@ -459,6 +527,7 @@ impl Orchestrator {
                         arguments: Some(params.clone()),
                         result: Some(observation.clone()),
                         tool_call_id: tool_call_id.map(|s| s.to_string()),
+                        data: None,
                     })
                     .await;
             }

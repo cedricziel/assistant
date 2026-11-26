@@ -345,6 +345,14 @@ pub trait MessageBus: Send + Sync {
         self.nack(message_id).await
     }
 
+    /// Refresh the claim of a message a worker is still processing.
+    ///
+    /// Long-running work (tool calls, a turn waiting on a human) calls this
+    /// periodically so [`reap_stale`](MessageBus::reap_stale) and broker
+    /// redelivery timers do not hand the message to a second worker. Touching
+    /// a message that is no longer claimed is a no-op.
+    async fn touch(&self, message_id: Uuid) -> Result<()>;
+
     /// Mark a message as permanently [`MessageStatus::Failed`].
     async fn fail(&self, message_id: Uuid) -> Result<()>;
 

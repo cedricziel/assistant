@@ -20,7 +20,7 @@ use assistant_llm_provider::scripted::ScriptedLlmProvider;
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 
-use super::super::{ConfirmationCallback, Orchestrator};
+use super::super::{ConfirmationAnswer, ConfirmationCallback, ConfirmationRequest, Orchestrator};
 
 /// A tool that records that it ran.
 struct Probe {
@@ -83,10 +83,15 @@ struct Counting {
     asked: Arc<AtomicUsize>,
 }
 
+#[async_trait]
 impl ConfirmationCallback for Counting {
-    fn confirm(&self, _tool_name: &str, _params: &Value) -> bool {
+    async fn confirm(&self, _req: ConfirmationRequest<'_>) -> ConfirmationAnswer {
         self.asked.fetch_add(1, Ordering::SeqCst);
-        self.answer
+        if self.answer {
+            ConfirmationAnswer::AllowOnce
+        } else {
+            ConfirmationAnswer::RejectOnce
+        }
     }
 }
 

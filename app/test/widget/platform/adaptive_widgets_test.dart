@@ -27,7 +27,7 @@ Widget _harness(Widget screen) {
 void main() {
   // 4.1.1 — Adaptive switches (SwitchListTile.adaptive)
   group('Adaptive switches — Settings', () {
-    testWidgets('3 switches render on iOS', (tester) async {
+    testWidgets('4 switches render on iOS', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize = const Size(375, 800);
@@ -40,14 +40,14 @@ void main() {
       // iOS uses CupertinoSwitch inside CupertinoListTile.
       expect(
         find.byType(CupertinoSwitch),
-        findsNWidgets(3),
-        reason: 'Settings should show 3 CupertinoSwitch toggles on iOS',
+        findsNWidgets(4),
+        reason: 'Settings should show 4 CupertinoSwitch toggles on iOS',
       );
 
       debugDefaultTargetPlatformOverride = null;
     });
 
-    testWidgets('3 switches render on macOS', (tester) async {
+    testWidgets('4 switches render on macOS', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize = const Size(375, 800);
@@ -59,8 +59,8 @@ void main() {
 
       expect(
         find.byType(SwitchListTile),
-        findsNWidgets(3),
-        reason: 'Settings should show 3 switch tiles on macOS',
+        findsNWidgets(4),
+        reason: 'Settings should show 4 switch tiles on macOS',
       );
 
       debugDefaultTargetPlatformOverride = null;
