@@ -163,6 +163,7 @@ void main() {
         'subagent',
         'command',
         'interaction',
+        'surface',
       ]);
     });
 

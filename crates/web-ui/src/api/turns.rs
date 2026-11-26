@@ -197,10 +197,37 @@ async fn turn_status(
     })
 }
 
+/// True when the run's recorded events belong to `conversation_id`. A run with
+/// no events at all is not known to any conversation.
+async fn run_belongs_to(
+    ctx: &SpaceCtx,
+    conversation_id: Uuid,
+    turn_id: Uuid,
+) -> Result<bool, (StatusCode, Json<ErrorBody>)> {
+    let events = ctx
+        .storage
+        .conversation_event_store()
+        .list_events_since(&turn_id.to_string(), 0)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorBody {
+                    error: format!("Failed to read turn events: {e}"),
+                }),
+            )
+        })?;
+    Ok(events
+        .first()
+        .is_some_and(|e| e.conversation_id == conversation_id.to_string()))
+}
+
 /// `POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`
 ///
-/// Idempotent: triggers `Orchestrator::cancel_turn` if a matching token is
-/// registered, otherwise no-op. Always returns 200 with the current turn
+/// Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this
+/// conversation and a matching token is registered, otherwise no-op. The cancel
+/// also covers a turn no worker has claimed yet: its stream ends at once with
+/// `agent_error {"reason":"cancelled","user_message_persisted":false}`. Always returns 200 with the current turn
 /// status — the cancellation propagates asynchronously through the worker's
 /// `tokio::select!`, the SSE stream's terminal `agent_error` event, and the
 /// `event_store`. Clients should poll `GET .../status` (or wait for the
@@ -235,14 +262,22 @@ pub async fn cancel_turn(
         return response;
     }
 
-    // Fire the cancellation signal. Outcome is intentionally not surfaced —
-    // the endpoint is idempotent and the authoritative reply is whatever
-    // the event store shows after the worker reacts.
-    let orchestrator = match state.runtime(&ctx).await {
-        Ok(runtime) => runtime.orchestrator.clone(),
-        Err(response) => return response,
-    };
-    let _outcome = orchestrator.cancel_turn(turn_id).await;
+    // Fire the cancellation signal only for a run of this conversation: the
+    // caller owns `conversation_id`, not necessarily the run named in the
+    // path. Outcome is intentionally not surfaced — the endpoint is
+    // idempotent and the authoritative reply is whatever the event store
+    // shows after the worker reacts.
+    match run_belongs_to(&ctx, conversation_id, turn_id).await {
+        Ok(true) => {
+            let orchestrator = match state.runtime(&ctx).await {
+                Ok(runtime) => runtime.orchestrator.clone(),
+                Err(response) => return response,
+            };
+            let _outcome = orchestrator.cancel_turn(turn_id).await;
+        }
+        Ok(false) => {}
+        Err(e) => return e.into_response(),
+    }
 
     // Return the current status. The transition from `running` →
     // `errored` (via the synthetic `agent_error` event from the SSE
@@ -610,6 +645,87 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = body_json(resp.into_body()).await;
         assert_eq!(body["state"], "unknown");
+    }
+
+    /// A caller who owns conversation A must not be able to cancel a run of
+    /// conversation B by putting B's run id in A's path.
+    #[tokio::test]
+    async fn cancel_with_a_run_of_another_conversation_leaves_the_run_alone() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use super::super::test_helpers::{body_bytes, test_state};
+
+        // A slow but successful reply keeps B's turn in flight long enough to
+        // cancel it from the wrong conversation.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_millis(600))
+                    .set_body_json(serde_json::json!({
+                        "model": "test",
+                        "message": { "role": "assistant", "content": "all good" },
+                        "done": true
+                    })),
+            )
+            .mount(&server)
+            .await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_a = seed_conversation(&storage).await;
+        let conv_b = seed_conversation(&storage).await;
+        let orchestrator = state
+            .runtimes
+            .get("default", "default")
+            .await
+            .unwrap()
+            .orchestrator
+            .clone();
+
+        // A turn runs in conversation B.
+        let stream_b = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_b}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hold on"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let run_b = Uuid::parse_str(stream_b.headers()["x-run-id"].to_str().unwrap()).unwrap();
+        for _ in 0..200 {
+            if orchestrator.is_turn_in_flight(run_b).await {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            orchestrator.is_turn_in_flight(run_b).await,
+            "precondition: B's run is registered"
+        );
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_a}/turns/{run_b}/cancel"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp.into_body()).await["state"], "unknown");
+
+        let stream = String::from_utf8_lossy(&body_bytes(stream_b.into_body()).await).to_string();
+        assert!(
+            stream.contains("event: done") && !stream.contains("cancelled"),
+            "B's turn finished normally: {stream}"
+        );
     }
 
     // -- existing status tests below --
