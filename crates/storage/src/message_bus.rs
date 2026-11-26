@@ -202,6 +202,16 @@ impl MessageBus for SqliteMessageBus {
         Ok(())
     }
 
+    async fn touch(&self, message_id: Uuid) -> Result<()> {
+        sqlx::query("UPDATE bus_messages SET claimed_at = ?2 WHERE id = ?1 AND status = 'claimed'")
+            .bind(message_id.to_string())
+            .bind(self.clock.now())
+            .execute(&self.pool)
+            .await?;
+        debug!(id = %message_id, "touched bus message claim");
+        Ok(())
+    }
+
     async fn fail(&self, message_id: Uuid) -> Result<()> {
         sqlx::query("UPDATE bus_messages SET status = 'failed' WHERE id = ?1")
             .bind(message_id.to_string())
@@ -489,6 +499,17 @@ impl MessageBus for InMemoryMessageBus {
             e.msg.claimed_at = None;
             e.msg.claimed_by = None;
             e.visible_at = visible_at;
+        }
+        Ok(())
+    }
+
+    async fn touch(&self, message_id: Uuid) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        if let Some(e) = state.by_id.get_mut(&message_id)
+            && e.msg.status == MessageStatus::Claimed
+        {
+            e.msg.claimed_at = Some(now);
         }
         Ok(())
     }
@@ -1157,6 +1178,67 @@ mod tests {
 
         let reaped = bus.reap_stale(Duration::from_secs(3600)).await.unwrap();
         assert_eq!(reaped, 0, "fresh claims should not be reaped");
+    }
+
+    #[tokio::test]
+    async fn test_touch_keeps_a_long_running_claim_from_being_reaped() {
+        let clock = FakeClock::new_at_seed();
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let bus = storage.message_bus().with_clock(Arc::new(clock.clone()));
+
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
+        bus.claim("q", "w1").await.unwrap();
+
+        clock.advance(Duration::from_secs(3 * 60));
+        bus.touch(id).await.unwrap();
+        clock.advance(Duration::from_secs(4 * 60));
+
+        let reaped = bus.reap_stale(Duration::from_secs(5 * 60)).await.unwrap();
+        assert_eq!(
+            reaped, 0,
+            "a claim touched 4 minutes ago must survive a 5 minute reap"
+        );
+        let claimed = bus.claim("q", "w2").await.unwrap();
+        assert!(claimed.is_none(), "a touched claim must not be redelivered");
+    }
+
+    #[tokio::test]
+    async fn test_untouched_claim_is_reaped_after_timeout() {
+        let clock = FakeClock::new_at_seed();
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let bus = storage.message_bus().with_clock(Arc::new(clock.clone()));
+
+        bus.publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
+        bus.claim("q", "w1").await.unwrap();
+
+        clock.advance(Duration::from_secs(7 * 60));
+        let reaped = bus.reap_stale(Duration::from_secs(5 * 60)).await.unwrap();
+        assert_eq!(reaped, 1, "an untouched claim is reaped after the timeout");
+    }
+
+    #[tokio::test]
+    async fn test_touch_ignores_messages_that_are_not_claimed() {
+        let clock = FakeClock::new_at_seed();
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let bus = storage.message_bus().with_clock(Arc::new(clock.clone()));
+
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
+        bus.touch(id).await.unwrap();
+
+        let msgs = bus
+            .list("q", Some(MessageStatus::Pending), 10)
+            .await
+            .unwrap();
+        assert_eq!(msgs.len(), 1, "touch must leave a pending message pending");
+        assert!(msgs[0].claimed_at.is_none(), "touch must not claim");
     }
 
     #[tokio::test]

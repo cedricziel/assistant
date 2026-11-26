@@ -1,4 +1,8 @@
-## ADDED Requirements
+# pwa-push-notifications Specification
+
+## Purpose
+TBD - created by archiving change pwa-push-notifications. Update Purpose after archive.
+## Requirements
 
 ### Requirement: VAPID key provisioning
 

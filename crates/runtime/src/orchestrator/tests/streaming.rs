@@ -169,6 +169,7 @@ async fn worker_routes_ext_plus_sink_to_streaming_path() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await;
 

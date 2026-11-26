@@ -188,8 +188,12 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "jsonschema",
+ "regex",
+ "regex-syntax",
  "serde",
  "serde_json",
+ "url",
+ "uuid",
 ]
 
 [[package]]
