@@ -45,8 +45,8 @@ Each numbered group is one PR in the stack, in order.
 
 ## 7. Server Tasks (PR 7)
 
-- [ ] 7.1 Add failing tests: a task-declaring client gets `resultType: "task"` for `run-prompt`; a non-declaring client gets a blocking result; polling reaches `completed` with the result; `tasks/cancel` yields `cancelled`; another user's task id is not-found; confirm red
-- [ ] 7.2 Wire an owner-scoped `rmcp::TaskManager` into `AssistantMcpServer`, advertise the extension, and verify the tests pass
+- [x] 7.1 Add failing tests: a task-declaring client gets `resultType: "task"` for `run-prompt`; a non-declaring client gets a blocking result; polling reaches `completed` with the result; `tasks/cancel` yields `cancelled`; another user's task id is not-found; confirm red
+- [x] 7.2 Wire an owner-scoped `rmcp::TaskManager` into `AssistantMcpServer`, advertise the extension, and verify the tests pass
 
 ## 8. Client handler, freshness and content conversion (PR 8)
 
