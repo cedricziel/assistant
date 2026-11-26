@@ -43,8 +43,8 @@ class McpAppFrame extends StatelessWidget {
 
 /// Everything a frame's surface and bridge are built from. A different call,
 /// app, policy or conversation at the same position needs its own surface and
-/// bridge. A call without an id is told apart by its input and result too;
-/// one with an id keeps its frame while its result arrives.
+/// bridge. A call without an id is told apart by its status, input, result
+/// and data too; one with an id keeps its frame while its result arrives.
 Object _identity(ToolCallRecord toolCall, McpApp app, String? conversationId) {
   final csp = app.csp;
   final permissions = app.permissions;
@@ -54,14 +54,12 @@ Object _identity(ToolCallRecord toolCall, McpApp app, String? conversationId) {
     app.server,
     app.resourceUri,
     app.html,
-    Object.hashAll([
-      ...csp.connectDomains,
-      '|',
-      ...csp.resourceDomains,
-      '|',
-      ...csp.frameDomains,
-      '|',
-      ...csp.baseUriDomains,
+    // Encoded, not hashed: lists compared by value, kept apart per field.
+    jsonEncode([
+      csp.connectDomains,
+      csp.resourceDomains,
+      csp.frameDomains,
+      csp.baseUriDomains,
     ]),
     (
       permissions.camera,
@@ -70,7 +68,12 @@ Object _identity(ToolCallRecord toolCall, McpApp app, String? conversationId) {
       permissions.clipboardWrite,
     ),
     toolCall.toolCallId == null
-        ? (jsonEncode(toolCall.arguments), toolCall.result)
+        ? (
+            toolCall.status,
+            jsonEncode(toolCall.arguments),
+            toolCall.result,
+            jsonEncode(toolCall.data),
+          )
         : null,
   );
 }

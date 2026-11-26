@@ -151,8 +151,21 @@ void main() {
         csp: McpAppCsp(connectDomains: ['api.weather.example']),
       );
       await _pump(tester, child: McpAppFrame(toolCall: untracked(narrowed)));
-      // Same policy, new instance: keeps the surface.
-      await _pump(tester, child: McpAppFrame(toolCall: untracked(narrowed)));
+      // An equal policy in separate instances keeps the surface.
+      await _pump(
+        tester,
+        child: McpAppFrame(
+          toolCall: untracked(
+            McpApp(
+              server: 'weather',
+              resourceUri: 'ui://weather/forecast',
+              html: '<p>Sunny</p>',
+              csp: McpAppCsp(connectDomains: ['api.weather.example'.trim()]),
+              permissions: McpAppPermissions(geolocation: bool.parse('true')),
+            ),
+          ),
+        ),
+      );
       await _pump(
         tester,
         child: McpAppFrame(toolCall: untracked(sameButNarrowed)),
@@ -166,6 +179,45 @@ void main() {
 
       expect(FakeMcpAppSurface.created, hasLength(3));
       expect(FakeMcpAppSurface.created[1].app.permissions.geolocation, isFalse);
+
+      await _unmount(tester);
+    });
+
+    testWidgets('rebinds on CSP lists that flatten alike and on an id-less '
+        'status change', (tester) async {
+      ToolCallRecord untracked(
+        McpApp app, {
+        ToolCallStatus status = ToolCallStatus.ok,
+      }) => ToolCallRecord(
+        toolName: 'mcp__weather__forecast',
+        status: status,
+        app: app,
+      );
+      McpApp withCsp(McpAppCsp csp) => McpApp(
+        server: 'weather',
+        resourceUri: 'ui://weather/forecast',
+        html: '<p>Sunny</p>',
+        csp: csp,
+      );
+      final wideConnect = withCsp(
+        const McpAppCsp(connectDomains: ['|', 'https://b.example']),
+      );
+      final wideResource = withCsp(
+        const McpAppCsp(resourceDomains: ['https://b.example', '|']),
+      );
+      await _pump(tester, child: McpAppFrame(toolCall: untracked(wideConnect)));
+      await _pump(
+        tester,
+        child: McpAppFrame(toolCall: untracked(wideResource)),
+      );
+      await _pump(
+        tester,
+        child: McpAppFrame(
+          toolCall: untracked(wideResource, status: ToolCallStatus.error),
+        ),
+      );
+
+      expect(FakeMcpAppSurface.created, hasLength(3));
 
       await _unmount(tester);
     });
