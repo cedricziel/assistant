@@ -177,6 +177,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ToolPermissionRuleSummary.serializer)
       ..add(TurnState.serializer)
       ..add(TurnStatusResponse.serializer)
+      ..add(UiCapabilities.serializer)
       ..add(UnsubscribeRequest.serializer)
       ..add(UpdateAgentRequest.serializer)
       ..add(UpdateConversationRequest.serializer)
@@ -259,6 +260,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

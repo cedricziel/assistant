@@ -393,6 +393,7 @@ Class | Method | HTTP request | Description
  - [ToolPermissionRuleSummary](doc/ToolPermissionRuleSummary.md)
  - [TurnState](doc/TurnState.md)
  - [TurnStatusResponse](doc/TurnStatusResponse.md)
+ - [UiCapabilities](doc/UiCapabilities.md)
  - [UnsubscribeRequest](doc/UnsubscribeRequest.md)
  - [UpdateAgentRequest](doc/UpdateAgentRequest.md)
  - [UpdateConversationRequest](doc/UpdateConversationRequest.md)

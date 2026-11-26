@@ -191,6 +191,7 @@ doc/ToolPermissionRuleSummary.md
 doc/ToolPermissionRulesApi.md
 doc/TurnState.md
 doc/TurnStatusResponse.md
+doc/UiCapabilities.md
 doc/UnsubscribeRequest.md
 doc/UpdateAgentRequest.md
 doc/UpdateConversationRequest.md
@@ -428,6 +429,7 @@ lib/src/model/tool_decision.dart
 lib/src/model/tool_permission_rule_summary.dart
 lib/src/model/turn_state.dart
 lib/src/model/turn_status_response.dart
+lib/src/model/ui_capabilities.dart
 lib/src/model/unsubscribe_request.dart
 lib/src/model/update_agent_request.dart
 lib/src/model/update_conversation_request.dart

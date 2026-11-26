@@ -181,6 +181,7 @@ import 'package:assistant_api/src/model/tool_decision.dart';
 import 'package:assistant_api/src/model/tool_permission_rule_summary.dart';
 import 'package:assistant_api/src/model/turn_state.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
+import 'package:assistant_api/src/model/ui_capabilities.dart';
 import 'package:assistant_api/src/model/unsubscribe_request.dart';
 import 'package:assistant_api/src/model/update_agent_request.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
@@ -381,6 +382,7 @@ part 'serializers.g.dart';
   ToolPermissionRuleSummary,
   TurnState,
   TurnStatusResponse,
+  UiCapabilities,
   UnsubscribeRequest,
   UpdateAgentRequest,
   UpdateConversationRequest,

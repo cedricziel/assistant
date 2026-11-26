@@ -14067,9 +14067,14 @@
         "description": "Server capability flags.",
         "required": [
           "voice_send",
-          "voice_receive"
+          "voice_receive",
+          "ui"
         ],
         "properties": {
+          "ui": {
+            "$ref": "#/components/schemas/UiCapabilities",
+            "description": "Generative-UI settings of the selected space's org."
+          },
           "voice_receive": {
             "type": "boolean",
             "description": "Whether the server can serve TTS audio for messages (TTS configured)."
@@ -15335,6 +15340,22 @@
           },
           "turn_id": {
             "type": "string"
+          }
+        }
+      },
+      "UiCapabilities": {
+        "type": "object",
+        "description": "The part of the org's `[ui]` settings a client needs.\n\n`image_hosts` is deliberately absent: the server enforces it.",
+        "required": [
+          "link_hosts"
+        ],
+        "properties": {
+          "link_hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lower-case hosts whose `openUrl` targets open without a confirmation\nprompt. Empty means every link asks first."
           }
         }
       },
