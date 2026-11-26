@@ -14,7 +14,14 @@ import 'conversation_search_provider.dart';
 /// [conversationListProvider], maps entries to [ConversationListItem]s, and
 /// supplies navigation, the "New Chat" button and the delete confirmation.
 class ConversationListPane extends ConsumerWidget {
-  const ConversationListPane({super.key, this.onConversationSelected});
+  const ConversationListPane({
+    super.key,
+    this.onConversationSelected,
+    this.selectedId,
+  });
+
+  /// Id of the open conversation, highlighted in the list.
+  final String? selectedId;
 
   /// Optional callback invoked when a conversation is tapped (e.g. to close
   /// the drawer on mobile).
@@ -84,10 +91,12 @@ class ConversationListPane extends ConsumerWidget {
               id: conv.id,
               title: conv.title,
               updatedAt: conv.updatedAt,
+              pinnedAt: conv.pinnedAt,
             ),
         ];
         return ConversationListView(
           items: items,
+          selectedId: selectedId,
           emptyState: Center(
             child: Padding(
               padding: const EdgeInsets.all(16),

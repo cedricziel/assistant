@@ -6,11 +6,15 @@ class ConversationListItem {
     required this.id,
     required this.title,
     required this.updatedAt,
+    this.pinnedAt,
   });
 
   final String id;
   final String title;
   final DateTime updatedAt;
+
+  /// When the conversation was pinned, or `null` when it is not pinned.
+  final DateTime? pinnedAt;
 }
 
 /// Builds the optional trailing widget of one row.
@@ -28,8 +32,10 @@ typedef ConversationTrailingBuilder = Widget? Function(
 ///
 /// [header] sits above the rows and stays visible for an empty list, where
 /// [emptyState] fills the remaining space. Relative dates are computed against
-/// [now], which defaults to the current time. No row is highlighted as
-/// selected.
+/// [now], which defaults to the current time. The row whose id equals
+/// [selectedId] is highlighted. When any item has a `pinnedAt`, a "Pinned"
+/// header precedes the first pinned row; the caller supplies [items] already
+/// ordered, pinned rows first.
 class ConversationListView extends StatelessWidget {
   const ConversationListView({
     super.key,
@@ -39,6 +45,7 @@ class ConversationListView extends StatelessWidget {
     this.header,
     this.emptyState,
     this.trailingBuilder,
+    this.selectedId,
     this.now,
   });
 
@@ -48,12 +55,14 @@ class ConversationListView extends StatelessWidget {
   final Widget? header;
   final Widget? emptyState;
   final ConversationTrailingBuilder? trailingBuilder;
+  final String? selectedId;
   final DateTime? now;
 
   @override
   Widget build(BuildContext context) {
     final reference = now ?? DateTime.now();
     final scheme = Theme.of(context).colorScheme;
+    final firstPinned = items.indexWhere((item) => item.pinnedAt != null);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -63,8 +72,14 @@ class ConversationListView extends StatelessWidget {
           child: items.isEmpty
               ? emptyState ?? const SizedBox.shrink()
               : ListView.builder(
-                  itemCount: items.length,
+                  itemCount: items.length + (firstPinned < 0 ? 0 : 1),
                   itemBuilder: (context, index) {
+                    if (firstPinned >= 0) {
+                      if (index == firstPinned) {
+                        return const _PinnedHeader();
+                      }
+                      if (index > firstPinned) index -= 1;
+                    }
                     final item = items[index];
                     return Dismissible(
                       key: ValueKey(item.id),
@@ -77,6 +92,9 @@ class ConversationListView extends StatelessWidget {
                       ),
                       confirmDismiss: (_) => onDelete(item.id),
                       child: ListTile(
+                        selected: item.id == selectedId,
+                        selectedTileColor: scheme.secondaryContainer,
+                        selectedColor: scheme.onSecondaryContainer,
                         title: Text(
                           item.title,
                           maxLines: 1,
@@ -103,5 +121,23 @@ class ConversationListView extends StatelessWidget {
     if (diff.inHours < 1) return '${diff.inMinutes}m ago';
     if (diff.inDays < 1) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+}
+
+class _PinnedHeader extends StatelessWidget {
+  const _PinnedHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Text(
+        'Pinned',
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
   }
 }

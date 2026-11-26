@@ -7,12 +7,34 @@ import 'package:material_ui/material_ui.dart';
 
 import '../support/golden.dart';
 
-ConversationListItem _item(String id, String title, Duration ago) =>
-    ConversationListItem(
-      id: id,
-      title: title,
-      updatedAt: kGoldenNow.subtract(ago),
-    );
+ConversationListItem _item(
+  String id,
+  String title,
+  Duration ago, {
+  Duration? pinnedAgo,
+}) => ConversationListItem(
+  id: id,
+  title: title,
+  updatedAt: kGoldenNow.subtract(ago),
+  pinnedAt: pinnedAgo == null ? null : kGoldenNow.subtract(pinnedAgo),
+);
+
+final _pinnedAndRecent = [
+  _item(
+    '1',
+    'Release checklist',
+    const Duration(days: 8),
+    pinnedAgo: const Duration(days: 2),
+  ),
+  _item(
+    '2',
+    'Standing notes',
+    const Duration(days: 20),
+    pinnedAgo: const Duration(days: 6),
+  ),
+  _item('3', 'Plan the launch', const Duration(minutes: 5, seconds: 30)),
+  _item('4', 'Debug flaky CI job', const Duration(hours: 2, minutes: 30)),
+];
 
 void main() {
   final cases = <String, List<ConversationListItem>>{
@@ -27,6 +49,8 @@ void main() {
       ),
       _item('4', 'Summarise meeting notes', const Duration(days: 3, hours: 12)),
     ],
+    'conversation_list_view_pinned': _pinnedAndRecent,
+    'conversation_list_view_selected': _pinnedAndRecent,
   };
 
   for (final entry in cases.entries) {
@@ -39,6 +63,9 @@ void main() {
             height: 420,
             child: ConversationListView(
               items: entry.value,
+              selectedId: entry.key == 'conversation_list_view_selected'
+                  ? '3'
+                  : null,
               onSelect: (_) {},
               onDelete: (_) async => false,
               now: kGoldenNow,
