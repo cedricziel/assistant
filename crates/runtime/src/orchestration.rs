@@ -16,9 +16,10 @@ use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::Interface;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
-use crate::orchestrator::{CancelOutcome, SubmitTurn, TurnResult};
+use crate::orchestrator::{CancelOutcome, SubmitTurn, TURN_CANCELLED_MARKER, TurnResult};
 
 /// Trait-based interface for submitting and cancelling assistant turns.
 #[async_trait]
@@ -27,6 +28,19 @@ pub trait OrchestrationEngine: Send + Sync {
     async fn submit_turn(
         &self,
         auth: &AuthContext,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Result<TurnResult>;
+
+    /// Submit a turn under a caller-chosen `request_id`, so the caller can
+    /// pass the same id to [`cancel_turn`](Self::cancel_turn) while the turn
+    /// runs.
+    async fn submit_turn_with_request_id(
+        &self,
+        auth: &AuthContext,
+        request_id: Uuid,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
@@ -55,6 +69,24 @@ impl OrchestrationEngine for crate::Orchestrator {
         .await
     }
 
+    async fn submit_turn_with_request_id(
+        &self,
+        auth: &AuthContext,
+        request_id: Uuid,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Result<TurnResult> {
+        self.submit(
+            SubmitTurn::new(prompt, conversation_id, interface)
+                .with_auth(auth)
+                .with_request_id(request_id)
+                .with_timestamp(timestamp),
+        )
+        .await
+    }
+
     async fn cancel_turn(&self, request_id: Uuid) -> CancelOutcome {
         crate::Orchestrator::cancel_turn(self, request_id).await
     }
@@ -64,6 +96,9 @@ impl OrchestrationEngine for crate::Orchestrator {
 #[derive(Debug, Clone)]
 pub struct RecordedSubmitTurn {
     pub auth: AuthContext,
+    /// The caller-chosen request id, when the turn came through
+    /// [`OrchestrationEngine::submit_turn_with_request_id`].
+    pub request_id: Option<Uuid>,
     pub prompt: String,
     pub conversation_id: Uuid,
     pub interface: Interface,
@@ -76,6 +111,7 @@ struct StubData {
     submits: Vec<RecordedSubmitTurn>,
     cancel_outcomes: Vec<CancelOutcome>,
     cancel_calls: Vec<Uuid>,
+    hold_turns: bool,
 }
 
 /// In-memory [`OrchestrationEngine`] stub for tests.
@@ -84,13 +120,25 @@ struct StubData {
 /// returns a benign `TurnResult` containing `(stub: no more responses)`.
 pub struct StubOrchestrationEngine {
     state: Arc<Mutex<StubData>>,
+    cancelled: Arc<Notify>,
 }
 
 impl StubOrchestrationEngine {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(StubData::default())),
+            cancelled: Arc::new(Notify::new()),
         }
+    }
+
+    /// Make turns wait until [`cancel_turn`](OrchestrationEngine::cancel_turn)
+    /// is called, then fail with [`TURN_CANCELLED_MARKER`], like a real
+    /// in-flight turn that is cancelled.
+    pub fn hold_turns(self) -> Self {
+        if let Ok(mut s) = self.state.lock() {
+            s.hold_turns = true;
+        }
+        self
     }
 
     /// Queue a turn response.
@@ -134,27 +182,39 @@ impl Default for StubOrchestrationEngine {
     }
 }
 
-#[async_trait]
-impl OrchestrationEngine for StubOrchestrationEngine {
-    async fn submit_turn(
+impl StubOrchestrationEngine {
+    async fn record_and_answer(
         &self,
         auth: &AuthContext,
+        request_id: Option<Uuid>,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
+        let hold = {
+            let mut state = match self.state.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            state.submits.push(RecordedSubmitTurn {
+                auth: auth.clone(),
+                request_id,
+                prompt: prompt.to_string(),
+                conversation_id,
+                interface,
+                timestamp,
+            });
+            state.hold_turns
+        };
+        if hold {
+            self.cancelled.notified().await;
+            return Err(anyhow::anyhow!(TURN_CANCELLED_MARKER));
+        }
         let mut state = match self.state.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        state.submits.push(RecordedSubmitTurn {
-            auth: auth.clone(),
-            prompt: prompt.to_string(),
-            conversation_id,
-            interface,
-            timestamp,
-        });
         if state.responses.is_empty() {
             return Ok(TurnResult {
                 answer: "(stub: no more responses)".to_string(),
@@ -167,18 +227,57 @@ impl OrchestrationEngine for StubOrchestrationEngine {
         }
         state.responses.remove(0)
     }
+}
+
+#[async_trait]
+impl OrchestrationEngine for StubOrchestrationEngine {
+    async fn submit_turn(
+        &self,
+        auth: &AuthContext,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Result<TurnResult> {
+        self.record_and_answer(auth, None, prompt, conversation_id, interface, timestamp)
+            .await
+    }
+
+    async fn submit_turn_with_request_id(
+        &self,
+        auth: &AuthContext,
+        request_id: Uuid,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Result<TurnResult> {
+        self.record_and_answer(
+            auth,
+            Some(request_id),
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+        )
+        .await
+    }
 
     async fn cancel_turn(&self, request_id: Uuid) -> CancelOutcome {
-        let mut state = match self.state.lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
+        let outcome = {
+            let mut state = match self.state.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            state.cancel_calls.push(request_id);
+            if state.cancel_outcomes.is_empty() {
+                CancelOutcome::NotFound
+            } else {
+                state.cancel_outcomes.remove(0)
+            }
         };
-        state.cancel_calls.push(request_id);
-        if state.cancel_outcomes.is_empty() {
-            CancelOutcome::NotFound
-        } else {
-            state.cancel_outcomes.remove(0)
-        }
+        self.cancelled.notify_one();
+        outcome
     }
 }
 
@@ -243,5 +342,58 @@ mod tests {
         let stub = StubOrchestrationEngine::new();
         let outcome = stub.cancel_turn(Uuid::new_v4()).await;
         assert!(matches!(outcome, CancelOutcome::NotFound));
+    }
+
+    #[tokio::test]
+    async fn submit_with_request_id_records_the_id() {
+        let stub = StubOrchestrationEngine::new();
+        let request_id = Uuid::new_v4();
+        stub.submit_turn_with_request_id(
+            &AuthContext::system(),
+            request_id,
+            "hi",
+            Uuid::new_v4(),
+            Interface::Mcp,
+            None,
+        )
+        .await
+        .unwrap();
+        stub.submit_turn(
+            &AuthContext::system(),
+            "again",
+            Uuid::new_v4(),
+            Interface::Mcp,
+            None,
+        )
+        .await
+        .unwrap();
+        let ids: Vec<_> = stub.submit_calls().iter().map(|c| c.request_id).collect();
+        assert_eq!(ids, vec![Some(request_id), None]);
+    }
+
+    #[tokio::test]
+    async fn held_turn_fails_as_cancelled_once_cancel_turn_is_called() {
+        let stub = Arc::new(StubOrchestrationEngine::new().hold_turns());
+        let request_id = Uuid::new_v4();
+        let turn = tokio::spawn({
+            let stub = stub.clone();
+            async move {
+                stub.submit_turn_with_request_id(
+                    &AuthContext::system(),
+                    request_id,
+                    "hi",
+                    Uuid::new_v4(),
+                    Interface::Mcp,
+                    None,
+                )
+                .await
+            }
+        });
+        while stub.submit_calls().is_empty() {
+            tokio::task::yield_now().await;
+        }
+        stub.cancel_turn(request_id).await;
+        let error = turn.await.unwrap().err().expect("cancelled turn fails");
+        assert!(error.to_string().contains(TURN_CANCELLED_MARKER), "{error}");
     }
 }

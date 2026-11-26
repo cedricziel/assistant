@@ -8,6 +8,8 @@ part of 'tool_call_summary.dart';
 
 class _$ToolCallSummary extends ToolCallSummary {
   @override
+  final McpAppView? app;
+  @override
   final JsonObject? arguments;
   @override
   final JsonObject? data;
@@ -24,7 +26,8 @@ class _$ToolCallSummary extends ToolCallSummary {
       (ToolCallSummaryBuilder()..update(updates))._build();
 
   _$ToolCallSummary._(
-      {this.arguments,
+      {this.app,
+      this.arguments,
       this.data,
       required this.name,
       this.result,
@@ -42,6 +45,7 @@ class _$ToolCallSummary extends ToolCallSummary {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is ToolCallSummary &&
+        app == other.app &&
         arguments == other.arguments &&
         data == other.data &&
         name == other.name &&
@@ -53,6 +57,7 @@ class _$ToolCallSummary extends ToolCallSummary {
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, app.hashCode);
     _$hash = $jc(_$hash, arguments.hashCode);
     _$hash = $jc(_$hash, data.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
@@ -66,6 +71,7 @@ class _$ToolCallSummary extends ToolCallSummary {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'ToolCallSummary')
+          ..add('app', app)
           ..add('arguments', arguments)
           ..add('data', data)
           ..add('name', name)
@@ -79,6 +85,10 @@ class _$ToolCallSummary extends ToolCallSummary {
 class ToolCallSummaryBuilder
     implements Builder<ToolCallSummary, ToolCallSummaryBuilder> {
   _$ToolCallSummary? _$v;
+
+  McpAppViewBuilder? _app;
+  McpAppViewBuilder get app => _$this._app ??= McpAppViewBuilder();
+  set app(McpAppViewBuilder? app) => _$this._app = app;
 
   JsonObject? _arguments;
   JsonObject? get arguments => _$this._arguments;
@@ -111,6 +121,7 @@ class ToolCallSummaryBuilder
   ToolCallSummaryBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _app = $v.app?.toBuilder();
       _arguments = $v.arguments;
       _data = $v.data;
       _name = $v.name;
@@ -136,17 +147,31 @@ class ToolCallSummaryBuilder
   ToolCallSummary build() => _build();
 
   _$ToolCallSummary _build() {
-    final _$result = _$v ??
-        _$ToolCallSummary._(
-          arguments: arguments,
-          data: data,
-          name: BuiltValueNullFieldError.checkNotNull(
-              name, r'ToolCallSummary', 'name'),
-          result: result,
-          status: BuiltValueNullFieldError.checkNotNull(
-              status, r'ToolCallSummary', 'status'),
-          toolCallId: toolCallId,
-        );
+    _$ToolCallSummary _$result;
+    try {
+      _$result = _$v ??
+          _$ToolCallSummary._(
+            app: _app?.build(),
+            arguments: arguments,
+            data: data,
+            name: BuiltValueNullFieldError.checkNotNull(
+                name, r'ToolCallSummary', 'name'),
+            result: result,
+            status: BuiltValueNullFieldError.checkNotNull(
+                status, r'ToolCallSummary', 'status'),
+            toolCallId: toolCallId,
+          );
+    } catch (_) {
+      late String _$failedField;
+      try {
+        _$failedField = 'app';
+        _app?.build();
+      } catch (e) {
+        throw BuiltValueNestedFieldError(
+            r'ToolCallSummary', _$failedField, e.toString());
+      }
+      rethrow;
+    }
     replace(_$result);
     return _$result;
   }

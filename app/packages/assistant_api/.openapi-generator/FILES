@@ -27,6 +27,7 @@ doc/AuthenticationInfo.md
 doc/AuthorizationCodeOAuthFlow.md
 doc/BindingResponse.md
 doc/BindingsApi.md
+doc/CallMcpAppToolRequest.md
 doc/CancelTaskRequest.md
 doc/CapabilitiesApi.md
 doc/CatalogApi.md
@@ -88,10 +89,14 @@ doc/InterfaceInstanceResponse.md
 doc/InterfacesApi.md
 doc/ListTaskPushNotificationConfigsResponse.md
 doc/ListTasksResponse.md
+doc/McpAppCspView.md
+doc/McpAppPermissionsView.md
+doc/McpAppView.md
 doc/MemberEntry.md
 doc/MembersApi.md
 doc/Message.md
 doc/MessageFeedbackResponse.md
+doc/MessageFeedbackSummary.md
 doc/MessageSummary.md
 doc/MessagesApi.md
 doc/ModelPart.md
@@ -122,6 +127,7 @@ doc/PutOrgOidcConfigRequest.md
 doc/QuestionAnswer.md
 doc/QuickMessageRequest.md
 doc/QuickMessageResponse.md
+doc/ReadMcpAppResourceRequest.md
 doc/RegisterAgentRequest.md
 doc/RespondToInteractionRequest.md
 doc/RespondToInteractionRequestOneOf.md
@@ -129,6 +135,7 @@ doc/RespondToInteractionRequestOneOf1.md
 doc/RespondToInteractionRequestOneOf2.md
 doc/Role.md
 doc/RotateSecretResponse.md
+doc/RuleScope.md
 doc/SecurityRequirement.md
 doc/SecurityScheme.md
 doc/SendMessageConfiguration.md
@@ -179,6 +186,8 @@ doc/TestIntegrationResponse.md
 doc/TokenResponse.md
 doc/ToolCallSummary.md
 doc/ToolDecision.md
+doc/ToolPermissionRuleSummary.md
+doc/ToolPermissionRulesApi.md
 doc/TurnState.md
 doc/TurnStatusResponse.md
 doc/UiCapabilities.md
@@ -239,6 +248,7 @@ lib/src/api/skills_api.dart
 lib/src/api/spaces_api.dart
 lib/src/api/tasks_api.dart
 lib/src/api/templates_api.dart
+lib/src/api/tool_permission_rules_api.dart
 lib/src/api/users_api.dart
 lib/src/api/web_push_api.dart
 lib/src/api/webhooks_api.dart
@@ -270,6 +280,7 @@ lib/src/model/attachment_meta_response.dart
 lib/src/model/authentication_info.dart
 lib/src/model/authorization_code_o_auth_flow.dart
 lib/src/model/binding_response.dart
+lib/src/model/call_mcp_app_tool_request.dart
 lib/src/model/cancel_task_request.dart
 lib/src/model/catalog_auth_kind_response.dart
 lib/src/model/catalog_auth_response.dart
@@ -326,9 +337,13 @@ lib/src/model/interaction_status_view.dart
 lib/src/model/interface_instance_response.dart
 lib/src/model/list_task_push_notification_configs_response.dart
 lib/src/model/list_tasks_response.dart
+lib/src/model/mcp_app_csp_view.dart
+lib/src/model/mcp_app_permissions_view.dart
+lib/src/model/mcp_app_view.dart
 lib/src/model/member_entry.dart
 lib/src/model/message.dart
 lib/src/model/message_feedback_response.dart
+lib/src/model/message_feedback_summary.dart
 lib/src/model/message_summary.dart
 lib/src/model/model_part.dart
 lib/src/model/mutual_tls_security_scheme.dart
@@ -354,6 +369,7 @@ lib/src/model/put_org_oidc_config_request.dart
 lib/src/model/question_answer.dart
 lib/src/model/quick_message_request.dart
 lib/src/model/quick_message_response.dart
+lib/src/model/read_mcp_app_resource_request.dart
 lib/src/model/register_agent_request.dart
 lib/src/model/respond_to_interaction_request.dart
 lib/src/model/respond_to_interaction_request_one_of.dart
@@ -361,6 +377,7 @@ lib/src/model/respond_to_interaction_request_one_of1.dart
 lib/src/model/respond_to_interaction_request_one_of2.dart
 lib/src/model/role.dart
 lib/src/model/rotate_secret_response.dart
+lib/src/model/rule_scope.dart
 lib/src/model/security_requirement.dart
 lib/src/model/security_scheme.dart
 lib/src/model/send_message_configuration.dart
@@ -407,6 +424,7 @@ lib/src/model/test_integration_response.dart
 lib/src/model/token_response.dart
 lib/src/model/tool_call_summary.dart
 lib/src/model/tool_decision.dart
+lib/src/model/tool_permission_rule_summary.dart
 lib/src/model/turn_state.dart
 lib/src/model/turn_status_response.dart
 lib/src/model/ui_capabilities.dart

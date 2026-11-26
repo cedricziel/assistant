@@ -10,6 +10,7 @@ import 'package:dio/dio.dart';
 
 import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/api_send_message_request.dart';
+import 'package:assistant_api/src/model/call_mcp_app_tool_request.dart';
 import 'package:assistant_api/src/model/conversation_detail.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
 import 'package:assistant_api/src/model/create_conversation_request.dart';
@@ -18,11 +19,13 @@ import 'package:assistant_api/src/model/interaction_detail.dart';
 import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
+import 'package:assistant_api/src/model/read_mcp_app_resource_request.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request.dart';
 import 'package:assistant_api/src/model/set_message_feedback_request.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
 import 'package:built_collection/built_collection.dart';
+import 'package:built_value/json_object.dart';
 
 class ConversationsApi {
   final Dio _dio;
@@ -30,6 +33,126 @@ class ConversationsApi {
   final Serializers _serializers;
 
   const ConversationsApi(this._dio, this._serializers);
+
+  /// &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call&#x60;
+  /// Call a tool on the server of the app this tool call rendered, as the caller. The tool must be on that server and visible to apps; the call is checked against the permission policy, and one that needs a human (any tool not marked read-only, an untrusted server, or a policy &#x60;ask&#x60;) runs only with &#x60;confirmed: true&#x60;. Returns the MCP &#x60;CallToolResult&#x60;.
+  ///
+  /// Parameters:
+  /// * [conversationId] - Conversation UUID
+  /// * [toolCallId] - Id of the tool call that carries the app
+  /// * [callMcpAppToolRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [JsonObject] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<JsonObject>> callMcpAppTool({
+    required String conversationId,
+    required String toolCallId,
+    required CallMcpAppToolRequest callMcpAppToolRequest,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path =
+        r'/api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call'
+            .replaceAll(
+                '{' r'conversation_id' '}',
+                encodeQueryParameter(
+                        _serializers, conversationId, const FullType(String))
+                    .toString())
+            .replaceAll(
+                '{' r'tool_call_id' '}',
+                encodeQueryParameter(
+                        _serializers, toolCallId, const FullType(String))
+                    .toString());
+    final _options = Options(
+      method: r'POST',
+      headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      contentType: 'application/json',
+      validateStatus: validateStatus,
+    );
+
+    dynamic _bodyData;
+
+    try {
+      const _type = FullType(CallMcpAppToolRequest);
+      _bodyData =
+          _serializers.serialize(callMcpAppToolRequest, specifiedType: _type);
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final _response = await _dio.request<Object>(
+      _path,
+      data: _bodyData,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    JsonObject? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(JsonObject),
+            ) as JsonObject;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<JsonObject>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
+  }
 
   /// &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel&#x60;
   /// Idempotent: triggers &#x60;Orchestrator::cancel_turn&#x60; if a matching token is registered, otherwise no-op. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker&#39;s &#x60;tokio::select!&#x60;, the SSE stream&#39;s terminal &#x60;agent_error&#x60; event, and the &#x60;event_store&#x60;. Clients should poll &#x60;GET .../status&#x60; (or wait for the stream&#39;s &#x60;agent_error&#x60;) to observe the transition.
@@ -838,6 +961,126 @@ class ConversationsApi {
     }
 
     return Response<BuiltList<ConversationSummary>>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
+  }
+
+  /// &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
+  /// Read a resource from the server of the app this tool call rendered, as the caller. Returns the MCP &#x60;ReadResourceResult&#x60;.
+  ///
+  /// Parameters:
+  /// * [conversationId] - Conversation UUID
+  /// * [toolCallId] - Id of the tool call that carries the app
+  /// * [readMcpAppResourceRequest]
+  /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [JsonObject] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<JsonObject>> readMcpAppResource({
+    required String conversationId,
+    required String toolCallId,
+    required ReadMcpAppResourceRequest readMcpAppResourceRequest,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path =
+        r'/api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read'
+            .replaceAll(
+                '{' r'conversation_id' '}',
+                encodeQueryParameter(
+                        _serializers, conversationId, const FullType(String))
+                    .toString())
+            .replaceAll(
+                '{' r'tool_call_id' '}',
+                encodeQueryParameter(
+                        _serializers, toolCallId, const FullType(String))
+                    .toString());
+    final _options = Options(
+      method: r'POST',
+      headers: <String, dynamic>{
+        if (xSpaceId != null) r'X-Space-Id': xSpaceId,
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      contentType: 'application/json',
+      validateStatus: validateStatus,
+    );
+
+    dynamic _bodyData;
+
+    try {
+      const _type = FullType(ReadMcpAppResourceRequest);
+      _bodyData = _serializers.serialize(readMcpAppResourceRequest,
+          specifiedType: _type);
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final _response = await _dio.request<Object>(
+      _path,
+      data: _bodyData,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    JsonObject? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(JsonObject),
+            ) as JsonObject;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<JsonObject>(
       data: _responseData,
       headers: _response.headers,
       isRedirect: _response.isRedirect,

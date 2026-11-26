@@ -729,6 +729,290 @@
         ]
       }
     },
+    "/api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read`",
+        "description": "Read a resource from the server of the app this tool call rendered, as the\ncaller. Returns the MCP `ReadResourceResult`.",
+        "operationId": "read_mcp_app_resource",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tool_call_id",
+            "in": "path",
+            "description": "Id of the tool call that carries the app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadMcpAppResourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The MCP ReadResourceResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewer access, or missing conversations:write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or tool call not found, or the tool call has no app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body larger than 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The app's server failed the read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The app's server is not available to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call`",
+        "description": "Call a tool on the server of the app this tool call rendered, as the\ncaller. The tool must be on that server and visible to apps; the call is\nchecked against the permission policy, and one that needs a human (any\ntool not marked read-only, an untrusted server, or a policy `ask`) runs\nonly with `confirmed: true`. Returns the MCP `CallToolResult`.",
+        "operationId": "call_mcp_app_tool",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tool_call_id",
+            "in": "path",
+            "description": "Id of the tool call that carries the app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallMcpAppToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The MCP CallToolResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewer access, missing conversations:write scope, a tool not on the app's server or not visible to apps, or denied by the permission policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or tool call not found, or the tool call has no app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The call needs the user's confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body larger than 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The app's server failed the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The app's server is not available to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/{conversation_id}/turns/{turn_id}/cancel": {
       "post": {
         "tags": [
@@ -7070,6 +7354,172 @@
         ]
       }
     },
+    "/api/tool-permission-rules": {
+      "get": {
+        "tags": [
+          "tool-permission-rules"
+        ],
+        "summary": "`GET /api/tool-permission-rules`",
+        "description": "The caller's saved rules in the selected space, oldest first. With\n`scope=space`, every member's rules (space admins and org admins only).",
+        "operationId": "list_tool_permission_rules",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "`own` (default) or `space` (admins only).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuleScope"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Space to read rules from",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ToolPermissionRuleSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "scope=space without admin access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/tool-permission-rules/{id}": {
+      "delete": {
+        "tags": [
+          "tool-permission-rules"
+        ],
+        "summary": "`DELETE /api/tool-permission-rules/{id}`",
+        "description": "Revoke a saved rule. Members can revoke their own rules; a space admin or\norg admin can revoke any rule in the selected space.",
+        "operationId": "delete_tool_permission_rule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Rule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Space the rule belongs to",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Rule revoked"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot revoke rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such rule visible to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/users/me": {
       "get": {
         "tags": [
@@ -10590,6 +11040,28 @@
           }
         }
       },
+      "CallMcpAppToolRequest": {
+        "type": "object",
+        "description": "Body of `POST .../app/tools-call`: a call the app makes to one of its\nserver's tools.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "object",
+            "description": "The tool's arguments."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "The user confirmed this call. Required for a tool without\n`readOnlyHint: true`, and for any call the permission policy leaves\nto a human; without it such a call is refused with `409`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The tool's name on the app's server."
+          }
+        },
+        "additionalProperties": false
+      },
       "CancelTaskRequest": {
         "type": "object",
         "description": "Request for the `CancelTask` method.",
@@ -12251,6 +12723,98 @@
           }
         }
       },
+      "McpAppCspView": {
+        "type": "object",
+        "description": "The origins the app may reach. An empty list means the restrictive default.",
+        "properties": {
+          "base_uri_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "connect_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "frame_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resource_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "McpAppPermissionsView": {
+        "type": "object",
+        "description": "The device permissions the app asks for.",
+        "required": [
+          "camera",
+          "microphone",
+          "geolocation",
+          "clipboard_write"
+        ],
+        "properties": {
+          "camera": {
+            "type": "boolean"
+          },
+          "clipboard_write": {
+            "type": "boolean"
+          },
+          "geolocation": {
+            "type": "boolean"
+          },
+          "microphone": {
+            "type": "boolean"
+          }
+        }
+      },
+      "McpAppView": {
+        "type": "object",
+        "description": "The interactive UI an external MCP tool declared for its result.",
+        "required": [
+          "server",
+          "resource_uri",
+          "html",
+          "csp",
+          "permissions"
+        ],
+        "properties": {
+          "csp": {
+            "$ref": "#/components/schemas/McpAppCspView"
+          },
+          "html": {
+            "type": "string",
+            "description": "The app document, served as `text/html;profile=mcp-app`."
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/McpAppPermissionsView"
+          },
+          "prefers_border": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the app asks to be drawn with a border."
+          },
+          "resource_uri": {
+            "type": "string",
+            "description": "The `ui://` resource the HTML was read from."
+          },
+          "server": {
+            "type": "string",
+            "description": "Namespace of the server the tool came from, as in\n`mcp__{server}__{tool}`."
+          }
+        }
+      },
       "MemberEntry": {
         "type": "object",
         "description": "A space member entry.",
@@ -12370,6 +12934,31 @@
           }
         }
       },
+      "MessageFeedbackSummary": {
+        "type": "object",
+        "description": "The calling user's feedback on a message, as embedded in history.",
+        "required": [
+          "rating",
+          "updated_at"
+        ],
+        "properties": {
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional free-text comment. Omitted when none was given."
+          },
+          "rating": {
+            "type": "string",
+            "description": "`\"positive\"` or `\"negative\"`."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "MessageSummary": {
         "type": "object",
         "description": "A single message in a conversation.",
@@ -12395,6 +12984,17 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "feedback": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageFeedbackSummary",
+                "description": "The calling user's verdict on this message. Omitted when the caller has\nnot rated it."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "finish_reason": {
             "type": [
@@ -13127,6 +13727,20 @@
           }
         }
       },
+      "ReadMcpAppResourceRequest": {
+        "type": "object",
+        "description": "Body of `POST .../app/resources-read`.",
+        "required": [
+          "uri"
+        ],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "The resource to read from the app's server."
+          }
+        },
+        "additionalProperties": false
+      },
       "RegisterAgentRequest": {
         "type": "object",
         "description": "Body for `POST /api/agents`.",
@@ -13251,6 +13865,14 @@
             "type": "string"
           }
         }
+      },
+      "RuleScope": {
+        "type": "string",
+        "description": "Whose rules `GET /api/tool-permission-rules` returns.",
+        "enum": [
+          "own",
+          "space"
+        ]
       },
       "SecurityRequirement": {
         "type": "object",
@@ -13973,6 +14595,17 @@
           "status"
         ],
         "properties": {
+          "app": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/McpAppView",
+                "description": "The MCP App the tool declared for its result. Absent for tools\nwithout one, and on subagent tool results."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "arguments": {
             "type": [
               "object",
@@ -14482,6 +15115,17 @@
           "status"
         ],
         "properties": {
+          "app": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/McpAppView",
+                "description": "The MCP App the tool declared for its result. Absent for tools\nwithout one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "arguments": {
             "description": "The JSON arguments passed to the tool."
           },
@@ -14525,6 +15169,43 @@
           "reject_once",
           "reject_always"
         ]
+      },
+      "ToolPermissionRuleSummary": {
+        "type": "object",
+        "description": "A saved rule.",
+        "required": [
+          "id",
+          "user_id",
+          "effect",
+          "rule",
+          "tool_name",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339 creation time."
+          },
+          "effect": {
+            "type": "string",
+            "description": "`allow` or `deny`."
+          },
+          "id": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string",
+            "description": "Rule text, for example `bash(git status*)`."
+          },
+          "tool_name": {
+            "type": "string",
+            "description": "The tool part of the rule, for example `bash`."
+          },
+          "user_id": {
+            "type": "string",
+            "description": "The user the rule belongs to."
+          }
+        }
       },
       "TurnState": {
         "type": "string",
@@ -15486,6 +16167,10 @@
     {
       "name": "templates",
       "description": "Persona templates — list templates, instantiate personas, check onboarding status"
+    },
+    {
+      "name": "tool-permission-rules",
+      "description": "Saved tool permission rules — list the caller's rules (or the space's, for admins) and revoke them"
     }
   ]
 }

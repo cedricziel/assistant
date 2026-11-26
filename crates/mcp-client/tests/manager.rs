@@ -17,6 +17,7 @@ fn stdio_entry(name: &str, command: Vec<String>, enabled: bool) -> McpServerEntr
         env: HashMap::new(),
         enabled,
         trust: McpTrustLevel::Confirm,
+        tool_timeout_secs: None,
     }
 }
 
@@ -30,6 +31,7 @@ fn http_entry(name: &str, url: &str, enabled: bool) -> McpServerEntry {
         env: HashMap::new(),
         enabled,
         trust: McpTrustLevel::Confirm,
+        tool_timeout_secs: None,
     }
 }
 
@@ -204,6 +206,7 @@ async fn start_records_http_failure_with_env_substituted_and_invalid_headers() {
         env: HashMap::new(),
         enabled: true,
         trust: McpTrustLevel::Trust,
+        tool_timeout_secs: None,
     };
     let mgr = McpClientManager::start(&[entry]).await.unwrap();
     assert_eq!(mgr.tool_count().await, 0);

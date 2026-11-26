@@ -8,6 +8,8 @@ part of 'sse_tool_result_event.dart';
 
 class _$SseToolResultEvent extends SseToolResultEvent {
   @override
+  final McpAppView? app;
+  @override
   final JsonObject? arguments;
   @override
   final JsonObject? data;
@@ -25,7 +27,8 @@ class _$SseToolResultEvent extends SseToolResultEvent {
       (SseToolResultEventBuilder()..update(updates))._build();
 
   _$SseToolResultEvent._(
-      {this.arguments,
+      {this.app,
+      this.arguments,
       this.data,
       this.result,
       required this.status,
@@ -45,6 +48,7 @@ class _$SseToolResultEvent extends SseToolResultEvent {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is SseToolResultEvent &&
+        app == other.app &&
         arguments == other.arguments &&
         data == other.data &&
         result == other.result &&
@@ -56,6 +60,7 @@ class _$SseToolResultEvent extends SseToolResultEvent {
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, app.hashCode);
     _$hash = $jc(_$hash, arguments.hashCode);
     _$hash = $jc(_$hash, data.hashCode);
     _$hash = $jc(_$hash, result.hashCode);
@@ -69,6 +74,7 @@ class _$SseToolResultEvent extends SseToolResultEvent {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'SseToolResultEvent')
+          ..add('app', app)
           ..add('arguments', arguments)
           ..add('data', data)
           ..add('result', result)
@@ -82,6 +88,10 @@ class _$SseToolResultEvent extends SseToolResultEvent {
 class SseToolResultEventBuilder
     implements Builder<SseToolResultEvent, SseToolResultEventBuilder> {
   _$SseToolResultEvent? _$v;
+
+  McpAppViewBuilder? _app;
+  McpAppViewBuilder get app => _$this._app ??= McpAppViewBuilder();
+  set app(McpAppViewBuilder? app) => _$this._app = app;
 
   JsonObject? _arguments;
   JsonObject? get arguments => _$this._arguments;
@@ -114,6 +124,7 @@ class SseToolResultEventBuilder
   SseToolResultEventBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _app = $v.app?.toBuilder();
       _arguments = $v.arguments;
       _data = $v.data;
       _result = $v.result;
@@ -139,17 +150,31 @@ class SseToolResultEventBuilder
   SseToolResultEvent build() => _build();
 
   _$SseToolResultEvent _build() {
-    final _$result = _$v ??
-        _$SseToolResultEvent._(
-          arguments: arguments,
-          data: data,
-          result: result,
-          status: BuiltValueNullFieldError.checkNotNull(
-              status, r'SseToolResultEvent', 'status'),
-          toolCallId: toolCallId,
-          toolName: BuiltValueNullFieldError.checkNotNull(
-              toolName, r'SseToolResultEvent', 'toolName'),
-        );
+    _$SseToolResultEvent _$result;
+    try {
+      _$result = _$v ??
+          _$SseToolResultEvent._(
+            app: _app?.build(),
+            arguments: arguments,
+            data: data,
+            result: result,
+            status: BuiltValueNullFieldError.checkNotNull(
+                status, r'SseToolResultEvent', 'status'),
+            toolCallId: toolCallId,
+            toolName: BuiltValueNullFieldError.checkNotNull(
+                toolName, r'SseToolResultEvent', 'toolName'),
+          );
+    } catch (_) {
+      late String _$failedField;
+      try {
+        _$failedField = 'app';
+        _app?.build();
+      } catch (e) {
+        throw BuiltValueNestedFieldError(
+            r'SseToolResultEvent', _$failedField, e.toString());
+      }
+      rethrow;
+    }
     replace(_$result);
     return _$result;
   }
