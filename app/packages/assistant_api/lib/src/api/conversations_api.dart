@@ -157,7 +157,7 @@ class ConversationsApi {
   }
 
   /// &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel&#x60;
-  /// Idempotent: triggers &#x60;Orchestrator::cancel_turn&#x60; if a matching token is registered, otherwise no-op. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker&#39;s &#x60;tokio::select!&#x60;, the SSE stream&#39;s terminal &#x60;agent_error&#x60; event, and the &#x60;event_store&#x60;. Clients should poll &#x60;GET .../status&#x60; (or wait for the stream&#39;s &#x60;agent_error&#x60;) to observe the transition.
+  /// Idempotent: triggers &#x60;Orchestrator::cancel_turn&#x60; if the run belongs to this conversation and a matching token is registered, otherwise no-op. The cancel also covers a turn no worker has claimed yet: its stream ends at once with &#x60;agent_error {\&quot;reason\&quot;:\&quot;cancelled\&quot;,\&quot;user_message_persisted\&quot;:false}&#x60;. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker&#39;s &#x60;tokio::select!&#x60;, the SSE stream&#39;s terminal &#x60;agent_error&#x60; event, and the &#x60;event_store&#x60;. Clients should poll &#x60;GET .../status&#x60; (or wait for the stream&#39;s &#x60;agent_error&#x60;) to observe the transition.
   ///
   /// Parameters:
   /// * [conversationId] - Conversation UUID

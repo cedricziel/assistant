@@ -1,4 +1,6 @@
-import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:assistant_api/assistant_api.dart' as api show BranchInfo;
+import 'package:assistant_api/assistant_api.dart'
+    hide BranchInfo, ServerCapabilities;
 import 'package:assistant_ui/models.dart';
 
 /// Map a server tool-status string onto [ToolCallStatus]; unknown values
@@ -83,6 +85,9 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
         content: m.content,
         status: parseFinishReason(m.finishReason),
         ttsAvailable: m.ttsAvailable,
+        parentId: m.parentId,
+        branch: _branchFromApi(m.branch),
+        replyBranch: _branchFromApi(m.replyBranch),
         attachments: attachments
             ?.map(
               (a) => ChatAttachment(
@@ -98,6 +103,14 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
   }
   return messages;
 }
+
+BranchInfo? _branchFromApi(api.BranchInfo? info) => info == null
+    ? null
+    : BranchInfo(
+        count: info.count,
+        index: info.index,
+        siblingIds: info.siblingIds.toList(),
+      );
 
 McpApp _mcpAppFromView(McpAppView view) => McpApp(
   server: view.server,

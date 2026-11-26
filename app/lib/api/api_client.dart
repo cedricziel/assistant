@@ -305,11 +305,13 @@ class ApiClient {
   ///
   /// Calls `GET /api/conversations/{id}/runs/{runId}/events/stream?since={since}`
   /// and streams the SSE response.  Throws [DioException] with status 404 if
-  /// the run is unknown or 410 if its events were pruned.
+  /// the run is unknown or 410 if its events were pruned. Cancelling
+  /// [cancelToken] closes the connection.
   Stream<StreamEvent> streamEventsFrom(
     String conversationId,
     String runId, {
     int since = 0,
+    CancelToken? cancelToken,
   }) async* {
     final bearer = await _currentBearer();
     final Response<ResponseBody> response;
@@ -317,6 +319,7 @@ class ApiClient {
       response = await _dio.get<ResponseBody>(
         '/api/conversations/$conversationId/runs/$runId/events/stream',
         queryParameters: {'since': since},
+        cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.stream,
           headers: {

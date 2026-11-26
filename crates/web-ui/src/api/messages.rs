@@ -472,7 +472,10 @@ pub(crate) async fn stream_turn_to_sse(
         // a structured terminal rather than a `done` with empty content.
         enum TerminalKind {
             Done,
-            Cancelled,
+            Cancelled {
+                /// The turn never started, so its user message was not saved.
+                before_start: bool,
+            },
             Errored(String),
         }
         let (reply_text, reply_message_id, reply_attachment_ids, terminal) =
@@ -486,7 +489,10 @@ pub(crate) async fn stream_turn_to_sse(
                 Ok(Err(e)) => {
                     let msg = e.to_string();
                     let kind = if msg.contains(assistant_runtime::TURN_CANCELLED_MARKER) {
-                        TerminalKind::Cancelled
+                        TerminalKind::Cancelled {
+                            before_start: msg
+                                .contains(assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER),
+                        }
                     } else {
                         TerminalKind::Errored(msg)
                     };
@@ -502,7 +508,7 @@ pub(crate) async fn stream_turn_to_sse(
 
         let done_message_id = match terminal {
             TerminalKind::Done => reply_message_id,
-            TerminalKind::Cancelled | TerminalKind::Errored(_) => None,
+            TerminalKind::Cancelled { .. } | TerminalKind::Errored(_) => None,
         };
 
         let (event_type, payload) = match &terminal {
@@ -524,14 +530,17 @@ pub(crate) async fn stream_turn_to_sse(
                 }
                 ("done", done_data)
             }
-            TerminalKind::Cancelled => (
-                "agent_error",
-                serde_json::json!({
+            TerminalKind::Cancelled { before_start } => {
+                let mut cancelled = serde_json::json!({
                     "reason": "cancelled",
                     "message": "Turn cancelled by user",
                     "partial_content": reply_text,
-                }),
-            ),
+                });
+                if *before_start {
+                    cancelled["user_message_persisted"] = serde_json::Value::Bool(false);
+                }
+                ("agent_error", cancelled)
+            }
             TerminalKind::Errored(msg) => (
                 "agent_error",
                 serde_json::json!({
@@ -1831,9 +1840,8 @@ mod tests {
             .clone()
     }
 
-    /// Wait until a worker has claimed the turn and called the LLM at `llm`,
-    /// then cancel it.
-    async fn cancel_when_running(
+    /// Wait until a worker has claimed the turn and called the LLM at `llm`.
+    async fn wait_until_running(
         orchestrator: &assistant_runtime::Orchestrator,
         llm: &MockServer,
         run_id: Uuid,
@@ -1852,6 +1860,15 @@ mod tests {
             orchestrator.is_turn_in_flight(run_id).await,
             "precondition: the turn is in flight"
         );
+    }
+
+    /// Wait until a worker has claimed the turn, then cancel it.
+    async fn cancel_when_running(
+        orchestrator: &assistant_runtime::Orchestrator,
+        llm: &MockServer,
+        run_id: Uuid,
+    ) {
+        wait_until_running(orchestrator, llm, run_id).await;
         orchestrator.cancel_turn(run_id).await;
     }
 
@@ -1976,6 +1993,97 @@ mod tests {
         let (_, last_type, last_payload) = log.last().unwrap();
         assert_eq!(last_type, "agent_error", "the terminal is persisted too");
         assert_eq!(last_payload["reason"], "cancelled");
+    }
+
+    /// Wait until `run_id` is registered with the orchestrator, claimed or not.
+    async fn wait_until_in_flight(orchestrator: &assistant_runtime::Orchestrator, run_id: Uuid) {
+        for _ in 0..200 {
+            if orchestrator.is_turn_in_flight(run_id).await {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("run {run_id} was never registered with the orchestrator");
+    }
+
+    #[tokio::test]
+    async fn send_message_cancelled_before_a_worker_claims_it_ends_the_stream_at_once() {
+        let server = MockServer::start().await;
+        mount_llm_hang(&server).await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let busy_conv = new_conversation(&storage).await;
+        let queued_conv = new_conversation(&storage).await;
+
+        // The only worker is stuck on a turn in another conversation.
+        let busy = post_message(state.clone(), busy_conv, "occupy the worker").await;
+        let busy_run = Uuid::parse_str(&run_id_of(&busy)).unwrap();
+        wait_until_running(&orchestrator, &server, busy_run).await;
+
+        // This turn waits for a worker. Cancel it before one claims it.
+        let queued = post_message(state.clone(), queued_conv, "never starts").await;
+        let queued_run = Uuid::parse_str(&run_id_of(&queued)).unwrap();
+        wait_until_in_flight(&orchestrator, queued_run).await;
+        orchestrator.cancel_turn(queued_run).await;
+
+        let frames = tokio::time::timeout(std::time::Duration::from_secs(3), sse_frames(queued))
+            .await
+            .expect("the stream ends without waiting for a worker");
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(
+            payload["user_message_persisted"], false,
+            "nothing of the turn ran, so the user message was not saved"
+        );
+        assert!(
+            payload.get("message_id").is_none(),
+            "no assistant message exists for a turn that never started"
+        );
+
+        let history = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{queued_conv}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let history = body_json(history.into_body()).await;
+        assert_eq!(
+            history["messages"].as_array().map(Vec::len),
+            Some(0),
+            "the cancelled turn left no user row: {history}"
+        );
+
+        orchestrator.cancel_turn(busy_run).await;
+    }
+
+    #[tokio::test]
+    async fn runner_streams_every_buffered_token_before_done_when_the_result_is_ready() {
+        let (state, storage) = event_log_state().await;
+        let tokens: Vec<_> = (0..20)
+            .map(|i| assistant_runtime::OrchestratorEvent::Token(format!("t{i} ")))
+            .collect();
+
+        let (_, frames) = run_runner(
+            &state,
+            &storage,
+            RunOptions {
+                push: false,
+                suggestions: false,
+            },
+            tokens,
+            Some(Ok(turn_result("done text"))),
+        )
+        .await;
+
+        let streamed = frames.iter().filter(|(ev, _, _)| ev == "token").count();
+        assert_eq!(streamed, 20, "every buffered token precedes the terminal");
+        assert_eq!(frames.last().unwrap().0, "done");
     }
 
     #[tokio::test]
