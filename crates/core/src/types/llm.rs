@@ -438,6 +438,30 @@ pub struct OpenRouterOptions {
     /// Voice notes sent to the model as audio (`[llm.openrouter.audio_input]`).
     #[serde(default)]
     pub audio_input: OpenRouterAudioInput,
+    /// Spoken replies to voice turns (`[llm.openrouter.audio_output]`).
+    #[serde(default)]
+    pub audio_output: OpenRouterAudioOutput,
+}
+
+/// `[llm.openrouter.audio_output]`. The model must list audio output in the
+/// catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OpenRouterAudioOutput {
+    pub enabled: bool,
+    pub voice: String,
+    /// Sample rate of the model's PCM16 audio.
+    pub pcm_sample_rate: u32,
+}
+
+impl Default for OpenRouterAudioOutput {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            voice: "alloy".into(),
+            pcm_sample_rate: 24_000,
+        }
+    }
 }
 
 /// `[llm.openrouter.audio_input]`. The model must list audio input in the
@@ -852,6 +876,26 @@ mod tests {
                 Some(OpenRouterPdfEngine::MistralOcr)
             );
             assert!(parse("pdf_engine = \"tesseract\"").is_err());
+        }
+
+        #[test]
+        fn audio_output_defaults_and_overrides() {
+            let unset = parse("").unwrap().audio_output;
+            assert!(!unset.enabled);
+            assert_eq!(unset.voice, "alloy");
+            assert_eq!(unset.pcm_sample_rate, 24_000);
+
+            let set =
+                parse("[audio_output]\nenabled = true\nvoice = \"nova\"\npcm_sample_rate = 16000")
+                    .unwrap()
+                    .audio_output;
+            assert!(set.enabled);
+            assert_eq!(set.voice, "nova");
+            assert_eq!(set.pcm_sample_rate, 16_000);
+            assert!(
+                parse("[audio_output]\nformat = \"mp3\"").is_err(),
+                "unknown key"
+            );
         }
 
         #[test]
