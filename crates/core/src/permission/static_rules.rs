@@ -376,6 +376,7 @@ fn builtin_allow() -> Vec<Rule> {
         ("agent-terminate", None),
         ("self-analyze", None),
         ("voice-response", None),
+        ("image-generate", None),
         ("web-search", None),
     ]);
     for tool in FILE_TOOLS {
@@ -604,6 +605,16 @@ mod tests {
             "list-tasks",
             "agent-status",
         ] {
+            assert_eq!(verdict(&rules, tool, json!({})), Verdict::Allow, "{tool}");
+        }
+    }
+
+    /// Media tools exist only when the operator configured them, so they
+    /// need no further confirmation.
+    #[test]
+    fn configured_media_tools_are_allowed_by_default() {
+        let rules = StaticRules::builtin();
+        for tool in ["voice-response", "image-generate"] {
             assert_eq!(verdict(&rules, tool, json!({})), Verdict::Allow, "{tool}");
         }
     }

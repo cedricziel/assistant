@@ -225,6 +225,18 @@ pub(crate) async fn state_over_config(
     (state, resolver)
 }
 
+/// The documented split deployment: the returned `ApiState` runs no turn
+/// worker, and a separate set of runtimes over the same databases (and so the
+/// same SQLite bus) claims and runs every turn, as `assistant orchestrator
+/// run` does in its own process.
+pub(crate) async fn split_process_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let spaces = [default_space(&storage)];
+    let (state, _) = state_over(llm_url, &spaces, false).await;
+    let _orchestrator_process = state_over(llm_url, &spaces, true).await;
+    (state, storage)
+}
+
 pub(crate) fn default_space(storage: &Arc<StorageLayer>) -> TestSpace {
     TestSpace {
         id: "default",
