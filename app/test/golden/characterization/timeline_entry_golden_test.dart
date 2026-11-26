@@ -27,7 +27,6 @@ ToolCallRecord _tool(
     ToolCallStatus.ok => '3 results found',
     ToolCallStatus.error => 'Request failed: connection refused',
     ToolCallStatus.denied => 'Denied by permission policy',
-    ToolCallStatus.cancelled => 'Cancelled',
   },
   startedAt: kGoldenNow,
   duration: status == ToolCallStatus.pending ? null : duration,
