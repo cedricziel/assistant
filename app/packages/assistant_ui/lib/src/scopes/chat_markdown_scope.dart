@@ -73,7 +73,11 @@ class ChatMarkdownScope extends InheritedWidget {
 /// with an image icon. Used when no [ChatMarkdownScope] supplies an image
 /// builder. The markdown renderer adds the image semantics.
 Widget markdownImagePlaceholder(String url, String? alt, String? title) {
-  final label = [alt, title, url].firstWhere((s) => s != null && s.isNotEmpty)!;
+  final label = [
+    alt,
+    title,
+    url,
+  ].nonNulls.firstWhere((s) => s.isNotEmpty, orElse: () => '');
   return Builder(
     builder: (context) {
       final color = Theme.of(context).colorScheme.onSurfaceVariant;

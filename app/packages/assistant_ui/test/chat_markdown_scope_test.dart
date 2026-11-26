@@ -72,6 +72,18 @@ void main() {
       expect(find.byType(Image), findsNothing);
     });
 
+    testWidgets('the placeholder renders for an image with no alt, title or '
+        'URL', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: markdownImagePlaceholder('', '', null)),
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.byIcon(Icons.image_outlined), findsOneWidget);
+    });
+
     testWidgets('onTapLink receives the tapped URL', (tester) async {
       final taps = <String>[];
       await _pump(
