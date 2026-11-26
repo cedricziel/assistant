@@ -9,22 +9,21 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
 use tower::ServiceExt;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use assistant_core::auth::AuthContext;
+use assistant_core::bus_messages::TurnAnchor;
 use assistant_core::types::agent::OrgConfig;
-use assistant_core::types::conversation::Interface;
-use assistant_runtime::SubmitTurn;
+use assistant_runtime::TurnMode;
 use assistant_storage::{
     InteractionRow, InteractionStatus, InteractionStore as _, StorageLayer,
     ToolPermissionRuleStore as _,
 };
 
-use super::messages::{RunOptions, stream_turn_to_sse};
+use super::messages::{RunOptions, start_turn, stream_turn_to_sse};
 use super::test_helpers::{
     app, body_bytes, default_space, seed_conversation, split_process_state_with_approvals,
 };
@@ -138,25 +137,28 @@ impl Harness {
             Err(_) => panic!("no runtime"),
         };
         let run_id = Uuid::new_v4();
-        let (event_tx, event_rx) = mpsc::channel(64);
-        let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
-        let submit = SubmitTurn::new(text, self.conversation, Interface::Web)
-            .with_auth(&ctx.auth)
-            .with_request_id(run_id)
-            .with_interactive(true)
-            .with_relay_events(true);
-        tokio::spawn(async move {
-            let _ = turn_tx.send(orchestrator.submit_streaming(submit, event_tx).await);
-        });
+        let lease = orchestrator
+            .turn_registry()
+            .try_begin(self.conversation, run_id, TurnMode::Shared)
+            .expect("no other turn holds the conversation");
+        // Web chat does not ask for approvals yet; the harness opts in.
+        let opts = RunOptions::web_turn(TurnAnchor::Append)
+            .with_user_message_id(Uuid::new_v4())
+            .with_interactive(true);
+        let turn = opts.submit_turn(
+            text.to_string(),
+            self.conversation,
+            &ctx.auth,
+            run_id,
+            lease,
+        );
+        let (event_rx, turn_rx) = start_turn(orchestrator, turn);
         let response = stream_turn_to_sse(
             &ctx,
             &self.state,
             run_id,
             self.conversation,
-            RunOptions {
-                push: false,
-                suggestions: false,
-            },
+            opts,
             text.to_string(),
             event_rx,
             turn_rx,
