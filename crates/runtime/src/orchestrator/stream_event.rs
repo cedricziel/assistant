@@ -40,6 +40,11 @@ pub enum OrchestratorEvent {
         /// Provider-assigned tool-call ID (e.g. Anthropic `tool_use_id`).
         /// `None` for providers that do not use IDs (Ollama).
         tool_call_id: Option<String>,
+        /// Structured render data from `ToolOutput.data`, capped at
+        /// `TOOL_RESULT_DATA_LIMIT_BYTES` (32 KiB) in the orchestrator.
+        /// `None` when the tool produced none, the data was over the cap, or
+        /// the call was denied. Never reaches the LLM, webhooks or adapters.
+        data: Option<serde_json::Value>,
     },
 
     /// A skill run completed (success or failure).
@@ -228,6 +233,7 @@ mod tests {
             arguments: None,
             result: Some("contents".to_string()),
             tool_call_id: Some("call_xyz789".to_string()),
+            data: None,
         };
         match event {
             OrchestratorEvent::ToolResult { tool_call_id, .. } => {
@@ -247,6 +253,7 @@ mod tests {
                 arguments: Some(serde_json::json!({"query": "rust async"})),
                 result: Some("Found results".to_string()),
                 tool_call_id: Some("call_inner_123".to_string()),
+                data: None,
             }),
         };
         match event {

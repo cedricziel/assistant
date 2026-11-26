@@ -80,7 +80,7 @@ impl SpaceRuntime {
 pub struct SpaceRuntimes {
     pools: Arc<OrgPoolFactory>,
     orgs: Arc<OrgContexts>,
-    confirmation: Arc<dyn ConfirmationCallback>,
+    confirmation: Option<Arc<dyn ConfirmationCallback>>,
     audio_store: Option<Arc<AudioStore>>,
     voice: Option<Arc<dyn TtsProvider>>,
     shared_bus: Option<Arc<dyn MessageBus>>,
@@ -97,7 +97,7 @@ impl SpaceRuntimes {
     pub fn new(
         pools: Arc<OrgPoolFactory>,
         orgs: Arc<OrgContexts>,
-        confirmation: Arc<dyn ConfirmationCallback>,
+        confirmation: Option<Arc<dyn ConfirmationCallback>>,
     ) -> Self {
         Self {
             pools,
@@ -296,8 +296,10 @@ impl SpaceRuntimes {
             registry.clone(),
             bus.clone(),
             &config,
-        )
-        .with_confirmation_callback(self.confirmation.clone());
+        );
+        if let Some(callback) = &self.confirmation {
+            orchestrator = orchestrator.with_confirmation_callback(callback.clone());
+        }
         if let Some(source) = &self.turn_tool_source {
             orchestrator = orchestrator.with_turn_tool_source(source.clone(), org_slug, space_slug);
         }
@@ -400,8 +402,6 @@ mod tests {
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
     use assistant_storage::{ConversationStore as _, OrgPoolFactory, SqliteConversationStore};
 
-    use crate::bootstrap::AutoDenyConfirmation;
-
     use super::*;
 
     fn runtimes(base: &std::path::Path) -> Arc<SpaceRuntimes> {
@@ -414,9 +414,7 @@ mod tests {
                     config,
                     Arc::new(ScriptedLlmProvider::new()),
                 )),
-                Arc::new(AutoDenyConfirmation {
-                    interface_name: "test",
-                }),
+                None,
             )
             .with_submit_timeout(10),
         )
@@ -456,9 +454,7 @@ mod tests {
         let runtimes = SpaceRuntimes::new(
             Arc::new(OrgPoolFactory::new(tmp.path())),
             Arc::new(OrgContexts::from_files(tmp.path())),
-            Arc::new(AutoDenyConfirmation {
-                interface_name: "test",
-            }),
+            None,
         );
 
         let acme = runtimes.get("acme", "main").await.unwrap();
@@ -507,9 +503,7 @@ mod tests {
                         config,
                         Arc::new(ScriptedLlmProvider::new()),
                     )),
-                    Arc::new(AutoDenyConfirmation {
-                        interface_name: "test",
-                    }),
+                    None,
                 )
                 .with_submit_timeout(10)
                 .with_turn_tool_source(source.clone()),
@@ -690,9 +684,7 @@ mod tests {
                 config,
                 Arc::new(ScriptedLlmProvider::new()),
             )),
-            Arc::new(AutoDenyConfirmation {
-                interface_name: "test",
-            }),
+            None,
         )
         .with_shared_bus(shared);
         let alpha = runtimes.get("acme", "alpha").await.unwrap();

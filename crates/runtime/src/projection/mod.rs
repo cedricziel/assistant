@@ -80,6 +80,7 @@ impl StreamProjector for SseProjector {
                 arguments,
                 result,
                 tool_call_id,
+                data,
             } => {
                 let mut p = json!({ "tool_name": tool_name, "status": status });
                 if let Some(args) = arguments {
@@ -90,6 +91,9 @@ impl StreamProjector for SseProjector {
                 }
                 if let Some(id) = tool_call_id {
                     p["tool_call_id"] = Value::String(id.clone());
+                }
+                if let Some(data) = data {
+                    p["data"] = data.clone();
                 }
                 SseFrame {
                     event: "tool_result".to_string(),
@@ -197,6 +201,9 @@ fn project_subagent_inner(inner: &OrchestratorEvent) -> (&'static str, Value) {
             arguments,
             result,
             tool_call_id,
+            // Subagent tool calls stay compact rows: `data` is deliberately
+            // not forwarded, so it is not stored twice in the event log.
+            data: _,
         } => {
             let mut d = json!({
                 "tool_name": tool_name,
@@ -260,6 +267,7 @@ mod tests {
                 arguments: Some(json!({"path": "/tmp/x"})),
                 result: Some("contents".into()),
                 tool_call_id: Some("call_2".into()),
+                data: None,
             },
             OrchestratorEvent::SkillComplete {
                 skill_name: "tdd".into(),
@@ -287,6 +295,120 @@ mod tests {
                 audio_id: "audio-1".into(),
             },
         ]
+    }
+
+    /// Frames of a representative turn: a token, a top-level tool result and a
+    /// subagent's tool result. Pinned by `testdata/sse_frames.golden.json` so
+    /// that the wire shape only changes on purpose.
+    fn golden_events() -> Vec<OrchestratorEvent> {
+        vec![
+            OrchestratorEvent::Token("Running it".into()),
+            OrchestratorEvent::ToolResult {
+                tool_name: "bash".into(),
+                status: "ok".into(),
+                arguments: Some(json!({"command": "ls"})),
+                result: Some("a.txt".into()),
+                tool_call_id: Some("call_1".into()),
+                data: None,
+            },
+            OrchestratorEvent::SubagentEvent {
+                agent_id: "a1".into(),
+                inner: Box::new(OrchestratorEvent::ToolResult {
+                    tool_name: "web-fetch".into(),
+                    status: "ok".into(),
+                    arguments: Some(json!({"url": "https://example.com"})),
+                    result: Some("<html>".into()),
+                    tool_call_id: Some("call_2".into()),
+                    data: None,
+                }),
+            },
+        ]
+    }
+
+    fn project_to_golden_shape(events: &[OrchestratorEvent]) -> Value {
+        let frames: Vec<Value> = events
+            .iter()
+            .flat_map(|e| SseProjector.project(e))
+            .map(|f| json!({ "event": f.event, "payload": f.log_payload }))
+            .collect();
+        Value::Array(frames)
+    }
+
+    fn golden() -> Value {
+        serde_json::from_str(include_str!("testdata/sse_frames.golden.json"))
+            .expect("golden file is valid JSON")
+    }
+
+    #[test]
+    fn frames_without_data_match_the_golden_file() {
+        assert_eq!(project_to_golden_shape(&golden_events()), golden());
+    }
+
+    #[test]
+    fn tool_result_with_data_projects_a_data_field() {
+        let frame = only(OrchestratorEvent::ToolResult {
+            tool_name: "bash".into(),
+            status: "ok".into(),
+            arguments: None,
+            result: None,
+            tool_call_id: None,
+            data: Some(json!({"kind": "terminal"})),
+        });
+        assert_eq!(frame.event, "tool_result");
+        assert_eq!(frame.log_payload["data"], json!({"kind": "terminal"}));
+        assert_eq!(frame.sse_data, frame.log_payload.to_string());
+    }
+
+    #[test]
+    fn tool_result_without_data_has_no_data_key() {
+        let frame = only(OrchestratorEvent::ToolResult {
+            tool_name: "bash".into(),
+            status: "ok".into(),
+            arguments: None,
+            result: None,
+            tool_call_id: None,
+            data: None,
+        });
+        assert!(frame.log_payload.get("data").is_none());
+    }
+
+    #[test]
+    fn subagent_tool_result_never_carries_data() {
+        let events: Vec<OrchestratorEvent> = golden_events()
+            .into_iter()
+            .map(|event| match event {
+                OrchestratorEvent::SubagentEvent { agent_id, inner } => {
+                    let inner = match *inner {
+                        OrchestratorEvent::ToolResult {
+                            tool_name,
+                            status,
+                            arguments,
+                            result,
+                            tool_call_id,
+                            ..
+                        } => OrchestratorEvent::ToolResult {
+                            tool_name,
+                            status,
+                            arguments,
+                            result,
+                            tool_call_id,
+                            data: Some(json!({"kind": "terminal"})),
+                        },
+                        other => other,
+                    };
+                    OrchestratorEvent::SubagentEvent {
+                        agent_id,
+                        inner: Box::new(inner),
+                    }
+                }
+                other => other,
+            })
+            .collect();
+        assert_eq!(
+            project_to_golden_shape(&events),
+            golden(),
+            "subagent frames must match the golden file even when the inner result has data"
+        );
     }
 
     #[test]
@@ -359,6 +481,7 @@ mod tests {
                     arguments: None,
                     result: None,
                     tool_call_id: None,
+                    data: None,
                 },
                 "tool_result",
             ),

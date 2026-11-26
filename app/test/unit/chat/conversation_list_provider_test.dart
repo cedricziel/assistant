@@ -43,6 +43,32 @@ class _FakeConversationsApi extends ConversationsApi {
   _FakeConversationsApi() : super(Dio(), standardSerializers);
 
   final List<String> deletedIds = [];
+  final List<CreateConversationRequest> createRequests = [];
+
+  @override
+  Future<Response<ConversationSummary>> createConversation({
+    required CreateConversationRequest createConversationRequest,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    createRequests.add(createConversationRequest);
+    return Response(
+      requestOptions: RequestOptions(path: '/api/conversations'),
+      statusCode: 201,
+      data: ConversationSummary(
+        (b) => b
+          ..id = 'created-1'
+          ..title = 'Untitled'
+          ..createdAt = DateTime(2024, 1, 1)
+          ..updatedAt = DateTime(2024, 1, 1),
+      ),
+    );
+  }
 
   @override
   Future<Response<void>> deleteConversation({
@@ -612,6 +638,41 @@ void main() {
         // Final state should have the latest title
         final state = container.read(conversationListProvider).value!;
         expect(state.conversations.first.title, 'Update 4');
+      },
+    );
+
+    // -----------------------------------------------------------------------
+    // createConversation()
+    // -----------------------------------------------------------------------
+
+    test(
+      'createConversation sends no title so the server auto-titles the chat',
+      () async {
+        final controller = StreamController<ConversationListEvent>.broadcast();
+        final fakeConversationsApi = _FakeConversationsApi();
+        final client = _FakeApiClient(
+          streamController: controller,
+          conversationsApi: fakeConversationsApi,
+        );
+        final container = _makeContainer(client: client);
+        addTearDown(container.dispose);
+        addTearDown(controller.close);
+        final sub = _keepAlive(container);
+        addTearDown(sub.close);
+
+        await container.read(conversationListProvider.future);
+
+        final id = await container
+            .read(conversationListProvider.notifier)
+            .createConversation();
+
+        expect(id, 'created-1');
+        expect(fakeConversationsApi.createRequests, hasLength(1));
+        expect(
+          fakeConversationsApi.createRequests.single.title,
+          isNull,
+          reason: 'An explicit title locks the row and disables auto-titling',
+        );
       },
     );
 

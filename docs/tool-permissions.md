@@ -123,16 +123,17 @@ allow = [
 workspace_roots = ["~/notes"]
 ```
 
-| Key               | Type          | Meaning                                                        |
-| ----------------- | ------------- | -------------------------------------------------------------- |
-| `deny`            | list of rules | Always deny.                                                   |
-| `ask`             | list of rules | Always send to a human.                                        |
-| `allow`           | list of rules | Allow, unless a deny, confinement or ask check fires first.    |
-| `workspace_roots` | list of paths | Directories file tools may use, besides the Persona workspace. |
-| `limits`          | table         | Resource limits for `bash` and `process` (below).              |
-| `decision_model`  | table         | Decision model (above).                                        |
+| Key                        | Type          | Meaning                                                                                |
+| -------------------------- | ------------- | -------------------------------------------------------------------------------------- |
+| `deny`                     | list of rules | Always deny.                                                                           |
+| `ask`                      | list of rules | Always send to a human.                                                                |
+| `allow`                    | list of rules | Allow, unless a deny, confinement or ask check fires first.                            |
+| `workspace_roots`          | list of paths | Directories file tools may use, besides the Persona workspace.                         |
+| `limits`                   | table         | Resource limits for `bash` and `process` (below).                                      |
+| `decision_model`           | table         | Decision model (above).                                                                |
+| `interaction_timeout_secs` | integer       | Seconds an approval or question waits for an answer. Default `600`, range `30..=3600`. |
 
-A rule that does not parse, such as `bash(oops`, stops the config from loading, and the error names the rule. An unknown key under `[permissions]` does too, as does an unpinned `decision_model.model` or a `threshold` outside (0, 1].
+A rule that does not parse, such as `bash(oops`, stops the config from loading, and the error names the rule. An unknown key under `[permissions]` does too, as does an unpinned `decision_model.model` or a `threshold` outside (0, 1], or an `interaction_timeout_secs` outside `30..=3600`.
 
 ### Rule grammar
 

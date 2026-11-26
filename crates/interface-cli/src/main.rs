@@ -141,13 +141,11 @@ async fn main() -> Result<()> {
         wiring::select_binary_role(cli.command.as_ref(), orchestrator_interface_filtered);
     let worker_plan = assistant_runtime::core_worker_plan(binary_role.clone());
 
-    let confirmation_cb: Arc<dyn ConfirmationCallback> =
+    let confirmation_cb: Option<Arc<dyn ConfirmationCallback>> =
         if wiring::uses_auto_deny_confirmation(cli.command.as_ref(), orchestrator_no_repl) {
-            Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
-                interface_name: "background",
-            })
+            None
         } else {
-            Arc::new(CliConfirmation)
+            Some(Arc::new(CliConfirmation::stdin()))
         };
 
     let _otel_guard = init_tracing()?;

@@ -24,6 +24,7 @@ pub mod catalog_item_store;
 pub mod command_events;
 pub mod conversation_broadcaster;
 pub mod conversation_events;
+pub mod conversation_search;
 pub mod conversations;
 pub mod integration_store;
 pub mod interface_instance_store;
