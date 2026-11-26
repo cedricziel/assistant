@@ -239,6 +239,7 @@ mod misc;
 mod model_override;
 mod multimodal;
 mod permission;
+mod response_media;
 mod sanitize;
 mod skill_executions;
 mod streaming;

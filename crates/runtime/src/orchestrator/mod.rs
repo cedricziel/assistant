@@ -1140,7 +1140,7 @@ impl Orchestrator {
             }
 
             match response {
-                LlmResponse::FinalAnswer(text, _meta) => {
+                LlmResponse::FinalAnswer(text, meta) => {
                     let outcome = Self::handle_final_answer_with_extensions(
                         replied,
                         &text,
@@ -1162,6 +1162,14 @@ impl Orchestrator {
                     .await?;
                     match outcome {
                         FinalAnswerOutcome::Done(mut result) => {
+                            self.persist_response_media(
+                                conversation_id,
+                                result.message_id,
+                                meta.media,
+                                &mut turn_attachments,
+                                &mut turn_attachment_ids,
+                            )
+                            .await;
                             result.attachments = turn_attachments;
                             result.attachment_ids = turn_attachment_ids;
                             return Ok(result);
@@ -1603,7 +1611,7 @@ impl Orchestrator {
             }
 
             match response {
-                LlmResponse::FinalAnswer(text, _meta) => {
+                LlmResponse::FinalAnswer(text, meta) => {
                     info!(iteration, "LLM returned final answer");
 
                     let (saved_message_id, timing) = if !text.trim().is_empty() {
@@ -1656,6 +1664,14 @@ impl Orchestrator {
                         );
                     }
 
+                    self.persist_response_media(
+                        conversation_id,
+                        saved_message_id,
+                        meta.media,
+                        &mut turn_attachments,
+                        &mut turn_attachment_ids,
+                    )
+                    .await;
                     return Ok(TurnResult {
                         answer: text,
                         attachments: turn_attachments,
@@ -1789,6 +1805,53 @@ impl Orchestrator {
     }
 
     // ── Attachment helpers ─────────────────────────────────────────────────────
+
+    /// Stores media generated with a final answer as attachments of
+    /// `message_id`, the saved assistant message, and adds them to the
+    /// turn's attachments so interfaces deliver them like tool output.
+    async fn persist_response_media(
+        &self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        media: Vec<assistant_core::GeneratedMedia>,
+        attachments: &mut Vec<assistant_core::Attachment>,
+        attachment_ids: &mut Vec<Uuid>,
+    ) {
+        let store = self.storage.attachment_store();
+        for (index, item) in media.into_iter().enumerate() {
+            let kind = match item.kind {
+                assistant_core::MediaKind::Image => "image",
+                assistant_core::MediaKind::Audio => "audio",
+            };
+            let filename = format!(
+                "{kind}-{}.{}",
+                index + 1,
+                assistant_core::attachment::extension_for_mime(&item.mime)
+            );
+            let meta = assistant_core::AttachmentMeta {
+                id: Uuid::new_v4(),
+                message_id,
+                conversation_id,
+                agent_id: self.agent_id.clone(),
+                filename: filename.clone(),
+                mime_type: item.mime.clone(),
+                size_bytes: item.data.len() as u64,
+                created_at: self.clock.now(),
+            };
+            match store.store(&meta, &item.data).await {
+                Ok(()) => {
+                    debug!(attachment_id = %meta.id, %filename, "Persisted generated media");
+                    attachment_ids.push(meta.id);
+                    attachments.push(assistant_core::Attachment::new(
+                        filename,
+                        item.mime,
+                        item.data.to_vec(),
+                    ));
+                }
+                Err(e) => warn!(%filename, error = %e, "Failed to persist generated media"),
+            }
+        }
+    }
 
     /// Build a map of `message_id → [ContentBlock]` for all attachments in a
     /// conversation that are linked to a message.  Used to replay attachments
