@@ -16,17 +16,19 @@ Checks run in this order. The first one that decides wins.
 
 1. **Deny rules.** Built-in hard-deny rules, then your `deny` rules. A match denies the call.
 2. **Confinement.** For `file-read`, `file-write`, `file-edit` and `file-glob`, a path outside the workspace roots is denied. No allow rule overrides this. To open another directory, add it to `workspace_roots`.
-3. **Ask rules.** Built-in ask rules, then your `ask` rules. A match sends the call to a human.
-4. **Allow rules.** Built-in allow rules, then your `allow` rules. A match allows the call.
-5. **Decision model.** A call no rule decided goes to the decision model when `[permissions.decision_model] enabled = true`. A call whose tool flags it as requiring confirmation skips the model and goes to a human. The model can approve a call and nothing else.
-6. **Human.** Anything still undecided goes to a human. This is also the path when no model is configured.
+3. **Saved deny rules.** The calling user's saved deny rules (see [Approvals and saved rules](#approvals-and-saved-rules)). A match denies the call.
+4. **Ask rules.** Built-in ask rules, then your `ask` rules. A match sends the call to a human.
+5. **Allow rules.** Built-in allow rules, then your `allow` rules. A match allows the call.
+6. **Saved allow rules.** The calling user's saved allow rules. A match allows the call, even for a tool that asks for confirmation.
+7. **Decision model.** A call no rule decided goes to the decision model when `[permissions.decision_model] enabled = true`. A call whose tool flags it as requiring confirmation skips the model and goes to a human. The model can approve a call and nothing else.
+8. **Human.** Anything still undecided goes to a human. This is also the path when no model is configured.
 
 "Goes to a human" resolves like this:
 
-- On an interactive turn, the CLI prompts you. Your answer decides.
+- On an interactive turn, the owner is asked. In the CLI REPL that is a prompt on stdin. In web chat it is an approval card (see below). The answer decides.
 - On any other turn, the call is denied. The reason goes back to the LLM as the tool result, for example `Permission denied for 'bash': approval is required but this turn cannot prompt a user (...). Ask the owner to add an allow rule for this call.`
 
-Only the CLI REPL turn is interactive. Calls over MCP are never interactive.
+Scheduled tasks, messenger interfaces (Slack, Matrix, Signal, Mattermost, Nextcloud), A2A, MCP and Subagent Processes never prompt, so an undecided call there is denied. They do read saved rules.
 
 The final outcome is `allow`, `deny` or `ask`. `ask` is the label for "a human decides, or denial if nobody can be asked".
 
@@ -268,6 +270,44 @@ deny = ["web-fetch(*169.254.169.254*)"]
 
 Rules match the URL string as the LLM wrote it. A hostname that resolves to a blocked address, or a redirect to one, does not match a deny rule on the IP. Prefer narrow allow rules over a broad allow plus a few denies. When the decision model is on, it also sees whether the host is a private address (see Decision model).
 
+## Approvals and saved rules
+
+A turn that someone is watching asks that person before it runs a call the pipeline left undecided. The request is an _approval_. It names the tool and its arguments and waits for the answer. Approvals are rolling out with web chat: until web chat shows approval cards, web turns still deny an undecided call.
+
+### The four answers
+
+| Answer        | Effect                                                                |
+| ------------- | --------------------------------------------------------------------- |
+| Allow once    | The call runs. Nothing is saved.                                      |
+| Allow always  | The call runs and an allow rule is saved for you in this space.       |
+| Reject once   | The call does not run. The LLM is told you denied it.                 |
+| Reject always | The call does not run and a deny rule is saved for you in this space. |
+
+An approval that nobody answers expires after `interaction_timeout_secs` (default 10 minutes, range `30..=3600`). The call does not run and the LLM is told the request expired. The CLI prompt offers only the once answers.
+
+### When "always" is withheld
+
+The card offers only the once answers when saving a rule would be too broad or is not yours to grant:
+
+- The command contains a shell metacharacter (`|`, `;`, `&`, `>`, `` ` ``, `$(`, and so on).
+- It starts with a shell or interpreter (`sh`, `bash`, `zsh`, `python`, `node`, `ruby`, `perl`, and similar) or a wrapper that runs other commands (`env`, `xargs`, `eval`, `exec`, `nohup`, `time`, `watch`).
+- It starts with a destructive command (`rm`, `mv`, `chmod`, `chown`, `dd`, `truncate`, `shred`).
+- A configured `ask` rule produced the approval. That rule means a human decides every time.
+
+Otherwise the saved rule is narrow. `git status --short` saves `bash(git status*)`. `npm -s run build` saves `bash(npm -s run*)`. `web-fetch` saves the scheme and host, and every other tool saves its bare name. The server derives the rule from the stored request. The client never sends a pattern.
+
+### What a saved rule covers
+
+A saved rule belongs to one user in one space. It applies to every turn that carries your identity in that space, whatever the interface. That includes your scheduled tasks and your messages from Slack or Matrix, which never prompt: a saved allow lets a matching call run unattended, and a saved deny blocks it. A call that no saved rule matches is still denied on those turns. Other users, and you in another space, are not affected.
+
+Saved rules never outrank configuration. A configured or built-in deny wins over a saved allow, and a configured `ask` rule still asks. The saved allow also uses the shell-metacharacter guard of allow rules, so `bash(git status*)` does not allow `git status; rm -rf x`.
+
+You can list and revoke your saved rules through `/api/tool-permission-rules`. Space admins and org admins can list and revoke every member's rules in a space. They cannot create or edit a rule or answer a member's approval.
+
+### Messenger interfaces
+
+Slack, Matrix, Signal, Mattermost and Nextcloud turns cannot show an approval. They deny an undecided call as before, and they follow saved rules.
+
 ## Audit events
 
 Each decision logs one `tracing` event at `info` level on the target `assistant::permission`, with the message `tool permission decision`.
@@ -275,13 +315,15 @@ Each decision logs one `tracing` event at `info` level on the target `assistant:
 | Field         | Value                                                                                                   |
 | ------------- | ------------------------------------------------------------------------------------------------------- |
 | `tool`        | Tool name.                                                                                              |
-| `decider`     | Which stage decided. `static-rules` or `decision-model`.                                                |
+| `decider`     | Which stage decided. `static-rules`, `user-rules` or `decision-model`.                                  |
 | `rule`        | The matching rule text, `workspace-roots` for confinement, the model id for `decision-model`, or empty. |
 | `confidence`  | The lowest score from the decision model. Unset for static rules and when the model failed.             |
 | `outcome`     | `allow`, `deny` or `ask`.                                                                               |
 | `interactive` | Whether the turn could prompt a user.                                                                   |
 
 `outcome` is the pipeline result before the human step. An `ask` event does not record whether the user then agreed or the call was denied for lack of a prompt. Arguments are not logged.
+
+Each answer to an approval logs a second event, `tool approval answered`, on the same target. It carries `user`, `tool`, `interaction` (the approval id), `decision` and `rule_id` (empty unless a rule was saved).
 
 The default console filter is `info`, so the events show up without extra setup. See `docs/opentelemetry.md` for `RUST_LOG`.
 

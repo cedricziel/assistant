@@ -40,6 +40,8 @@ pub mod webhooks;
 pub mod workflows;
 
 #[cfg(test)]
+mod approval_flow_tests;
+#[cfg(test)]
 mod space_turn_tests;
 #[cfg(test)]
 mod tenancy_tests;

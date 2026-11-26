@@ -73,7 +73,7 @@ pub use turn_registry::{TurnLease, TurnMode, TurnRegistry};
 ///
 /// The once answers (`AllowOnce`, `RejectOnce`) are always available; the
 /// "always" answers persist a rule and are offered only when the request
-/// carries a suggested rule to save.
+/// carries a suggested rule to save (and no configured ask rule forbids it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ApprovalOptions {
     /// `AllowAlways` may be offered.
@@ -88,6 +88,14 @@ impl ApprovalOptions {
         Self {
             allow_always: false,
             reject_always: false,
+        }
+    }
+
+    /// Offer both "always" answers.
+    pub const fn with_always() -> Self {
+        Self {
+            allow_always: true,
+            reject_always: true,
         }
     }
 
@@ -108,6 +116,8 @@ pub struct ConfirmationRequest<'a> {
     pub reason: &'a str,
     /// Which answers may be offered.
     pub options: ApprovalOptions,
+    /// The rule an "always" answer would save, when one is offered.
+    pub suggested_rule: Option<&'a str>,
     /// Stream sink for the turn, when it has one.
     pub event_sink: Option<&'a mpsc::Sender<OrchestratorEvent>>,
 }
@@ -628,6 +638,17 @@ impl Orchestrator {
         policy: assistant_core::permission::PermissionPolicy,
     ) -> Self {
         self.permission_policy = policy;
+        self
+    }
+
+    /// Let the permission policy read the calling user's saved rules. They
+    /// apply to every turn that carries the user's identity, whatever its
+    /// interface.
+    pub fn with_user_rules(
+        mut self,
+        source: Arc<dyn assistant_core::permission::UserRuleSource>,
+    ) -> Self {
+        self.permission_policy = self.permission_policy.clone().with_user_rules(source);
         self
     }
 
