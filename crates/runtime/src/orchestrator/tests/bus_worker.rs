@@ -66,6 +66,7 @@ async fn run_worker_processes_turn_request() {
         traceparent: None,
         attachment_ids: vec![],
         interactive: false,
+        relay_events: false,
         anchor: bus_messages::TurnAnchor::Append,
         user_message_id: None,
         model_override: None,
@@ -202,6 +203,7 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
         traceparent: None,
         attachment_ids: vec![],
         interactive: false,
+        relay_events: false,
         anchor: bus_messages::TurnAnchor::Append,
         user_message_id: None,
         model_override: None,
@@ -1201,6 +1203,7 @@ async fn worker_touches_the_claimed_message_while_a_turn_runs() {
         traceparent: None,
         attachment_ids: vec![],
         interactive: false,
+        relay_events: false,
         anchor: bus_messages::TurnAnchor::Append,
         user_message_id: None,
         model_override: None,
@@ -1258,6 +1261,7 @@ async fn publish_turn_directly(orch: &Orchestrator, conv_id: Uuid, prompt: &str)
         traceparent: None,
         attachment_ids: vec![],
         interactive: false,
+        relay_events: false,
         anchor: bus_messages::TurnAnchor::Append,
         user_message_id: None,
         model_override: None,
@@ -1461,4 +1465,131 @@ async fn stop_finds_a_running_turn_through_the_registry() {
     assert_eq!(result.ack_text, "Stopped.");
     assert!(handle.await.unwrap().is_err(), "the cancelled turn errors");
     assert!(!orch.conversation_turn_in_flight(conv_id));
+}
+
+// -- Run event relay --
+
+/// An Ollama NDJSON stream of `tokens`, ending with a `done` chunk.
+fn streaming_answer(tokens: &[&str]) -> String {
+    let mut body = String::new();
+    for token in tokens {
+        let chunk = serde_json::json!({
+            "model": "test",
+            "message": {"role": "assistant", "content": token},
+            "done": false,
+        });
+        body.push_str(&format!("{chunk}\n"));
+    }
+    let done = serde_json::json!({
+        "model": "test",
+        "message": {"role": "assistant", "content": ""},
+        "done": true,
+        "done_reason": "stop",
+    });
+    body.push_str(&format!("{done}\n"));
+    body
+}
+
+async fn mount_streaming_answer(server: &MockServer, tokens: &[&str]) {
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(streaming_answer(tokens)))
+        .mount(server)
+        .await;
+}
+
+/// Every `turn.event` message on the bus, oldest first, as `(batch_id, event)`.
+async fn relayed_events(orch: &Orchestrator) -> Vec<(Option<Uuid>, serde_json::Value)> {
+    let mut messages = orch.bus().list(topic::TURN_EVENT, None, 100).await.unwrap();
+    messages.sort_by_key(|m| m.created_at);
+    messages
+        .into_iter()
+        .map(|m| (m.batch_id, m.payload))
+        .collect()
+}
+
+fn streamed_text(events: &[(Option<Uuid>, serde_json::Value)]) -> String {
+    events
+        .iter()
+        .filter(|(_, e)| e["type"] == "token")
+        .filter_map(|(_, e)| e["data"].as_str())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_relayed_turn_publishes_its_events_on_the_bus_keyed_by_run_id() {
+    let server = MockServer::start().await;
+    mount_streaming_answer(&server, &["Hello", ",", " world", "!"]).await;
+    let (orch, _storage) = build(&server.uri()).await;
+    spawn_worker(&orch);
+
+    let run_id = Uuid::new_v4();
+    orch.submit(
+        SubmitTurn::new("hi", Uuid::new_v4(), Interface::Web)
+            .with_auth(&AuthContext::system())
+            .with_request_id(run_id)
+            .with_relay_events(true),
+    )
+    .await
+    .unwrap();
+
+    let events = relayed_events(&orch).await;
+    assert!(!events.is_empty(), "the turn published no events");
+    assert!(
+        events.iter().all(|(batch, _)| *batch == Some(run_id)),
+        "every relayed event carries the run id as its batch id"
+    );
+    assert_eq!(streamed_text(&events), "Hello, world!");
+    let token_messages = events.iter().filter(|(_, e)| e["type"] == "token").count();
+    assert_eq!(
+        token_messages, 1,
+        "tokens that arrive within 200 ms share one message"
+    );
+}
+
+#[tokio::test]
+async fn a_turn_with_a_local_sink_publishes_no_events() {
+    let server = MockServer::start().await;
+    mount_streaming_answer(&server, &["Hello", " world"]).await;
+    let (orch, _storage) = build(&server.uri()).await;
+    spawn_worker(&orch);
+
+    let conversation_id = Uuid::new_v4();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    orch.register_token_sink(conversation_id, tx).await;
+    orch.submit(
+        SubmitTurn::new("hi", conversation_id, Interface::Web)
+            .with_auth(&AuthContext::system())
+            .with_relay_events(true),
+    )
+    .await
+    .unwrap();
+
+    let mut text = String::new();
+    while let Ok(event) = rx.try_recv() {
+        if let crate::OrchestratorEvent::Token(t) = event {
+            text.push_str(&t);
+        }
+    }
+    assert_eq!(text, "Hello world", "the local sink still gets the tokens");
+    assert!(
+        relayed_events(&orch).await.is_empty(),
+        "nothing is published when a local sink consumes the events"
+    );
+}
+
+#[tokio::test]
+async fn a_turn_without_relay_publishes_no_events() {
+    let server = MockServer::start().await;
+    mount_streaming_answer(&server, &["Hello"]).await;
+    let (orch, _storage) = build(&server.uri()).await;
+    spawn_worker(&orch);
+
+    orch.submit(
+        SubmitTurn::new("hi", Uuid::new_v4(), Interface::Web).with_auth(&AuthContext::system()),
+    )
+    .await
+    .unwrap();
+
+    assert!(relayed_events(&orch).await.is_empty());
 }

@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **createdAt** | [**DateTime**](DateTime.md) |  | 
 **id** | **String** |  | 
 **messages** | [**BuiltList&lt;MessageSummary&gt;**](MessageSummary.md) |  | 
+**surfaces** | [**BuiltList&lt;SurfaceSummary&gt;**](SurfaceSummary.md) | Generative UI surfaces anchored on the returned messages. | 
 **title** | **String** |  | 
 **updatedAt** | [**DateTime**](DateTime.md) |  | 
 
