@@ -168,6 +168,7 @@ pub fn turn(answer: &str) -> TurnResult {
         attachment_ids: Vec::new(),
         message_id: None,
         had_errors: false,
+        timing: None,
     }
 }
 

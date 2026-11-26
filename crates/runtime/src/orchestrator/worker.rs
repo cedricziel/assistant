@@ -369,14 +369,7 @@ impl Orchestrator {
 
                     match result {
                         Ok(turn_result) => {
-                            let bus_result = bus_messages::TurnResult {
-                                conversation_id: conv_id,
-                                content: turn_result.answer,
-                                turn: 0,
-                                attachment_ids: turn_result.attachment_ids,
-                                message_id: turn_result.message_id,
-                                had_errors: turn_result.had_errors,
-                            };
+                            let bus_result = bus_turn_result(conv_id, turn_result);
 
                             let result_payload =
                                 serde_json::to_value(&bus_result).unwrap_or_default();
@@ -570,6 +563,7 @@ impl Orchestrator {
                                 attachment_ids: vec![],
                                 message_id: None,
                                 had_errors: true,
+                                timing: None,
                             };
                             let mut pub_req = PublishRequest::new(
                                 topic::TURN_RESULT,
@@ -1053,17 +1047,40 @@ impl Orchestrator {
                         "submit_turn waiter state"
                     );
                 }
-                return Ok(TurnResult {
-                    answer: bus_result.content,
-                    attachments: vec![],
-                    attachment_ids: bus_result.attachment_ids,
-                    message_id: bus_result.message_id,
-                    had_errors: bus_result.had_errors,
-                });
+                return Ok(turn_result_from_bus(bus_result));
             }
 
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+}
+
+// -- Bus conversions ----------------------------------------------------------
+
+/// Converts an orchestrator [`TurnResult`] into the bus message published to
+/// the submitter. Attachment bytes stay behind; only their IDs travel.
+fn bus_turn_result(conversation_id: Uuid, turn_result: TurnResult) -> bus_messages::TurnResult {
+    bus_messages::TurnResult {
+        conversation_id,
+        content: turn_result.answer,
+        turn: 0,
+        attachment_ids: turn_result.attachment_ids,
+        message_id: turn_result.message_id,
+        had_errors: turn_result.had_errors,
+        timing: turn_result.timing,
+    }
+}
+
+/// Converts a bus result back into the orchestrator [`TurnResult`] returned
+/// to the `submit_turn` caller.
+fn turn_result_from_bus(bus_result: bus_messages::TurnResult) -> TurnResult {
+    TurnResult {
+        answer: bus_result.content,
+        attachments: vec![],
+        attachment_ids: bus_result.attachment_ids,
+        message_id: bus_result.message_id,
+        had_errors: bus_result.had_errors,
+        timing: bus_result.timing,
     }
 }
 
@@ -1196,5 +1213,60 @@ mod transient_failure_tests {
     fn ordinary_429_remains_transient() {
         let e = anyhow::anyhow!("API error 429: Too Many Requests");
         assert!(is_transient_turn_error(&e));
+    }
+}
+
+#[cfg(test)]
+mod turn_result_conversion_tests {
+    use super::*;
+
+    fn timed_result() -> TurnResult {
+        TurnResult {
+            answer: "hello".into(),
+            attachments: vec![],
+            attachment_ids: vec![Uuid::new_v4()],
+            message_id: Some(Uuid::new_v4()),
+            had_errors: false,
+            timing: Some(assistant_core::TurnTiming {
+                time_to_first_token_ms: Some(800),
+                total_ms: 3000,
+                output_tokens: Some(120),
+                decode_ms: Some(2200),
+            }),
+        }
+    }
+
+    fn clone_result(r: &TurnResult) -> TurnResult {
+        TurnResult {
+            answer: r.answer.clone(),
+            attachments: vec![],
+            attachment_ids: r.attachment_ids.clone(),
+            message_id: r.message_id,
+            had_errors: r.had_errors,
+            timing: r.timing.clone(),
+        }
+    }
+
+    #[test]
+    fn timing_survives_the_bus_round_trip() {
+        let original = timed_result();
+        let bus = bus_turn_result(Uuid::new_v4(), clone_result(&original));
+        assert_eq!(bus.timing, original.timing, "orchestrator -> bus");
+
+        let json = serde_json::to_value(&bus).unwrap();
+        let wire: bus_messages::TurnResult = serde_json::from_value(json).unwrap();
+        let back = turn_result_from_bus(wire);
+        assert_eq!(back.timing, original.timing, "bus -> orchestrator");
+        assert_eq!(back.answer, original.answer);
+        assert_eq!(back.attachment_ids, original.attachment_ids);
+        assert_eq!(back.message_id, original.message_id);
+    }
+
+    #[test]
+    fn missing_timing_stays_none() {
+        let mut original = timed_result();
+        original.timing = None;
+        let bus = bus_turn_result(Uuid::new_v4(), clone_result(&original));
+        assert_eq!(turn_result_from_bus(bus).timing, None);
     }
 }

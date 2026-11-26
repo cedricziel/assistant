@@ -166,6 +166,7 @@ impl OrchestrationEngine for StubOrchestrationEngine {
                 attachment_ids: Vec::new(),
                 message_id: None,
                 had_errors: false,
+                timing: None,
             });
         }
         state.responses.remove(0)
@@ -197,6 +198,7 @@ mod tests {
             attachment_ids: Vec::new(),
             message_id: None,
             had_errors: false,
+            timing: None,
         }));
         let r = stub
             .submit_turn(

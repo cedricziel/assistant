@@ -945,6 +945,7 @@ pub(crate) mod test_support {
                 attachment_ids: vec![],
                 message_id: None,
                 had_errors: false,
+                timing: None,
             })
         }
 

@@ -129,6 +129,9 @@ pub struct TurnResult {
     /// Gates downstream signals like skill-learner evaluation.
     #[serde(default)]
     pub had_errors: bool,
+    /// How long the turn took. `None` when the turn was not measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<crate::TurnTiming>,
 }
 
 /// A status update emitted during turn processing.
@@ -295,6 +298,54 @@ mod tests {
         assert_eq!(back.traceparent, req.traceparent);
     }
 
+    fn bus_turn_result(timing: Option<crate::TurnTiming>) -> TurnResult {
+        TurnResult {
+            conversation_id: Uuid::new_v4(),
+            content: "done".into(),
+            turn: 0,
+            attachment_ids: vec![],
+            message_id: None,
+            had_errors: false,
+            timing,
+        }
+    }
+
+    #[test]
+    fn turn_result_without_timing_omits_the_key() {
+        let json = serde_json::to_value(bus_turn_result(None)).unwrap();
+        assert!(
+            json.get("timing").is_none(),
+            "timing: None must not serialise a key"
+        );
+    }
+
+    #[test]
+    fn turn_result_payload_without_timing_deserialises() {
+        let json = serde_json::json!({
+            "conversation_id": Uuid::new_v4(),
+            "content": "done",
+            "turn": 0,
+        });
+        let back: TurnResult = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            back.timing, None,
+            "a payload without timing defaults to None"
+        );
+    }
+
+    #[test]
+    fn turn_result_timing_roundtrips_json() {
+        let timing = crate::TurnTiming {
+            time_to_first_token_ms: Some(800),
+            total_ms: 3000,
+            output_tokens: Some(120),
+            decode_ms: Some(2200),
+        };
+        let json = serde_json::to_value(bus_turn_result(Some(timing.clone()))).unwrap();
+        let back: TurnResult = serde_json::from_value(json).unwrap();
+        assert_eq!(back.timing, Some(timing));
+    }
+
     #[test]
     fn turn_request_extension_tools_default_empty() {
         let json = serde_json::json!({
@@ -318,6 +369,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: None,
             had_errors: false,
+            timing: None,
         };
         let json = serde_json::to_value(&res).unwrap();
         let back: TurnResult = serde_json::from_value(json).unwrap();
@@ -336,6 +388,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: Some(mid),
             had_errors: false,
+            timing: None,
         };
         let json = serde_json::to_value(&res).unwrap();
         // message_id should be present in the serialised form.

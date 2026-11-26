@@ -217,6 +217,7 @@ mod tests {
                 attachment_ids: vec![],
                 message_id: None,
                 had_errors: false,
+                timing: None,
             })
         }
 
