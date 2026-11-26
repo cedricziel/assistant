@@ -258,6 +258,13 @@ pub(crate) async fn stream_turn_to_sse(
     let relay = runtime
         .as_ref()
         .map(|runtime| runtime.orchestrator.run_event_relay(conv_id, run_id));
+    // Settles the run's interactions when it ends (ADR-0017).
+    let interaction_broker = super::interactions::broker_or_store_only(
+        runtime
+            .as_ref()
+            .and_then(|runtime| runtime.interactions.clone()),
+        ctx,
+    );
     let suggestion_setup = runtime
         .filter(|runtime| opts.suggestions && runtime.config.suggestions.enabled)
         .map(|runtime| (runtime.config.suggestions.clone(), runtime.llm.clone()));
@@ -429,6 +436,14 @@ pub(crate) async fn stream_turn_to_sse(
             {
                 warn!("Failed to persist event seq={seq} for run {run_id}: {e}");
             }
+            // The log now holds this interaction's resolution; the end-of-run
+            // cleanup must not write it again.
+            if frame.event == "interaction_resolved"
+                && let Some(id) = frame.log_payload["interaction_id"].as_str()
+                && let Err(e) = interaction_broker.store().mark_emitted(id).await
+            {
+                warn!("Failed to mark interaction {id} emitted: {e}");
+            }
             // Broadcast to live tail subscribers.
             let live = assistant_storage::LiveEvent {
                 sequence: seq,
@@ -472,7 +487,10 @@ pub(crate) async fn stream_turn_to_sse(
         // a structured terminal rather than a `done` with empty content.
         enum TerminalKind {
             Done,
-            Cancelled,
+            Cancelled {
+                /// The turn never started, so its user message was not saved.
+                before_start: bool,
+            },
             Errored(String),
         }
         let (reply_text, reply_message_id, reply_attachment_ids, terminal) =
@@ -486,7 +504,10 @@ pub(crate) async fn stream_turn_to_sse(
                 Ok(Err(e)) => {
                     let msg = e.to_string();
                     let kind = if msg.contains(assistant_runtime::TURN_CANCELLED_MARKER) {
-                        TerminalKind::Cancelled
+                        TerminalKind::Cancelled {
+                            before_start: msg
+                                .contains(assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER),
+                        }
                     } else {
                         TerminalKind::Errored(msg)
                     };
@@ -500,9 +521,57 @@ pub(crate) async fn stream_turn_to_sse(
                 ),
             };
 
+        // The turn is over: end its pending interactions and write every
+        // resolution the waiter did not get to emit, ahead of the terminal.
+        match interaction_broker.abandon_run(&run_id_str).await {
+            Ok(rows) => {
+                for event in rows
+                    .iter()
+                    .filter_map(assistant_runtime::interaction::resolved_event)
+                {
+                    for frame in SseProjector.project(&event) {
+                        if let Err(e) = event_store
+                            .append_event(
+                                &run_id_str,
+                                &conv_id_str,
+                                seq,
+                                &frame.event,
+                                &frame.log_payload,
+                            )
+                            .await
+                        {
+                            warn!(
+                                "Failed to persist {} seq={seq} for run {run_id}: {e}",
+                                frame.event
+                            );
+                        }
+                        let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                            sequence: seq,
+                            event_type: frame.event.clone(),
+                            payload: frame.log_payload.clone(),
+                        });
+                        let sse_event = Event::default()
+                            .event(frame.event)
+                            .data(frame.sse_data)
+                            .id(seq.to_string());
+                        seq += 1;
+                        if !client_gone && sse_tx.send(Ok(sse_event)).await.is_err() {
+                            client_gone = true;
+                        }
+                    }
+                }
+                for row in &rows {
+                    if let Err(e) = interaction_broker.store().mark_emitted(&row.id).await {
+                        warn!("Failed to mark interaction {} emitted: {e}", row.id);
+                    }
+                }
+            }
+            Err(e) => warn!("Failed to end interactions of run {run_id}: {e}"),
+        }
+
         let done_message_id = match terminal {
             TerminalKind::Done => reply_message_id,
-            TerminalKind::Cancelled | TerminalKind::Errored(_) => None,
+            TerminalKind::Cancelled { .. } | TerminalKind::Errored(_) => None,
         };
 
         let (event_type, payload) = match &terminal {
@@ -524,14 +593,17 @@ pub(crate) async fn stream_turn_to_sse(
                 }
                 ("done", done_data)
             }
-            TerminalKind::Cancelled => (
-                "agent_error",
-                serde_json::json!({
+            TerminalKind::Cancelled { before_start } => {
+                let mut cancelled = serde_json::json!({
                     "reason": "cancelled",
                     "message": "Turn cancelled by user",
                     "partial_content": reply_text,
-                }),
-            ),
+                });
+                if *before_start {
+                    cancelled["user_message_persisted"] = serde_json::Value::Bool(false);
+                }
+                ("agent_error", cancelled)
+            }
             TerminalKind::Errored(msg) => (
                 "agent_error",
                 serde_json::json!({
@@ -1574,6 +1646,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_message_unarchives_an_archived_conversation() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Hello again").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let id = store
+            .create_conversation(Some("Old chat"))
+            .await
+            .unwrap()
+            .id;
+        store
+            .update_metadata(
+                id,
+                assistant_storage::ConversationPatch {
+                    title: None,
+                    pinned: None,
+                    archived: Some(true),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .get_conversation(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .archived_at
+                .is_some(),
+            "precondition: archived"
+        );
+
+        let resp = post_message(state, id, "Are you still there?").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let _ = body_bytes(resp.into_body()).await;
+
+        let loaded = store.get_conversation(id).await.unwrap().unwrap();
+        assert!(
+            loaded.archived_at.is_none(),
+            "a new user message must unarchive the conversation"
+        );
+        let listed = store.list_conversations().await.unwrap();
+        assert!(listed.iter().any(|c| c.id == id), "back in the main list");
+    }
+
+    #[tokio::test]
     async fn send_message_unknown_conversation_returns_404() {
         let server = MockServer::start().await;
         let (state, _) = test_state(&server.uri()).await;
@@ -1784,9 +1903,8 @@ mod tests {
             .clone()
     }
 
-    /// Wait until a worker has claimed the turn and called the LLM at `llm`,
-    /// then cancel it.
-    async fn cancel_when_running(
+    /// Wait until a worker has claimed the turn and called the LLM at `llm`.
+    async fn wait_until_running(
         orchestrator: &assistant_runtime::Orchestrator,
         llm: &MockServer,
         run_id: Uuid,
@@ -1805,6 +1923,15 @@ mod tests {
             orchestrator.is_turn_in_flight(run_id).await,
             "precondition: the turn is in flight"
         );
+    }
+
+    /// Wait until a worker has claimed the turn, then cancel it.
+    async fn cancel_when_running(
+        orchestrator: &assistant_runtime::Orchestrator,
+        llm: &MockServer,
+        run_id: Uuid,
+    ) {
+        wait_until_running(orchestrator, llm, run_id).await;
         orchestrator.cancel_turn(run_id).await;
     }
 
@@ -1929,6 +2056,97 @@ mod tests {
         let (_, last_type, last_payload) = log.last().unwrap();
         assert_eq!(last_type, "agent_error", "the terminal is persisted too");
         assert_eq!(last_payload["reason"], "cancelled");
+    }
+
+    /// Wait until `run_id` is registered with the orchestrator, claimed or not.
+    async fn wait_until_in_flight(orchestrator: &assistant_runtime::Orchestrator, run_id: Uuid) {
+        for _ in 0..200 {
+            if orchestrator.is_turn_in_flight(run_id).await {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("run {run_id} was never registered with the orchestrator");
+    }
+
+    #[tokio::test]
+    async fn send_message_cancelled_before_a_worker_claims_it_ends_the_stream_at_once() {
+        let server = MockServer::start().await;
+        mount_llm_hang(&server).await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let busy_conv = new_conversation(&storage).await;
+        let queued_conv = new_conversation(&storage).await;
+
+        // The only worker is stuck on a turn in another conversation.
+        let busy = post_message(state.clone(), busy_conv, "occupy the worker").await;
+        let busy_run = Uuid::parse_str(&run_id_of(&busy)).unwrap();
+        wait_until_running(&orchestrator, &server, busy_run).await;
+
+        // This turn waits for a worker. Cancel it before one claims it.
+        let queued = post_message(state.clone(), queued_conv, "never starts").await;
+        let queued_run = Uuid::parse_str(&run_id_of(&queued)).unwrap();
+        wait_until_in_flight(&orchestrator, queued_run).await;
+        orchestrator.cancel_turn(queued_run).await;
+
+        let frames = tokio::time::timeout(std::time::Duration::from_secs(3), sse_frames(queued))
+            .await
+            .expect("the stream ends without waiting for a worker");
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(
+            payload["user_message_persisted"], false,
+            "nothing of the turn ran, so the user message was not saved"
+        );
+        assert!(
+            payload.get("message_id").is_none(),
+            "no assistant message exists for a turn that never started"
+        );
+
+        let history = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{queued_conv}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let history = body_json(history.into_body()).await;
+        assert_eq!(
+            history["messages"].as_array().map(Vec::len),
+            Some(0),
+            "the cancelled turn left no user row: {history}"
+        );
+
+        orchestrator.cancel_turn(busy_run).await;
+    }
+
+    #[tokio::test]
+    async fn runner_streams_every_buffered_token_before_done_when_the_result_is_ready() {
+        let (state, storage) = event_log_state().await;
+        let tokens: Vec<_> = (0..20)
+            .map(|i| assistant_runtime::OrchestratorEvent::Token(format!("t{i} ")))
+            .collect();
+
+        let (_, frames) = run_runner(
+            &state,
+            &storage,
+            RunOptions {
+                push: false,
+                suggestions: false,
+            },
+            tokens,
+            Some(Ok(turn_result("done text"))),
+        )
+        .await;
+
+        let streamed = frames.iter().filter(|(ev, _, _)| ev == "token").count();
+        assert_eq!(streamed, 20, "every buffered token precedes the terminal");
+        assert_eq!(frames.last().unwrap().0, "done");
     }
 
     #[tokio::test]
@@ -2268,6 +2486,228 @@ mod tests {
             logged, all,
             "the event log has consecutive seq ids to the terminal"
         );
+    }
+
+    // -- Interaction events and end-of-run cleanup (ADR-0017) --
+
+    /// A `pending` interaction of `run_id`; returns its id.
+    async fn seed_interaction(storage: &Arc<StorageLayer>, conv_id: Uuid, run_id: Uuid) -> String {
+        use assistant_storage::{InteractionStore as _, NewInteraction};
+        let id = Uuid::new_v4().to_string();
+        storage
+            .interaction_store()
+            .create(NewInteraction {
+                id: id.clone(),
+                conversation_id: conv_id.to_string(),
+                run_id: run_id.to_string(),
+                user_id: "system".into(),
+                kind: "tool_approval".into(),
+                tool_call_id: Some("toolu_1".into()),
+                request: serde_json::json!({"tool_name": "bash"}),
+                expires_at: chrono::Utc::now() + chrono::Duration::minutes(10),
+            })
+            .await
+            .unwrap();
+        id
+    }
+
+    /// [`run_runner_in`] with a caller-chosen run id.
+    async fn run_runner_as(
+        state: &ApiState,
+        storage: &Arc<StorageLayer>,
+        (conv_id, run_id): (Uuid, Uuid),
+        events: Vec<assistant_runtime::OrchestratorEvent>,
+        outcome: anyhow::Result<assistant_runtime::TurnResult>,
+    ) -> Vec<(i64, String, serde_json::Value)> {
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
+        for event in events {
+            event_tx.send(event).await.unwrap();
+        }
+        drop(event_tx);
+        let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
+        let _ = turn_tx.send(outcome);
+        let resp = stream_turn_to_sse(
+            &system_ctx(storage),
+            state,
+            run_id,
+            conv_id,
+            NO_SUGGESTIONS,
+            "hi".to_string(),
+            event_rx,
+            turn_rx,
+        )
+        .await;
+        sse_frames(resp).await;
+        event_log(storage, &run_id.to_string()).await
+    }
+
+    fn kinds_of(log: &[(i64, String, serde_json::Value)]) -> Vec<&str> {
+        log.iter().map(|(_, kind, _)| kind.as_str()).collect()
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_turn_ends_its_pending_interaction_before_the_terminal() {
+        use assistant_storage::InteractionStore as _;
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        let run_id = Uuid::new_v4();
+        let id = seed_interaction(&storage, conv_id, run_id).await;
+
+        let log = run_runner_as(
+            &state,
+            &storage,
+            (conv_id, run_id),
+            vec![],
+            Err(anyhow::anyhow!(assistant_runtime::TURN_CANCELLED_MARKER)),
+        )
+        .await;
+
+        assert_eq!(
+            kinds_of(&log),
+            ["run_started", "interaction_resolved", "agent_error"]
+        );
+        assert_eq!(log[1].2["interaction_id"], id);
+        assert_eq!(log[1].2["kind"], "tool_approval");
+        assert_eq!(log[1].2["outcome"], "cancelled");
+        assert_eq!(log[2].2["reason"], "cancelled");
+        let row = storage.interaction_store().get(&id).await.unwrap().unwrap();
+        assert!(row.resolution_emitted, "the frame marks the row emitted");
+    }
+
+    #[tokio::test]
+    async fn an_answer_that_won_just_before_the_cancel_is_still_reported() {
+        use assistant_storage::{InteractionStatus, InteractionStore as _};
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        let run_id = Uuid::new_v4();
+        let id = seed_interaction(&storage, conv_id, run_id).await;
+        let response = serde_json::json!({"decision": "allow_once"});
+        storage
+            .interaction_store()
+            .resolve_if_pending(&id, InteractionStatus::Resolved, Some(&response), None)
+            .await
+            .unwrap();
+
+        let log = run_runner_as(
+            &state,
+            &storage,
+            (conv_id, run_id),
+            vec![],
+            Err(anyhow::anyhow!(assistant_runtime::TURN_CANCELLED_MARKER)),
+        )
+        .await;
+
+        assert_eq!(
+            kinds_of(&log),
+            ["run_started", "interaction_resolved", "agent_error"]
+        );
+        assert_eq!(log[1].2["outcome"], "resolved");
+        assert_eq!(log[1].2["response"], response);
+    }
+
+    #[tokio::test]
+    async fn a_persisted_resolution_marks_its_row_emitted_and_is_not_repeated() {
+        use assistant_runtime::OrchestratorEvent;
+        use assistant_runtime::interaction::InteractionOutcome;
+        use assistant_storage::{InteractionStatus, InteractionStore as _};
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        let run_id = Uuid::new_v4();
+        let id = seed_interaction(&storage, conv_id, run_id).await;
+        let response = serde_json::json!({"decision": "allow_once"});
+        storage
+            .interaction_store()
+            .resolve_if_pending(&id, InteractionStatus::Resolved, Some(&response), None)
+            .await
+            .unwrap();
+
+        let log = run_runner_as(
+            &state,
+            &storage,
+            (conv_id, run_id),
+            vec![OrchestratorEvent::InteractionResolved {
+                interaction_id: id.clone(),
+                kind: "tool_approval".into(),
+                resolved_at: chrono::Utc::now(),
+                outcome: InteractionOutcome::Resolved {
+                    response,
+                    rule_id: None,
+                },
+            }],
+            Ok(turn_result("ok")),
+        )
+        .await;
+
+        assert_eq!(
+            kinds_of(&log),
+            ["run_started", "interaction_resolved", "done"]
+        );
+        let row = storage.interaction_store().get(&id).await.unwrap().unwrap();
+        assert!(row.resolution_emitted);
+    }
+
+    #[tokio::test]
+    async fn a_turn_ended_by_edit_or_regenerate_leaves_no_approval_waiting() {
+        use assistant_storage::{InteractionStatus, InteractionStore as _};
+        // Edit and regenerate cancel the turn through `cancel_turn`, which
+        // reaches the same terminal path as Stop.
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        let run_id = Uuid::new_v4();
+        let id = seed_interaction(&storage, conv_id, run_id).await;
+
+        run_runner_as(
+            &state,
+            &storage,
+            (conv_id, run_id),
+            vec![],
+            Err(anyhow::anyhow!(assistant_runtime::TURN_CANCELLED_MARKER)),
+        )
+        .await;
+
+        let row = storage.interaction_store().get(&id).await.unwrap().unwrap();
+        assert_eq!(row.status, InteractionStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn a_turn_is_never_blocked_by_a_departed_client() {
+        use assistant_runtime::OrchestratorEvent::Token;
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        let run_id = Uuid::new_v4();
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
+        let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
+        let resp = stream_turn_to_sse(
+            &system_ctx(&storage),
+            &state,
+            run_id,
+            conv_id,
+            NO_SUGGESTIONS,
+            "hi".to_string(),
+            event_rx,
+            turn_rx,
+        )
+        .await;
+        drop(resp);
+
+        for n in 0..100 {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                event_tx.send(Token(format!("t{n}"))),
+            )
+            .await
+            .expect("the turn blocked on a full sink")
+            .expect("the runner stopped draining");
+        }
+        drop(event_tx);
+        let _ = turn_tx.send(Ok(turn_result("done")));
+        while state.run_broadcaster.is_active(&run_id).await {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        let log = event_log(&storage, &run_id.to_string()).await;
+        assert_eq!(log.len(), 102, "run_started, 100 tokens and done");
+        assert_eq!(log.last().map(|(_, kind, _)| kind.as_str()), Some("done"));
     }
 
     #[tokio::test]

@@ -282,6 +282,22 @@ impl SseInteractionResolvedEvent {
 
 // -- Handler --
 
+/// The runtime's broker, or one over the space's store when the runtime has
+/// none. Without a broker no turn waits in this process, but a turn in another
+/// process still reads answers from the shared store, and the end-of-run
+/// cleanup still has rows to settle.
+pub(crate) fn broker_or_store_only(
+    broker: Option<Arc<InteractionBroker>>,
+    ctx: &SpaceCtx,
+) -> Arc<InteractionBroker> {
+    broker.unwrap_or_else(|| {
+        Arc::new(InteractionBroker::new(
+            Arc::new(ctx.storage.interaction_store()),
+            Arc::new(InteractionKinds::with_builtin()),
+        ))
+    })
+}
+
 /// `POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond`
 ///
 /// The turn's owner answers a pending interaction. The answer is validated by
@@ -342,17 +358,9 @@ pub async fn respond_to_interaction(
     };
 
     let broker = match state.runtime(&ctx).await {
-        Ok(runtime) => runtime.interactions.clone(),
+        Ok(runtime) => broker_or_store_only(runtime.interactions.clone(), &ctx),
         Err(response) => return response,
     };
-    // Without a broker no turn waits in this process, but a turn in another
-    // process still reads the answer from the shared store.
-    let broker = broker.unwrap_or_else(|| {
-        Arc::new(InteractionBroker::new(
-            Arc::new(ctx.storage.interaction_store()),
-            Arc::new(InteractionKinds::with_builtin()),
-        ))
-    });
 
     let (conversation_id, run_id) = (conversation_id.to_string(), turn_id.to_string());
     let who = Responder {

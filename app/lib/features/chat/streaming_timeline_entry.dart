@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
@@ -54,6 +52,7 @@ class StreamingTimelineEntry extends StatelessWidget {
       TimelineEntryType.subagent => _buildSubagent(context),
       TimelineEntryType.command => const SizedBox.shrink(),
       TimelineEntryType.interaction => const SizedBox.shrink(),
+      TimelineEntryType.surface => const SizedBox.shrink(),
       TimelineEntryType.message => const SizedBox.shrink(),
     };
   }
@@ -129,153 +128,13 @@ class StreamingTimelineEntry extends StatelessWidget {
         : null;
     if (record == null) return const SizedBox.shrink();
 
-    final hasDetails = record.arguments != null || record.result != null;
-
-    // Duration badge for completed tool calls.
-    final durationLabel = record.duration != null
-        ? _formatDuration(record.duration!)
-        : null;
-
-    return _buildSection(
-      context,
-      icon: Icons.build_outlined,
-      label: record.toolName,
-      statusWidget: _toolStatusWidget(context, record, durationLabel),
-      expandable: hasDetails,
-      expandedContent: hasDetails ? _toolDetails(context, record) : null,
-      forceExpand: record.status == ToolCallStatus.error,
+    return ToolCallBody(
+      record: record,
+      entryState: entryState,
       // An MCP App renders in the footer slot: visible while collapsed.
       footer: record.app == null
           ? null
           : McpAppFrame(toolCall: record, conversationId: conversationId),
-    );
-  }
-
-  String _formatDuration(Duration d) {
-    if (d.inSeconds >= 60) {
-      return '${d.inMinutes}m ${d.inSeconds % 60}s';
-    }
-    final ms = d.inMilliseconds;
-    return '${(ms / 1000).toStringAsFixed(1)}s';
-  }
-
-  Widget _toolStatusWidget(
-    BuildContext context,
-    ToolCallRecord record,
-    String? durationLabel,
-  ) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final icon = _toolStatusIcon(context, record.status);
-
-    if (durationLabel == null ||
-        ThreadDensityScope.of(context) == TimelineDensity.compact) {
-      return icon;
-    }
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        icon,
-        const SizedBox(width: 4),
-        Text(
-          durationLabel,
-          style: TextStyle(
-            fontSize: 10,
-            color: colorScheme.onSurfaceVariant.withAlpha(180),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _toolStatusIcon(BuildContext context, ToolCallStatus status) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return switch (status) {
-      ToolCallStatus.pending => const SizedBox(
-        width: 12,
-        height: 12,
-        child: CircularProgressIndicator.adaptive(strokeWidth: 1.5),
-      ),
-      ToolCallStatus.ok => const Icon(
-        Icons.check_circle_outline,
-        size: 14,
-        color: Colors.green,
-      ),
-      ToolCallStatus.error => Icon(
-        Icons.error_outline,
-        size: 14,
-        color: colorScheme.error,
-      ),
-      ToolCallStatus.denied => const Icon(
-        Icons.block,
-        size: 14,
-        color: Colors.amber,
-      ),
-      ToolCallStatus.cancelled => Icon(
-        Icons.block,
-        size: 14,
-        color: colorScheme.onSurfaceVariant.withAlpha(180),
-        semanticLabel: 'Cancelled',
-      ),
-    };
-  }
-
-  Widget _toolDetails(BuildContext context, ToolCallRecord record) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (record.arguments != null) ...[
-          Text(
-            'Arguments',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 2),
-          SelectableText(
-            _formatJson(record.arguments!),
-            style: TextStyle(
-              fontSize: 10,
-              fontFamily: 'monospace',
-              color: colorScheme.onSurface,
-            ),
-          ),
-        ],
-        if (record.arguments != null && record.result != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Divider(
-              height: 1,
-              thickness: 0.5,
-              color: colorScheme.outlineVariant.withAlpha(80),
-            ),
-          ),
-        if (record.result != null) ...[
-          Text(
-            'Result',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 2),
-          SelectableText(
-            record.result!,
-            style: TextStyle(
-              fontSize: 10,
-              fontFamily: 'monospace',
-              color: record.status == ToolCallStatus.error
-                  ? colorScheme.error
-                  : colorScheme.onSurface,
-            ),
-          ),
-        ],
-      ],
     );
   }
 
@@ -395,7 +254,7 @@ class StreamingTimelineEntry extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              _toolStatusIcon(context, tc.status),
+              ToolStatusIcon(status: tc.status),
             ],
           ),
         ),
@@ -446,13 +305,5 @@ class StreamingTimelineEntry extends StatelessWidget {
       body: expandedContent,
       footer: footer,
     );
-  }
-
-  String _formatJson(Map<String, dynamic> json) {
-    try {
-      return const JsonEncoder.withIndent('  ').convert(json);
-    } catch (_) {
-      return json.toString();
-    }
   }
 }

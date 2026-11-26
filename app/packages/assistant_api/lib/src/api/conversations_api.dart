@@ -157,7 +157,7 @@ class ConversationsApi {
   }
 
   /// &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel&#x60;
-  /// Idempotent: triggers &#x60;Orchestrator::cancel_turn&#x60; if a matching token is registered, otherwise no-op. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker&#39;s &#x60;tokio::select!&#x60;, the SSE stream&#39;s terminal &#x60;agent_error&#x60; event, and the &#x60;event_store&#x60;. Clients should poll &#x60;GET .../status&#x60; (or wait for the stream&#39;s &#x60;agent_error&#x60;) to observe the transition.
+  /// Idempotent: triggers &#x60;Orchestrator::cancel_turn&#x60; if the run belongs to this conversation and a matching token is registered, otherwise no-op. The cancel also covers a turn no worker has claimed yet: its stream ends at once with &#x60;agent_error {\&quot;reason\&quot;:\&quot;cancelled\&quot;,\&quot;user_message_persisted\&quot;:false}&#x60;. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker&#39;s &#x60;tokio::select!&#x60;, the SSE stream&#39;s terminal &#x60;agent_error&#x60; event, and the &#x60;event_store&#x60;. Clients should poll &#x60;GET .../status&#x60; (or wait for the stream&#39;s &#x60;agent_error&#x60;) to observe the transition.
   ///
   /// Parameters:
   /// * [conversationId] - Conversation UUID
@@ -890,10 +890,11 @@ class ConversationsApi {
     );
   }
 
-  /// &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
-  ///
+  /// &#x60;GET /api/conversations&#x60; — list conversations, newest first.
+  /// Returns the unarchived conversations, pinned first. With &#x60;?archived&#x3D;true&#x60; it returns the archived ones instead, most recently archived first.
   ///
   /// Parameters:
+  /// * [archived] - `true` lists only archived conversations, newest archive first. Absent or `false` lists the unarchived ones, pinned first.
   /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
@@ -905,6 +906,7 @@ class ConversationsApi {
   /// Returns a [Future] containing a [Response] with a [BuiltList<ConversationSummary>] as data
   /// Throws [DioException] if API call or serialization fails
   Future<Response<BuiltList<ConversationSummary>>> listConversations({
+    bool? archived,
     String? xSpaceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -933,9 +935,15 @@ class ConversationsApi {
       validateStatus: validateStatus,
     );
 
+    final _queryParameters = <String, dynamic>{
+      r'archived':
+          encodeQueryParameter(_serializers, archived, const FullType(bool)),
+    };
+
     final _response = await _dio.request<Object>(
       _path,
       options: _options,
+      queryParameters: _queryParameters,
       cancelToken: cancelToken,
       onSendProgress: onSendProgress,
       onReceiveProgress: onReceiveProgress,
@@ -1845,8 +1853,8 @@ class ConversationsApi {
     );
   }
 
-  /// &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
-  /// Neither change moves the conversation in the list: only new messages bump &#x60;updated_at&#x60;.
+  /// &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title, pin and/or archive state.
+  /// None of these changes moves the conversation in the list: only new messages bump &#x60;updated_at&#x60;. Archiving clears the pin; pinning an archived conversation unarchives it.
   ///
   /// Parameters:
   /// * [id] - Conversation ID

@@ -8,6 +8,8 @@ part of 'conversation_summary.dart';
 
 class _$ConversationSummary extends ConversationSummary {
   @override
+  final DateTime? archivedAt;
+  @override
   final DateTime createdAt;
   @override
   final String id;
@@ -23,7 +25,8 @@ class _$ConversationSummary extends ConversationSummary {
       (ConversationSummaryBuilder()..update(updates))._build();
 
   _$ConversationSummary._(
-      {required this.createdAt,
+      {this.archivedAt,
+      required this.createdAt,
       required this.id,
       this.pinnedAt,
       required this.title,
@@ -42,6 +45,7 @@ class _$ConversationSummary extends ConversationSummary {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is ConversationSummary &&
+        archivedAt == other.archivedAt &&
         createdAt == other.createdAt &&
         id == other.id &&
         pinnedAt == other.pinnedAt &&
@@ -52,6 +56,7 @@ class _$ConversationSummary extends ConversationSummary {
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, archivedAt.hashCode);
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, pinnedAt.hashCode);
@@ -64,6 +69,7 @@ class _$ConversationSummary extends ConversationSummary {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'ConversationSummary')
+          ..add('archivedAt', archivedAt)
           ..add('createdAt', createdAt)
           ..add('id', id)
           ..add('pinnedAt', pinnedAt)
@@ -76,6 +82,10 @@ class _$ConversationSummary extends ConversationSummary {
 class ConversationSummaryBuilder
     implements Builder<ConversationSummary, ConversationSummaryBuilder> {
   _$ConversationSummary? _$v;
+
+  DateTime? _archivedAt;
+  DateTime? get archivedAt => _$this._archivedAt;
+  set archivedAt(DateTime? archivedAt) => _$this._archivedAt = archivedAt;
 
   DateTime? _createdAt;
   DateTime? get createdAt => _$this._createdAt;
@@ -104,6 +114,7 @@ class ConversationSummaryBuilder
   ConversationSummaryBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _archivedAt = $v.archivedAt;
       _createdAt = $v.createdAt;
       _id = $v.id;
       _pinnedAt = $v.pinnedAt;
@@ -130,6 +141,7 @@ class ConversationSummaryBuilder
   _$ConversationSummary _build() {
     final _$result = _$v ??
         _$ConversationSummary._(
+          archivedAt: archivedAt,
           createdAt: BuiltValueNullFieldError.checkNotNull(
               createdAt, r'ConversationSummary', 'createdAt'),
           id: BuiltValueNullFieldError.checkNotNull(

@@ -4,10 +4,9 @@
 //
 // Specified by: openspec/changes/chat-stream-progress-ux/specs/...
 
+import 'package:assistant_ui/assistant_ui.dart';
+import 'package:assistant_ui/models.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:assistant_app/features/chat/chat_provider.dart';
-import 'package:assistant_app/features/chat/turn_status_label.dart';
 
 TurnStatusSnapshot _snap(TurnEventKind kind, {String? toolName}) =>
     TurnStatusSnapshot(
