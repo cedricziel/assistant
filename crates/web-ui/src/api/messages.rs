@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use assistant_core::VOICE_PLACEHOLDER;
 use assistant_core::auth::AuthContext;
+use assistant_core::bus_messages::TurnAnchor;
 use assistant_core::clock::{Clock, SystemClock};
 use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::llm::provider::LlmProvider;
@@ -32,12 +33,14 @@ use assistant_core::types::conversation::Interface;
 use assistant_core::types::features::SuggestionsConfig;
 use assistant_runtime::OrchestratorEvent;
 use assistant_runtime::SubmitTurn;
+use assistant_runtime::orchestrator::{TurnLease, TurnMode};
 use assistant_runtime::projection::{SseProjector, StreamProjector};
 use assistant_storage::{
     ConversationEventStore as _, ConversationStore, PushSubscriptionStore, SqliteConversationStore,
 };
 use assistant_transcription::TranscriptionRequest;
 
+use crate::errors::json_error;
 use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
@@ -112,6 +115,7 @@ pub struct QuickMessageResponse {
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
         (status = 404, description = "Conversation not found", body = ErrorBody),
+        (status = 409, description = "An edit or regenerate is running in this conversation", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -149,55 +153,66 @@ pub async fn send_message(
     // Generate a unique ID for this orchestrator run.
     let run_id = Uuid::new_v4();
 
-    let (event_tx, event_rx) = mpsc::channel::<OrchestratorEvent>(64);
-
     let orchestrator = match state.runtime(&ctx).await {
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    let user_attachment_ids = body.attachment_ids;
-    let user_message = content.clone();
+    // An edit or regenerate holds the conversation exclusively: an append
+    // would land its user row on a leaf that is about to move.
+    let Some(lease) = orchestrator
+        .turn_registry()
+        .try_begin(conv_id, run_id, TurnMode::Shared)
+    else {
+        return json_error(
+            StatusCode::CONFLICT,
+            "An edit or regenerate is running in this conversation",
+        );
+    };
+    let opts = RunOptions::web_turn(TurnAnchor::Append).with_user_message_id(Uuid::new_v4());
     // Use `run_id` as the orchestrator's `request_id` so external cancel
     // calls — `POST .../turns/{run_id}/cancel` — can find the matching
     // CancellationToken via `Orchestrator::cancel_turn`.
-    let turn_result_rx = {
-        let (tx, rx) =
-            tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
-        let submit_request_id = run_id;
-        tokio::spawn(async move {
-            let result = orchestrator
-                .submit_streaming(
-                    SubmitTurn::new(content, conv_id, Interface::Web)
-                        .with_auth(&auth)
-                        .with_request_id(submit_request_id)
-                        .with_attachments(user_attachment_ids)
-                        // The turn may run in another process, which relays
-                        // its events over the bus instead of into `event_tx`.
-                        .with_relay_events(true),
-                    event_tx,
-                )
-                .await;
-            let _ = tx.send(result);
-        });
-        rx
-    };
+    let turn = opts
+        .submit_turn(content.clone(), conv_id, &auth, run_id, lease)
+        .with_attachments(body.attachment_ids);
+    let (event_rx, turn_result_rx) = start_turn(orchestrator, turn);
 
     stream_turn_to_sse(
         &ctx,
         &state,
         run_id,
         conv_id,
-        RunOptions {
-            push: true,
-            suggestions: true,
-            transcript: None,
-        },
-        user_message,
+        opts,
+        content,
         event_rx,
         turn_result_rx,
     )
     .await
 }
+
+/// Submit `turn` in the background and return the channels
+/// [`stream_turn_to_sse`] reads: its events and its outcome.
+pub(crate) fn start_turn(
+    orchestrator: std::sync::Arc<assistant_runtime::Orchestrator>,
+    turn: SubmitTurn,
+) -> (
+    mpsc::Receiver<OrchestratorEvent>,
+    tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+) {
+    let (event_tx, event_rx) = mpsc::channel::<OrchestratorEvent>(64);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let result = orchestrator.submit_streaming(turn, event_tx).await;
+        let _ = tx.send(result);
+    });
+    (event_rx, rx)
+}
+
+/// Whether web turns can answer prompts (tool approvals, questions).
+/// `tool-approval-prompts`' enabling PR flips it, once the client cards
+/// exist. Send, edit and regenerate all read it through
+/// [`RunOptions::web_turn`], so they flip together.
+const WEB_TURNS_INTERACTIVE: bool = false;
 
 /// Per-entry-point policy for [`stream_turn_to_sse`].
 #[derive(Debug, Clone)]
@@ -210,6 +225,75 @@ pub(crate) struct RunOptions {
     /// What the user said, when the turn answers a voice message. Emitted and
     /// persisted as the `transcript` frame right after `run_started`.
     pub transcript: Option<String>,
+    /// A human is waiting on the turn and can answer prompts.
+    pub interactive: bool,
+    /// Where the turn's rows attach in the message tree.
+    pub anchor: TurnAnchor,
+    /// The id the run persists its user row under (the answered message for a
+    /// regenerate). Announced in `run_started`.
+    pub user_message_id: Option<Uuid>,
+}
+
+impl RunOptions {
+    /// The options of a streaming web turn. Send, edit and regenerate all
+    /// build theirs here, so a policy change applies to the three together.
+    pub(crate) const fn web_turn(anchor: TurnAnchor) -> Self {
+        Self {
+            push: true,
+            suggestions: true,
+            transcript: None,
+            interactive: WEB_TURNS_INTERACTIVE,
+            anchor,
+            user_message_id: None,
+        }
+    }
+
+    pub(crate) const fn with_user_message_id(mut self, id: Uuid) -> Self {
+        self.user_message_id = Some(id);
+        self
+    }
+
+    /// A voice turn: it answers what the user said, offers no suggestions and
+    /// opens with that transcript.
+    pub(crate) fn voice_turn(transcript: String) -> Self {
+        Self {
+            suggestions: false,
+            transcript: Some(transcript),
+            ..Self::web_turn(TurnAnchor::Append)
+        }
+    }
+
+    /// Tests use it to flip the flag the enabling PR will flip.
+    #[cfg(test)]
+    pub(crate) const fn with_interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
+        self
+    }
+
+    /// The turn to submit under `lease`, a web turn identified by `run_id`.
+    pub(crate) fn submit_turn(
+        &self,
+        prompt: String,
+        conversation_id: Uuid,
+        auth: &AuthContext,
+        run_id: Uuid,
+        lease: TurnLease,
+    ) -> SubmitTurn {
+        let mut turn = SubmitTurn::new(prompt, conversation_id, Interface::Web)
+            .with_auth(auth)
+            .with_request_id(run_id)
+            .with_lease(lease)
+            .with_interactive(self.interactive)
+            // The turn may run in another process, which relays its events
+            // over the bus instead of into the local sink.
+            .with_relay_events(true);
+        turn.anchor = self.anchor.clone();
+        // A regenerate persists no user row, so it has no id to pre-assign.
+        if !matches!(self.anchor, TurnAnchor::Regenerate { .. }) {
+            turn.user_message_id = self.user_message_id;
+        }
+        turn
+    }
 }
 
 /// Drive one turn to its SSE response: emit `run_started` (sequence 0), forward
@@ -279,7 +363,10 @@ pub(crate) async fn stream_turn_to_sse(
 
     // Emit run_started event (sequence 0) to the durable log.
     let run_id_str = run_id.to_string();
-    let run_started_payload = serde_json::json!({"run_id": run_id_str});
+    let run_started_payload = match opts.user_message_id {
+        Some(id) => serde_json::json!({"run_id": run_id_str, "user_message_id": id}),
+        None => serde_json::json!({"run_id": run_id_str}),
+    };
     if let Err(e) = event_store
         .append_event(
             &run_id_str,
@@ -1480,43 +1567,31 @@ pub async fn send_voice_message(
     // Run through the same lifecycle as `send_message`: the run id is the
     // orchestrator's request id, so the turn can be cancelled and replayed.
     let run_id = Uuid::new_v4();
-    let (event_tx, event_rx) = mpsc::channel::<OrchestratorEvent>(64);
-
     let orchestrator = match state.runtime(&ctx).await {
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    let content = transcript.clone();
-    let recording_id = meta.id;
-    let turn_result_rx = {
-        let (tx, rx) =
-            tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
-        tokio::spawn(async move {
-            let result = orchestrator
-                .submit_streaming(
-                    SubmitTurn::new(content, conv_id, Interface::Web)
-                        .with_auth(&auth)
-                        .with_request_id(run_id)
-                        .with_attachments(vec![recording_id])
-                        .with_relay_events(true),
-                    event_tx,
-                )
-                .await;
-            let _ = tx.send(result);
-        });
-        rx
+    let Some(lease) = orchestrator
+        .turn_registry()
+        .try_begin(conv_id, run_id, TurnMode::Shared)
+    else {
+        return json_error(
+            StatusCode::CONFLICT,
+            "An edit or regenerate is running in this conversation",
+        );
     };
+    let opts = RunOptions::voice_turn(transcript.clone()).with_user_message_id(Uuid::new_v4());
+    let turn = opts
+        .submit_turn(transcript.clone(), conv_id, &auth, run_id, lease)
+        .with_attachments(vec![meta.id]);
+    let (event_rx, turn_result_rx) = start_turn(orchestrator, turn);
 
     stream_turn_to_sse(
         &ctx,
         &state,
         run_id,
         conv_id,
-        RunOptions {
-            push: true,
-            suggestions: false,
-            transcript: Some(transcript.clone()),
-        },
+        opts,
         transcript,
         event_rx,
         turn_result_rx,
@@ -1821,6 +1896,85 @@ mod tests {
             uuid::Uuid::parse_str(mid).is_ok(),
             "message_id should be a valid UUID, got: {mid}"
         );
+    }
+
+    // -- RunOptions::web_turn ---------------------------------------------------
+
+    fn web_anchors() -> [TurnAnchor; 3] {
+        let (parent, edited, user) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        [
+            TurnAnchor::Append,
+            TurnAnchor::Edit {
+                parent_message_id: Some(parent),
+                edited_message_id: edited,
+            },
+            TurnAnchor::Regenerate {
+                user_message_id: user,
+            },
+        ]
+    }
+
+    fn submitted(opts: &RunOptions) -> assistant_runtime::SubmitTurn {
+        let conv = Uuid::new_v4();
+        let run = Uuid::new_v4();
+        let lease = assistant_runtime::orchestrator::TurnRegistry::default()
+            .try_begin(
+                conv,
+                run,
+                assistant_runtime::orchestrator::TurnMode::Exclusive,
+            )
+            .unwrap();
+        opts.submit_turn(
+            "text".into(),
+            conv,
+            &assistant_core::auth::AuthContext::system(),
+            run,
+            lease,
+        )
+    }
+
+    #[test]
+    fn send_edit_and_regenerate_submit_the_same_web_turn_policy() {
+        for interactive in [false, true] {
+            let submitted: Vec<_> = web_anchors()
+                .into_iter()
+                .map(|anchor| {
+                    let opts = RunOptions::web_turn(anchor).with_interactive(interactive);
+                    assert!(opts.push && opts.suggestions, "{:?}", opts.anchor);
+                    let turn = submitted(&opts);
+                    (turn.interactive, turn.relay_events)
+                })
+                .collect();
+            assert_eq!(
+                submitted,
+                vec![(interactive, true); 3],
+                "the flag reaches all three entry points alike"
+            );
+        }
+    }
+
+    #[test]
+    fn web_turns_are_not_interactive_until_the_approvals_pr_enables_them() {
+        for anchor in web_anchors() {
+            let opts = RunOptions::web_turn(anchor);
+            assert!(!opts.interactive, "{:?}", opts.anchor);
+            assert!(!submitted(&opts).interactive, "{:?}", opts.anchor);
+        }
+    }
+
+    #[test]
+    fn a_regenerate_pre_assigns_no_user_row_id() {
+        let id = Uuid::new_v4();
+        for anchor in web_anchors() {
+            let regenerates = matches!(anchor, TurnAnchor::Regenerate { .. });
+            let turn = submitted(&RunOptions::web_turn(anchor.clone()).with_user_message_id(id));
+            assert_eq!(turn.anchor, anchor);
+            assert_eq!(
+                turn.user_message_id,
+                (!regenerates).then_some(id),
+                "{anchor:?}"
+            );
+        }
     }
 
     // -- send_message frame sequence (characterisation of the streamed runner) --
@@ -2163,7 +2317,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
-                transcript: None,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             tokens,
             Some(Ok(turn_result("done text"))),
@@ -2327,7 +2481,9 @@ mod tests {
 
     // -- stream_turn_to_sse driven directly -----------------------------------
 
-    use super::{RunOptions, stream_turn_to_sse};
+    use assistant_core::bus_messages::TurnAnchor;
+
+    use super::{RunOptions, WEB_TURNS_INTERACTIVE, stream_turn_to_sse};
 
     fn system_ctx(storage: &Arc<StorageLayer>) -> crate::space::SpaceCtx {
         crate::space::SpaceCtx {
@@ -2345,6 +2501,9 @@ mod tests {
         push: true,
         suggestions: false,
         transcript: None,
+        interactive: WEB_TURNS_INTERACTIVE,
+        anchor: TurnAnchor::Append,
+        user_message_id: None,
     };
 
     /// Run the shared runner over hand-fed channels; returns the run id and SSE frames.
@@ -2461,7 +2620,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
-                transcript: None,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             "hi".to_string(),
             event_rx,
@@ -2971,7 +3130,7 @@ mod tests {
             RunOptions {
                 push: false,
                 suggestions: false,
-                transcript: None,
+                ..RunOptions::web_turn(TurnAnchor::Append)
             },
             vec![],
             Some(Ok(turn_result("quiet"))),
@@ -2992,6 +3151,9 @@ mod tests {
         push: true,
         suggestions: true,
         transcript: None,
+        interactive: WEB_TURNS_INTERACTIVE,
+        anchor: TurnAnchor::Append,
+        user_message_id: None,
     };
 
     /// State over `llm` whose org has `[suggestions]` set as given.
