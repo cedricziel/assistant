@@ -102,9 +102,6 @@ pub trait ConversationStore: Send + Sync {
     /// rename that lands while the LLM is running is never overwritten.
     async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool>;
 
-    /// Replace the full message history of a conversation.
-    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()>;
-
     /// Delete a conversation (and its messages).
     async fn delete_conversation(&self, id: Uuid) -> Result<()>;
 
@@ -315,8 +312,8 @@ impl SqliteConversationStore {
 
         let insert = sqlx::query(
             "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json, tool_call_id, tool_status, tool_data_json, traceparent, finish_reason, model) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18) \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json, tool_call_id, tool_status, tool_data_json, tool_app_json, traceparent, finish_reason, model) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -334,6 +331,7 @@ impl SqliteConversationStore {
         .bind(&msg.tool_call_id)
         .bind(&msg.tool_status)
         .bind(&msg.tool_data_json)
+        .bind(&msg.tool_app_json)
         .bind(&msg.traceparent)
         .bind(msg.finish_reason.map(MessageFinishReason::as_str))
         .bind(&msg.model)
@@ -680,39 +678,6 @@ impl ConversationStore for SqliteConversationStore {
     }
 
     /// Delete a conversation and all its messages (cascade).
-    /// Replace all persisted messages for a conversation with the provided
-    /// set.  Existing messages are deleted first; the new messages are then
-    /// inserted in order.  The conversation record itself is kept intact.
-    ///
-    /// Used by context compaction to persist a shrunk history so subsequent
-    /// turns do not reload the full pre-compaction history from storage.
-    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
-        let conv_id_str = conversation_id.to_string();
-
-        // Verify the conversation belongs to this agent before mutating.
-        self.ensure_conversation_agent(conversation_id).await?;
-
-        // Delete the rows and clear the leaf together, so the first re-insert
-        // cannot take a deleted row as its parent.
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        sqlx::query("DELETE FROM messages WHERE conversation_id = ?1")
-            .bind(&conv_id_str)
-            .execute(&mut *tx)
-            .await
-            .with_context(|| format!("deleting messages for conversation {conversation_id}"))?;
-        sqlx::query("UPDATE conversations SET active_leaf_id = NULL WHERE id = ?1")
-            .bind(&conv_id_str)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-
-        for msg in messages {
-            self.save_message(msg).await?;
-        }
-
-        Ok(())
-    }
-
     async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
         let result = sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
@@ -767,7 +732,7 @@ impl ConversationStore for SqliteConversationStore {
     /// Fetch a single message by its ID (agent-scoped via the conversation join).
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason, m.model \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.tool_app_json, m.traceparent, m.finish_reason, m.model \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
@@ -808,7 +773,7 @@ impl ConversationStore for SqliteConversationStore {
         parent_id: Option<Uuid>,
     ) -> Result<Vec<Message>> {
         let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason, m.model \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.tool_app_json, m.traceparent, m.finish_reason, m.model \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.conversation_id = ?1 AND c.agent_id = ?2 AND m.parent_id IS ?3 \
@@ -860,7 +825,7 @@ impl ConversationStore for SqliteConversationStore {
                  SELECT m.id, m.parent_id, ch.depth + 1 \
                  FROM chain ch INNER JOIN messages m ON m.id = ch.parent_id \
              ) \
-             SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason, m.model \
+             SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.tool_app_json, m.traceparent, m.finish_reason, m.model \
              FROM chain INNER JOIN messages m ON m.id = chain.id \
              ORDER BY chain.depth DESC",
         )
@@ -1220,18 +1185,6 @@ impl ConversationStore for InMemoryConversationStore {
         Ok(true)
     }
 
-    async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
-        {
-            let mut state = self.lock_state();
-            state.messages.remove(&conversation_id);
-            state.leaves.remove(&conversation_id);
-        }
-        for msg in messages {
-            self.save_message(msg).await?;
-        }
-        Ok(())
-    }
-
     async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let mut state = self.lock_state();
         state.conversations.remove(&id);
@@ -1423,7 +1376,7 @@ const ACTIVE_PATH_SQL: &str = "\
         FROM path p \
         INNER JOIN messages m ON m.id = p.parent_id \
     ) \
-    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.traceparent, m.finish_reason, m.model \
+    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.tool_call_id, m.tool_status, m.tool_data_json, m.tool_app_json, m.traceparent, m.finish_reason, m.model \
     FROM path \
     INNER JOIN messages m ON m.id = path.id \
     ORDER BY path.depth ASC \
@@ -1452,6 +1405,7 @@ fn message_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Message> {
         tool_call_id: r.get("tool_call_id"),
         tool_status: r.get("tool_status"),
         tool_data_json: r.get("tool_data_json"),
+        tool_app_json: r.get("tool_app_json"),
         traceparent: r.get("traceparent"),
         model: r.get("model"),
         finish_reason: finish_str
@@ -2133,5 +2087,222 @@ mod tests {
 
         store.set_leaf(conv.id, a.id).await.unwrap();
         assert_no_event(&mut rx);
+    }
+
+    // -- messages_fts --
+
+    async fn fts_ids(storage: &StorageLayer, query: &str) -> Vec<String> {
+        let mut ids: Vec<String> =
+            sqlx::query_scalar("SELECT message_id FROM messages_fts WHERE messages_fts MATCH ?1")
+                .bind(query)
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        ids.sort();
+        ids
+    }
+
+    async fn fts_integrity_check(storage: &StorageLayer) {
+        sqlx::query("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+            .execute(&storage.pool)
+            .await
+            .expect("messages_fts integrity-check");
+        // The side table maps every indexed message to exactly one FTS row.
+        let unmapped: i64 = sqlx::query_scalar(
+            "SELECT (SELECT COUNT(*) FROM messages_fts) \
+                  + (SELECT COUNT(*) FROM messages_fts_map) \
+                  - 2 * (SELECT COUNT(*) FROM messages_fts f \
+                         JOIN messages_fts_map m \
+                           ON m.fts_rowid = f.rowid AND m.message_id = f.message_id)",
+        )
+        .fetch_one(&storage.pool)
+        .await
+        .unwrap();
+        assert_eq!(unmapped, 0, "messages_fts_map matches messages_fts");
+    }
+
+    fn sorted(ids: &[Uuid]) -> Vec<String> {
+        let mut v: Vec<String> = ids.iter().map(Uuid::to_string).collect();
+        v.sort();
+        v
+    }
+
+    #[tokio::test]
+    async fn fts_indexes_only_user_and_assistant_prose() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let user = Message::user(conv.id, "Planning a trip to Lisbon");
+        let assistant = Message::assistant(conv.id, "Lisbon is lovely in spring");
+        let tool = Message::new(
+            conv.id,
+            assistant_core::types::conversation::MessageRole::Tool,
+            "Lisbon search result page",
+        );
+        let thinking = Message::assistant(conv.id, "<think>Lisbon…</think>");
+        let mut tool_call = Message::assistant(conv.id, "");
+        tool_call.tool_calls_json = Some(r#"[{"name":"lisbon"}]"#.to_string());
+        let blank = Message::assistant(conv.id, "  \n ");
+        for m in [&user, &assistant, &tool, &thinking, &tool_call, &blank] {
+            store.save_message(m).await.unwrap();
+        }
+
+        assert_eq!(
+            fts_ids(&storage, "lisbon").await,
+            sorted(&[user.id, assistant.id]),
+            "only user and assistant prose is indexed"
+        );
+        fts_integrity_check(&storage).await;
+    }
+
+    #[tokio::test]
+    async fn fts_reindexes_on_content_edit_and_ignores_other_columns() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+        let a = Message::user(conv.id, "Planning a trip to Lisbon");
+        let b = Message::assistant(conv.id, "Sounds great");
+        store.save_message(&a).await.unwrap();
+        store.save_message(&b).await.unwrap();
+
+        sqlx::query("UPDATE messages SET content = 'Madrid instead' WHERE id = ?1")
+            .bind(a.id.to_string())
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        assert!(fts_ids(&storage, "lisbon").await.is_empty());
+        assert_eq!(fts_ids(&storage, "madrid").await, sorted(&[a.id]));
+        fts_integrity_check(&storage).await;
+
+        // An edit into a non-indexable shape removes the row, and back again.
+        sqlx::query("UPDATE messages SET content = '<think>madrid</think>' WHERE id = ?1")
+            .bind(a.id.to_string())
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        assert!(fts_ids(&storage, "madrid").await.is_empty());
+        sqlx::query("UPDATE messages SET content = 'Madrid again' WHERE id = ?1")
+            .bind(a.id.to_string())
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(fts_ids(&storage, "madrid").await, sorted(&[a.id]));
+
+        // Updating a different column leaves the index untouched.
+        let before: Vec<(i64, String)> =
+            sqlx::query_as("SELECT rowid, message_id FROM messages_fts ORDER BY rowid")
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        sqlx::query("UPDATE messages SET turn = turn + 1, model = 'm', parent_id = parent_id")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        let after: Vec<(i64, String)> =
+            sqlx::query_as("SELECT rowid, message_id FROM messages_fts ORDER BY rowid")
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            before, after,
+            "non-content updates must not churn the index"
+        );
+        fts_integrity_check(&storage).await;
+    }
+
+    #[tokio::test]
+    async fn fts_rows_vanish_with_message_and_conversation_delete() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let keep = store.create_conversation(None).await.unwrap();
+        let gone = store.create_conversation(None).await.unwrap();
+        let kept = Message::user(keep.id, "Lisbon forever");
+        let m1 = Message::user(gone.id, "Lisbon one");
+        let m2 = Message::assistant(gone.id, "Lisbon two");
+        for m in [&kept, &m1, &m2] {
+            store.save_message(m).await.unwrap();
+        }
+
+        // `m2` is the leaf; deleting a row that still has children would break
+        // the `parent_id` foreign key.
+        sqlx::query("DELETE FROM messages WHERE id = ?1")
+            .bind(m2.id.to_string())
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(fts_ids(&storage, "lisbon").await, sorted(&[kept.id, m1.id]));
+        fts_integrity_check(&storage).await;
+
+        store.delete_conversation(gone.id).await.unwrap();
+        assert_eq!(fts_ids(&storage, "lisbon").await, sorted(&[kept.id]));
+        let orphans: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages_fts WHERE conversation_id = ?1")
+                .bind(gone.id.to_string())
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(orphans, 0, "cascade delete leaves no FTS rows");
+        fts_integrity_check(&storage).await;
+    }
+
+    #[tokio::test]
+    async fn fts_indexed_copy_strips_highlight_sentinels_but_stored_message_is_unchanged() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+        let raw = "pre\u{E000}lisbon\u{E001}post";
+        let msg = Message::user(conv.id, raw);
+        store.save_message(&msg).await.unwrap();
+
+        let stored: String = sqlx::query_scalar("SELECT content FROM messages WHERE id = ?1")
+            .bind(msg.id.to_string())
+            .fetch_one(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, raw, "stored message is unchanged");
+
+        let indexed: String =
+            sqlx::query_scalar("SELECT content FROM messages_fts WHERE message_id = ?1")
+                .bind(msg.id.to_string())
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(indexed, "pre lisbon post", "sentinels become spaces");
+
+        // The same holds after an edit.
+        sqlx::query("UPDATE messages SET content = ?2 WHERE id = ?1")
+            .bind(msg.id.to_string())
+            .bind("a\u{E001}b\u{E000}c")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        let reindexed: String =
+            sqlx::query_scalar("SELECT content FROM messages_fts WHERE message_id = ?1")
+                .bind(msg.id.to_string())
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(reindexed, "a b c");
+    }
+
+    #[tokio::test]
+    async fn fts_covers_every_branch_of_the_message_tree() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+        let conv = store.create_conversation(None).await.unwrap();
+        let root = Message::user(conv.id, "Lisbon question");
+        store.save_message(&root).await.unwrap();
+        let first = Message::assistant(conv.id, "Lisbon answer one");
+        let second = Message::assistant(conv.id, "Lisbon answer two");
+        store.branch_message(&first, Some(root.id)).await.unwrap();
+        store.branch_message(&second, Some(root.id)).await.unwrap();
+
+        assert_eq!(
+            fts_ids(&storage, "lisbon").await,
+            sorted(&[root.id, first.id, second.id]),
+            "inactive branches stay searchable"
+        );
+        fts_integrity_check(&storage).await;
     }
 }

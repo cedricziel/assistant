@@ -6,6 +6,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:assistant_app/features/chat/chat_provider.dart';
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
 
 /// Wrap widget under test in a MaterialApp with the given screen width.
@@ -17,6 +18,16 @@ Widget _wrap(Widget child, {double width = 500}) {
     ),
   );
 }
+
+/// Renders a [StreamingTimelineEntry] under a [ThreadDensityScope].
+Widget _entry({
+  required ChatMessage message,
+  required TimelineDensity density,
+  EntryState entryState = EntryState.complete,
+}) => ThreadDensityScope(
+  density: density,
+  child: StreamingTimelineEntry(message: message, entryState: entryState),
+);
 
 ChatMessage _thinkingMessage({
   bool isStreaming = false,
@@ -45,7 +56,7 @@ void main() {
 
         await tester.pumpWidget(
           _wrap(
-            StreamingTimelineEntry(
+            _entry(
               message: msg,
               density: TimelineDensity.normal,
               entryState: EntryState.active,
@@ -63,7 +74,7 @@ void main() {
         // Now transition to complete.
         await tester.pumpWidget(
           _wrap(
-            StreamingTimelineEntry(
+            _entry(
               message: msg,
               density: TimelineDensity.normal,
               entryState: EntryState.complete,
@@ -90,7 +101,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.active,
@@ -120,7 +131,7 @@ void main() {
       // Now transition to complete — pinned entry should stay expanded.
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.complete,
@@ -155,7 +166,7 @@ void main() {
       // Compact width (< 400): should not show status icon by default.
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.compact,
             entryState: EntryState.complete,
@@ -171,7 +182,7 @@ void main() {
       // Normal width: shows tool name + status.
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.complete,
@@ -187,7 +198,7 @@ void main() {
       // Expanded width: same visible elements.
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.expanded,
             entryState: EntryState.complete,
@@ -206,7 +217,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.stale,
@@ -240,7 +251,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.active,
@@ -265,7 +276,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.complete,
@@ -303,7 +314,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.compact,
             entryState: EntryState.active,
@@ -342,7 +353,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.complete,
@@ -374,7 +385,7 @@ void main() {
         );
         await tester.pumpWidget(
           _wrap(
-            StreamingTimelineEntry(
+            _entry(
               message: msg,
               density: TimelineDensity.normal,
               entryState: status == ToolCallStatus.pending
@@ -461,7 +472,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.compact,
             entryState: EntryState.complete,
@@ -498,7 +509,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.complete,
@@ -534,7 +545,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.expanded,
             entryState: EntryState.active,
@@ -567,7 +578,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.complete,
@@ -599,7 +610,7 @@ void main() {
       // Start as active.
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.active,
@@ -613,7 +624,7 @@ void main() {
       // Transition to complete (provider set isStreaming=false).
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.complete,
@@ -639,7 +650,7 @@ void main() {
       // Start as active.
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.active,
@@ -653,7 +664,7 @@ void main() {
       // Transition to stale.
       await tester.pumpWidget(
         _wrap(
-          StreamingTimelineEntry(
+          _entry(
             message: msg,
             density: TimelineDensity.normal,
             entryState: EntryState.stale,

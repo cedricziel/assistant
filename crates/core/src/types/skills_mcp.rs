@@ -49,20 +49,27 @@ pub struct McpConfig {
 pub const RESERVED_MCP_SERVER_PREFIXES: [&str; 3] = ["org_", "space_", "user_"];
 
 impl McpConfig {
-    /// Fails when a server is named with a prefix reserved for integration tools.
-    pub fn check_names(&self) -> anyhow::Result<()> {
-        match self
+    /// Fails when a server is named with a prefix reserved for integration
+    /// tools, or has a tool timeout of zero.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some((server, prefix)) = self
             .servers
             .iter()
             .find_map(|s| Some((s, s.reserved_prefix()?)))
         {
-            Some((server, prefix)) => anyhow::bail!(
+            anyhow::bail!(
                 "MCP server '{}' uses the reserved prefix '{prefix}': names starting with {} are reserved for integration tools",
                 server.name,
                 RESERVED_MCP_SERVER_PREFIXES.join(", ")
-            ),
-            None => Ok(()),
+            );
         }
+        if let Some(server) = self.servers.iter().find(|s| s.tool_timeout_secs == Some(0)) {
+            anyhow::bail!(
+                "MCP server '{}' sets tool_timeout_secs = 0: the timeout must be at least 1 second",
+                server.name
+            );
+        }
+        Ok(())
     }
 }
 
@@ -88,6 +95,10 @@ pub struct McpServerEntry {
     /// Trust level controlling safety-gate behaviour for this server's tools.
     #[serde(default)]
     pub trust: McpTrustLevel,
+    /// Longest a tool call to this server may take, task polling included.
+    /// Unset keeps the client's default.
+    #[serde(default)]
+    pub tool_timeout_secs: Option<u64>,
 }
 
 impl McpServerEntry {
@@ -115,9 +126,9 @@ pub enum McpTransportConfig {
         /// Command and its arguments (e.g. `["npx", "-y", "@mcp/server-github"]`).
         command: Vec<String>,
     },
-    /// Connect to a remote HTTP endpoint (SSE or Streamable HTTP).
+    /// Connect to a remote Streamable HTTP endpoint.
     Http {
-        /// Server URL (e.g. `"https://example.com/mcp/sse"`).
+        /// Server URL (e.g. `"https://example.com/mcp"`).
         url: String,
         /// Extra HTTP headers sent with every request.
         /// Values may reference environment variables with `${VAR}` syntax.
@@ -183,7 +194,7 @@ mod tests {
         let toml_str = r#"
             [[servers]]
             name = "remote-db"
-            url = "https://db.example.com/mcp/sse"
+            url = "https://db.example.com/mcp"
             trust = "trust"
 
             [servers.headers]
@@ -196,7 +207,7 @@ mod tests {
         assert_eq!(s.trust, McpTrustLevel::Trust);
         match &s.transport {
             McpTransportConfig::Http { url, headers } => {
-                assert_eq!(url, "https://db.example.com/mcp/sse");
+                assert_eq!(url, "https://db.example.com/mcp");
                 assert_eq!(headers.get("Authorization").unwrap(), "Bearer secret");
             }
             other => panic!("expected Http, got {other:?}"),
@@ -219,6 +230,23 @@ mod tests {
         assert_eq!(cfg.servers.len(), 2);
         assert!(cfg.servers[0].enabled);
         assert!(!cfg.servers[1].enabled);
+    }
+
+    #[test]
+    fn mcp_config_tool_timeout_is_unset_unless_configured() {
+        let toml_str = r#"
+            [[servers]]
+            name = "default"
+            command = ["x"]
+
+            [[servers]]
+            name = "slow"
+            url = "https://slow.example.com/mcp"
+            tool_timeout_secs = 600
+        "#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        let timeouts: Vec<_> = cfg.servers.iter().map(|s| s.tool_timeout_secs).collect();
+        assert_eq!(timeouts, [None, Some(600)]);
     }
 
     #[test]

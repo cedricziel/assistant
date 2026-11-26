@@ -12,6 +12,7 @@ Name | Type | Description | Notes
 **branch** | [**BranchInfo**](BranchInfo.md) | This message's place among its versions, present only when it has siblings. On a user message: the edited versions. On an assistant message: the versions of the reply it ends. | [optional] 
 **content** | **String** |  | 
 **createdAt** | [**DateTime**](DateTime.md) |  | 
+**feedback** | [**MessageFeedbackSummary**](MessageFeedbackSummary.md) | The calling user's verdict on this message. Omitted when the caller has not rated it. | [optional] 
 **finishReason** | **String** | Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message. | [optional] 
 **id** | **String** |  | 
 **parentId** | **String** | The message this one follows in the conversation tree. Omitted for a root. | [optional] 

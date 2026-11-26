@@ -97,6 +97,7 @@ Class | Method | HTTP request | Description
 [*CommandsApi*](doc/CommandsApi.md) | [**executeCommand**](doc/CommandsApi.md#executecommand) | **POST** /api/conversations/{id}/command | &#x60;POST /api/conversations/{id}/command&#x60; — execute a slash command.
 [*CommandsApi*](doc/CommandsApi.md) | [**listCommands**](doc/CommandsApi.md#listcommands) | **GET** /api/commands | &#x60;GET /api/commands&#x60; — list all registered commands.
 [*CommandsApi*](doc/CommandsApi.md) | [**listConversationEvents**](doc/CommandsApi.md#listconversationevents) | **GET** /api/conversations/{id}/events | &#x60;GET /api/conversations/{id}/events&#x60; — list command events for the timeline.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**callMcpAppTool**](doc/ConversationsApi.md#callmcpapptool) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/tools-call&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**cancelTurn**](doc/ConversationsApi.md#cancelturn) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/cancel | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**createConversation**](doc/ConversationsApi.md#createconversation) | **POST** /api/conversations | &#x60;POST /api/conversations&#x60; — create a new conversation.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**createQuickMessage**](doc/ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
@@ -107,6 +108,7 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getMessageAudio**](doc/ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it as &#x60;audio/mpeg&#x60;.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getTurnStatus**](doc/ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**listConversations**](doc/ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**readMcpAppResource**](doc/ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**respondToInteraction**](doc/ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendMessage**](doc/ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
@@ -191,6 +193,8 @@ Class | Method | HTTP request | Description
 [*TemplatesApi*](doc/TemplatesApi.md) | [**createFromTemplate**](doc/TemplatesApi.md#createfromtemplate) | **POST** /api/orgs/{org_id}/spaces/{space_id}/personas/from-template | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/personas/from-template&#x60; — create a persona from a template.
 [*TemplatesApi*](doc/TemplatesApi.md) | [**listTemplates**](doc/TemplatesApi.md#listtemplates) | **GET** /api/orgs/{org_id}/catalog/templates | &#x60;GET /api/orgs/{org_id}/catalog/templates&#x60; — list available persona templates.
 [*TemplatesApi*](doc/TemplatesApi.md) | [**onboardingStatus**](doc/TemplatesApi.md#onboardingstatus) | **GET** /api/users/me/onboarding-status | &#x60;GET /api/users/me/onboarding-status&#x60; — check if user has created at least one persona.
+[*ToolPermissionRulesApi*](doc/ToolPermissionRulesApi.md) | [**deleteToolPermissionRule**](doc/ToolPermissionRulesApi.md#deletetoolpermissionrule) | **DELETE** /api/tool-permission-rules/{id} | &#x60;DELETE /api/tool-permission-rules/{id}&#x60;
+[*ToolPermissionRulesApi*](doc/ToolPermissionRulesApi.md) | [**listToolPermissionRules**](doc/ToolPermissionRulesApi.md#listtoolpermissionrules) | **GET** /api/tool-permission-rules | &#x60;GET /api/tool-permission-rules&#x60;
 [*UsersApi*](doc/UsersApi.md) | [**createUser**](doc/UsersApi.md#createuser) | **POST** /api/orgs/{org_id}/users | &#x60;POST /api/orgs/{org_id}/users&#x60; — create/invite a user.
 [*UsersApi*](doc/UsersApi.md) | [**deleteUser**](doc/UsersApi.md#deleteuser) | **DELETE** /api/orgs/{org_id}/users/{id} | &#x60;DELETE /api/orgs/{org_id}/users/{id}&#x60; — remove a user (org-admin only).
 [*UsersApi*](doc/UsersApi.md) | [**getUser**](doc/UsersApi.md#getuser) | **GET** /api/orgs/{org_id}/users/{id} | &#x60;GET /api/orgs/{org_id}/users/{id}&#x60; — get user detail.
@@ -244,6 +248,7 @@ Class | Method | HTTP request | Description
  - [AuthorizationCodeOAuthFlow](doc/AuthorizationCodeOAuthFlow.md)
  - [BindingResponse](doc/BindingResponse.md)
  - [BranchInfo](doc/BranchInfo.md)
+ - [CallMcpAppToolRequest](doc/CallMcpAppToolRequest.md)
  - [CancelTaskRequest](doc/CancelTaskRequest.md)
  - [CatalogAuthKindResponse](doc/CatalogAuthKindResponse.md)
  - [CatalogAuthResponse](doc/CatalogAuthResponse.md)
@@ -299,9 +304,13 @@ Class | Method | HTTP request | Description
  - [InterfaceInstanceResponse](doc/InterfaceInstanceResponse.md)
  - [ListTaskPushNotificationConfigsResponse](doc/ListTaskPushNotificationConfigsResponse.md)
  - [ListTasksResponse](doc/ListTasksResponse.md)
+ - [McpAppCspView](doc/McpAppCspView.md)
+ - [McpAppPermissionsView](doc/McpAppPermissionsView.md)
+ - [McpAppView](doc/McpAppView.md)
  - [MemberEntry](doc/MemberEntry.md)
  - [Message](doc/Message.md)
  - [MessageFeedbackResponse](doc/MessageFeedbackResponse.md)
+ - [MessageFeedbackSummary](doc/MessageFeedbackSummary.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
  - [MutualTlsSecurityScheme](doc/MutualTlsSecurityScheme.md)
@@ -327,6 +336,7 @@ Class | Method | HTTP request | Description
  - [QuestionAnswer](doc/QuestionAnswer.md)
  - [QuickMessageRequest](doc/QuickMessageRequest.md)
  - [QuickMessageResponse](doc/QuickMessageResponse.md)
+ - [ReadMcpAppResourceRequest](doc/ReadMcpAppResourceRequest.md)
  - [RegisterAgentRequest](doc/RegisterAgentRequest.md)
  - [RespondToInteractionRequest](doc/RespondToInteractionRequest.md)
  - [RespondToInteractionRequestOneOf](doc/RespondToInteractionRequestOneOf.md)
@@ -334,6 +344,7 @@ Class | Method | HTTP request | Description
  - [RespondToInteractionRequestOneOf2](doc/RespondToInteractionRequestOneOf2.md)
  - [Role](doc/Role.md)
  - [RotateSecretResponse](doc/RotateSecretResponse.md)
+ - [RuleScope](doc/RuleScope.md)
  - [SecurityRequirement](doc/SecurityRequirement.md)
  - [SecurityScheme](doc/SecurityScheme.md)
  - [SendMessageConfiguration](doc/SendMessageConfiguration.md)
@@ -381,6 +392,7 @@ Class | Method | HTTP request | Description
  - [TokenResponse](doc/TokenResponse.md)
  - [ToolCallSummary](doc/ToolCallSummary.md)
  - [ToolDecision](doc/ToolDecision.md)
+ - [ToolPermissionRuleSummary](doc/ToolPermissionRuleSummary.md)
  - [TurnState](doc/TurnState.md)
  - [TurnStatusResponse](doc/TurnStatusResponse.md)
  - [UnsubscribeRequest](doc/UnsubscribeRequest.md)

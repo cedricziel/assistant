@@ -6,6 +6,7 @@ import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
+import 'package:assistant_app/features/chat/chat_stream_session.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:material_ui/material_ui.dart';
@@ -36,12 +37,16 @@ class _FakeApiClient extends ApiClient {
     return ctrl;
   }
 
+  /// Messages passed to [streamMessages], in call order.
+  final List<String> sentMessages = [];
+
   @override
   Stream<StreamEvent> streamMessages(
     String conversationId,
     String message, {
     List<String>? attachmentIds,
   }) {
+    sentMessages.add(message);
     if (_queue.isNotEmpty) {
       return _queue.removeAt(0).stream;
     }
@@ -128,7 +133,83 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<TurnState?> cancelTurn(String conversationId, String turnId) async {
     cancelTurnCalls.add((conversationId: conversationId, runId: turnId));
-    return TurnState.running;
+    if (cancelResults.isEmpty) return TurnState.running;
+    return cancelResults.removeAt(0);
+  }
+
+  /// Results for successive [cancelTurn] calls (`null` = request failed);
+  /// `running` once exhausted.
+  final List<TurnState?> cancelResults = [];
+
+  final _FakeConversationsApi _conversationsApi = _FakeConversationsApi();
+
+  /// The conversation `GET` the notifier refreshes from.
+  @override
+  ConversationsApi get conversations => _conversationsApi;
+
+  /// Gates and scripts the next `getConversation` reply.
+  _FakeConversationsApi get conversationsFake => _conversationsApi;
+}
+
+class _FakeConversationsApi extends ConversationsApi {
+  _FakeConversationsApi() : super(Dio(), standardSerializers);
+
+  /// Messages the server reports, as `(id, role, content)`. While `null`
+  /// (the default) the request fails, like an unreachable server.
+  List<(String, String, String)>? serverMessages;
+
+  /// `finish_reason` per message id; ids not listed have none.
+  final Map<String, String> finishReasons = {};
+
+  /// When set, `getConversation` waits for it before answering.
+  Completer<void>? gate;
+
+  int getConversationCalls = 0;
+
+  @override
+  Future<Response<ConversationDetail>> getConversation({
+    required String id,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    getConversationCalls++;
+    await gate?.future;
+    final messages = serverMessages;
+    if (messages == null) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '/api/conversations/$id'),
+        type: DioExceptionType.connectionError,
+      );
+    }
+    return Response(
+      requestOptions: RequestOptions(path: '/api/conversations/$id'),
+      statusCode: 200,
+      data: ConversationDetail(
+        (b) => b
+          ..id = id
+          ..title = 'T'
+          ..createdAt = DateTime(2024, 1, 1)
+          ..updatedAt = DateTime(2024, 1, 1)
+          ..messages.replace([
+            for (final (mid, role, content) in messages)
+              MessageSummary(
+                (m) => m
+                  ..id = mid
+                  ..role = role
+                  ..content = content
+                  ..createdAt = DateTime(2024, 1, 1)
+                  ..turn = 0
+                  ..ttsAvailable = false
+                  ..finishReason = finishReasons[mid],
+              ),
+          ]),
+      ),
+    );
   }
 }
 
@@ -3304,6 +3385,8 @@ void main() {
             });
             await tester.pump(const Duration(seconds: 2));
         }
+        // Let the replay backoff run out so no retry timer outlives the test.
+        await tester.pump(const Duration(seconds: 10));
         await tester.pumpAndSettle();
         return (notifier: notifier, api: fakeApi);
       }
@@ -3421,6 +3504,29 @@ void main() {
 
       expect(fakeApi.replayCallCount, 1);
       expect(notifier.needsReconnect, isFalse);
+    });
+  });
+
+  group('loadConversation', () {
+    testWidgets('shows a cancelled reply as stopped', (tester) async {
+      final fakeApi = _FakeApiClient();
+      fakeApi.conversationsFake.serverMessages = [
+        ('u1', 'user', 'go'),
+        ('a1', 'assistant', 'The capital'),
+        ('a2', 'assistant', 'Done'),
+      ];
+      fakeApi.conversationsFake.finishReasons['a1'] = 'cancelled';
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      await notifier.loadConversation('conv-1');
+      await tester.pump();
+
+      final messages = notifier.state.value!.messages;
+      expect(messages.map((m) => m.status), [
+        MessageStatus.ok,
+        MessageStatus.stopped,
+        MessageStatus.ok,
+      ]);
     });
   });
 
@@ -3575,5 +3681,354 @@ void main() {
       expect(s.isStopping, isFalse);
       expect(r.api.cancelTurnCalls, isEmpty);
     });
+  });
+
+  group('stopTurn — bounded wait', () {
+    const stoppedMessage =
+        "Couldn't reach the server to stop this reply. It may still finish.";
+    const unconfirmed =
+        "The server hasn't confirmed the stop. The reply may still finish.";
+    const noRunId = "Couldn't confirm the stop. The reply may still finish.";
+    const cancelledFrame = AgentErrorEvent(
+      reason: AgentErrorReason.cancelled,
+      message: 'Turn cancelled',
+      partialContent: 'part',
+      messageId: 'M',
+    );
+
+    Future<
+      ({
+        ChatNotifier notifier,
+        _FakeApiClient api,
+        StreamController<StreamEvent> ctrl,
+      })
+    >
+    start(WidgetTester tester, {int queued = 0}) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+      unawaited(notifier.sendMessage('go'));
+      await tester.pump();
+      for (var i = 0; i < queued; i++) {
+        await notifier.sendMessage('queued-$i');
+      }
+      return (notifier: notifier, api: fakeApi, ctrl: ctrl);
+    }
+
+    Future<void> emit(
+      WidgetTester tester,
+      StreamEvent e,
+      StreamController<StreamEvent> ctrl,
+    ) async {
+      await tester.runAsync(() async {
+        ctrl.add(e);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      // The queue drain resumes a few microtask hops after the stream ends.
+      await tester.pump();
+      await tester.pump();
+    }
+
+    /// Lets a queued turn that started after a detach finish, so no stall
+    /// timer outlives the test.
+    Future<void> finishNext(
+      WidgetTester tester,
+      StreamController<StreamEvent> next,
+    ) async {
+      await emit(
+        tester,
+        const DoneEvent(role: 'assistant', content: 'ok', messageId: 'N'),
+        next,
+      );
+    }
+
+    testWidgets('cancel null twice then running: no error, keeps listening', (
+      tester,
+    ) async {
+      final r = await start(tester);
+      r.api.cancelResults.addAll([null, null, TurnState.running]);
+      await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+      r.notifier.stopTurn();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 2));
+
+      expect(r.api.cancelTurnCalls, hasLength(3));
+      var s = r.notifier.state.value!;
+      expect(s.error, isNull);
+      expect(s.isStopping, isTrue);
+
+      await emit(tester, cancelledFrame, r.ctrl);
+      s = r.notifier.state.value!;
+      expect(s.isStopping, isFalse);
+      expect(s.error, isNull);
+    });
+
+    testWidgets('cancel null three times detaches and resumes the queue', (
+      tester,
+    ) async {
+      final r = await start(tester, queued: 1);
+      final next = r.api.enqueueStream();
+      r.api.cancelResults.addAll([null, null, null]);
+      await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+      await emit(tester, const TokenEvent('Hello'), r.ctrl);
+      r.notifier.stopTurn();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+
+      final s = r.notifier.state.value!;
+      expect(r.api.cancelTurnCalls, hasLength(3));
+      expect(s.error, stoppedMessage);
+      expect(s.isStopping, isFalse);
+      final stopped = s.messages.firstWhere(
+        (m) => !m.isUser && m.status == MessageStatus.stopped,
+      );
+      expect(stopped.content, 'Hello');
+      expect(
+        s.messages.firstWhere((m) => m.content == 'go').status,
+        MessageStatus.ok,
+      );
+      // The queue resumed without waiting for another server event.
+      expect(r.api.sentMessages, ['go', 'queued-0']);
+      expect(s.pendingQueue, isEmpty);
+      await finishNext(tester, next);
+    });
+
+    testWidgets(
+      'cancel unknown detaches and refreshes; the queue is kept and a late '
+      'refresh does not overwrite the next turn',
+      (tester) async {
+        final r = await start(tester, queued: 2);
+        final next = r.api.enqueueStream();
+        r.api.cancelResults.add(TurnState.unknown);
+        r.api.conversationsFake.gate = Completer<void>();
+        r.api.conversationsFake.serverMessages = [
+          ('u1', 'user', 'go'),
+          ('a1', 'assistant', 'server reply'),
+        ];
+        await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+        r.notifier.stopTurn();
+        await tester.pump();
+        await tester.pump();
+
+        expect(r.api.conversationsFake.getConversationCalls, 1);
+        // The next queued turn already started; one message is still queued.
+        var s = r.notifier.state.value!;
+        expect(r.api.sentMessages, ['go', 'queued-0']);
+        expect(s.pendingQueue.map((p) => p.text), ['queued-1']);
+
+        // The refresh completes late and must not clobber that turn.
+        r.api.conversationsFake.gate!.complete();
+        await tester.pump();
+        await tester.pump();
+        s = r.notifier.state.value!;
+        expect(s.isSending, isTrue);
+        expect(s.pendingQueue.map((p) => p.text), ['queued-1']);
+        expect(s.messages.any((m) => m.content == 'queued-0'), isTrue);
+        expect(s.messages.any((m) => m.content == 'server reply'), isFalse);
+
+        final third = r.api.enqueueStream();
+        await finishNext(tester, next);
+        await finishNext(tester, third);
+      },
+    );
+
+    testWidgets('cancel unknown without a next turn shows the server state', (
+      tester,
+    ) async {
+      final r = await start(tester, queued: 0);
+      r.api.cancelResults.add(TurnState.unknown);
+      r.api.conversationsFake.serverMessages = [
+        ('u1', 'user', 'go'),
+        ('a1', 'assistant', 'server reply'),
+      ];
+      await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+      r.notifier.stopTurn();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      final s = r.notifier.state.value!;
+      expect(s.isSending, isFalse);
+      expect(s.isStopping, isFalse);
+      expect(s.messages.map((m) => m.content), ['go', 'server reply']);
+    });
+
+    testWidgets(
+      'the stall-recovery refresh maps a cancelled reply to stopped',
+      (tester) async {
+        final r = await start(tester, queued: 0);
+        r.api.cancelResults.add(TurnState.unknown);
+        r.api.conversationsFake.serverMessages = [
+          ('u1', 'user', 'go'),
+          ('a1', 'assistant', 'The capital'),
+        ];
+        r.api.conversationsFake.finishReasons['a1'] = 'cancelled';
+        await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+        r.notifier.stopTurn();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump();
+
+        final reply = r.notifier.state.value!.messages.last;
+        expect(reply.content, 'The capital');
+        expect(reply.status, MessageStatus.stopped);
+      },
+    );
+
+    testWidgets('grace expiry with a running probe detaches with the '
+        'unconfirmed-stop error', (tester) async {
+      final r = await start(tester, queued: 1);
+      final next = r.api.enqueueStream();
+      r.api.nextTurnStatus = TurnState.running;
+      await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+      await emit(tester, const TokenEvent('Hello'), r.ctrl);
+      r.notifier.stopTurn();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 9));
+      expect(r.notifier.state.value!.isStopping, isTrue);
+      expect(r.api.turnStatusCalls, isEmpty);
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+
+      expect(r.api.turnStatusCalls.map((c) => c.runId), ['run-1']);
+      final s = r.notifier.state.value!;
+      expect(s.error, unconfirmed);
+      expect(s.isStopping, isFalse);
+      expect(
+        s.messages
+            .firstWhere((m) => !m.isUser && m.status == MessageStatus.stopped)
+            .content,
+        'Hello',
+      );
+      expect(r.api.sentMessages, ['go', 'queued-0']);
+      await finishNext(tester, next);
+    });
+
+    testWidgets('grace expiry with a completed probe shows the server answer', (
+      tester,
+    ) async {
+      final r = await start(tester);
+      r.api.nextTurnStatus = TurnState.completed;
+      r.api.conversationsFake.serverMessages = [
+        ('u1', 'user', 'go'),
+        ('a1', 'assistant', 'Full answer'),
+      ];
+      await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+      await emit(tester, const TokenEvent('Hel'), r.ctrl);
+      r.notifier.stopTurn();
+      await tester.pump();
+      await tester.pump(ChatStreamSession.stopGrace);
+      await tester.pump();
+      await tester.pump();
+
+      final s = r.notifier.state.value!;
+      expect(s.isStopping, isFalse);
+      expect(s.error, isNull);
+      expect(s.messages.map((m) => m.content), ['go', 'Full answer']);
+      expect(s.messages.any((m) => m.status == MessageStatus.stopped), isFalse);
+    });
+
+    testWidgets('Stop before a run id detaches after the grace period', (
+      tester,
+    ) async {
+      final r = await start(tester, queued: 1);
+      final next = r.api.enqueueStream();
+      r.notifier.stopTurn();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 9));
+      expect(r.notifier.state.value!.isStopping, isTrue);
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+
+      final s = r.notifier.state.value!;
+      expect(r.api.cancelTurnCalls, isEmpty);
+      expect(r.api.turnStatusCalls, isEmpty);
+      expect(s.error, noRunId);
+      expect(s.isStopping, isFalse);
+      expect(
+        s.messages.firstWhere((m) => m.content == 'go').status,
+        MessageStatus.ok,
+      );
+      expect(r.api.sentMessages, ['go', 'queued-0']);
+      await finishNext(tester, next);
+    });
+
+    testWidgets('the first queued message is sent right after the cancelled '
+        'frame', (tester) async {
+      final r = await start(tester, queued: 2);
+      final next = r.api.enqueueStream();
+      await emit(tester, const RunStartedEvent('run-1'), r.ctrl);
+      r.notifier.stopTurn();
+      await tester.pump();
+      await emit(tester, cancelledFrame, r.ctrl);
+
+      expect(r.api.sentMessages, ['go', 'queued-0']);
+      expect(r.notifier.state.value!.pendingQueue.map((p) => p.text), [
+        'queued-1',
+      ]);
+      final third = r.api.enqueueStream();
+      await finishNext(tester, next);
+      await finishNext(tester, third);
+    });
+  });
+
+  group('stopTurn — voice run id', () {
+    testWidgets(
+      'Stop before the voice run id never cancels the previous turn',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final text = fakeApi.enqueueStream();
+        final voice = fakeApi.enqueueVoiceStream();
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('go'));
+        await tester.pump();
+        await tester.runAsync(() async {
+          text.add(const RunStartedEvent('T'));
+          text.add(
+            const DoneEvent(role: 'assistant', content: 'a', messageId: 'M'),
+          );
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pump();
+
+        unawaited(
+          notifier.sendVoiceMessage(Uint8List.fromList([1, 2]), 'audio/webm'),
+        );
+        await tester.pump();
+        notifier.stopTurn();
+        await tester.pump();
+        expect(fakeApi.cancelTurnCalls, isEmpty);
+
+        await tester.runAsync(() async {
+          voice.add(const RunStartedEvent('V'));
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pump();
+
+        expect(fakeApi.cancelTurnCalls.map((c) => c.runId), ['V']);
+        await tester.runAsync(() async {
+          voice.add(
+            const AgentErrorEvent(
+              reason: AgentErrorReason.cancelled,
+              message: 'Turn cancelled',
+              partialContent: '',
+              userMessagePersisted: false,
+            ),
+          );
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pump();
+      },
+    );
   });
 }

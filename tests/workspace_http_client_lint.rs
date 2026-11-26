@@ -16,7 +16,8 @@
 //!   Constructors are allowed to build a default client.
 //! - Lines inside top-level binary `main.rs` files (root CLI entry points
 //!   that wire up dependencies once at startup).
-//! - Lines inside `#[cfg(test)]` regions or files under `tests/` directories.
+//! - Lines inside `#[cfg(test)]` regions, files under `tests/` directories,
+//!   and files a parent module declares with `#[cfg(test)] mod name;`.
 //! - Files explicitly listed in `EXEMPT_PATHS` (documented one-off helpers).
 //!
 //! The heuristic for "inside a constructor": walk backwards from the match
@@ -24,8 +25,11 @@
 //! signature contains `-> Self`, `-> Result<Self`, `-> anyhow::Result<Self`,
 //! or `Result<Self,`, treat the match as inside a constructor.
 
-use std::fs;
 use std::path::{Path, PathBuf};
+
+use common::{first_cfg_test_line, production_sources};
+
+mod common;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -61,20 +65,7 @@ const EXEMPT_PATHS: &[&str] = &[
 
 #[test]
 fn no_in_method_client_construction() {
-    let root = workspace_root().join("crates");
-    let mut violations: Vec<String> = Vec::new();
-
-    for entry in fs::read_dir(&root).expect("read crates/") {
-        let entry = entry.expect("dir entry");
-        if !entry.path().is_dir() {
-            continue;
-        }
-        let src_dir = entry.path().join("src");
-        if !src_dir.is_dir() {
-            continue;
-        }
-        scan_dir(&src_dir, &mut violations);
-    }
+    let violations = scan_crates(&workspace_root().join("crates"));
 
     assert!(
         violations.is_empty(),
@@ -83,27 +74,15 @@ fn no_in_method_client_construction() {
     );
 }
 
-fn scan_dir(dir: &Path, violations: &mut Vec<String>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if path.file_name().and_then(|n| n.to_str()) == Some("tests") {
-                continue;
-            }
-            scan_dir(&path, violations);
-            continue;
-        }
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        scan_file(&path, violations);
+fn scan_crates(crates_dir: &Path) -> Vec<String> {
+    let mut violations = Vec::new();
+    for source in production_sources(crates_dir, &[]) {
+        scan_file(&source.path, &source.content, &mut violations);
     }
+    violations
 }
 
-fn scan_file(path: &Path, violations: &mut Vec<String>) {
+fn scan_file(path: &Path, content: &str, violations: &mut Vec<String>) {
     let root = workspace_root();
     let rel_path = path.strip_prefix(&root).unwrap_or(path);
     let rel_path_str = rel_path.to_string_lossy().to_string();
@@ -112,20 +91,9 @@ fn scan_file(path: &Path, violations: &mut Vec<String>) {
         return;
     }
 
-    let Ok(content) = fs::read_to_string(path) else {
-        return;
-    };
-
     let lines: Vec<&str> = content.lines().collect();
 
-    let first_cfg_test_line: Option<usize> = lines.iter().enumerate().find_map(|(idx, line)| {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("#[cfg(test)]") {
-            Some(idx + 1)
-        } else {
-            None
-        }
-    });
+    let first_cfg_test_line = first_cfg_test_line(content);
 
     for (idx, line) in lines.iter().enumerate() {
         let line_no = idx + 1;
