@@ -322,6 +322,9 @@ impl SpaceRuntimes {
         if let Some(store) = &self.audio_store {
             orchestrator = orchestrator.with_audio_store(store.clone());
         }
+        if let Some(tts) = &self.voice {
+            orchestrator = orchestrator.with_tts(tts.clone());
+        }
         if let Some(secs) = self.submit_timeout_secs.or(persona_timeout) {
             orchestrator = orchestrator.with_submit_timeout(secs);
         }
