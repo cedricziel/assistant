@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use assistant_core::ToolHandler;
 use assistant_core::types::skills_mcp::{McpServerEntry, McpTransportConfig, McpTrustLevel};
 use assistant_mcp_client::manager::McpClientManager;
 
