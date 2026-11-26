@@ -12,9 +12,11 @@ const List<String> kAssistantUiElements = [
   'BranchPicker',
   'CodeBlock',
   'ConversationListView',
+  'ConversationSearchResultsView',
   'FeedbackButtons',
   'FeedbackCommentField',
   'GenericToolResultView',
+  'HighlightedSegments',
   'MessageActionButton',
   'MessageActions',
   'MessageEditor',
@@ -43,11 +45,9 @@ const List<String> kAssistantUiElements = [
   // 'CompactExpandable', // slot: tool-result-renderers C2
   // 'Composer', // slot: chat-element-library 11a
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
-  // 'ConversationSearchResultsView', // slot: conversation-list-management 14
   // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
-  // 'HighlightedSegments', // slot: conversation-list-management 14
   // 'JsonTreeView', // slot: tool-result-renderers C2b
   // 'LinkPreviewResultView', // slot: tool-result-renderers C5
   // 'MessageBody', // slot: chat-element-library 8b

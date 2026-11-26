@@ -18,6 +18,8 @@ export 'src/branch_picker.dart';
 export 'src/code/code_block.dart';
 export 'src/composer/queued_message_bubble.dart';
 export 'src/conversations/conversation_list_view.dart';
+export 'src/conversations/conversation_search_results_view.dart';
+export 'src/conversations/highlighted_segments.dart';
 export 'src/feedback/feedback_buttons.dart';
 export 'src/feedback/feedback_comment_field.dart';
 export 'src/highlight/code_token.dart';
