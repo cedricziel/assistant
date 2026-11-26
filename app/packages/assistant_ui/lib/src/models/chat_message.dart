@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'branch_info.dart';
 import 'mcp_app.dart';
+import 'message_rating.dart';
 import 'message_timing.dart';
 
 // -- Chat messages -----------------------------------------------------------
@@ -103,6 +104,28 @@ class ChatAttachment {
   final String filename;
   final String mimeType;
   final String url;
+}
+
+/// The caller's feedback on an assistant message.
+class MessageFeedback {
+  const MessageFeedback({required this.rating, this.comment});
+
+  final MessageRating rating;
+
+  /// Optional free-text reason; `null` when none was given.
+  final String? comment;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MessageFeedback &&
+      other.rating == rating &&
+      other.comment == comment;
+
+  @override
+  int get hashCode => Object.hash(rating, comment);
+
+  @override
+  String toString() => 'MessageFeedback($rating, $comment)';
 }
 
 /// A message shown in the chat UI (may be a streaming partial).
@@ -221,6 +244,12 @@ class ChatMessage {
   /// of that reply.
   final BranchInfo? replyBranch;
 
+  /// The caller's feedback on this message, `null` when none.
+  ///
+  /// Mutable like [content]: the chat notifier applies optimistic changes in
+  /// place on the message it publishes.
+  MessageFeedback? feedback;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -242,6 +271,8 @@ class ChatMessage {
     String? subagentTask,
     String? subagentSummary,
     MessageTiming? timing,
+    MessageFeedback? feedback,
+    bool clearFeedback = false,
   }) {
     return ChatMessage(
       id: id,
@@ -265,7 +296,7 @@ class ChatMessage {
       parentId: parentId,
       branch: branch,
       replyBranch: replyBranch,
-    );
+    )..feedback = clearFeedback ? null : (feedback ?? this.feedback);
   }
 }
 
