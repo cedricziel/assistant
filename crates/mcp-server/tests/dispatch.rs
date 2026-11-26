@@ -32,6 +32,7 @@ fn echo_spec() -> ToolSpec {
         params_schema: json!({}),
         is_mutating: false,
         requires_confirmation: false,
+        requires_rich_client: false,
     }
 }
 
@@ -74,6 +75,30 @@ async fn tools_list_is_stable_with_management_tools_last() {
 
     assert_eq!(first, second, "listing twice must not reorder tools");
     assert_eq!(first, ["zeta", "alpha", "run-prompt", "install-skill"]);
+}
+
+#[tokio::test]
+async fn tools_list_omits_rich_client_tools() {
+    let specs = vec![
+        echo_spec(),
+        ToolSpec {
+            name: "render-surface".into(),
+            requires_rich_client: true,
+            ..echo_spec()
+        },
+    ];
+    let exec = Arc::new(StubToolDispatcher::new().with_specs(specs));
+    let client = default_stubs().executor(exec).connect().await;
+
+    let names: Vec<String> = client
+        .list_all_tools()
+        .await
+        .unwrap()
+        .iter()
+        .map(|t| t.name.to_string())
+        .collect();
+
+    assert_eq!(names, ["echo", "run-prompt", "install-skill"]);
 }
 
 #[tokio::test]
@@ -459,6 +484,7 @@ async fn tools_call_refuses_tools_that_require_confirmation_without_an_allow_rul
         params_schema: json!({"type": "object"}),
         is_mutating: true,
         requires_confirmation: true,
+        requires_rich_client: false,
     };
     let stub = Arc::new(StubToolDispatcher::new().with_specs(vec![spec]));
     let client = default_stubs()

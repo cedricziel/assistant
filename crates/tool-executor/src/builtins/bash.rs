@@ -7,9 +7,12 @@
 //! lines — is almost always the most relevant part.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use anyhow::Result;
 use assistant_core::permission::{WorkspaceRoots, resolve_real_path};
+use assistant_core::tool_render::{TerminalData, ToolRenderData};
 use assistant_core::{
     Attachment, ToolHandler, ToolOutput, runtime_workspace_dir,
     types::conversation::ExecutionContext, types::permissions::LimitsConfig,
@@ -20,6 +23,13 @@ use tokio::time::Duration;
 use tracing::debug;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
+
+/// Render budget per stream for the terminal view (design D4). Much smaller
+/// than the LLM-facing `bash_max_output_chars`.
+const RENDER_TAIL_BYTES: usize = 12 * 1024;
+
+/// How long the readers get to drain their pipes after a timed-out child is killed.
+const READER_GRACE: Duration = Duration::from_secs(1);
 
 /// Keeps the last `cap` bytes of a stream without holding more than `2 * cap`.
 struct TailBuffer {
@@ -46,23 +56,64 @@ impl TailBuffer {
     }
 
     /// The kept tail as text, the total bytes seen, and whether bytes were dropped.
-    fn finish(self) -> (String, usize, bool) {
+    fn snapshot(&self) -> (String, usize, bool) {
         let start = self.buf.len().saturating_sub(self.cap);
         let text = String::from_utf8_lossy(&self.buf[start..]).into_owned();
         (text, self.total, self.total > self.cap)
     }
 }
 
-async fn read_tail<R: AsyncRead + Unpin>(mut reader: R, cap: usize) -> TailBuffer {
-    let mut tail = TailBuffer::new(cap);
+/// A [`TailBuffer`] filled by a reader task and read by the handler, so the
+/// captured tail survives a reader that never sees EOF.
+type SharedTail = Arc<Mutex<TailBuffer>>;
+
+fn lock(tail: &SharedTail) -> MutexGuard<'_, TailBuffer> {
+    tail.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+async fn read_tail<R: AsyncRead + Unpin>(mut reader: R, tail: SharedTail) {
     let mut chunk = [0u8; 8192];
     while let Ok(n) = reader.read(&mut chunk).await {
         if n == 0 {
             break;
         }
-        tail.push(&chunk[..n]);
+        lock(&tail).push(&chunk[..n]);
     }
-    tail
+}
+
+/// The last [`RENDER_TAIL_BYTES`] of `text`, cut on a char boundary.
+fn render_tail(text: &str) -> (String, bool) {
+    if text.len() <= RENDER_TAIL_BYTES {
+        return (text.to_string(), false);
+    }
+    let mut start = text.len() - RENDER_TAIL_BYTES;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    (text[start..].to_string(), true)
+}
+
+/// The `terminal` render payload for a finished or timed-out command.
+fn terminal_render(
+    command: &str,
+    exit_code: Option<i32>,
+    stdout: &(String, bool),
+    stderr: &(String, bool),
+    started: Instant,
+    timed_out: bool,
+) -> ToolRenderData {
+    let (stdout_text, stdout_cut) = render_tail(&stdout.0);
+    let (stderr_text, stderr_cut) = render_tail(&stderr.0);
+    ToolRenderData::Terminal(TerminalData {
+        command: command.to_string(),
+        exit_code,
+        stdout: stdout_text,
+        stderr: stderr_text,
+        stdout_truncated: stdout.1 || stdout_cut,
+        stderr_truncated: stderr.1 || stderr_cut,
+        duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        timed_out,
+    })
 }
 
 /// Image file extensions we recognise for automatic attachment.
@@ -176,15 +227,7 @@ impl ToolHandler for BashHandler {
     }
 
     fn output_schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "exit_code": {"type": "integer", "description": "Process exit code (0 = success)"},
-                "stdout": {"type": "string", "description": "Standard output"},
-                "stderr": {"type": "string", "description": "Standard error"}
-            },
-            "required": ["exit_code", "stdout", "stderr"]
-        }))
+        ToolRenderData::schema("terminal")
     }
 
     async fn run(
@@ -243,34 +286,62 @@ impl ToolHandler for BashHandler {
             return Ok(ToolOutput::error("spawned command has no piped output"));
         };
 
-        let finished = tokio::time::timeout(timeout, async {
-            let (status, stdout, stderr) = tokio::join!(
-                child.wait(),
-                read_tail(stdout_pipe, cap),
-                read_tail(stderr_pipe, cap)
-            );
-            (status, stdout, stderr)
+        let started = Instant::now();
+        let stdout_tail: SharedTail = Arc::new(Mutex::new(TailBuffer::new(cap)));
+        let stderr_tail: SharedTail = Arc::new(Mutex::new(TailBuffer::new(cap)));
+        // One task owns both readers; it is awaited through `&mut` so it can
+        // still be awaited (or aborted) after the timeout drops the wait below.
+        let mut drain = tokio::spawn({
+            let (out, err) = (Arc::clone(&stdout_tail), Arc::clone(&stderr_tail));
+            async move {
+                tokio::join!(read_tail(stdout_pipe, out), read_tail(stderr_pipe, err));
+            }
+        });
+
+        let waited = tokio::time::timeout(timeout, async {
+            let status = child.wait().await;
+            let _ = (&mut drain).await;
+            status
         })
         .await;
 
-        match finished {
+        let timed_out = waited.is_err();
+        if timed_out {
+            let _ = child.kill().await;
+            // A grandchild may hold a pipe open past the kill, so bound the
+            // wait and keep whatever the readers captured so far.
+            let _ = tokio::time::timeout(READER_GRACE, &mut drain).await;
+            drain.abort();
+        }
+        let stdout_snapshot = lock(&stdout_tail).snapshot();
+        let stderr_snapshot = lock(&stderr_tail).snapshot();
+
+        match waited {
             Err(_elapsed) => {
-                let _ = child.kill().await;
+                let render = terminal_render(
+                    &command,
+                    None,
+                    &(stdout_snapshot.0, stdout_snapshot.2),
+                    &(stderr_snapshot.0, stderr_snapshot.2),
+                    started,
+                    true,
+                );
                 Ok(ToolOutput::error(format!(
                     "Command timed out after {} seconds: {}",
                     timeout_secs, command
-                )))
+                ))
+                .with_render(render))
             }
-            Ok((Err(e), _, _)) => Ok(ToolOutput::error(format!(
+            Ok(Err(e)) => Ok(ToolOutput::error(format!(
                 "Failed to run command '{}': {}",
                 command, e
             ))),
-            Ok((Ok(status), stdout_tail, stderr_tail)) => {
-                let exit_code = status.code().unwrap_or(-1);
-                let (stdout, stdout_total, stdout_truncated) = stdout_tail.finish();
-                let (stderr, stderr_total, stderr_truncated) = stderr_tail.finish();
+            Ok(Ok(status)) => {
+                let exit_code = status.code();
+                let (stdout, stdout_total, stdout_truncated) = stdout_snapshot;
+                let (stderr, stderr_total, stderr_truncated) = stderr_snapshot;
                 let mut parts: Vec<String> = Vec::new();
-                parts.push(format!("Exit code: {}", exit_code));
+                parts.push(format!("Exit code: {}", exit_code.unwrap_or(-1)));
 
                 if !stdout.is_empty() {
                     if stdout_truncated {
@@ -294,11 +365,14 @@ impl ToolHandler for BashHandler {
                     parts.push("(no output)".to_string());
                 }
 
-                let data = serde_json::json!({
-                    "exit_code": exit_code,
-                    "stdout": stdout,
-                    "stderr": stderr
-                });
+                let render = terminal_render(
+                    &command,
+                    exit_code,
+                    &(stdout.clone(), stdout_truncated),
+                    &(stderr, stderr_truncated),
+                    started,
+                    false,
+                );
 
                 // Auto-attach images referenced by path in stdout so they
                 // flow to the user via the interface (Slack upload, etc.)
@@ -306,7 +380,15 @@ impl ToolHandler for BashHandler {
                 let roots = WorkspaceRoots::for_agent(&ctx.agent_id, &self.extra_roots);
                 let images = collect_image_attachments(&stdout, &roots).await;
 
-                let mut result = ToolOutput::success(parts.join("\n\n")).with_data(data);
+                // A non-zero exit is a failure for the timeline; the text the
+                // LLM sees is the same either way (design D11).
+                let content = parts.join("\n\n");
+                let mut result = if exit_code == Some(0) {
+                    ToolOutput::success(content)
+                } else {
+                    ToolOutput::error(content)
+                }
+                .with_render(render);
                 if !images.is_empty() {
                     debug!(
                         count = images.len(),

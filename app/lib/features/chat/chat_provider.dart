@@ -228,6 +228,32 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
   }
 
+  /// Reconcile a terminal `agent_error` frame on any of the three stream
+  /// paths: a cancelled turn keeps its partial reply as a stopped message,
+  /// anything else fails the turn like an [ErrorEvent].
+  void _onAgentError(
+    ChatState chatState,
+    AgentErrorEvent event, {
+    required String userMsgId,
+  }) {
+    _session.closeThinking();
+    state = AsyncData(switch (event.reason) {
+      AgentErrorReason.cancelled => stoppedTurnState(
+        chatState,
+        userMsgId: userMsgId,
+        partialContent: event.partialContent,
+        messageId: event.messageId,
+        userMessagePersisted: event.userMessagePersisted,
+      ),
+      AgentErrorReason.error => abortedTurnState(
+        chatState,
+        failedUserMsgId: userMsgId,
+        error: event.message,
+        clearTurnStatus: true,
+      ),
+    });
+  }
+
   /// Store the synthesized-audio id on the streaming assistant placeholder.
   void _onAudioReadyEvent(ChatState chatState, AudioReadyEvent event) {
     final msgs = List<ChatMessage>.from(chatState.messages);
@@ -486,17 +512,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // Put the user message back into sending state and add streaming placeholder.
     final msgs = List<ChatMessage>.from(current.messages);
     setMessageStatus(msgs, userMsgId, MessageStatus.sending);
-    final placeholder = ChatMessage(
-      id: streamingPlaceholderId,
-      role: 'assistant',
-      content: '',
-      isStreaming: true,
-    );
+    // A dropped stream leaves its placeholder behind; reuse it so the replay
+    // never ends up with two and reconciliation only touches one.
+    final hasPlaceholder = msgs.any((m) => m.id == streamingPlaceholderId);
+    if (!hasPlaceholder) {
+      msgs.add(
+        ChatMessage(
+          id: streamingPlaceholderId,
+          role: 'assistant',
+          content: '',
+          isStreaming: true,
+        ),
+      );
+    }
     state = AsyncData(
       current.copyWith(
-        messages: [...msgs, placeholder],
+        messages: msgs,
         isSending: true,
-        streamingContent: '',
+        streamingContent: hasPlaceholder ? current.streamingContent : '',
       ),
     );
 
@@ -524,11 +557,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           return true;
         } else if (event is AgentErrorEvent) {
           _session.advance(event);
-          final ms = List<ChatMessage>.from(chatState.messages)
-            ..removeWhere((m) => m.id == streamingPlaceholderId);
-          setMessageStatus(ms, userMsgId, MessageStatus.failed);
-          state = AsyncData(chatState.copyWith(messages: ms, isSending: false));
-          return false;
+          _onAgentError(chatState, event, userMsgId: userMsgId);
+          return event.reason == AgentErrorReason.cancelled;
         } else if (event is ErrorEvent) {
           _session.advance(event);
           return false;
@@ -680,6 +710,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           unawaited(tokenController.close());
           _failTurn(chatState, event, userMsgId: userMsgId);
           return;
+        } else if (event is AgentErrorEvent) {
+          unawaited(tokenController.close());
+          _onAgentError(chatState, event, userMsgId: userMsgId);
+          return;
         }
       }
     } catch (e) {
@@ -801,6 +835,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _session.advance(event);
           unawaited(tokenController.close());
           _failTurn(chatState, event, userMsgId: userMsgId);
+          return;
+        } else if (event is AgentErrorEvent) {
+          _session.advance(event);
+          unawaited(tokenController.close());
+          _onAgentError(chatState, event, userMsgId: userMsgId);
           return;
         }
       }

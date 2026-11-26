@@ -8,6 +8,7 @@ use assistant_core::{
     ToolCallItem, ToolSpec,
     permission::{Outcome, PermissionRequest},
     types::conversation::ExecutionContext,
+    types::conversation::Interface,
     types::conversation::Message,
     types::conversation::MessageRole,
 };
@@ -38,15 +39,32 @@ pub(crate) struct FinalizedTool {
 }
 
 impl Orchestrator {
-    /// Filter tool specs based on provider capabilities.
+    /// Whether a turn's client can render rich UI such as an A2UI surface.
+    ///
+    /// Only an interactive web turn at depth 0 can: `quick-message` and voice
+    /// are `Interface::Web` but not interactive, a CLI turn is interactive but
+    /// has no renderer, and subagents have no user attached.
+    pub(crate) fn rich_client_turn(interface: &Interface, interactive: bool, depth: u32) -> bool {
+        interactive && *interface == Interface::Web && depth == 0
+    }
+
+    /// Filter tool specs based on provider capabilities and the turn's client.
     ///
     /// Suppresses builtin tools when the provider offers an equivalent
     /// hosted tool (e.g. suppress `web-search` when the provider has
-    /// native web search).
-    pub(crate) fn filter_tool_specs(specs: Vec<ToolSpec>, caps: &Capabilities) -> Vec<ToolSpec> {
+    /// native web search), and drops `requires_rich_client` tools unless
+    /// `rich_client` is set (see [`Self::rich_client_turn`]).
+    pub(crate) fn filter_tool_specs(
+        specs: Vec<ToolSpec>,
+        caps: &Capabilities,
+        rich_client: bool,
+    ) -> Vec<ToolSpec> {
         specs
             .into_iter()
-            .filter(|spec| !Self::tool_suppressed_by_caps(spec, caps))
+            .filter(|spec| {
+                (rich_client || !spec.requires_rich_client)
+                    && !Self::tool_suppressed_by_caps(spec, caps)
+            })
             .collect()
     }
 

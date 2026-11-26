@@ -17,9 +17,10 @@ use async_openai::types::responses::{
     CreateResponse, CreateResponseArgs, EasyInputMessage, FunctionCallOutput,
     FunctionCallOutputItemParam, FunctionTool, FunctionToolCall, InputContent, InputItem,
     InputParam, InputTextContent, Item, MessageType, OutputItem, OutputMessage,
-    OutputMessageContent, OutputStatus, Response, Role, Tool, ToolChoiceFunction,
-    ToolChoiceOptions, ToolChoiceParam, WebSearchApproximateLocation,
-    WebSearchApproximateLocationType, WebSearchTool, WebSearchToolSearchContextSize,
+    OutputMessageContent, OutputStatus, Response, ResponseFormatJsonSchema, ResponseTextParam,
+    Role, TextResponseFormatConfiguration, Tool, ToolChoiceFunction, ToolChoiceOptions,
+    ToolChoiceParam, WebSearchApproximateLocation, WebSearchApproximateLocationType, WebSearchTool,
+    WebSearchToolSearchContextSize,
 };
 use async_trait::async_trait;
 use futures::StreamExt as _;
@@ -32,8 +33,8 @@ use assistant_core::types::llm::LlmConfig;
 use assistant_core::types::llm::OpenAIUserLocation;
 use assistant_core::{
     Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, ChatRole, ContentBlock,
-    HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem,
-    ToolCallResponse, ToolChoice, ToolSpec, ToolSupport,
+    HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, ResponseFormat, StreamChunk,
+    ToolCallItem, ToolCallResponse, ToolChoice, ToolSpec, ToolSupport,
 };
 
 use crate::http::build_reqwest_client;
@@ -233,6 +234,22 @@ impl OpenAIProvider {
         if !system_prompt.is_empty() {
             builder.instructions(system_prompt);
         }
+        if let ResponseFormat::JsonSchema {
+            name,
+            schema,
+            strict,
+        } = &options.response_format
+        {
+            builder.text(ResponseTextParam {
+                format: TextResponseFormatConfiguration::JsonSchema(ResponseFormatJsonSchema {
+                    description: None,
+                    name: name.clone(),
+                    schema: schema.clone(),
+                    strict: Some(*strict),
+                }),
+                verbosity: None,
+            });
+        }
         if !api_tools.is_empty() {
             builder.tools(api_tools);
             if let Some(choice) = openai_tool_choice(&options.tool_choice) {
@@ -412,7 +429,7 @@ impl LlmProvider for OpenAIProvider {
         ChatOptionsSupport {
             tool_choice: true,
             parallel_tool_calls: true,
-            json_schema: false,
+            json_schema: true,
         }
     }
 
@@ -937,6 +954,7 @@ mod tests {
             }),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         };
         let tool = tool_spec_to_responses(&spec);
         match tool {
@@ -1158,6 +1176,7 @@ mod tests {
                 params_schema: json!({"type": "object"}),
                 is_mutating: false,
                 requires_confirmation: false,
+                requires_rich_client: false,
             }
         }
 
@@ -1213,6 +1232,118 @@ mod tests {
             let body = request(&[], options);
             assert!(body.get("tool_choice").is_none(), "{body}");
             assert!(body.get("parallel_tool_calls").is_none(), "{body}");
+        }
+    }
+
+    mod structured_output {
+        use serde_json::{Value, json};
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use assistant_core::{
+            ChatHistoryMessage, ChatOptions, ChatRole, LlmProvider, ResponseFormat, chat_structured,
+        };
+
+        use super::super::{OpenAIProvider, OpenAIProviderConfig};
+
+        fn schema() -> Value {
+            json!({
+                "type": "object",
+                "properties": {"verdict": {"type": "string"}},
+                "required": ["verdict"],
+                "additionalProperties": false,
+            })
+        }
+
+        fn history() -> Vec<ChatHistoryMessage> {
+            vec![ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "judge this".into(),
+            }]
+        }
+
+        fn provider(base_url: &str) -> OpenAIProvider {
+            let config = OpenAIProviderConfig {
+                base_url: base_url.to_string(),
+                ..OpenAIProviderConfig::default()
+            };
+            OpenAIProvider::new(config, "test").unwrap()
+        }
+
+        #[test]
+        fn reports_native_json_schema_support() {
+            assert!(provider("http://unused").chat_options_support().json_schema);
+        }
+
+        #[test]
+        fn json_schema_format_is_sent_as_text_format() {
+            let options = ChatOptions {
+                response_format: ResponseFormat::JsonSchema {
+                    name: "decision".into(),
+                    schema: schema(),
+                    strict: true,
+                },
+                ..ChatOptions::default()
+            };
+            let request = provider("http://unused")
+                .build_request("sys", &history(), &[], &options)
+                .unwrap();
+            let body = serde_json::to_value(request).unwrap();
+            assert_eq!(
+                body["text"]["format"],
+                json!({"type": "json_schema", "name": "decision", "schema": schema(), "strict": true})
+            );
+        }
+
+        #[test]
+        fn text_format_sends_no_text_field() {
+            let request = provider("http://unused")
+                .build_request("sys", &history(), &[], &ChatOptions::default())
+                .unwrap();
+            let body = serde_json::to_value(request).unwrap();
+            assert!(body.get("text").is_none(), "{body}");
+        }
+
+        #[tokio::test]
+        async fn chat_structured_uses_the_native_schema() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/responses"))
+                .and(body_partial_json(json!({
+                    "text": {"format": {"type": "json_schema", "name": "decision", "strict": true}},
+                })))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "id": "resp_1",
+                    "object": "response",
+                    "created_at": 0,
+                    "model": "gpt-4o",
+                    "status": "completed",
+                    "output": [{
+                        "type": "message",
+                        "id": "msg_1",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [{
+                            "type": "output_text",
+                            "text": "{\"verdict\": \"keep\"}",
+                            "annotations": [],
+                        }],
+                    }],
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let value = chat_structured(
+                &provider(&server.uri()),
+                "sys",
+                &history(),
+                "decision",
+                &schema(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(value, json!({"verdict": "keep"}));
         }
     }
 }

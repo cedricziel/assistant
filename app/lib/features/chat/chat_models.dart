@@ -15,10 +15,13 @@ enum MessageStatus {
 
   /// The message failed to deliver (network or server error).
   failed,
+
+  /// The assistant reply was cut short by a Stop; the content is the partial.
+  stopped,
 }
 
 /// Status of a single tool call within an assistant message.
-enum ToolCallStatus { pending, ok, error, denied }
+enum ToolCallStatus { pending, ok, error, denied, cancelled }
 
 /// A single tool invocation recorded on an assistant message.
 class ToolCallRecord {

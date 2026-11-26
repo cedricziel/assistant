@@ -6,6 +6,7 @@ use assistant_core::clock::{Clock, SystemClock};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
+use tracing::warn;
 
 /// Default output destination for scheduler-originated turns (cron tasks and
 /// heartbeats).  Operator-configured; the agent is unaware of routing.
@@ -33,6 +34,8 @@ pub struct PersonaRecord {
     /// The user who owns this persona (multi-user scoping).
     /// `None` means org-owned (visible to all org members).
     pub owner_user_id: Option<String>,
+    /// Prompts offered in the empty chat, in display order.
+    pub starter_prompts: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -61,6 +64,8 @@ pub trait PersonaStore: Send + Sync {
     ) -> Result<()>;
     async fn clear_home_channel(&self, id: &str) -> Result<()>;
     async fn list_accessible(&self, user_id: &str) -> Result<Vec<PersonaRecord>>;
+    /// Replace the Persona's starter prompts. Errors when the Persona does not exist.
+    async fn set_starter_prompts(&self, id: &str, prompts: &[String]) -> Result<()>;
 }
 
 pub struct SqlitePersonaStore {
@@ -101,7 +106,7 @@ impl PersonaStore for SqlitePersonaStore {
 
     async fn list(&self) -> Result<Vec<PersonaRecord>> {
         let rows = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, starter_prompts, created_at, updated_at
              FROM personas
              ORDER BY id ASC",
         )
@@ -113,7 +118,7 @@ impl PersonaStore for SqlitePersonaStore {
 
     async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
         let row = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, starter_prompts, created_at, updated_at
              FROM personas
              WHERE id = ?1",
         )
@@ -132,7 +137,7 @@ impl PersonaStore for SqlitePersonaStore {
         anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
 
         let row = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, starter_prompts, created_at, updated_at
              FROM personas
              WHERE id = ?1 AND (owner_user_id IS NULL OR owner_user_id = ?2)",
         )
@@ -231,7 +236,7 @@ impl PersonaStore for SqlitePersonaStore {
         anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
 
         let rows = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, starter_prompts, created_at, updated_at
              FROM personas
              WHERE owner_user_id IS NULL OR owner_user_id = ?1
              ORDER BY id ASC",
@@ -277,6 +282,23 @@ impl PersonaStore for SqlitePersonaStore {
         self.get(id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("persona '{}' missing after create_owned", id))
+    }
+
+    /// Replace the Persona's starter prompts with a JSON array.
+    async fn set_starter_prompts(&self, id: &str, prompts: &[String]) -> Result<()> {
+        let json = serde_json::to_string(prompts)?;
+        let rows = sqlx::query(
+            "UPDATE personas
+             SET starter_prompts = ?1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?2",
+        )
+        .bind(json)
+        .bind(id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        anyhow::ensure!(rows > 0, "persona '{}' not found", id);
+        Ok(())
     }
 
     /// Clear the per-persona turn timeout, reverting to the compiled-in default.
@@ -351,6 +373,7 @@ impl PersonaStore for InMemoryPersonaStore {
                 turn_timeout_secs: None,
                 home_channel: None,
                 owner_user_id: None,
+                starter_prompts: Vec::new(),
                 created_at: now,
                 updated_at: now,
             })
@@ -396,6 +419,7 @@ impl PersonaStore for InMemoryPersonaStore {
             turn_timeout_secs: None,
             home_channel: None,
             owner_user_id: None,
+            starter_prompts: Vec::new(),
             created_at: now,
             updated_at: now,
         };
@@ -429,6 +453,7 @@ impl PersonaStore for InMemoryPersonaStore {
             turn_timeout_secs: None,
             home_channel: None,
             owner_user_id: Some(owner_user_id.to_string()),
+            starter_prompts: Vec::new(),
             created_at: now,
             updated_at: now,
         };
@@ -444,6 +469,17 @@ impl PersonaStore for InMemoryPersonaStore {
             .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("persona '{}' not found", id))?;
         p.turn_timeout_secs = Some(secs);
+        p.updated_at = now;
+        Ok(())
+    }
+
+    async fn set_starter_prompts(&self, id: &str, prompts: &[String]) -> Result<()> {
+        let now = self.clock.now();
+        let mut state = self.lock();
+        let p = state
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("persona '{}' not found", id))?;
+        p.starter_prompts = prompts.to_vec();
         p.updated_at = now;
         Ok(())
     }
@@ -506,6 +542,20 @@ impl PersonaStore for InMemoryPersonaStore {
     }
 }
 
+/// Decode the `starter_prompts` JSON column; anything unreadable reads as empty.
+fn parse_starter_prompts(persona_id: &str, raw: Option<String>) -> Vec<String> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    match serde_json::from_str(&raw) {
+        Ok(prompts) => prompts,
+        Err(e) => {
+            warn!(persona = %persona_id, error = %e, "ignoring malformed starter_prompts");
+            Vec::new()
+        }
+    }
+}
+
 fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
     let home_interface: Option<String> = row.try_get("home_interface").unwrap_or(None);
     let home_channel_val: Option<String> = row.try_get("home_channel").unwrap_or(None);
@@ -517,8 +567,11 @@ fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
         _ => None,
     };
 
+    let id: String = row.get("id");
+    let starter_prompts = parse_starter_prompts(&id, row.try_get("starter_prompts").ok());
+
     Ok(PersonaRecord {
-        id: row.get("id"),
+        id,
         name: row.get("name"),
         is_default: row.get::<i64, _>("is_default") != 0,
         skill_access_mode: row
@@ -530,6 +583,7 @@ fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
             .map(|v| v as u64),
         home_channel,
         owner_user_id: row.try_get("owner_user_id").unwrap_or(None),
+        starter_prompts,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })
@@ -907,5 +961,92 @@ mod tests {
 
         let result = store.get_accessible("any", "").await;
         assert!(result.is_err(), "empty user_id should be rejected");
+    }
+
+    // -- Starter prompts --
+
+    #[tokio::test]
+    async fn new_persona_has_no_starter_prompts() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let sqlite = super::SqlitePersonaStore::new(storage.pool.clone());
+        let memory = super::InMemoryPersonaStore::new();
+
+        for store in [&sqlite as &dyn PersonaStore, &memory] {
+            let created = store.create("p1", "P One").await.unwrap();
+            assert!(created.starter_prompts.is_empty(), "create returns []");
+            let fetched = store.get("p1").await.unwrap().unwrap();
+            assert!(fetched.starter_prompts.is_empty(), "get returns []");
+        }
+    }
+
+    #[tokio::test]
+    async fn set_starter_prompts_round_trips_in_order() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let sqlite = super::SqlitePersonaStore::new(storage.pool.clone());
+        let memory = super::InMemoryPersonaStore::new();
+        let prompts = vec!["Plan my week".to_string(), "Summarize inbox".to_string()];
+
+        for store in [&sqlite as &dyn PersonaStore, &memory] {
+            store.create("p1", "P One").await.unwrap();
+            store.set_starter_prompts("p1", &prompts).await.unwrap();
+            let fetched = store.get("p1").await.unwrap().unwrap();
+            assert_eq!(fetched.starter_prompts, prompts, "order is preserved");
+
+            store.set_starter_prompts("p1", &[]).await.unwrap();
+            let cleared = store.get("p1").await.unwrap().unwrap();
+            assert!(cleared.starter_prompts.is_empty(), "empty list clears");
+        }
+    }
+
+    #[tokio::test]
+    async fn set_starter_prompts_unknown_persona_returns_error() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let sqlite = super::SqlitePersonaStore::new(storage.pool.clone());
+        let memory = super::InMemoryPersonaStore::new();
+
+        for store in [&sqlite as &dyn PersonaStore, &memory] {
+            let result = store.set_starter_prompts("missing", &[]).await;
+            assert!(result.is_err(), "unknown persona must error");
+        }
+    }
+
+    #[tokio::test]
+    async fn starter_prompts_visible_in_list_and_accessible_reads() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
+        store.create_owned("p1", "P One", "alice").await.unwrap();
+        store
+            .set_starter_prompts("p1", &["Hello".to_string()])
+            .await
+            .unwrap();
+
+        let listed = store.list().await.unwrap();
+        let from_list = listed.iter().find(|p| p.id == "p1").unwrap();
+        assert_eq!(from_list.starter_prompts, vec!["Hello"]);
+
+        let accessible = store.list_accessible("alice").await.unwrap();
+        let from_accessible = accessible.iter().find(|p| p.id == "p1").unwrap();
+        assert_eq!(from_accessible.starter_prompts, vec!["Hello"]);
+
+        let got = store.get_accessible("p1", "alice").await.unwrap().unwrap();
+        assert_eq!(got.starter_prompts, vec!["Hello"]);
+    }
+
+    #[tokio::test]
+    async fn malformed_starter_prompts_column_reads_as_empty() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::SqlitePersonaStore::new(storage.pool.clone());
+        store.create("p1", "P One").await.unwrap();
+
+        sqlx::query("UPDATE personas SET starter_prompts = 'not json' WHERE id = 'p1'")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let persona = store.get("p1").await.unwrap().unwrap();
+        assert!(
+            persona.starter_prompts.is_empty(),
+            "malformed JSON reads as an empty list"
+        );
     }
 }
