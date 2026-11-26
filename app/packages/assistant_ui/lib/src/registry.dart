@@ -19,6 +19,7 @@ const List<String> kAssistantUiElements = [
   'CompactExpandable',
   'Composer',
   'ComposerVoiceButton',
+  'ConversationArchivedSection',
   'ConversationListView',
   'ConversationSearchResultsView',
   'DataTableResultView',
