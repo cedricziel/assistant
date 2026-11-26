@@ -66,6 +66,7 @@ pub use store::{
 };
 // -- LLM abstractions (types, traits, streaming) --
 pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};
+pub use llm::options::{ChatOptions, ChatOptionsSupport, ToolChoice};
 pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport};
 pub use llm::stream_chunk::StreamChunk;
 pub use llm::tool_spec::ToolSpec;
