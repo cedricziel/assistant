@@ -27,6 +27,7 @@ use super::{
     ApprovalOptions, ConfirmationAnswer, ConfirmationRequest, DispatchOutcome, Orchestrator,
     OrchestratorEvent, value_to_params_map,
 };
+use crate::history::TurnHistory;
 use crate::webhook_dispatch;
 
 /// Call metadata persisted on a tool row next to the observation.
@@ -136,19 +137,22 @@ impl Orchestrator {
     /// (extension-tools, core, and subagent). Returns the id of the persisted
     /// tool-call message, which surfaces anchor to.
     pub(crate) async fn persist_tool_calls(
-        history: &mut Vec<ChatHistoryMessage>,
+        history: &mut TurnHistory,
         conv_store: &dyn ConversationStore,
         conversation_id: Uuid,
         turn_index: i64,
         tool_call_items: &[ToolCallItem],
         provider_state: Option<&ProviderState>,
     ) -> Uuid {
-        history.push(ChatHistoryMessage::AssistantToolCalls {
-            items: tool_call_items.to_vec(),
-            provider_state: provider_state.cloned(),
-        });
         let mut tc_msg = Self::make_tool_call_message(conversation_id, turn_index, tool_call_items);
         tc_msg.provider_state_json = provider_state.and_then(|s| serde_json::to_string(s).ok());
+        history.push(
+            ChatHistoryMessage::AssistantToolCalls {
+                items: tool_call_items.to_vec(),
+                provider_state: provider_state.cloned(),
+            },
+            Some(tc_msg.id),
+        );
         if let Err(e) = conv_store.save_message(&tc_msg).await {
             warn!("Failed to persist tool-call message: {e}");
         }
@@ -178,7 +182,7 @@ impl Orchestrator {
         exec_result: anyhow::Result<assistant_core::ToolOutput>,
         elapsed: std::time::Duration,
         otel_span: &mut opentelemetry::global::BoxedSpan,
-        history: &mut Vec<ChatHistoryMessage>,
+        history: &mut TurnHistory,
         conv_store: &dyn ConversationStore,
         conversation_id: Uuid,
         turn_index: i64,
@@ -325,7 +329,6 @@ impl Orchestrator {
             .await;
         }
 
-        crate::history::append_tool_result(history, tool_name, &observation);
         let tr_msg = Self::make_tool_result_message(
             conversation_id,
             turn_index,
@@ -337,6 +340,7 @@ impl Orchestrator {
                 data: data.as_ref(),
             },
         );
+        crate::history::append_tool_result(history, tool_name, &observation, Some(tr_msg.id));
         if let Err(e) = conv_store.save_message(&tr_msg).await {
             warn!("Failed to persist tool-result message: {e}");
         }
@@ -542,7 +546,7 @@ impl Orchestrator {
         params: &serde_json::Value,
         ctx: &ExecutionContext,
         otel_span: &mut opentelemetry::global::BoxedSpan,
-        history: &mut Vec<ChatHistoryMessage>,
+        history: &mut TurnHistory,
         conv_store: &dyn ConversationStore,
         conversation_id: Uuid,
         turn_index: i64,
@@ -575,7 +579,6 @@ impl Orchestrator {
             info!(%observation);
             otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
             otel_span.set_attribute(KeyValue::new("tool_error", observation.clone()));
-            crate::history::append_tool_result(history, name, &observation);
             let tr_msg = Self::make_tool_result_message(
                 conversation_id,
                 turn_index,
@@ -587,6 +590,7 @@ impl Orchestrator {
                     data: None,
                 },
             );
+            crate::history::append_tool_result(history, name, &observation, Some(tr_msg.id));
             if let Err(e) = conv_store
                 .save_message(&tr_msg)
                 .instrument(instrument_span.clone())

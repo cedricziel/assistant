@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 
 use assistant_core::llm::call_context::LlmCallContext;
 use assistant_core::types::llm::{
-    OpenRouterCache, OpenRouterCacheTtl, OpenRouterReasoning, OpenRouterRouting,
-    OpenRouterWebSearch,
+    OpenRouterCache, OpenRouterCacheTtl, OpenRouterPdfEngine, OpenRouterReasoning,
+    OpenRouterRouting, OpenRouterWebSearch,
 };
 use assistant_core::{
     ChatHistoryMessage, ChatOptions, ContentBlock, ResponseFormat, ToolChoice, ToolSpec,
@@ -25,6 +25,7 @@ pub struct RequestSettings {
     pub reasoning: Option<OpenRouterReasoning>,
     pub cache: OpenRouterCache,
     pub web_search: OpenRouterWebSearch,
+    pub pdf_engine: Option<OpenRouterPdfEngine>,
 }
 
 /// OpenRouter's `web` plugin with the configured options, when enabled.
@@ -55,22 +56,15 @@ fn web_plugin(search: &OpenRouterWebSearch) -> Option<Value> {
 const IMAGE_OMITTED: &str = "[An image was attached, but this model cannot view images.]";
 
 /// Builds a request. Inside a turn, [`LlmCallContext`] supplies
-/// `session_id` and `user`; outside one, both are omitted. Without
-/// `vision`, each image becomes a short text note.
+/// `session_id` and `user`; outside one, both are omitted. `inputs` decides
+/// how images and PDFs are sent.
 pub fn build_chat_request(
     settings: &RequestSettings,
     system_prompt: &str,
     history: &[ChatHistoryMessage],
     tools: &[ToolSpec],
-    vision: bool,
+    inputs: ModelInputs,
 ) -> ChatRequest {
-    let text_only;
-    let history = if vision {
-        history
-    } else {
-        text_only = without_images(history);
-        &text_only[..]
-    };
     let context = LlmCallContext::current();
     let models = if settings.fallback_models.is_empty() {
         Vec::new()
@@ -83,6 +77,7 @@ pub fn build_chat_request(
         model: settings.model.clone(),
         messages: {
             let mut messages = build_raw_messages(system_prompt, history);
+            set_user_parts(&mut messages, history, inputs.vision);
             attach_details(&mut messages, history, &settings.model);
             apply_cache_breakpoints(&mut messages, &settings.model, &settings.cache);
             messages
@@ -110,7 +105,10 @@ pub fn build_chat_request(
         tool_choice: None,
         parallel_tool_calls: None,
         response_format: None,
-        plugins: web_plugin(&settings.web_search).into_iter().collect(),
+        plugins: web_plugin(&settings.web_search)
+            .into_iter()
+            .chain(pdf_plugin(history, settings.pdf_engine, inputs.file_input))
+            .collect(),
         web_search_options: settings
             .web_search
             .search_context_size
@@ -119,22 +117,73 @@ pub fn build_chat_request(
     }
 }
 
-fn without_images(history: &[ChatHistoryMessage]) -> Vec<ChatHistoryMessage> {
-    history
+/// What the model reads besides text, from the catalog.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModelInputs {
+    pub vision: bool,
+    /// The model reads PDFs itself, so no parser plugin is needed.
+    pub file_input: bool,
+}
+
+const PDF: &str = "application/pdf";
+
+/// OpenRouter content parts for a multimodal user message: text, images
+/// (a short note instead when the model has no vision) and PDFs as `file`
+/// parts. Other documents are left out.
+fn user_parts(content: &[ContentBlock], vision: bool) -> Vec<Value> {
+    content
         .iter()
-        .map(|message| match message {
-            ChatHistoryMessage::MultimodalUser { content } => ChatHistoryMessage::MultimodalUser {
-                content: content
-                    .iter()
-                    .map(|block| match block {
-                        ContentBlock::Image { .. } => ContentBlock::Text(IMAGE_OMITTED.into()),
-                        other => other.clone(),
-                    })
-                    .collect(),
-            },
-            other => other.clone(),
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(json!({"type": "text", "text": text})),
+            ContentBlock::Image { media_type, data } if vision => Some(json!({
+                "type": "image_url",
+                "image_url": {"url": format!("data:{media_type};base64,{data}")},
+            })),
+            ContentBlock::Image { .. } => Some(json!({"type": "text", "text": IMAGE_OMITTED})),
+            ContentBlock::Document { media_type, data } if media_type == PDF => Some(json!({
+                "type": "file",
+                "file": {
+                    "filename": "document.pdf",
+                    "file_data": format!("data:{PDF};base64,{data}"),
+                },
+            })),
+            ContentBlock::Document { .. } => None,
         })
         .collect()
+}
+
+/// Replaces the content of each multimodal user message in `messages` with
+/// [`user_parts`]. `messages` holds one array-content user message per
+/// [`ChatHistoryMessage::MultimodalUser`] in `history`, in the same order.
+fn set_user_parts(messages: &mut [Value], history: &[ChatHistoryMessage], vision: bool) {
+    let multimodal = history.iter().filter_map(|m| match m {
+        ChatHistoryMessage::MultimodalUser { content } => Some(content),
+        _ => None,
+    });
+    let users = messages
+        .iter_mut()
+        .filter(|m| m["role"] == "user" && m["content"].is_array());
+    for (message, content) in users.zip(multimodal) {
+        message["content"] = Value::Array(user_parts(content, vision));
+    }
+}
+
+/// The `file-parser` plugin for a request with a PDF: the configured engine,
+/// else `cloudflare-ai` for models that can't read PDFs themselves.
+fn pdf_plugin(
+    history: &[ChatHistoryMessage],
+    engine: Option<OpenRouterPdfEngine>,
+    file_input: bool,
+) -> Option<Value> {
+    let has_pdf = history.iter().any(|m| {
+        matches!(m, ChatHistoryMessage::MultimodalUser { content }
+            if content.iter().any(|b| matches!(b, ContentBlock::Document { media_type, .. } if media_type == PDF)))
+    });
+    if !has_pdf {
+        return None;
+    }
+    let engine = engine.or((!file_input).then_some(OpenRouterPdfEngine::CloudflareAi))?;
+    Some(json!({"id": "file-parser", "pdf": {"engine": engine}}))
 }
 
 /// Adds `options` to `request` in OpenRouter's wire format. The caller

@@ -5,7 +5,9 @@
 //! (orphaned messages, missing tool results), and error recovery.
 
 use std::collections::HashMap;
+use std::ops::Deref;
 
+use anyhow::Result;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -13,8 +15,8 @@ use assistant_core::types::conversation::{Message, MessageRole};
 use assistant_core::{
     ChatHistoryMessage, ChatRole, ContentBlock, ProviderState, ToolCallItem, TurnTiming,
 };
-use assistant_storage::MessageTimingStore;
 use assistant_storage::conversations::ConversationStore;
+use assistant_storage::{ConversationSummaryStore, MessageTimingStore};
 
 /// Pre-loaded attachment content blocks keyed by message ID.
 ///
@@ -29,53 +31,167 @@ pub(crate) type AttachmentMap = HashMap<Uuid, Vec<ContentBlock>>;
 /// When `attachment_map` is non-empty, user messages whose ID appears in the
 /// map are emitted as [`ChatHistoryMessage::MultimodalUser`] with inline
 /// image blocks so the LLM can see previously-sent images on history replay.
+#[cfg(test)]
 pub(crate) fn messages_to_chat_history(
     messages: Vec<Message>,
     attachment_map: &AttachmentMap,
 ) -> Vec<ChatHistoryMessage> {
     messages
         .into_iter()
-        .filter_map(|m| match m.role {
-            MessageRole::User => {
-                if let Some(atts) = attachment_map.get(&m.id)
-                    && !atts.is_empty()
-                {
-                    let mut blocks = vec![ContentBlock::Text(m.content)];
-                    blocks.extend(atts.iter().cloned());
-                    return Some(ChatHistoryMessage::MultimodalUser { content: blocks });
-                }
-                Some(ChatHistoryMessage::Text {
-                    role: ChatRole::User,
-                    content: m.content,
-                })
-            }
-            MessageRole::Assistant => {
-                if let Some(tc_json) = m.tool_calls_json
-                    && let Ok(items) = serde_json::from_str::<Vec<ToolCallItem>>(&tc_json)
-                    && !items.is_empty()
-                {
-                    // A corrupt state is dropped; the tool calls themselves stay.
-                    let provider_state = m
-                        .provider_state_json
-                        .as_deref()
-                        .and_then(|json| serde_json::from_str::<ProviderState>(json).ok());
-                    return Some(ChatHistoryMessage::AssistantToolCalls {
-                        items,
-                        provider_state,
-                    });
-                }
-                Some(ChatHistoryMessage::Text {
-                    role: ChatRole::Assistant,
-                    content: m.content,
-                })
-            }
-            MessageRole::Tool => Some(ChatHistoryMessage::ToolResult {
-                name: m.skill_name.unwrap_or_default(),
-                content: m.content,
-            }),
-            _ => None,
-        })
+        .filter_map(|m| message_to_chat(m, attachment_map))
         .collect()
+}
+
+/// Convert one persisted [`Message`]; `None` for roles the LLM never sees.
+fn message_to_chat(m: Message, attachment_map: &AttachmentMap) -> Option<ChatHistoryMessage> {
+    match m.role {
+        MessageRole::User => {
+            if let Some(atts) = attachment_map.get(&m.id)
+                && !atts.is_empty()
+            {
+                let mut blocks = vec![ContentBlock::Text(m.content)];
+                blocks.extend(atts.iter().cloned());
+                return Some(ChatHistoryMessage::MultimodalUser { content: blocks });
+            }
+            Some(ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: m.content,
+            })
+        }
+        MessageRole::Assistant => {
+            if let Some(tc_json) = m.tool_calls_json
+                && let Ok(items) = serde_json::from_str::<Vec<ToolCallItem>>(&tc_json)
+                && !items.is_empty()
+            {
+                // A corrupt state is dropped; the tool calls themselves stay.
+                let provider_state = m
+                    .provider_state_json
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<ProviderState>(json).ok());
+                return Some(ChatHistoryMessage::AssistantToolCalls {
+                    items,
+                    provider_state,
+                });
+            }
+            Some(ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: m.content,
+            })
+        }
+        MessageRole::Tool => Some(ChatHistoryMessage::ToolResult {
+            name: m.skill_name.unwrap_or_default(),
+            content: m.content,
+        }),
+        _ => None,
+    }
+}
+
+/// The messages a turn sends to the LLM, with the persisted row behind each.
+///
+/// `row_ids[i]` is the id of the stored message that produced `messages[i]`,
+/// or `None` for entries with no row of their own (the summary, synthetic
+/// repairs). The two vectors only change together, through [`push`], [`insert`]
+/// and [`remove`], so they cannot drift apart. A later change uses the ids to say
+/// which stored message a summary runs through.
+///
+/// [`push`]: TurnHistory::push
+/// [`insert`]: TurnHistory::insert
+/// [`remove`]: TurnHistory::remove
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TurnHistory {
+    messages: Vec<ChatHistoryMessage>,
+    row_ids: Vec<Option<Uuid>>,
+}
+
+impl TurnHistory {
+    /// Wrap messages that have no persisted rows (every id is `None`).
+    #[cfg(test)]
+    pub(crate) fn unmapped(messages: Vec<ChatHistoryMessage>) -> Self {
+        let row_ids = vec![None; messages.len()];
+        Self { messages, row_ids }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn messages(&self) -> &[ChatHistoryMessage] {
+        &self.messages
+    }
+
+    /// The persisted row behind each entry of [`messages`](Self::messages).
+    #[cfg(test)]
+    pub(crate) fn row_ids(&self) -> Vec<Option<Uuid>> {
+        self.row_ids.clone()
+    }
+
+    /// Append `message`, which was persisted as `row_id` when it has a row.
+    pub(crate) fn push(&mut self, message: ChatHistoryMessage, row_id: Option<Uuid>) {
+        self.messages.push(message);
+        self.row_ids.push(row_id);
+    }
+
+    /// Insert a synthetic entry, which has no row.
+    pub(crate) fn insert(&mut self, index: usize, message: ChatHistoryMessage) {
+        self.messages.insert(index, message);
+        self.row_ids.insert(index, None);
+    }
+
+    pub(crate) fn remove(&mut self, index: usize) {
+        self.messages.remove(index);
+        self.row_ids.remove(index);
+    }
+
+    /// Replace the first `split_at` entries with one summary entry.
+    pub(crate) fn replace_prefix_with_summary(
+        &mut self,
+        split_at: usize,
+        summary: ChatHistoryMessage,
+    ) {
+        self.messages.splice(..split_at, std::iter::once(summary));
+        self.row_ids.splice(..split_at, std::iter::once(None));
+    }
+}
+
+impl Deref for TurnHistory {
+    type Target = [ChatHistoryMessage];
+
+    fn deref(&self) -> &Self::Target {
+        &self.messages
+    }
+}
+
+/// Build the history a turn sends to the LLM from the path `path` (root
+/// first) of `conversation_id`.
+///
+/// When the newest summary whose `through_message_id` lies on the path
+/// exists, the history is that summary followed by the path rows after it.
+/// A summary that covers messages the path branched away from does not apply.
+/// Without a summary the history is the whole path.
+pub(crate) async fn build_turn_history(
+    path: Vec<Message>,
+    conversation_id: Uuid,
+    summaries: &dyn ConversationSummaryStore,
+    attachment_map: &AttachmentMap,
+) -> Result<TurnHistory> {
+    let path_ids: Vec<Uuid> = path.iter().map(|m| m.id).collect();
+    let summary = summaries.newest_on_path(conversation_id, &path_ids).await?;
+
+    let mut history = TurnHistory::default();
+    let mut rows = path;
+    if let Some(summary) = summary {
+        // `newest_on_path` only returns a summary whose message is on the path.
+        let after = path_ids
+            .iter()
+            .position(|id| *id == summary.through_message_id)
+            .map_or(0, |i| i + 1);
+        rows = rows.split_off(after);
+        history.push(crate::compaction::summary_message(&summary.content), None);
+    }
+    for message in rows {
+        let id = message.id;
+        if let Some(entry) = message_to_chat(message, attachment_map) {
+            history.push(entry, Some(id));
+        }
+    }
+    Ok(history)
 }
 
 /// Repair structural problems in a loaded conversation history.
@@ -94,7 +210,7 @@ pub(crate) fn messages_to_chat_history(
 ///    messages were written.  Missing results are filled in with a
 ///    synthetic error result so providers that require tool results
 ///    (Ollama, Anthropic) do not reject the request.
-pub(crate) fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
+pub(crate) fn sanitize_history(history: &mut TurnHistory) {
     if history.is_empty() {
         return;
     }
@@ -202,10 +318,13 @@ pub(crate) fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
         debug!(
             "Sanitizing history: inserting synthetic assistant message after orphaned user message"
         );
-        history.push(ChatHistoryMessage::Text {
-            role: ChatRole::Assistant,
-            content: "[An error occurred processing the previous message.]".to_string(),
-        });
+        history.push(
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "[An error occurred processing the previous message.]".to_string(),
+            },
+            None,
+        );
     }
 }
 
@@ -265,11 +384,21 @@ pub(crate) async fn persist_error_recovery(
 }
 
 /// Append a tool result to the running chat history.
-pub(crate) fn append_tool_result(history: &mut Vec<ChatHistoryMessage>, name: &str, content: &str) {
-    history.push(ChatHistoryMessage::ToolResult {
-        name: name.to_string(),
-        content: content.to_string(),
-    });
+///
+/// `row_id` is the stored tool-result message, when there is one.
+pub(crate) fn append_tool_result(
+    history: &mut TurnHistory,
+    name: &str,
+    content: &str,
+    row_id: Option<Uuid>,
+) {
+    history.push(
+        ChatHistoryMessage::ToolResult {
+            name: name.to_string(),
+            content: content.to_string(),
+        },
+        row_id,
+    );
 }
 
 #[cfg(test)]
@@ -326,6 +455,156 @@ mod tests {
         m.tool_calls_json = Some(r#"[{"name":"bash","params":{"command":"ls"},"id":"c1"}]"#.into());
         m.provider_state_json = provider_state_json.map(str::to_string);
         m
+    }
+
+    // -- build_turn_history ---------------------------------------------------
+
+    fn path_of(contents: &[&str]) -> Vec<Message> {
+        let conv = Uuid::new_v4();
+        contents
+            .iter()
+            .enumerate()
+            .map(|(i, content)| {
+                let mut m = if i % 2 == 0 {
+                    Message::user(conv, *content)
+                } else {
+                    Message::assistant(conv, *content)
+                };
+                m.turn = i as i64;
+                m
+            })
+            .collect()
+    }
+
+    fn text_of(msg: &ChatHistoryMessage) -> &str {
+        match msg {
+            ChatHistoryMessage::Text { content, .. } => content,
+            other => panic!("expected a text message, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn build_turn_history_without_a_summary_equals_the_raw_path() {
+        let path = path_of(&["q1", "a1", "q2", "a2"]);
+        let conv = path[0].conversation_id;
+        let summaries = assistant_storage::InMemoryConversationSummaryStore::new();
+
+        let built = build_turn_history(path.clone(), conv, &summaries, &AttachmentMap::new())
+            .await
+            .unwrap();
+
+        let expected = messages_to_chat_history(path.clone(), &AttachmentMap::new());
+        assert_eq!(
+            format!("{:?}", built.messages()),
+            format!("{expected:?}"),
+            "no summary leaves the path untouched"
+        );
+        assert_eq!(
+            built.row_ids(),
+            path.iter().map(|m| Some(m.id)).collect::<Vec<_>>(),
+            "every history entry maps to its row"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_turn_history_starts_with_the_summary_then_the_rows_after_it() {
+        let path = path_of(&["q1", "a1", "q2", "a2", "q3"]);
+        let conv = path[0].conversation_id;
+        let summaries = assistant_storage::InMemoryConversationSummaryStore::new();
+        summaries
+            .insert(conv, path[1].id, "talked about X")
+            .await
+            .unwrap();
+
+        let built = build_turn_history(path.clone(), conv, &summaries, &AttachmentMap::new())
+            .await
+            .unwrap();
+
+        let texts: Vec<&str> = built.messages().iter().map(text_of).collect();
+        assert_eq!(texts.len(), 4, "summary plus the three rows after a1");
+        assert!(
+            texts[0].starts_with("[Conversation summary — earlier context compacted]"),
+            "summary header first, got {:?}",
+            texts[0]
+        );
+        assert!(texts[0].ends_with("talked about X"));
+        assert_eq!(&texts[1..], ["q2", "a2", "q3"]);
+        assert_eq!(built.row_ids().len(), built.messages().len());
+        assert_eq!(built.row_ids()[0], None, "the summary has no row");
+        assert_eq!(built.row_ids()[1], Some(path[2].id));
+    }
+
+    #[tokio::test]
+    async fn build_turn_history_ignores_a_summary_that_is_not_on_the_path() {
+        let path = path_of(&["q1", "a1"]);
+        let conv = path[0].conversation_id;
+        let summaries = assistant_storage::InMemoryConversationSummaryStore::new();
+        summaries
+            .insert(conv, Uuid::new_v4(), "from another branch")
+            .await
+            .unwrap();
+
+        let built = build_turn_history(path, conv, &summaries, &AttachmentMap::new())
+            .await
+            .unwrap();
+
+        let texts: Vec<&str> = built.messages().iter().map(text_of).collect();
+        assert_eq!(texts, ["q1", "a1"]);
+    }
+
+    // -- TurnHistory ----------------------------------------------------------
+
+    #[test]
+    fn turn_history_push_keeps_row_ids_the_same_length() {
+        let mut h = TurnHistory::unmapped(vec![ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "q".into(),
+        }]);
+        assert_eq!(h.row_ids().len(), h.messages().len());
+
+        let id = Uuid::new_v4();
+        h.push(
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![],
+                provider_state: None,
+            },
+            Some(id),
+        );
+        append_tool_result(&mut h, "bash", "ok", None);
+
+        assert_eq!(h.messages().len(), 3);
+        assert_eq!(h.row_ids(), vec![None, Some(id), None]);
+    }
+
+    #[test]
+    fn turn_history_remove_and_insert_keep_row_ids_the_same_length() {
+        let a = Uuid::new_v4();
+        let mut h = TurnHistory::unmapped(vec![]);
+        for (i, id) in [Some(a), None, Some(Uuid::new_v4())]
+            .into_iter()
+            .enumerate()
+        {
+            h.push(
+                ChatHistoryMessage::Text {
+                    role: ChatRole::User,
+                    content: format!("m{i}"),
+                },
+                id,
+            );
+        }
+
+        h.remove(0);
+        h.insert(
+            1,
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "synthetic".into(),
+            },
+        );
+
+        assert_eq!(h.messages().len(), 3);
+        assert_eq!(h.row_ids().len(), 3);
+        assert_eq!(h.row_ids()[1], None, "an inserted entry has no row");
     }
 
     #[test]

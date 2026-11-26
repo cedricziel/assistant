@@ -10,6 +10,7 @@ use assistant_storage::InMemoryConversationStore;
 use assistant_storage::conversations::ConversationStore;
 use uuid::Uuid;
 
+use crate::history::TurnHistory;
 use crate::orchestrator::Orchestrator;
 use crate::orchestrator::dispatch::ToolResultMeta;
 
@@ -201,7 +202,7 @@ async fn persist_tool_calls_keeps_provider_state_in_history_and_storage() {
         model: "anthropic/claude-sonnet-5.5".to_string(),
         data: serde_json::json!({"reasoning_details": [{"type": "reasoning.encrypted", "data": "x"}]}),
     };
-    let mut history = Vec::new();
+    let mut history = TurnHistory::default();
 
     Orchestrator::persist_tool_calls(&mut history, &store, conv.id, 1, &items, Some(&state)).await;
 
@@ -216,13 +217,18 @@ async fn persist_tool_calls_keeps_provider_state_in_history_and_storage() {
     let stored: ProviderState =
         serde_json::from_str(saved[0].provider_state_json.as_deref().unwrap()).unwrap();
     assert_eq!(stored, state, "the state is persisted for history rebuilds");
+    assert_eq!(
+        history.row_ids(),
+        vec![Some(saved[0].id)],
+        "the history entry maps to the row that was saved"
+    );
 }
 
 #[tokio::test]
 async fn persist_tool_calls_without_provider_state_stores_none() {
     let store = InMemoryConversationStore::new();
     let conv = store.create_conversation(None).await.unwrap();
-    let mut history = Vec::new();
+    let mut history = TurnHistory::default();
     Orchestrator::persist_tool_calls(&mut history, &store, conv.id, 1, &[], None).await;
     let saved = store.load_history(conv.id).await.unwrap();
     assert!(saved[0].provider_state_json.is_none());
