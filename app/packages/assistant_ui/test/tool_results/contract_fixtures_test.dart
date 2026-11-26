@@ -10,8 +10,6 @@ const pendingKinds = <String>{
   'terminal',
   'sources',
   'link_preview',
-  'code_file',
-  'code_diff',
   'data_table',
   'plan',
 };

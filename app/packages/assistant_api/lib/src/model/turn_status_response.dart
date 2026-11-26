@@ -33,7 +33,7 @@ abstract class TurnStatusResponse
 
   @BuiltValueField(wireName: r'state')
   TurnState get state;
-  // enum stateEnum {  running,  completed,  errored,  unknown,  };
+  // enum stateEnum {  running,  awaiting_input,  completed,  errored,  unknown,  };
 
   @BuiltValueField(wireName: r'turn_id')
   String get turnId;

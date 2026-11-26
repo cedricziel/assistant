@@ -7,6 +7,8 @@ import 'platform.dart';
 
 /// Shows a confirmation dialog styled for the current platform.
 ///
+/// [body] replaces the plain [content] text when the message needs styling.
+///
 /// Returns `true` when the user taps the confirm action, `false` otherwise.
 Future<bool> showAdaptiveConfirmDialog({
   required BuildContext context,
@@ -14,6 +16,7 @@ Future<bool> showAdaptiveConfirmDialog({
   required String content,
   required String confirmLabel,
   bool isDestructive = false,
+  Widget? body,
 }) async {
   if (isAppleTouch) {
     if (isDestructive) HapticFeedback.mediumImpact();
@@ -21,7 +24,7 @@ Future<bool> showAdaptiveConfirmDialog({
       context: context,
       builder: (ctx) => CupertinoAlertDialog(
         title: Text(title),
-        content: Text(content),
+        content: body ?? Text(content),
         actions: [
           CupertinoDialogAction(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -42,7 +45,7 @@ Future<bool> showAdaptiveConfirmDialog({
     context: context,
     builder: (ctx) => AlertDialog(
       title: Text(title),
-      content: Text(content),
+      content: body ?? Text(content),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(false),

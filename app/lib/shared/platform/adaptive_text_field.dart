@@ -23,6 +23,7 @@ class AdaptiveTextField extends StatelessWidget {
     this.autofocus = false,
     this.textInputAction,
     this.prefix,
+    this.suffix,
     this.minLines,
     this.maxLines = 1,
     this.cursorColor,
@@ -44,6 +45,11 @@ class AdaptiveTextField extends StatelessWidget {
   /// `CupertinoTextField.prefix` on iOS and `InputDecoration.prefixIcon`
   /// on Material. Commonly an [Icon] used for search affordances.
   final Widget? prefix;
+
+  /// Optional trailing widget rendered inside the field. Maps to
+  /// `CupertinoTextField.suffix` on iOS and `InputDecoration.suffixIcon` on
+  /// Material. Commonly a clear button.
+  final Widget? suffix;
 
   /// Multi-line support. `maxLines = 1` (the default) renders a single
   /// line; pass `null` for unbounded growth.
@@ -74,6 +80,7 @@ class AdaptiveTextField extends StatelessWidget {
         autofocus: autofocus,
         textInputAction: textInputAction,
         prefix: prefix,
+        suffix: suffix,
         minLines: minLines,
         maxLines: maxLines,
         cursorColor: cursorColor,
@@ -87,10 +94,14 @@ class AdaptiveTextField extends StatelessWidget {
       controller: controller,
       focusNode: focusNode,
       decoration:
-          (placeholder != null || prefix != null || contentPadding != null)
+          (placeholder != null ||
+              prefix != null ||
+              suffix != null ||
+              contentPadding != null)
           ? InputDecoration(
               hintText: placeholder,
               prefixIcon: prefix,
+              suffixIcon: suffix,
               contentPadding: contentPadding,
             )
           : null,

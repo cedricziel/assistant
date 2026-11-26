@@ -1,3 +1,4 @@
+import 'package:a2ui_core/a2ui_core.dart';
 import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:a2ui_flutter/basic_catalog.dart';
 
@@ -57,7 +58,10 @@ CatalogImplementation assistantCatalog({
                 )
               : component,
     ],
-    functions: basic.functions.values.toList(),
+    functions: [
+      for (final function in basic.functions.values)
+        function.name == 'regex' ? _CappedRegex(function) : function,
+    ],
     schemaId: kAssistantCatalogId,
     title: 'Assistant catalog',
     description:
@@ -66,4 +70,43 @@ CatalogImplementation assistantCatalog({
     protocolVersion: basic.protocolVersion,
     definitions: basic.definitions,
   );
+}
+
+/// The most code points the `regex` function evaluates (design D7). The
+/// library's own cap is 4,096; the client evaluates with a backtracking
+/// engine, so this one is lower.
+const kRegexInputCap = 1000;
+
+/// The basic `regex` function with a tighter input cap. Longer input fails
+/// the check without compiling or running the pattern.
+class _CappedRegex extends FunctionImplementation {
+  _CappedRegex(this._inner)
+    : super(
+        name: _inner.name,
+        argumentSchema: _inner.argumentSchema,
+        returnType: _inner.returnType,
+        description: _inner.description,
+        allowedCallers: _inner.declaredAllowedCallers,
+        requiresUserActivation: _inner.declaredRequiresUserActivation,
+        definition: _inner.definition,
+      );
+
+  final FunctionImplementation _inner;
+
+  @override
+  Object? execute(
+    Map<String, dynamic> args,
+    DataContext context, [
+    CancellationSignal? cancellationSignal,
+  ]) {
+    final value = args['value'];
+    final text = value is String ? value : (value?.toString() ?? '');
+    if (text.runes.length > kRegexInputCap) {
+      return const ValidationResult(
+        valid: false,
+        message: 'Value does not match required pattern.',
+      );
+    }
+    return _inner.execute(args, context, cancellationSignal);
+  }
 }

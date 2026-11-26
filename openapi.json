@@ -824,6 +824,106 @@
         ]
       }
     },
+    "/api/conversations/{conversation_id}/interactions": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`GET /api/conversations/{conversation_id}/interactions`",
+        "description": "The interactions of one of the caller's conversations, oldest first, as a\nbare array. `?status=pending` narrows it to those still waiting, which is\nhow a client that opens a conversation finds a run to attach to.",
+        "operationId": "list_conversation_interactions",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only interactions in this state, such as `pending`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/InteractionStatusView"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Interactions in creation order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InteractionDetail"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid conversation ID or status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation not found, or not the caller's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read": {
       "post": {
         "tags": [
@@ -1902,6 +2002,133 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "An edit or regenerate is running in this conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{id}/messages/{message_id}/edit": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{id}/messages/{message_id}/edit` — replace a user\nmessage and stream the new reply.",
+        "description": "Saves the new text as a sibling of `message_id`, carries the original's\nattachments forward, makes the new branch active and answers it. The\noriginal message and everything below it stay stored. The first frame is\n`run_started{run_id, user_message_id}`, the id the new message is saved\nunder. Returns `409` while a turn is working or another edit or regenerate\nruns.",
+        "operationId": "edit_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "The user message to edit",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "SSE stream of assistant tokens and final message",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "400": {
+            "description": "Invalid ID, blank message, or not a user message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Read-only access, or missing conversations:write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is still working in this conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2092,6 +2319,113 @@
           },
           "404": {
             "description": "Conversation or message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{id}/messages/{message_id}/regenerate": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{id}/messages/{message_id}/regenerate` — answer a\nuser message again and stream the new reply.",
+        "description": "`message_id` is a user message or any row of a reply; a reply row resolves\nto the user message above it. No user message is saved: the new reply\nbecomes another version of the old one. The first frame is\n`run_started{run_id, user_message_id}` with the answered message's id.\nReturns `409` while a turn is working or another edit or regenerate runs.",
+        "operationId": "regenerate_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "A user message, or any row of the reply to regenerate",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream of assistant tokens and final message",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "400": {
+            "description": "Invalid ID, or no user message to answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Read-only access, or missing conversations:write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is still working in this conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
             "content": {
               "application/json": {
                 "schema": {
@@ -11733,7 +12067,8 @@
           "created_at",
           "updated_at",
           "messages",
-          "surfaces"
+          "surfaces",
+          "interactions"
         ],
         "properties": {
           "created_at": {
@@ -11743,6 +12078,13 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "interactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InteractionDetail"
+            },
+            "description": "Every interaction of the conversation (tool approvals, questions), in\ncreation order. Includes those of runs on inactive branches; the client\ndecides what to show."
           },
           "messages": {
             "type": "array",
@@ -12387,6 +12729,19 @@
           },
           "user_code": {
             "type": "string"
+          }
+        }
+      },
+      "EditMessageRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/conversations/{id}/messages/{message_id}/edit`.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The new text. The edited message's attachments carry forward."
           }
         }
       },
@@ -15726,9 +16081,10 @@
       },
       "TurnState": {
         "type": "string",
-        "description": "Closed enum of turn states surfaced by the status endpoint.\n\nAnything not in this set must round-trip to one of these four when\nserialised — the client's switch is exhaustive.",
+        "description": "Closed enum of turn states surfaced by the status endpoint.\n\nAnything not in this set must round-trip to one of these five when\nserialised — the client's switch is exhaustive.",
         "enum": [
           "running",
+          "awaiting_input",
           "completed",
           "errored",
           "unknown"
