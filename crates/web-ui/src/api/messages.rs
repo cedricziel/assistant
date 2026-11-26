@@ -258,6 +258,9 @@ pub(crate) async fn stream_turn_to_sse(
     let relay = runtime
         .as_ref()
         .map(|runtime| runtime.orchestrator.run_event_relay(conv_id, run_id));
+    // A cancelled turn hands its streamed text back to the runtime to persist.
+    let orchestrator = runtime.as_ref().map(|runtime| runtime.orchestrator.clone());
+
     // Settles the run's interactions when it ends (ADR-0017).
     let interaction_broker = super::interactions::broker_or_store_only(
         runtime
@@ -493,7 +496,7 @@ pub(crate) async fn stream_turn_to_sse(
             },
             Errored(String),
         }
-        let (reply_text, reply_message_id, reply_attachment_ids, terminal) =
+        let (mut reply_text, reply_message_id, reply_attachment_ids, terminal) =
             match run_events.into_turn_result().await {
                 Ok(Ok(result)) => (
                     result.answer,
@@ -574,6 +577,35 @@ pub(crate) async fn stream_turn_to_sse(
             TerminalKind::Cancelled { .. } | TerminalKind::Errored(_) => None,
         };
 
+        // The turn's user message was saved, so the stopped reply (or the
+        // placeholder when nothing streamed) becomes its assistant message.
+        // A turn cancelled before it started saved nothing to answer.
+        let mut cancelled_message_id = None;
+        if matches!(
+            terminal,
+            TerminalKind::Cancelled {
+                before_start: false
+            }
+        ) {
+            let persisted = match &orchestrator {
+                Some(orchestrator) => {
+                    orchestrator
+                        .persist_cancelled_reply(conv_id, &reply_text, &Interface::Web)
+                        .await
+                }
+                None => Err(anyhow::anyhow!("no runtime for the conversation")),
+            };
+            match persisted {
+                Ok(message_id) => {
+                    cancelled_message_id = Some(message_id);
+                    if reply_text.trim().is_empty() {
+                        reply_text = assistant_runtime::CANCELLED_REPLY_PLACEHOLDER.to_string();
+                    }
+                }
+                Err(e) => warn!("Failed to persist the cancelled reply of run {run_id}: {e:#}"),
+            }
+        }
+
         let (event_type, payload) = match &terminal {
             TerminalKind::Done => {
                 let mut done_data = serde_json::json!({
@@ -601,6 +633,9 @@ pub(crate) async fn stream_turn_to_sse(
                 });
                 if *before_start {
                     cancelled["user_message_persisted"] = serde_json::Value::Bool(false);
+                }
+                if let Some(message_id) = cancelled_message_id {
+                    cancelled["message_id"] = serde_json::Value::String(message_id.to_string());
                 }
                 ("agent_error", cancelled)
             }
@@ -2730,6 +2765,192 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(data).unwrap();
         assert_eq!(payload["reason"], "cancelled");
         assert_eq!(payload["partial_content"], "par");
+    }
+
+    /// Save the user row of a turn that is about to be cancelled.
+    async fn seed_user_row(storage: &Arc<StorageLayer>, conv_id: Uuid, text: &str) {
+        SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system")
+            .save_message(&assistant_core::types::conversation::Message::user(
+                conv_id, text,
+            ))
+            .await
+            .unwrap();
+    }
+
+    /// The conversation's messages as `GET /conversations/{id}` lists them.
+    async fn history_of(state: &ApiState, conv_id: Uuid) -> Vec<serde_json::Value> {
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{conv_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_json(resp.into_body()).await;
+        json["messages"].as_array().cloned().unwrap_or_default()
+    }
+
+    fn last_payload(frames: &[Frame]) -> serde_json::Value {
+        serde_json::from_str(&frames.last().unwrap().1).unwrap()
+    }
+
+    fn cancelled() -> Option<anyhow::Result<assistant_runtime::TurnResult>> {
+        Some(Err(anyhow::anyhow!(
+            assistant_runtime::TURN_CANCELLED_MARKER
+        )))
+    }
+
+    #[tokio::test]
+    async fn runner_persists_the_streamed_partial_of_a_cancelled_turn() {
+        use assistant_runtime::OrchestratorEvent::Token;
+
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        seed_user_row(&storage, conv_id, "hi").await;
+
+        let (run_id, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            NO_SUGGESTIONS,
+            vec![Token("The capital ".into()), Token("of France".into())],
+            cancelled(),
+        )
+        .await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(payload["partial_content"], "The capital of France");
+        let history = history_of(&state, conv_id).await;
+        assert_eq!(history.len(), 2, "user row plus the partial: {history:?}");
+        assert_eq!(history[1]["role"], "assistant");
+        assert_eq!(history[1]["content"], "The capital of France");
+        assert_eq!(history[1]["finish_reason"], "cancelled");
+        assert_eq!(
+            payload["message_id"], history[1]["id"],
+            "the frame names the persisted row"
+        );
+        let log = event_log(&storage, &run_id).await;
+        assert_eq!(
+            log.last().unwrap().2["message_id"],
+            payload["message_id"],
+            "the replayed terminal carries message_id too"
+        );
+    }
+
+    #[tokio::test]
+    async fn runner_persists_the_placeholder_when_nothing_streamed() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        seed_user_row(&storage, conv_id, "hi").await;
+
+        let (_, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            NO_SUGGESTIONS,
+            vec![],
+            cancelled(),
+        )
+        .await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["partial_content"], "_Stopped._");
+        let history = history_of(&state, conv_id).await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1]["content"], "_Stopped._");
+        assert_eq!(history[1]["finish_reason"], "cancelled");
+        assert_eq!(payload["message_id"], history[1]["id"]);
+    }
+
+    #[tokio::test]
+    async fn runner_cancelled_before_start_persists_nothing() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+
+        let (_, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            NO_SUGGESTIONS,
+            vec![],
+            Some(Err(anyhow::anyhow!(
+                "{} before it started ({})",
+                assistant_runtime::TURN_CANCELLED_MARKER,
+                assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER
+            ))),
+        )
+        .await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["user_message_persisted"], false);
+        assert!(payload.get("message_id").is_none());
+        assert_eq!(payload["partial_content"], "", "no placeholder either");
+        assert!(history_of(&state, conv_id).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn runner_still_ends_a_cancelled_turn_when_the_partial_cannot_be_saved() {
+        use assistant_runtime::OrchestratorEvent::Token;
+
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        seed_user_row(&storage, conv_id, "hi").await;
+        sqlx::query(
+            "CREATE TRIGGER refuse_cancelled BEFORE INSERT ON messages \
+             WHEN NEW.finish_reason = 'cancelled' BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+        )
+        .execute(&storage.pool)
+        .await
+        .unwrap();
+
+        let (_, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            NO_SUGGESTIONS,
+            vec![Token("par".into())],
+            cancelled(),
+        )
+        .await;
+
+        let (event, _, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload = last_payload(&frames);
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(payload["partial_content"], "par");
+        assert!(payload.get("message_id").is_none(), "{payload}");
+    }
+
+    #[tokio::test]
+    async fn send_message_cancelled_before_any_token_persists_the_stopped_row() {
+        let server = MockServer::start().await;
+        mount_llm_hang(&server).await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state.clone(), conv_id, "slow").await;
+        let run_id = run_id_of(&resp);
+        cancel_when_running(&orchestrator, &server, Uuid::parse_str(&run_id).unwrap()).await;
+        let frames = sse_frames(resp).await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(payload["partial_content"], "_Stopped._");
+        let history = history_of(&state, conv_id).await;
+        assert_eq!(
+            history.len(),
+            2,
+            "user row plus the placeholder: {history:?}"
+        );
+        assert_eq!(history[0]["role"], "user");
+        assert_eq!(history[1]["content"], "_Stopped._");
+        assert_eq!(history[1]["finish_reason"], "cancelled");
+        assert_eq!(payload["message_id"], history[1]["id"]);
     }
 
     #[tokio::test]
