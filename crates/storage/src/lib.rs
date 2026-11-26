@@ -27,6 +27,7 @@ pub mod conversation_events;
 pub mod conversation_search;
 pub mod conversations;
 pub mod integration_store;
+pub mod interactions;
 pub mod interface_instance_store;
 pub mod memory_chunks;
 pub mod message_bus;
@@ -76,6 +77,10 @@ pub use conversations::{
 };
 pub use integration_store::{
     SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
+};
+pub use interactions::{
+    InMemoryInteractionStore, InteractionRow, InteractionStatus, InteractionStore, NewInteraction,
+    ResolveOutcome, SqliteInteractionStore,
 };
 pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use memory_chunks::{
