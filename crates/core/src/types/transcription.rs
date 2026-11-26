@@ -21,6 +21,8 @@ pub enum TranscriptionProviderKind {
     Ollama,
     /// Deepgram hosted speech-to-text API.
     Deepgram,
+    /// OpenRouter speech-to-text (`POST /audio/transcriptions`).
+    OpenRouter,
 }
 
 /// Configuration for audio transcription.
