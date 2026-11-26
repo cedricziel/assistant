@@ -6,6 +6,13 @@ const runTag = process.env.GITHUB_RUN_ID || `${process.pid}`;
 // The server keeps all state under $HOME/.assistant, so a throwaway HOME
 // isolates each run.
 const homeDir = path.join(os.tmpdir(), `assistant-e2e-home-${runTag}`);
+const assistant =
+  process.env.ASSISTANT_BIN || "cargo run -q -p assistant-cli --";
+const MOCK_LLM_PORT = 18788;
+
+// The iPad-landscape project exists only for the sidebar-collapse regression
+// (#620); it has no screenshot baselines.
+const IPAD_ONLY_SPEC = /sidebar-collapse-ipad\.spec\.ts/;
 
 /**
  * Playwright configuration for visual regression tests.
@@ -14,6 +21,8 @@ const homeDir = path.join(os.tmpdir(), `assistant-e2e-home-${runTag}`);
  *   - Desktop (1280px) — full icon rail + top bar
  *   - Tablet  (768px)  — hamburger menu, no icon rail  (breakpoint: 900px)
  *   - Mobile  (375px)  — bottom tab bar, no top bar    (breakpoint: 640px)
+ *
+ * A fourth project, iPad landscape (1180px), runs only the sidebar-collapse spec.
  *
  * The assistant webui server must be running at BASE_URL before tests start.
  * Set E2E_BASE_URL to override the default address.
@@ -51,6 +60,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chrome",
+      testIgnore: IPAD_ONLY_SPEC,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 900 },
@@ -58,6 +68,7 @@ export default defineConfig({
     },
     {
       name: "tablet-chrome",
+      testIgnore: IPAD_ONLY_SPEC,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 768, height: 1024 },
@@ -65,6 +76,7 @@ export default defineConfig({
     },
     {
       name: "ipad-landscape-chrome",
+      testMatch: IPAD_ONLY_SPEC,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1180, height: 820 },
@@ -72,21 +84,31 @@ export default defineConfig({
     },
     {
       name: "mobile-chrome",
+      testIgnore: IPAD_ONLY_SPEC,
       use: {
         ...devices["Pixel 7"],
       },
     },
   ],
 
-  /* Auto-start the server if not already running */
-  webServer: {
-    command: process.env.ASSISTANT_BIN
-      ? `rm -rf ${homeDir} && mkdir -p ${homeDir} && HOME=${homeDir} ${process.env.ASSISTANT_BIN} webui serve --auth-token test-token --listen 127.0.0.1:8787`
-      : `rm -rf ${homeDir} && mkdir -p ${homeDir} && HOME=${homeDir} cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787`,
-    url: "http://127.0.0.1:8787/login",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+  /* Auto-start the servers if not already running: a scripted Ollama
+   * stand-in, then the assistant web UI and orchestrator with the
+   * examples/mcp-apps-demo MCP server under [mcp] and the stand-in as their
+   * LLM (see tests/support/e2e-server.mjs). */
+  webServer: [
+    {
+      command: `node tests/support/mock-ollama.mjs ${MOCK_LLM_PORT}`,
+      url: `http://127.0.0.1:${MOCK_LLM_PORT}/api/tags`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 10_000,
+    },
+    {
+      command: `node tests/support/e2e-server.mjs ${homeDir} ${MOCK_LLM_PORT} ${assistant}`,
+      url: "http://127.0.0.1:8787/login",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  ],
 });

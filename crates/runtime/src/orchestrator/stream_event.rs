@@ -12,10 +12,9 @@ use crate::interaction::InteractionOutcome;
 
 /// A single event emitted by the orchestrator during a streaming turn.
 ///
-/// Events flow through an `mpsc::Sender<OrchestratorEvent>` registered via
-/// [`Orchestrator::register_token_sink`].  The sender is consumed (removed)
-/// by the worker once the turn is complete; callers should drain their
-/// receiver until it is closed to know the turn is finished.
+/// Events flow through the `mpsc::Sender<OrchestratorEvent>` handed to
+/// [`Orchestrator::submit_streaming`]. The sender is released when the turn
+/// result arrives, so callers drain their receiver until it closes.
 ///
 /// The serde form (`{"type": "token", "data": "…"}`) is the wire format of the
 /// run event relay (`turn.event`), so renaming a variant breaks a worker and a

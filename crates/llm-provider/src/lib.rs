@@ -20,6 +20,7 @@ pub mod openrouter;
 // -- Shared provider infrastructure --
 pub mod chat_completions;
 pub mod http;
+pub mod images;
 pub mod retry;
 pub mod scripted;
 pub mod voyage;

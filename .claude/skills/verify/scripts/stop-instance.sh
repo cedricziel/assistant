@@ -8,7 +8,7 @@ case "$home" in
   *) echo "refusing: $home is not a verify instance" >&2; exit 1 ;;
 esac
 
-if [[ -f "$home/server.pid" ]]; then
-  kill "$(cat "$home/server.pid")" 2>/dev/null || true
-fi
+for pidfile in "$home"/*.pid; do
+  [[ -f "$pidfile" ]] && kill "$(cat "$pidfile")" 2>/dev/null || true
+done
 rm -rf "$home"

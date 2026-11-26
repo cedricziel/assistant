@@ -16,6 +16,7 @@ assistant-storage = { path = "../storage" }
 assistant-transcription = { path = "../transcription" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+bytes = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }

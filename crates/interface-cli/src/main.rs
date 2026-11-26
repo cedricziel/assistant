@@ -486,37 +486,25 @@ async fn main() -> Result<()> {
                 let (tx, rx) = mpsc::channel::<assistant_runtime::OrchestratorEvent>(64);
                 let printer = repl_helpers::start_token_printer(rx);
 
-                // Register the token sink so the worker streams to it.
-                bs.orchestrator
-                    .register_token_sink(conversation_id, tx)
-                    .await;
-
-                // submit_turn publishes to the bus; the worker claims it,
-                // finds the registered sink, and calls run_turn_streaming.
+                // submit_streaming publishes to the bus; the worker claims it,
+                // finds the sink, and calls run_turn_streaming.
                 let orch = bs.orchestrator.clone();
                 let prompt = input.to_string();
                 let msg_ts = SystemClock.now();
-                let submit = tokio::spawn(async move {
-                    orch.submit(
+                let submit_result = tokio::spawn(async move {
+                    orch.submit_streaming(
                         SubmitTurn::new(prompt, conversation_id, Interface::Cli)
                             .with_auth(&assistant_core::auth::AuthContext::system())
                             .with_timestamp(Some(msg_ts))
                             .with_interactive(repl_interactive),
+                        tx,
                     )
                     .await
-                });
+                })
+                .await;
 
-                // Await the submit result first — if it fails, abort the
-                // printer to avoid hanging on a never-closed channel.
-                let submit_result = submit.await;
-
-                // Flush remaining tokens on success; abort on failure to
-                // prevent blocking on a channel that may never close.
-                if matches!(&submit_result, Ok(Ok(_))) {
-                    let _ = printer.await;
-                } else {
-                    printer.abort();
-                }
+                // The sink is released with the result, so the printer ends.
+                let _ = printer.await;
 
                 match submit_result {
                     Ok(Ok(result)) => {

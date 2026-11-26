@@ -67,14 +67,17 @@ pub use store::{
 };
 // -- LLM abstractions (types, traits, streaming) --
 pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};
+pub use llm::images::{
+    GeneratedImage, ImageGenerationProvider, ImageRequest, ImageResult, ReferenceImage,
+};
 pub use llm::options::{ChatOptions, ChatOptionsSupport, ResponseFormat, ToolChoice};
 pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport, chat_with_fallback};
 pub use llm::stream_chunk::StreamChunk;
 pub use llm::structured::chat_structured;
 pub use llm::tool_spec::ToolSpec;
 pub use llm::types::{
-    ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ProviderState,
-    ToolCallItem, ToolCallResponse, TurnTiming,
+    ChatHistoryMessage, ChatRole, ContentBlock, GeneratedMedia, LlmResponse, LlmResponseMeta,
+    MediaKind, ProviderState, ToolCallItem, ToolCallResponse, TurnTiming,
 };
 pub use memory::{
     MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,
@@ -83,5 +86,9 @@ pub use secret::Secret;
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput, TurnScope, TurnToolSource};
-pub use tool_render::{SourceResult, SourcesData, TerminalData, ToolRenderData};
+pub use tool_render::{
+    CodeDiffData, CodeFileData, DataTableData, DiffHunk, DiffLine, DiffOp, DiffOperation,
+    LinkPreviewData, PlanData, PlanStep, PlanStepStatus, SourceResult, SourcesData, TableColumn,
+    TerminalData, ToolRenderData,
+};
 pub use upload::resolve_upload_bytes;

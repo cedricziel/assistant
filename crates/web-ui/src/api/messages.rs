@@ -153,7 +153,6 @@ pub async fn send_message(
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    orchestrator.register_token_sink(conv_id, event_tx).await;
     let user_attachment_ids = body.attachment_ids;
     let user_message = content.clone();
     // Use `run_id` as the orchestrator's `request_id` so external cancel
@@ -165,14 +164,15 @@ pub async fn send_message(
         let submit_request_id = run_id;
         tokio::spawn(async move {
             let result = orchestrator
-                .submit(
+                .submit_streaming(
                     SubmitTurn::new(content, conv_id, Interface::Web)
                         .with_auth(&auth)
                         .with_request_id(submit_request_id)
                         .with_attachments(user_attachment_ids)
-                        // The turn may run in another process, which has no
-                        // access to the sink registered above.
+                        // The turn may run in another process, which relays
+                        // its events over the bus instead of into `event_tx`.
                         .with_relay_events(true),
+                    event_tx,
                 )
                 .await;
             let _ = tx.send(result);
@@ -217,10 +217,11 @@ pub(crate) struct RunOptions {
 ///
 /// `user_message` is the text the turn answered; the suggestion call reads it.
 ///
-/// The caller has already registered the token sink behind `event_rx` and
-/// submitted the turn whose outcome arrives on `turn_result_rx`. The returned response
-/// carries the run id in `X-Run-Id` for clients that drop the stream before
-/// `run_started` arrives.
+/// The caller has already submitted the turn with
+/// [`submit_streaming`](assistant_runtime::Orchestrator::submit_streaming),
+/// streaming into `event_rx`; its outcome arrives on `turn_result_rx`. The
+/// returned response carries the run id in `X-Run-Id` for clients that drop the
+/// stream before `run_started` arrives.
 // Every argument is a distinct per-turn input; the sibling entry points
 // (edit, regenerate, voice) each pass all of them.
 #[allow(clippy::too_many_arguments)]
@@ -237,31 +238,27 @@ pub(crate) async fn stream_turn_to_sse(
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
     let push_dispatcher_for_sse = state.push_dispatcher.clone().filter(|_| opts.push);
-    // The org's suggestion settings and LLM, when this turn may offer chips.
-    // A runtime that cannot be resolved only costs the chips, not the turn.
-    let suggestion_setup = if opts.suggestions {
-        state
-            .runtime(ctx)
-            .await
-            .ok()
-            .filter(|runtime| runtime.config.suggestions.enabled)
-            .map(|runtime| (runtime.config.suggestions.clone(), runtime.llm.clone()))
-    } else {
-        None
-    };
     let push_store: std::sync::Arc<dyn PushSubscriptionStore> =
         std::sync::Arc::new(ctx.storage.push_subscription_store());
     let event_store = ctx.storage.conversation_event_store();
     let run_broadcaster = state.run_broadcaster.clone();
     // Events of a turn another process runs arrive over the bus; the stream
-    // ends with the turn either way.
-    let relay = match state.runtime(ctx).await {
-        Ok(runtime) => Some(runtime.orchestrator.run_event_relay(conv_id, run_id)),
+    // ends with the turn either way. The same runtime supplies the org's
+    // suggestion settings and LLM; without it the turn still streams, only
+    // the relay and the chips are lost.
+    let runtime = match state.runtime(ctx).await {
+        Ok(runtime) => Some(runtime),
         Err(_) => {
             warn!("No runtime to relay events for run {run_id}; streaming local events only");
             None
         }
     };
+    let relay = runtime
+        .as_ref()
+        .map(|runtime| runtime.orchestrator.run_event_relay(conv_id, run_id));
+    let suggestion_setup = runtime
+        .filter(|runtime| opts.suggestions && runtime.config.suggestions.enabled)
+        .map(|runtime| (runtime.config.suggestions.clone(), runtime.llm.clone()));
     let mut run_events = RunEvents::new(event_rx, relay, turn_result_rx);
 
     // Emit run_started event (sequence 0) to the durable log.
@@ -680,8 +677,8 @@ type TurnOutcome =
 
 /// The events of one turn, from whichever side delivers them: the local sink
 /// when a worker in this process runs the turn, the bus relay when a worker in
-/// another process does. It ends with the turn's outcome, not with the sink,
-/// because a sink nobody consumes never closes.
+/// another process does. It ends with the turn's outcome, because the relay
+/// has no end of its own.
 struct RunEvents {
     local: mpsc::Receiver<OrchestratorEvent>,
     local_open: bool,
@@ -1319,14 +1316,16 @@ pub async fn send_voice_message(
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
-    orchestrator.register_token_sink(conv_id, event_tx).await;
     let content = transcript.clone();
     let turn_result_rx = {
         let (tx, rx) =
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
             let result = orchestrator
-                .submit(SubmitTurn::new(content, conv_id, Interface::Web).with_auth(&auth))
+                .submit_streaming(
+                    SubmitTurn::new(content, conv_id, Interface::Web).with_auth(&auth),
+                    event_tx,
+                )
                 .await;
             let _ = tx.send(result);
         });
@@ -1761,10 +1760,6 @@ mod tests {
 
     /// Wait until a worker has claimed the turn and called the LLM at `llm`,
     /// then cancel it.
-    ///
-    /// Cancelling earlier would hit the cancel-before-claim path, which leaves
-    /// the turn's token sink registered so the stream never ends; that is
-    /// current behaviour, owned by the `chat-stop-cancels-turn` change.
     async fn cancel_when_running(
         orchestrator: &assistant_runtime::Orchestrator,
         llm: &MockServer,
@@ -1934,6 +1929,42 @@ mod tests {
             payload["message"].as_str().is_some_and(|m| !m.is_empty()),
             "the terminal carries the failure message: {payload}"
         );
+    }
+
+    // -- Turns run by an orchestrator in another process --
+
+    /// Bound on a stream that should end on its own; a hung stream fails the
+    /// test instead of running into the submit timeout.
+    async fn frames_within_10s(resp: axum::response::Response) -> Vec<Frame> {
+        tokio::time::timeout(std::time::Duration::from_secs(10), sse_frames(resp))
+            .await
+            .expect("the SSE stream must end once the turn completes")
+    }
+
+    #[tokio::test]
+    async fn send_message_ends_with_cancelled_agent_error_when_cancelled_before_any_worker_claims_it()
+     {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let (state, _) = state_over("http://127.0.0.1:1", &[default_space(&storage)], false).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let conv_id = new_conversation(&storage).await;
+
+        let resp = post_message(state, conv_id, "never claimed").await;
+        let run_id = Uuid::parse_str(&run_id_of(&resp)).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !orchestrator.is_turn_in_flight(run_id).await {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("precondition: the turn is submitted");
+        orchestrator.cancel_turn(run_id).await;
+        let frames = frames_within_10s(resp).await;
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "cancelled");
     }
 
     /// Give `state` a dispatcher that delivers to `push_server`, and subscribe
@@ -2723,6 +2754,51 @@ mod tests {
         assert!(
             uuid::Uuid::parse_str(mid).is_ok(),
             "message_id should be a valid UUID, got: {mid}"
+        );
+    }
+
+    #[tokio::test]
+    async fn voice_message_ends_with_done_when_another_process_runs_the_turn() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Voice from afar").await;
+        let (state, storage) = split_process_state(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+        let state = ApiState {
+            transcription_provider: Some(Arc::new(StubTranscriptionProvider {
+                transcript: "hello from voice".to_string(),
+            })),
+            ..state
+        };
+        let boundary = "testboundary";
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.webm\"\r\nContent-Type: audio/webm\r\n\r\nfakeaudio\r\n--{boundary}--\r\n",
+        );
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/voice"))
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let text = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            body_bytes(resp.into_body()),
+        )
+        .await
+        .expect("the voice stream must end once the turn completes");
+
+        let text = String::from_utf8_lossy(&text);
+        assert!(
+            text.contains("Voice from afar"),
+            "the reply reaches the stream: {text}"
         );
     }
 

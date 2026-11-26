@@ -92,7 +92,12 @@ async fn build_customized(
     config: OrgConfig,
     customize: impl FnOnce(Orchestrator) -> Orchestrator,
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
-    let llm: Arc<dyn LlmProvider> = Arc::new(
+    build_with_llm(ollama_llm(base_url), config, customize).await
+}
+
+/// An Ollama client pointed at `base_url`, with retries off.
+fn ollama_llm(base_url: &str) -> Arc<dyn LlmProvider> {
+    Arc::new(
         LlmClient::new(LlmClientConfig {
             model: "test".to_string(),
             base_url: base_url.to_string(),
@@ -100,8 +105,7 @@ async fn build_customized(
             retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
         })
         .unwrap(),
-    );
-    build_with_llm(llm, config, customize).await
+    )
 }
 
 /// Like [`build_customized`], with a caller-supplied provider instead of an
@@ -112,6 +116,18 @@ async fn build_with_llm(
     customize: impl FnOnce(Orchestrator) -> Orchestrator,
 ) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let orch = orchestrator_over(&storage, llm, config, customize).await;
+    (orch, storage)
+}
+
+/// An orchestrator over `storage` and its message bus. A second one over the
+/// same storage stands in for an orchestrator in another process.
+async fn orchestrator_over(
+    storage: &Arc<StorageLayer>,
+    llm: Arc<dyn LlmProvider>,
+    config: OrgConfig,
+    customize: impl FnOnce(Orchestrator) -> Orchestrator,
+) -> Arc<Orchestrator> {
     let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
     let executor = Arc::new(ToolExecutor::new(
         storage.clone(),
@@ -124,12 +140,12 @@ async fn build_with_llm(
         llm,
         storage.clone(),
         executor.clone(),
-        registry.clone(),
+        registry,
         bus,
         &config,
     )));
     executor.set_subagent_runner(orch.clone());
-    (orch, storage)
+    orch
 }
 
 /// Like [`build`], but also returns the [`ToolExecutor`] so tests can
@@ -239,6 +255,7 @@ mod misc;
 mod model_override;
 mod multimodal;
 mod permission;
+mod response_media;
 mod sanitize;
 mod skill_executions;
 mod streaming;
