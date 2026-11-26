@@ -2,6 +2,8 @@ import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
+import 'components/message_action_button.dart';
+import 'components/message_actions.dart';
 import 'components/message_editor.dart';
 import 'components/message_timing_indicator.dart';
 import 'components/starter_prompts.dart';
@@ -13,6 +15,8 @@ import 'components/thread_density_scope.dart';
 final List<WidgetbookComponent> kComponents = [
   approvalCardComponent,
   branchPickerComponent,
+  messageActionButtonComponent,
+  messageActionsComponent,
   messageEditorComponent,
   messageTimingIndicatorComponent,
   starterPromptsComponent,
