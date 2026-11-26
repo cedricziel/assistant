@@ -4,9 +4,11 @@
 //! OpenRouter provides access to 300+ models from multiple providers through
 //! a single OpenAI-compatible Chat Completions endpoint. The wire client in
 //! this module keeps fields a generic client drops, such as `usage.cost`,
-//! and sends the configured `HTTP-Referer` and `X-Title` headers.
+//! and sends the configured attribution headers, routing preferences and
+//! fallback models.
 
 mod client;
+mod errors;
 mod request;
 mod stream;
 mod wire;
@@ -21,7 +23,7 @@ use assistant_core::{
 };
 
 use self::client::OpenRouterClient;
-use self::request::build_chat_request;
+use self::request::{RequestSettings, build_chat_request};
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -34,9 +36,8 @@ const DEFAULT_MAX_TOKENS: u32 = 8192;
 ///
 pub struct OpenRouterProvider {
     client: OpenRouterClient,
-    model: String,
+    settings: RequestSettings,
     base_url: String,
-    max_tokens: u32,
 }
 
 impl OpenRouterProvider {
@@ -69,7 +70,13 @@ impl OpenRouterProvider {
             extra_headers.push(("HTTP-Referer".to_string(), referer.clone()));
         }
         if let Some(ref title) = cfg.openrouter.title {
-            extra_headers.push(("X-Title".to_string(), title.clone()));
+            extra_headers.push(("X-OpenRouter-Title".to_string(), title.clone()));
+        }
+        if !cfg.openrouter.categories.is_empty() {
+            extra_headers.push((
+                "X-OpenRouter-Categories".to_string(),
+                cfg.openrouter.categories.join(","),
+            ));
         }
 
         let max_tokens = cfg.openrouter.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
@@ -83,9 +90,13 @@ impl OpenRouterProvider {
                 cfg.timeout_secs,
                 extra_headers,
             )?,
-            model: cfg.model.clone(),
+            settings: RequestSettings {
+                model: cfg.model.clone(),
+                max_tokens,
+                fallback_models: cfg.openrouter.fallback_models.clone(),
+                routing: cfg.openrouter.provider.clone(),
+            },
             base_url,
-            max_tokens,
         })
     }
 }
@@ -110,8 +121,7 @@ impl LlmProvider for OpenRouterProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        let request =
-            build_chat_request(&self.model, self.max_tokens, system_prompt, history, tools);
+        let request = build_chat_request(&self.settings, system_prompt, history, tools);
         self.client.chat(&request).await
     }
 
@@ -122,8 +132,7 @@ impl LlmProvider for OpenRouterProvider {
         tools: &[ToolSpec],
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        let mut request =
-            build_chat_request(&self.model, self.max_tokens, system_prompt, history, tools);
+        let mut request = build_chat_request(&self.settings, system_prompt, history, tools);
         request.stream = true;
         self.client.chat_stream(&request, chunk_sink).await
     }
@@ -140,7 +149,7 @@ impl LlmProvider for OpenRouterProvider {
     }
 
     fn model_name(&self) -> &str {
-        &self.model
+        &self.settings.model
     }
 
     fn server_address(&self) -> &str {
@@ -240,12 +249,13 @@ mod tests {
                 referer: Some("https://example.com".to_string()),
                 title: Some("Test App".to_string()),
                 max_tokens: Some(4096),
+                ..OpenRouterOptions::default()
             },
             ..LlmConfig::default()
         };
         let provider = OpenRouterProvider::from_llm_config(&cfg).unwrap();
         assert_eq!(provider.model_name(), "anthropic/claude-sonnet-4-20250514");
-        assert_eq!(provider.max_tokens, 4096);
+        assert_eq!(provider.settings.max_tokens, 4096);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────
@@ -291,6 +301,7 @@ mod tests {
                 referer: Some("https://my-app.example.com".to_string()),
                 title: Some("My Test App".to_string()),
                 max_tokens: Some(4096),
+                ..OpenRouterOptions::default()
             },
             ..LlmConfig::default()
         };
@@ -338,7 +349,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
             .and(header("http-referer", "https://my-app.example.com"))
-            .and(header("x-title", "My Test App"))
+            .and(header("x-openrouter-title", "My Test App"))
             .and(header("authorization", "Bearer test-key"))
             .respond_with(ResponseTemplate::new(200).set_body_json(chat_response("OK")))
             .expect(1)
@@ -651,6 +662,111 @@ mod tests {
         }
     }
 
+    // ── Wiremock: attribution, routing and identity ──────────────────────
+
+    fn provider_with(server_uri: &str, openrouter: OpenRouterOptions) -> OpenRouterProvider {
+        let cfg = LlmConfig {
+            provider: LlmProviderKind::OpenRouter,
+            model: "anthropic/claude-sonnet-4.5".to_string(),
+            api_key: Some(Secret::new("test-key")),
+            base_url: server_uri.to_string(),
+            openrouter,
+            ..LlmConfig::default()
+        };
+        OpenRouterProvider::from_llm_config(&cfg).unwrap()
+    }
+
+    #[tokio::test]
+    async fn categories_are_sent_comma_separated() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let options = OpenRouterOptions {
+            categories: vec!["cli-agent".into(), "chat".into()],
+            ..OpenRouterOptions::default()
+        };
+
+        provider_with(&server.uri(), options)
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let value = requests[0].headers.get("x-openrouter-categories").unwrap();
+        assert_eq!(value.to_str().unwrap(), "cli-agent,chat");
+    }
+
+    #[tokio::test]
+    async fn routing_and_fallback_models_are_sent() {
+        use assistant_core::types::llm::{OpenRouterDataCollection, OpenRouterRouting};
+
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let options = OpenRouterOptions {
+            fallback_models: vec!["openai/gpt-4o".into()],
+            provider: Some(OpenRouterRouting {
+                data_collection: Some(OpenRouterDataCollection::Deny),
+                zdr: Some(true),
+                ..OpenRouterRouting::default()
+            }),
+            ..OpenRouterOptions::default()
+        };
+
+        provider_with(&server.uri(), options)
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(
+            body["provider"],
+            json!({"data_collection": "deny", "zdr": true})
+        );
+        assert_eq!(
+            body["models"],
+            json!(["anthropic/claude-sonnet-4.5", "openai/gpt-4o"]),
+            "primary model first"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_routing_fields_without_config_or_context() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+
+        provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        for absent in ["provider", "models", "session_id", "user"] {
+            assert!(
+                body.get(absent).is_none(),
+                "{absent} must not be sent: {body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn turn_context_sets_session_id_and_user() {
+        use assistant_core::llm::call_context::LlmCallContext;
+
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let conversation_id = Default::default();
+        let context = LlmCallContext {
+            conversation_id,
+            user_hash: Some("abc123".into()),
+        };
+
+        let provider = provider_with(&server.uri(), OpenRouterOptions::default());
+        context.scope(provider.chat("sys", &[], &[])).await.unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(body["session_id"], conversation_id.to_string());
+        assert_eq!(body["user"], "abc123");
+    }
+
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────
 
     async fn mount_sse(server: &MockServer, events: &[&str]) {
@@ -794,6 +910,170 @@ mod tests {
     }
 
     // ── Wiremock: error handling ─────────────────────────────────────────
+
+    /// A provider whose retries back off for 10 ms instead of seconds.
+    fn fast_retry_provider(server_uri: &str) -> OpenRouterProvider {
+        let mut provider = make_provider(server_uri);
+        provider.client.retry = crate::retry::RetryConfig {
+            max_retries: 2,
+            initial_delay_ms: 10,
+            max_delay_ms: 5_000,
+            jitter: false,
+            ..crate::retry::RetryConfig::default()
+        };
+        provider
+    }
+
+    async fn mount_error(server: &MockServer, status: u16, body: Value, times: u64) {
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(status).set_body_json(body))
+            .up_to_n_times(times)
+            .mount(server)
+            .await;
+    }
+
+    async fn request_count(server: &MockServer) -> usize {
+        server.received_requests().await.unwrap().len()
+    }
+
+    #[tokio::test]
+    async fn rate_limit_waits_for_retry_after_then_succeeds() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("retry-after", "1")
+                    .set_body_json(json!({"error": {"code": 429, "message": "Rate limited"}})),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        mount_once(&server, chat_response("OK")).await;
+
+        let started = std::time::Instant::now();
+        let response = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+
+        assert!(matches!(response, LlmResponse::FinalAnswer(ref t, _) if t == "OK"));
+        assert!(
+            started.elapsed() >= std::time::Duration::from_secs(1),
+            "waited only {:?}",
+            started.elapsed()
+        );
+        assert_eq!(request_count(&server).await, 2);
+    }
+
+    #[tokio::test]
+    async fn service_unavailable_is_retried() {
+        let server = MockServer::start().await;
+        mount_error(
+            &server,
+            503,
+            json!({"error": {"code": 503, "message": "busy"}}),
+            1,
+        )
+        .await;
+        mount_once(&server, chat_response("OK")).await;
+
+        fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+        assert_eq!(request_count(&server).await, 2);
+    }
+
+    #[tokio::test]
+    async fn insufficient_credits_fails_at_once() {
+        let server = MockServer::start().await;
+        mount_error(
+            &server,
+            402,
+            json!({"error": {"code": 402, "message": "Insufficient credits"}}),
+            10,
+        )
+        .await;
+
+        let err = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("lacks credits"), "{err}");
+        assert!(err.contains("402"), "{err}");
+        assert_eq!(request_count(&server).await, 1, "402 is not retried");
+    }
+
+    #[tokio::test]
+    async fn moderation_error_names_the_reasons() {
+        let server = MockServer::start().await;
+        mount_error(
+            &server,
+            403,
+            json!({"error": {
+                "code": 403,
+                "message": "Input was flagged",
+                "metadata": {"reasons": ["violence", "harassment"], "flagged_input": "..."},
+            }}),
+            10,
+        )
+        .await;
+
+        let err = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Input was flagged"), "{err}");
+        assert!(err.contains("violence, harassment"), "{err}");
+        assert_eq!(request_count(&server).await, 1);
+    }
+
+    #[tokio::test]
+    async fn bad_request_is_not_retried_and_reports_error_type() {
+        let server = MockServer::start().await;
+        mount_error(
+            &server,
+            400,
+            json!({"error": {
+                "code": 400,
+                "message": "Invalid tool schema",
+                "metadata": {"error_type": "invalid_request"},
+            }}),
+            10,
+        )
+        .await;
+
+        let err = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("400"), "{err}");
+        assert!(err.contains("invalid_request"), "{err}");
+        assert!(err.contains("Invalid tool schema"), "{err}");
+        assert_eq!(request_count(&server).await, 1);
+    }
+
+    #[tokio::test]
+    async fn ok_status_with_error_body_fails() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({"error": {"code": 502, "message": "Upstream provider failed"}}),
+        )
+        .await;
+
+        let err = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Upstream provider failed"), "{err}");
+    }
 
     #[tokio::test]
     async fn api_error_propagated() {
