@@ -30,7 +30,9 @@ pub async fn run_one_shot(
         Command::Skill {
             command: SkillCommand::Generate { .. },
         } => return None,
-        Command::Skill { command } => cmd_skill::cmd_skill(db_path, config, command).await,
+        Command::Skill { command } => {
+            cmd_skill::cmd_skill(assistant_dir, db_path, config, command).await
+        }
         Command::Backup(args) => cmd_backup::cmd_backup(args).await,
         Command::Restore(args) => cmd_backup::cmd_restore(args).await,
         Command::Webui { command } => cmd_webui::cmd_webui(command).await,
