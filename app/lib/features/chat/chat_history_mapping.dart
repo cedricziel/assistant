@@ -16,6 +16,19 @@ ToolCallStatus parseToolStatus(String status) {
   };
 }
 
+/// Map a persisted feedback rating onto [MessageRating]; unknown values map
+/// to `null` so a newer server cannot break history rendering.
+MessageFeedback? _feedbackFromHistory(MessageFeedbackSummary? source) {
+  if (source == null) return null;
+  final rating = switch (source.rating) {
+    'positive' => MessageRating.positive,
+    'negative' => MessageRating.negative,
+    _ => null,
+  };
+  if (rating == null) return null;
+  return MessageFeedback(rating: rating, comment: source.comment);
+}
+
 /// Map a persisted `finish_reason` onto [MessageStatus]: `"cancelled"` is a
 /// reply the user stopped; anything else (including unknown values) is `ok`.
 MessageStatus parseFinishReason(String? reason) {
@@ -98,7 +111,7 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
               ),
             )
             .toList(),
-      ),
+      )..feedback = _feedbackFromHistory(m.feedback),
     );
   }
   return messages;
