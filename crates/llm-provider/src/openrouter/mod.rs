@@ -125,6 +125,7 @@ impl OpenRouterProvider {
                 cfg.timeout_secs,
                 cfg.model.clone(),
                 cfg.openrouter.provider.clone(),
+                cfg.openrouter.reasoning.as_ref().and_then(|r| r.effort),
                 clock,
             )?,
             client: OpenRouterClient::new(
@@ -138,6 +139,7 @@ impl OpenRouterProvider {
                 max_tokens,
                 fallback_models: cfg.openrouter.fallback_models.clone(),
                 routing: cfg.openrouter.provider.clone(),
+                reasoning: cfg.openrouter.reasoning.clone(),
             },
             base_url,
         })
@@ -1481,6 +1483,130 @@ mod tests {
         let body = sent_body(&server).await;
         let parts = body["messages"][1]["content"].as_array().unwrap();
         assert!(parts.iter().any(|p| p["type"] == "image_url"), "{parts:?}");
+    }
+
+    // ── Wiremock: reasoning ─────────────────────────────────────────────
+
+    fn reasoning_options(
+        effort: assistant_core::types::llm::OpenRouterEffort,
+    ) -> OpenRouterOptions {
+        OpenRouterOptions {
+            reasoning: Some(assistant_core::types::llm::OpenRouterReasoning {
+                effort: Some(effort),
+                ..Default::default()
+            }),
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    async fn reasoning_provider(
+        server: &MockServer,
+        reasoning: Option<Value>,
+        options: OpenRouterOptions,
+    ) -> OpenRouterProvider {
+        let mut model = catalog_model(&["text"], &["tools", "reasoning"]);
+        if let Some(reasoning) = reasoning {
+            model["reasoning"] = reasoning;
+        }
+        mount_catalog(
+            server,
+            model,
+            json!([endpoint("Anthropic", "anthropic", 200_000)]),
+        )
+        .await;
+        provider_with(&server.uri(), options)
+    }
+
+    #[tokio::test]
+    async fn configured_reasoning_is_sent() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = reasoning_provider(
+            &server,
+            Some(json!({"supported_efforts": ["high", "medium", "low"]})),
+            reasoning_options(OpenRouterEffort::High),
+        )
+        .await;
+
+        provider.chat("sys", &[], &[]).await.unwrap();
+
+        assert_eq!(
+            sent_body(&server).await["reasoning"],
+            json!({"effort": "high"})
+        );
+    }
+
+    #[tokio::test]
+    async fn unsupported_effort_fails_every_call_with_the_supported_list() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        let provider = reasoning_provider(
+            &server,
+            Some(json!({"supported_efforts": ["high", "medium"]})),
+            reasoning_options(OpenRouterEffort::Xhigh),
+        )
+        .await;
+
+        for _ in 0..2 {
+            let err = provider
+                .chat("sys", &[], &[])
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("xhigh"), "{err}");
+            assert!(err.contains("high, medium"), "{err}");
+        }
+        assert_eq!(request_count(&server).await, 0, "nothing is sent upstream");
+    }
+
+    #[tokio::test]
+    async fn null_supported_efforts_accepts_any_effort() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = reasoning_provider(
+            &server,
+            Some(json!({"supported_efforts": null})),
+            reasoning_options(OpenRouterEffort::Max),
+        )
+        .await;
+
+        provider.chat("sys", &[], &[]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn effort_on_a_model_without_effort_selection_fails() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        let provider =
+            reasoning_provider(&server, None, reasoning_options(OpenRouterEffort::Low)).await;
+
+        let err = provider
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("does not support reasoning effort"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn effort_none_fails_when_reasoning_is_mandatory() {
+        use assistant_core::types::llm::OpenRouterEffort;
+        let server = MockServer::start().await;
+        let provider = reasoning_provider(
+            &server,
+            Some(json!({"supported_efforts": null, "mandatory": true})),
+            reasoning_options(OpenRouterEffort::None),
+        )
+        .await;
+
+        let err = provider
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("mandatory"), "{err}");
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────

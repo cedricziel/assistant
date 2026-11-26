@@ -15,7 +15,7 @@ use serde::Deserialize;
 use tokio::sync::watch;
 use tracing::{debug, error, warn};
 
-use assistant_core::types::llm::OpenRouterRouting;
+use assistant_core::types::llm::{OpenRouterEffort, OpenRouterRouting};
 use assistant_core::{Clock, Secret};
 
 use crate::retry::RetryConfig;
@@ -45,10 +45,12 @@ pub struct OpenRouterCatalog {
     api_key: Secret,
     model: String,
     routing: Option<OpenRouterRouting>,
+    effort: Option<OpenRouterEffort>,
     clock: Arc<dyn Clock>,
     info: ArcSwapOption<ModelInfo>,
-    /// Set when the catalog does not list the model; calls then fail.
-    unknown_model: AtomicBool,
+    /// Why the configuration can't work with this model, such as an unknown
+    /// model or an unsupported effort; calls then fail with it.
+    config_error: ArcSwapOption<String>,
     /// When a failed fetch may be retried.
     retry_at: Mutex<Option<Instant>>,
     in_flight: AtomicBool,
@@ -67,6 +69,7 @@ impl OpenRouterCatalog {
         timeout_secs: u64,
         model: String,
         routing: Option<OpenRouterRouting>,
+        effort: Option<OpenRouterEffort>,
         clock: Arc<dyn Clock>,
     ) -> anyhow::Result<Arc<Self>> {
         let catalog = Arc::new(Self {
@@ -75,9 +78,10 @@ impl OpenRouterCatalog {
             api_key,
             model,
             routing,
+            effort,
             clock,
             info: ArcSwapOption::empty(),
-            unknown_model: AtomicBool::new(false),
+            config_error: ArcSwapOption::empty(),
             retry_at: Mutex::new(None),
             in_flight: AtomicBool::new(false),
             ready: watch::Sender::new(false),
@@ -91,12 +95,13 @@ impl OpenRouterCatalog {
         self.info.load_full()
     }
 
-    /// Fails when the catalog does not list the configured model.
+    /// Fails when the catalog showed the configuration can't work: the
+    /// model is unknown, or it doesn't support the configured effort.
     pub fn check_model(&self) -> anyhow::Result<()> {
-        if self.unknown_model.load(Ordering::SeqCst) {
-            anyhow::bail!("OpenRouter has no model `{}`", self.model);
+        match self.config_error.load_full() {
+            Some(error) => Err(anyhow::anyhow!("{error}")),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// Starts a fetch when one is due, then waits for any running fetch for
@@ -117,7 +122,7 @@ impl OpenRouterCatalog {
     fn refresh_if_due(self: &Arc<Self>) {
         if tokio::runtime::Handle::try_current().is_err()
             || self.info.load().is_some()
-            || self.unknown_model.load(Ordering::SeqCst)
+            || self.config_error.load().is_some()
         {
             return;
         }
@@ -141,13 +146,13 @@ impl OpenRouterCatalog {
 
     async fn refresh(&self) {
         match self.fetch().await {
-            Ok(Some(info)) => {
+            Ok(Ok(info)) => {
                 debug!(model = %self.model, ?info, "OpenRouter model catalog loaded");
                 self.info.store(Some(Arc::new(info)));
             }
-            Ok(None) => {
-                error!(model = %self.model, "OpenRouter has no such model; chat calls will fail");
-                self.unknown_model.store(true, Ordering::SeqCst);
+            Ok(Err(problem)) => {
+                error!(model = %self.model, "{problem}; chat calls will fail");
+                self.config_error.store(Some(Arc::new(problem)));
             }
             Err(e) => {
                 warn!(
@@ -162,13 +167,16 @@ impl OpenRouterCatalog {
         }
     }
 
-    /// The model's capabilities, or `None` when the catalog does not list it.
-    async fn fetch(&self) -> anyhow::Result<Option<ModelInfo>> {
+    /// The model's capabilities, or why the configuration can't work with it.
+    async fn fetch(&self) -> anyhow::Result<Result<ModelInfo, String>> {
         let base = self.base_url.trim_end_matches('/');
         let models: ModelList = self.get_json(&format!("{base}/models")).await?;
         let Some(entry) = models.data.into_iter().find(|m| m.id == self.model) else {
-            return Ok(None);
+            return Ok(Err(format!("OpenRouter has no model `{}`", self.model)));
         };
+        if let Some(problem) = effort_problem(&self.model, self.effort, entry.reasoning.as_ref()) {
+            return Ok(Err(problem));
+        }
         let endpoints = match self
             .get_json::<EndpointList>(&format!("{base}/models/{}/endpoints", self.model))
             .await
@@ -179,7 +187,7 @@ impl OpenRouterCatalog {
                 Vec::new()
             }
         };
-        Ok(Some(model_info(&entry, &endpoints, self.routing.as_ref())))
+        Ok(Ok(model_info(&entry, &endpoints, self.routing.as_ref())))
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> anyhow::Result<T> {
@@ -216,6 +224,47 @@ struct ModelEntry {
     architecture: Option<Architecture>,
     #[serde(default)]
     supported_parameters: Option<Vec<String>>,
+    /// Absent when the model has no effort selection.
+    #[serde(default)]
+    reasoning: Option<CatalogReasoning>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CatalogReasoning {
+    /// `None` means every effort is accepted.
+    #[serde(default)]
+    supported_efforts: Option<Vec<String>>,
+    /// When set, `effort = "none"` is rejected.
+    #[serde(default)]
+    mandatory: bool,
+}
+
+/// Why `effort` can't be used with `model`, if it can't.
+fn effort_problem(
+    model: &str,
+    effort: Option<OpenRouterEffort>,
+    reasoning: Option<&CatalogReasoning>,
+) -> Option<String> {
+    let effort = effort?;
+    let Some(reasoning) = reasoning else {
+        return Some(format!(
+            "OpenRouter model `{model}` does not support reasoning effort; \
+             remove `effort` from [llm.openrouter.reasoning]"
+        ));
+    };
+    if reasoning.mandatory && effort == OpenRouterEffort::None {
+        return Some(format!(
+            "reasoning is mandatory for OpenRouter model `{model}`, so effort `none` is not allowed"
+        ));
+    }
+    match &reasoning.supported_efforts {
+        Some(supported) if !supported.iter().any(|e| e == effort.as_str()) => Some(format!(
+            "OpenRouter model `{model}` does not support reasoning effort `{}`; it supports {}",
+            effort.as_str(),
+            supported.join(", ")
+        )),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
