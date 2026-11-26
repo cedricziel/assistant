@@ -824,6 +824,9 @@ async fn process_sse_event(
             {
                 meta.output_tokens = Some(out);
             }
+            if let Some(usage) = json.get("usage") {
+                merge_anthropic_delta_usage(meta, usage);
+            }
         }
 
         _ => {}
@@ -922,6 +925,39 @@ fn extract_anthropic_meta(json: &Value) -> LlmResponseMeta {
         apply_anthropic_usage(&mut meta, usage);
     }
     meta
+}
+
+/// Fold a `message_delta` usage object into `meta`. Its counts are cumulative
+/// but may omit fields, so a count it leaves out keeps the value seen in
+/// `message_start`.
+fn merge_anthropic_delta_usage(meta: &mut LlmResponseMeta, usage: &Value) {
+    let count = |key: &str| usage.get(key).and_then(Value::as_u64);
+    let (delta_uncached, delta_cached, delta_write) = (
+        count("input_tokens"),
+        count("cache_read_input_tokens"),
+        count("cache_creation_input_tokens"),
+    );
+    if delta_uncached.is_none() && delta_cached.is_none() && delta_write.is_none() {
+        return;
+    }
+    let prior_cached = meta.cached_input_tokens.unwrap_or(0);
+    let prior_write = meta.cache_write_input_tokens.unwrap_or(0);
+    let uncached = delta_uncached.unwrap_or_else(|| {
+        meta.input_tokens
+            .unwrap_or(0)
+            .saturating_sub(prior_cached + prior_write)
+    });
+    if delta_cached.is_some() {
+        meta.cached_input_tokens = delta_cached;
+    }
+    if delta_write.is_some() {
+        meta.cache_write_input_tokens = delta_write;
+    }
+    meta.input_tokens = Some(
+        uncached
+            + meta.cached_input_tokens.unwrap_or(0)
+            + meta.cache_write_input_tokens.unwrap_or(0),
+    );
 }
 
 /// Copy input-side token counts from an Anthropic `usage` object. Anthropic's
@@ -1513,6 +1549,78 @@ mod tests {
         assert_eq!(meta.input_tokens, Some(2305));
         assert_eq!(meta.cached_input_tokens, Some(2000));
         assert_eq!(meta.cache_write_input_tokens, Some(300));
+    }
+
+    async fn feed(meta: &mut LlmResponseMeta, event: &str, json: serde_json::Value) {
+        let (mut text, mut thinking, mut blocks, mut idx, mut block_type, _) = empty_state();
+        process_sse_event(
+            event,
+            &json,
+            &mut text,
+            &mut thinking,
+            &mut blocks,
+            &mut idx,
+            &mut block_type,
+            &None,
+            meta,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn message_delta_updates_cumulative_cache_counts() {
+        let mut meta = LlmResponseMeta::default();
+        feed(
+            &mut meta,
+            "message_start",
+            serde_json::json!({"message": {"usage": {
+                "input_tokens": 5,
+                "cache_read_input_tokens": 2000,
+                "cache_creation_input_tokens": 300
+            }}}),
+        )
+        .await;
+        feed(
+            &mut meta,
+            "message_delta",
+            serde_json::json!({
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 50, "input_tokens": 7, "cache_read_input_tokens": 2100}
+            }),
+        )
+        .await;
+        assert_eq!(meta.output_tokens, Some(50));
+        assert_eq!(
+            meta.cached_input_tokens,
+            Some(2100),
+            "the delta's cumulative count wins"
+        );
+        assert_eq!(
+            meta.cache_write_input_tokens,
+            Some(300),
+            "a count absent from the delta keeps its message_start value"
+        );
+        assert_eq!(meta.input_tokens, Some(7 + 2100 + 300));
+    }
+
+    #[tokio::test]
+    async fn message_delta_with_only_output_tokens_keeps_input_counts() {
+        let mut meta = LlmResponseMeta::default();
+        feed(
+            &mut meta,
+            "message_start",
+            serde_json::json!({"message": {"usage": {"input_tokens": 5, "cache_read_input_tokens": 2000}}}),
+        )
+        .await;
+        feed(
+            &mut meta,
+            "message_delta",
+            serde_json::json!({"delta": {}, "usage": {"output_tokens": 9}}),
+        )
+        .await;
+        assert_eq!(meta.input_tokens, Some(2005));
+        assert_eq!(meta.cached_input_tokens, Some(2000));
+        assert_eq!(meta.output_tokens, Some(9));
     }
 
     #[tokio::test]
