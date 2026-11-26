@@ -36,6 +36,7 @@ fn shell_entry(env: HashMap<String, String>) -> McpServerEntry {
         env,
         enabled: true,
         trust: McpTrustLevel::Trust,
+        tool_timeout_secs: None,
     }
 }
 
