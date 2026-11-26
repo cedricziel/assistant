@@ -37,6 +37,8 @@ pub struct ChatRequest {
     pub response_format: Option<Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plugins: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_search_options: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
