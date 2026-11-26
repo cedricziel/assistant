@@ -7,15 +7,17 @@ use tracing::debug;
 
 use assistant_core::{LlmResponse, Secret, StreamChunk};
 
+use super::errors::http_error;
 use super::stream::{LineBuffer, StreamAccumulator};
 use super::wire::{ChatRequest, ChatResponse};
-use crate::retry::RetryConfig;
+use crate::retry::{RetryConfig, classify_provider_error, parse_retry_after, with_retry_hinted};
 
 pub struct OpenRouterClient {
     http: ClientWithMiddleware,
     base_url: String,
     api_key: Secret,
     headers: Vec<(String, String)>,
+    pub(super) retry: RetryConfig,
 }
 
 impl OpenRouterClient {
@@ -26,10 +28,12 @@ impl OpenRouterClient {
         headers: Vec<(String, String)>,
     ) -> anyhow::Result<Self> {
         Ok(Self {
-            http: crate::http::build_http_client(timeout_secs, &RetryConfig::default())?,
+            // Retries happen in `send`, where `Retry-After` is honored.
+            http: crate::http::build_http_client(timeout_secs, &RetryConfig::disabled())?,
             base_url,
             api_key,
             headers,
+            retry: RetryConfig::default(),
         })
     }
 
@@ -70,8 +74,16 @@ impl OpenRouterClient {
         acc.finish()
     }
 
-    /// Posts `request` and fails on a non-success status.
+    /// Posts `request`, retrying transient failures.
     async fn send(&self, request: &ChatRequest) -> anyhow::Result<reqwest::Response> {
+        with_retry_hinted(&self.retry, "OpenRouter", classify_provider_error, || {
+            self.send_once(request)
+        })
+        .await
+    }
+
+    /// Posts `request` once and fails on a non-success status.
+    async fn send_once(&self, request: &ChatRequest) -> anyhow::Result<reqwest::Response> {
         debug!(
             model = %request.model,
             tools = request.tools.len(),
@@ -93,8 +105,13 @@ impl OpenRouterClient {
             .map_err(|e| anyhow::anyhow!("OpenRouter request failed: {e}"))?;
         let status = resp.status();
         if !status.is_success() {
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(parse_retry_after);
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("OpenRouter returned {status}: {body}");
+            return Err(http_error(status.as_u16(), retry_after, &body).into());
         }
         Ok(resp)
     }

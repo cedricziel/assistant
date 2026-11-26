@@ -7,6 +7,7 @@
 //! and sends the configured `HTTP-Referer` and `X-Title` headers.
 
 mod client;
+mod errors;
 mod request;
 mod stream;
 mod wire;
@@ -794,6 +795,170 @@ mod tests {
     }
 
     // ── Wiremock: error handling ─────────────────────────────────────────
+
+    /// A provider whose retries back off for 10 ms instead of seconds.
+    fn fast_retry_provider(server_uri: &str) -> OpenRouterProvider {
+        let mut provider = make_provider(server_uri);
+        provider.client.retry = crate::retry::RetryConfig {
+            max_retries: 2,
+            initial_delay_ms: 10,
+            max_delay_ms: 5_000,
+            jitter: false,
+            ..crate::retry::RetryConfig::default()
+        };
+        provider
+    }
+
+    async fn mount_error(server: &MockServer, status: u16, body: Value, times: u64) {
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(status).set_body_json(body))
+            .up_to_n_times(times)
+            .mount(server)
+            .await;
+    }
+
+    async fn request_count(server: &MockServer) -> usize {
+        server.received_requests().await.unwrap().len()
+    }
+
+    #[tokio::test]
+    async fn rate_limit_waits_for_retry_after_then_succeeds() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("retry-after", "1")
+                    .set_body_json(json!({"error": {"code": 429, "message": "Rate limited"}})),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        mount_once(&server, chat_response("OK")).await;
+
+        let started = std::time::Instant::now();
+        let response = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+
+        assert!(matches!(response, LlmResponse::FinalAnswer(ref t, _) if t == "OK"));
+        assert!(
+            started.elapsed() >= std::time::Duration::from_secs(1),
+            "waited only {:?}",
+            started.elapsed()
+        );
+        assert_eq!(request_count(&server).await, 2);
+    }
+
+    #[tokio::test]
+    async fn service_unavailable_is_retried() {
+        let server = MockServer::start().await;
+        mount_error(
+            &server,
+            503,
+            json!({"error": {"code": 503, "message": "busy"}}),
+            1,
+        )
+        .await;
+        mount_once(&server, chat_response("OK")).await;
+
+        fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+        assert_eq!(request_count(&server).await, 2);
+    }
+
+    #[tokio::test]
+    async fn insufficient_credits_fails_at_once() {
+        let server = MockServer::start().await;
+        mount_error(
+            &server,
+            402,
+            json!({"error": {"code": 402, "message": "Insufficient credits"}}),
+            10,
+        )
+        .await;
+
+        let err = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("lacks credits"), "{err}");
+        assert!(err.contains("402"), "{err}");
+        assert_eq!(request_count(&server).await, 1, "402 is not retried");
+    }
+
+    #[tokio::test]
+    async fn moderation_error_names_the_reasons() {
+        let server = MockServer::start().await;
+        mount_error(
+            &server,
+            403,
+            json!({"error": {
+                "code": 403,
+                "message": "Input was flagged",
+                "metadata": {"reasons": ["violence", "harassment"], "flagged_input": "..."},
+            }}),
+            10,
+        )
+        .await;
+
+        let err = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Input was flagged"), "{err}");
+        assert!(err.contains("violence, harassment"), "{err}");
+        assert_eq!(request_count(&server).await, 1);
+    }
+
+    #[tokio::test]
+    async fn bad_request_is_not_retried_and_reports_error_type() {
+        let server = MockServer::start().await;
+        mount_error(
+            &server,
+            400,
+            json!({"error": {
+                "code": 400,
+                "message": "Invalid tool schema",
+                "metadata": {"error_type": "invalid_request"},
+            }}),
+            10,
+        )
+        .await;
+
+        let err = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("400"), "{err}");
+        assert!(err.contains("invalid_request"), "{err}");
+        assert!(err.contains("Invalid tool schema"), "{err}");
+        assert_eq!(request_count(&server).await, 1);
+    }
+
+    #[tokio::test]
+    async fn ok_status_with_error_body_fails() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({"error": {"code": 502, "message": "Upstream provider failed"}}),
+        )
+        .await;
+
+        let err = fast_retry_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Upstream provider failed"), "{err}");
+    }
 
     #[tokio::test]
     async fn api_error_propagated() {

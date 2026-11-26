@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
 
+use super::errors::{ErrorBody, body_error};
 use super::wire::Usage;
 
 /// Splits a byte stream into lines, decoding each line only once it is
@@ -38,7 +39,7 @@ struct Chunk {
     #[serde(default)]
     usage: Option<Usage>,
     #[serde(default)]
-    error: Option<StreamError>,
+    error: Option<ErrorBody>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,14 +74,6 @@ struct FunctionDelta {
     name: Option<String>,
     #[serde(default)]
     arguments: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StreamError {
-    #[serde(default)]
-    code: Value,
-    #[serde(default)]
-    message: String,
 }
 
 #[derive(Default)]
@@ -118,12 +111,8 @@ impl StreamAccumulator {
         }
         let chunk: Chunk = serde_json::from_str(payload)
             .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter stream chunk: {e}"))?;
-        if let Some(error) = chunk.error {
-            anyhow::bail!(
-                "OpenRouter stream error ({}): {}",
-                error.code,
-                error.message
-            );
+        if let Some(error) = &chunk.error {
+            return Err(body_error(error));
         }
         if chunk.id.is_some() {
             self.meta.response_id = chunk.id;
