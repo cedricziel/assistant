@@ -424,6 +424,20 @@ void main() {
         expect(find.byIcon(Icons.block), findsOneWidget);
         expect(iconColor(tester, Icons.block), Colors.amber);
       });
+
+      testWidgets('cancelled shows a muted block icon labelled Cancelled', (
+        tester,
+      ) async {
+        await pumpToolCall(tester, ToolCallStatus.cancelled);
+
+        expect(find.byIcon(Icons.block), findsOneWidget);
+        expect(iconColor(tester, Icons.block), isNot(Colors.amber));
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(
+          tester.widget<Icon>(find.byIcon(Icons.block)).semanticLabel,
+          'Cancelled',
+        );
+      });
     });
 
     testWidgets('compact density renders tool name only without duration', (

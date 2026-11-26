@@ -319,6 +319,12 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
         size: 14,
         color: Colors.amber,
       ),
+      ToolCallStatus.cancelled => Icon(
+        Icons.block,
+        size: 14,
+        color: colorScheme.onSurfaceVariant.withAlpha(180),
+        semanticLabel: 'Cancelled',
+      ),
     };
   }
 

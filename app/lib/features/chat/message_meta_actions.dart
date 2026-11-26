@@ -52,6 +52,21 @@ class MetaActionRow extends StatelessWidget {
 
     final actions = <Widget>[];
 
+    // Stopped: the reply was cut short by Stop.
+    if (!isUser && message.status == MessageStatus.stopped) {
+      actions.add(
+        Row(
+          key: const Key('stopped_label'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.stop_circle_outlined, size: 14, color: mutedColor),
+            const SizedBox(width: 4),
+            Text('Stopped', style: TextStyle(fontSize: 12, color: mutedColor)),
+          ],
+        ),
+      );
+    }
+
     // Read aloud: assistant messages without real audio, when TTS is available.
     if (!isUser &&
         capabilities.voiceReceive &&
