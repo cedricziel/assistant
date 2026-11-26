@@ -247,3 +247,73 @@ async fn without_tts_a_voice_turn_answers_in_text() {
     let result = turn(Speaker::new(false, vec![]), config(None), None, true).await;
     assert!(result.attachments.is_empty(), "{:?}", result.attachments);
 }
+
+/// Returns one spoken clip, like `voice-response`.
+struct SpeakTool;
+
+#[async_trait]
+impl assistant_core::ToolHandler for SpeakTool {
+    fn name(&self) -> &str {
+        "speak"
+    }
+
+    fn description(&self) -> &str {
+        "speaks"
+    }
+
+    fn params_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+
+    async fn run(
+        &self,
+        _params: std::collections::HashMap<String, serde_json::Value>,
+        _ctx: &assistant_core::types::conversation::ExecutionContext,
+    ) -> anyhow::Result<assistant_core::ToolOutput> {
+        Ok(
+            assistant_core::ToolOutput::success("spoken").with_attachments(vec![
+                assistant_core::Attachment::new("voice.ogg", "audio/ogg", b"tool".to_vec()),
+            ]),
+        )
+    }
+}
+
+#[tokio::test]
+async fn a_clip_from_a_tool_needs_no_tts() {
+    let llm =
+        assistant_llm_provider::scripted::ScriptedLlmProvider::new().with_canned_responses(vec![
+            LlmResponse::ToolCalls(assistant_core::ToolCallResponse {
+                items: vec![assistant_core::ToolCallItem {
+                    name: "speak".into(),
+                    params: serde_json::json!({}),
+                    id: Some("call-1".into()),
+                }],
+                meta: LlmResponseMeta::default(),
+                thinking: None,
+                provider_state: None,
+            }),
+            LlmResponse::FinalAnswer("Said it.".into(), LlmResponseMeta::default()),
+        ]);
+    let mut config = config(None);
+    allow_all_tools(&mut config);
+    let tts = Arc::new(StubTts::default());
+    let tts_for_build = tts.clone();
+    let (orch, _) = build_with_llm(Arc::new(llm), config, |o| o.with_tts(tts_for_build)).await;
+
+    let result = orch
+        .run_turn_with_tools(
+            "[Voice message]: say it",
+            Uuid::new_v4(),
+            Interface::Web,
+            vec![Arc::new(SpeakTool) as Arc<dyn assistant_core::ToolHandler>],
+            None,
+            vec![voice_note()],
+            vec![],
+            TurnIdentity::default(),
+        )
+        .await
+        .unwrap();
+
+    assert!(tts.spoken.lock().unwrap().is_empty(), "nothing synthesized");
+    assert_eq!(result.attachments.len(), 1, "only the tool's clip");
+}

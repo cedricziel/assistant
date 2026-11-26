@@ -1187,7 +1187,9 @@ impl Orchestrator {
                     .await?;
                     match outcome {
                         FinalAnswerOutcome::Done(mut result) => {
-                            let media = self.reply_media(voice_turn, &text, meta.media).await;
+                            let media = self
+                                .reply_media(voice_turn, &text, meta.media, &turn_attachments)
+                                .await;
                             self.persist_response_media(
                                 conversation_id,
                                 result.message_id,
@@ -1689,7 +1691,9 @@ impl Orchestrator {
                         );
                     }
 
-                    let media = self.reply_media(voice_turn, &text, meta.media).await;
+                    let media = self
+                        .reply_media(voice_turn, &text, meta.media, &turn_attachments)
+                        .await;
                     self.persist_response_media(
                         conversation_id,
                         saved_message_id,
@@ -1832,17 +1836,22 @@ impl Orchestrator {
 
     // ── Attachment helpers ─────────────────────────────────────────────────────
 
-    /// `media` plus, for a voice turn whose answer has no audio, the answer
+    /// `media` plus, for a voice turn that produced no audio (neither with
+    /// the answer nor from a tool such as `voice-response`), the answer
     /// spoken by the TTS provider. A failed synthesis leaves the text only.
     async fn reply_media(
         &self,
         voice_turn: bool,
         answer: &str,
         mut media: Vec<assistant_core::GeneratedMedia>,
+        tool_attachments: &[Attachment],
     ) -> Vec<assistant_core::GeneratedMedia> {
         let has_audio = media
             .iter()
-            .any(|m| m.kind == assistant_core::MediaKind::Audio);
+            .any(|m| m.kind == assistant_core::MediaKind::Audio)
+            || tool_attachments
+                .iter()
+                .any(|a| a.mime_type.starts_with("audio/"));
         let Some(tts) = self.tts.as_ref().filter(|_| voice_turn && !has_audio) else {
             return media;
         };
