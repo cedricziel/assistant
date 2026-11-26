@@ -30,6 +30,7 @@ import 'conversation_list.dart';
 import 'message_bubble.dart';
 import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
+import 'follow_up_chips.dart';
 import 'reconnect_banner.dart';
 import 'streaming_timeline_entry.dart';
 import 'voice_recorder_button.dart';
@@ -534,6 +535,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         // recovering an interrupted stream after a resume.
                         // Renders nothing on routine foreground transitions.
                         const ReconnectBanner(),
+                        // Follow-up prompts after a finished turn.
+                        const FollowUpChips(),
                         // In-flight turn progress card — renders nothing when no
                         // turn is active, an activity label otherwise, a stall
                         // label after 30s of silence.
