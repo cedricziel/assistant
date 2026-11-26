@@ -9,6 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
+use super::options::{ChatOptions, ChatOptionsSupport};
 use super::provider::{Capabilities, LlmProvider};
 use super::stream_chunk::StreamChunk;
 use super::tool_spec::ToolSpec;
@@ -106,6 +107,23 @@ impl LlmProvider for WithEmbeddingOverride {
     ) -> anyhow::Result<LlmResponse> {
         self.inner
             .chat_streaming(system_prompt, history, tools, chunk_sink)
+            .await
+    }
+
+    fn chat_options_support(&self) -> ChatOptionsSupport {
+        self.inner.chat_options_support()
+    }
+
+    async fn chat_with(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+    ) -> anyhow::Result<LlmResponse> {
+        self.inner
+            .chat_with(system_prompt, history, tools, options, chunk_sink)
             .await
     }
 
@@ -303,6 +321,76 @@ mod tests {
             LlmResponse::FinalAnswer(text, _) => assert_eq!(text, "stub"),
             other => panic!("Expected FinalAnswer, got {other:?}"),
         }
+    }
+
+    /// A provider with native chat options, answering with a marker.
+    struct NativeOptions;
+
+    #[async_trait]
+    impl LlmProvider for NativeOptions {
+        fn capabilities(&self) -> Capabilities {
+            StubChat.capabilities()
+        }
+
+        async fn chat(
+            &self,
+            _: &str,
+            _: &[ChatHistoryMessage],
+            _: &[ToolSpec],
+        ) -> anyhow::Result<LlmResponse> {
+            Ok(LlmResponse::FinalAnswer(
+                "plain".into(),
+                LlmResponseMeta::default(),
+            ))
+        }
+
+        async fn chat_streaming(
+            &self,
+            _: &str,
+            _: &[ChatHistoryMessage],
+            _: &[ToolSpec],
+            _: Option<mpsc::Sender<StreamChunk>>,
+        ) -> anyhow::Result<LlmResponse> {
+            Ok(LlmResponse::FinalAnswer(
+                "plain".into(),
+                LlmResponseMeta::default(),
+            ))
+        }
+
+        fn chat_options_support(&self) -> ChatOptionsSupport {
+            ChatOptionsSupport {
+                tool_choice: true,
+                parallel_tool_calls: true,
+            }
+        }
+
+        async fn chat_with(
+            &self,
+            _: &str,
+            _: &[ChatHistoryMessage],
+            _: &[ToolSpec],
+            _: &ChatOptions,
+            _: Option<mpsc::Sender<StreamChunk>>,
+        ) -> anyhow::Result<LlmResponse> {
+            Ok(LlmResponse::FinalAnswer(
+                "native".into(),
+                LlmResponseMeta::default(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn override_forwards_native_chat_options() {
+        let wrapped = WithEmbeddingOverride::new(Arc::new(NativeOptions), Arc::new(StubEmbedder));
+        assert!(wrapped.chat_options_support().tool_choice);
+        let response = wrapped
+            .chat_with("", &[], &[], &ChatOptions::default(), None)
+            .await
+            .unwrap();
+        assert!(
+            matches!(response, LlmResponse::FinalAnswer(ref t, _) if t == "native"),
+            "the inner provider's chat_with must not be replaced by the default: {response:?}"
+        );
     }
 
     #[tokio::test]
