@@ -115,6 +115,15 @@ fn patch(title: Option<&str>, pinned: Option<bool>) -> ConversationPatch {
     ConversationPatch {
         title: title.map(String::from),
         pinned,
+        archived: None,
+    }
+}
+
+fn archive_patch(archived: Option<bool>, pinned: Option<bool>) -> ConversationPatch {
+    ConversationPatch {
+        title: None,
+        pinned,
+        archived,
     }
 }
 
@@ -125,7 +134,7 @@ async fn expect_updated(
 ) -> assistant_storage::ConversationRecord {
     match store.update_metadata(id, p).await.unwrap() {
         MetadataUpdate::Updated(rec) => rec,
-        MetadataUpdate::NotFound => panic!("expected Updated, got NotFound"),
+        other => panic!("expected Updated, got {other:?}"),
     }
 }
 
@@ -782,6 +791,177 @@ async fn model_round_trips(store: Box<dyn ConversationStore>) {
     assert_eq!(single.model.as_deref(), Some("claude-opus-4"));
 }
 
+// -- archive --
+
+async fn archive_sets_archived_at_and_clears_the_pin(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    assert!(
+        conv.archived_at.is_none(),
+        "new conversations are not archived"
+    );
+    expect_updated(&*store, conv.id, patch(None, Some(true))).await;
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+
+    let rec = expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+    assert!(rec.archived_at.is_some(), "archived: true sets archived_at");
+    assert!(rec.pinned_at.is_none(), "archiving clears pinned_at");
+    assert_eq!(rec.updated_at, conv.updated_at, "archive keeps updated_at");
+
+    let rec = expect_updated(&*store, conv.id, archive_patch(Some(false), None)).await;
+    assert!(
+        rec.archived_at.is_none(),
+        "archived: false clears archived_at"
+    );
+    assert_eq!(
+        rec.updated_at, conv.updated_at,
+        "unarchive keeps updated_at"
+    );
+}
+
+async fn pin_and_archive_in_one_patch_is_invalid(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    let res = store
+        .update_metadata(conv.id, archive_patch(Some(true), Some(true)))
+        .await
+        .unwrap();
+    assert!(matches!(res, MetadataUpdate::Invalid), "got {res:?}");
+    let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert!(
+        loaded.pinned_at.is_none(),
+        "an invalid patch changes nothing"
+    );
+    assert!(
+        loaded.archived_at.is_none(),
+        "an invalid patch changes nothing"
+    );
+}
+
+async fn pinning_an_archived_conversation_unarchives_it(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+    for archived in [None, Some(false)] {
+        expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+        let rec = expect_updated(&*store, conv.id, archive_patch(archived, Some(true))).await;
+        assert!(rec.pinned_at.is_some(), "pin sets pinned_at");
+        assert!(rec.archived_at.is_none(), "pin clears archived_at");
+    }
+}
+
+async fn unpinning_alone_leaves_archived_at(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    let archived = expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+    let rec = expect_updated(&*store, conv.id, archive_patch(None, Some(false))).await;
+    assert_eq!(rec.archived_at, archived.archived_at);
+    assert!(rec.pinned_at.is_none());
+}
+
+async fn archive_and_pin_race_resolves_last_writer_wins(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+    let rec = expect_updated(&*store, conv.id, archive_patch(None, Some(true))).await;
+    assert!(
+        rec.pinned_at.is_some() && rec.archived_at.is_none(),
+        "archive, then pin"
+    );
+
+    let rec = expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+    assert!(
+        rec.pinned_at.is_none() && rec.archived_at.is_some(),
+        "pin, then archive"
+    );
+}
+
+async fn list_excludes_archived_and_archived_list_is_newest_first(
+    store: Box<dyn ConversationStore>,
+) {
+    let live = store.create_conversation(Some("live")).await.unwrap();
+    let first = store.create_conversation(Some("first")).await.unwrap();
+    let second = store.create_conversation(Some("second")).await.unwrap();
+    expect_updated(&*store, first.id, archive_patch(Some(true), None)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    expect_updated(&*store, second.id, archive_patch(Some(true), None)).await;
+
+    let listed = store.list_conversations().await.unwrap();
+    assert_eq!(
+        listed.iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![live.id],
+        "the main list excludes archived rows"
+    );
+    let archived = store.list_archived_conversations().await.unwrap();
+    assert_eq!(
+        archived.iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![second.id, first.id],
+        "archived rows only, newest archive first"
+    );
+    let mut owned = store.list_owned_ids().await.unwrap();
+    owned.sort();
+    let mut all = vec![live.id, first.id, second.id];
+    all.sort();
+    assert_eq!(owned, all, "owned ids include archived rows");
+}
+
+async fn a_user_message_unarchives_but_an_assistant_message_does_not(
+    store: Box<dyn ConversationStore>,
+) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+
+    store
+        .save_message(&assistant_msg(conv.id, "late reply", 1))
+        .await
+        .unwrap();
+    let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert!(
+        loaded.archived_at.is_some(),
+        "assistant rows keep the archive"
+    );
+
+    store
+        .save_message(&user_msg(conv.id, "hello", 2))
+        .await
+        .unwrap();
+    let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert!(loaded.archived_at.is_none(), "a user row unarchives");
+}
+
+async fn branching_a_user_message_unarchives(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("A")).await.unwrap();
+    let root = user_msg(conv.id, "first", 1);
+    store.save_message(&root).await.unwrap();
+    expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+
+    store
+        .branch_message(&assistant_msg(conv.id, "alt", 2), Some(root.id))
+        .await
+        .unwrap();
+    let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert!(
+        loaded.archived_at.is_some(),
+        "assistant branch keeps the archive"
+    );
+
+    store
+        .branch_message(&user_msg(conv.id, "edited", 3), None)
+        .await
+        .unwrap();
+    let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+    assert!(loaded.archived_at.is_none(), "a user branch unarchives");
+}
+
+async fn search_still_finds_archived_conversations(store: Box<dyn ConversationStore>) {
+    let conv = store
+        .create_conversation(Some("Lisbon trip"))
+        .await
+        .unwrap();
+    expect_updated(&*store, conv.id, archive_patch(Some(true), None)).await;
+    let hits = search(&*store, "lisbon").await;
+    assert_eq!(hit_ids(&hits), vec![conv.id]);
+    assert!(
+        hits[0].record.archived_at.is_some(),
+        "the hit carries archived_at"
+    );
+}
+
 // -- search_conversations --
 
 async fn search(store: &dyn ConversationStore, query: &str) -> Vec<ConversationSearchHit> {
@@ -1373,6 +1553,51 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_search_without_a_match_returns_nothing() {
                 search_without_a_match_returns_nothing($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_archive_sets_archived_at_and_clears_the_pin() {
+                archive_sets_archived_at_and_clears_the_pin($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_pin_and_archive_in_one_patch_is_invalid() {
+                pin_and_archive_in_one_patch_is_invalid($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_pinning_an_archived_conversation_unarchives_it() {
+                pinning_an_archived_conversation_unarchives_it($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_unpinning_alone_leaves_archived_at() {
+                unpinning_alone_leaves_archived_at($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_archive_and_pin_race_resolves_last_writer_wins() {
+                archive_and_pin_race_resolves_last_writer_wins($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_list_excludes_archived_and_archived_list_is_newest_first() {
+                list_excludes_archived_and_archived_list_is_newest_first($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_a_user_message_unarchives_but_an_assistant_message_does_not() {
+                a_user_message_unarchives_but_an_assistant_message_does_not($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_branching_a_user_message_unarchives() {
+                branching_a_user_message_unarchives($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_search_still_finds_archived_conversations() {
+                search_still_finds_archived_conversations($constructor).await;
             }
         }
     };

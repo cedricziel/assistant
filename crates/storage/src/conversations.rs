@@ -46,6 +46,21 @@ pub struct ConversationRecord {
     /// When the owner pinned this conversation; `None` when not pinned.
     /// Pinned conversations list first, newest pin first.
     pub pinned_at: Option<DateTime<Utc>>,
+    /// When the owner archived this conversation; `None` when not archived.
+    /// Archived conversations leave the main list but stay searchable. Never
+    /// set together with `pinned_at`.
+    pub archived_at: Option<DateTime<Utc>>,
+}
+
+/// Which of the caller's conversations a SQLite listing returns.
+#[derive(Debug, Clone, Copy)]
+enum ListScope {
+    /// Unarchived, pinned first.
+    Live,
+    /// Archived only, newest archive first.
+    Archived,
+    /// Everything, in list order (used by search).
+    All,
 }
 
 /// A partial update of conversation metadata. `None` fields are left unchanged.
@@ -56,6 +71,9 @@ pub struct ConversationPatch {
     pub title: Option<String>,
     /// `Some(true)` pins (keeping an existing `pinned_at`), `Some(false)` unpins.
     pub pinned: Option<bool>,
+    /// `Some(true)` archives (clearing the pin), `Some(false)` unarchives.
+    /// Pinning an archived conversation unarchives it.
+    pub archived: Option<bool>,
 }
 
 /// Outcome of [`ConversationStore::update_metadata`].
@@ -65,6 +83,8 @@ pub enum MetadataUpdate {
     Updated(ConversationRecord),
     /// No conversation with that id exists for this store's scope.
     NotFound,
+    /// The patch asked to pin and archive at once; nothing was changed.
+    Invalid,
 }
 
 /// One conversation matched by [`ConversationStore::search_conversations`].
@@ -112,9 +132,15 @@ pub trait ConversationStore: Send + Sync {
     /// Fetch a conversation by ID. Returns `None` if not found.
     async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>>;
 
-    /// List all conversations for the configured agent: pinned first (newest
-    /// pin first), then most-recently-updated first.
+    /// List the unarchived conversations for the configured agent: pinned
+    /// first (newest pin first), then most-recently-updated first.
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>>;
+
+    /// List the caller's archived conversations, most recently archived first.
+    async fn list_archived_conversations(&self) -> Result<Vec<ConversationRecord>>;
+
+    /// The ids of every conversation the caller owns, archived ones included.
+    async fn list_owned_ids(&self) -> Result<Vec<Uuid>>;
 
     /// Search the caller's conversations by title and message text.
     ///
@@ -138,6 +164,10 @@ pub trait ConversationStore: Send + Sync {
 
     /// Apply a partial metadata update in one step and emit one `Upserted`
     /// event. Does not change `updated_at`.
+    ///
+    /// Pinned and archived are exclusive: pinning clears `archived_at`,
+    /// archiving clears `pinned_at`, and asking for both is
+    /// [`MetadataUpdate::Invalid`].
     async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate>;
 
     /// Write an auto-generated title, only while the conversation is unlocked.
@@ -150,7 +180,8 @@ pub trait ConversationStore: Send + Sync {
     /// Delete a conversation (and its messages).
     async fn delete_conversation(&self, id: Uuid) -> Result<()>;
 
-    /// Persist a single message.
+    /// Persist a single message. A `user` message unarchives the
+    /// conversation; other roles leave it archived.
     async fn save_message(&self, msg: &Message) -> Result<()>;
 
     /// Load the full message history for a conversation.
@@ -305,6 +336,7 @@ fn conversation_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<ConversationReco
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
         pinned_at: r.get("pinned_at"),
+        archived_at: r.get("archived_at"),
     })
 }
 
@@ -386,13 +418,15 @@ impl SqliteConversationStore {
 
         if inserted {
             sqlx::query(
-                "UPDATE conversations SET active_leaf_id = ?1, updated_at = ?2 \
+                "UPDATE conversations SET active_leaf_id = ?1, updated_at = ?2, \
+                 archived_at = CASE WHEN ?5 THEN NULL ELSE archived_at END \
                  WHERE id = ?3 AND agent_id = ?4",
             )
             .bind(&id)
             .bind(self.clock.now())
             .bind(&conversation_id)
             .bind(&self.agent_id)
+            .bind(msg.role == MessageRole::User)
             .execute(&mut *tx)
             .await?;
         }
@@ -454,30 +488,37 @@ impl SqliteConversationStore {
         Ok(Some(leaf))
     }
 
-    /// Every conversation visible to this store's agent and user scope.
-    async fn scoped_conversations(&self) -> Result<Vec<ConversationRecord>> {
-        let rows = if self.user_id.is_some() {
-            sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
-                 FROM conversations \
-                 WHERE agent_id = ?1 AND user_id = ?2 \
-                 ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC",
-            )
+    /// The conversations visible to this store's agent and user scope, in
+    /// `scope`'s order.
+    async fn scoped_conversations(&self, scope: ListScope) -> Result<Vec<ConversationRecord>> {
+        macro_rules! scoped_sql {
+            ($filter:literal, $order:literal) => {
+                concat!(
+                    "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at, archived_at \
+                     FROM conversations \
+                     WHERE agent_id = ?1 AND (?2 IS NULL OR user_id = ?2) ",
+                    $filter,
+                    " ORDER BY ",
+                    $order
+                )
+            };
+        }
+        let sql = match scope {
+            ListScope::Live => scoped_sql!(
+                "AND archived_at IS NULL",
+                "pinned_at IS NULL, pinned_at DESC, updated_at DESC"
+            ),
+            ListScope::Archived => scoped_sql!(
+                "AND archived_at IS NOT NULL",
+                "archived_at DESC, updated_at DESC"
+            ),
+            ListScope::All => scoped_sql!("", "pinned_at IS NULL, pinned_at DESC, updated_at DESC"),
+        };
+        let rows = sqlx::query(sql)
             .bind(&self.agent_id)
             .bind(&self.user_id)
             .fetch_all(&self.pool)
-            .await?
-        } else {
-            sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
-                 FROM conversations \
-                 WHERE agent_id = ?1 \
-                 ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC",
-            )
-            .bind(&self.agent_id)
-            .fetch_all(&self.pool)
-            .await?
-        };
+            .await?;
 
         rows.iter().map(conversation_from_row).collect()
     }
@@ -584,6 +625,7 @@ impl ConversationStore for SqliteConversationStore {
             created_at: now,
             updated_at: now,
             pinned_at: None,
+            archived_at: None,
         };
 
         if let Some(b) = &self.broadcaster {
@@ -599,7 +641,7 @@ impl ConversationStore for SqliteConversationStore {
 
         let row = if self.user_id.is_some() {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at, archived_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2 AND user_id = ?3",
             )
@@ -610,7 +652,7 @@ impl ConversationStore for SqliteConversationStore {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at, archived_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2",
             )
@@ -625,7 +667,24 @@ impl ConversationStore for SqliteConversationStore {
 
     /// List all conversations, most-recently updated first.
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
-        self.scoped_conversations().await
+        self.scoped_conversations(ListScope::Live).await
+    }
+
+    async fn list_archived_conversations(&self) -> Result<Vec<ConversationRecord>> {
+        self.scoped_conversations(ListScope::Archived).await
+    }
+
+    async fn list_owned_ids(&self) -> Result<Vec<Uuid>> {
+        let ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM conversations WHERE agent_id = ?1 AND (?2 IS NULL OR user_id = ?2)",
+        )
+        .bind(&self.agent_id)
+        .bind(&self.user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        ids.iter()
+            .map(|id| Uuid::parse_str(id).map_err(Into::into))
+            .collect()
     }
 
     async fn search_conversations(
@@ -638,7 +697,7 @@ impl ConversationStore for SqliteConversationStore {
             return Ok(Vec::new());
         }
         let records: HashMap<Uuid, ConversationRecord> = self
-            .scoped_conversations()
+            .scoped_conversations(ListScope::All)
             .await?
             .into_iter()
             .map(|r| (r.id, r))
@@ -829,6 +888,9 @@ impl ConversationStore for SqliteConversationStore {
     }
 
     async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate> {
+        if patch.pinned == Some(true) && patch.archived == Some(true) {
+            return Ok(MetadataUpdate::Invalid);
+        }
         let id_str = id.to_string();
         let mut tx = self
             .pool
@@ -840,16 +902,24 @@ impl ConversationStore for SqliteConversationStore {
             "UPDATE conversations
                  SET title = COALESCE(?1, title),
                      title_locked = CASE WHEN ?1 IS NULL THEN title_locked ELSE 1 END,
-                     pinned_at = CASE ?2
-                         WHEN 1 THEN COALESCE(pinned_at, ?3)
-                         WHEN 0 THEN NULL
+                     pinned_at = CASE
+                         WHEN ?4 = 1 THEN NULL
+                         WHEN ?2 = 1 THEN COALESCE(pinned_at, ?3)
+                         WHEN ?2 = 0 THEN NULL
                          ELSE pinned_at
+                     END,
+                     archived_at = CASE
+                         WHEN ?2 = 1 THEN NULL
+                         WHEN ?4 = 1 THEN COALESCE(archived_at, ?3)
+                         WHEN ?4 = 0 THEN NULL
+                         ELSE archived_at
                      END
-                 WHERE id = ?4 AND agent_id = ?5 AND (?6 IS NULL OR user_id = ?6)",
+                 WHERE id = ?5 AND agent_id = ?6 AND (?7 IS NULL OR user_id = ?7)",
         )
         .bind(&patch.title)
         .bind(patch.pinned)
         .bind(self.clock.now())
+        .bind(patch.archived)
         .bind(&id_str)
         .bind(&self.agent_id)
         .bind(&self.user_id)
@@ -1171,6 +1241,21 @@ impl InMemoryConversationStore {
 }
 
 impl InMemoryConversationStore {
+    /// Every conversation in this store's agent and user scope, unordered.
+    fn owned_records(&self) -> Vec<ConversationRecord> {
+        self.lock_state()
+            .conversations
+            .values()
+            .filter(|c| c.agent_id == self.agent_id)
+            .filter(|c| {
+                self.user_id
+                    .as_ref()
+                    .is_none_or(|u| c.user_id.as_ref() == Some(u))
+            })
+            .cloned()
+            .collect()
+    }
+
     /// Insert `msg` and make it the active leaf. `parent` is `None` to append
     /// under the current leaf, or `Some(explicit_parent)` to branch.
     fn insert_message(&self, msg: &Message, parent: Option<Option<Uuid>>) -> Result<()> {
@@ -1203,6 +1288,9 @@ impl InMemoryConversationStore {
         state.leaves.insert(msg.conversation_id, msg.id);
         if let Some(conv) = state.conversations.get_mut(&msg.conversation_id) {
             conv.updated_at = self.clock.now();
+            if msg.role == MessageRole::User {
+                conv.archived_at = None;
+            }
         }
         Ok(())
     }
@@ -1267,6 +1355,7 @@ impl ConversationStore for InMemoryConversationStore {
                     created_at: now,
                     updated_at: now,
                     pinned_at: None,
+                    archived_at: None,
                 });
             if entry.agent_id != self.agent_id {
                 anyhow::bail!(
@@ -1305,18 +1394,8 @@ impl ConversationStore for InMemoryConversationStore {
     }
 
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
-        let state = self.lock_state();
-        let mut out: Vec<ConversationRecord> = state
-            .conversations
-            .values()
-            .filter(|c| c.agent_id == self.agent_id)
-            .filter(|c| {
-                self.user_id
-                    .as_ref()
-                    .is_none_or(|u| c.user_id.as_ref() == Some(u))
-            })
-            .cloned()
-            .collect();
+        let mut out = self.owned_records();
+        out.retain(|c| c.archived_at.is_none());
         out.sort_by_key(|c| {
             (
                 c.pinned_at.is_none(),
@@ -1324,6 +1403,17 @@ impl ConversationStore for InMemoryConversationStore {
             )
         });
         Ok(out)
+    }
+
+    async fn list_archived_conversations(&self) -> Result<Vec<ConversationRecord>> {
+        let mut out = self.owned_records();
+        out.retain(|c| c.archived_at.is_some());
+        out.sort_by_key(|c| Reverse((c.archived_at, c.updated_at)));
+        Ok(out)
+    }
+
+    async fn list_owned_ids(&self) -> Result<Vec<Uuid>> {
+        Ok(self.owned_records().iter().map(|c| c.id).collect())
     }
 
     async fn search_conversations(
@@ -1461,6 +1551,9 @@ impl ConversationStore for InMemoryConversationStore {
     }
 
     async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate> {
+        if patch.pinned == Some(true) && patch.archived == Some(true) {
+            return Ok(MetadataUpdate::Invalid);
+        }
         let now = self.clock.now();
         let updated = {
             let mut state = self.lock_state();
@@ -1478,8 +1571,19 @@ impl ConversationStore for InMemoryConversationStore {
                         c.title = Some(title);
                         c.title_locked = true;
                     }
+                    match patch.archived {
+                        Some(true) => {
+                            c.archived_at = c.archived_at.or(Some(now));
+                            c.pinned_at = None;
+                        }
+                        Some(false) => c.archived_at = None,
+                        None => {}
+                    }
                     match patch.pinned {
-                        Some(true) => c.pinned_at = c.pinned_at.or(Some(now)),
+                        Some(true) => {
+                            c.pinned_at = c.pinned_at.or(Some(now));
+                            c.archived_at = None;
+                        }
                         Some(false) => c.pinned_at = None,
                         None => {}
                     }
@@ -2299,6 +2403,7 @@ mod tests {
 
         let mut rx = broadcaster.subscribe();
         let patch = ConversationPatch {
+            archived: None,
             title: Some("Pinned".to_string()),
             pinned: Some(true),
         };
@@ -2329,6 +2434,7 @@ mod tests {
         let conv = alice.create_conversation(Some("Mine")).await.unwrap();
 
         let patch = ConversationPatch {
+            archived: None,
             title: None,
             pinned: Some(true),
         };
