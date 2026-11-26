@@ -11,6 +11,7 @@ use assistant_core::{
     ChatHistoryMessage, ToolHandler, types::conversation::ExecutionContext,
     types::conversation::Interface, types::conversation::Message,
 };
+use assistant_storage::MessageTimingStore;
 use assistant_storage::conversations::ConversationStore;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Span as _;
@@ -41,6 +42,7 @@ impl Orchestrator {
         interface: &Interface,
         ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
         conv_store: &dyn ConversationStore,
+        timing_store: &dyn MessageTimingStore,
         turn_had_errors: bool,
         meta: FinalAnswerMeta,
     ) -> Result<FinalAnswerOutcome> {
@@ -50,7 +52,7 @@ impl Orchestrator {
             if !text.trim().is_empty() {
                 let mut m = Message::assistant(conversation_id, text);
                 m.turn = turn_index;
-                if let Err(e) = persist_final_answer(conv_store, m, meta).await {
+                if let Err(e) = persist_final_answer(conv_store, timing_store, m, meta).await {
                     warn!("Failed to persist post-reply assistant message: {e}");
                 }
             }
@@ -74,7 +76,7 @@ impl Orchestrator {
 
         let mut m = Message::assistant(conversation_id, text);
         m.turn = turn_index;
-        persist_final_answer(conv_store, m, meta).await?;
+        persist_final_answer(conv_store, timing_store, m, meta).await?;
 
         // Collect candidates and sort deterministically so the chosen tool
         // doesn't depend on HashMap iteration order.

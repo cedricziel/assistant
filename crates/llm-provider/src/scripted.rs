@@ -260,7 +260,13 @@ impl LlmProvider for ScriptedLlmProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> Result<LlmResponse> {
-        Ok(self.record_and_pop_response(system_prompt, history, tools, false))
+        let response = self.record_and_pop_response(system_prompt, history, tools, false);
+        // A non-streaming call plays its timed script too, without a sink,
+        // so turns without a token sink can be timed on the fake clock.
+        if let Some((clock, call)) = self.next_timed_call() {
+            play_timed_call(&clock, call, None).await;
+        }
+        Ok(response)
     }
 
     async fn chat_streaming(
@@ -533,6 +539,24 @@ mod tests {
         );
         let start = clock.now_instant();
         let _ = p.chat_streaming("sys", &[], &[], None).await.unwrap();
+        assert_eq!(clock.now_instant() - start, ms(300));
+    }
+
+    #[tokio::test]
+    async fn non_streaming_chat_plays_the_timed_script() {
+        let clock = FakeClock::new_at_seed();
+        let p = ScriptedLlmProvider::new()
+            .with_canned_responses(vec![final_answer("hello")])
+            .with_timed_streaming_calls(
+                clock.clone(),
+                vec![TimedCall {
+                    steps: vec![text_step(250, "x")],
+                    advance_before_return: ms(50),
+                }],
+            );
+        let start = clock.now_instant();
+        let response = p.chat("sys", &[], &[]).await.unwrap();
+        assert!(matches!(response, LlmResponse::FinalAnswer(t, _) if t == "hello"));
         assert_eq!(clock.now_instant() - start, ms(300));
     }
 
