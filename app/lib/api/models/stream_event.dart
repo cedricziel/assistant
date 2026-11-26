@@ -73,6 +73,7 @@ class ConversationListEntry {
     required this.createdAt,
     required this.updatedAt,
     this.pinnedAt,
+    this.archivedAt,
   });
 
   final String id;
@@ -82,6 +83,9 @@ class ConversationListEntry {
 
   /// When the conversation was pinned, or `null` when it is not pinned.
   final DateTime? pinnedAt;
+
+  /// When the conversation was archived, or `null` when it is not archived.
+  final DateTime? archivedAt;
 
   factory ConversationListEntry.fromJson(Map<String, dynamic> json) {
     final id = json['id'] as String?;
@@ -94,6 +98,10 @@ class ConversationListEntry {
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
       pinnedAt: switch (json['pinned_at']) {
+        final String at => DateTime.parse(at),
+        _ => null,
+      },
+      archivedAt: switch (json['archived_at']) {
         final String at => DateTime.parse(at),
         _ => null,
       },

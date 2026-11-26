@@ -53,7 +53,44 @@ class _RecordingConversationListNotifier
   final String? error;
   final List<(String, String)> renames = [];
   final List<(String, bool)> pins = [];
+  final List<(String, bool)> archives = [];
+  final List<bool> expansions = [];
   final List<String> deletes = [];
+
+  @override
+  Future<ConversationListState> build() async {
+    final base = await super.build();
+    return ConversationListState(
+      conversations: base.conversations,
+      archived: ArchivedSectionState(
+        loaded: true,
+        conversations: [
+          ConversationListEntry(
+            id: 'a1',
+            title: 'Archived chat',
+            createdAt: DateTime.utc(2024, 1, 1),
+            updatedAt: DateTime.utc(2024, 1, 1),
+            archivedAt: DateTime.utc(2024, 4, 1),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Future<String?> setArchived(String id, bool archived) async {
+    archives.add((id, archived));
+    return error;
+  }
+
+  @override
+  Future<void> setArchivedExpanded(bool expanded) async {
+    expansions.add(expanded);
+    final current = state.value!;
+    state = AsyncData(
+      current.copyWith(archived: current.archived.copyWith(expanded: expanded)),
+    );
+  }
 
   @override
   Future<String?> renameConversation(String id, String title) async {
@@ -220,9 +257,10 @@ void main() {
 
       await rightClick(tester, 'Recent chat');
 
-      expect(popupItems, findsNWidgets(3));
+      expect(popupItems, findsNWidgets(4));
       expect(find.text('Rename'), findsOneWidget);
       expect(find.text('Pin'), findsOneWidget);
+      expect(find.text('Archive'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
       expect(find.byType(BottomSheet), findsNothing);
       expect(find.byType(CupertinoActionSheet), findsNothing);
@@ -386,6 +424,116 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(notifier.deletes, ['r1']);
+    });
+
+    testWidgets('Archive archives the row', (tester) async {
+      await pumpPane(tester);
+
+      await rightClick(tester, 'Recent chat');
+      await tester.tap(find.text('Archive'));
+      await tester.pumpAndSettle();
+
+      expect(notifier.archives, [('r1', true)]);
+    });
+
+    testWidgets('a failed Archive shows a snack bar', (tester) async {
+      await pumpPane(tester, error: 'nope');
+
+      await rightClick(tester, 'Recent chat');
+      await tester.tap(find.text('Archive'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Could not archive'), findsOneWidget);
+      expect(find.textContaining('nope'), findsOneWidget);
+    });
+
+    testWidgets('a touch action sheet offers Archive', (tester) async {
+      await withPlatform(TargetPlatform.android, () async {
+        await pumpPane(tester);
+
+        await longPress(tester, 'Recent chat');
+
+        expect(find.text('Archive'), findsOneWidget);
+      });
+    });
+  });
+
+  group('archived section', () {
+    late _RecordingConversationListNotifier notifier;
+
+    Future<void> pumpPane(WidgetTester tester) async {
+      notifier = _RecordingConversationListNotifier();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            conversationListProvider.overrideWith(() => notifier),
+            chatProvider.overrideWith(_FakeChatNotifier.new),
+          ],
+          child: MaterialApp(home: Scaffold(body: ConversationListPane())),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> rightClick(WidgetTester tester, String title) async {
+      await tester.tapAt(
+        tester.getCenter(find.text(title)),
+        buttons: kSecondaryMouseButton,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('renders a collapsed Archived header that expands on tap', (
+      tester,
+    ) async {
+      await pumpPane(tester);
+
+      expect(find.text('Archived'), findsOneWidget);
+      expect(find.text('Archived chat'), findsNothing);
+
+      await tester.tap(find.text('Archived'));
+      await tester.pumpAndSettle();
+
+      expect(notifier.expansions, [true]);
+      expect(find.text('Archived chat'), findsOneWidget);
+    });
+
+    testWidgets('an archived row offers Unarchive and Pin', (tester) async {
+      await pumpPane(tester);
+      await tester.tap(find.text('Archived'));
+      await tester.pumpAndSettle();
+
+      await rightClick(tester, 'Archived chat');
+
+      expect(find.text('Unarchive'), findsOneWidget);
+      expect(find.text('Pin'), findsOneWidget);
+      expect(find.text('Archive'), findsNothing);
+    });
+
+    testWidgets('Unarchive unarchives the row', (tester) async {
+      await pumpPane(tester);
+      await tester.tap(find.text('Archived'));
+      await tester.pumpAndSettle();
+
+      await rightClick(tester, 'Archived chat');
+      await tester.tap(find.text('Unarchive'));
+      await tester.pumpAndSettle();
+
+      expect(notifier.archives, [('a1', false)]);
+    });
+
+    testWidgets('Pin on an archived row sends only pin', (tester) async {
+      await pumpPane(tester);
+      await tester.tap(find.text('Archived'));
+      await tester.pumpAndSettle();
+
+      await rightClick(tester, 'Archived chat');
+      await tester.tap(find.text('Pin'));
+      await tester.pumpAndSettle();
+
+      expect(notifier.pins, [('a1', true)]);
+      expect(notifier.archives, isEmpty);
     });
   });
 }

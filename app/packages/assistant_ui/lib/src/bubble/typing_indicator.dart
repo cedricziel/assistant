@@ -1,8 +1,10 @@
-import '../../shared/platform/widgets.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Animated three-dot indicator shown while waiting for the first token.
-class TypingDots extends StatelessWidget {
-  const TypingDots({super.key});
+///
+/// With `MediaQuery.disableAnimations` the dots stay still.
+class TypingIndicator extends StatelessWidget {
+  const TypingIndicator({super.key});
 
   @override
   Widget build(BuildContext context) {
