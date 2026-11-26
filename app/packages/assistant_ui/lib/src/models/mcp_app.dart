@@ -31,7 +31,10 @@ class McpApp {
       permissions: permissions is Map
           ? McpAppPermissions._fromJson(permissions)
           : const McpAppPermissions(),
-      prefersBorder: json['prefers_border'] as bool?,
+      prefersBorder: switch (json['prefers_border']) {
+        final bool value => value,
+        _ => null,
+      },
     );
   }
 
