@@ -424,6 +424,18 @@ void main() {
         }),
         const AgentErrorEvent(reason: AgentErrorReason.error, message: 'err'),
         const SuggestionsEvent(messageId: 'm', prompts: ['p']),
+        InteractionRequestedEvent(
+          interactionId: 'i',
+          kind: 'question',
+          createdAt: DateTime.utc(2026),
+          expiresAt: DateTime.utc(2026),
+        ),
+        InteractionResolvedEvent(
+          interactionId: 'i',
+          kind: 'question',
+          outcome: InteractionOutcome.expired,
+          resolvedAt: DateTime.utc(2026),
+        ),
       ];
 
       int count = 0;
@@ -447,6 +459,8 @@ void main() {
           case SubagentToolResultEvent():
           case SubagentStatusEvent():
           case SuggestionsEvent():
+          case InteractionRequestedEvent():
+          case InteractionResolvedEvent():
             count++;
         }
       }

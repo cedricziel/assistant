@@ -7,9 +7,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:assistant_ui/models.dart' show ApprovalDecision;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:fresh_dio/fresh_dio.dart';
+import 'package:one_of/one_of.dart';
 
 import '../features/auth/oauth_credentials.dart';
 import 'auth_interceptor.dart';
@@ -17,6 +19,7 @@ import 'event_source_stream.dart';
 import 'event_source_stream_stub.dart'
     if (dart.library.js_interop) 'event_source_stream_web.dart'
     as event_source;
+import 'models/interaction_answer.dart';
 import 'models/server_capabilities.dart';
 import 'models/stream_event.dart';
 import 'native_http_adapter_stub.dart'
@@ -209,6 +212,8 @@ class ApiClient {
   CatalogApi get catalog => _generatedApi.getCatalogApi();
   IntegrationsApi get integrations => _generatedApi.getIntegrationsApi();
   TemplatesApi get templates => _generatedApi.getTemplatesApi();
+  ToolPermissionRulesApi get toolPermissionRules =>
+      _generatedApi.getToolPermissionRulesApi();
 
   /// Request that the server cancel an in-flight turn.
   ///
@@ -255,6 +260,66 @@ class ApiClient {
     } catch (_) {
       return null;
     }
+  }
+
+  // -- Turn interactions -----------------------------------------------------
+
+  /// Answer a pending interaction of the turn [turnId] (its run id).
+  ///
+  /// Returns the stored interaction, now `resolved`. Errors surface as
+  /// [DioException] so the card can tell a refused answer (400), an interaction
+  /// that already ended (404, 409) and an unreachable server apart.
+  Future<InteractionDetail> respondToInteraction(
+    String conversationId,
+    String turnId,
+    String interactionId,
+    InteractionAnswer answer,
+  ) async {
+    final resp = await conversations.respondToInteraction(
+      conversationId: conversationId,
+      turnId: turnId,
+      interactionId: interactionId,
+      respondToInteractionRequest: _respondRequest(answer),
+    );
+    final detail = resp.data;
+    if (detail == null) {
+      throw StateError('respond route returned no interaction');
+    }
+    return detail;
+  }
+
+  /// The interactions of [conversationId], optionally only those in [status].
+  ///
+  /// Used after a reload to find the approvals and questions that are still
+  /// waiting, and to show the receipts of those that ended.
+  Future<List<InteractionDetail>> listConversationInteractions(
+    String conversationId, {
+    InteractionStatusView? status,
+  }) async {
+    final resp = await conversations.listConversationInteractions(
+      conversationId: conversationId,
+      status: status,
+    );
+    return resp.data?.toList() ?? const [];
+  }
+
+  // -- Tool permission rules -------------------------------------------------
+
+  /// The saved tool permission rules: the caller's own by default, or with
+  /// [RuleScope.space] every member's (admins only).
+  Future<List<ToolPermissionRuleSummary>> listToolPermissionRules({
+    RuleScope? scope,
+  }) async {
+    final resp = await toolPermissionRules.listToolPermissionRules(
+      scope: scope,
+    );
+    return resp.data?.toList() ?? const [];
+  }
+
+  /// Revoke the saved rule [id]. Throws [DioException] when it is gone or not
+  /// the caller's to revoke.
+  Future<void> deleteToolPermissionRule(String id) async {
+    await toolPermissionRules.deleteToolPermissionRule(id: id);
   }
 
   /// Stream assistant tokens for a conversation message.
@@ -534,6 +599,55 @@ class ApiClient {
   ) => parseConversationSseByteStream(byteStream);
 }
 
+typedef _RespondOneOf =
+    OneOf3<
+      RespondToInteractionRequestOneOf,
+      RespondToInteractionRequestOneOf1,
+      RespondToInteractionRequestOneOf2
+    >;
+
+/// Builds the generated respond-route body for [answer].
+RespondToInteractionRequest _respondRequest(InteractionAnswer answer) =>
+    RespondToInteractionRequest(
+      (b) => b.oneOf = switch (answer) {
+        ToolApprovalAnswer(:final decision) => _RespondOneOf(
+          typeIndex: 0,
+          value: RespondToInteractionRequestOneOf(
+            (r) => r
+              ..kind = RespondToInteractionRequestOneOfKindEnum.toolApproval
+              ..decision = switch (decision) {
+                ApprovalDecision.allowOnce => ToolDecision.allowOnce,
+                ApprovalDecision.allowAlways => ToolDecision.allowAlways,
+                ApprovalDecision.rejectOnce => ToolDecision.rejectOnce,
+                ApprovalDecision.rejectAlways => ToolDecision.rejectAlways,
+              },
+          ),
+        ),
+        QuestionAnswers(:final answers) => _RespondOneOf(
+          typeIndex: 1,
+          value: RespondToInteractionRequestOneOf1(
+            (r) => r
+              ..kind = RespondToInteractionRequestOneOf1KindEnum.question
+              ..answers.replace([
+                for (final a in answers)
+                  QuestionAnswer(
+                    (q) => q
+                      ..questionId = a.questionId
+                      ..selectedOptionIds.replace(a.selectedOptionIds)
+                      ..text = a.text,
+                  ),
+              ]),
+          ),
+        ),
+        DeclineAnswer() => _RespondOneOf(
+          typeIndex: 2,
+          value: RespondToInteractionRequestOneOf2(
+            (r) => r.kind = RespondToInteractionRequestOneOf2KindEnum.decline,
+          ),
+        ),
+      },
+    );
+
 // -- Heartbeat timeout wrapper ------------------------------------------------
 
 /// Wraps an SSE byte stream with a watchdog timer that fires a
@@ -807,6 +921,20 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           yield SuggestionsEvent.fromJson(json, sequenceId: seq);
         } catch (_) {
           // ignore malformed suggestions events
+        }
+      } else if (eventType == 'interaction_requested' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield InteractionRequestedEvent.fromJson(json, sequenceId: seq);
+        } catch (_) {
+          // ignore malformed interaction_requested events
+        }
+      } else if (eventType == 'interaction_resolved' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield InteractionResolvedEvent.fromJson(json, sequenceId: seq);
+        } catch (_) {
+          // ignore malformed interaction_resolved events
         }
       }
       eventType = null;

@@ -574,3 +574,138 @@ class SuggestionsEvent extends StreamEvent {
     );
   }
 }
+
+/// A running turn asks its owner something.
+///
+/// Corresponds to `event:interaction_requested` in the SSE stream. The JSON
+/// body carries the common fields below plus kind-specific ones, which are kept
+/// untouched in [request] so a kind this build does not know still round-trips
+/// to the registry that decides how to render it.
+class InteractionRequestedEvent extends StreamEvent {
+  const InteractionRequestedEvent({
+    required this.interactionId,
+    required this.kind,
+    required this.createdAt,
+    required this.expiresAt,
+    this.toolCallId,
+    this.rendersCard = true,
+    this.request = const {},
+    super.sequenceId,
+  });
+
+  final String interactionId;
+
+  /// `tool_approval`, `question`, or a kind a newer server added.
+  final String kind;
+  final DateTime createdAt;
+  final DateTime expiresAt;
+
+  /// Provider id of the tool call this belongs to, when there is one.
+  final String? toolCallId;
+
+  /// False when the kind wants no timeline card. The turn still waits.
+  final bool rendersCard;
+
+  /// The kind-specific fields (`tool_name`, `arguments`, `questions`, …).
+  final Map<String, Object?> request;
+
+  static const _commonFields = {
+    'interaction_id',
+    'kind',
+    'created_at',
+    'expires_at',
+    'tool_call_id',
+    'renders_card',
+  };
+
+  /// Throws a [FormatException] when `interaction_id`, `kind`, `created_at` or
+  /// `expires_at` is missing or malformed.
+  factory InteractionRequestedEvent.fromJson(
+    Map<String, dynamic> json, {
+    int? sequenceId,
+  }) {
+    return InteractionRequestedEvent(
+      interactionId: _requiredString(json, 'interaction_id'),
+      kind: _requiredString(json, 'kind'),
+      createdAt: DateTime.parse(_requiredString(json, 'created_at')),
+      expiresAt: DateTime.parse(_requiredString(json, 'expires_at')),
+      toolCallId: json['tool_call_id'] as String?,
+      rendersCard: json['renders_card'] as bool? ?? true,
+      request: {
+        for (final entry in json.entries)
+          if (!_commonFields.contains(entry.key)) entry.key: entry.value,
+      },
+      sequenceId: sequenceId,
+    );
+  }
+}
+
+/// How an interaction ended.
+enum InteractionOutcome {
+  /// The owner answered.
+  resolved,
+
+  /// The turn ended or was stopped first.
+  cancelled,
+
+  /// Nobody answered before `expires_at`.
+  expired,
+}
+
+/// An interaction ended: exactly one per [InteractionRequestedEvent].
+///
+/// Corresponds to `event:interaction_resolved` in the SSE stream.
+class InteractionResolvedEvent extends StreamEvent {
+  const InteractionResolvedEvent({
+    required this.interactionId,
+    required this.kind,
+    required this.outcome,
+    required this.resolvedAt,
+    this.response,
+    this.ruleId,
+    super.sequenceId,
+  });
+
+  final String interactionId;
+  final String kind;
+  final InteractionOutcome outcome;
+  final DateTime resolvedAt;
+
+  /// The owner's answer. Only when [outcome] is [InteractionOutcome.resolved].
+  final Map<String, Object?>? response;
+
+  /// Id of the permission rule an "always" answer saved.
+  final String? ruleId;
+
+  /// Throws a [FormatException] when a required field is missing or malformed,
+  /// including an `outcome` this build does not know.
+  factory InteractionResolvedEvent.fromJson(
+    Map<String, dynamic> json, {
+    int? sequenceId,
+  }) {
+    final outcome = _requiredString(json, 'outcome');
+    return InteractionResolvedEvent(
+      interactionId: _requiredString(json, 'interaction_id'),
+      kind: _requiredString(json, 'kind'),
+      outcome: InteractionOutcome.values.firstWhere(
+        (o) => o.name == outcome,
+        orElse: () => throw FormatException('unknown outcome: $outcome'),
+      ),
+      resolvedAt: DateTime.parse(_requiredString(json, 'resolved_at')),
+      response: switch (json['response']) {
+        final Map<dynamic, dynamic> r => r.cast<String, Object?>(),
+        _ => null,
+      },
+      ruleId: json['rule_id'] as String?,
+      sequenceId: sequenceId,
+    );
+  }
+}
+
+String _requiredString(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value is! String || value.isEmpty) {
+    throw FormatException('$key is required');
+  }
+  return value;
+}
