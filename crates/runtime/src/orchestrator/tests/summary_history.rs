@@ -204,3 +204,131 @@ async fn compact_summarises_the_existing_summary_plus_the_rows_after_it() {
         "summarised rows are not re-read"
     );
 }
+
+/// `/compact` over a conversation of three exchanges, with a scripted model
+/// that answers the summary request and then one ordinary turn.
+async fn compacted_conversation() -> (
+    Arc<Orchestrator>,
+    Arc<StorageLayer>,
+    Arc<ScriptedLlmProvider>,
+    Uuid,
+    Vec<Uuid>,
+) {
+    let scripted = Arc::new(ScriptedLlmProvider::new().with_canned_responses(vec![
+        LlmResponse::FinalAnswer("fresh summary".into(), LlmResponseMeta::default()),
+        LlmResponse::FinalAnswer("ok".into(), LlmResponseMeta::default()),
+    ]));
+    let llm: Arc<dyn LlmProvider> = scripted.clone();
+    let mut config = OrgConfig::default();
+    config.memory.enabled = false;
+    config.compaction.keep_recent_turns = 1;
+    allow_all_tools(&mut config);
+    let (orch, storage) = build_with_llm(llm, config, |o| o).await;
+
+    let store = storage.conversation_store();
+    let conv = store.create_conversation(None).await.unwrap();
+    for (i, text) in ["u1", "a1", "u2", "a2", "u3", "a3"].into_iter().enumerate() {
+        let msg = if i % 2 == 0 {
+            Message::user(conv.id, text)
+        } else {
+            Message::assistant(conv.id, text)
+        };
+        store.save_message(&msg).await.unwrap();
+    }
+    let ids: Vec<Uuid> = store
+        .load_history(conv.id)
+        .await
+        .unwrap()
+        .iter()
+        .map(|m| m.id)
+        .collect();
+
+    let result = CommandRegistry::new()
+        .execute("compact", &[], command_context(&orch, conv.id))
+        .await;
+    assert_eq!(result.ack_text, "Context compacted.");
+    (orch, storage, scripted, conv.id, ids)
+}
+
+#[tokio::test]
+async fn compact_keeps_every_row_and_the_next_turn_starts_with_the_summary() {
+    let (orch, storage, scripted, conv, ids) = compacted_conversation().await;
+
+    let stored: Vec<Uuid> = storage
+        .conversation_store()
+        .load_history(conv)
+        .await
+        .unwrap()
+        .iter()
+        .map(|m| m.id)
+        .collect();
+    assert_eq!(stored, ids, "compaction deletes no message");
+    let summary = storage
+        .conversation_summary_store()
+        .newest_on_path(conv, &ids)
+        .await
+        .unwrap()
+        .expect("compaction records a summary");
+    assert_eq!(
+        summary.through_message_id, ids[3],
+        "through the last summarised row (a2)"
+    );
+
+    orch.run_turn(
+        "u4",
+        conv,
+        Interface::Cli,
+        None,
+        vec![],
+        TurnIdentity::default(),
+    )
+    .await
+    .unwrap();
+
+    let calls = scripted.recorded_calls();
+    let texts: Vec<String> = calls[1]
+        .history
+        .iter()
+        .map(|m| match m {
+            ChatHistoryMessage::Text { content, .. } => content.clone(),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert!(
+        texts[0].contains("fresh summary"),
+        "summary first: {texts:?}"
+    );
+    assert_eq!(texts[1..], ["u3", "a3", "u4"], "post-summary path follows");
+}
+
+#[tokio::test]
+async fn a_branch_created_before_the_summarised_range_gets_no_summary() {
+    let (orch, storage, _scripted, conv, ids) = compacted_conversation().await;
+    let store = storage.conversation_store();
+    // Edit u2: a sibling under a1 diverges from the summarised range.
+    let edited = Message::user(conv, "u2 edited");
+    store.branch_message(&edited, Some(ids[1])).await.unwrap();
+
+    let (_, history, _) = orch
+        .prepare_history("next", conv, Vec::new(), &[], &orch.agent_id)
+        .await
+        .unwrap();
+
+    let texts: Vec<String> = history
+        .messages()
+        .iter()
+        .map(|m| match m {
+            ChatHistoryMessage::Text { content, .. } => content.clone(),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        texts[..3],
+        ["u1", "a1", "u2 edited"],
+        "the raw path: {texts:?}"
+    );
+    assert!(
+        texts.iter().all(|t| !t.contains("fresh summary")),
+        "no summary applies to the branch: {texts:?}"
+    );
+}
