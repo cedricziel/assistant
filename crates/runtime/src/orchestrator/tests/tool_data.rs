@@ -66,6 +66,7 @@ fn call_with(tool: &str, params: Value) -> LlmResponse {
         }],
         meta: LlmResponseMeta::default(),
         thinking: None,
+        provider_state: None,
     })
 }
 
