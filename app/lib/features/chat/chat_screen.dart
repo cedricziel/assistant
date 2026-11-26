@@ -512,6 +512,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                           TimelineEntryType.message) {
                                         return StreamingTimelineEntry(
                                           message: msg,
+                                          conversationId:
+                                              chatState.conversationId,
                                           entryState: msg.isStale
                                               ? EntryState.stale
                                               : msg.isStreaming

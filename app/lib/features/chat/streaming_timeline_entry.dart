@@ -9,6 +9,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
 import 'chat_provider.dart';
 import '../../shared/theme/legacy_theme.dart';
 import 'markdown_link_handler.dart';
+import 'mcp_app/mcp_app_frame.dart';
 
 /// A streaming-aware timeline entry for one thinking, tool call or subagent
 /// step in the chat timeline.
@@ -20,10 +21,14 @@ class StreamingTimelineEntry extends StatefulWidget {
     super.key,
     required this.message,
     this.entryState = EntryState.complete,
+    this.conversationId,
   });
 
   final ChatMessage message;
   final EntryState entryState;
+
+  /// The conversation the entry belongs to; an MCP App routes its calls by it.
+  final String? conversationId;
 
   @override
   State<StreamingTimelineEntry> createState() => _StreamingTimelineEntryState();
@@ -223,7 +228,7 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
         ? _formatDuration(record.duration!)
         : null;
 
-    return _buildSection(
+    final chip = _buildSection(
       context,
       icon: Icons.build_outlined,
       label: record.toolName,
@@ -232,6 +237,20 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
       expandedContent: hasDetails ? _toolDetails(context, record) : null,
       forceExpand: record.status == ToolCallStatus.error,
       showInline: showArgs,
+    );
+    final app = record.app;
+    if (app == null) return chip;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        chip,
+        McpAppFrame(
+          app: app,
+          toolCall: record,
+          conversationId: widget.conversationId,
+        ),
+      ],
     );
   }
 
