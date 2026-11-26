@@ -1,9 +1,9 @@
-# Spec Delta
+# mcp-server Specification
 
 ## Purpose
 Define how the assistant behaves as an MCP server: which protocol revisions it speaks, which features it offers, and how stdio serving works.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Protocol revisions
 The server SHALL speak MCP revision `2026-07-28` and SHALL also accept clients that negotiate `2025-11-25` through `initialize`. A per-request revision other than these SHALL fail with the protocol's unsupported-version error, listing the supported revisions. An `initialize` that proposes an unsupported revision SHALL be answered with a supported one, as the MCP lifecycle requires, and never with the unsupported revision.
@@ -77,11 +77,15 @@ The server SHALL expose each installed skill as a prompt taking one optional fre
 - **THEN** the result lists installed skill names starting with `ex`
 
 ### Requirement: Change notifications
-The server SHALL advertise list-changed support for tools, resources and prompts and SHALL notify subscribed clients when installed skills change. Under `2026-07-28` notifications SHALL be delivered only on a `subscriptions/listen` stream the client opened for that notification kind.
+The server SHALL advertise list-changed support for tools, resources and prompts and SHALL notify subscribed clients when `install-skill` installs a skill. Under `2026-07-28` notifications SHALL be delivered only on a `subscriptions/listen` stream the client opened for that notification kind. Skills added or removed any other way SHALL send no notifications. Because `install-skill` is unavailable over HTTP, `/mcp` sessions are registered as listeners but receive no list-changed notifications in practice; each `assistant mcp` process notifies only its own session.
 
 #### Scenario: Skill installed while subscribed
-- **WHEN** a client listens for tool and prompt list changes and a skill is installed
+- **WHEN** a client listens for tool and prompt list changes and `install-skill` installs a skill over stdio
 - **THEN** the client receives list-changed notifications carrying its subscription id
+
+#### Scenario: HTTP session
+- **WHEN** a client listens for list changes on `/mcp`
+- **THEN** it receives no list-changed notifications, because no skill can be installed over HTTP
 
 ### Requirement: Progress and cancellation
 The server SHALL report progress for `run-prompt` when the request carries a progress token, and SHALL stop the underlying turn when the request is cancelled.
