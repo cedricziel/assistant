@@ -1,5 +1,6 @@
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
+import 'package:assistant_app/features/chat/chat_turn_transitions.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:built_value/json_object.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,7 @@ MessageSummary _msg({
   required String role,
   required String content,
   int turn = 0,
+  String? finishReason,
   List<({String name, String status, String? result})> toolCalls = const [],
   List<({String id, String filename, String mimeType, String url})>
       attachments =
@@ -22,6 +24,7 @@ MessageSummary _msg({
       ..turn = turn
       ..createdAt = DateTime.parse('2026-05-16T00:00:00Z')
       ..ttsAvailable = false
+      ..finishReason = finishReason
       ..toolCalls = toolCalls.isEmpty
           ? null
           : ListBuilder<ToolCallSummary>(
@@ -316,6 +319,66 @@ void main() {
       expect(records[0].data, {'kind': 'terminal', 'exit_code': 0});
       expect(records[1].toolCallId, isNull);
       expect(records[1].data, isNull);
+    });
+
+    group('finish reason', () {
+      MessageStatus statusOf(String? reason) => chatMessagesFromHistory([
+        _msg(id: 'a1', role: 'assistant', content: 'x', finishReason: reason),
+      ]).single.status;
+
+      test('cancelled maps to stopped', () {
+        expect(statusOf('cancelled'), MessageStatus.stopped);
+      });
+
+      test('no finish reason maps to ok', () {
+        expect(statusOf(null), MessageStatus.ok);
+      });
+
+      test('an unknown finish reason maps to ok', () {
+        expect(statusOf('length'), MessageStatus.ok);
+      });
+
+      for (final (name, partial, streamed) in [
+        ('a partial reply', 'The capital', 'The capital'),
+        ('the _Stopped._ placeholder', '_Stopped._', ''),
+        ('an empty frame falling back to streamed text', '', 'The capital'),
+      ]) {
+        test('a live stopped reply and its reload agree for $name', () {
+          final live = stoppedTurnState(
+            ChatState(
+              conversationId: 'c1',
+              messages: [
+                ChatMessage(id: 'u1', role: 'user', content: 'q'),
+                ChatMessage(
+                  id: streamingPlaceholderId,
+                  role: 'assistant',
+                  content: streamed,
+                  isStreaming: true,
+                ),
+              ],
+              isSending: true,
+              streamingContent: streamed,
+            ),
+            userMsgId: 'u1',
+            partialContent: partial,
+            messageId: 'M',
+          ).messages.last;
+
+          // The server persists whatever text the frame carried.
+          final reloaded = chatMessagesFromHistory([
+            _msg(
+              id: 'M',
+              role: 'assistant',
+              content: partial.isNotEmpty ? partial : streamed,
+              finishReason: 'cancelled',
+            ),
+          ]).single;
+
+          expect(reloaded.id, live.id);
+          expect(reloaded.status, live.status);
+          expect(reloaded.content, live.content);
+        });
+      }
     });
   });
 }
