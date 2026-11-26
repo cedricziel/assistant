@@ -551,6 +551,7 @@ mod tests {
             params_schema: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         };
 
         match p.chat("You are helpful.", &[], &[spec]).await.unwrap() {

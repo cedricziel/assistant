@@ -37,6 +37,28 @@ pub struct ConversationRecord {
     pub user_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// When the owner pinned this conversation; `None` when not pinned.
+    /// Pinned conversations list first, newest pin first.
+    pub pinned_at: Option<DateTime<Utc>>,
+}
+
+/// A partial update of conversation metadata. `None` fields are left unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConversationPatch {
+    /// New title. Setting it locks the title against auto-titling and
+    /// overwrites an already locked title.
+    pub title: Option<String>,
+    /// `Some(true)` pins (keeping an existing `pinned_at`), `Some(false)` unpins.
+    pub pinned: Option<bool>,
+}
+
+/// Outcome of [`ConversationStore::update_metadata`].
+#[derive(Debug, Clone)]
+pub enum MetadataUpdate {
+    /// The patch was applied; carries the stored row after the update.
+    Updated(ConversationRecord),
+    /// No conversation with that id exists for this store's scope.
+    NotFound,
 }
 
 /// Trait-based interface for conversation + message persistence.
@@ -60,11 +82,18 @@ pub trait ConversationStore: Send + Sync {
     /// Fetch a conversation by ID. Returns `None` if not found.
     async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>>;
 
-    /// List all conversations for the configured agent (most-recently-updated first).
+    /// List all conversations for the configured agent: pinned first (newest
+    /// pin first), then most-recently-updated first.
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>>;
 
     /// Set a conversation's title and lock it from auto-titling.
+    ///
+    /// Does not change `updated_at`: renaming must not reorder the list.
     async fn update_title(&self, id: Uuid, title: &str) -> Result<()>;
+
+    /// Apply a partial metadata update in one step and emit one `Upserted`
+    /// event. Does not change `updated_at`.
+    async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate>;
 
     /// Write an auto-generated title, only while the conversation is unlocked.
     ///
@@ -220,6 +249,21 @@ impl SqliteConversationStore {
             None => anyhow::bail!("conversation {} not found", id),
         }
     }
+}
+
+/// Map a `conversations` row (see the `SELECT` lists above) to a record.
+fn conversation_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<ConversationRecord> {
+    let raw_id: String = r.get("id");
+    Ok(ConversationRecord {
+        id: Uuid::parse_str(&raw_id)?,
+        agent_id: r.get("agent_id"),
+        title: r.get("title"),
+        title_locked: r.get("title_locked"),
+        user_id: r.get("user_id"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+        pinned_at: r.get("pinned_at"),
+    })
 }
 
 // -----------------------------------------------------------------------
@@ -462,6 +506,7 @@ impl ConversationStore for SqliteConversationStore {
             user_id: self.user_id.clone(),
             created_at: now,
             updated_at: now,
+            pinned_at: None,
         };
 
         if let Some(b) = &self.broadcaster {
@@ -477,7 +522,7 @@ impl ConversationStore for SqliteConversationStore {
 
         let row = if self.user_id.is_some() {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2 AND user_id = ?3",
             )
@@ -488,7 +533,7 @@ impl ConversationStore for SqliteConversationStore {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
                  FROM conversations \
                  WHERE id = ?1 AND agent_id = ?2",
             )
@@ -498,29 +543,17 @@ impl ConversationStore for SqliteConversationStore {
             .await?
         };
 
-        row.map(|r| {
-            let raw_id: String = r.get("id");
-            Ok(ConversationRecord {
-                id: Uuid::parse_str(&raw_id)?,
-                agent_id: r.get("agent_id"),
-                title: r.get("title"),
-                title_locked: r.get("title_locked"),
-                user_id: r.get("user_id"),
-                created_at: r.get("created_at"),
-                updated_at: r.get("updated_at"),
-            })
-        })
-        .transpose()
+        row.as_ref().map(conversation_from_row).transpose()
     }
 
     /// List all conversations, most-recently updated first.
     async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
         let rows = if self.user_id.is_some() {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
                  FROM conversations \
                  WHERE agent_id = ?1 AND user_id = ?2 \
-                 ORDER BY updated_at DESC",
+                 ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC",
             )
             .bind(&self.agent_id)
             .bind(&self.user_id)
@@ -528,30 +561,17 @@ impl ConversationStore for SqliteConversationStore {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at \
+                "SELECT id, title, title_locked, agent_id, user_id, created_at, updated_at, pinned_at \
                  FROM conversations \
                  WHERE agent_id = ?1 \
-                 ORDER BY updated_at DESC",
+                 ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC",
             )
             .bind(&self.agent_id)
             .fetch_all(&self.pool)
             .await?
         };
 
-        rows.into_iter()
-            .map(|r| {
-                let raw_id: String = r.get("id");
-                Ok(ConversationRecord {
-                    id: Uuid::parse_str(&raw_id)?,
-                    agent_id: r.get("agent_id"),
-                    title: r.get("title"),
-                    title_locked: r.get("title_locked"),
-                    user_id: r.get("user_id"),
-                    created_at: r.get("created_at"),
-                    updated_at: r.get("updated_at"),
-                })
-            })
-            .collect()
+        rows.iter().map(conversation_from_row).collect()
     }
 
     /// Update the title of an existing conversation.
@@ -564,11 +584,10 @@ impl ConversationStore for SqliteConversationStore {
         let id_str = id.to_string();
         let result = sqlx::query(
             "UPDATE conversations
-                 SET title = ?1, title_locked = 1, updated_at = ?2
-                 WHERE id = ?3 AND agent_id = ?4",
+                 SET title = ?1, title_locked = 1
+                 WHERE id = ?2 AND agent_id = ?3",
         )
         .bind(title)
-        .bind(self.clock.now())
         .bind(&id_str)
         .bind(&self.agent_id)
         .execute(&self.pool)
@@ -585,6 +604,48 @@ impl ConversationStore for SqliteConversationStore {
         }
 
         Ok(())
+    }
+
+    async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate> {
+        let id_str = id.to_string();
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .with_context(|| format!("failed to begin metadata update for conversation {id}"))?;
+
+        let result = sqlx::query(
+            "UPDATE conversations
+                 SET title = COALESCE(?1, title),
+                     title_locked = CASE WHEN ?1 IS NULL THEN title_locked ELSE 1 END,
+                     pinned_at = CASE ?2
+                         WHEN 1 THEN COALESCE(pinned_at, ?3)
+                         WHEN 0 THEN NULL
+                         ELSE pinned_at
+                     END
+                 WHERE id = ?4 AND agent_id = ?5 AND (?6 IS NULL OR user_id = ?6)",
+        )
+        .bind(&patch.title)
+        .bind(patch.pinned)
+        .bind(self.clock.now())
+        .bind(&id_str)
+        .bind(&self.agent_id)
+        .bind(&self.user_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("failed to update metadata for conversation {id}"))?;
+        tx.commit().await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(MetadataUpdate::NotFound);
+        }
+        let Some(conv) = self.get_conversation(id).await? else {
+            return Ok(MetadataUpdate::NotFound);
+        };
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(conv.clone()));
+        }
+        Ok(MetadataUpdate::Updated(conv))
     }
 
     async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool> {
@@ -1016,6 +1077,7 @@ impl ConversationStore for InMemoryConversationStore {
                     user_id: self.user_id.clone(),
                     created_at: now,
                     updated_at: now,
+                    pinned_at: None,
                 });
             if entry.agent_id != self.agent_id {
                 anyhow::bail!(
@@ -1066,12 +1128,16 @@ impl ConversationStore for InMemoryConversationStore {
             })
             .cloned()
             .collect();
-        out.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
+        out.sort_by_key(|c| {
+            (
+                c.pinned_at.is_none(),
+                std::cmp::Reverse((c.pinned_at, c.updated_at)),
+            )
+        });
         Ok(out)
     }
 
     async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
-        let now = self.clock.now();
         let updated = {
             let mut state = self.lock_state();
             let conv = state.conversations.get_mut(&id);
@@ -1079,7 +1145,6 @@ impl ConversationStore for InMemoryConversationStore {
                 Some(c) if c.agent_id == self.agent_id => {
                     c.title = Some(title.to_string());
                     c.title_locked = true;
-                    c.updated_at = now;
                     Some(c.clone())
                 }
                 _ => None,
@@ -1091,6 +1156,41 @@ impl ConversationStore for InMemoryConversationStore {
             b.emit(ConversationEvent::Upserted(rec));
         }
         Ok(())
+    }
+
+    async fn update_metadata(&self, id: Uuid, patch: ConversationPatch) -> Result<MetadataUpdate> {
+        let now = self.clock.now();
+        let updated = {
+            let mut state = self.lock_state();
+            state
+                .conversations
+                .get_mut(&id)
+                .filter(|c| c.agent_id == self.agent_id)
+                .filter(|c| {
+                    self.user_id
+                        .as_ref()
+                        .is_none_or(|u| c.user_id.as_ref() == Some(u))
+                })
+                .map(|c| {
+                    if let Some(title) = patch.title {
+                        c.title = Some(title);
+                        c.title_locked = true;
+                    }
+                    match patch.pinned {
+                        Some(true) => c.pinned_at = c.pinned_at.or(Some(now)),
+                        Some(false) => c.pinned_at = None,
+                        None => {}
+                    }
+                    c.clone()
+                })
+        };
+        let Some(rec) = updated else {
+            return Ok(MetadataUpdate::NotFound);
+        };
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(rec.clone()));
+        }
+        Ok(MetadataUpdate::Updated(rec))
     }
 
     async fn set_generated_title(&self, id: Uuid, title: &str) -> Result<bool> {
@@ -1703,6 +1803,59 @@ mod tests {
             }
             _ => panic!("expected Upserted event"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_emits_one_upserted_event_with_pin() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut rx = broadcaster.subscribe();
+        let patch = ConversationPatch {
+            title: Some("Pinned".to_string()),
+            pinned: Some(true),
+        };
+        store.update_metadata(conv.id, patch).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => {
+                assert_eq!(record.title.as_deref(), Some("Pinned"));
+                assert!(record.pinned_at.is_some(), "event must carry pinned_at");
+            }
+            other => panic!("expected Upserted event, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "one patch must emit exactly one event"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_is_scoped_to_user() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let alice = storage.conversation_store().with_user_id("alice");
+        let bob = storage.conversation_store().with_user_id("bob");
+        let conv = alice.create_conversation(Some("Mine")).await.unwrap();
+
+        let patch = ConversationPatch {
+            title: None,
+            pinned: Some(true),
+        };
+        let res = bob.update_metadata(conv.id, patch).await.unwrap();
+        assert!(
+            matches!(res, MetadataUpdate::NotFound),
+            "another user's conversation must not be patched"
+        );
+        let loaded = alice.get_conversation(conv.id).await.unwrap().unwrap();
+        assert!(loaded.pinned_at.is_none());
     }
 
     /// Assert the receiver holds no event, i.e. the last write was silent.

@@ -3,14 +3,22 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use assistant_core::tool_render::{SourceResult, SourcesData, ToolRenderData};
 use assistant_core::{ToolHandler, ToolOutput, types::conversation::ExecutionContext};
 use async_trait::async_trait;
 use scraper::{Html, Selector};
 
 const DEFAULT_NUM_RESULTS: usize = 10;
 
+/// Render budget for the `sources` view (design D4).
+const MAX_RENDER_RESULTS: usize = 20;
+const MAX_RENDER_SNIPPET_CHARS: usize = 300;
+
+const DDG_HTML_URL: &str = "https://html.duckduckgo.com/html/";
+
 pub struct WebSearchHandler {
     client: reqwest::Client,
+    base_url: String,
 }
 
 impl WebSearchHandler {
@@ -20,7 +28,16 @@ impl WebSearchHandler {
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap_or_default();
-        Self { client }
+        Self {
+            client,
+            base_url: DDG_HTML_URL.to_string(),
+        }
+    }
+
+    /// Send queries to `base_url` instead of DuckDuckGo (tests point this at a mock).
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
     }
 }
 
@@ -52,25 +69,7 @@ impl ToolHandler for WebSearchHandler {
     }
 
     fn output_schema(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "results": {
-                    "type": "array",
-                    "description": "Search result items",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "title":   {"type": "string"},
-                            "url":     {"type": "string"},
-                            "snippet": {"type": ["string", "null"]}
-                        },
-                        "required": ["title", "url"]
-                    }
-                }
-            },
-            "required": ["results"]
-        }))
+        ToolRenderData::schema("sources")
     }
 
     async fn run(
@@ -91,7 +90,7 @@ impl ToolHandler for WebSearchHandler {
 
         let response = match self
             .client
-            .get("https://html.duckduckgo.com/html/")
+            .get(&self.base_url)
             .query(&[("q", &query)])
             .header("Accept-Language", "en-US,en;q=0.9")
             .send()
@@ -121,10 +120,9 @@ impl ToolHandler for WebSearchHandler {
         let results = parse_ddg_results(&body, num_results);
 
         if results.is_empty() {
-            let data = serde_json::json!({"results": []});
             return Ok(
                 ToolOutput::success(format!("No results found for query: {}", query))
-                    .with_data(data),
+                    .with_render(sources_render(&query, &results)),
             );
         }
 
@@ -145,16 +143,32 @@ impl ToolHandler for WebSearchHandler {
             formatted.join("\n\n")
         );
 
-        let data = serde_json::json!({
-            "results": results.iter().map(|(title, url, snippet)| serde_json::json!({
-                "title":   title,
-                "url":     url,
-                "snippet": snippet
-            })).collect::<Vec<_>>()
-        });
-
-        Ok(ToolOutput::success(output).with_data(data))
+        Ok(ToolOutput::success(output).with_render(sources_render(&query, &results)))
     }
+}
+
+/// The `sources` render payload: at most [`MAX_RENDER_RESULTS`] rows with
+/// short snippets. Rows whose URL does not parse keep an empty domain.
+fn sources_render(query: &str, results: &[(String, String, Option<String>)]) -> ToolRenderData {
+    let results = results
+        .iter()
+        .take(MAX_RENDER_RESULTS)
+        .map(|(title, url, snippet)| SourceResult {
+            title: title.clone(),
+            url: url.clone(),
+            domain: reqwest::Url::parse(url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_string))
+                .unwrap_or_default(),
+            snippet: snippet
+                .as_deref()
+                .map(|s| s.chars().take(MAX_RENDER_SNIPPET_CHARS).collect()),
+        })
+        .collect();
+    ToolRenderData::Sources(SourcesData {
+        query: query.to_string(),
+        results,
+    })
 }
 
 /// Parse DuckDuckGo HTML search results into structured `(title, url, snippet)` tuples.
