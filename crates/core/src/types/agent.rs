@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::channels::{MatrixConfig, MattermostConfig, NextcloudConfig, SignalConfig, SlackConfig};
 use super::features::{
     CompactionConfig, IntegrationsConfig, LearningConfig, MemoryConfig, NotificationsConfig,
-    SuggestionsConfig, TitlingConfig,
+    SuggestionsConfig, TitlingConfig, UiConfig,
 };
 use super::llm::LlmConfig;
 use super::observability::ObservabilityConfig;
@@ -63,6 +63,9 @@ pub struct OrgConfig {
     /// Follow-up suggestion configuration (`[suggestions]` section).
     #[serde(default)]
     pub suggestions: SuggestionsConfig,
+    /// Generative-UI settings (`[ui]` section); `None` when absent.
+    #[serde(default)]
+    pub ui: Option<UiConfig>,
     #[serde(default)]
     pub agent: AgentConfig,
     /// Tool-permission rules and decision model (`[permissions]` section).
@@ -193,6 +196,64 @@ mod tests {
         assert!(!titling.enabled);
         assert_eq!(titling.min_turns, 4);
         assert_eq!(titling.long_first_message_chars, 500);
+    }
+
+    // -- UiConfig (`[ui]`) ---------------------------------------------------
+
+    #[test]
+    fn ui_section_loads_both_host_lists() {
+        let cfg: OrgConfig = toml::from_str(
+            r#"
+            [ui]
+            image_hosts = ["a.example"]
+            link_hosts = ["docs.example"]
+            "#,
+        )
+        .unwrap();
+        let ui = cfg.ui.expect("section present");
+        assert_eq!(ui.image_hosts, vec!["a.example"]);
+        assert_eq!(ui.link_hosts, vec!["docs.example"]);
+    }
+
+    #[test]
+    fn ui_section_absent_yields_none() {
+        let cfg: OrgConfig = toml::from_str("").unwrap();
+        assert!(cfg.ui.is_none(), "no [ui] section means no UiConfig");
+    }
+
+    #[test]
+    fn ui_absent_keys_yield_empty_lists() {
+        let cfg: OrgConfig = toml::from_str("[ui]").unwrap();
+        let ui = cfg.ui.expect("section present");
+        assert!(
+            ui.image_hosts.is_empty(),
+            "empty image_hosts means any https host"
+        );
+        assert!(
+            ui.link_hosts.is_empty(),
+            "empty link_hosts means every link asks"
+        );
+    }
+
+    #[test]
+    fn ui_non_string_entry_fails_to_load() {
+        let err = toml::from_str::<OrgConfig>("[ui]\nimage_hosts = [\"a.example\", 7]\n");
+        assert!(err.is_err(), "a non-string host must not load");
+    }
+
+    #[test]
+    fn ui_hosts_are_lower_cased_on_load() {
+        let cfg: OrgConfig = toml::from_str(
+            r#"
+            [ui]
+            image_hosts = ["Images.Example"]
+            link_hosts = ["Docs.EXAMPLE"]
+            "#,
+        )
+        .unwrap();
+        let ui = cfg.ui.expect("section present");
+        assert_eq!(ui.image_hosts, vec!["images.example"]);
+        assert_eq!(ui.link_hosts, vec!["docs.example"]);
     }
 
     // -- Integrations catalog ------------------------------------------------

@@ -9,10 +9,12 @@ repository.workspace = true
 name = "assistant_tool_executor"
 
 [dependencies]
+assistant-a2ui = { path = "../a2ui" }
 assistant-core = { path = "../core" }
 assistant-skills = { path = "../skills" }
 assistant-storage = { path = "../storage" }
 assistant-transcription = { path = "../transcription" }
+serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }

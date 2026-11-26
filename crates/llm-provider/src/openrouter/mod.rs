@@ -8,6 +8,7 @@
 //! fallback models.
 
 mod catalog;
+mod citations;
 mod client;
 mod errors;
 mod reasoning;
@@ -21,9 +22,9 @@ use tracing::debug;
 
 use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, Clock, LlmProvider,
-    LlmResponse, ResponseFormat, StreamChunk, SystemClock, ToolChoice, ToolSpec, ToolSupport,
-    chat_with_fallback,
+    Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, Clock, HostedTool,
+    LlmProvider, LlmResponse, ResponseFormat, StreamChunk, SystemClock, ToolChoice, ToolSpec,
+    ToolSupport, chat_with_fallback,
 };
 
 use std::sync::Arc;
@@ -142,6 +143,7 @@ impl OpenRouterProvider {
                 routing: cfg.openrouter.provider.clone(),
                 reasoning: cfg.openrouter.reasoning.clone(),
                 cache: cfg.openrouter.cache.clone(),
+                web_search: cfg.openrouter.web_search.clone(),
             },
             base_url,
         })
@@ -161,7 +163,11 @@ impl LlmProvider for OpenRouterProvider {
             },
             streaming: true,
             vision: info.as_deref().is_some_and(|i| i.vision),
-            hosted_tools: vec![],
+            hosted_tools: if self.settings.web_search.enabled {
+                vec![HostedTool::WebSearch]
+            } else {
+                vec![]
+            },
             context_window_tokens: info.and_then(|i| i.context_window_tokens),
         }
     }
@@ -262,7 +268,9 @@ mod tests {
     use super::*;
     use assistant_core::types::llm::LlmProviderKind;
     use assistant_core::types::llm::OpenRouterOptions;
-    use assistant_core::{ChatOptions, ChatOptionsSupport, ResponseFormat, Secret, ToolChoice};
+    use assistant_core::{
+        ChatOptions, ChatOptionsSupport, HostedTool, ResponseFormat, Secret, ToolChoice,
+    };
     use serde_json::{Value, json};
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1932,6 +1940,152 @@ mod tests {
         assert_eq!(
             body["messages"][1]["content"][0]["cache_control"],
             ephemeral
+        );
+    }
+
+    // ── Wiremock: web search ────────────────────────────────────────────
+
+    fn web_search(search: assistant_core::types::llm::OpenRouterWebSearch) -> OpenRouterOptions {
+        OpenRouterOptions {
+            web_search: search,
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn enabled_web_search_sends_the_plugin_and_is_a_hosted_tool() {
+        use assistant_core::types::llm::{OpenRouterSearchEngine, OpenRouterWebSearch};
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = provider_with(
+            &server.uri(),
+            web_search(OpenRouterWebSearch {
+                enabled: true,
+                engine: Some(OpenRouterSearchEngine::Exa),
+                max_results: Some(3),
+                exclude_domains: Some(vec!["reddit.com".into()]),
+                ..OpenRouterWebSearch::default()
+            }),
+        );
+
+        assert_eq!(
+            provider.capabilities().hosted_tools,
+            [HostedTool::WebSearch]
+        );
+        provider.chat("sys", &[], &[]).await.unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(
+            body["plugins"],
+            json!([{"id": "web", "engine": "exa", "max_results": 3, "exclude_domains": ["reddit.com"]}])
+        );
+        assert!(body.get("web_search_options").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn search_context_size_is_sent_as_web_search_options() {
+        use assistant_core::types::llm::{OpenRouterSearchContextSize, OpenRouterWebSearch};
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+
+        provider_with(
+            &server.uri(),
+            web_search(OpenRouterWebSearch {
+                enabled: true,
+                search_context_size: Some(OpenRouterSearchContextSize::High),
+                ..OpenRouterWebSearch::default()
+            }),
+        )
+        .chat("sys", &[], &[])
+        .await
+        .unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(body["plugins"], json!([{"id": "web"}]));
+        assert_eq!(
+            body["web_search_options"],
+            json!({"search_context_size": "high"})
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_web_search_sends_no_plugin_and_hosts_nothing() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = provider_with(&server.uri(), OpenRouterOptions::default());
+
+        assert!(provider.capabilities().hosted_tools.is_empty());
+        provider.chat("sys", &[], &[]).await.unwrap();
+
+        let body = sent_body(&server).await;
+        assert!(body.get("plugins").is_none(), "{body}");
+        assert!(body.get("web_search_options").is_none(), "{body}");
+    }
+
+    // ── Wiremock: citations ─────────────────────────────────────────────
+
+    fn citation(url: &str, title: &str) -> Value {
+        json!({"type": "url_citation", "url_citation": {"url": url, "title": title}})
+    }
+
+    #[tokio::test]
+    async fn final_answer_ends_with_its_sources() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({
+                "id": "gen-c",
+                "model": MODEL,
+                "choices": [{"finish_reason": "stop", "message": {
+                    "role": "assistant",
+                    "content": "It rained.",
+                    "annotations": [citation("https://a.example", "A"), citation("https://a.example", "A")],
+                }}],
+            }),
+        )
+        .await;
+
+        let response = make_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+        let LlmResponse::FinalAnswer(text, _) = response else {
+            panic!("expected a final answer, got {response:?}");
+        };
+        assert_eq!(text, "It rained.\n\nSources:\n- [A](https://a.example)");
+    }
+
+    #[tokio::test]
+    async fn streamed_sources_arrive_as_the_last_chunk_and_match_the_answer() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"content":"It rained."}}]}"#,
+                r#"data: {"choices":[{"delta":{"annotations":[{"type":"url_citation","url_citation":{"url":"https://a.example","title":"A"}}]},"finish_reason":"stop"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+        let response = make_provider(&server.uri())
+            .chat_streaming("sys", &[], &[], Some(tx))
+            .await
+            .unwrap();
+
+        let LlmResponse::FinalAnswer(text, _) = response else {
+            panic!("expected a final answer, got {response:?}");
+        };
+        let streamed = drain(&mut rx);
+        assert_eq!(
+            streamed.last().unwrap(),
+            "\n\nSources:\n- [A](https://a.example)"
+        );
+        assert_eq!(
+            streamed.concat(),
+            text,
+            "the persisted answer equals what was streamed"
         );
     }
 
