@@ -8,6 +8,8 @@ const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'ConversationSearchResultsView',
   'HighlightedSegments',
+  'MessageActionButton',
+  'MessageActions',
   'MessageTimingIndicator',
   'StarterPrompts',
   'SuggestionChips',

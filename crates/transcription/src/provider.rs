@@ -2,6 +2,8 @@
 
 use async_trait::async_trait;
 
+use crate::converter::AudioFormat;
+
 /// A request to transcribe audio data.
 #[derive(Debug, Clone)]
 pub struct TranscriptionRequest {
@@ -51,6 +53,13 @@ pub(crate) fn extension_for_mime(mime: &str) -> &str {
 pub trait TranscriptionProvider: Send + Sync {
     /// Human-readable provider name (e.g. `"whisper"`, `"ollama"`, `"deepgram"`).
     fn name(&self) -> &str;
+
+    /// The input formats this provider accepts, or `None` to send any
+    /// audio unchanged. [`ConvertingTranscriber`](crate::ConvertingTranscriber)
+    /// converts other recognized formats to WAV first.
+    fn accepted_formats(&self) -> Option<&[AudioFormat]> {
+        None
+    }
 
     /// Transcribe audio bytes into text.
     async fn transcribe(
