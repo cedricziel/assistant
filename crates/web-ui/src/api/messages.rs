@@ -2088,18 +2088,27 @@ mod tests {
         }
     }
 
-    /// The `tool_result` frames in an SSE body, parsed from their `data:` lines.
-    fn tool_result_frames(sse: &str) -> Vec<serde_json::Value> {
+    /// The raw `data:` payload of every `event` frame in an SSE body.
+    fn frame_payloads(sse: &str, event: &str) -> Vec<String> {
+        let marker = format!("event: {event}");
         sse.split("\n\n")
-            .filter(|frame| frame.lines().any(|l| l.trim() == "event: tool_result"))
-            .filter_map(|frame| {
-                let data: Vec<&str> = frame
+            .filter(|frame| frame.lines().any(|l| l.trim() == marker))
+            .map(|frame| {
+                frame
                     .lines()
                     .filter_map(|l| l.strip_prefix("data:"))
                     .map(str::trim_start)
-                    .collect();
-                serde_json::from_str(&data.join("\n")).ok()
+                    .collect::<Vec<_>>()
+                    .join("\n")
             })
+            .collect()
+    }
+
+    /// The `tool_result` frames in an SSE body, parsed from their `data:` lines.
+    fn tool_result_frames(sse: &str) -> Vec<serde_json::Value> {
+        frame_payloads(sse, "tool_result")
+            .iter()
+            .filter_map(|data| serde_json::from_str(data).ok())
             .collect()
     }
 
@@ -2184,6 +2193,59 @@ mod tests {
         assert_eq!(
             replayed_frames, live_frames,
             "replayed tool_result must equal the live frame; replay: {replayed}"
+        );
+    }
+
+    /// A persisted `surface_update` frame replays with the exact `data:` bytes
+    /// the live projection sent, so a reload sees the surface unchanged.
+    #[tokio::test]
+    async fn stream_run_events_replays_surface_update_byte_identically() {
+        use assistant_runtime::orchestrator::OrchestratorEvent;
+        use assistant_runtime::projection::{SseProjector, StreamProjector};
+
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await.to_string();
+        let run_id = Uuid::new_v4().to_string();
+
+        let live = SseProjector.project(&OrchestratorEvent::SurfaceUpdate {
+            surface_id: "s-1".into(),
+            tool_call_id: Some("call_9".into()),
+            anchor_message_id: "m-1".into(),
+            anchor_call_index: 2,
+            title: "Trip form".into(),
+            fallback_text: "Trip form: choose a date".into(),
+            status: "active".into(),
+            messages: vec![serde_json::json!({
+                "version": "1.0",
+                "createSurface": {"surfaceId": "s-1", "components": [{"id": "root", "component": "Text", "text": "héllo"}]}
+            })],
+        });
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].event, "surface_update");
+        storage
+            .conversation_event_store()
+            .append_event(&run_id, &conv_id, 0, &live[0].event, &live[0].log_payload)
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/conversations/{conv_id}/runs/{run_id}/events/stream"
+                    ))
+                    .header("Authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let replayed = String::from_utf8_lossy(&body_bytes(resp.into_body()).await).into_owned();
+        assert_eq!(
+            frame_payloads(&replayed, "surface_update"),
+            vec![live[0].sse_data.clone()],
+            "replay: {replayed}"
         );
     }
 

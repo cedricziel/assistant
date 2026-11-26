@@ -243,6 +243,7 @@ mod skill_executions;
 mod streaming;
 mod subagent;
 mod summary_history;
+mod surfaces;
 mod tool_data;
 mod turn_options;
 mod turn_timing;

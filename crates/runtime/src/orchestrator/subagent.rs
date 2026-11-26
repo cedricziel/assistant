@@ -559,6 +559,7 @@ impl SubagentRunner for Orchestrator {
                                 &mut subagent_active_skill,
                                 child_event_sink.as_ref(),
                                 tool_call_id.as_deref(),
+                                None,
                             )
                             .await;
 
