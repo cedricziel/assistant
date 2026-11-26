@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assistant.invalid/schemas/tool-results/terminal.schema.json",
+  "title": "terminal",
+  "description": "Result of a finished shell command. exit_code is null when the command timed out.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "kind",
+    "command",
+    "exit_code",
+    "stdout",
+    "stderr",
+    "stdout_truncated",
+    "stderr_truncated",
+    "duration_ms",
+    "timed_out"
+  ],
+  "properties": {
+    "kind": { "const": "terminal" },
+    "command": { "type": "string" },
+    "exit_code": { "type": ["integer", "null"] },
+    "stdout": { "type": "string" },
+    "stderr": { "type": "string" },
+    "stdout_truncated": { "type": "boolean" },
+    "stderr_truncated": { "type": "boolean" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "timed_out": { "type": "boolean" }
+  }
+}

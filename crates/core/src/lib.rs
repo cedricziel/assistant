@@ -20,6 +20,7 @@ pub mod subagent;
 pub mod text;
 pub mod tls;
 pub mod tool;
+pub mod tool_render;
 pub mod types;
 pub mod upload;
 
@@ -79,4 +80,5 @@ pub use secret::Secret;
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput, TurnScope, TurnToolSource};
+pub use tool_render::{SourceResult, SourcesData, TerminalData, ToolRenderData};
 pub use upload::resolve_upload_bytes;
