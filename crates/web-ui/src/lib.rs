@@ -438,7 +438,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     tokio::spawn(supervisor.run(SPACE_RECONCILE_INTERVAL));
 
     // -- Persona-scoped A2A profile store (filesystem-backed) --
-    let agent_store = AgentStore::for_persona(&selected_agent)?;
+    let agent_store = AgentStore::for_persona(&base_path, &selected_agent)?;
     // Clone for the agents REST API — AgentStore is Clone (wraps a PathBuf).
     let agents_api_store = agent_store.clone();
 
@@ -526,6 +526,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     let persona_api_state = api::personas::PersonaApiState {
         spaces: space_resolver.clone(),
         agent_id: state.agent_id.clone(),
+        agents_dir: base_path.join("agents"),
     };
 
     let skills_api_state = api::skills::SkillsApiState {
