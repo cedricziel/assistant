@@ -538,9 +538,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                                 .read(chatProvider.notifier)
                                                 .retryMessage(msg)
                                           : null,
+                                      isStopping: chatState.isStopping,
                                       onStop: () => ref
                                           .read(chatProvider.notifier)
-                                          .cancelStream(),
+                                          .stopTurn(),
                                       fetchMessageAudio: () {
                                         final api = ref.read(apiClientProvider);
                                         final audioId = msg.audioId;
@@ -587,13 +588,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       controller: _inputController,
                       focusNode: _inputFocus,
                       isSending: chatState.isSending,
+                      isStopping: chatState.isStopping,
                       pendingQueueCount: chatState.pendingQueue.length,
                       pendingAttachments: ref.watch(pendingAttachmentsProvider),
                       capabilities: capabilities,
                       commands: ref.watch(commandsProvider).value ?? [],
                       onSend: _sendMessage,
-                      onStop: () =>
-                          ref.read(chatProvider.notifier).cancelStream(),
+                      onStop: () => ref.read(chatProvider.notifier).stopTurn(),
                       onVoiceRecorded: _sendVoiceMessage,
                       onPickImage: _pickImages,
                       onRemoveAttachment: (i) => ref
