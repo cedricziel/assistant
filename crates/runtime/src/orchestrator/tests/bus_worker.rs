@@ -23,7 +23,10 @@ use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 
 use super::super::{Orchestrator, SubmitTurn};
-use super::{build, build_with_config, mount_answer, ollama_answer, ollama_tool_calls};
+use super::{
+    build, build_with_config, mount_answer, ollama_answer, ollama_llm, ollama_tool_calls,
+    orchestrator_over,
+};
 
 #[test]
 fn parse_interface_known_values() {
@@ -1056,6 +1059,43 @@ async fn cancel_reaches_turn_claimed_while_map_is_contended() {
             == 1
     })
     .await;
+}
+
+// -- submit_streaming --
+
+#[tokio::test]
+async fn submit_streaming_closes_the_sink_when_another_process_runs_the_turn() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "remote answer").await;
+    let (orch, storage) = build(&server.uri()).await;
+    let mut config = OrgConfig::default();
+    config.memory.enabled = false;
+    let other_process = orchestrator_over(&storage, ollama_llm(&server.uri()), config, |o| o).await;
+    spawn_worker(&other_process);
+    let conversation_id = Uuid::new_v4();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        orch.submit_streaming(
+            SubmitTurn::new("hi", conversation_id, Interface::Web)
+                .with_auth(&AuthContext::system()),
+            tx,
+        ),
+    )
+    .await
+    .expect("the turn must finish")
+    .expect("the turn must succeed");
+
+    assert_eq!(result.answer, "remote answer");
+    assert!(
+        rx.recv().await.is_none(),
+        "the sink must close once the turn result arrives"
+    );
+    assert!(
+        orch.token_sinks.read().await.is_empty(),
+        "no sink may stay registered after the turn"
+    );
 }
 
 // -- release_token_sink --
