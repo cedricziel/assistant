@@ -15,9 +15,7 @@ use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
 use assistant_core::types::conversation::ExecutionContext;
-use assistant_core::{
-    ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path, types::agent::OrgConfig,
-};
+use assistant_core::{ToolHandler, ToolOutput, base_dir, resolve, types::agent::OrgConfig};
 
 /// Canonicalize as much of `p` as exists, then re-append non-existent tail
 /// components.  This allows security checks to work even when parent
@@ -58,29 +56,21 @@ impl MemoryAppendHandler {
     /// Map a target name to an absolute path within the default agent memory root.
     fn resolve_target(&self, target: &str) -> Option<PathBuf> {
         let mem = &self.config.memory;
-        let base = base_dir();
+        let base = base_dir()?;
+        let root = Some(base.as_path());
 
         let path = match target {
-            "soul" => resolve_path(&mem.soul_path, &base, "SOUL.md"),
-            "identity" => resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
-            "user" => resolve_path(&mem.user_path, &base, "USER.md"),
-            "tools" => resolve_path(&mem.tools_path, &base, "TOOLS.md"),
-            "memory" => resolve_path(&mem.memory_path, &base, "MEMORY.md"),
+            "soul" => resolve(&mem.soul_path, root, "SOUL.md")?,
+            "identity" => resolve(&mem.identity_path, root, "IDENTITY.md")?,
+            "user" => resolve(&mem.user_path, root, "USER.md")?,
+            "tools" => resolve(&mem.tools_path, root, "TOOLS.md")?,
+            "memory" => resolve(&mem.memory_path, root, "MEMORY.md")?,
             notes if notes.starts_with("notes/") => {
                 let date = &notes["notes/".len()..];
-                // Enforce YYYY-MM-DD: positions 4 and 7 must be '-', rest digits.
-                let valid_format = date.len() == 10
-                    && date.chars().enumerate().all(|(i, c)| {
-                        if i == 4 || i == 7 {
-                            c == '-'
-                        } else {
-                            c.is_ascii_digit()
-                        }
-                    });
-                if !valid_format {
+                if !is_iso_date(date) {
                     return None;
                 }
-                let notes_dir = resolve_dir(&mem.notes_dir, &base, "memory");
+                let notes_dir = resolve(&mem.notes_dir, root, "memory")?;
                 notes_dir.join(format!("{date}.md"))
             }
             _ => return None,
@@ -95,6 +85,18 @@ impl MemoryAppendHandler {
 
         Some(path)
     }
+}
+
+/// `YYYY-MM-DD`: positions 4 and 7 are `-`, the rest digits.
+fn is_iso_date(date: &str) -> bool {
+    date.len() == 10
+        && date.chars().enumerate().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                c == '-'
+            } else {
+                c.is_ascii_digit()
+            }
+        })
 }
 
 #[async_trait]
@@ -229,32 +231,24 @@ mod tests {
 
     #[test]
     fn date_validation_rejects_all_dashes() {
-        // "----------" is 10 chars of dashes — must be rejected.
-        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
-        let result = handler.resolve_target("notes/----------");
-        assert!(result.is_none(), "all-dash string should be rejected");
+        assert!(
+            !is_iso_date("----------"),
+            "all-dash string should be rejected"
+        );
     }
 
     #[test]
     fn date_validation_rejects_bad_structure() {
-        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
-        // Digits in wrong positions.
-        assert!(
-            handler.resolve_target("notes/99-99-9999").is_none(),
-            "99-99-9999 should be rejected"
-        );
-        // Too short.
-        assert!(
-            handler.resolve_target("notes/2026-1-1").is_none(),
-            "short date should be rejected"
-        );
+        assert!(!is_iso_date("99-99-9999"), "digits in wrong positions");
+        assert!(!is_iso_date("2026-1-1"), "short date should be rejected");
     }
 
     #[test]
     fn date_validation_accepts_valid_date() {
-        let handler = MemoryAppendHandler::new(Arc::new(OrgConfig::default()));
-        let result = handler.resolve_target("notes/2026-02-26");
-        assert!(result.is_some(), "valid ISO date should be accepted");
+        assert!(
+            is_iso_date("2026-02-26"),
+            "valid ISO date should be accepted"
+        );
     }
 
     #[test]

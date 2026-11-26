@@ -537,7 +537,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "cron",
- "dirs",
  "serde",
  "serde_json",
  "sqlx",

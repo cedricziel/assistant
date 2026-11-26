@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path, types::agent::OrgConfig,
+    ToolHandler, ToolOutput, base_dir, resolve, types::agent::OrgConfig,
     types::conversation::ExecutionContext,
 };
 use async_trait::async_trait;
@@ -27,20 +27,21 @@ impl MemoryGetHandler {
     /// Map a target name to an absolute path within the default agent memory root.
     fn resolve_target(&self, target: &str) -> Option<PathBuf> {
         let mem = &self.config.memory;
-        let base = base_dir();
+        let base = base_dir()?;
+        let root = Some(base.as_path());
 
         let path = match target {
-            "soul" => resolve_path(&mem.soul_path, &base, "SOUL.md"),
-            "identity" => resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
-            "user" => resolve_path(&mem.user_path, &base, "USER.md"),
-            "tools" => resolve_path(&mem.tools_path, &base, "TOOLS.md"),
-            "memory" => resolve_path(&mem.memory_path, &base, "MEMORY.md"),
+            "soul" => resolve(&mem.soul_path, root, "SOUL.md")?,
+            "identity" => resolve(&mem.identity_path, root, "IDENTITY.md")?,
+            "user" => resolve(&mem.user_path, root, "USER.md")?,
+            "tools" => resolve(&mem.tools_path, root, "TOOLS.md")?,
+            "memory" => resolve(&mem.memory_path, root, "MEMORY.md")?,
             notes if notes.starts_with("notes/") => {
                 let date = &notes["notes/".len()..];
                 if date.len() != 10 || !date.chars().all(|c| c.is_ascii_digit() || c == '-') {
                     return None;
                 }
-                let notes_dir = resolve_dir(&mem.notes_dir, &base, "memory");
+                let notes_dir = resolve(&mem.notes_dir, root, "memory")?;
                 notes_dir.join(format!("{date}.md"))
             }
             _ => return None,

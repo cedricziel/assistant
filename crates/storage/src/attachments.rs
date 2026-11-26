@@ -44,11 +44,25 @@ pub trait AttachmentStore: Send + Sync {
 #[derive(Clone)]
 pub struct SqliteAttachmentStore {
     pool: SqlitePool,
+    /// Bytes live under `<install_root>/agents/<id>/attachments/`.
+    install_root: Option<PathBuf>,
 }
 
 impl SqliteAttachmentStore {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(pool: SqlitePool, install_root: Option<PathBuf>) -> Self {
+        Self { pool, install_root }
+    }
+
+    /// Resolve the filesystem path for an attachment's bytes.
+    fn attachment_path(&self, meta: &AttachmentMeta) -> Result<PathBuf> {
+        let root = self
+            .install_root
+            .as_deref()
+            .context("this storage has no attachment directory")?;
+        Ok(agent_base_dir(root, &meta.agent_id)
+            .join("attachments")
+            .join(meta.conversation_id.to_string())
+            .join(format!("{}.{}", meta.id, meta.extension())))
     }
 }
 
@@ -56,7 +70,7 @@ impl SqliteAttachmentStore {
 impl AttachmentStore for SqliteAttachmentStore {
     /// Persist an attachment: write bytes to disk and insert a metadata row.
     async fn store(&self, meta: &AttachmentMeta, data: &[u8]) -> Result<()> {
-        let path = attachment_path(meta);
+        let path = self.attachment_path(meta)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -88,7 +102,7 @@ impl AttachmentStore for SqliteAttachmentStore {
     /// Read raw bytes from disk for the given attachment.
     async fn load_bytes(&self, id: Uuid) -> Result<Vec<u8>> {
         let meta = self.get_meta(id).await?;
-        let path = attachment_path(&meta);
+        let path = self.attachment_path(&meta)?;
         tokio::fs::read(&path)
             .await
             .with_context(|| format!("reading attachment from {}", path.display()))
@@ -166,16 +180,6 @@ impl AttachmentStore for SqliteAttachmentStore {
             .context("linking attachment to message")?;
         Ok(())
     }
-}
-
-// -- Path helpers -------------------------------------------------------------
-
-/// Resolve the filesystem path for an attachment's bytes.
-pub fn attachment_path(meta: &AttachmentMeta) -> PathBuf {
-    agent_base_dir(&meta.agent_id)
-        .join("attachments")
-        .join(meta.conversation_id.to_string())
-        .join(format!("{}.{}", meta.id, meta.extension()))
 }
 
 // -- Row conversion -----------------------------------------------------------
@@ -348,6 +352,50 @@ mod tests {
             size_bytes: 4,
             created_at: Utc::now(),
         }
+    }
+
+    #[tokio::test]
+    async fn store_writes_bytes_under_the_install_root() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = StorageLayer::new(&root.path().join("space.db"))
+            .await
+            .unwrap()
+            .with_install_root(root.path().to_path_buf());
+        let store = storage.attachment_store();
+        let conv_id = Uuid::new_v4();
+        let msg_id = Uuid::new_v4();
+        seed_conv_and_msg(&store, conv_id, msg_id).await;
+        let meta = make_meta(conv_id, "writer");
+
+        store.store(&meta, b"png!").await.unwrap();
+
+        let expected = root
+            .path()
+            .join("agents/writer/attachments")
+            .join(conv_id.to_string())
+            .join(format!("{}.png", meta.id));
+        assert_eq!(std::fs::read(expected).unwrap(), b"png!");
+    }
+
+    #[tokio::test]
+    async fn store_fails_without_an_install_root() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = StorageLayer::new(&root.path().join("space.db"))
+            .await
+            .unwrap();
+        let store = storage.attachment_store();
+        let conv_id = Uuid::new_v4();
+        seed_conv_and_msg(&store, conv_id, Uuid::new_v4()).await;
+
+        let err = store
+            .store(&make_meta(conv_id, "writer"), b"png!")
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("attachment directory"),
+            "unexpected error: {err}"
+        );
     }
 
     /// Create a conversation + message row so FK constraints pass.

@@ -15,8 +15,8 @@ use assistant_core::types::conversation::{
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
     LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec, TurnScope,
-    TurnTiming, TurnToolSource, context::agent_base_dir, is_resizable_mime_type,
-    is_supported_mime_type, is_text_mime_type, strip_html_comments,
+    TurnTiming, TurnToolSource, is_resizable_mime_type, is_supported_mime_type, is_text_mime_type,
+    strip_html_comments,
 };
 use assistant_storage::{
     AttachmentStore as _AttachmentStoreTrait, SkillRegistry, StorageLayer,
@@ -715,13 +715,8 @@ impl Orchestrator {
     }
 
     /// Return the path to this persona's HEARTBEAT.md.
-    ///
-    /// Always derived from `agent_id` so it stays consistent even if the
-    /// `MemoryLoader` was constructed from a config that didn't explicitly set
-    /// `heartbeat_path` (e.g. in tests or when `apply_agent_context` wasn't
-    /// called).
     pub fn heartbeat_path(&self) -> std::path::PathBuf {
-        agent_base_dir(&self.agent_id).join("HEARTBEAT.md")
+        self.memory_loader.heartbeat_path().to_path_buf()
     }
 
     /// Return the path to BOOT.md (per-session startup hook).

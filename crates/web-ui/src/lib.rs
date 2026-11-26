@@ -27,8 +27,9 @@ use anyhow::{Context, Result};
 use assistant_core::types::llm::LlmProviderKind;
 use assistant_core::types::storage::BusKind;
 use assistant_core::{
-    MessageBus, apply_agent_context, default_workspace_dir, load_server_config, server_config_path,
-    set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
+    MessageBus, agent_base_dir, apply_agent_context, default_workspace_dir, load_server_config,
+    server_config_path, set_runtime_agent_root, set_runtime_install_root,
+    set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_mcp_server::{ListChangeListeners, TaskStore};
 use assistant_runtime::{OrgContexts, SpaceRuntimes, SpaceSupervisor, init_tracing};
@@ -218,6 +219,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     let (llm_model_override, llm_base_url_override) =
         (args.llm_model.clone(), args.llm_base_url.clone());
     let cli_agent_override = args.agent.clone();
+    let agent_install_root = base_path.clone();
     let orgs = Arc::new(OrgContexts::from_files(&base_path).with_adjust(Arc::new(
         move |org_config| {
             if let Some(provider) = &llm_provider_override {
@@ -237,7 +239,7 @@ async fn run_with_args(args: Args) -> Result<()> {
                     "Invalid agent ID '{agent}'. Use only letters, numbers, '-' and '_'."
                 );
             }
-            apply_agent_context(org_config, &agent);
+            apply_agent_context(org_config, &agent_install_root, &agent);
             Ok(())
         },
     )));
@@ -267,11 +269,9 @@ async fn run_with_args(args: Args) -> Result<()> {
         .context("Failed to load the default org's settings")?;
     let config = default_org.config.clone();
     let selected_agent = config.agent.id.clone();
-    if let Some(home) = dirs::home_dir() {
-        let agent_root = home.join(".assistant").join("agents").join(&selected_agent);
-        set_runtime_agent_root(agent_root);
-    }
-    let workspace_dir = default_workspace_dir(&selected_agent);
+    set_runtime_install_root(base_path.clone());
+    set_runtime_agent_root(agent_base_dir(&base_path, &selected_agent));
+    let workspace_dir = default_workspace_dir(&base_path, &selected_agent);
     set_runtime_workspace_dir(workspace_dir.clone());
     tokio::fs::create_dir_all(&workspace_dir)
         .await
