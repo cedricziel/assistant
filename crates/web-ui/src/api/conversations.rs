@@ -26,7 +26,8 @@ use uuid::Uuid;
 use assistant_core::types::conversation::MessageRole;
 use assistant_storage::{
     AttachmentStore as _, ConversationEvent, ConversationPatch, ConversationRecord,
-    ConversationStore, MetadataUpdate, SqliteConversationStore,
+    ConversationStore, MessageFeedbackRow, MessageFeedbackStore as _, MetadataUpdate,
+    SqliteConversationStore,
 };
 
 use crate::errors::json_error;
@@ -272,6 +273,31 @@ pub struct MessageSummary {
     /// Omitted for every other message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+    /// The calling user's verdict on this message. Omitted when the caller has
+    /// not rated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<MessageFeedbackSummary>,
+}
+
+/// The calling user's feedback on a message, as embedded in history.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct MessageFeedbackSummary {
+    /// `"positive"` or `"negative"`.
+    pub rating: String,
+    /// Optional free-text comment. Omitted when none was given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<MessageFeedbackRow> for MessageFeedbackSummary {
+    fn from(row: MessageFeedbackRow) -> Self {
+        Self {
+            rating: row.rating.as_str().to_string(),
+            comment: row.comment,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 // -- Request types -----------------------------------------------------------
@@ -591,6 +617,20 @@ pub async fn get_conversation(
         }
     }
 
+    // The caller's feedback for the whole conversation, in one query.
+    let mut feedback_by_msg: HashMap<Uuid, MessageFeedbackSummary> = ctx
+        .storage
+        .message_feedback_store()
+        .list_for_conversation(conv_id, &ctx.auth.user_id.0)
+        .await
+        .unwrap_or_else(|e| {
+            warn!("Failed to load message feedback: {e}");
+            Vec::new()
+        })
+        .into_iter()
+        .map(|row| (row.message_id, MessageFeedbackSummary::from(row)))
+        .collect();
+
     // Tool-result rows (role=tool), joined to assistant tool calls below.
     let mut tool_rows = ToolRows::new(
         history
@@ -613,6 +653,7 @@ pub async fn get_conversation(
             let tts_available =
                 tts_configured && matches!(m.role, MessageRole::Assistant) && !m.content.is_empty();
             let attachments = attachments_by_msg.remove(&m.id).unwrap_or_default();
+            let feedback = feedback_by_msg.remove(&m.id);
             MessageSummary {
                 id: m.id,
                 role: m.role.to_string(),
@@ -624,6 +665,7 @@ pub async fn get_conversation(
                 tts_available,
                 attachments,
                 finish_reason: m.finish_reason.map(|r| r.as_str().to_string()),
+                feedback,
             }
         })
         .collect();
@@ -1174,6 +1216,125 @@ mod tests {
             messages[2].get("finish_reason").is_none(),
             "ordinary assistant message omits finish_reason"
         );
+    }
+
+    #[tokio::test]
+    async fn get_conversation_projects_only_the_callers_feedback() {
+        use assistant_core::types::conversation::Message;
+        use assistant_storage::{MessageFeedbackRating, MessageFeedbackStore as _};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Test")).await.unwrap();
+        let user = Message::user(conv.id, "hi");
+        let mut rated = Message::assistant(conv.id, "Rated answer");
+        rated.turn = 1;
+        let mut unrated = Message::assistant(conv.id, "Unrated answer");
+        unrated.turn = 2;
+        let mut other_only = Message::assistant(conv.id, "Rated by someone else");
+        other_only.turn = 3;
+        for m in [&user, &rated, &unrated, &other_only] {
+            store.save_message(m).await.unwrap();
+        }
+
+        let feedback = storage.message_feedback_store();
+        feedback
+            .set(
+                conv.id,
+                rated.id,
+                "system",
+                MessageFeedbackRating::Negative,
+                Some("too long"),
+            )
+            .await
+            .unwrap();
+        feedback
+            .set(
+                conv.id,
+                other_only.id,
+                "someone-else",
+                MessageFeedbackRating::Positive,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let messages = json["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 4);
+        assert!(
+            messages[0].get("feedback").is_none(),
+            "user message omits feedback"
+        );
+        assert_eq!(messages[1]["feedback"]["rating"], "negative");
+        assert_eq!(messages[1]["feedback"]["comment"], "too long");
+        assert!(
+            messages[1]["feedback"]["updated_at"].as_str().is_some(),
+            "feedback carries updated_at"
+        );
+        assert!(
+            messages[2].get("feedback").is_none(),
+            "unrated message omits feedback"
+        );
+        assert!(
+            messages[3].get("feedback").is_none(),
+            "another user's vote is not visible"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_conversation_feedback_omits_absent_comment() {
+        use assistant_core::types::conversation::Message;
+        use assistant_storage::{MessageFeedbackRating, MessageFeedbackStore as _};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Test")).await.unwrap();
+        let reply = Message::assistant(conv.id, "Answer");
+        store.save_message(&reply).await.unwrap();
+        storage
+            .message_feedback_store()
+            .set(
+                conv.id,
+                reply.id,
+                "system",
+                MessageFeedbackRating::Positive,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let json = body_json(resp.into_body()).await;
+        let feedback = &json["messages"][0]["feedback"];
+        assert_eq!(feedback["rating"], "positive");
+        assert!(feedback.get("comment").is_none(), "no comment key");
     }
 
     #[tokio::test]

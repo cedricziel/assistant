@@ -96,6 +96,7 @@ import 'package:assistant_api/src/model/mcp_app_view.dart';
 import 'package:assistant_api/src/model/member_entry.dart';
 import 'package:assistant_api/src/model/message.dart';
 import 'package:assistant_api/src/model/message_feedback_response.dart';
+import 'package:assistant_api/src/model/message_feedback_summary.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
@@ -292,6 +293,7 @@ part 'serializers.g.dart';
   MemberEntry,
   Message,
   MessageFeedbackResponse,
+  MessageFeedbackSummary,
   MessageSummary,
   ModelPart,
   MutualTlsSecurityScheme,

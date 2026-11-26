@@ -119,6 +119,7 @@ export 'package:assistant_api/src/model/mcp_app_view.dart';
 export 'package:assistant_api/src/model/member_entry.dart';
 export 'package:assistant_api/src/model/message.dart';
 export 'package:assistant_api/src/model/message_feedback_response.dart';
+export 'package:assistant_api/src/model/message_feedback_summary.dart';
 export 'package:assistant_api/src/model/message_summary.dart';
 export 'package:assistant_api/src/model/model_part.dart';
 export 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
