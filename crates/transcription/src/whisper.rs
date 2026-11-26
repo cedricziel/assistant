@@ -10,6 +10,7 @@ use reqwest::multipart;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, warn};
 
+use crate::converter::{AudioFormat, OPENAI_COMPATIBLE_FORMATS};
 use crate::provider::{
     TranscriptionProvider, TranscriptionRequest, TranscriptionResult, extension_for_mime,
 };
@@ -69,6 +70,10 @@ struct WhisperResponse {
 impl TranscriptionProvider for WhisperProvider {
     fn name(&self) -> &str {
         "whisper"
+    }
+
+    fn accepted_formats(&self) -> Option<&[AudioFormat]> {
+        Some(OPENAI_COMPATIBLE_FORMATS)
     }
 
     async fn transcribe(

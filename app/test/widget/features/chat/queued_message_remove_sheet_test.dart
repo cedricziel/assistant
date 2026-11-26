@@ -1,17 +1,17 @@
-// Widget tests for [QueuedMessageBubble]. Pins:
-//   - rendering the message text + "Queued" badge
+// Widget tests for [QueuedMessageBubble] wired to the app's remove sheet. Pins:
 //   - long-press surfaces the remove action sheet
 //   - tapping "Remove from queue" calls removeFromQueue on the notifier
 //
 // Specified by: openspec/changes/chat-stream-progress-ux/specs/.../
 //   chat-message-queue/spec.md
 
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:assistant_app/features/chat/chat_provider.dart';
-import 'package:assistant_app/features/chat/queued_message_bubble.dart';
+import 'package:assistant_app/features/chat/queued_message_remove_sheet.dart';
 
 class _FakeChatNotifier extends ChatNotifier {
   final List<int> removedIndices = [];
@@ -38,7 +38,13 @@ Future<_FakeChatNotifier> _pumpBubble(
       overrides: [chatProvider.overrideWith(() => notifier)],
       child: MaterialApp(
         home: Scaffold(
-          body: QueuedMessageBubble(message: message, index: index),
+          body: Consumer(
+            builder: (context, ref, _) => QueuedMessageBubble(
+              message: message,
+              onLongPress: () =>
+                  showQueuedMessageRemoveSheet(context, ref, message, index),
+            ),
+          ),
         ),
       ),
     ),
@@ -48,23 +54,7 @@ Future<_FakeChatNotifier> _pumpBubble(
 }
 
 void main() {
-  group('QueuedMessageBubble', () {
-    testWidgets('renders the message text and a "Queued" badge', (
-      tester,
-    ) async {
-      await _pumpBubble(
-        tester,
-        message: const PendingMessage(
-          text: 'hello world',
-          conversationId: 'c1',
-        ),
-        index: 0,
-      );
-
-      expect(find.text('hello world'), findsOneWidget);
-      expect(find.text('Queued'), findsOneWidget);
-    });
-
+  group('showQueuedMessageRemoveSheet via QueuedMessageBubble', () {
     testWidgets('long-press opens an action sheet with Remove', (tester) async {
       await _pumpBubble(
         tester,

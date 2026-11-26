@@ -13,26 +13,33 @@
 
 pub mod audio_store;
 mod converter;
+mod converting;
 mod deepgram;
 mod deepgram_tts;
 mod ollama;
 mod openai_tts;
+mod openrouter;
+pub mod openrouter_tts;
 pub mod pipeline;
 mod provider;
 mod whisper;
 
 use std::sync::Arc;
 
+use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::types::transcription::{
     TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsProviderKind,
 };
 
 pub use audio_store::AudioStore;
-pub use converter::{AudioConverter, AudioFormat, ConversionResult};
+pub use converter::AudioFormat;
+pub use converting::ConvertingTranscriber;
 pub use deepgram::DeepgramProvider;
 pub use deepgram_tts::DeepgramTtsProvider;
 pub use ollama::OllamaTranscriptionProvider;
 pub use openai_tts::OpenAITtsProvider;
+pub use openrouter::OpenRouterTranscriber;
+pub use openrouter_tts::{OpenRouterTts, OpenRouterTtsSettings};
 pub use provider::{
     TranscriptionProvider, TranscriptionRequest, TranscriptionResult, TtsProvider, TtsRequest,
     TtsResult,
@@ -138,14 +145,44 @@ pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvi
     }
 }
 
-/// Build a [`TranscriptionProvider`] from the assistant configuration.
-///
-/// Returns `None` when `config` is `None` (transcription not configured).
-/// Returns an error if the configuration is invalid (e.g. missing API key).
-pub fn build_provider(
+/// Build a [`TranscriptionProvider`] from `[transcription]`. `llm` supplies
+/// the OpenRouter key when `[transcription]` has none. Every provider is
+/// wrapped in a [`ConvertingTranscriber`]. Fails when the configuration is
+/// invalid, e.g. a missing API key.
+pub async fn build_provider(
     config: &TranscriptionConfig,
+    llm: &LlmConfig,
 ) -> anyhow::Result<Arc<dyn TranscriptionProvider>> {
     match config.provider {
+        TranscriptionProviderKind::OpenRouter => {
+            let api_key = resolve_openrouter_key(
+                config.api_key.as_ref(),
+                llm,
+                OPENROUTER_API_KEY_ENV,
+                |name| std::env::var(name).ok(),
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "OpenRouter transcription requires an API key. Set api_key in \
+                     [transcription] or [llm], or the OPENROUTER_API_KEY env var."
+                )
+            })?;
+            let base_url = config.base_url.clone().unwrap_or_else(|| {
+                assistant_llm_provider::openrouter::DEFAULT_BASE_URL.to_string()
+            });
+            let mut provider =
+                OpenRouterTranscriber::new(base_url, api_key, config.effective_max_chunk_secs())?;
+            if let Some(ref model) = config.model {
+                provider = provider.with_model(model);
+            }
+            if let Some(ref language) = config.language {
+                provider = provider.with_language(language);
+            }
+            if let Some(ref prompt) = config.prompt {
+                provider = provider.with_prompt(prompt);
+            }
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
+        }
         TranscriptionProviderKind::Whisper => {
             let api_key = config
                 .api_key
@@ -166,7 +203,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
         TranscriptionProviderKind::Ollama => {
             let mut provider = OllamaTranscriptionProvider::new()?;
@@ -176,7 +213,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
         TranscriptionProviderKind::Deepgram => {
             let api_key = config
@@ -198,9 +235,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            // Enable audio conversion for formats not supported by Deepgram (e.g., M4A)
-            provider = provider.with_audio_conversion(AudioConverter::new());
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
     }
 }

@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use assistant_core::Secret;
+use assistant_core::types::llm::{LlmConfig, LlmProviderKind};
 use assistant_core::types::transcription::{
     TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsProviderKind,
 };
@@ -65,6 +67,10 @@ fn build_tts_openai_uses_api_key_from_config() {
         model: Some("tts-1".to_string()),
         voice: Some("alloy".to_string()),
         voices: HashMap::new(),
+        format: None,
+        speed: None,
+        instructions: None,
+        pcm_sample_rate: None,
     };
     let provider = build_tts_provider(&config).ok();
     assert!(provider.is_some());
@@ -89,6 +95,10 @@ fn build_tts_deepgram_uses_api_key_from_config() {
         model: Some("aura-asteria-en".to_string()),
         voice: None,
         voices,
+        format: None,
+        speed: None,
+        instructions: None,
+        pcm_sample_rate: None,
     };
     let provider = build_tts_provider(&config).ok();
     assert!(provider.is_some());
@@ -100,48 +110,113 @@ fn build_tts_deepgram_uses_api_key_from_config() {
 
 // ── build_provider (transcription) ─────────────────────────────────────────
 
-#[test]
-fn build_transcription_whisper_uses_api_key_from_config() {
+#[tokio::test]
+async fn build_transcription_whisper_uses_api_key_from_config() {
     let config = TranscriptionConfig {
         provider: TranscriptionProviderKind::Whisper,
         api_key: Some("sk-test".into()),
         base_url: None,
         model: None,
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
-    let provider = build_provider(&config).ok();
+    let provider = build_provider(&config, &LlmConfig::default()).await.ok();
     assert!(provider.is_some());
     assert!(!provider.unwrap().name().is_empty());
 }
 
 // Whisper env-fallback path intentionally not asserted.
 
-#[test]
-fn build_transcription_ollama_constructs_without_api_key() {
+#[tokio::test]
+async fn build_transcription_ollama_constructs_without_api_key() {
     let config = TranscriptionConfig {
         provider: TranscriptionProviderKind::Ollama,
         api_key: None,
         base_url: Some("http://localhost:11434".into()),
         model: Some("whisper".into()),
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
-    let provider = build_provider(&config).ok();
+    let provider = build_provider(&config, &LlmConfig::default()).await.ok();
     assert!(provider.is_some());
     assert!(!provider.unwrap().name().is_empty());
 }
 
-#[test]
-fn build_transcription_deepgram_uses_api_key_from_config() {
+#[tokio::test]
+async fn build_transcription_deepgram_uses_api_key_from_config() {
     let config = TranscriptionConfig {
         provider: TranscriptionProviderKind::Deepgram,
         api_key: Some("dg-test".into()),
         base_url: None,
         model: None,
         language: None,
+        prompt: None,
+        max_chunk_secs: None,
     };
-    let provider = build_provider(&config).ok();
+    let provider = build_provider(&config, &LlmConfig::default()).await.ok();
     assert!(provider.is_some());
     assert!(!provider.unwrap().name().is_empty());
 }
 
 // Deepgram transcription env-fallback path intentionally not asserted.
+
+fn openrouter_transcription(api_key: Option<&str>) -> TranscriptionConfig {
+    TranscriptionConfig {
+        provider: TranscriptionProviderKind::OpenRouter,
+        api_key: api_key.map(Into::into),
+        base_url: None,
+        model: None,
+        language: Some("de".into()),
+        prompt: None,
+        max_chunk_secs: Some(120),
+    }
+}
+
+#[tokio::test]
+async fn build_transcription_openrouter_reuses_the_llm_key() {
+    let llm = LlmConfig {
+        provider: LlmProviderKind::OpenRouter,
+        api_key: Some(Secret::new("sk-or-chat")),
+        ..LlmConfig::default()
+    };
+    let provider = build_provider(&openrouter_transcription(None), &llm)
+        .await
+        .unwrap();
+    assert_eq!(provider.name(), "openrouter");
+    assert!(
+        provider.accepted_formats().is_some(),
+        "wrapped so other formats are converted"
+    );
+}
+
+#[tokio::test]
+async fn build_transcription_openrouter_uses_its_own_key() {
+    let llm = LlmConfig {
+        provider: LlmProviderKind::Anthropic,
+        ..LlmConfig::default()
+    };
+    build_provider(&openrouter_transcription(Some("sk-or-stt")), &llm)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn build_transcription_openrouter_without_a_key_names_openrouter() {
+    // SAFETY: test-only env mutation.
+    let prev = std::env::var("OPENROUTER_API_KEY").ok();
+    unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
+    let llm = LlmConfig {
+        provider: LlmProviderKind::Anthropic,
+        ..LlmConfig::default()
+    };
+    let err = build_provider(&openrouter_transcription(None), &llm)
+        .await
+        .err()
+        .expect("must error");
+    assert!(err.to_string().contains("OpenRouter"), "{err}");
+    if let Some(v) = prev {
+        unsafe { std::env::set_var("OPENROUTER_API_KEY", v) };
+    }
+}

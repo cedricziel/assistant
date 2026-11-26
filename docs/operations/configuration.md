@@ -22,8 +22,10 @@ What the `server.toml` sections do:
 - `[mcp]` lists external MCP servers under `[[mcp.servers]]`. Their tools and
   skills are offered in every space. A server name must not start with `org_`,
   `space_` or `user_`. Those prefixes belong to integration tools, and the file
-  fails to load otherwise. Skills these servers publish are verified and cached
-  under `~/.assistant/cache/mcp-skills/`, which is not backed up. For the keys
+  fails to load otherwise. `tool_timeout_secs` sets how long a tool call to a
+  server may take, 120 seconds by default; 0 makes the file fail to load.
+  Skills these servers publish are verified and cached under
+  `~/.assistant/cache/mcp-skills/`, which is not backed up. For the keys
   and behavior, see [MCP](../mcp.md#connect-external-mcp-servers).
 - `[notifications]` holds the Web Push VAPID keys. The web UI generates them on
   first start and writes them back to this file.
