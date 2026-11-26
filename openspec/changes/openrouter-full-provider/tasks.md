@@ -56,7 +56,7 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 - [x] 7.7 Write failing tests: `session_id` and `user` come from `LlmCallContext` and are omitted without it. Confirm red. Implement, then verify.
 - [x] 7.8 Switch `OpenRouterProvider` from `ChatCompletionsProvider` to the new client, delete the dead code, and verify the existing OpenRouter tests still pass.
 - [x] 7.9 Rewrite the chat, routing, identity and errors sections of `docs/openrouter.md`.
-- [ ] 7.10 Write failing wiremock tests for OpenRouter native `tool_choice`, `parallel_tool_calls` and JSON schema, each adding `provider.require_parameters: true`, plus the `response-healing` plugin on native non-streaming structured calls. Confirm red. Implement, then verify.
+- [x] 7.10 Write failing wiremock tests for OpenRouter native `tool_choice`, `parallel_tool_calls` and JSON schema, each adding `provider.require_parameters: true`, plus the `response-healing` plugin on native non-streaming structured calls. Confirm red. Implement, then verify.
 
 ## 8. Model catalog and capabilities
 
@@ -64,7 +64,7 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 - [x] 8.2 Implement `catalog.rs` with an `ArcSwap` snapshot, a background fetch, and a 5-second first-call wait. Add `arc-swap` to the workspace dependencies. Verify 6.1.
 - [x] 8.3 Write failing tests: an unknown model fails each call without an upstream request; a catalog outage yields conservative capabilities and refreshes after the backoff (driven by a test clock). Confirm red. Implement, then verify.
 - [x] 8.4 Document capability detection in `docs/openrouter.md`.
-- [ ] 8.5 Write a failing test that chat-option support (`tool_choice`, `parallel_tool_calls`, `structured_outputs`/`response_format`, image and audio output) comes from the catalog. Confirm red. Implement, then verify.
+- [x] 8.5 Write a failing test that chat-option support (`tool_choice`, `parallel_tool_calls`, `structured_outputs`/`response_format`, image and audio output) comes from the catalog. Confirm red. Implement, then verify.
 
 ## 9. Reasoning
 

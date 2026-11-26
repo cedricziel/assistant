@@ -26,6 +26,14 @@ pub struct ChatRequest {
     pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plugins: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -119,13 +119,14 @@ model catalog. When the provider is built, it fetches `{base_url}/models`
 and `{base_url}/models/{model}/endpoints` in the background. The first
 chat call waits for that fetch for at most 5 seconds.
 
-| Capability     | Value                                                                    |
-| -------------- | ------------------------------------------------------------------------ |
-| Tool calling   | Native when the model lists `tools` in `supported_parameters`, else none |
-| Streaming      | Yes                                                                      |
-| Vision         | Yes when the model lists `image` in its input modalities                 |
-| Context window | Smallest `context_length` among the endpoints routing can select         |
-| Embeddings     | No                                                                       |
+| Capability     | Value                                                                                                                                                                                                                              |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool calling   | Native when the model lists `tools` in `supported_parameters`, else none                                                                                                                                                           |
+| Streaming      | Yes                                                                                                                                                                                                                                |
+| Vision         | Yes when the model lists `image` in its input modalities                                                                                                                                                                           |
+| Context window | Smallest `context_length` among the endpoints routing can select                                                                                                                                                                   |
+| Chat options   | `tool_choice`, `parallel_tool_calls` and JSON schemas are sent natively when the model lists them in `supported_parameters`, with `provider.require_parameters = true`; otherwise `tool_choice` falls back to a prompt instruction |
+| Embeddings     | No                                                                                                                                                                                                                                 |
 
 History compaction reads the context window on every turn.
 `[llm.openrouter.provider]` decides which endpoints count:
