@@ -71,7 +71,8 @@ pub use conversation_events::{
     RunBroadcaster, SqliteConversationEventStore,
 };
 pub use conversations::{
-    ConversationRecord, ConversationStore, InMemoryConversationStore, SqliteConversationStore,
+    ConversationPatch, ConversationRecord, ConversationStore, InMemoryConversationStore,
+    MetadataUpdate, SqliteConversationStore,
 };
 pub use integration_store::{
     SqliteIntegrationCredentialStore, SqliteIntegrationHealthStore, SqliteIntegrationStore,
