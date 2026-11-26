@@ -87,6 +87,9 @@ pub struct OrgConfig {
     /// Text-to-speech configuration (optional).
     #[serde(default)]
     pub tts: Option<TtsConfig>,
+    /// Image generation configuration (optional).
+    #[serde(default)]
+    pub images: Option<crate::types::images::ImagesConfig>,
 }
 
 /// Active assistant agent configuration.

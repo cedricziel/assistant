@@ -21,8 +21,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::types::conversation::TurnIdentity;
 use assistant_core::{
-    ChannelAdapter, ChannelContent, ChannelMessage, ContentBlock, ConversationConfig,
-    IdentityResolver,
+    Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, ContentBlock,
+    ConversationConfig, IdentityResolver,
 };
 use assistant_storage::{CommandEventStore, SqliteCommandEventStore};
 use base64::Engine as _;
@@ -243,22 +243,13 @@ impl ChannelRunner {
                     }
                 }
 
-                // Send outbound attachments (tool-produced images, etc.).
-                for attachment in &turn_result.attachments {
-                    let content = ChannelContent::FileData {
-                        data: attachment.data.clone(),
-                        filename: attachment.filename.clone(),
-                        mime_type: attachment.mime_type.clone(),
-                    };
-                    let send_result = if let Some(tid) = &thread_id {
-                        adapter.send_in_thread(&user, content, tid).await
-                    } else {
-                        adapter.send(&user, content).await
-                    };
-                    if let Err(e) = send_result {
-                        warn!(adapter = adapter.name(), error = %e, "failed to send attachment");
-                    }
-                }
+                send_attachments(
+                    adapter.as_ref(),
+                    &user,
+                    thread_id.as_deref(),
+                    &turn_result.attachments,
+                )
+                .await;
             }
             Err(ref e) => {
                 error!(
@@ -496,6 +487,30 @@ impl ChannelRunner {
 
 // -- Tests --
 
+/// Sends a turn's attachments (tool output, generated images and audio) as
+/// [`ChannelContent::FileData`], in the turn's thread when it has one.
+async fn send_attachments(
+    adapter: &dyn ChannelAdapter,
+    user: &ChannelUser,
+    thread_id: Option<&str>,
+    attachments: &[Attachment],
+) {
+    for attachment in attachments {
+        let content = ChannelContent::FileData {
+            data: attachment.data.clone(),
+            filename: attachment.filename.clone(),
+            mime_type: attachment.mime_type.clone(),
+        };
+        let send_result = match thread_id {
+            Some(tid) => adapter.send_in_thread(user, content, tid).await,
+            None => adapter.send(user, content).await,
+        };
+        if let Err(e) = send_result {
+            warn!(adapter = adapter.name(), error = %e, "failed to send attachment");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
@@ -510,7 +525,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use assistant_core::types::conversation::ChannelType;
-    use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
+    use assistant_core::{Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
     use async_trait::async_trait;
     use chrono::Utc;
     use futures::Stream;
@@ -555,6 +570,76 @@ mod tests {
             !Arc::ptr_eq(&l1, &l2),
             "different UUIDs must have different locks"
         );
+    }
+
+    /// A spoken reply from response media is sent like `voice_response`
+    /// audio: as audio `FileData`, in the turn's thread.
+    #[tokio::test]
+    async fn response_audio_is_sent_as_file_data_in_the_thread() {
+        #[derive(Default)]
+        struct Recorder {
+            sent: std::sync::Mutex<Vec<(Option<String>, ChannelContent)>>,
+        }
+
+        #[async_trait]
+        impl ChannelAdapter for Recorder {
+            fn name(&self) -> &str {
+                "recorder"
+            }
+            fn channel_type(&self) -> ChannelType {
+                ChannelType::Slack
+            }
+            async fn start(
+                &self,
+            ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ChannelMessage> + Send + 'static>>>
+            {
+                unimplemented!()
+            }
+            async fn send(&self, _u: &ChannelUser, c: ChannelContent) -> anyhow::Result<()> {
+                self.sent.lock().unwrap().push((None, c));
+                Ok(())
+            }
+            async fn send_in_thread(
+                &self,
+                _u: &ChannelUser,
+                c: ChannelContent,
+                thread: &str,
+            ) -> anyhow::Result<()> {
+                self.sent
+                    .lock()
+                    .unwrap()
+                    .push((Some(thread.to_string()), c));
+                Ok(())
+            }
+            async fn stop(&self) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        let adapter = Recorder::default();
+        let user = ChannelUser {
+            platform_id: "C1/ts1".into(),
+            display_name: None,
+        };
+        let audio = Attachment::new("audio-1.ogg", "audio/ogg", b"OggS".to_vec());
+
+        super::send_attachments(&adapter, &user, Some("ts1"), &[audio]).await;
+
+        let sent = adapter.sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0.as_deref(), Some("ts1"));
+        match &sent[0].1 {
+            ChannelContent::FileData {
+                mime_type,
+                filename,
+                data,
+            } => {
+                assert_eq!(mime_type, "audio/ogg");
+                assert_eq!(filename, "audio-1.ogg");
+                assert_eq!(data, b"OggS");
+            }
+            other => panic!("expected FileData, got {other:?}"),
+        }
     }
 
     /// `content_to_dispatch` maps image FileData to a multimodal attachment.

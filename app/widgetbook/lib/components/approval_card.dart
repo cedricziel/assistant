@@ -14,6 +14,33 @@ const _allOptions = [
   ApprovalDecision.rejectAlways,
 ];
 
+InteractionRecord _record({
+  InteractionStatus status = InteractionStatus.pending,
+  ApprovalDecision? decision,
+  List<ApprovalDecision> options = _allOptions,
+}) => InteractionRecord(
+  id: 'i1',
+  kind: InteractionKind.toolApproval,
+  status: status,
+  createdAt: _now,
+  expiresAt: _now.add(const Duration(minutes: 9, seconds: 42)),
+  toolName: 'bash',
+  arguments: const {'command': 'git status --short', 'cwd': '/repo'},
+  reason: "no rule allows 'bash'",
+  options: options,
+  suggestedRule: 'bash(git status*)',
+  decision: decision,
+);
+
+WidgetbookUseCase _useCase(String name, InteractionRecord record) =>
+    WidgetbookUseCase(
+      name: name,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: ApprovalCard(now: _now, onDecision: (_) {}, record: record),
+      ),
+    );
+
 final approvalCardComponent = WidgetbookComponent(
   name: 'ApprovalCard',
   useCases: [
@@ -57,5 +84,46 @@ final approvalCardComponent = WidgetbookComponent(
         );
       },
     ),
+    _useCase('pending', _record()),
+    _useCase(
+      'pending, once only',
+      _record(
+        options: const [
+          ApprovalDecision.allowOnce,
+          ApprovalDecision.rejectOnce,
+        ],
+      ),
+    ),
+    _useCase('submitting', _record(status: InteractionStatus.submitting)),
+    _useCase(
+      'allowed once',
+      _record(
+        status: InteractionStatus.resolved,
+        decision: ApprovalDecision.allowOnce,
+      ),
+    ),
+    _useCase(
+      'allowed always',
+      _record(
+        status: InteractionStatus.resolved,
+        decision: ApprovalDecision.allowAlways,
+      ),
+    ),
+    _useCase(
+      'rejected once',
+      _record(
+        status: InteractionStatus.resolved,
+        decision: ApprovalDecision.rejectOnce,
+      ),
+    ),
+    _useCase(
+      'rejected always',
+      _record(
+        status: InteractionStatus.resolved,
+        decision: ApprovalDecision.rejectAlways,
+      ),
+    ),
+    _useCase('expired', _record(status: InteractionStatus.expired)),
+    _useCase('cancelled', _record(status: InteractionStatus.cancelled)),
   ],
 );

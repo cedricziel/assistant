@@ -5,18 +5,21 @@ use async_trait::async_trait;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::debug;
 
+use assistant_core::types::transcription::TtsFormat;
+
 use crate::provider::{TtsProvider, TtsRequest, TtsResult};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_MODEL: &str = "tts-1";
 const DEFAULT_VOICE: &str = "nova";
-const DEFAULT_FORMAT: &str = "mp3";
 
 pub struct OpenAITtsProvider {
     base_url: String,
     api_key: String,
     model: String,
     default_voice: String,
+    /// Delivered when a request names no format.
+    format: TtsFormat,
     client: ClientWithMiddleware,
 }
 
@@ -31,6 +34,7 @@ impl OpenAITtsProvider {
             api_key: api_key.into(),
             model: DEFAULT_MODEL.to_string(),
             default_voice: DEFAULT_VOICE.to_string(),
+            format: TtsFormat::default(),
             client,
         })
     }
@@ -49,6 +53,19 @@ impl OpenAITtsProvider {
         self.default_voice = voice.into();
         self
     }
+
+    pub fn with_format(mut self, format: TtsFormat) -> Self {
+        self.format = format;
+        self
+    }
+}
+
+/// OpenAI's `response_format` for `format`; Ogg/Opus is `opus` there.
+fn wire_format(format: TtsFormat) -> &'static str {
+    match format {
+        TtsFormat::Ogg => "opus",
+        other => other.as_str(),
+    }
 }
 
 #[async_trait]
@@ -59,7 +76,10 @@ impl TtsProvider for OpenAITtsProvider {
 
     async fn synthesize(&self, request: TtsRequest) -> anyhow::Result<TtsResult> {
         let voice = request.voice.unwrap_or_else(|| self.default_voice.clone());
-        let format = request.format.unwrap_or_else(|| DEFAULT_FORMAT.to_string());
+        let format = match request.format.as_deref() {
+            Some(name) => TtsFormat::parse(name)?,
+            None => self.format,
+        };
 
         debug!(
             provider = "openai-tts",
@@ -73,7 +93,7 @@ impl TtsProvider for OpenAITtsProvider {
             "model": self.model,
             "input": request.text,
             "voice": voice,
-            "response_format": format,
+            "response_format": wire_format(format),
         });
 
         let url = format!("{}/audio/speech", self.base_url);
@@ -102,7 +122,7 @@ impl TtsProvider for OpenAITtsProvider {
 
         Ok(TtsResult {
             audio_data,
-            mime_type: "audio/mpeg".to_string(),
+            mime_type: format.mime_type().to_string(),
         })
     }
 }
@@ -152,6 +172,65 @@ mod tests {
 
         assert_eq!(result.audio_data, fake_audio);
         assert_eq!(result.mime_type, "audio/mpeg");
+    }
+
+    async fn sent_format(server: &MockServer) -> serde_json::Value {
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        body["response_format"].clone()
+    }
+
+    async fn mount_ok(server: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path("/audio/speech"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"audio".to_vec()))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn configured_ogg_is_requested_as_opus_and_labelled_ogg() {
+        let server = MockServer::start().await;
+        mount_ok(&server).await;
+        let provider = OpenAITtsProvider::new("key")
+            .unwrap()
+            .with_base_url(server.uri())
+            .with_format(assistant_core::types::transcription::TtsFormat::Ogg);
+
+        let result = provider
+            .synthesize(TtsRequest {
+                text: "Hi".into(),
+                voice: None,
+                format: None,
+                speed: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(sent_format(&server).await, "opus");
+        assert_eq!(result.mime_type, "audio/ogg");
+    }
+
+    #[tokio::test]
+    async fn request_format_sets_the_mime_type() {
+        let server = MockServer::start().await;
+        mount_ok(&server).await;
+        let provider = OpenAITtsProvider::new("key")
+            .unwrap()
+            .with_base_url(server.uri());
+
+        let result = provider
+            .synthesize(TtsRequest {
+                text: "Hi".into(),
+                voice: None,
+                format: Some("wav".into()),
+                speed: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(sent_format(&server).await, "wav");
+        assert_eq!(result.mime_type, "audio/wav", "not always audio/mpeg");
     }
 
     #[tokio::test]

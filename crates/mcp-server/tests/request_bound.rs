@@ -6,10 +6,14 @@ mod common;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use assistant_mcp_server::{AssistantMcpServer, ListChangeListeners, RequestBoundServer};
+use assistant_core::auth::AuthContext;
+use assistant_mcp_server::{
+    AssistantMcpServer, ListChangeListeners, RequestBoundServer, TaskStore,
+};
+use assistant_runtime::StubOrchestrationEngine;
 use common::*;
 use http::request::Parts;
-use rmcp::model::{ClientJsonRpcMessage, GetExtensions, ProtocolVersion};
+use rmcp::model::{ClientJsonRpcMessage, GetExtensions, ProtocolVersion, TaskStatus};
 use rmcp::service::{RxJsonRpcMessage, TxJsonRpcMessage};
 use rmcp::transport::{IntoTransport, Transport};
 use rmcp::{RoleServer, ServiceExt};
@@ -59,10 +63,12 @@ impl<T: Transport<RoleServer>> Transport<RoleServer> for BindingTransport<T> {
     }
 }
 
-/// Serves [`RequestBoundServer`] with `server` bound to every message.
+/// Serves [`RequestBoundServer`] with `server` bound to every message, as the
+/// local system identity.
 fn spawn_bound(server: AssistantMcpServer) -> DuplexStream {
     let (mut parts, ()) = http::Request::new(()).into_parts();
     parts.extensions.insert(Arc::new(server));
+    parts.extensions.insert(AuthContext::system());
     let (server_io, client_io) = tokio::io::duplex(64 * 1024);
     let transport = BindingTransport {
         inner: IntoTransport::<RoleServer, _, _>::into_transport(server_io),
@@ -90,4 +96,31 @@ async fn bound_legacy_session_is_notified_when_another_server_installs_a_skill()
     installer.call_tool(params).await.unwrap();
 
     assert_eq!(next_received(&mut received).await, Received::ToolsChanged);
+}
+
+#[tokio::test]
+async fn bound_task_is_visible_through_another_bound_server_sharing_the_store() {
+    let stub = Arc::new(StubOrchestrationEngine::new().hold_turns());
+    let tasks = TaskStore::default();
+    let bound = |tasks: TaskStore| {
+        default_stubs()
+            .orchestrator(stub.clone())
+            .tasks(tasks)
+            .server(allow_everything())
+    };
+    let creator = TaskAwareClient
+        .serve(spawn_bound(bound(tasks.clone())))
+        .await
+        .expect("handshake");
+    let poller = TaskAwareClient
+        .serve(spawn_bound(bound(tasks)))
+        .await
+        .expect("handshake");
+
+    let task = start_task(&creator).await;
+
+    assert_eq!(
+        task_payload(&poller, &task.task.task_id).await.status(),
+        TaskStatus::Working
+    );
 }
