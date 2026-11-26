@@ -33,7 +33,7 @@ The client extends `retry.rs` with an error type that carries `retry_after: Opti
 
 ### D3. Per-call identity through a task-local `LlmCallContext`
 
-`assistant_core::llm::LlmCallContext { conversation_id, user_hash }` lives in a `tokio::task_local!`. The orchestrator sets it around each turn's LLM calls with `LlmCallContext::scope(ctx, fut)`. The OpenRouter client reads it with `try_with`. When it is absent (background jobs), the client omits `session_id` and `user`. `user_hash` is a keyed hash (HMAC-SHA256 with the install's `jwt_secret`, truncated to 32 hex characters) of `org_slug:user_id`, so it stays stable but cannot be reversed off the box.
+`assistant_core::llm::call_context::LlmCallContext { conversation_id, user_hash }` lives in a `tokio::task_local!`. The four public turn entry points wrap the turn in `LlmCallContext::scope`, and providers read it with `LlmCallContext::current()`. When it is absent (background jobs), the client omits `session_id` and `user`. `user_hash` is SHA-256 over a namespaced `org_id`/`user_id` pair, truncated to 32 hex characters. User IDs are `usr_<uuid v4>`, so an unkeyed hash cannot be reversed or linked to an email. A keyed hash would have needed the auth signing key in the orchestrator for no gain.
 
 _Alternative:_ add a context parameter to `chat` and `chat_streaming`. Rejected for now because it touches every provider and around 10 test fakes for two optional fields. The task-local only requires that LLM calls are not `tokio::spawn`ed away from the turn future, which holds today. A test pins that invariant.
 
