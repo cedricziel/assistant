@@ -1,5 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 
+import { enableAccessibility } from "./support/flutter";
+
 /**
  * Sidebar-collapse persistence regression for iPad-landscape viewport (#620).
  *
@@ -12,25 +14,19 @@ const FLUTTER_SETTLE_MS = 3000;
 
 // Flutter builds its semantics tree, which holds the tooltip labels the
 // tests query, only after its off-screen accessibility placeholder is clicked.
-async function enableSemantics(page: Page) {
-  await page
-    .getByRole("button", { name: "Enable accessibility" })
-    .evaluate((el) => (el as HTMLElement).click());
-}
-
 async function loginFlutter(page: Page) {
   await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "load" });
   await page.waitForURL((url) => !url.pathname.includes("/setup"), {
     timeout: 20_000,
   });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
-  await enableSemantics(page);
+  await enableAccessibility(page);
 }
 
 async function reloadFlutter(page: Page) {
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
-  await enableSemantics(page);
+  await enableAccessibility(page);
 }
 
 test.describe("iPad-landscape sidebar collapse (#620)", () => {
