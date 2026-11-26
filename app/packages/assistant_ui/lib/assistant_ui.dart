@@ -7,6 +7,7 @@ export 'src/registry.dart';
 export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
 export 'src/interactions/approval_card.dart';
+export 'src/interactions/permission_rule_tile.dart';
 export 'src/suggestions/starter_prompts.dart';
 export 'src/suggestions/suggestion_chips.dart';
 export 'src/theme/assistant_ui_colors.dart';
