@@ -23,9 +23,6 @@ fn default_llm_timeout_secs() -> u64 {
 fn default_llm_provider() -> LlmProviderKind {
     LlmProviderKind::Ollama
 }
-fn default_embedding_model() -> String {
-    "nomic-embed-text".to_string()
-}
 
 // ── Provider kinds ────────────────────────────────────────────────────────────
 
@@ -110,9 +107,10 @@ pub struct LlmConfig {
     /// the provider's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
-    /// Embedding model for vector search (default: `nomic-embed-text`).
-    #[serde(default = "default_embedding_model")]
-    pub embedding_model: String,
+    /// Embedding model for vector search. Unset, each provider uses its
+    /// own default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
     /// API key for cloud providers (Anthropic, OpenAI, …).
     /// For Anthropic, also checked via `ANTHROPIC_API_KEY` env var.
     /// For OpenAI, also checked via `OPENAI_API_KEY` env var.
@@ -152,7 +150,7 @@ impl Default for LlmConfig {
             max_iterations: default_llm_max_iterations(),
             timeout_secs: default_llm_timeout_secs(),
             parallel_tool_calls: None,
-            embedding_model: default_embedding_model(),
+            embedding_model: None,
             api_key: None,
             anthropic: AnthropicOptions::default(),
             openai: OpenAIOptions::default(),

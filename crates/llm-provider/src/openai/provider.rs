@@ -42,6 +42,9 @@ use crate::retry::{RetryConfig, is_transient_error_message, with_retry};
 
 use super::oauth::OAuthManager;
 
+/// Embedding model used when `[llm] embedding_model` is unset.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
+
 // ── OpenAIProviderConfig ──────────────────────────────────────────────────────
 
 /// Configuration for the OpenAI backend.
@@ -68,7 +71,7 @@ impl Default for OpenAIProviderConfig {
             base_url: "https://api.openai.com/v1".to_string(),
             timeout_secs: 120,
             max_tokens: 8192,
-            embedding_model: "text-embedding-3-small".to_string(),
+            embedding_model: DEFAULT_EMBEDDING_MODEL.to_string(),
             web_search: None,
         }
     }
@@ -150,7 +153,10 @@ impl OpenAIProvider {
             base_url,
             timeout_secs: cfg.timeout_secs,
             max_tokens,
-            embedding_model: cfg.embedding_model.clone(),
+            embedding_model: cfg
+                .embedding_model
+                .clone()
+                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
             web_search,
         };
 
@@ -1232,6 +1238,41 @@ mod tests {
             let body = request(&[], options);
             assert!(body.get("tool_choice").is_none(), "{body}");
             assert!(body.get("parallel_tool_calls").is_none(), "{body}");
+        }
+    }
+
+    mod embedding_model {
+        use assistant_core::Secret;
+        use assistant_core::types::llm::{LlmConfig, LlmProviderKind};
+
+        use super::super::OpenAIProvider;
+
+        fn provider(embedding_model: Option<&str>) -> OpenAIProvider {
+            OpenAIProvider::from_llm_config(&LlmConfig {
+                provider: LlmProviderKind::OpenAI,
+                api_key: Some(Secret::new("test")),
+                embedding_model: embedding_model.map(String::from),
+                ..LlmConfig::default()
+            })
+            .unwrap()
+        }
+
+        #[test]
+        fn unset_embedding_model_uses_the_openai_default() {
+            assert_eq!(
+                provider(None).config.embedding_model,
+                "text-embedding-3-small"
+            );
+        }
+
+        #[test]
+        fn configured_embedding_model_is_used() {
+            assert_eq!(
+                provider(Some("text-embedding-3-large"))
+                    .config
+                    .embedding_model,
+                "text-embedding-3-large"
+            );
         }
     }
 
