@@ -67,6 +67,10 @@ fn build_tts_openai_uses_api_key_from_config() {
         model: Some("tts-1".to_string()),
         voice: Some("alloy".to_string()),
         voices: HashMap::new(),
+        format: None,
+        speed: None,
+        instructions: None,
+        pcm_sample_rate: None,
     };
     let provider = build_tts_provider(&config).ok();
     assert!(provider.is_some());
@@ -91,6 +95,10 @@ fn build_tts_deepgram_uses_api_key_from_config() {
         model: Some("aura-asteria-en".to_string()),
         voice: None,
         voices,
+        format: None,
+        speed: None,
+        instructions: None,
+        pcm_sample_rate: None,
     };
     let provider = build_tts_provider(&config).ok();
     assert!(provider.is_some());
