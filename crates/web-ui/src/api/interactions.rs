@@ -303,10 +303,13 @@ pub(crate) fn broker_or_store_only(
     ctx: &SpaceCtx,
 ) -> Arc<InteractionBroker> {
     broker.unwrap_or_else(|| {
-        Arc::new(InteractionBroker::new(
-            Arc::new(ctx.storage.interaction_store()),
-            Arc::new(InteractionKinds::with_builtin()),
-        ))
+        Arc::new(
+            InteractionBroker::new(
+                Arc::new(ctx.storage.interaction_store()),
+                Arc::new(InteractionKinds::with_builtin()),
+            )
+            .with_rules(Arc::new(ctx.storage.tool_permission_rule_store())),
+        )
     })
 }
 
