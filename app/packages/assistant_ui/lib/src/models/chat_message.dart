@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'branch_info.dart';
+import 'interaction_record.dart';
 import 'mcp_app.dart';
 import 'message_rating.dart';
 import 'message_timing.dart';
@@ -72,6 +73,11 @@ class ToolCallRecord {
 
   /// Elapsed time from start to completion. Null while pending.
   Duration? duration;
+
+  /// The interaction (a tool approval) that gates this call, rendered in the
+  /// entry's footer. Mutable like [status]: it moves from pending to a receipt
+  /// in place.
+  InteractionRecord? interaction;
 }
 
 /// The kind of entry shown in the chat timeline.
@@ -244,6 +250,10 @@ class ChatMessage {
   /// of that reply.
   final BranchInfo? replyBranch;
 
+  /// The interaction a [TimelineEntryType.interaction] entry renders. Mutable
+  /// like [content]; only set when the request had no tool call to attach to.
+  InteractionRecord? interaction;
+
   /// The caller's feedback on this message, `null` when none.
   ///
   /// Mutable like [content]: the chat notifier applies optimistic changes in
@@ -275,28 +285,32 @@ class ChatMessage {
     bool clearFeedback = false,
   }) {
     return ChatMessage(
-      id: id,
-      role: role,
-      content: content ?? this.content,
-      isStreaming: isStreaming ?? this.isStreaming,
-      status: status ?? this.status,
-      audioId: audioId ?? this.audioId,
-      ttsAvailable: ttsAvailable ?? this.ttsAvailable,
-      toolCalls: toolCalls ?? this.toolCalls,
-      tokenStream: clearTokenStream ? null : (tokenStream ?? this.tokenStream),
-      attachments: attachments ?? this.attachments,
-      audioBytes: audioBytes ?? this.audioBytes,
-      audioMimeType: audioMimeType ?? this.audioMimeType,
-      timelineType: timelineType ?? this.timelineType,
-      thinkingContent: thinkingContent ?? this.thinkingContent,
-      subagentId: subagentId ?? this.subagentId,
-      subagentTask: subagentTask ?? this.subagentTask,
-      subagentSummary: subagentSummary ?? this.subagentSummary,
-      timing: timing ?? this.timing,
-      parentId: parentId,
-      branch: branch,
-      replyBranch: replyBranch,
-    )..feedback = clearFeedback ? null : (feedback ?? this.feedback);
+        id: id,
+        role: role,
+        content: content ?? this.content,
+        isStreaming: isStreaming ?? this.isStreaming,
+        status: status ?? this.status,
+        audioId: audioId ?? this.audioId,
+        ttsAvailable: ttsAvailable ?? this.ttsAvailable,
+        toolCalls: toolCalls ?? this.toolCalls,
+        tokenStream: clearTokenStream
+            ? null
+            : (tokenStream ?? this.tokenStream),
+        attachments: attachments ?? this.attachments,
+        audioBytes: audioBytes ?? this.audioBytes,
+        audioMimeType: audioMimeType ?? this.audioMimeType,
+        timelineType: timelineType ?? this.timelineType,
+        thinkingContent: thinkingContent ?? this.thinkingContent,
+        subagentId: subagentId ?? this.subagentId,
+        subagentTask: subagentTask ?? this.subagentTask,
+        subagentSummary: subagentSummary ?? this.subagentSummary,
+        timing: timing ?? this.timing,
+        parentId: parentId,
+        branch: branch,
+        replyBranch: replyBranch,
+      )
+      ..interaction = interaction
+      ..feedback = clearFeedback ? null : (feedback ?? this.feedback);
   }
 }
 

@@ -20,6 +20,8 @@ import 'chat_timeline_reducers.dart';
 import 'chat_turn_transitions.dart';
 import 'conversation_list_provider.dart';
 import 'follow_up_listener.dart';
+import 'interaction_actions.dart';
+import 'interaction_kinds.dart';
 import 'message_feedback_provider.dart';
 
 export 'package:assistant_ui/models.dart';
@@ -29,7 +31,8 @@ export 'chat_models.dart';
 export 'conversation_list_provider.dart';
 
 /// Manages the active chat conversation.
-class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
+class ChatNotifier extends AsyncNotifier<ChatState>
+    with ChatBranchSwitching, ChatInteractions {
   final _session = ChatStreamSession();
 
   /// Waits for follow-up suggestions after the last `done`. Independent of
@@ -139,6 +142,32 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     state = AsyncData(chatState.copyWith(messages: msgs));
   }
 
+  /// Show an interaction the turn now waits on and announce it.
+  void _onInteractionRequested(
+    ChatState chatState,
+    InteractionRequestedEvent event,
+  ) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    applyInteractionRequested(msgs, event);
+    state = AsyncData(withInteractionMessages(chatState, msgs));
+    final record = findInteraction(msgs, event.interactionId);
+    if (_turnInFlight && record != null) {
+      final announcement = interactionKindSpec(record).announcement;
+      _emit((at) => TurnAwaitingInput(announcement: announcement, at: at));
+    }
+  }
+
+  /// End an interaction and let the progress card return to its activity.
+  void _onInteractionResolved(
+    ChatState chatState,
+    InteractionResolvedEvent event,
+  ) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    applyInteractionResolved(msgs, event);
+    state = AsyncData(withInteractionMessages(chatState, msgs));
+    if (_turnInFlight) _emit((at) => TurnInputResolved(at: at));
+  }
+
   /// Apply [reduce] to a copy of the message list and publish the result.
   void _reduceMessages(
     ChatState chatState,
@@ -206,6 +235,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
         break;
       case AudioReadyEvent():
         _onAudioReadyEvent(chatState, event);
+      case InteractionRequestedEvent():
+        _onInteractionRequested(chatState, event);
+      case InteractionResolvedEvent():
+        _onInteractionResolved(chatState, event);
       default:
         return false;
     }

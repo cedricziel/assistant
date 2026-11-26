@@ -484,11 +484,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                     return StreamingTimelineEntry(
                                       message: msg,
                                       conversationId: chatState.conversationId,
-                                      entryState: msg.isStale
-                                          ? EntryState.stale
-                                          : msg.isStreaming
-                                          ? EntryState.active
-                                          : EntryState.complete,
+                                      entryState: timelineEntryState(msg),
+                                      onInteractionAnswer: (id, answer) => ref
+                                          .read(chatProvider.notifier)
+                                          .respond(id, answer),
                                     );
                                   }
 
@@ -540,6 +539,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         TurnProgressCard(
                           status: chatState.currentTurnStatus,
                           showSkip: kSkipButtonEnabled,
+                          awaitingLabel:
+                              chatState.currentTurnStatus?.awaitingLabel,
                           // The SSE stream surfaces the server-side
                           // cancellation as `agent_error`, which the notifier
                           // reconciles.
