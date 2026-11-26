@@ -119,7 +119,6 @@ use axum::{
 };
 use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
-use uuid::Uuid;
 
 use crate::errors::json_error;
 use crate::space::{SpaceCtx, SpaceResolver};
@@ -149,8 +148,6 @@ pub struct ApiState {
     pub command_registry: Arc<CommandRegistry>,
     /// Per-space conversation-list broadcasters for reactive SSE streaming.
     pub conversation_broadcasters: ConversationBroadcasters,
-    /// Active turns map: conv_id → request_id (for `/stop`).
-    pub active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
 }
 
 impl ApiState {
@@ -170,7 +167,6 @@ impl ApiState {
             run_broadcaster: RunBroadcaster::new(),
             command_registry: Arc::new(CommandRegistry::new()),
             conversation_broadcasters: ConversationBroadcasters::default(),
-            active_turns: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 

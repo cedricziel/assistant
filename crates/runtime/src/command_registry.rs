@@ -26,8 +26,6 @@ pub struct CommandContext {
     pub conversation_configs: Arc<RwLock<HashMap<Uuid, ConversationConfig>>>,
     /// Orchestrator reference (for `/stop`, `/compact`, `/status`).
     pub orchestrator: Arc<Orchestrator>,
-    /// Active turns map: conv_id → request_id (for `/stop`).
-    pub active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
     /// Callback to evict the conversation key from the LRU cache (for `/new`).
     /// When called, the next message from this context will create a new conversation.
     pub evict_conversation: Option<Box<dyn FnOnce() + Send>>,
@@ -190,24 +188,22 @@ impl CommandRegistry {
     }
 
     async fn cmd_stop(&self, ctx: CommandContext) -> CommandResult {
-        // Look up the active request_id for this conversation.
-        let request_id = ctx
-            .active_turns
-            .read()
-            .await
-            .get(&ctx.conversation_id)
-            .copied();
-
-        match request_id {
-            Some(rid) => {
-                if ctx.orchestrator.cancel_turn(rid).await == CancelOutcome::Cancelled {
-                    info!(conv_id = %ctx.conversation_id, request_id = %rid, "Turn cancelled via /stop");
-                    CommandResult::ack("Stopped.")
-                } else {
-                    CommandResult::ack("Nothing to stop.")
-                }
+        // Cancel every turn the orchestrator has running in this conversation.
+        let mut stopped = false;
+        for request_id in ctx
+            .orchestrator
+            .turn_registry()
+            .request_ids(ctx.conversation_id)
+        {
+            if ctx.orchestrator.cancel_turn(request_id).await == CancelOutcome::Cancelled {
+                info!(conv_id = %ctx.conversation_id, request_id = %request_id, "Turn cancelled via /stop");
+                stopped = true;
             }
-            None => CommandResult::ack("Nothing to stop."),
+        }
+        if stopped {
+            CommandResult::ack("Stopped.")
+        } else {
+            CommandResult::ack("Nothing to stop.")
         }
     }
 
@@ -249,10 +245,8 @@ impl CommandRegistry {
         };
 
         let is_active = ctx
-            .active_turns
-            .read()
-            .await
-            .contains_key(&ctx.conversation_id);
+            .orchestrator
+            .conversation_turn_in_flight(ctx.conversation_id);
 
         let mut lines = vec![
             format!("Conversation: {}", ctx.conversation_id),
