@@ -102,6 +102,7 @@ doc/MessageFeedbackResponse.md
 doc/MessageFeedbackSummary.md
 doc/MessageSearchMatch.md
 doc/MessageSummary.md
+doc/MessageTimingSummary.md
 doc/MessagesApi.md
 doc/ModelPart.md
 doc/MutualTlsSecurityScheme.md
@@ -161,6 +162,7 @@ doc/SpaceAccessMode.md
 doc/SpaceDetail.md
 doc/SpaceSummary.md
 doc/SpacesApi.md
+doc/SseDoneEvent.md
 doc/SseInteractionRequestedEvent.md
 doc/SseInteractionResolvedEvent.md
 doc/SseStatusEvent.md
@@ -358,6 +360,7 @@ lib/src/model/message_feedback_response.dart
 lib/src/model/message_feedback_summary.dart
 lib/src/model/message_search_match.dart
 lib/src/model/message_summary.dart
+lib/src/model/message_timing_summary.dart
 lib/src/model/model_part.dart
 lib/src/model/mutual_tls_security_scheme.dart
 lib/src/model/o_auth2_security_scheme.dart
@@ -410,6 +413,7 @@ lib/src/model/space_access_entry.dart
 lib/src/model/space_access_mode.dart
 lib/src/model/space_detail.dart
 lib/src/model/space_summary.dart
+lib/src/model/sse_done_event.dart
 lib/src/model/sse_interaction_requested_event.dart
 lib/src/model/sse_interaction_resolved_event.dart
 lib/src/model/sse_status_event.dart
