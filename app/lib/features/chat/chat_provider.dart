@@ -10,6 +10,7 @@ import '../../api/api_client.dart';
 import '../../api/models/stream_event.dart';
 import '../connection/connection_provider.dart';
 import 'chat_announcer.dart';
+import 'chat_branch_switch.dart';
 import 'chat_history_mapping.dart';
 import 'chat_models.dart';
 import 'chat_stream_errors.dart';
@@ -26,7 +27,7 @@ export 'chat_models.dart';
 export 'conversation_list_provider.dart';
 
 /// Manages the active chat conversation.
-class ChatNotifier extends AsyncNotifier<ChatState> {
+class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
   final _session = ChatStreamSession();
 
   final _lifecycle = StreamController<ChatLifecycleEvent>.broadcast(sync: true);
