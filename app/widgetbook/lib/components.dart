@@ -2,6 +2,7 @@ import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
+import 'components/chat_markdown_scope.dart';
 import 'components/chat_thread_layout.dart';
 import 'components/code_block.dart';
 import 'components/code_diff_result_view.dart';
@@ -26,6 +27,7 @@ import 'components/slash_command_menu.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/surface_frame.dart';
+import 'components/thinking_body.dart';
 import 'components/thread_density_scope.dart';
 import 'components/thread_empty_state.dart';
 import 'components/thread_error_banner.dart';
@@ -68,13 +70,13 @@ final List<WidgetbookComponent> kComponents = [
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
   // subagentBodyComponent, // slot: chat-element-library 7b
   // terminalResultViewComponent, // slot: tool-result-renderers C4
-  // thinkingBodyComponent, // slot: chat-element-library 7a
   // timelineEntryShellComponent, // slot: chat-element-library 5b
   // timelineEntryViewComponent, // slot: chat-element-library 7c
   // typingIndicatorComponent, // slot: chat-element-library 8b
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   branchPickerComponent,
+  chatMarkdownScopeComponent,
   chatThreadLayoutComponent,
   codeBlockComponent,
   codeDiffResultViewComponent,
@@ -99,6 +101,7 @@ final List<WidgetbookComponent> kComponents = [
   starterPromptsComponent,
   suggestionChipsComponent,
   surfaceFrameComponent,
+  thinkingBodyComponent,
   threadDensityScopeComponent,
   threadEmptyStateComponent,
   threadErrorBannerComponent,

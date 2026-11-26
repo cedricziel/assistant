@@ -46,4 +46,21 @@ abstract final class UrlPolicy {
     }
     return NetworkImageTarget(uri);
   }
+
+  /// The target of a resolved `openUrl` value, or `null` when the policy
+  /// blocks it.
+  ///
+  /// Mirrors the server's `check_link_url`: `https:` with a host, or
+  /// `mailto:` with an address. Everything else (`javascript:`, `data:`,
+  /// `http:`, `tel:`, relative references) is blocked and never reaches the
+  /// confirmation dialog.
+  static Uri? link(String url) {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null) return null;
+    return switch (uri.scheme) {
+      'https' when uri.host.isNotEmpty => uri,
+      'mailto' when uri.path.isNotEmpty => uri,
+      _ => null,
+    };
+  }
 }
