@@ -185,7 +185,7 @@ fn message_text(msg: &ChatHistoryMessage) -> String {
             })
             .collect::<Vec<_>>()
             .join(" "),
-        ChatHistoryMessage::AssistantToolCalls(calls) => {
+        ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
             let summaries: Vec<String> = calls
                 .iter()
                 .map(|c: &ToolCallItem| {
@@ -215,7 +215,7 @@ fn build_transcript(messages: &[ChatHistoryMessage]) -> String {
                     ChatRole::Tool => "Tool",
                 },
                 ChatHistoryMessage::MultimodalUser { .. } => "User",
-                ChatHistoryMessage::AssistantToolCalls(_) => "Assistant",
+                ChatHistoryMessage::AssistantToolCalls { .. } => "Assistant",
                 ChatHistoryMessage::ToolResult { .. } => "Tool",
             };
             format!("[Turn {i}] {role_label}: {}", message_text(msg))
@@ -333,10 +333,16 @@ fn chat_history_to_message(
             m.turn = turn;
             Some(m)
         }
-        ChatHistoryMessage::AssistantToolCalls(calls) => {
+        ChatHistoryMessage::AssistantToolCalls {
+            items: calls,
+            provider_state,
+        } => {
             let json = serde_json::to_string(calls).ok()?;
             let mut m = Message::new(conversation_id, MessageRole::Assistant, String::new());
             m.tool_calls_json = Some(json);
+            m.provider_state_json = provider_state
+                .as_ref()
+                .and_then(|s| serde_json::to_string(s).ok());
             m.turn = turn;
             Some(m)
         }
@@ -494,7 +500,10 @@ mod tests {
                 role: ChatRole::User,
                 content: "q1".into(),
             },
-            ChatHistoryMessage::AssistantToolCalls(vec![]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "t".into(),
                 content: "r".into(),
@@ -600,6 +609,7 @@ mod tests {
             params_schema: serde_json::json!({"type": "object"}),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         }];
 
         let history_only = estimate_tokens(&history);

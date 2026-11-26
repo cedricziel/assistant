@@ -80,6 +80,7 @@ impl StreamProjector for SseProjector {
                 arguments,
                 result,
                 tool_call_id,
+                data,
             } => {
                 let mut p = json!({ "tool_name": tool_name, "status": status });
                 if let Some(args) = arguments {
@@ -90,6 +91,9 @@ impl StreamProjector for SseProjector {
                 }
                 if let Some(id) = tool_call_id {
                     p["tool_call_id"] = Value::String(id.clone());
+                }
+                if let Some(data) = data {
+                    p["data"] = data.clone();
                 }
                 SseFrame {
                     event: "tool_result".to_string(),
@@ -168,6 +172,38 @@ impl StreamProjector for SseProjector {
                     log_payload: p,
                 }
             }
+            // Projected onto the wire by the stream-events PR (7c); until then
+            // interactions are dormant and nothing reaches the stream.
+            OrchestratorEvent::InteractionRequested { .. }
+            | OrchestratorEvent::InteractionResolved { .. } => return Vec::new(),
+            OrchestratorEvent::SurfaceUpdate {
+                surface_id,
+                tool_call_id,
+                anchor_message_id,
+                anchor_call_index,
+                title,
+                fallback_text,
+                status,
+                messages,
+            } => {
+                let mut p = json!({
+                    "surface_id": surface_id,
+                    "anchor_message_id": anchor_message_id,
+                    "anchor_call_index": anchor_call_index,
+                    "title": title,
+                    "fallback_text": fallback_text,
+                    "status": status,
+                    "messages": messages,
+                });
+                if let Some(id) = tool_call_id {
+                    p["tool_call_id"] = Value::String(id.clone());
+                }
+                SseFrame {
+                    event: "surface_update".to_string(),
+                    sse_data: p.to_string(),
+                    log_payload: p,
+                }
+            }
         };
         vec![frame]
     }
@@ -197,6 +233,9 @@ fn project_subagent_inner(inner: &OrchestratorEvent) -> (&'static str, Value) {
             arguments,
             result,
             tool_call_id,
+            // Subagent tool calls stay compact rows: `data` is deliberately
+            // not forwarded, so it is not stored twice in the event log.
+            data: _,
         } => {
             let mut d = json!({
                 "tool_name": tool_name,
@@ -236,7 +275,14 @@ impl StreamProjector for CliProjector {
             | OrchestratorEvent::SubagentStarted { .. }
             | OrchestratorEvent::SubagentCompleted { .. }
             | OrchestratorEvent::SubagentEvent { .. }
-            | OrchestratorEvent::AudioReady { .. } => Vec::new(),
+            | OrchestratorEvent::AudioReady { .. }
+            | OrchestratorEvent::InteractionRequested { .. }
+            | OrchestratorEvent::InteractionResolved { .. } => Vec::new(),
+            // Totality only: surfaces are gated to interactive web turns, so
+            // this arm is unreachable in practice.
+            OrchestratorEvent::SurfaceUpdate { fallback_text, .. } => {
+                vec![fallback_text.clone()]
+            }
         }
     }
 }
@@ -260,6 +306,7 @@ mod tests {
                 arguments: Some(json!({"path": "/tmp/x"})),
                 result: Some("contents".into()),
                 tool_call_id: Some("call_2".into()),
+                data: None,
             },
             OrchestratorEvent::SkillComplete {
                 skill_name: "tdd".into(),
@@ -286,7 +333,135 @@ mod tests {
             OrchestratorEvent::AudioReady {
                 audio_id: "audio-1".into(),
             },
+            surface_update_sample(),
         ]
+    }
+
+    fn surface_update_sample() -> OrchestratorEvent {
+        OrchestratorEvent::SurfaceUpdate {
+            surface_id: "s-1".into(),
+            tool_call_id: Some("call_9".into()),
+            anchor_message_id: "m-1".into(),
+            anchor_call_index: 2,
+            title: "Trip form".into(),
+            fallback_text: "Trip form: choose a date".into(),
+            status: "active".into(),
+            messages: vec![json!({"version": "v1.0", "createSurface": {"surfaceId": "s-1"}})],
+        }
+    }
+
+    /// Frames of a representative turn: a token, a top-level tool result and a
+    /// subagent's tool result. Pinned by `testdata/sse_frames.golden.json` so
+    /// that the wire shape only changes on purpose.
+    fn golden_events() -> Vec<OrchestratorEvent> {
+        vec![
+            OrchestratorEvent::Token("Running it".into()),
+            OrchestratorEvent::ToolResult {
+                tool_name: "bash".into(),
+                status: "ok".into(),
+                arguments: Some(json!({"command": "ls"})),
+                result: Some("a.txt".into()),
+                tool_call_id: Some("call_1".into()),
+                data: None,
+            },
+            OrchestratorEvent::SubagentEvent {
+                agent_id: "a1".into(),
+                inner: Box::new(OrchestratorEvent::ToolResult {
+                    tool_name: "web-fetch".into(),
+                    status: "ok".into(),
+                    arguments: Some(json!({"url": "https://example.com"})),
+                    result: Some("<html>".into()),
+                    tool_call_id: Some("call_2".into()),
+                    data: None,
+                }),
+            },
+        ]
+    }
+
+    fn project_to_golden_shape(events: &[OrchestratorEvent]) -> Value {
+        let frames: Vec<Value> = events
+            .iter()
+            .flat_map(|e| SseProjector.project(e))
+            .map(|f| json!({ "event": f.event, "payload": f.log_payload }))
+            .collect();
+        Value::Array(frames)
+    }
+
+    fn golden() -> Value {
+        serde_json::from_str(include_str!("testdata/sse_frames.golden.json"))
+            .expect("golden file is valid JSON")
+    }
+
+    #[test]
+    fn frames_without_data_match_the_golden_file() {
+        assert_eq!(project_to_golden_shape(&golden_events()), golden());
+    }
+
+    #[test]
+    fn tool_result_with_data_projects_a_data_field() {
+        let frame = only(OrchestratorEvent::ToolResult {
+            tool_name: "bash".into(),
+            status: "ok".into(),
+            arguments: None,
+            result: None,
+            tool_call_id: None,
+            data: Some(json!({"kind": "terminal"})),
+        });
+        assert_eq!(frame.event, "tool_result");
+        assert_eq!(frame.log_payload["data"], json!({"kind": "terminal"}));
+        assert_eq!(frame.sse_data, frame.log_payload.to_string());
+    }
+
+    #[test]
+    fn tool_result_without_data_has_no_data_key() {
+        let frame = only(OrchestratorEvent::ToolResult {
+            tool_name: "bash".into(),
+            status: "ok".into(),
+            arguments: None,
+            result: None,
+            tool_call_id: None,
+            data: None,
+        });
+        assert!(frame.log_payload.get("data").is_none());
+    }
+
+    #[test]
+    fn subagent_tool_result_never_carries_data() {
+        let events: Vec<OrchestratorEvent> = golden_events()
+            .into_iter()
+            .map(|event| match event {
+                OrchestratorEvent::SubagentEvent { agent_id, inner } => {
+                    let inner = match *inner {
+                        OrchestratorEvent::ToolResult {
+                            tool_name,
+                            status,
+                            arguments,
+                            result,
+                            tool_call_id,
+                            ..
+                        } => OrchestratorEvent::ToolResult {
+                            tool_name,
+                            status,
+                            arguments,
+                            result,
+                            tool_call_id,
+                            data: Some(json!({"kind": "terminal"})),
+                        },
+                        other => other,
+                    };
+                    OrchestratorEvent::SubagentEvent {
+                        agent_id,
+                        inner: Box::new(inner),
+                    }
+                }
+                other => other,
+            })
+            .collect();
+        assert_eq!(
+            project_to_golden_shape(&events),
+            golden(),
+            "subagent frames must match the golden file even when the inner result has data"
+        );
     }
 
     #[test]
@@ -359,6 +534,7 @@ mod tests {
                     arguments: None,
                     result: None,
                     tool_call_id: None,
+                    data: None,
                 },
                 "tool_result",
             ),
@@ -398,6 +574,7 @@ mod tests {
                 },
                 "audio_ready",
             ),
+            (surface_update_sample(), "surface_update"),
         ];
         for (event, expected) in cases {
             assert_eq!(only(event).event, expected);
@@ -449,6 +626,54 @@ mod tests {
                 .is_some_and(|s| s.contains("AudioReady")),
             "unknown inner event should be debug-formatted, got {:?}",
             frame.log_payload
+        );
+    }
+
+    #[test]
+    fn surface_update_projects_exact_snake_case_payload() {
+        let frame = only(surface_update_sample());
+        assert_eq!(frame.event, "surface_update");
+        assert_eq!(
+            frame.log_payload,
+            json!({
+                "surface_id": "s-1",
+                "tool_call_id": "call_9",
+                "anchor_message_id": "m-1",
+                "anchor_call_index": 2,
+                "title": "Trip form",
+                "fallback_text": "Trip form: choose a date",
+                "status": "active",
+                "messages": [{"version": "v1.0", "createSurface": {"surfaceId": "s-1"}}],
+            })
+        );
+        assert_eq!(frame.sse_data, frame.log_payload.to_string());
+    }
+
+    #[test]
+    fn surface_update_omits_absent_tool_call_id_and_keeps_empty_messages() {
+        let frame = only(OrchestratorEvent::SurfaceUpdate {
+            surface_id: "s-1".into(),
+            tool_call_id: None,
+            anchor_message_id: "m-1".into(),
+            anchor_call_index: 0,
+            title: "t".into(),
+            fallback_text: "f".into(),
+            status: "submitted".into(),
+            messages: Vec::new(),
+        });
+        assert!(
+            frame.log_payload.get("tool_call_id").is_none(),
+            "absent tool_call_id must be omitted"
+        );
+        assert_eq!(frame.log_payload["messages"], json!([]));
+        assert_eq!(frame.log_payload["status"], "submitted");
+    }
+
+    #[test]
+    fn cli_projector_prints_surface_fallback_text() {
+        assert_eq!(
+            CliProjector.project(&surface_update_sample()),
+            vec!["Trip form: choose a date".to_string()]
         );
     }
 }

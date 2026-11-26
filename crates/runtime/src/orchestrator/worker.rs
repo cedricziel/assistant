@@ -3,17 +3,16 @@
 //! These methods handle claiming messages from the message bus, dispatching
 //! them to the appropriate `run_turn*` variant, and publishing results back.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    ClaimFilter, ContentBlock, MAX_TURN_REDELIVERIES, OrgId, PublishRequest, SpaceId, ToolHandler,
-    UserId, auth::AuthContext, bus_messages, topic, types::conversation::Interface,
+    ClaimFilter, ContentBlock, MAX_TURN_REDELIVERIES, MessageBus, OrgId, PublishRequest, SpaceId,
+    ToolHandler, UserId, bus_messages, topic, types::conversation::Interface,
     types::conversation::TurnIdentity,
 };
-use chrono::{DateTime, Local, Utc};
+use chrono::Local;
 use opentelemetry::{
     Context as OtelContext, KeyValue,
     trace::{Span as _, SpanKind, TraceContextExt},
@@ -23,8 +22,37 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::{ExtensionRegistration, Orchestrator, TurnResult, parse_interface};
+use super::turn_cancellations::Claim;
+use super::{ExtensionRegistration, Orchestrator, SubmitTurn, TurnResult, parse_interface};
 use crate::webhook_dispatch;
+
+/// Periodically refreshes the claim of a bus message while a turn runs.
+///
+/// The background task is aborted when the guard is dropped.
+struct ClaimHeartbeat(tokio::task::JoinHandle<()>);
+
+impl ClaimHeartbeat {
+    fn spawn(bus: Arc<dyn MessageBus>, message_id: Uuid, interval: Duration) -> Self {
+        Self(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // The first tick completes immediately; the claim is fresh then.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                if let Err(e) = bus.touch(message_id).await {
+                    warn!(%message_id, error = %e, "failed to refresh bus claim");
+                }
+            }
+        }))
+    }
+}
+
+impl Drop for ClaimHeartbeat {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 
 impl Orchestrator {
     // ── Bus-based turn processing ────────────────────────────────────────────
@@ -41,6 +69,23 @@ impl Orchestrator {
         sink: mpsc::Sender<super::OrchestratorEvent>,
     ) {
         self.token_sinks.write().await.insert(conversation_id, sink);
+    }
+
+    /// Remove `conversation_id`'s event sink, but only if it is `sink`'s
+    /// channel. A runner can release its own sink without touching the one a
+    /// newer turn of the same conversation registered.
+    pub async fn release_token_sink(
+        &self,
+        conversation_id: Uuid,
+        sink: &mpsc::Sender<super::OrchestratorEvent>,
+    ) {
+        let mut sinks = self.token_sinks.write().await;
+        if sinks
+            .get(&conversation_id)
+            .is_some_and(|registered| registered.same_channel(sink))
+        {
+            sinks.remove(&conversation_id);
+        }
     }
 
     /// Register extension tools and attachments for an interface-specific turn.
@@ -183,6 +228,31 @@ impl Orchestrator {
                         turn_req.prompt.clone()
                     };
 
+                    // Claim the request before touching the per-conversation
+                    // maps: a request cancelled before any worker claimed it
+                    // is stale, and those maps may already belong to a newer
+                    // turn of the same conversation. Turns dispatched outside
+                    // of submit_turn (e.g. the scheduler) have no entry and
+                    // run to completion regardless.
+                    let claim = match msg.batch_id {
+                        Some(bid) => self.turn_cancellations.write().await.claim(bid),
+                        None => Claim::Untracked,
+                    };
+                    let turn_cancel = match claim {
+                        Claim::Cancelled => {
+                            info!(
+                                conversation_id = %conv_id,
+                                worker_id,
+                                submit_state = "cancelled_before_claim",
+                                "Skipping turn cancelled before a worker claimed it"
+                            );
+                            let _ = self.bus.ack(msg.id).await;
+                            continue;
+                        }
+                        Claim::Claimed(token) => token,
+                        Claim::Untracked => CancellationToken::new(),
+                    };
+
                     // Check for registered side-channel resources.
                     let ext = self.extension_registrations.write().await.remove(&conv_id);
                     let token_sink = self.token_sinks.write().await.remove(&conv_id);
@@ -192,30 +262,24 @@ impl Orchestrator {
                     // needs to be nacked for NATS redelivery.
                     let ext_for_retry = ext.clone();
 
-                    // Look up the cancellation token registered by submit_turn
-                    // for this specific request.  Turns dispatched outside of
-                    // submit_turn (e.g. the scheduler) won't have one, which is
-                    // fine — they run to completion regardless.
-                    let turn_cancel = msg
-                        .batch_id
-                        .and_then(|bid| {
-                            // Use try_read so we don't deadlock in the common
-                            // path; if the lock is contended we skip and the
-                            // turn runs without cancellation support (safe).
-                            self.turn_cancellations
-                                .try_read()
-                                .ok()
-                                .and_then(|g| g.get(&bid).cloned())
-                        })
-                        .unwrap_or_else(CancellationToken::new);
-
                     // Extract identity from the bus message so tools see who
                     // initiated this turn.
                     let identity = TurnIdentity {
                         user_id: turn_req.user_id.map(UserId::from),
                         org_id: turn_req.org_id.map(OrgId::from),
                         space_id: turn_req.space_id.map(SpaceId::from),
+                        interactive: turn_req.interactive,
+                        run_id: msg.batch_id,
                     };
+
+                    // Keep the bus claim alive for as long as the turn runs so
+                    // it is not reaped (or redelivered by the broker) and run
+                    // twice. Dropped, and thereby aborted, on every exit path.
+                    let _heartbeat = ClaimHeartbeat::spawn(
+                        self.bus.clone(),
+                        msg.id,
+                        self.bus_heartbeat_interval,
+                    );
 
                     // Dispatch to the appropriate processing method, racing
                     // against the per-turn cancellation token so an expired
@@ -292,14 +356,7 @@ impl Orchestrator {
 
                     match result {
                         Ok(turn_result) => {
-                            let bus_result = bus_messages::TurnResult {
-                                conversation_id: conv_id,
-                                content: turn_result.answer,
-                                turn: 0,
-                                attachment_ids: turn_result.attachment_ids,
-                                message_id: turn_result.message_id,
-                                had_errors: turn_result.had_errors,
-                            };
+                            let bus_result = bus_turn_result(conv_id, turn_result);
 
                             let result_payload =
                                 serde_json::to_value(&bus_result).unwrap_or_default();
@@ -493,6 +550,7 @@ impl Orchestrator {
                                 attachment_ids: vec![],
                                 message_id: None,
                                 had_errors: true,
+                                timing: None,
                             };
                             let mut pub_req = PublishRequest::new(
                                 topic::TURN_RESULT,
@@ -612,137 +670,25 @@ impl Orchestrator {
 
     /// Submit a turn through the message bus and wait for the result.
     ///
-    /// Publishes a [`TurnRequest`](bus_messages::TurnRequest) to the bus and
-    /// polls for the corresponding [`TurnResult`](bus_messages::TurnResult).
-    /// Requires [`run_worker`](Self::run_worker) to be running in a
-    /// background task.
+    /// Publishes a [`TurnRequest`](bus_messages::TurnRequest) built from `turn`
+    /// to the bus and polls for the corresponding
+    /// [`TurnResult`](bus_messages::TurnResult). Requires
+    /// [`run_worker`](Self::run_worker) to be running in a background task.
     ///
-    /// # Parameters
-    /// * `prompt` — the user message
-    /// * `conversation_id` — conversation to continue (or start)
-    /// * `interface` — originating interface
-    /// * `timestamp` — when the message was received (injected as a prefix into
-    ///   the prompt by the worker)
-    pub async fn submit_turn(
-        &self,
-        auth: &AuthContext,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-    ) -> Result<TurnResult> {
-        self.submit_turn_internal(
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            HashMap::new(),
-            vec![],
-            TurnIdentity::from_auth(auth),
-            None,
-        )
-        .await
-    }
-
-    /// Submit a turn with user-provided attachment IDs.
-    pub async fn submit_turn_with_attachments(
-        &self,
-        auth: &AuthContext,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        attachment_ids: Vec<Uuid>,
-    ) -> Result<TurnResult> {
-        self.submit_turn_internal(
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            HashMap::new(),
-            attachment_ids,
-            TurnIdentity::from_auth(auth),
-            None,
-        )
-        .await
-    }
-
-    /// Submit a turn with full identity context.
-    pub async fn submit_turn_with_identity(
-        &self,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        attachment_ids: Vec<Uuid>,
-        identity: TurnIdentity,
-    ) -> Result<TurnResult> {
-        self.submit_turn_internal(
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            HashMap::new(),
-            attachment_ids,
-            identity,
-            None,
-        )
-        .await
-    }
-
-    /// Submit a turn using a caller-supplied `request_id`.
-    ///
-    /// Used by streaming HTTP handlers in `assistant-web-ui` so that the SSE
-    /// `run_id` doubles as the orchestrator's `request_id` — letting clients
-    /// invoke [`Self::cancel_turn`] with the same id they already observe in
-    /// the `run_started` event. Behaviour is otherwise identical to
-    /// [`Self::submit_turn_with_attachments`].
-    #[allow(clippy::too_many_arguments)]
-    pub async fn submit_turn_with_request_id(
-        &self,
-        auth: &AuthContext,
-        request_id: Uuid,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        attachment_ids: Vec<Uuid>,
-    ) -> Result<TurnResult> {
-        self.submit_turn_internal(
-            prompt,
-            conversation_id,
-            interface,
-            timestamp,
-            HashMap::new(),
-            attachment_ids,
-            TurnIdentity::from_auth(auth),
-            Some(request_id),
-        )
-        .await
-    }
-
-    /// Submit a turn through the message bus and wait for the result, enriched
-    /// with interface-provided metadata attributes and optional attachment IDs.
-    #[allow(clippy::too_many_arguments)]
-    async fn submit_turn_internal(
-        &self,
-        prompt: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        timestamp: Option<DateTime<Utc>>,
-        submit_metadata: HashMap<String, String>,
-        attachment_ids: Vec<Uuid>,
-        identity: TurnIdentity,
-        request_id_override: Option<Uuid>,
-    ) -> Result<TurnResult> {
-        let request_id = request_id_override.unwrap_or_else(Uuid::new_v4);
+    /// Streaming HTTP handlers set [`SubmitTurn::request_id`] so the SSE
+    /// `run_id` doubles as the request id, letting clients call
+    /// [`Self::cancel_turn`] with the id they already observe in `run_started`.
+    pub async fn submit(&self, turn: SubmitTurn) -> Result<TurnResult> {
+        let request_id = turn.request_id.unwrap_or_else(Uuid::new_v4);
+        let conversation_id = turn.conversation_id;
+        let interface = turn.interface.clone();
         // Register a cancellation token so the worker can be interrupted if
         // submit_turn times out before the turn finishes.
         let cancel_token = CancellationToken::new();
         self.turn_cancellations
             .write()
             .await
-            .insert(request_id, cancel_token.clone());
+            .register(request_id, cancel_token.clone());
         let interface_label = format!("{interface:?}");
         let interface_cx = crate::otel_spans::start_interface_root_context(
             &interface,
@@ -755,11 +701,6 @@ impl Orchestrator {
         interface_cx
             .span()
             .set_attribute(KeyValue::new("bus.correlation_id", request_id.to_string()));
-        for (key, value) in &submit_metadata {
-            interface_cx
-                .span()
-                .set_attribute(KeyValue::new(key.clone(), value.clone()));
-        }
         info!(
             conversation_id = %conversation_id,
             request_id = %request_id,
@@ -767,17 +708,7 @@ impl Orchestrator {
             submit_state = "pending",
             "submit_turn waiter state"
         );
-        let turn_req = bus_messages::TurnRequest {
-            prompt: prompt.to_string(),
-            conversation_id,
-            extension_tools: vec![],
-            timestamp,
-            traceparent: crate::otel_spans::traceparent_from_context(&interface_cx),
-            attachment_ids,
-            user_id: identity.user_id.as_ref().map(|u| u.to_string()),
-            org_id: identity.org_id.as_ref().map(|o| o.to_string()),
-            space_id: identity.space_id.as_ref().map(|s| s.to_string()),
-        };
+        let turn_req = turn.to_request(crate::otel_spans::traceparent_from_context(&interface_cx));
 
         let mut produce_request_span = crate::otel_spans::start_bus_span(
             SpanKind::Producer,
@@ -785,9 +716,6 @@ impl Orchestrator {
             Some(conversation_id),
             &interface_cx,
         );
-        for (key, value) in &submit_metadata {
-            produce_request_span.set_attribute(KeyValue::new(key.clone(), value.clone()));
-        }
         let publish_result = self
             .bus
             .publish(
@@ -838,16 +766,29 @@ impl Orchestrator {
             // `submit_turn` return promptly instead of waiting for the bus
             // result that will never arrive.
             if cancel_token.is_cancelled() {
-                self.turn_cancellations.write().await.remove(&request_id);
+                let claimed = self
+                    .turn_cancellations
+                    .write()
+                    .await
+                    .remove(request_id)
+                    .unwrap_or(true);
                 info!(
                     conversation_id = %conversation_id,
                     request_id = %request_id,
                     interface = %interface_label,
-                    submit_state = "cancelled",
+                    submit_state = if claimed { "cancelled" } else { "cancelled_before_claim" },
                     "submit_turn waiter state"
                 );
+                let before_start = if claimed {
+                    String::new()
+                } else {
+                    format!(
+                        " before it started ({})",
+                        crate::orchestrator::TURN_CANCELLED_BEFORE_START_MARKER
+                    )
+                };
                 anyhow::bail!(
-                    "{}: submit_turn aborted by cancel_turn \
+                    "{}{before_start}: submit_turn aborted by cancel_turn \
                      (conversation_id={conversation_id}, request_id={request_id})",
                     crate::orchestrator::TURN_CANCELLED_MARKER
                 );
@@ -866,7 +807,7 @@ impl Orchestrator {
                 );
                 // Signal the worker to abort the in-flight turn, then clean up.
                 cancel_token.cancel();
-                self.turn_cancellations.write().await.remove(&request_id);
+                self.turn_cancellations.write().await.remove(request_id);
                 anyhow::bail!(
                     "submit_turn timed out waiting for result \
                      (conversation_id={conversation_id}, request_id={request_id})"
@@ -932,7 +873,7 @@ impl Orchestrator {
                     continue;
                 }
                 self.bus.ack(msg.id).await?;
-                self.turn_cancellations.write().await.remove(&request_id);
+                self.turn_cancellations.write().await.remove(request_id);
                 consume_result_span.set_attribute(KeyValue::new("bus.status", "ok"));
                 consume_result_span.end();
                 if now > deadline {
@@ -954,17 +895,40 @@ impl Orchestrator {
                         "submit_turn waiter state"
                     );
                 }
-                return Ok(TurnResult {
-                    answer: bus_result.content,
-                    attachments: vec![],
-                    attachment_ids: bus_result.attachment_ids,
-                    message_id: bus_result.message_id,
-                    had_errors: bus_result.had_errors,
-                });
+                return Ok(turn_result_from_bus(bus_result));
             }
 
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+}
+
+// -- Bus conversions ----------------------------------------------------------
+
+/// Converts an orchestrator [`TurnResult`] into the bus message published to
+/// the submitter. Attachment bytes stay behind; only their IDs travel.
+fn bus_turn_result(conversation_id: Uuid, turn_result: TurnResult) -> bus_messages::TurnResult {
+    bus_messages::TurnResult {
+        conversation_id,
+        content: turn_result.answer,
+        turn: 0,
+        attachment_ids: turn_result.attachment_ids,
+        message_id: turn_result.message_id,
+        had_errors: turn_result.had_errors,
+        timing: turn_result.timing,
+    }
+}
+
+/// Converts a bus result back into the orchestrator [`TurnResult`] returned
+/// to the `submit_turn` caller.
+fn turn_result_from_bus(bus_result: bus_messages::TurnResult) -> TurnResult {
+    TurnResult {
+        answer: bus_result.content,
+        attachments: vec![],
+        attachment_ids: bus_result.attachment_ids,
+        message_id: bus_result.message_id,
+        had_errors: bus_result.had_errors,
+        timing: bus_result.timing,
     }
 }
 
@@ -1097,5 +1061,60 @@ mod transient_failure_tests {
     fn ordinary_429_remains_transient() {
         let e = anyhow::anyhow!("API error 429: Too Many Requests");
         assert!(is_transient_turn_error(&e));
+    }
+}
+
+#[cfg(test)]
+mod turn_result_conversion_tests {
+    use super::*;
+
+    fn timed_result() -> TurnResult {
+        TurnResult {
+            answer: "hello".into(),
+            attachments: vec![],
+            attachment_ids: vec![Uuid::new_v4()],
+            message_id: Some(Uuid::new_v4()),
+            had_errors: false,
+            timing: Some(assistant_core::TurnTiming {
+                time_to_first_token_ms: Some(800),
+                total_ms: 3000,
+                output_tokens: Some(120),
+                decode_ms: Some(2200),
+            }),
+        }
+    }
+
+    fn clone_result(r: &TurnResult) -> TurnResult {
+        TurnResult {
+            answer: r.answer.clone(),
+            attachments: vec![],
+            attachment_ids: r.attachment_ids.clone(),
+            message_id: r.message_id,
+            had_errors: r.had_errors,
+            timing: r.timing.clone(),
+        }
+    }
+
+    #[test]
+    fn timing_survives_the_bus_round_trip() {
+        let original = timed_result();
+        let bus = bus_turn_result(Uuid::new_v4(), clone_result(&original));
+        assert_eq!(bus.timing, original.timing, "orchestrator -> bus");
+
+        let json = serde_json::to_value(&bus).unwrap();
+        let wire: bus_messages::TurnResult = serde_json::from_value(json).unwrap();
+        let back = turn_result_from_bus(wire);
+        assert_eq!(back.timing, original.timing, "bus -> orchestrator");
+        assert_eq!(back.answer, original.answer);
+        assert_eq!(back.attachment_ids, original.attachment_ids);
+        assert_eq!(back.message_id, original.message_id);
+    }
+
+    #[test]
+    fn missing_timing_stays_none() {
+        let mut original = timed_result();
+        original.timing = None;
+        let bus = bus_turn_result(Uuid::new_v4(), clone_result(&original));
+        assert_eq!(turn_result_from_bus(bus).timing, None);
     }
 }

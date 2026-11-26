@@ -1,3 +1,5 @@
+import 'package:assistant_ui/models.dart';
+
 import 'chat_models.dart';
 import 'chat_timeline_reducers.dart';
 
@@ -22,6 +24,7 @@ ChatState abortedTurnState(
   return from.copyWith(
     messages: msgs,
     isSending: false,
+    isStopping: false,
     streamingContent: '',
     error: error,
     clearStatusMessage: clearStatusMessage,
@@ -57,5 +60,67 @@ ChatState completedTurnState(
     conversationId: conversationId,
     messages: msgs,
     pendingQueue: from.pendingQueue,
+  );
+}
+
+/// State after a turn ends with a cancelled `agent_error` frame.
+///
+/// The streaming placeholder becomes a [MessageStatus.stopped] assistant
+/// message holding [partialContent] (the streamed text when that is empty),
+/// under [messageId] or a synthetic id. With no text and no [messageId] the
+/// placeholder is dropped. Pending tool calls become
+/// [ToolCallStatus.cancelled] and active timeline entries complete. The user
+/// message is `ok`, or `failed` (retryable) when the server never persisted
+/// it ([userMessagePersisted] false); then no reply is kept. Timeline entries
+/// and the pending queue carry over.
+ChatState stoppedTurnState(
+  ChatState from, {
+  required String userMsgId,
+  required String partialContent,
+  String? messageId,
+  bool userMessagePersisted = true,
+}) {
+  final msgs = List<ChatMessage>.from(from.messages);
+  completeActiveTimelineEntries(msgs);
+  for (final m in msgs) {
+    for (final record in m.toolCalls) {
+      if (record.status == ToolCallStatus.pending) {
+        record.status = ToolCallStatus.cancelled;
+      }
+    }
+  }
+  setMessageStatus(
+    msgs,
+    userMsgId,
+    userMessagePersisted ? MessageStatus.ok : MessageStatus.failed,
+  );
+
+  final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
+  if (idx != -1) {
+    final placeholder = msgs[idx];
+    final content = partialContent.isNotEmpty
+        ? partialContent
+        : from.streamingContent;
+    if (!userMessagePersisted || (content.isEmpty && messageId == null)) {
+      msgs.removeAt(idx);
+    } else {
+      msgs[idx] = ChatMessage(
+        id: messageId ?? 'assistant-${DateTime.now().millisecondsSinceEpoch}',
+        role: 'assistant',
+        content: content,
+        status: MessageStatus.stopped,
+        audioId: placeholder.audioId,
+        ttsAvailable: placeholder.ttsAvailable,
+      );
+    }
+  }
+  return from.copyWith(
+    messages: msgs,
+    isSending: false,
+    isStopping: false,
+    streamingContent: '',
+    clearError: true,
+    clearStatusMessage: true,
+    clearCurrentTurnStatus: true,
   );
 }

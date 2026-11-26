@@ -82,7 +82,7 @@ use crate::api::{
     personas::{
         AddSkillAccessRequest, CreatePersonaRequest, PersonaDetail, PersonaFileContent,
         PersonaFileSlot, PersonaSkillAccess, PersonaSummary, SetActivePersonaRequest,
-        SetSkillAccessModeRequest, WritePersonaFileRequest,
+        SetSkillAccessModeRequest, UpdatePersonaRequest, WritePersonaFileRequest,
     },
     skills::{CreateSkillRequest, SkillDetail, SkillEntryResponse, UpdateSkillRequest},
     spaces::{CreateSpaceRequest, SpaceDetail, SpaceSummary, UpdateSpaceRequest},
@@ -283,6 +283,8 @@ pub struct ApiErrorResponse {
         crate::api::conversations::delete_conversation,
         crate::api::conversations::update_conversation,
         crate::api::messages::send_message,
+        crate::api::feedback::set_message_feedback,
+        crate::api::feedback::delete_message_feedback,
         crate::api::messages::quick_message,
         crate::api::messages::send_voice_message,
         crate::api::messages::stream_run_events,
@@ -299,6 +301,7 @@ pub struct ApiErrorResponse {
         crate::api::personas::create_persona,
         crate::api::personas::set_active_persona,
         crate::api::personas::get_persona,
+        crate::api::personas::update_persona,
         crate::api::personas::get_persona_file,
         crate::api::personas::put_persona_file,
         crate::api::personas::get_skill_access,
@@ -508,6 +511,7 @@ pub struct ApiErrorResponse {
             CreatePersonaRequest,
             WritePersonaFileRequest,
             SetSkillAccessModeRequest,
+            UpdatePersonaRequest,
             AddSkillAccessRequest,
             SkillEntryResponse,
             SkillDetail,
@@ -573,6 +577,9 @@ pub struct ApiErrorResponse {
             crate::oauth::ClientInfoSchema,
             // Common error response
             ErrorBody,
+            crate::api::feedback::SetMessageFeedbackRequest,
+            crate::api::feedback::MessageFeedbackResponse,
+            crate::api::feedback::FeedbackRating,
             ApiErrorResponse,
             // Organization management types
             OrgSummary,
@@ -849,6 +856,8 @@ mod tests {
         for expected in [
             "get /api/conversations",
             "post /api/conversations/{id}/messages",
+            "put /api/conversations/{id}/messages/{message_id}/feedback",
+            "delete /api/conversations/{id}/messages/{message_id}/feedback",
             "get /api/attachments/{id}",
             "get /api/capabilities",
             "post /api/webhooks",
@@ -870,6 +879,61 @@ mod tests {
                 "{excluded} must not document X-Space-Id"
             );
         }
+    }
+
+    /// `tool_result` frames carry JSON objects for `arguments` and `data`, and
+    /// the call id, so generated clients decode them as maps, not strings.
+    #[test]
+    fn sse_tool_result_event_documents_object_arguments_data_and_call_id() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let schema = &spec["components"]["schemas"]["SseToolResultEvent"];
+        let props = &schema["properties"];
+        for field in ["arguments", "data"] {
+            let ty = &props[field]["type"];
+            let is_object =
+                ty == "object" || ty.as_array().is_some_and(|t| t.contains(&"object".into()));
+            assert!(
+                is_object,
+                "{field} must be type object, got {}",
+                props[field]
+            );
+        }
+        assert!(
+            props["tool_call_id"].is_object(),
+            "tool_call_id must be documented: {props}"
+        );
+        let required = schema["required"].as_array().expect("required list");
+        assert!(
+            !required.iter().any(|r| r == "tool_call_id" || r == "data"),
+            "tool_call_id and data stay optional: {required:?}"
+        );
+        let data_doc = props["data"]["description"].as_str().unwrap_or_default();
+        assert!(
+            data_doc.contains("schemas/tool-results/"),
+            "data must point at schemas/tool-results/: {data_doc}"
+        );
+    }
+
+    /// History summaries expose tool data as an object and the call id.
+    #[test]
+    fn tool_call_summary_documents_object_data_and_call_id() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let schema = &spec["components"]["schemas"]["ToolCallSummary"];
+        let props = &schema["properties"];
+        let ty = &props["data"]["type"];
+        assert!(
+            ty == "object" || ty.as_array().is_some_and(|t| t.contains(&"object".into())),
+            "data must be type object, got {}",
+            props["data"]
+        );
+        assert!(props["tool_call_id"].is_object(), "tool_call_id documented");
+        let required = schema["required"].as_array().expect("required list");
+        assert!(
+            !required.iter().any(|r| r == "tool_call_id" || r == "data"),
+            "tool_call_id and data stay optional: {required:?}"
+        );
+        let doc = props["data"]["description"].as_str().unwrap_or_default();
+        assert!(doc.contains("schemas/tool-results/"), "data doc: {doc}");
     }
 
     /// Telemetry is emitted over OTLP only; the REST API must not expose

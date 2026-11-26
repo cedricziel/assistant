@@ -14,74 +14,74 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 - [x] 2.1 Write a failing test for `with_retry`: it waits at least `retry_after` when the error carries one, and does not retry non-transient errors. Confirm red.
 - [x] 2.2 Add a retry-aware error type to `retry.rs` and honor `retry_after`. Verify 2.1.
-- [ ] 2.3 Write failing tests: Anthropic and OpenAI responses fill `cached_input_tokens`, `cache_write_input_tokens` and `reasoning_tokens`; Ollama leaves `cost_usd` unset. Confirm red.
-- [ ] 2.4 Add the four `Option` fields to `LlmResponseMeta` and fill them in the Anthropic and OpenAI parsers. Verify 2.3.
-- [ ] 2.5 Write failing tests in `otel_spans.rs` and `metrics.rs` for the cache-read, cache-creation and reasoning attributes and `assistant.llm.cost_usd`. Confirm red. Implement, then verify.
+- [x] 2.3 Write failing tests: Anthropic and OpenAI responses fill `cached_input_tokens`, `cache_write_input_tokens` and `reasoning_tokens`; Ollama leaves `cost_usd` unset. Confirm red.
+- [x] 2.4 Add the four `Option` fields to `LlmResponseMeta` and fill them in the Anthropic and OpenAI parsers. Verify 2.3.
+- [x] 2.5 Write failing tests in `otel_spans.rs` and `metrics.rs` for the cache-read, cache-creation and reasoning attributes and `assistant.llm.cost_usd`. Confirm red. Implement, then verify.
 
 ## 3. Provider state refactor (no behavior change)
 
-- [ ] 3.1 Write a failing storage test: a message saved with `provider_state_json` round-trips, and older rows read back as `None`. Confirm red.
-- [ ] 3.2 Add the nullable `messages.provider_state_json` migration and the store field. Verify 3.1 with `cargo test -p assistant-storage`.
-- [ ] 3.3 Write a failing `history.rs` test: a stored provider state is restored onto `AssistantToolCalls`. Confirm red.
-- [ ] 3.4 Change `AssistantToolCalls` to `{ items, provider_state }`, add `provider_state` to `ToolCallResponse`, update all match sites, persist the state in the orchestrator, and restore it in `history.rs`. Verify with `cargo test --workspace`.
+- [x] 3.1 Write a failing storage test: a message saved with `provider_state_json` round-trips, and older rows read back as `None`. Confirm red.
+- [x] 3.2 Add the nullable `messages.provider_state_json` migration and the store field. Verify 3.1 with `cargo test -p assistant-storage`.
+- [x] 3.3 Write a failing `history.rs` test: a stored provider state is restored onto `AssistantToolCalls`. Confirm red.
+- [x] 3.4 Change `AssistantToolCalls` to `{ items, provider_state }`, add `provider_state` to `ToolCallResponse`, update all match sites, persist the state in the orchestrator, and restore it in `history.rs`. Verify with `cargo test --workspace`.
 
 ## 4. Per-call context and per-turn context window
 
-- [ ] 4.1 Write failing tests for `LlmCallContext::scope` and `try_current`, and for `user_hash` (stable, org-scoped, not equal to the raw ID). Confirm red. Implement in core, then verify.
-- [ ] 4.2 Write a failing orchestrator test: a scripted provider observes the conversation ID inside a turn and none in a background job. Confirm red. Wrap the turn LLM calls in `scope`, then verify.
-- [ ] 4.3 Write a failing test: a provider whose `context_window_tokens` changes after construction affects compaction on the next turn. Confirm red. Move the adjustment into per-turn setup, then verify.
+- [x] 4.1 Write failing tests for `LlmCallContext::scope` and `try_current`, and for `user_hash` (stable, org-scoped, not equal to the raw ID). Confirm red. Implement in core, then verify.
+- [x] 4.2 Write a failing orchestrator test: a scripted provider observes the conversation ID inside a turn and none in a background job. Confirm red. Wrap the turn LLM calls in `scope`, then verify.
+- [x] 4.3 Write a failing test: a provider whose `context_window_tokens` changes after construction affects compaction on the next turn. Confirm red. Move the adjustment into per-turn setup, then verify.
 
 ## 5. Chat options (all providers)
 
-- [ ] 5.1 Write failing tests for `ChatOptions` defaults: `chat_with` with default options produces the same request as today for every provider (wiremock or scripted). Confirm red. Add `ChatOptions`, `ChatOptionsSupport`, the default `chat_with`, and `chat`/`chat_streaming` as wrappers. Verify.
-- [ ] 5.2 Write failing wiremock tests for native `tool_choice` and `parallel_tool_calls` mapping on Anthropic (`any`/`tool`, `disable_parallel_tool_use`), OpenAI and Moonshot. Confirm red. Implement, then verify.
-- [ ] 5.3 Write failing tests for the prompt fallback on Ollama: a forced tool not called leads to one retry and then an error naming the tool; `none` sends no tools. Confirm red. Implement, then verify.
-- [ ] 5.4 Write failing tests: `[llm] parallel_tool_calls` parses, and the orchestrator passes it on agent-loop calls. Confirm red. Implement, then verify. Document in `docs/operations/configuration.md`.
+- [x] 5.1 Write failing tests for `ChatOptions` defaults: `chat_with` with default options produces the same request as today for every provider (wiremock or scripted). Confirm red. Add `ChatOptions`, `ChatOptionsSupport`, the default `chat_with`, and `chat`/`chat_streaming` as wrappers. Verify.
+- [x] 5.2 Write failing tests for native `tool_choice` and `parallel_tool_calls` mapping on Anthropic (`any`/`tool`, `disable_parallel_tool_use`) and OpenAI. Confirm red. Implement, then verify. Moonshot keeps the prompt fallback (see D13).
+- [x] 5.3 Write failing tests for the prompt fallback on Ollama: a forced tool not called leads to one retry and then an error naming the tool; `none` sends no tools. Confirm red. Implement, then verify.
+- [x] 5.4 Write failing tests: `[llm] parallel_tool_calls` parses, and the orchestrator passes it on agent-loop calls. Confirm red. Implement, then verify. Document in `docs/operations/configuration.md`.
 
 ## 6. Structured output (all providers)
 
-- [ ] 6.1 Write failing tests for `chat_structured` strategy selection: native schema, forced `respond` tool, then prompt embedding; driven by `ChatOptionsSupport` on a scripted provider. Confirm red. Implement, then verify.
-- [ ] 6.2 Write failing tests: validation through `jsonschema`, fenced JSON stripped, one repair retry carrying the errors, and a final error containing the errors and the raw output. Confirm red. Implement, then verify.
-- [ ] 6.3 Write failing wiremock tests for native JSON schema on OpenAI, and for the forced tool on Anthropic. Confirm red. Implement, then verify.
-- [ ] 6.4 Write failing tests: the skill learner and skill improver send schemas and accept fenced or chatty model output that the fallback path repairs. Confirm red. Migrate both judges, then verify.
+- [x] 6.1 Write failing tests for `chat_structured` strategy selection: native schema, forced `respond` tool, then prompt embedding; driven by `ChatOptionsSupport` on a scripted provider. Confirm red. Implement, then verify.
+- [x] 6.2 Write failing tests: validation through `jsonschema`, fenced JSON stripped, one repair retry carrying the errors, and a final error containing the errors and the raw output. Confirm red. Implement, then verify.
+- [x] 6.3 Write failing wiremock tests for native JSON schema on OpenAI, and for the forced tool on Anthropic. Confirm red. Implement, then verify.
+- [x] 6.4 Write failing tests: the skill learner and skill improver send schemas and accept fenced or chatty model output that the fallback path repairs. Confirm red. Migrate both judges, then verify.
 
 ## 7. OpenRouter wire client
 
-- [ ] 7.1 Write failing wiremock tests for non-streaming chat: request shape (messages, tools, `max_completion_tokens`), served model in meta, tool-call parsing, text answer, and usage including `cost`. Confirm red.
-- [ ] 7.2 Implement `wire.rs`, `request.rs` and non-streaming `chat`. Verify 5.1.
-- [ ] 7.3 Write failing SSE tests covering comment lines, text deltas, tool-call deltas, the final usage chunk, mid-stream `error` with `finish_reason: "error"`, and `[DONE]`. Confirm red. Implement `stream.rs`, then verify.
-- [ ] 7.4 Write failing error tests for the 402, 403 moderation reasons, 429 with `Retry-After`, 503 retried, 400 not retried, and a 200 body with `error`. Confirm red. Implement `errors.rs` on top of task 2, then verify.
-- [ ] 7.5 Write failing tests for the `HTTP-Referer`, `X-OpenRouter-Title` and `X-OpenRouter-Categories` headers, and config rejection of more than two categories. Confirm red. Implement, then verify.
-- [ ] 7.6 Write failing tests: `[llm.openrouter.provider]` is sent as `provider`, unknown keys are rejected, and `fallback_models` is sent as `models` with the primary first. Confirm red. Implement, then verify.
-- [ ] 7.7 Write failing tests: `session_id` and `user` come from `LlmCallContext` and are omitted without it. Confirm red. Implement, then verify.
-- [ ] 7.8 Switch `OpenRouterProvider` from `ChatCompletionsProvider` to the new client, delete the dead code, and verify the existing OpenRouter tests still pass.
-- [ ] 7.9 Rewrite the chat, routing, identity and errors sections of `docs/openrouter.md`.
-- [ ] 7.10 Write failing wiremock tests for OpenRouter native `tool_choice`, `parallel_tool_calls` and JSON schema, each adding `provider.require_parameters: true`, plus the `response-healing` plugin on native non-streaming structured calls. Confirm red. Implement, then verify.
+- [x] 7.1 Write failing wiremock tests for non-streaming chat: request shape (messages, tools, `max_completion_tokens`), served model in meta, tool-call parsing, text answer, and usage including `cost`. Confirm red.
+- [x] 7.2 Implement `wire.rs`, `request.rs` and non-streaming `chat`. Verify 5.1.
+- [x] 7.3 Write failing SSE tests covering comment lines, text deltas, tool-call deltas, the final usage chunk, mid-stream `error` with `finish_reason: "error"`, and `[DONE]`. Confirm red. Implement `stream.rs`, then verify.
+- [x] 7.4 Write failing error tests for the 402, 403 moderation reasons, 429 with `Retry-After`, 503 retried, 400 not retried, and a 200 body with `error`. Confirm red. Implement `errors.rs` on top of task 2, then verify.
+- [x] 7.5 Write failing tests for the `HTTP-Referer`, `X-OpenRouter-Title` and `X-OpenRouter-Categories` headers, and config rejection of more than two categories. Confirm red. Implement, then verify.
+- [x] 7.6 Write failing tests: `[llm.openrouter.provider]` is sent as `provider`, unknown keys are rejected, and `fallback_models` is sent as `models` with the primary first. Confirm red. Implement, then verify.
+- [x] 7.7 Write failing tests: `session_id` and `user` come from `LlmCallContext` and are omitted without it. Confirm red. Implement, then verify.
+- [x] 7.8 Switch `OpenRouterProvider` from `ChatCompletionsProvider` to the new client, delete the dead code, and verify the existing OpenRouter tests still pass.
+- [x] 7.9 Rewrite the chat, routing, identity and errors sections of `docs/openrouter.md`.
+- [x] 7.10 Write failing wiremock tests for OpenRouter native `tool_choice`, `parallel_tool_calls` and JSON schema, each adding `provider.require_parameters: true`, plus the `response-healing` plugin on native non-streaming structured calls. Confirm red. Implement, then verify.
 
 ## 8. Model catalog and capabilities
 
-- [ ] 8.1 Write failing wiremock tests: context window is the minimum over selectable endpoints and respects `only` or `order` without fallbacks; `vision`, tools, reasoning and file input are derived from the catalog. Confirm red.
-- [ ] 8.2 Implement `catalog.rs` with an `ArcSwap` snapshot, a background fetch, and a 5-second first-call wait. Add `arc-swap` to the workspace dependencies. Verify 6.1.
-- [ ] 8.3 Write failing tests: an unknown model fails each call without an upstream request; a catalog outage yields conservative capabilities and refreshes after the backoff (driven by a test clock). Confirm red. Implement, then verify.
-- [ ] 8.4 Document capability detection in `docs/openrouter.md`.
-- [ ] 8.5 Write a failing test that chat-option support (`tool_choice`, `parallel_tool_calls`, `structured_outputs`/`response_format`, image and audio output) comes from the catalog. Confirm red. Implement, then verify.
+- [x] 8.1 Write failing wiremock tests: context window is the minimum over selectable endpoints and respects `only` or `order` without fallbacks; `vision`, tools, reasoning and file input are derived from the catalog. Confirm red.
+- [x] 8.2 Implement `catalog.rs` with an `ArcSwap` snapshot, a background fetch, and a 5-second first-call wait. Add `arc-swap` to the workspace dependencies. Verify 6.1.
+- [x] 8.3 Write failing tests: an unknown model fails each call without an upstream request; a catalog outage yields conservative capabilities and refreshes after the backoff (driven by a test clock). Confirm red. Implement, then verify.
+- [x] 8.4 Document capability detection in `docs/openrouter.md`.
+- [x] 8.5 Write a failing test that chat-option support (`tool_choice`, `parallel_tool_calls`, `structured_outputs`/`response_format`, image and audio output) comes from the catalog. Confirm red. Implement, then verify.
 
 ## 9. Reasoning
 
-- [ ] 9.1 Write failing tests: config parsing, `effort` combined with `max_tokens` rejected, `reasoning` sent, and an effort the catalog does not support fails with the supported list. Confirm red. Implement, then verify.
-- [ ] 9.2 Write failing tests: text and summary details stream as `Thinking`, encrypted details are hidden, `exclude` emits nothing, and `finish_reason: "length"` with empty content is an error. Confirm red. Implement, then verify.
-- [ ] 9.3 Write failing tests: tool-call `reasoning_details` are stored as `ProviderState`, sent back unchanged and in order, survive a history rebuild from storage, and are not sent when the state's provider differs. Confirm red. Implement, then verify.
-- [ ] 9.4 Document reasoning in `docs/openrouter.md`.
+- [x] 9.1 Write failing tests: config parsing, `effort` combined with `max_tokens` rejected, `reasoning` sent, and an effort the catalog does not support fails with the supported list. Confirm red. Implement, then verify.
+- [x] 9.2 Write failing tests: text and summary details stream as `Thinking`, encrypted details are hidden, `exclude` emits nothing, and `finish_reason: "length"` with empty content is an error. Confirm red. Implement, then verify.
+- [x] 9.3 Write failing tests: tool-call `reasoning_details` are stored as `ProviderState`, sent back unchanged and in order, survive a history rebuild from storage, and are not sent when the state's provider differs. Confirm red. Implement, then verify.
+- [x] 9.4 Document reasoning in `docs/openrouter.md`.
 
 ## 10. Prompt caching
 
-- [ ] 10.1 Write failing table tests for breakpoint placement on Anthropic, Google, Qwen and OpenAI, with caching disabled, and with `ttl = "1h"`. Confirm red. Implement, then verify.
-- [ ] 10.2 Write a failing test that cached and cache-write tokens reach meta. Confirm red. Implement, then verify.
-- [ ] 10.3 Document caching in `docs/openrouter.md`.
+- [x] 10.1 Write failing table tests for breakpoint placement on Anthropic, Google, Qwen and OpenAI, with caching disabled, and with `ttl = "1h"`. Confirm red. Implement, then verify.
+- [x] 10.2 Write a failing test that cached and cache-write tokens reach meta. Confirm red. Implement, then verify.
+- [x] 10.3 Document caching in `docs/openrouter.md`.
 
 ## 11. Web search
 
-- [ ] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
+- [x] 11.1 Write failing tests: the plugin options are sent, `HostedTool::WebSearch` is reported only when enabled, and `search_context_size` with a non-native engine is rejected. Confirm red. Implement, then verify.
 - [ ] 11.2 Write failing tests for citation rendering: dedupe, order, missing titles, URLs already linked inline, and the streamed final chunk equal to the persisted answer. Confirm red. Implement, then verify.
 - [ ] 11.3 Write a failing runtime test that the local web-search tool is not offered when the provider reports hosted web search. Confirm red, or green if this is already covered, and fix any gap. Then document in `docs/openrouter.md`.
 

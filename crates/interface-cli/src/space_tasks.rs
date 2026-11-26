@@ -71,9 +71,8 @@ mod tests {
     use assistant_core::types::agent::OrgConfig;
     use assistant_core::types::conversation::Interface;
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
-    use assistant_runtime::bootstrap::AutoDenyConfirmation;
     use assistant_runtime::{
-        BinaryRole, OrgContexts, SpaceRuntimes, SpaceSupervisor, core_worker_plan,
+        BinaryRole, OrgContexts, SpaceRuntimes, SpaceSupervisor, SubmitTurn, core_worker_plan,
     };
     use assistant_storage::{ConversationStore as _, OrgPoolFactory, SqliteConversationStore};
 
@@ -124,9 +123,7 @@ mod tests {
                     config,
                     Arc::new(ScriptedLlmProvider::new()),
                 )),
-                Arc::new(AutoDenyConfirmation {
-                    interface_name: "test",
-                }),
+                None,
             )
             .with_submit_timeout(TURN_DEADLINE.as_secs()),
         );
@@ -142,12 +139,9 @@ mod tests {
         let conversation = Uuid::new_v4();
         tokio::time::timeout(
             TURN_DEADLINE,
-            beta.orchestrator.submit_turn(
-                &AuthContext::system(),
-                "hello",
-                conversation,
-                Interface::Web,
-                None,
+            beta.orchestrator.submit(
+                SubmitTurn::new("hello", conversation, Interface::Web)
+                    .with_auth(&AuthContext::system()),
             ),
         )
         .await

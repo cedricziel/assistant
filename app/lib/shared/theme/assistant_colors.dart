@@ -1,3 +1,4 @@
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// Named brand + accent + warning colour roles for the assistant app.
@@ -20,5 +21,5 @@ abstract class AssistantColors {
   /// Warning amber. Material 3 has no built-in `warning` role, so we
   /// expose it explicitly. Used for `denied` status pills, soft warnings,
   /// and confirmation banners that aren't outright errors.
-  static const Color warning = Color(0xFFB45309);
+  static const Color warning = AssistantUiColors.warning;
 }

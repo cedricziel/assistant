@@ -1,6 +1,7 @@
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:built_collection/built_collection.dart';
+import 'package:built_value/json_object.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 MessageSummary _msg({
@@ -240,6 +241,22 @@ void main() {
       expect(chips.single.toolCalls.single.status, ToolCallStatus.pending);
     });
 
+    test('cancelled tool-call status maps to ToolCallStatus.cancelled', () {
+      final history = [
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [(name: 'bash', status: 'cancelled', result: null)],
+        ),
+      ];
+
+      final chips = chatMessagesFromHistory(history)
+          .where((m) => m.timelineType == TimelineEntryType.toolCall)
+          .toList();
+      expect(chips.single.toolCalls.single.status, ToolCallStatus.cancelled);
+    });
+
     test('multiple invocations of the same tool produce distinct chip ids', () {
       // Defensive: if a single assistant row carries two `bash` invocations,
       // both chips must have unique ids so Flutter widget keying does not
@@ -262,6 +279,43 @@ void main() {
           .toList();
       expect(ids, hasLength(2));
       expect(ids.toSet(), hasLength(2), reason: 'chip ids must be unique');
+    });
+
+    test('tool data and tool call id reach the ToolCallRecord', () {
+      final history = [
+        MessageSummary(
+          (b) => b
+            ..id = 'a1'
+            ..role = 'assistant'
+            ..content = ''
+            ..turn = 1
+            ..createdAt = DateTime.parse('2026-05-16T00:00:00Z')
+            ..ttsAvailable = false
+            ..toolCalls = ListBuilder<ToolCallSummary>([
+              ToolCallSummary(
+                (t) => t
+                  ..name = 'bash'
+                  ..status = 'ok'
+                  ..toolCallId = 'call_7'
+                  ..data = JsonObject({'kind': 'terminal', 'exit_code': 0}),
+              ),
+              ToolCallSummary(
+                (t) => t
+                  ..name = 'bash'
+                  ..status = 'ok',
+              ),
+            ]),
+        ),
+      ];
+
+      final records = chatMessagesFromHistory(history)
+          .map((m) => m.toolCalls.single)
+          .toList();
+
+      expect(records[0].toolCallId, 'call_7');
+      expect(records[0].data, {'kind': 'terminal', 'exit_code': 0});
+      expect(records[1].toolCallId, isNull);
+      expect(records[1].data, isNull);
     });
   });
 }

@@ -1,6 +1,5 @@
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
-
-import 'chat_models.dart';
+import 'package:assistant_ui/models.dart';
 
 /// Map a server tool-status string onto [ToolCallStatus]; unknown values
 /// are treated as [ToolCallStatus.ok].
@@ -10,6 +9,7 @@ ToolCallStatus parseToolStatus(String status) {
     'ok' => ToolCallStatus.ok,
     'error' => ToolCallStatus.error,
     'denied' => ToolCallStatus.denied,
+    'cancelled' => ToolCallStatus.cancelled,
     _ => ToolCallStatus.ok,
   };
 }
@@ -49,6 +49,8 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
               status: parseToolStatus(tc.status),
               arguments: tc.arguments?.asMap.cast<String, dynamic>(),
               result: tc.result,
+              toolCallId: tc.toolCallId,
+              data: tc.data?.asMap.cast<String, Object?>(),
             ),
           ],
         ),

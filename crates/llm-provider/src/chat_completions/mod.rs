@@ -2,7 +2,7 @@
 //!
 //! Provides reusable request building, SSE streaming, and response parsing
 //! for any provider that speaks the OpenAI Chat Completions wire format
-//! (Moonshot, OpenRouter, and any future OpenAI-compatible backend).
+//! (Moonshot and any future OpenAI-compatible backend).
 
 use async_openai::Client;
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
@@ -25,7 +25,7 @@ pub mod messages;
 pub mod tools;
 
 pub use messages::{build_chat_messages, build_raw_messages};
-pub use tools::{extract_chat_meta, parse_tool_calls, tool_spec_to_chat};
+pub use tools::{apply_chat_usage, extract_chat_meta, parse_tool_calls, tool_spec_to_chat};
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -37,9 +37,6 @@ pub struct ChatCompletionsConfig {
     pub api_key: Secret,
     pub timeout_secs: u64,
     pub max_tokens: u32,
-    /// Extra HTTP headers injected into every request.
-    /// Used by OpenRouter for `HTTP-Referer` and `X-Title`.
-    pub extra_headers: Vec<(String, String)>,
 }
 
 // ── Provider ─────────────────────────────────────────────────────────────────
@@ -47,7 +44,7 @@ pub struct ChatCompletionsConfig {
 /// Reusable Chat Completions client.
 ///
 /// Handles message conversion, tool-spec mapping, SSE streaming, response
-/// parsing.  Provider-specific wrappers (Moonshot, OpenRouter, …) compose
+/// parsing.  Provider-specific wrappers (such as Moonshot) compose
 /// this with their own config and capabilities.
 pub struct ChatCompletionsProvider {
     /// `async-openai` client configured for the target endpoint.
@@ -61,17 +58,9 @@ pub struct ChatCompletionsProvider {
 impl ChatCompletionsProvider {
     /// Create a new Chat Completions provider from configuration.
     pub fn new(config: ChatCompletionsConfig) -> anyhow::Result<Self> {
-        let mut oai_cfg = AsyncOpenAIConfig::new()
+        let oai_cfg = AsyncOpenAIConfig::new()
             .with_api_key(config.api_key.expose())
             .with_api_base(&config.base_url);
-
-        for (key, value) in &config.extra_headers {
-            let header_name = reqwest::header::HeaderName::from_bytes(key.as_bytes())
-                .map_err(|e| anyhow::anyhow!("Invalid extra header name {key}: {e}"))?;
-            oai_cfg = oai_cfg
-                .with_header(header_name, value.as_str())
-                .map_err(|e| anyhow::anyhow!("Failed to set extra header {key}: {e}"))?;
-        }
 
         let http = build_reqwest_client(config.timeout_secs)?;
         let client = Client::with_config(oai_cfg).with_http_client(http);
@@ -156,6 +145,7 @@ impl ChatCompletionsProvider {
                     items,
                     meta,
                     thinking: None,
+                    provider_state: None,
                 }));
             }
         }
@@ -216,8 +206,7 @@ impl ChatCompletionsProvider {
         let mut model_name = String::new();
         let mut response_id = String::new();
         let mut finish_reason: Option<String> = None;
-        let mut input_tokens: Option<u64> = None;
-        let mut output_tokens: Option<u64> = None;
+        let mut usage = None;
 
         while let Some(result) = stream.next().await {
             let chunk =
@@ -229,9 +218,8 @@ impl ChatCompletionsProvider {
             if response_id.is_empty() {
                 response_id.clone_from(&chunk.id);
             }
-            if let Some(ref usage) = chunk.usage {
-                input_tokens = Some(usage.prompt_tokens as u64);
-                output_tokens = Some(usage.completion_tokens as u64);
+            if chunk.usage.is_some() {
+                usage.clone_from(&chunk.usage);
             }
 
             for choice in &chunk.choices {
@@ -272,7 +260,7 @@ impl ChatCompletionsProvider {
 
         debug!("Chat Completions SSE stream complete");
 
-        let meta = LlmResponseMeta {
+        let mut meta = LlmResponseMeta {
             model: if model_name.is_empty() {
                 None
             } else {
@@ -284,9 +272,11 @@ impl ChatCompletionsProvider {
                 Some(response_id)
             },
             finish_reason,
-            input_tokens,
-            output_tokens,
+            ..Default::default()
         };
+        if let Some(usage) = &usage {
+            apply_chat_usage(&mut meta, usage);
+        }
 
         if !tool_map.is_empty() {
             let items: Vec<ToolCallItem> = tool_map
@@ -311,6 +301,7 @@ impl ChatCompletionsProvider {
                     items,
                     meta,
                     thinking: None,
+                    provider_state: None,
                 }));
             }
         }
@@ -358,5 +349,5 @@ impl ChatCompletionsProvider {
 // ── LlmProvider blanket helpers ──────────────────────────────────────────────
 //
 // We deliberately do NOT implement LlmProvider on ChatCompletionsProvider.
-// Each concrete provider (Moonshot, OpenRouter, …) implements LlmProvider
+// Each concrete provider (such as Moonshot) implements LlmProvider
 // itself so it can report its own `provider_name()`, `capabilities()`, etc.

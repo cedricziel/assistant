@@ -20,6 +20,7 @@ pub mod subagent;
 pub mod text;
 pub mod tls;
 pub mod tool;
+pub mod tool_render;
 pub mod types;
 pub mod upload;
 
@@ -39,8 +40,8 @@ pub use bus::{
     BusMessage, ClaimFilter, MAX_TURN_REDELIVERIES, MessageBus, MessageStatus, PublishRequest,
 };
 pub use bus_messages::{
-    AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase, TurnRequest,
-    TurnResult, TurnStatus, topic,
+    AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnAnchor, TurnPhase,
+    TurnRequest, TurnResult, TurnStatus, topic,
 };
 pub use catalog::{CatalogEntry, CatalogResolver, CatalogResourceType};
 pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
@@ -65,12 +66,14 @@ pub use store::{
 };
 // -- LLM abstractions (types, traits, streaming) --
 pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};
-pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport};
+pub use llm::options::{ChatOptions, ChatOptionsSupport, ResponseFormat, ToolChoice};
+pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport, chat_with_fallback};
 pub use llm::stream_chunk::StreamChunk;
+pub use llm::structured::chat_structured;
 pub use llm::tool_spec::ToolSpec;
 pub use llm::types::{
-    ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ToolCallItem,
-    ToolCallResponse,
+    ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ProviderState,
+    ToolCallItem, ToolCallResponse, TurnTiming,
 };
 pub use memory::{
     MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,
@@ -79,4 +82,5 @@ pub use secret::Secret;
 pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput, TurnScope, TurnToolSource};
+pub use tool_render::{SourceResult, SourcesData, TerminalData, ToolRenderData};
 pub use upload::resolve_upload_bytes;

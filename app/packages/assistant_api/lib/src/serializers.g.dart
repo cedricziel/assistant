@@ -65,6 +65,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(DeviceCodeResponseSchema.serializer)
       ..add(ErrorBody.serializer)
       ..add(ExecuteCommandRequest.serializer)
+      ..add(FeedbackRating.serializer)
       ..add(HttpAuthSecurityScheme.serializer)
       ..add(ImplicitOAuthFlow.serializer)
       ..add(IntegrationAuthKind.serializer)
@@ -80,6 +81,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ListTasksResponse.serializer)
       ..add(MemberEntry.serializer)
       ..add(Message.serializer)
+      ..add(MessageFeedbackResponse.serializer)
       ..add(MessageSummary.serializer)
       ..add(ModelPart.serializer)
       ..add(MutualTlsSecurityScheme.serializer)
@@ -115,6 +117,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ServerMetadata.serializer)
       ..add(SetActivePersonaRequest.serializer)
       ..add(SetCredentialRequest.serializer)
+      ..add(SetMessageFeedbackRequest.serializer)
       ..add(SetSkillAccessModeRequest.serializer)
       ..add(SetSpaceAccessRequest.serializer)
       ..add(SkillDetail.serializer)
@@ -159,6 +162,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(UpdateIntegrationRequest.serializer)
       ..add(UpdateMemberRequest.serializer)
       ..add(UpdateOrgRequest.serializer)
+      ..add(UpdatePersonaRequest.serializer)
       ..add(UpdateSkillRequest.serializer)
       ..add(UpdateSpaceRequest.serializer)
       ..add(UpdateUserRequest.serializer)
@@ -217,8 +221,14 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
           () => ListBuilder<PersonaFileSlot>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpaceAccessEntry)]),
           () => ListBuilder<SpaceAccessEntry>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

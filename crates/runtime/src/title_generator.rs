@@ -113,7 +113,8 @@ fn build_title_prompt_history(history: &[ChatHistoryMessage]) -> Vec<ChatHistory
                 joined.push_str("\n\n");
                 continue;
             }
-            ChatHistoryMessage::AssistantToolCalls(_) | ChatHistoryMessage::ToolResult { .. } => {
+            ChatHistoryMessage::AssistantToolCalls { .. }
+            | ChatHistoryMessage::ToolResult { .. } => {
                 continue;
             }
         };
@@ -345,12 +346,22 @@ impl TitleGeneratorWorker {
 
         match generate_title(&chat_history, self.llm.as_ref()).await {
             Ok(title) => {
-                if let Err(e) = store.update_title(conv_id, &title).await {
-                    warn!(%conv_id, error = %e, "title-generator: update_title failed");
-                    let _ = self.bus.nack_delayed(msg.id, RETRY_BACKOFF[0]).await;
-                    return Ok(());
+                match store.set_generated_title(conv_id, &title).await {
+                    Ok(true) => {
+                        info!(%conv_id, title = %title, "title-generator: auto-titled conversation");
+                    }
+                    Ok(false) => {
+                        debug!(
+                            %conv_id,
+                            "title-generator: conversation locked while generating; keeping existing title",
+                        );
+                    }
+                    Err(e) => {
+                        warn!(%conv_id, error = %e, "title-generator: set_generated_title failed");
+                        let _ = self.bus.nack_delayed(msg.id, RETRY_BACKOFF[0]).await;
+                        return Ok(());
+                    }
                 }
-                info!(%conv_id, title = %title, "title-generator: auto-titled conversation");
                 let _ = self.bus.ack(msg.id).await;
             }
             Err(e) => {
@@ -684,6 +695,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: None,
             had_errors: false,
+            timing: None,
         })
         .unwrap();
         let mut req = PublishRequest::new(bus_messages::topic::TURN_COMPLETED, payload)
@@ -743,6 +755,7 @@ mod tests {
             attachment_ids: vec![],
             message_id: None,
             had_errors: false,
+            timing: None,
         })
         .unwrap();
         bus.publish(
@@ -811,6 +824,94 @@ mod tests {
         assert_eq!(llm.chat_calls(), 0, "must not call LLM for locked conv");
         let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
         assert_eq!(loaded.title.as_deref(), Some("User Picked This"));
+    }
+
+    /// LLM stub that renames the conversation through `update_title` while
+    /// the worker is awaiting `chat`, like a user renaming mid-call.
+    struct RenamingLlm {
+        store: Arc<dyn ConversationStore>,
+        conv_id: uuid::Uuid,
+        manual_title: &'static str,
+    }
+
+    #[async_trait]
+    impl LlmProvider for RenamingLlm {
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                tools: ToolSupport::None,
+                streaming: false,
+                vision: false,
+                hosted_tools: vec![],
+                context_window_tokens: None,
+            }
+        }
+
+        async fn chat(
+            &self,
+            _system_prompt: &str,
+            _history: &[ChatHistoryMessage],
+            _tools: &[ToolSpec],
+        ) -> Result<LlmResponse> {
+            self.store
+                .update_title(self.conv_id, self.manual_title)
+                .await?;
+            Ok(LlmResponse::FinalAnswer(
+                "Generated Title".into(),
+                LlmResponseMeta::default(),
+            ))
+        }
+
+        async fn chat_streaming(
+            &self,
+            system_prompt: &str,
+            history: &[ChatHistoryMessage],
+            tools: &[ToolSpec],
+            _sink: Option<mpsc::Sender<StreamChunk>>,
+        ) -> Result<LlmResponse> {
+            self.chat(system_prompt, history, tools).await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_worker_does_not_overwrite_rename_made_during_llm_call() {
+        use assistant_core::bus::MessageStatus;
+
+        let (bus, storage) = make_bus_and_storage().await;
+        let agent_id = "default";
+        let conv_id =
+            seed_conversation_with_messages(&storage, agent_id, &["a", "b"], &["c", "d"]).await;
+        let store = storage.conversation_store_for_agent(agent_id);
+        let llm: Arc<dyn LlmProvider> = Arc::new(RenamingLlm {
+            store: Arc::new(storage.conversation_store_for_agent(agent_id)),
+            conv_id,
+            manual_title: "Trip plan",
+        });
+        publish_turn_completed(bus.as_ref(), conv_id, agent_id, 2).await;
+
+        let worker = TitleGeneratorWorker::new(
+            bus.clone(),
+            storage.clone(),
+            llm,
+            TitlingConfig::default(),
+            agent_id.to_string(),
+        );
+        worker.run_one().await.expect("run_one should not error");
+
+        let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
+        assert_eq!(
+            conv.title.as_deref(),
+            Some("Trip plan"),
+            "the manual rename must win over the generated title"
+        );
+        let done = bus
+            .list(
+                bus_messages::topic::TURN_COMPLETED,
+                Some(MessageStatus::Done),
+                10,
+            )
+            .await
+            .unwrap();
+        assert_eq!(done.len(), 1, "the bus message must be acked");
     }
 
     #[tokio::test]

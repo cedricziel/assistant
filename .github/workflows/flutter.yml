@@ -37,6 +37,7 @@ jobs:
             flutter:
               - 'app/**'
               - 'openapi.json'
+              - 'schemas/tool-results/**'
               - '.github/workflows/flutter.yml'
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -56,6 +57,15 @@ jobs:
       - name: Run tests
         if: steps.filter.outputs.flutter == 'true'
         run: flutter test
+
+      # Goldens run here: CI is Linux, where the baselines are generated.
+      - name: Run assistant_ui tests
+        if: steps.filter.outputs.flutter == 'true'
+        run: cd packages/assistant_ui && flutter test
+
+      - name: Analyze and test widgetbook gallery
+        if: steps.filter.outputs.flutter == 'true'
+        run: cd widgetbook && flutter analyze --fatal-infos && flutter test
 
   # Regenerates the Dart client with the generator version pinned in the
   # Makefile and fails when the committed output differs. Not a required check.

@@ -638,6 +638,9 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
             arguments: json['arguments'] as Map<String, dynamic>?,
             result: json['result'] as String?,
             toolCallId: json['tool_call_id'] as String?,
+            data: json['data'] is Map
+                ? (json['data'] as Map).cast<String, Object?>()
+                : null,
             sequenceId: seq,
           );
         } catch (_) {
@@ -776,7 +779,7 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           // ignore malformed subagent_status events
         }
       } else if (eventType == 'agent_error' && dataLine != null) {
-        yield AgentErrorEvent(dataLine, sequenceId: seq);
+        yield AgentErrorEvent.fromData(dataLine, sequenceId: seq);
       } else if (eventType == 'audio_ready' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
@@ -786,6 +789,13 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           );
         } catch (_) {
           // ignore malformed audio_ready events
+        }
+      } else if (eventType == 'suggestions' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield SuggestionsEvent.fromJson(json, sequenceId: seq);
+        } catch (_) {
+          // ignore malformed suggestions events
         }
       }
       eventType = null;

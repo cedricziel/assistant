@@ -1,0 +1,19 @@
+name: assistant_widgetbook
+description: Gallery of the assistant_ui elements. Never part of the shipped app.
+publish_to: none
+version: 0.0.1
+resolution: workspace
+environment:
+  sdk: ^3.13.0
+  flutter: 3.50.1
+dependencies:
+  flutter:
+    sdk: flutter
+  assistant_ui:
+    path: ../packages/assistant_ui
+  material_ui: ^1.11.1
+  widgetbook: 3.25.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

@@ -5,8 +5,11 @@
 //! `assistant-llm-provider`; this module only contains the abstractions
 //! they implement.
 
+pub mod call_context;
 pub mod embedding;
+pub mod options;
 pub mod provider;
 pub mod stream_chunk;
+pub mod structured;
 pub mod tool_spec;
 pub mod types;

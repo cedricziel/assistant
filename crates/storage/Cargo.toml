@@ -1,6 +1,6 @@
 [package]
 name = "assistant-storage"
-version = "0.3.0"
+version = "0.3.1"
 license.workspace = true
 edition.workspace = true
 description = "SQLite-backed storage layer: skill registry, traces, memory, and scheduled tasks"
@@ -19,6 +19,10 @@ dirs = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 cron = { workspace = true }
+unicode-normalization = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

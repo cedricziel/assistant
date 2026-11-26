@@ -72,6 +72,7 @@ import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/device_code_response_schema.dart';
 import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/execute_command_request.dart';
+import 'package:assistant_api/src/model/feedback_rating.dart';
 import 'package:assistant_api/src/model/http_auth_security_scheme.dart';
 import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
 import 'package:assistant_api/src/model/integration_auth_kind.dart';
@@ -87,6 +88,7 @@ import 'package:assistant_api/src/model/list_task_push_notification_configs_resp
 import 'package:assistant_api/src/model/list_tasks_response.dart';
 import 'package:assistant_api/src/model/member_entry.dart';
 import 'package:assistant_api/src/model/message.dart';
+import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
@@ -122,6 +124,7 @@ import 'package:assistant_api/src/model/server_capabilities.dart';
 import 'package:assistant_api/src/model/server_metadata.dart';
 import 'package:assistant_api/src/model/set_active_persona_request.dart';
 import 'package:assistant_api/src/model/set_credential_request.dart';
+import 'package:assistant_api/src/model/set_message_feedback_request.dart';
 import 'package:assistant_api/src/model/set_skill_access_mode_request.dart';
 import 'package:assistant_api/src/model/set_space_access_request.dart';
 import 'package:assistant_api/src/model/skill_detail.dart';
@@ -166,6 +169,7 @@ import 'package:assistant_api/src/model/update_integration_policy_request.dart';
 import 'package:assistant_api/src/model/update_integration_request.dart';
 import 'package:assistant_api/src/model/update_member_request.dart';
 import 'package:assistant_api/src/model/update_org_request.dart';
+import 'package:assistant_api/src/model/update_persona_request.dart';
 import 'package:assistant_api/src/model/update_skill_request.dart';
 import 'package:assistant_api/src/model/update_space_request.dart';
 import 'package:assistant_api/src/model/update_user_request.dart';
@@ -247,6 +251,7 @@ part 'serializers.g.dart';
   DeviceCodeResponseSchema,
   ErrorBody,
   ExecuteCommandRequest,
+  FeedbackRating,
   HttpAuthSecurityScheme,
   ImplicitOAuthFlow,
   IntegrationAuthKind,
@@ -262,6 +267,7 @@ part 'serializers.g.dart';
   ListTasksResponse,
   MemberEntry,
   Message,
+  MessageFeedbackResponse,
   MessageSummary,
   ModelPart,
   MutualTlsSecurityScheme,
@@ -297,6 +303,7 @@ part 'serializers.g.dart';
   ServerMetadata,
   SetActivePersonaRequest,
   SetCredentialRequest,
+  SetMessageFeedbackRequest,
   SetSkillAccessModeRequest,
   SetSpaceAccessRequest,
   SkillDetail,
@@ -341,6 +348,7 @@ part 'serializers.g.dart';
   UpdateIntegrationRequest,
   UpdateMemberRequest,
   UpdateOrgRequest,
+  UpdatePersonaRequest,
   UpdateSkillRequest,
   UpdateSpaceRequest,
   UpdateUserRequest,

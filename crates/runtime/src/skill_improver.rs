@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use assistant_core::types::features::LearningConfig;
-use assistant_core::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
+use assistant_core::{ChatHistoryMessage, ChatRole, LlmProvider, chat_structured};
 #[cfg(test)]
 use assistant_storage::SqliteRefinementsStore;
 use assistant_storage::{
@@ -15,6 +15,7 @@ use assistant_storage::{
     StorageLayer,
 };
 use chrono::Utc;
+use serde_json::json;
 use tracing::{debug, info, warn};
 
 /// Well-known name for the skill improvement scheduled task.
@@ -223,10 +224,9 @@ async fn check_regressions(
 /// System prompt for generating skill refinements.
 const REFINE_SYSTEM_PROMPT: &str = r#"You are a skill optimization engine. Given a skill's current body and its performance statistics, generate an improved version that addresses the observed issues.
 
-If the skill cannot be meaningfully improved, respond with: {"improved": false}
-
-Otherwise respond with:
-{"improved": true, "body": "<the complete improved skill body in markdown>"}
+Answer with:
+- improved: whether you could meaningfully improve the skill
+- body: the complete improved skill body in markdown, or an empty string when improved is false
 
 Focus on:
 - Clearer instructions that reduce error rates
@@ -235,6 +235,19 @@ Focus on:
 - Improved precondition checks
 
 Do NOT change the fundamental purpose of the skill. Only refine HOW it accomplishes its goal."#;
+
+/// The refinement answer. Strict-mode ready: every property is required.
+fn refinement_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "improved": {"type": "boolean"},
+            "body": {"type": "string"},
+        },
+        "required": ["improved", "body"],
+        "additionalProperties": false,
+    })
+}
 
 /// Use the LLM to generate an improved skill body.
 async fn generate_refinement(
@@ -273,16 +286,14 @@ async fn generate_refinement(
         content: user_msg,
     }];
 
-    let response = llm.chat(REFINE_SYSTEM_PROMPT, &history, &[]).await?;
-
-    let text = match &response {
-        LlmResponse::FinalAnswer(t, _) => t.trim(),
-        LlmResponse::Thinking(t, _) => t.trim(),
-        _ => return Ok(None),
-    };
-
-    let decision: serde_json::Value = serde_json::from_str(text)
-        .map_err(|e| anyhow::anyhow!("LLM returned invalid JSON: {e}"))?;
+    let decision = chat_structured(
+        llm,
+        REFINE_SYSTEM_PROMPT,
+        &history,
+        "skill_refinement",
+        &refinement_schema(),
+    )
+    .await?;
 
     let improved = decision
         .get("improved")
@@ -346,13 +357,7 @@ mod tests {
         ) -> anyhow::Result<LlmResponse> {
             Ok(LlmResponse::FinalAnswer(
                 self.response.clone(),
-                LlmResponseMeta {
-                    model: None,
-                    input_tokens: None,
-                    output_tokens: None,
-                    finish_reason: None,
-                    response_id: None,
-                },
+                LlmResponseMeta::default(),
             ))
         }
 
@@ -365,14 +370,69 @@ mod tests {
         ) -> anyhow::Result<LlmResponse> {
             Ok(LlmResponse::FinalAnswer(
                 self.response.clone(),
-                LlmResponseMeta {
-                    model: None,
-                    input_tokens: None,
-                    output_tokens: None,
-                    finish_reason: None,
-                    response_id: None,
-                },
+                LlmResponseMeta::default(),
             ))
+        }
+    }
+
+    mod refinement {
+        use assistant_core::{LlmResponse, LlmResponseMeta};
+        use assistant_llm_provider::scripted::ScriptedLlmProvider;
+        use assistant_storage::SkillStats;
+
+        use super::super::generate_refinement;
+
+        fn answering(text: &str) -> ScriptedLlmProvider {
+            ScriptedLlmProvider::new().with_canned_responses(vec![LlmResponse::FinalAnswer(
+                text.into(),
+                LlmResponseMeta::default(),
+            )])
+        }
+
+        fn stats() -> SkillStats {
+            SkillStats {
+                skill_name: "flaky".into(),
+                total: 10,
+                success_count: 4,
+                error_count: 6,
+                avg_duration_ms: 1.0,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                common_errors: vec![],
+            }
+        }
+
+        const IMPROVED: &str = r##"{"improved": true, "body": "# Better"}"##;
+
+        #[tokio::test]
+        async fn accepts_fenced_json() {
+            let llm = answering(&format!("```json\n{IMPROVED}\n```"));
+            let body = generate_refinement(&llm, "flaky", "old", &stats())
+                .await
+                .unwrap();
+            assert_eq!(body.as_deref(), Some("# Better"));
+        }
+
+        #[tokio::test]
+        async fn accepts_chatty_json() {
+            let llm = answering(&format!("Sure, here you go: {IMPROVED} Enjoy."));
+            let body = generate_refinement(&llm, "flaky", "old", &stats())
+                .await
+                .unwrap();
+            assert_eq!(body.as_deref(), Some("# Better"));
+        }
+
+        #[tokio::test]
+        async fn sends_its_schema() {
+            let llm = answering(IMPROVED);
+            generate_refinement(&llm, "flaky", "old", &stats())
+                .await
+                .unwrap();
+            let system = &llm.recorded_calls()[0].system_prompt;
+            assert!(
+                system.contains(r#""required":["improved","body"]"#),
+                "{system}"
+            );
         }
     }
 

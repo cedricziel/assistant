@@ -6,6 +6,7 @@ import '../../router/app_router.dart';
 import '../../shared/platform/widgets.dart';
 import '../notifications/notification_preferences.dart';
 import '../notifications/notification_service.dart';
+import 'response_timing_preference.dart';
 
 /// Application settings screen.
 class SettingsScreen extends ConsumerWidget {
@@ -14,6 +15,8 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final prefsAsync = ref.watch(notificationPreferencesProvider);
+    final showResponseTiming =
+        ref.watch(showResponseTimingProvider).value ?? false;
 
     return AdaptiveScaffold(
       body: CustomScrollView(
@@ -35,6 +38,29 @@ class SettingsScreen extends ConsumerWidget {
                     material: Icons.chevron_right,
                   ),
                   onTap: () => context.push(AppRoutes.settingsAccount),
+                ),
+              ],
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: AdaptiveListSection(
+              header: const Text('Chat'),
+              children: [
+                AdaptiveSwitchTile(
+                  leading: const AdaptiveIcon(
+                    cupertino: CupertinoIcons.speedometer,
+                    material: Icons.speed_outlined,
+                  ),
+                  title: const Text('Show response timing'),
+                  subtitle: const Text(
+                    'Show first-token time, total time and tokens per second '
+                    'under finished replies.',
+                  ),
+                  value: showResponseTiming,
+                  onChanged: (value) {
+                    if (isAppleTouch) HapticFeedback.lightImpact();
+                    ref.read(showResponseTimingProvider.notifier).set(value);
+                  },
                 ),
               ],
             ),

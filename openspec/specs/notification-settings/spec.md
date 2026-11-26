@@ -1,4 +1,8 @@
-## ADDED Requirements
+# notification-settings Specification
+
+## Purpose
+TBD - created by archiving change notification-settings. Update Purpose after archive.
+## Requirements
 
 ### Requirement: Per-category notification toggle
 

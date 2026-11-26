@@ -106,6 +106,10 @@ pub struct LlmConfig {
     pub max_iterations: usize,
     #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
+    /// Whether the model may request several tool calls at once. Unset keeps
+    /// the provider's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
     /// Embedding model for vector search (default: `nomic-embed-text`).
     #[serde(default = "default_embedding_model")]
     pub embedding_model: String,
@@ -143,6 +147,7 @@ impl Default for LlmConfig {
             base_url: default_llm_base_url(),
             max_iterations: default_llm_max_iterations(),
             timeout_secs: default_llm_timeout_secs(),
+            parallel_tool_calls: None,
             embedding_model: default_embedding_model(),
             api_key: None,
             anthropic: AnthropicOptions::default(),
@@ -370,17 +375,282 @@ impl Default for MoonshotWebSearchOptions {
 /// [llm.openrouter]
 /// referer = "https://my-app.example.com"
 /// title = "My App"
+/// categories = ["cli-agent"]
 /// max_tokens = 8192
+/// fallback_models = ["openai/gpt-4o"]
+///
+/// [llm.openrouter.provider]
+/// data_collection = "deny"
+/// zdr = true
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OpenRouterOptions {
-    /// `HTTP-Referer` header sent with every request.
-    /// Required by OpenRouter TOS for rankings/attribution.
+    /// `HTTP-Referer` header, used by OpenRouter for app attribution.
     pub referer: Option<String>,
-    /// `X-Title` header — shown in the OpenRouter dashboard.
+    /// `X-OpenRouter-Title` header, shown in the OpenRouter dashboard.
     pub title: Option<String>,
+    /// `X-OpenRouter-Categories` header; at most two.
+    #[serde(default, deserialize_with = "at_most_two_categories")]
+    pub categories: Vec<String>,
     /// Maximum completion tokens per response (default: 8192).
     pub max_tokens: Option<u32>,
+    /// Models to try, in order, when the primary model fails. Sent as
+    /// `models` after the primary model.
+    #[serde(default)]
+    pub fallback_models: Vec<String>,
+    /// Provider routing, sent as the request's `provider` object.
+    pub provider: Option<OpenRouterRouting>,
+    /// Reasoning controls, sent as the request's `reasoning` object.
+    pub reasoning: Option<OpenRouterReasoning>,
+    /// Prompt-cache breakpoints (`[llm.openrouter.cache]`).
+    #[serde(default)]
+    pub cache: OpenRouterCache,
+    /// OpenRouter's `web` plugin (`[llm.openrouter.web_search]`).
+    #[serde(default)]
+    pub web_search: OpenRouterWebSearch,
+}
+
+/// `[llm.openrouter.web_search]`. `search_context_size` needs the native
+/// engine, or no engine so OpenRouter may pick native search.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawOpenRouterWebSearch")]
+pub struct OpenRouterWebSearch {
+    pub enabled: bool,
+    pub engine: Option<OpenRouterSearchEngine>,
+    pub max_results: Option<u32>,
+    pub search_prompt: Option<String>,
+    pub include_domains: Option<Vec<String>>,
+    pub exclude_domains: Option<Vec<String>>,
+    pub search_context_size: Option<OpenRouterSearchContextSize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOpenRouterWebSearch {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    engine: Option<OpenRouterSearchEngine>,
+    #[serde(default)]
+    max_results: Option<u32>,
+    #[serde(default)]
+    search_prompt: Option<String>,
+    #[serde(default)]
+    include_domains: Option<Vec<String>>,
+    #[serde(default)]
+    exclude_domains: Option<Vec<String>>,
+    #[serde(default)]
+    search_context_size: Option<OpenRouterSearchContextSize>,
+}
+
+impl TryFrom<RawOpenRouterWebSearch> for OpenRouterWebSearch {
+    type Error = String;
+
+    fn try_from(raw: RawOpenRouterWebSearch) -> Result<Self, Self::Error> {
+        if raw.search_context_size.is_some()
+            && raw
+                .engine
+                .is_some_and(|e| e != OpenRouterSearchEngine::Native)
+        {
+            return Err("`search_context_size` works only with `engine = \"native\"`".to_owned());
+        }
+        Ok(Self {
+            enabled: raw.enabled,
+            engine: raw.engine,
+            max_results: raw.max_results,
+            search_prompt: raw.search_prompt,
+            include_domains: raw.include_domains,
+            exclude_domains: raw.exclude_domains,
+            search_context_size: raw.search_context_size,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterSearchEngine {
+    Native,
+    Exa,
+    Firecrawl,
+    Parallel,
+    Perplexity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterSearchContextSize {
+    Low,
+    Medium,
+    High,
+}
+
+/// `[llm.openrouter.cache]`: where models that need explicit breakpoints
+/// get `cache_control`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterCache {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub ttl: OpenRouterCacheTtl,
+}
+
+impl Default for OpenRouterCache {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl: OpenRouterCacheTtl::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpenRouterCacheTtl {
+    #[default]
+    #[serde(rename = "5m")]
+    FiveMinutes,
+    #[serde(rename = "1h")]
+    OneHour,
+}
+
+/// `[llm.openrouter.reasoning]`. `effort` and `max_tokens` are exclusive.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "RawOpenRouterReasoning")]
+pub struct OpenRouterReasoning {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<OpenRouterEffort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    /// Reason without returning the reasoning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOpenRouterReasoning {
+    #[serde(default)]
+    effort: Option<OpenRouterEffort>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
+    #[serde(default)]
+    exclude: Option<bool>,
+    #[serde(default)]
+    enabled: Option<bool>,
+}
+
+impl TryFrom<RawOpenRouterReasoning> for OpenRouterReasoning {
+    type Error = String;
+
+    fn try_from(raw: RawOpenRouterReasoning) -> Result<Self, Self::Error> {
+        if raw.effort.is_some() && raw.max_tokens.is_some() {
+            return Err("`effort` and `max_tokens` cannot both be set".to_owned());
+        }
+        Ok(Self {
+            effort: raw.effort,
+            max_tokens: raw.max_tokens,
+            exclude: raw.exclude,
+            enabled: raw.enabled,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl OpenRouterEffort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
+fn at_most_two_categories<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let categories = Vec::<String>::deserialize(deserializer)?;
+    if categories.len() > 2 {
+        return Err(serde::de::Error::custom(format!(
+            "`categories` takes at most two values, got {}",
+            categories.len()
+        )));
+    }
+    Ok(categories)
+}
+
+/// OpenRouter provider routing preferences (`[llm.openrouter.provider]`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterRouting {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_fallbacks: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_parameters: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_collection: Option<OpenRouterDataCollection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zdr: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<OpenRouterSort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantizations: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_price: Option<OpenRouterMaxPrice>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterDataCollection {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenRouterSort {
+    Price,
+    Throughput,
+    Latency,
+}
+
+/// Highest acceptable prices, in US dollars per million tokens (or per
+/// request or image).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterMaxPrice {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<f64>,
 }
 
 #[cfg(test)]
@@ -390,6 +660,145 @@ mod tests {
         resolve_openrouter_key,
     };
     use crate::secret::Secret;
+
+    // -- OpenRouter options ----------------------------------------------------
+
+    mod openrouter_options {
+        use super::super::{
+            OpenRouterDataCollection, OpenRouterOptions, OpenRouterRouting, OpenRouterSort,
+        };
+
+        fn parse(toml: &str) -> Result<OpenRouterOptions, toml::de::Error> {
+            toml::from_str(toml)
+        }
+
+        #[test]
+        fn provider_routing_parses() {
+            let options = parse(
+                r#"
+                fallback_models = ["openai/gpt-4o"]
+                categories = ["cli-agent", "chat"]
+                [provider]
+                order = ["anthropic"]
+                data_collection = "deny"
+                zdr = true
+                sort = "price"
+                max_price = { prompt = 1.0 }
+                "#,
+            )
+            .unwrap();
+            assert_eq!(options.fallback_models, ["openai/gpt-4o"]);
+            assert_eq!(options.categories, ["cli-agent", "chat"]);
+            let routing = options.provider.unwrap();
+            assert_eq!(
+                routing.data_collection,
+                Some(OpenRouterDataCollection::Deny)
+            );
+            assert_eq!(routing.zdr, Some(true));
+            assert_eq!(routing.sort, Some(OpenRouterSort::Price));
+            assert_eq!(routing.max_price.unwrap().prompt, Some(1.0));
+        }
+
+        #[test]
+        fn unknown_provider_key_is_rejected() {
+            let err = parse("[provider]\nprefer = [\"x\"]").unwrap_err();
+            assert!(err.to_string().contains("prefer"), "{err}");
+        }
+
+        #[test]
+        fn more_than_two_categories_are_rejected() {
+            let err = parse(r#"categories = ["a", "b", "c"]"#).unwrap_err();
+            assert!(err.to_string().contains("at most two"), "{err}");
+        }
+
+        #[test]
+        fn reasoning_parses_and_serializes_only_set_fields() {
+            use super::super::OpenRouterEffort;
+
+            let options = parse("[reasoning]\neffort = \"high\"\nexclude = true").unwrap();
+            let reasoning = options.reasoning.unwrap();
+            assert_eq!(reasoning.effort, Some(OpenRouterEffort::High));
+            assert_eq!(
+                serde_json::to_value(reasoning).unwrap(),
+                serde_json::json!({"effort": "high", "exclude": true})
+            );
+        }
+
+        #[test]
+        fn cache_defaults_on_with_five_minutes() {
+            use super::super::{OpenRouterCache, OpenRouterCacheTtl};
+
+            assert_eq!(parse("").unwrap().cache, OpenRouterCache::default());
+            let cache = parse("[cache]\nttl = \"1h\"").unwrap().cache;
+            assert!(cache.enabled);
+            assert_eq!(cache.ttl, OpenRouterCacheTtl::OneHour);
+            assert!(parse("[cache]\nttl = \"2h\"").is_err());
+            assert!(!parse("[cache]\nenabled = false").unwrap().cache.enabled);
+        }
+
+        #[test]
+        fn web_search_parses_and_defaults_off() {
+            use super::super::OpenRouterSearchEngine;
+
+            assert!(!parse("").unwrap().web_search.enabled);
+            let search = parse(
+                "[web_search]\nenabled = true\nengine = \"exa\"\nmax_results = 3\nexclude_domains = [\"reddit.com\"]",
+            )
+            .unwrap()
+            .web_search;
+            assert!(search.enabled);
+            assert_eq!(search.engine, Some(OpenRouterSearchEngine::Exa));
+            assert_eq!(search.max_results, Some(3));
+            assert!(parse("[web_search]\nsearch_context_size = \"high\"").is_ok());
+            assert!(
+                parse("[web_search]\nengine = \"native\"\nsearch_context_size = \"low\"").is_ok()
+            );
+        }
+
+        #[test]
+        fn search_context_size_with_a_non_native_engine_is_rejected() {
+            let err = parse("[web_search]\nengine = \"exa\"\nsearch_context_size = \"high\"")
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("search_context_size") && err.contains("native"),
+                "{err}"
+            );
+            assert!(
+                parse("[web_search]\nengin = \"exa\"").is_err(),
+                "unknown keys are rejected"
+            );
+        }
+
+        #[test]
+        fn effort_with_max_tokens_is_rejected() {
+            let err = parse("[reasoning]\neffort = \"low\"\nmax_tokens = 2000").unwrap_err();
+            let err = err.to_string();
+            assert!(
+                err.contains("effort") && err.contains("max_tokens"),
+                "{err}"
+            );
+        }
+
+        #[test]
+        fn unknown_reasoning_key_is_rejected() {
+            let err = parse("[reasoning]\nbudget = 1").unwrap_err();
+            assert!(err.to_string().contains("budget"), "{err}");
+        }
+
+        #[test]
+        fn routing_serializes_only_set_fields() {
+            let routing = OpenRouterRouting {
+                data_collection: Some(OpenRouterDataCollection::Deny),
+                zdr: Some(true),
+                ..OpenRouterRouting::default()
+            };
+            assert_eq!(
+                serde_json::to_value(routing).unwrap(),
+                serde_json::json!({"data_collection": "deny", "zdr": true})
+            );
+        }
+    }
 
     // -- OpenRouter key resolution --------------------------------------------
 
@@ -416,6 +825,17 @@ mod tests {
         let section = section.map(Secret::new);
         resolve_openrouter_key(section.as_ref(), llm, OPENROUTER_API_KEY_ENV, env)
             .map(|s| s.expose().to_string())
+    }
+
+    #[test]
+    fn parallel_tool_calls_is_optional() {
+        let unset: LlmConfig = toml::from_str("").unwrap();
+        assert_eq!(
+            unset.parallel_tool_calls, None,
+            "unset keeps the provider default"
+        );
+        let off: LlmConfig = toml::from_str("parallel_tool_calls = false").unwrap();
+        assert_eq!(off.parallel_tool_calls, Some(false));
     }
 
     #[test]

@@ -32,13 +32,31 @@ pub fn extract_chat_meta(
     id: &str,
     usage: &Option<CompletionUsage>,
 ) -> LlmResponseMeta {
-    LlmResponseMeta {
+    let mut meta = LlmResponseMeta {
         model: Some(model.to_string()),
         response_id: Some(id.to_string()),
-        input_tokens: usage.as_ref().map(|u| u.prompt_tokens as u64),
-        output_tokens: usage.as_ref().map(|u| u.completion_tokens as u64),
-        finish_reason: None,
+        ..Default::default()
+    };
+    if let Some(usage) = usage {
+        apply_chat_usage(&mut meta, usage);
     }
+    meta
+}
+
+/// Copy token counts from a Chat Completions `usage` object into `meta`.
+pub fn apply_chat_usage(meta: &mut LlmResponseMeta, usage: &CompletionUsage) {
+    meta.input_tokens = Some(u64::from(usage.prompt_tokens));
+    meta.output_tokens = Some(u64::from(usage.completion_tokens));
+    meta.cached_input_tokens = usage
+        .prompt_tokens_details
+        .as_ref()
+        .and_then(|d| d.cached_tokens)
+        .map(u64::from);
+    meta.reasoning_tokens = usage
+        .completion_tokens_details
+        .as_ref()
+        .and_then(|d| d.reasoning_tokens)
+        .map(u64::from);
 }
 
 /// Parse `async-openai` tool calls into [`ToolCallItem`]s.
@@ -78,6 +96,7 @@ mod tests {
             params_schema: serde_json::json!({"type": "object"}),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         };
         let tool = tool_spec_to_chat(&spec).unwrap();
         assert_eq!(tool.function.name, "echo");
@@ -99,6 +118,31 @@ mod tests {
         assert_eq!(meta.input_tokens, Some(10));
         assert_eq!(meta.output_tokens, Some(5));
         assert!(meta.finish_reason.is_none());
+    }
+
+    #[test]
+    fn extract_chat_meta_reads_cached_and_reasoning_tokens() {
+        let usage: Option<CompletionUsage> = serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 10339,
+            "completion_tokens": 60,
+            "total_tokens": 10399,
+            "prompt_tokens_details": {"cached_tokens": 10318},
+            "completion_tokens_details": {"reasoning_tokens": 40}
+        }))
+        .unwrap();
+        let meta = extract_chat_meta("m", "i", &usage);
+        assert_eq!(
+            meta.input_tokens,
+            Some(10339),
+            "prompt_tokens already include cached"
+        );
+        assert_eq!(meta.cached_input_tokens, Some(10318));
+        assert_eq!(meta.reasoning_tokens, Some(40));
+        assert_eq!(
+            meta.cache_write_input_tokens, None,
+            "not reported by this shape"
+        );
+        assert_eq!(meta.cost_usd, None, "the generic shape carries no cost");
     }
 
     #[test]

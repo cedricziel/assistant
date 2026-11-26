@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// Sealed class hierarchy representing a single SSE event from the chat API.
 ///
 /// Events arrive from `POST /api/conversations/{id}/messages` as a
@@ -129,7 +131,7 @@ class StatusEvent extends StreamEvent {
 /// A tool execution completed.
 ///
 /// Corresponds to `event:tool_result` in the SSE stream.  The JSON body is
-/// `{"tool_name":"...","status":"ok"|"error"|"denied","arguments":{...},"result":"...","tool_call_id":"..."}`.
+/// `{"tool_name":"...","status":"ok"|"error"|"denied","arguments":{...},"result":"...","tool_call_id":"...","data":{...}}`; `data` is optional.
 class ToolResultEvent extends StreamEvent {
   const ToolResultEvent({
     required this.toolName,
@@ -137,6 +139,7 @@ class ToolResultEvent extends StreamEvent {
     this.arguments,
     this.result,
     this.toolCallId,
+    this.data,
     super.sequenceId,
   });
 
@@ -156,6 +159,10 @@ class ToolResultEvent extends StreamEvent {
   /// `null` for providers that do not use IDs (Ollama) or older servers.
   final String? toolCallId;
 
+  /// Structured output of the tool, a JSON object with a `kind` tag.
+  /// `null` when the frame has no `data`, or `data` is not a JSON object.
+  final Map<String, Object?>? data;
+
   factory ToolResultEvent.fromJson(Map<String, dynamic> json) {
     return ToolResultEvent(
       toolName: json['tool_name'] as String? ?? '',
@@ -163,9 +170,14 @@ class ToolResultEvent extends StreamEvent {
       arguments: json['arguments'] as Map<String, dynamic>?,
       result: json['result'] as String?,
       toolCallId: json['tool_call_id'] as String?,
+      data: _toolDataFromJson(json['data']),
     );
   }
 }
+
+/// Returns [value] as a JSON object, or `null` when it is any other type.
+Map<String, Object?>? _toolDataFromJson(Object? value) =>
+    value is Map ? value.cast<String, Object?>() : null;
 
 /// The stream is complete; contains the full, canonical reply.
 ///
@@ -325,14 +337,69 @@ class SkillCompleteEvent extends StreamEvent {
   }
 }
 
-/// The orchestrator encountered a critical error.
-///
-/// Corresponds to `event:agent_error` in the SSE stream.  The data is a
-/// plain-text error message.
-class AgentErrorEvent extends StreamEvent {
-  const AgentErrorEvent(this.message, {super.sequenceId});
+/// Why a turn ended with an `agent_error` frame.
+enum AgentErrorReason {
+  /// The turn was cancelled (Stop, another client, `/stop`, shutdown).
+  cancelled,
 
+  /// The turn failed. Also the fallback for unknown reasons.
+  error,
+}
+
+/// The turn ended with a terminal `agent_error` frame.
+///
+/// Corresponds to `event:agent_error` in the SSE stream. The data is a JSON
+/// object `{"reason","message","partial_content","message_id",
+/// "user_message_persisted"}`; a non-JSON body is treated as an error whose
+/// message is the body.
+class AgentErrorEvent extends StreamEvent {
+  const AgentErrorEvent({
+    required this.reason,
+    required this.message,
+    this.partialContent = '',
+    this.messageId,
+    this.userMessagePersisted = true,
+    super.sequenceId,
+  });
+
+  /// Parse the `data:` body of an `agent_error` frame.
+  factory AgentErrorEvent.fromData(String body, {int? sequenceId}) {
+    try {
+      final json = jsonDecode(body);
+      if (json is Map<String, dynamic>) {
+        return AgentErrorEvent(
+          reason: json['reason'] == 'cancelled'
+              ? AgentErrorReason.cancelled
+              : AgentErrorReason.error,
+          message: json['message'] as String? ?? '',
+          partialContent: json['partial_content'] as String? ?? '',
+          messageId: json['message_id'] as String?,
+          userMessagePersisted: json['user_message_persisted'] as bool? ?? true,
+          sequenceId: sequenceId,
+        );
+      }
+    } on FormatException {
+      // Fall through to the plain-text form.
+    }
+    return AgentErrorEvent(
+      reason: AgentErrorReason.error,
+      message: body,
+      sequenceId: sequenceId,
+    );
+  }
+
+  final AgentErrorReason reason;
   final String message;
+
+  /// Text streamed before the turn ended; the server's "_Stopped._"
+  /// placeholder when nothing streamed.
+  final String partialContent;
+
+  /// Id of the persisted partial reply, when the server could persist it.
+  final String? messageId;
+
+  /// False when the turn was cancelled before the user message was saved.
+  final bool userMessagePersisted;
 }
 
 /// An incremental text token produced by a running subagent.
@@ -448,5 +515,47 @@ class AudioReadyEvent extends StreamEvent {
 
   factory AudioReadyEvent.fromJson(Map<String, dynamic> json) {
     return AudioReadyEvent(json['audio_id'] as String? ?? '');
+  }
+}
+
+/// Follow-up prompts the server suggests for the answer in [messageId].
+///
+/// Corresponds to `event:suggestions` in the SSE stream. The JSON body is
+/// `{"message_id":"<uuid>","suggestions":[{"prompt":"..."}]}`. It arrives
+/// after `done`, on the run's replay stream only.
+class SuggestionsEvent extends StreamEvent {
+  const SuggestionsEvent({
+    required this.messageId,
+    required this.prompts,
+    super.sequenceId,
+  });
+
+  /// The assistant message the suggestions follow up on.
+  final String messageId;
+
+  /// Prompt texts in server order.
+  final List<String> prompts;
+
+  /// Throws a [FormatException] when `message_id` is missing. Items without a
+  /// string `prompt` are skipped so a future item shape cannot break the frame.
+  factory SuggestionsEvent.fromJson(
+    Map<String, dynamic> json, {
+    int? sequenceId,
+  }) {
+    final messageId = json['message_id'];
+    if (messageId is! String || messageId.isEmpty) {
+      throw const FormatException('message_id is required');
+    }
+    final items = json['suggestions'];
+    return SuggestionsEvent(
+      messageId: messageId,
+      prompts: [
+        if (items is List)
+          for (final item in items)
+            if (item is Map && item['prompt'] is String)
+              item['prompt'] as String,
+      ],
+      sequenceId: sequenceId,
+    );
   }
 }

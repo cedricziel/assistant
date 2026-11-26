@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.3.0"
+    "version": "0.3.1"
   },
   "servers": [
     {
@@ -764,6 +764,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -832,6 +842,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -887,7 +907,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Not found"
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -947,7 +974,8 @@
         "tags": [
           "conversations"
         ],
-        "summary": "`PATCH /api/conversations/{id}` — update a conversation's title.",
+        "summary": "`PATCH /api/conversations/{id}` — update a conversation's title and/or pin state.",
+        "description": "Neither change moves the conversation in the list: only new messages bump\n`updated_at`.",
         "operationId": "update_conversation",
         "parameters": [
           {
@@ -992,16 +1020,47 @@
             }
           },
           "400": {
-            "description": "Invalid ID"
+            "description": "Invalid ID or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "Read-only access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Not found"
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "500": {
-            "description": "Internal server error"
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1079,7 +1138,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Conversation not found"
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1140,6 +1206,16 @@
           },
           "400": {
             "description": "Unknown command"
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1193,6 +1269,16 @@
           },
           "400": {
             "description": "Invalid ID"
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1258,7 +1344,211 @@
             "description": "Missing conversations:write scope"
           },
           "404": {
-            "description": "Conversation not found"
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{id}/messages/{message_id}/feedback": {
+      "put": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`PUT /api/conversations/{id}/messages/{message_id}/feedback` — rate a reply.",
+        "description": "Replaces the caller's previous feedback on the message in full.",
+        "operationId": "set_message_feedback",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Assistant message ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMessageFeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Feedback stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageFeedbackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID, body or comment, or the message cannot be rated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewer role or missing conversations:write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`DELETE /api/conversations/{id}/messages/{message_id}/feedback` — clear feedback.",
+        "description": "Returns 204 whether or not feedback existed.",
+        "operationId": "delete_message_feedback",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Assistant message ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Feedback cleared (or none existed)"
+          },
+          "400": {
+            "description": "Invalid ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewer role or missing conversations:write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1274,7 +1564,7 @@
           "conversations"
         ],
         "summary": "`GET /api/conversations/{id}/runs/{run_id}/events/stream`",
-        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active.  Closes automatically when the `done` or\n`error` event is reached.\n\nReturns:\n- `404` if no events exist for `run_id` (run never started or unknown)\n- `410` if the run existed but all events have been pruned (TTL elapsed)",
+        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active. Closes when the run finishes, not at the\n`done` or `agent_error` frame: events such as `suggestions` follow `done`.\nA client that disconnects stops the tail at once.\n\nReturns `404` if no events exist for `run_id` and the run is not active\n(never started, unknown, or pruned after the TTL elapsed).",
         "operationId": "stream_run_events",
         "parameters": [
           {
@@ -1323,10 +1613,14 @@
             }
           },
           "404": {
-            "description": "Run not found"
-          },
-          "410": {
-            "description": "Run events expired"
+            "description": "Conversation or run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1405,6 +1699,16 @@
           },
           "403": {
             "description": "Missing conversations:write scope"
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "503": {
             "description": "Voice not configured"
@@ -2586,7 +2890,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Message not found"
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "503": {
             "description": "TTS not configured"
@@ -5628,6 +5939,72 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Persona not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "personas"
+        ],
+        "summary": "`PATCH /api/personas/{id}` — update a persona's starter prompts.",
+        "operationId": "update_persona",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Persona ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePersonaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated persona",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID or starter prompts"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Caller may not edit this persona's starter prompts"
           },
           "404": {
             "description": "Persona not found"
@@ -10523,6 +10900,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "pinned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the conversation was pinned; absent when it is not pinned."
+          },
           "title": {
             "type": "string"
           },
@@ -11086,6 +11471,14 @@
             "description": "Command name without the leading `/` (e.g. `\"model\"`)."
           }
         }
+      },
+      "FeedbackRating": {
+        "type": "string",
+        "description": "The caller's verdict on an assistant message.",
+        "enum": [
+          "positive",
+          "negative"
+        ]
       },
       "HttpAuthSecurityScheme": {
         "type": "object",
@@ -11676,6 +12069,39 @@
           }
         }
       },
+      "MessageFeedbackResponse": {
+        "type": "object",
+        "description": "The caller's stored feedback on a message.",
+        "required": [
+          "message_id",
+          "rating",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/FeedbackRating"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "MessageSummary": {
         "type": "object",
         "description": "A single message in a conversation.",
@@ -11701,6 +12127,13 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "finish_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the reply ended early; `\"cancelled\"` for a reply the user stopped.\nOmitted for every other message."
           },
           "id": {
             "type": "string",
@@ -12076,9 +12509,15 @@
           "skill_access_mode",
           "created_at",
           "updated_at",
-          "files"
+          "files",
+          "starter_prompts",
+          "can_edit_starter_prompts"
         ],
         "properties": {
+          "can_edit_starter_prompts": {
+            "type": "boolean",
+            "description": "True when the caller may `PATCH` this Persona's starter prompts."
+          },
           "created_at": {
             "type": "string"
           },
@@ -12096,6 +12535,13 @@
           },
           "skill_access_mode": {
             "type": "string"
+          },
+          "starter_prompts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Up to 4 prompts shown as suggestions in an empty chat. Always present."
           },
           "turn_timeout_secs": {
             "type": [
@@ -12713,6 +13159,26 @@
           }
         }
       },
+      "SetMessageFeedbackRequest": {
+        "type": "object",
+        "description": "Body for `PUT /api/conversations/{id}/messages/{message_id}/feedback`.",
+        "required": [
+          "rating"
+        ],
+        "properties": {
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional free-text reason. Trimmed; an empty result means no comment.\nAt most 2000 Unicode scalar values. Omitting it clears a stored comment."
+          },
+          "rating": {
+            "$ref": "#/components/schemas/FeedbackRating",
+            "description": "Thumbs up or down."
+          }
+        }
+      },
       "SetSkillAccessModeRequest": {
         "type": "object",
         "description": "Body for `PATCH /api/personas/{id}/skill-access`.",
@@ -13026,10 +13492,17 @@
         "properties": {
           "arguments": {
             "type": [
-              "string",
+              "object",
               "null"
             ],
-            "description": "The arguments passed to the tool (JSON string)."
+            "description": "The arguments passed to the tool, as a JSON object."
+          },
+          "data": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Structured output of the tool, a JSON object with a `kind` tag. Absent\nwhen the tool returned text only or the data exceeded the size limit.\nEach `kind` is defined by a JSON Schema in `schemas/tool-results/`."
           },
           "result": {
             "type": [
@@ -13041,6 +13514,13 @@
           "status": {
             "type": "string",
             "description": "Whether the tool call succeeded or failed."
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of the tool call this result answers, when the provider\nsupplied one."
           },
           "tool_name": {
             "type": "string",
@@ -13522,6 +14002,13 @@
           "arguments": {
             "description": "The JSON arguments passed to the tool."
           },
+          "data": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Structured output of the tool, a JSON object with a `kind` tag. Absent\nwhen the tool returned text only, the data exceeded the size limit, or\nthe call predates structured data. Each `kind` is defined by a JSON\nSchema in `schemas/tool-results/`."
+          },
           "name": {
             "type": "string",
             "description": "The tool that was called."
@@ -13536,6 +14023,13 @@
           "status": {
             "type": "string",
             "description": "`\"ok\"`, `\"error\"`, or `\"denied\"`."
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider-assigned id of the call, when the provider supplied one."
           }
         }
       },
@@ -13610,14 +14104,21 @@
       },
       "UpdateConversationRequest": {
         "type": "object",
-        "description": "Body for `PATCH /api/conversations/{id}`.",
-        "required": [
-          "title"
-        ],
+        "description": "Body for `PATCH /api/conversations/{id}`. At least one field is required.",
         "properties": {
+          "pinned": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`true` pins the conversation, `false` unpins it."
+          },
           "title": {
-            "type": "string",
-            "description": "New title for the conversation."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New title. Trimmed; must be 1 to 200 characters after trimming."
           }
         }
       },
@@ -13766,6 +14267,22 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "UpdatePersonaRequest": {
+        "type": "object",
+        "description": "Body for `PATCH /api/personas/{id}`.",
+        "properties": {
+          "starter_prompts": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Replaces the starter prompts: at most 4, each 1 to 200 characters\nafter trimming. Absent leaves them unchanged; `[]` clears them."
           }
         }
       },

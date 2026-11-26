@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Keep the chat view scrolled to the latest message when a conversation opens and while a reply streams, without fighting a user who scrolled up.
+
+## Requirements
 
 ### Requirement: Scroll to bottom on conversation open
 

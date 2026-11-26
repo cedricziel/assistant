@@ -24,6 +24,7 @@ use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 use super::{Orchestrator, value_to_params_map};
+use crate::history::{FinalAnswerMeta, persist_final_answer};
 use crate::webhook_dispatch;
 
 #[async_trait]
@@ -138,10 +139,13 @@ impl SubagentRunner for Orchestrator {
         };
 
         // Determine the tool specs to advertise to the LLM for this subagent.
+        self.llm.ready().await;
         let provider_caps = self.llm.capabilities();
         let tool_specs = Self::filter_tool_specs(
             self.executor.to_specs_filtered(&allowed_tools),
             &provider_caps,
+            // A subagent has no user attached, so it never sees rich-client tools.
+            false,
         );
 
         // Build the system prompt.  If the spawn request provides one, use it;
@@ -231,6 +235,7 @@ impl SubagentRunner for Orchestrator {
                     &history,
                     &tool_specs,
                 );
+                let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
                 let llm_start = std::time::Instant::now();
                 let response = if let Some(ref parent_sink) = parent_event_sink {
                     // Stream subagent LLM output, forwarding chunks as SubagentEvent.
@@ -254,14 +259,26 @@ impl SubagentRunner for Orchestrator {
                     });
                     let result = self
                         .llm
-                        .chat_streaming(&system_prompt, &history, &tool_specs, Some(chunk_tx))
+                        .chat_with(
+                            &system_prompt,
+                            &history,
+                            &tool_specs,
+                            &self.chat_options(),
+                            Some(chunk_tx),
+                        )
                         .instrument(iteration_span.clone())
                         .await;
                     forward_handle.await.ok();
                     result
                 } else {
                     self.llm
-                        .chat(&system_prompt, &history, &tool_specs)
+                        .chat_with(
+                            &system_prompt,
+                            &history,
+                            &tool_specs,
+                            &self.chat_options(),
+                            None,
+                        )
                         .instrument(iteration_span.clone())
                         .await
                 };
@@ -324,10 +341,17 @@ impl SubagentRunner for Orchestrator {
                                 m.turn = base_turn + iteration as i64 + 1;
                                 m
                             };
-                            if let Err(e) = conv_store
-                                .save_message(&assistant_msg)
-                                .instrument(iteration_span.clone())
-                                .await
+                            if let Err(e) = persist_final_answer(
+                                &conv_store,
+                                &self.storage.message_timing_store(),
+                                assistant_msg,
+                                FinalAnswerMeta {
+                                    traceparent: llm_traceparent,
+                                    timing: None,
+                                },
+                            )
+                            .instrument(iteration_span.clone())
+                            .await
                             {
                                 warn!("Failed to persist subagent answer: {e}");
                             }
@@ -410,6 +434,7 @@ impl SubagentRunner for Orchestrator {
                             conversation_id,
                             base_turn + iteration as i64 + 1,
                             &tool_call_items,
+                            tool_call_resp.provider_state.as_ref(),
                         )
                         .instrument(iteration_span.clone())
                         .await;
@@ -449,6 +474,7 @@ impl SubagentRunner for Orchestrator {
                                 turn: iteration as i64,
                                 interface: Interface::Scheduler,
                                 interactive: false,
+                                run_id: None,
                                 allowed_tools: allowed_tools.clone(),
                                 depth: new_depth,
                                 user_id: None,
@@ -468,6 +494,8 @@ impl SubagentRunner for Orchestrator {
                                     &ctx,
                                     requires_confirm,
                                     super::dispatch::task_context(&history),
+                                    None,
+                                    None,
                                 )
                                 .await;
 

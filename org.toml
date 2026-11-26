@@ -25,6 +25,9 @@ base_url = "http://localhost:11434"
 max_iterations = 80
 # Timeout for LLM calls (seconds)
 timeout_secs = 120
+# Whether the model may request several tool calls at once. Unset keeps the
+# provider's default (usually true). Set false to run tools one at a time.
+# parallel_tool_calls = false
 
 # ── Anthropic cloud provider ──────────────────────────────────────────────────
 # To use Claude instead of a local Ollama model, replace the [llm] block above
@@ -137,9 +140,33 @@ timeout_secs = 120
 # timeout_secs    = 120
 #
 # [llm.openrouter]
-# referer    = "https://my-app.example.com"  # HTTP-Referer header (OpenRouter TOS)
-# title      = "My App"                       # X-Title header (dashboard display)
-# max_tokens = 8192                            # max completion tokens per response
+# referer         = "https://my-app.example.com"  # HTTP-Referer header (app attribution)
+# title           = "My App"                       # X-OpenRouter-Title header (dashboard display)
+# categories      = ["cli-agent"]                  # X-OpenRouter-Categories header, at most two
+# max_tokens      = 8192                           # sent as max_completion_tokens
+# fallback_models = ["openai/gpt-4o"]              # tried in order after `model`
+#
+# # Provider routing, sent as the request's `provider` object. Only set keys
+# # are sent; unknown keys fail config load. See docs/openrouter.md.
+# [llm.openrouter.provider]
+# data_collection = "deny"   # "allow" | "deny"
+# zdr             = true     # zero-data-retention endpoints only
+# # sort          = "price"  # "price" | "throughput" | "latency"
+# # order         = ["anthropic", "openai"]
+#
+# # Reasoning, sent as the request's `reasoning` object. `effort` and
+# # `max_tokens` are exclusive; the effort is checked against the model's
+# # catalog entry. See docs/openrouter.md.
+# [llm.openrouter.reasoning]
+# effort        = "high"   # "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+# # max_tokens  = 4096     # reasoning token budget, instead of `effort`
+# # exclude     = true     # reason without returning the reasoning
+#
+# # Prompt caching breakpoints for anthropic/, google/ and qwen/ models;
+# # other models cache automatically. See docs/openrouter.md.
+# [llm.openrouter.cache]
+# enabled = true   # false sends no cache_control
+# ttl     = "5m"   # "5m" | "1h" (1h: Anthropic models only)
 #
 # Browse models at: https://openrouter.ai/models
 

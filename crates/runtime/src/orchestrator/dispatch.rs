@@ -4,9 +4,11 @@
 //! result recording (metrics, OTel, persistence), and tool-call history helpers.
 
 use assistant_core::{
-    Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ToolCallItem, ToolSpec,
+    Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ProviderState,
+    ToolCallItem, ToolSpec,
     permission::{Outcome, PermissionRequest},
     types::conversation::ExecutionContext,
+    types::conversation::Interface,
     types::conversation::Message,
     types::conversation::MessageRole,
 };
@@ -20,8 +22,33 @@ use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info, warn};
 use uuid::Uuid;
 
-use super::{DispatchOutcome, Orchestrator, OrchestratorEvent, value_to_params_map};
+use super::{
+    ApprovalOptions, ConfirmationAnswer, ConfirmationRequest, DispatchOutcome, Orchestrator,
+    OrchestratorEvent, value_to_params_map,
+};
 use crate::webhook_dispatch;
+
+/// Call metadata persisted on a tool row next to the observation.
+#[derive(Clone, Copy)]
+pub(crate) struct ToolResultMeta<'a> {
+    /// Provider-supplied id of the call this row answers.
+    pub tool_call_id: Option<&'a str>,
+    /// `ok`, `error` or `denied`.
+    pub status: &'a str,
+    /// Capped structured render data; client-only.
+    pub data: Option<&'a serde_json::Value>,
+}
+
+impl ToolResultMeta<'_> {
+    /// Metadata for rows that carry neither an id nor data (`end_turn`).
+    pub(crate) const fn ok() -> Self {
+        Self {
+            tool_call_id: None,
+            status: "ok",
+            data: None,
+        }
+    }
+}
 
 /// Result of [`Orchestrator::finalize_tool_result`].
 ///
@@ -34,15 +61,32 @@ pub(crate) struct FinalizedTool {
 }
 
 impl Orchestrator {
-    /// Filter tool specs based on provider capabilities.
+    /// Whether a turn's client can render rich UI such as an A2UI surface.
+    ///
+    /// Only an interactive web turn at depth 0 can: `quick-message` and voice
+    /// are `Interface::Web` but not interactive, a CLI turn is interactive but
+    /// has no renderer, and subagents have no user attached.
+    pub(crate) fn rich_client_turn(interface: &Interface, interactive: bool, depth: u32) -> bool {
+        interactive && *interface == Interface::Web && depth == 0
+    }
+
+    /// Filter tool specs based on provider capabilities and the turn's client.
     ///
     /// Suppresses builtin tools when the provider offers an equivalent
     /// hosted tool (e.g. suppress `web-search` when the provider has
-    /// native web search).
-    pub(crate) fn filter_tool_specs(specs: Vec<ToolSpec>, caps: &Capabilities) -> Vec<ToolSpec> {
+    /// native web search), and drops `requires_rich_client` tools unless
+    /// `rich_client` is set (see [`Self::rich_client_turn`]).
+    pub(crate) fn filter_tool_specs(
+        specs: Vec<ToolSpec>,
+        caps: &Capabilities,
+        rich_client: bool,
+    ) -> Vec<ToolSpec> {
         specs
             .into_iter()
-            .filter(|spec| !Self::tool_suppressed_by_caps(spec, caps))
+            .filter(|spec| {
+                (rich_client || !spec.requires_rich_client)
+                    && !Self::tool_suppressed_by_caps(spec, caps)
+            })
             .collect()
     }
 
@@ -74,10 +118,14 @@ impl Orchestrator {
         turn: i64,
         tool_name: &str,
         observation: &str,
+        meta: ToolResultMeta<'_>,
     ) -> Message {
         let mut m = Message::new(conversation_id, MessageRole::Tool, observation);
         m.turn = turn;
         m.skill_name = Some(tool_name.to_string());
+        m.tool_call_id = meta.tool_call_id.map(str::to_string);
+        m.tool_status = Some(meta.status.to_string());
+        m.tool_data_json = meta.data.and_then(|data| serde_json::to_string(data).ok());
         m
     }
 
@@ -91,11 +139,14 @@ impl Orchestrator {
         conversation_id: Uuid,
         turn_index: i64,
         tool_call_items: &[ToolCallItem],
+        provider_state: Option<&ProviderState>,
     ) {
-        history.push(ChatHistoryMessage::AssistantToolCalls(
-            tool_call_items.to_vec(),
-        ));
-        let tc_msg = Self::make_tool_call_message(conversation_id, turn_index, tool_call_items);
+        history.push(ChatHistoryMessage::AssistantToolCalls {
+            items: tool_call_items.to_vec(),
+            provider_state: provider_state.cloned(),
+        });
+        let mut tc_msg = Self::make_tool_call_message(conversation_id, turn_index, tool_call_items);
+        tc_msg.provider_state_json = provider_state.and_then(|s| serde_json::to_string(s).ok());
         if let Err(e) = conv_store.save_message(&tc_msg).await {
             warn!("Failed to persist tool-call message: {e}");
         }
@@ -110,6 +161,11 @@ impl Orchestrator {
     /// API responses.  Keeps payloads small while still giving clients useful
     /// context.
     const TOOL_RESULT_DISPLAY_LIMIT: usize = 512;
+
+    /// Maximum serialized size of the structured `data` carried on a
+    /// `ToolResult` event. Larger payloads are dropped whole: cutting JSON
+    /// generically would produce half-valid shapes.
+    pub(crate) const TOOL_RESULT_DATA_LIMIT_BYTES: usize = 32 * 1024;
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn finalize_tool_result(
@@ -177,11 +233,21 @@ impl Orchestrator {
         };
 
         let mut had_error = false;
+        let mut data = None;
         let observation = match exec_result {
-            Ok(output) => {
+            Ok(mut output) => {
                 debug!(tool = %tool_name, duration_ms, "Tool execution completed");
+                // Structured render data goes to the event only: take it before
+                // anything else sees the output so it cannot leak into the LLM
+                // history, the persisted observation or the webhook payload.
+                data = Self::cap_tool_data(tool_name, output.data.take());
+                // A tool-level failure (`ToolOutput::error`, non-zero bash
+                // exit) is an error even though the call itself returned `Ok`.
+                if !output.success {
+                    tool_status = "error";
+                }
                 otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                otel_span.set_attribute(KeyValue::new("tool_status", tool_status));
                 otel_span.set_attribute(KeyValue::new("tool_observation", output.content.clone()));
                 if !output.attachments.is_empty() {
                     // Persist each tool-produced attachment to the store.
@@ -247,8 +313,17 @@ impl Orchestrator {
         }
 
         crate::history::append_tool_result(history, tool_name, &observation);
-        let tr_msg =
-            Self::make_tool_result_message(conversation_id, turn_index, tool_name, &observation);
+        let tr_msg = Self::make_tool_result_message(
+            conversation_id,
+            turn_index,
+            tool_name,
+            &observation,
+            ToolResultMeta {
+                tool_call_id,
+                status: tool_status,
+                data: data.as_ref(),
+            },
+        );
         if let Err(e) = conv_store.save_message(&tr_msg).await {
             warn!("Failed to persist tool-result message: {e}");
         }
@@ -273,7 +348,8 @@ impl Orchestrator {
 
         if let Some(sink) = event_sink {
             let truncated_result = if observation.len() > Self::TOOL_RESULT_DISPLAY_LIMIT {
-                let mut s = observation[..Self::TOOL_RESULT_DISPLAY_LIMIT].to_string();
+                let cut = observation.floor_char_boundary(Self::TOOL_RESULT_DISPLAY_LIMIT);
+                let mut s = observation[..cut].to_string();
                 s.push('…');
                 Some(s)
             } else {
@@ -286,6 +362,7 @@ impl Orchestrator {
                     arguments: tool_arguments.cloned(),
                     result: truncated_result,
                     tool_call_id: tool_call_id.map(|s| s.to_string()),
+                    data,
                 })
                 .await;
 
@@ -333,6 +410,26 @@ impl Orchestrator {
         FinalizedTool { had_error }
     }
 
+    /// Drop `data` whole when its serialized form exceeds
+    /// [`Self::TOOL_RESULT_DATA_LIMIT_BYTES`].
+    fn cap_tool_data(
+        tool_name: &str,
+        data: Option<serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        let value = data?;
+        let size = value.to_string().len();
+        if size > Self::TOOL_RESULT_DATA_LIMIT_BYTES {
+            warn!(
+                tool = %tool_name,
+                size,
+                limit = Self::TOOL_RESULT_DATA_LIMIT_BYTES,
+                "Dropping tool result data over the size cap"
+            );
+            return None;
+        }
+        Some(value)
+    }
+
     /// Append one tool call to the skill execution log.
     async fn record_skill_execution(
         &self,
@@ -367,6 +464,7 @@ impl Orchestrator {
     /// text to return to the LLM in place of a tool result. Undecided calls
     /// defer to the confirmation callback on interactive turns and are denied
     /// on every other turn.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn authorize_tool_call(
         &self,
         name: &str,
@@ -374,6 +472,8 @@ impl Orchestrator {
         ctx: &ExecutionContext,
         requires_confirmation: bool,
         task_context: Option<&str>,
+        event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
+        tool_call_id: Option<&str>,
     ) -> Result<(), String> {
         let resolution = self
             .permission_policy
@@ -390,10 +490,27 @@ impl Orchestrator {
             && ctx.interactive
             && let Some(cb) = &self.confirmation_callback
         {
-            return if cb.confirm(name, params) {
-                Ok(())
-            } else {
-                Err(format!("User denied execution of '{name}'."))
+            let answer = cb
+                .confirm(ConfirmationRequest {
+                    tool_name: name,
+                    params,
+                    ctx,
+                    tool_call_id,
+                    reason: &resolution.decision.reason,
+                    options: ApprovalOptions::once_only(),
+                    event_sink,
+                })
+                .await;
+            return match answer {
+                ConfirmationAnswer::AllowOnce | ConfirmationAnswer::AllowAlways => Ok(()),
+                ConfirmationAnswer::RejectOnce
+                | ConfirmationAnswer::RejectAlways
+                | ConfirmationAnswer::Cancelled => {
+                    Err(format!("User denied execution of '{name}'."))
+                }
+                ConfirmationAnswer::Expired => Err(format!(
+                    "The approval request for '{name}' expired before the user answered, so it was not run."
+                )),
             };
         }
         resolution.refusal(name).map_or(Ok(()), Err)
@@ -430,15 +547,32 @@ impl Orchestrator {
             .is_some_and(|h| h.requires_confirmation());
 
         let authorization = self
-            .authorize_tool_call(name, params, ctx, requires_confirm, task_context(history))
+            .authorize_tool_call(
+                name,
+                params,
+                ctx,
+                requires_confirm,
+                task_context(history),
+                event_sink,
+                tool_call_id,
+            )
             .await;
         if let Err(observation) = authorization {
             info!(%observation);
             otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
             otel_span.set_attribute(KeyValue::new("tool_error", observation.clone()));
             crate::history::append_tool_result(history, name, &observation);
-            let tr_msg =
-                Self::make_tool_result_message(conversation_id, turn_index, name, &observation);
+            let tr_msg = Self::make_tool_result_message(
+                conversation_id,
+                turn_index,
+                name,
+                &observation,
+                ToolResultMeta {
+                    tool_call_id,
+                    status: "denied",
+                    data: None,
+                },
+            );
             if let Err(e) = conv_store
                 .save_message(&tr_msg)
                 .instrument(instrument_span.clone())
@@ -455,6 +589,7 @@ impl Orchestrator {
                         arguments: Some(params.clone()),
                         result: Some(observation.clone()),
                         tool_call_id: tool_call_id.map(|s| s.to_string()),
+                        data: None,
                     })
                     .await;
             }

@@ -14,10 +14,12 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::types::embeddings::CreateEmbeddingRequestArgs;
 use async_openai::types::responses::{
-    CreateResponseArgs, EasyInputMessage, FunctionCallOutput, FunctionCallOutputItemParam,
-    FunctionTool, FunctionToolCall, InputContent, InputItem, InputParam, InputTextContent, Item,
-    MessageType, OutputItem, OutputMessage, OutputMessageContent, OutputStatus, Response, Role,
-    Tool, WebSearchApproximateLocation, WebSearchApproximateLocationType, WebSearchTool,
+    CreateResponse, CreateResponseArgs, EasyInputMessage, FunctionCallOutput,
+    FunctionCallOutputItemParam, FunctionTool, FunctionToolCall, InputContent, InputItem,
+    InputParam, InputTextContent, Item, MessageType, OutputItem, OutputMessage,
+    OutputMessageContent, OutputStatus, Response, ResponseFormatJsonSchema, ResponseTextParam,
+    Role, TextResponseFormatConfiguration, Tool, ToolChoiceFunction, ToolChoiceOptions,
+    ToolChoiceParam, WebSearchApproximateLocation, WebSearchApproximateLocationType, WebSearchTool,
     WebSearchToolSearchContextSize,
 };
 use async_trait::async_trait;
@@ -30,8 +32,9 @@ use assistant_core::Secret;
 use assistant_core::types::llm::LlmConfig;
 use assistant_core::types::llm::OpenAIUserLocation;
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, ChatRole, ContentBlock,
+    HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, ResponseFormat, StreamChunk,
+    ToolCallItem, ToolCallResponse, ToolChoice, ToolSpec, ToolSupport,
 };
 
 use crate::http::build_reqwest_client;
@@ -212,6 +215,56 @@ impl OpenAIProvider {
         tools
     }
 
+    fn build_request(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+    ) -> anyhow::Result<CreateResponse> {
+        let api_tools = self.build_tools(tools);
+
+        let mut builder = CreateResponseArgs::default();
+        builder
+            .model(&self.config.model)
+            .input(InputParam::Items(build_input_items(history)))
+            .max_output_tokens(self.config.max_tokens)
+            .store(false);
+
+        if !system_prompt.is_empty() {
+            builder.instructions(system_prompt);
+        }
+        if let ResponseFormat::JsonSchema {
+            name,
+            schema,
+            strict,
+        } = &options.response_format
+        {
+            builder.text(ResponseTextParam {
+                format: TextResponseFormatConfiguration::JsonSchema(ResponseFormatJsonSchema {
+                    description: None,
+                    name: name.clone(),
+                    schema: schema.clone(),
+                    strict: Some(*strict),
+                }),
+                verbosity: None,
+            });
+        }
+        if !api_tools.is_empty() {
+            builder.tools(api_tools);
+            if let Some(choice) = openai_tool_choice(&options.tool_choice) {
+                builder.tool_choice(choice);
+            }
+            if let Some(parallel) = options.parallel_tool_calls {
+                builder.parallel_tool_calls(parallel);
+            }
+        }
+
+        builder
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build OpenAI Responses request: {e}"))
+    }
+
     // ── Non-streaming chat ────────────────────────────────────────────────
 
     async fn chat_non_streaming(
@@ -219,31 +272,13 @@ impl OpenAIProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
+        options: &ChatOptions,
     ) -> anyhow::Result<LlmResponse> {
         self.ensure_fresh_client().await?;
 
         debug!(model = %self.config.model, tools = tools.len(), "Sending Responses API request to OpenAI");
 
-        let input_items = build_input_items(history);
-        let api_tools = self.build_tools(tools);
-
-        let mut builder = CreateResponseArgs::default();
-        builder
-            .model(&self.config.model)
-            .input(InputParam::Items(input_items))
-            .max_output_tokens(self.config.max_tokens)
-            .store(false);
-
-        if !system_prompt.is_empty() {
-            builder.instructions(system_prompt);
-        }
-        if !api_tools.is_empty() {
-            builder.tools(api_tools);
-        }
-
-        let request = builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build OpenAI Responses request: {e}"))?;
+        let request = self.build_request(system_prompt, history, tools, options)?;
 
         let retry_config = RetryConfig::default();
         let response = with_retry(
@@ -277,32 +312,14 @@ impl OpenAIProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
+        options: &ChatOptions,
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         self.ensure_fresh_client().await?;
 
         debug!(model = %self.config.model, "Sending streaming Responses API request to OpenAI");
 
-        let input_items = build_input_items(history);
-        let api_tools = self.build_tools(tools);
-
-        let mut builder = CreateResponseArgs::default();
-        builder
-            .model(&self.config.model)
-            .input(InputParam::Items(input_items))
-            .max_output_tokens(self.config.max_tokens)
-            .store(false);
-
-        if !system_prompt.is_empty() {
-            builder.instructions(system_prompt);
-        }
-        if !api_tools.is_empty() {
-            builder.tools(api_tools);
-        }
-
-        let request = builder.build().map_err(|e| {
-            anyhow::anyhow!("Failed to build OpenAI streaming Responses request: {e}")
-        })?;
+        let request = self.build_request(system_prompt, history, tools, options)?;
 
         let retry_config = RetryConfig::default();
         let mut stream = with_retry(
@@ -387,7 +404,8 @@ impl LlmProvider for OpenAIProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_non_streaming(system_prompt, history, tools).await
+        self.chat_non_streaming(system_prompt, history, tools, &ChatOptions::default())
+            .await
     }
 
     async fn chat_streaming(
@@ -397,8 +415,42 @@ impl LlmProvider for OpenAIProvider {
         tools: &[ToolSpec],
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_sse(system_prompt, history, tools, chunk_sink)
-            .await
+        self.chat_sse(
+            system_prompt,
+            history,
+            tools,
+            &ChatOptions::default(),
+            chunk_sink,
+        )
+        .await
+    }
+
+    fn chat_options_support(&self) -> ChatOptionsSupport {
+        ChatOptionsSupport {
+            tool_choice: true,
+            parallel_tool_calls: true,
+            json_schema: true,
+        }
+    }
+
+    async fn chat_with(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+    ) -> anyhow::Result<LlmResponse> {
+        match chunk_sink {
+            Some(sink) => {
+                self.chat_sse(system_prompt, history, tools, options, Some(sink))
+                    .await
+            }
+            None => {
+                self.chat_non_streaming(system_prompt, history, tools, options)
+                    .await
+            }
+        }
     }
 
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
@@ -507,7 +559,7 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                 }));
             }
 
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
+            ChatHistoryMessage::AssistantToolCalls { items: calls, .. } => {
                 // Each tool call becomes a FunctionCall item that we feed back
                 // as input for conversation context.
                 for call in calls {
@@ -685,6 +737,7 @@ fn parse_response(response: Response) -> anyhow::Result<LlmResponse> {
             items: tool_calls,
             meta,
             thinking: None,
+            provider_state: None,
         }));
     }
 
@@ -716,7 +769,21 @@ fn extract_response_meta(response: &Response) -> LlmResponseMeta {
         response_id: Some(response.id.clone()),
         input_tokens: response.usage.as_ref().map(|u| u.input_tokens as u64),
         output_tokens: response.usage.as_ref().map(|u| u.output_tokens as u64),
+        cached_input_tokens: response
+            .usage
+            .as_ref()
+            .map(|u| u64::from(u.input_tokens_details.cached_tokens)),
+        cache_write_input_tokens: response
+            .usage
+            .as_ref()
+            .and_then(|u| u.input_tokens_details.cache_write_tokens)
+            .and_then(|t| u64::try_from(t).ok()),
+        reasoning_tokens: response
+            .usage
+            .as_ref()
+            .map(|u| u64::from(u.output_tokens_details.reasoning_tokens)),
         finish_reason: Some(status),
+        cost_usd: None,
     }
 }
 
@@ -738,10 +805,51 @@ fn normalise_base_url(url: &str) -> String {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+/// The Responses API `tool_choice` for `choice`, or `None` to send the default.
+fn openai_tool_choice(choice: &ToolChoice) -> Option<ToolChoiceParam> {
+    match choice {
+        ToolChoice::Auto => None,
+        ToolChoice::None => Some(ToolChoiceParam::Option(ToolChoiceOptions::None)),
+        ToolChoice::Required => Some(ToolChoiceParam::Option(ToolChoiceOptions::Required)),
+        ToolChoice::Tool(name) => Some(ToolChoiceParam::Function(ToolChoiceFunction {
+            name: name.clone(),
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use assistant_core::{ChatHistoryMessage, ChatRole, ToolCallItem};
+
+    #[test]
+    fn extract_response_meta_reads_cached_and_reasoning_tokens() {
+        let response: Response = serde_json::from_value(serde_json::json!({
+            "id": "resp_1",
+            "object": "response",
+            "created_at": 0,
+            "model": "gpt-5.6",
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "input_tokens": 1200,
+                "input_tokens_details": {"cached_tokens": 1024},
+                "output_tokens": 80,
+                "output_tokens_details": {"reasoning_tokens": 64},
+                "total_tokens": 1280
+            }
+        }))
+        .unwrap();
+        let meta = extract_response_meta(&response);
+        assert_eq!(
+            meta.input_tokens,
+            Some(1200),
+            "input_tokens already include cached"
+        );
+        assert_eq!(meta.cached_input_tokens, Some(1024));
+        assert_eq!(meta.reasoning_tokens, Some(64));
+        assert_eq!(meta.cost_usd, None);
+    }
 
     #[test]
     fn normalise_base_url_adds_v1() {
@@ -802,11 +910,14 @@ mod tests {
     #[test]
     fn build_input_items_tool_calls_and_results() {
         let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "my-tool".to_string(),
-                params: serde_json::json!({"key": "val"}),
-                id: Some("call_123".to_string()),
-            }]),
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![ToolCallItem {
+                    name: "my-tool".to_string(),
+                    params: serde_json::json!({"key": "val"}),
+                    id: Some("call_123".to_string()),
+                }],
+                provider_state: None,
+            },
             ChatHistoryMessage::ToolResult {
                 name: "my-tool".to_string(),
                 content: "result".to_string(),
@@ -843,6 +954,7 @@ mod tests {
             }),
             is_mutating: false,
             requires_confirmation: false,
+            requires_rich_client: false,
         };
         let tool = tool_spec_to_responses(&spec);
         match tool {
@@ -1036,5 +1148,202 @@ mod tests {
         // call_1 is matched, call_2 is unmatched → should return call_2
         let id = find_preceding_call_id(&items);
         assert_eq!(id, "call_2");
+    }
+
+    mod chat_options {
+        use serde_json::{Value, json};
+
+        use assistant_core::{ChatHistoryMessage, ChatOptions, ChatRole, ToolChoice, ToolSpec};
+
+        use super::super::{OpenAIProvider, OpenAIProviderConfig};
+
+        fn request(tools: &[ToolSpec], options: ChatOptions) -> Value {
+            let provider = OpenAIProvider::new(OpenAIProviderConfig::default(), "test").unwrap();
+            let history = [ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "hi".into(),
+            }];
+            let request = provider
+                .build_request("sys", &history, tools, &options)
+                .unwrap();
+            serde_json::to_value(request).unwrap()
+        }
+
+        fn tool() -> ToolSpec {
+            ToolSpec {
+                name: "submit".into(),
+                description: "Submit".into(),
+                params_schema: json!({"type": "object"}),
+                is_mutating: false,
+                requires_confirmation: false,
+                requires_rich_client: false,
+            }
+        }
+
+        fn choose(tool_choice: ToolChoice) -> ChatOptions {
+            ChatOptions {
+                tool_choice,
+                ..ChatOptions::default()
+            }
+        }
+
+        #[test]
+        fn default_options_send_neither_field() {
+            let body = request(&[tool()], ChatOptions::default());
+            assert!(body.get("tool_choice").is_none(), "{body}");
+            assert!(body.get("parallel_tool_calls").is_none(), "{body}");
+        }
+
+        #[test]
+        fn tool_choices_map_to_responses_values() {
+            let cases = [
+                (ToolChoice::None, json!("none")),
+                (ToolChoice::Required, json!("required")),
+                (
+                    ToolChoice::Tool("submit".into()),
+                    json!({"type": "function", "name": "submit"}),
+                ),
+            ];
+            for (choice, expected) in cases {
+                let body = request(&[tool()], choose(choice.clone()));
+                assert_eq!(body["tool_choice"], expected, "{choice:?}");
+            }
+        }
+
+        #[test]
+        fn parallel_tool_calls_is_sent() {
+            let options = ChatOptions {
+                parallel_tool_calls: Some(false),
+                ..ChatOptions::default()
+            };
+            assert_eq!(
+                request(&[tool()], options)["parallel_tool_calls"],
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn no_options_without_tools() {
+            let options = ChatOptions {
+                tool_choice: ToolChoice::Required,
+                parallel_tool_calls: Some(false),
+                ..ChatOptions::default()
+            };
+            let body = request(&[], options);
+            assert!(body.get("tool_choice").is_none(), "{body}");
+            assert!(body.get("parallel_tool_calls").is_none(), "{body}");
+        }
+    }
+
+    mod structured_output {
+        use serde_json::{Value, json};
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use assistant_core::{
+            ChatHistoryMessage, ChatOptions, ChatRole, LlmProvider, ResponseFormat, chat_structured,
+        };
+
+        use super::super::{OpenAIProvider, OpenAIProviderConfig};
+
+        fn schema() -> Value {
+            json!({
+                "type": "object",
+                "properties": {"verdict": {"type": "string"}},
+                "required": ["verdict"],
+                "additionalProperties": false,
+            })
+        }
+
+        fn history() -> Vec<ChatHistoryMessage> {
+            vec![ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "judge this".into(),
+            }]
+        }
+
+        fn provider(base_url: &str) -> OpenAIProvider {
+            let config = OpenAIProviderConfig {
+                base_url: base_url.to_string(),
+                ..OpenAIProviderConfig::default()
+            };
+            OpenAIProvider::new(config, "test").unwrap()
+        }
+
+        #[test]
+        fn reports_native_json_schema_support() {
+            assert!(provider("http://unused").chat_options_support().json_schema);
+        }
+
+        #[test]
+        fn json_schema_format_is_sent_as_text_format() {
+            let options = ChatOptions {
+                response_format: ResponseFormat::JsonSchema {
+                    name: "decision".into(),
+                    schema: schema(),
+                    strict: true,
+                },
+                ..ChatOptions::default()
+            };
+            let request = provider("http://unused")
+                .build_request("sys", &history(), &[], &options)
+                .unwrap();
+            let body = serde_json::to_value(request).unwrap();
+            assert_eq!(
+                body["text"]["format"],
+                json!({"type": "json_schema", "name": "decision", "schema": schema(), "strict": true})
+            );
+        }
+
+        #[test]
+        fn text_format_sends_no_text_field() {
+            let request = provider("http://unused")
+                .build_request("sys", &history(), &[], &ChatOptions::default())
+                .unwrap();
+            let body = serde_json::to_value(request).unwrap();
+            assert!(body.get("text").is_none(), "{body}");
+        }
+
+        #[tokio::test]
+        async fn chat_structured_uses_the_native_schema() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/responses"))
+                .and(body_partial_json(json!({
+                    "text": {"format": {"type": "json_schema", "name": "decision", "strict": true}},
+                })))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "id": "resp_1",
+                    "object": "response",
+                    "created_at": 0,
+                    "model": "gpt-4o",
+                    "status": "completed",
+                    "output": [{
+                        "type": "message",
+                        "id": "msg_1",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [{
+                            "type": "output_text",
+                            "text": "{\"verdict\": \"keep\"}",
+                            "annotations": [],
+                        }],
+                    }],
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let value = chat_structured(
+                &provider(&server.uri()),
+                "sys",
+                &history(),
+                "decision",
+                &schema(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(value, json!({"verdict": "keep"}));
+        }
     }
 }
