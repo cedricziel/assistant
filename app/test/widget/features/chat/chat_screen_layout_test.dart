@@ -87,7 +87,7 @@ Scaffold _chatScaffold(WidgetTester tester) => tester.widget<Scaffold>(
 bool _listInline(WidgetTester tester) => find
     .descendant(
       of: find.byType(ChatScreen),
-      matching: find.byType(ConversationList),
+      matching: find.byType(ConversationListPane),
     )
     .evaluate()
     .isNotEmpty;
