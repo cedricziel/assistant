@@ -12,7 +12,9 @@ use reqwest::multipart;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, warn};
 
-use crate::converter::{AudioFormat, OPENAI_COMPATIBLE_FORMATS};
+use assistant_audio::AudioFormat;
+
+use crate::converter::OPENAI_COMPATIBLE_FORMATS;
 use crate::provider::{
     TranscriptionProvider, TranscriptionRequest, TranscriptionResult, extension_for_mime,
 };

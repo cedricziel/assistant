@@ -3,9 +3,9 @@
 use async_trait::async_trait;
 use tracing::debug;
 
-use crate::converter::AudioFormat;
-use crate::pipeline::AudioPipeline;
 use crate::provider::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
+use assistant_audio::AudioFormat;
+use assistant_audio::AudioPipeline;
 
 /// Wraps a provider that declares
 /// [`accepted_formats`](TranscriptionProvider::accepted_formats). Audio in
@@ -77,9 +77,9 @@ mod tests {
     use async_trait::async_trait;
 
     use super::ConvertingTranscriber;
-    use crate::converter::AudioFormat;
-    use crate::pipeline::AudioPipeline;
     use crate::provider::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
+    use assistant_audio::AudioFormat;
+    use assistant_audio::AudioPipeline;
 
     /// Accepts Ogg and WAV, and records what it was sent.
     #[derive(Default)]

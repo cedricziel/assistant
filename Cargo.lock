@@ -207,6 +207,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant-audio"
+version = "0.3.1"
+dependencies = [
+ "anyhow",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "assistant-auth"
 version = "0.3.1"
 dependencies = [
@@ -406,6 +415,7 @@ version = "0.3.1"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "assistant-audio",
  "assistant-core",
  "async-openai",
  "async-trait",
@@ -599,6 +609,7 @@ name = "assistant-transcription"
 version = "0.3.1"
 dependencies = [
  "anyhow",
+ "assistant-audio",
  "assistant-core",
  "assistant-llm-provider",
  "async-trait",

@@ -169,6 +169,25 @@ pub(crate) async fn mount_llm_reply(server: &MockServer, reply: &str) {
         .await;
 }
 
+/// Mount ordered Ollama-shaped replies on `/api/chat`: the first request gets
+/// `replies[0]`, the second `replies[1]`, and so on. A request beyond the last
+/// reply gets wiremock's default `404`.
+pub(crate) async fn mount_llm_replies(server: &MockServer, replies: &[&str]) {
+    for reply in replies {
+        let body = serde_json::json!({
+            "model": "test",
+            "message": { "role": "assistant", "content": reply },
+            "done": true
+        });
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .up_to_n_times(1)
+            .mount(server)
+            .await;
+    }
+}
+
 /// An `ApiState` whose runtimes are built over `spaces`' preloaded storage,
 /// answering from the Ollama-shaped mock at `llm_url`. With `workers`, every
 /// space's orchestrator also runs a turn worker.
@@ -195,6 +214,9 @@ pub(crate) async fn state_over_in(
 ) -> (ApiState, SpaceResolver) {
     let mut config = OrgConfig::default();
     config.memory.enabled = false;
+    // Follow-up suggestions make a second `/api/chat` call after every web
+    // turn; tests that exercise them opt in through `state_over_config`.
+    config.suggestions.enabled = false;
     state_over_config(root, llm_url, spaces, workers, config).await
 }
 

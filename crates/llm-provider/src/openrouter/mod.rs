@@ -7,6 +7,7 @@
 //! and sends the configured attribution headers, routing preferences and
 //! fallback models.
 
+mod audio_input;
 mod catalog;
 mod citations;
 mod client;
@@ -31,6 +32,7 @@ use assistant_core::{
 
 use std::sync::Arc;
 
+use self::audio_input::AudioInput;
 use self::catalog::{OpenRouterCatalog, Requirements};
 use self::client::OpenRouterClient;
 pub use self::embedder::OpenRouterEmbedder;
@@ -54,6 +56,7 @@ pub struct OpenRouterProvider {
     catalog: Arc<OpenRouterCatalog>,
     settings: RequestSettings,
     base_url: String,
+    audio_input: AudioInput,
 }
 
 impl OpenRouterProvider {
@@ -73,6 +76,58 @@ impl OpenRouterProvider {
             vision: info.as_deref().is_some_and(|i| i.vision),
             file_input: info.as_deref().is_some_and(|i| i.file_input),
         };
+        let hears = self
+            .audio_input
+            .enabled(info.as_deref().is_some_and(|i| i.audio_input));
+        let history = if hears {
+            self.audio_input.prepare(history).await
+        } else {
+            audio_input::strip(history)
+        };
+        let result = self
+            .dispatch(
+                system_prompt,
+                &history,
+                tools,
+                options,
+                stream,
+                chunk_sink.clone(),
+                inputs,
+            )
+            .await;
+        match result {
+            Err(e)
+                if audio_input::has_audio(&history)
+                    && self.audio_input.reject_if_audio_error(&e) =>
+            {
+                let history = audio_input::strip(&history);
+                self.dispatch(
+                    system_prompt,
+                    &history,
+                    tools,
+                    options,
+                    stream,
+                    chunk_sink,
+                    inputs,
+                )
+                .await
+            }
+            result => result,
+        }
+    }
+
+    /// Builds and sends one request.
+    #[allow(clippy::too_many_arguments)]
+    async fn dispatch(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+        stream: bool,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+        inputs: ModelInputs,
+    ) -> anyhow::Result<LlmResponse> {
         let mut request = build_chat_request(&self.settings, system_prompt, history, tools, inputs);
         request.stream = stream;
         apply_options(&mut request, options);
@@ -167,6 +222,7 @@ impl OpenRouterProvider {
                 image_config: cfg.openrouter.image_config.clone(),
             },
             base_url,
+            audio_input: AudioInput::new(cfg.openrouter.audio_input.clone()),
         })
     }
 }
@@ -228,7 +284,7 @@ impl LlmProvider for OpenRouterProvider {
                 tool_choice: info.tool_choice,
                 parallel_tool_calls: info.parallel_tool_calls,
                 json_schema: info.json_schema,
-                audio_input: false,
+                audio_input: self.audio_input.enabled(info.audio_input),
             })
     }
 
@@ -2905,6 +2961,203 @@ mod tests {
                 ("image/png".to_string(), b"second".to_vec()),
             ]
         );
+    }
+
+    // ── Wiremock: audio input ───────────────────────────────────────────
+
+    /// A `secs`-long tone made by ffmpeg, or `None` without ffmpeg.
+    fn tone(secs: u32, format: &str) -> Option<Vec<u8>> {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join(format!("tone.{format}"));
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-loglevel", "error", "-y", "-f", "lavfi", "-i"])
+            .arg(format!("sine=frequency=440:duration={secs}"))
+            .arg(&out)
+            .status()
+            .ok()?;
+        status.success().then(|| std::fs::read(out).unwrap())
+    }
+
+    macro_rules! or_skip {
+        ($media:expr) => {
+            match $media {
+                Some(media) => media,
+                None => {
+                    eprintln!("skipped: ffmpeg is not installed");
+                    return;
+                }
+            }
+        };
+    }
+
+    fn b64(data: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(data)
+    }
+
+    fn hearing(max_secs: u32) -> OpenRouterOptions {
+        OpenRouterOptions {
+            audio_input: assistant_core::types::llm::OpenRouterAudioInput {
+                enabled: true,
+                max_secs,
+                ..Default::default()
+            },
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    fn voice_turn(text: &str, mime: &str, data: &[u8]) -> Vec<ChatHistoryMessage> {
+        vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                assistant_core::ContentBlock::Text(text.into()),
+                assistant_core::ContentBlock::Audio {
+                    media_type: mime.into(),
+                    data: b64(data),
+                },
+            ],
+        }]
+    }
+
+    fn user_parts(body: &Value) -> Vec<Value> {
+        body["messages"][1]["content"].as_array().unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn audio_input_support_needs_the_setting_and_the_catalog() {
+        for (options, inputs, expected) in [
+            (hearing(600), vec!["text", "audio"], true),
+            (hearing(600), vec!["text"], false),
+            (OpenRouterOptions::default(), vec!["text", "audio"], false),
+        ] {
+            let server = MockServer::start().await;
+            mount_catalog(
+                &server,
+                catalog_model(&inputs, &["tools"]),
+                json!([endpoint("OpenAI", "openai", 128_000)]),
+            )
+            .await;
+            mount_once(&server, chat_response("OK")).await;
+            let provider = provider_with(&server.uri(), options);
+            provider.chat("sys", &[], &[]).await.unwrap();
+            assert_eq!(
+                provider.chat_options_support().audio_input,
+                expected,
+                "inputs {inputs:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn ogg_voice_note_is_sent_as_wav_with_the_transcript() {
+        let ogg = or_skip!(tone(2, "ogg"));
+        let body = body_for(
+            &["text", "audio"],
+            hearing(600),
+            &voice_turn("[Voice message]: hello", "audio/ogg", &ogg),
+        )
+        .await;
+
+        let parts = user_parts(&body);
+        assert_eq!(
+            parts[0],
+            json!({"type": "text", "text": "Transcript (may contain errors): [Voice message]: hello"})
+        );
+        assert_eq!(parts[1]["type"], "input_audio");
+        assert_eq!(parts[1]["input_audio"]["format"], "wav");
+        use base64::Engine as _;
+        let wav = base64::engine::general_purpose::STANDARD
+            .decode(parts[1]["input_audio"]["data"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(&wav[..4], b"RIFF", "converted to WAV");
+    }
+
+    #[tokio::test]
+    async fn accepted_formats_are_sent_unchanged() {
+        let mp3 = or_skip!(tone(1, "mp3"));
+        let body = body_for(
+            &["text", "audio"],
+            hearing(600),
+            &voice_turn("[Voice message]: hi", "audio/mpeg", &mp3),
+        )
+        .await;
+
+        let parts = user_parts(&body);
+        assert_eq!(
+            parts[1]["input_audio"],
+            json!({"data": b64(&mp3), "format": "mp3"})
+        );
+    }
+
+    #[tokio::test]
+    async fn without_a_transcript_the_text_is_not_labelled() {
+        let wav = or_skip!(tone(1, "wav"));
+        let body = body_for(
+            &["text", "audio"],
+            hearing(600),
+            &voice_turn("[Voice message]", "audio/wav", &wav),
+        )
+        .await;
+
+        assert_eq!(
+            user_parts(&body)[0],
+            json!({"type": "text", "text": "[Voice message]"})
+        );
+    }
+
+    #[tokio::test]
+    async fn recordings_longer_than_max_secs_send_only_the_text() {
+        let wav = or_skip!(tone(3, "wav"));
+        let body = body_for(
+            &["text", "audio"],
+            hearing(2),
+            &voice_turn("[Voice message]: long", "audio/wav", &wav),
+        )
+        .await;
+
+        let parts = user_parts(&body);
+        assert_eq!(parts.len(), 1, "{parts:?}");
+        assert_eq!(parts[0]["text"], "[Voice message]: long");
+    }
+
+    #[tokio::test]
+    async fn rejected_audio_is_retried_once_without_it_and_then_disabled() {
+        let wav = or_skip!(tone(1, "wav"));
+        let server = MockServer::start().await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text", "audio"], &["tools"]),
+            json!([endpoint("OpenAI", "openai", 128_000)]),
+        )
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": {"code": 400, "message": "input_audio is not supported by this endpoint"}
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(chat_response("OK")))
+            .mount(&server)
+            .await;
+        let provider = provider_with(&server.uri(), hearing(600));
+        let history = voice_turn("[Voice message]: hi", "audio/wav", &wav);
+
+        provider.chat("sys", &history, &[]).await.unwrap();
+        provider.chat("sys", &history, &[]).await.unwrap();
+
+        let requests = chat_requests(&server).await;
+        assert_eq!(requests.len(), 3, "one rejected call, its repeat, one more");
+        let sent_audio = |i: usize| {
+            let body: Value = serde_json::from_slice(&requests[i].body).unwrap();
+            body.to_string().contains("input_audio")
+        };
+        assert!(sent_audio(0));
+        assert!(!sent_audio(1), "the repeat has no audio");
+        assert!(!sent_audio(2), "audio stays off");
+        assert!(!provider.chat_options_support().audio_input);
     }
 
     // ── Live integration test ───────────────────────────────────────────
