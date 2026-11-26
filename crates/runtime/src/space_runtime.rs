@@ -30,9 +30,12 @@ use assistant_storage::{
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{AudioStore, TtsProvider};
 
-use crate::interaction::{InteractionBroker, InteractionKinds};
+use crate::interaction::{
+    InteractionBroker, InteractionKinds, InteractiveConfirmation, RoutedConfirmation,
+};
 use crate::orchestrator::{ConfirmationCallback, Orchestrator};
 use crate::org_context::{OrgContext, OrgContexts};
+use crate::user_rules::StoredUserRules;
 
 type SpaceKey = (String, String);
 type Slot = Arc<OnceCell<Arc<SpaceRuntime>>>;
@@ -313,8 +316,22 @@ impl SpaceRuntimes {
             bus.clone(),
             &config,
         );
-        if let Some(callback) = &self.confirmation {
-            orchestrator = orchestrator.with_confirmation_callback(callback.clone());
+        let rules = Arc::new(storage.tool_permission_rule_store());
+        orchestrator = orchestrator.with_user_rules(Arc::new(StoredUserRules::new(rules.clone())));
+        let interactions = self.interactions.then(|| {
+            Arc::new(
+                InteractionBroker::new(
+                    Arc::new(storage.interaction_store()),
+                    Arc::new(InteractionKinds::with_builtin()),
+                )
+                .with_rules(rules)
+                .with_timeout(Duration::from_secs(
+                    config.permissions.interaction_timeout_secs,
+                )),
+            )
+        });
+        if let Some(callback) = self.confirmation_for(interactions.as_ref()) {
+            orchestrator = orchestrator.with_confirmation_callback(callback);
         }
         if let Some(source) = &self.turn_tool_source {
             orchestrator = orchestrator.with_turn_tool_source(source.clone(), org_slug, space_slug);
@@ -358,18 +375,6 @@ impl SpaceRuntimes {
             }
         }
 
-        let interactions = self.interactions.then(|| {
-            Arc::new(
-                InteractionBroker::new(
-                    Arc::new(storage.interaction_store()),
-                    Arc::new(InteractionKinds::with_builtin()),
-                )
-                .with_timeout(Duration::from_secs(
-                    config.permissions.interaction_timeout_secs,
-                )),
-            )
-        });
-
         info!(org = org_slug, space = space_slug, "built space runtime");
         Ok(Arc::new(SpaceRuntime {
             org_slug: org_slug.to_owned(),
@@ -383,6 +388,25 @@ impl SpaceRuntimes {
             bus,
             interactions,
         }))
+    }
+
+    /// The callback a space's orchestrator asks. Without interactions it is
+    /// the one the embedder supplied. With them, undecided calls on turns a
+    /// person watches go to the owner through `broker`; a REPL's terminal
+    /// keeps answering its own `Interface::Cli` turns.
+    fn confirmation_for(
+        &self,
+        broker: Option<&Arc<InteractionBroker>>,
+    ) -> Option<Arc<dyn ConfirmationCallback>> {
+        let Some(broker) = broker else {
+            return self.confirmation.clone();
+        };
+        let interactive: Arc<dyn ConfirmationCallback> =
+            Arc::new(InteractiveConfirmation::new(broker.clone()));
+        Some(match &self.confirmation {
+            Some(terminal) => Arc::new(RoutedConfirmation::new(terminal.clone(), interactive)),
+            None => interactive,
+        })
     }
 
     async fn load_registry(
@@ -639,6 +663,93 @@ mod tests {
             "another space's store never sees it"
         );
         waiting.abort();
+    }
+
+    /// Answers every request `AllowOnce`, like a terminal user typing `y`.
+    struct Terminal;
+
+    #[async_trait::async_trait]
+    impl ConfirmationCallback for Terminal {
+        async fn confirm(
+            &self,
+            _req: crate::orchestrator::ConfirmationRequest<'_>,
+        ) -> crate::orchestrator::ConfirmationAnswer {
+            crate::orchestrator::ConfirmationAnswer::AllowOnce
+        }
+    }
+
+    async fn authorize_make(
+        runtime: &SpaceRuntime,
+        interface: assistant_core::types::conversation::Interface,
+    ) -> Result<(), String> {
+        let ctx = assistant_core::types::conversation::ExecutionContext {
+            conversation_id: uuid::Uuid::new_v4(),
+            agent_id: "t".into(),
+            turn: 0,
+            interface,
+            interactive: true,
+            run_id: None,
+            allowed_tools: None,
+            depth: 0,
+            user_id: None,
+            org_id: None,
+            space_id: None,
+        };
+        runtime
+            .orchestrator
+            .authorize_tool_call(
+                "bash",
+                &serde_json::json!({"command": "make build"}),
+                &ctx,
+                false,
+                None,
+                None,
+                None,
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn a_repl_keeps_its_terminal_for_cli_turns_and_routes_the_rest_to_the_broker() {
+        use assistant_core::types::conversation::Interface;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = OrgConfig::default();
+        config.memory.enabled = false;
+        let runtimes = SpaceRuntimes::new(
+            Arc::new(OrgPoolFactory::new(tmp.path())),
+            Arc::new(OrgContexts::fixed(
+                config,
+                Arc::new(ScriptedLlmProvider::new()),
+            )),
+            Some(Arc::new(Terminal)),
+        )
+        .with_interactions();
+        let space = runtimes.get("acme", "main").await.unwrap();
+
+        assert_eq!(authorize_make(&space, Interface::Cli).await, Ok(()));
+        // The broker needs a turn owner and a run; this context has neither, so
+        // it denies instead of asking the terminal.
+        assert!(authorize_make(&space, Interface::Web).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn without_interactions_the_supplied_callback_answers_every_turn() {
+        use assistant_core::types::conversation::Interface;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = OrgConfig::default();
+        config.memory.enabled = false;
+        let runtimes = SpaceRuntimes::new(
+            Arc::new(OrgPoolFactory::new(tmp.path())),
+            Arc::new(OrgContexts::fixed(
+                config,
+                Arc::new(ScriptedLlmProvider::new()),
+            )),
+            Some(Arc::new(Terminal)),
+        );
+        let space = runtimes.get("acme", "main").await.unwrap();
+        assert_eq!(authorize_make(&space, Interface::Web).await, Ok(()));
     }
 
     #[tokio::test]

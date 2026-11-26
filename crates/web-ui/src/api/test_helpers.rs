@@ -228,6 +228,19 @@ pub(crate) async fn state_over_config(
     workers: bool,
     config: OrgConfig,
 ) -> (ApiState, SpaceResolver) {
+    state_over_runtimes(root, llm_url, spaces, workers, config, false).await
+}
+
+/// [`state_over_config`], optionally with turn interactions (approvals) on in
+/// every space's runtime, as `SpaceRuntimes::with_interactions` does.
+async fn state_over_runtimes(
+    root: &Path,
+    llm_url: &str,
+    spaces: &[TestSpace],
+    workers: bool,
+    config: OrgConfig,
+    interactions: bool,
+) -> (ApiState, SpaceResolver) {
     let llm = Arc::new(
         LlmClient::new(LlmClientConfig {
             model: "test".to_string(),
@@ -241,14 +254,16 @@ pub(crate) async fn state_over_config(
     // Cap the submit timeout: the production default is 3 hours, so a turn
     // that never gets picked up by the worker would keep a test — and the CI
     // job around it — blocked for that long instead of failing fast.
-    let runtimes = Arc::new(
-        SpaceRuntimes::new(
-            resolver.pools().clone(),
-            Arc::new(OrgContexts::fixed(config, llm)),
-            None,
-        )
-        .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS),
-    );
+    let mut runtimes = SpaceRuntimes::new(
+        resolver.pools().clone(),
+        Arc::new(OrgContexts::fixed(config, llm)),
+        None,
+    )
+    .with_submit_timeout(TEST_SUBMIT_TIMEOUT_SECS);
+    if interactions {
+        runtimes = runtimes.with_interactions();
+    }
+    let runtimes = Arc::new(runtimes);
     if workers {
         for space in spaces {
             let runtime = runtimes.get(space.org_slug, space.slug).await.unwrap();
@@ -273,6 +288,21 @@ pub(crate) async fn split_process_state(llm_url: &str) -> (ApiState, Arc<Storage
     let spaces = [default_space(&storage)];
     let (state, _) = state_over(llm_url, &spaces, false).await;
     let _orchestrator_process = state_over(llm_url, &spaces, true).await;
+    (state, storage)
+}
+
+/// [`split_process_state`] with approvals on in both processes: the web-ui
+/// process serves the routes and the orchestrator process runs the turns.
+pub(crate) async fn split_process_state_with_approvals(
+    llm_url: &str,
+    config: OrgConfig,
+) -> (ApiState, Arc<StorageLayer>) {
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let spaces = [default_space(&storage)];
+    let root = Path::new("/nonexistent/assistant-test-root");
+    let (state, _) = state_over_runtimes(root, llm_url, &spaces, false, config.clone(), true).await;
+    let _orchestrator_process =
+        state_over_runtimes(root, llm_url, &spaces, true, config, true).await;
     (state, storage)
 }
 

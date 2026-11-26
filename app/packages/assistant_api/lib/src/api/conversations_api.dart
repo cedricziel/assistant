@@ -1689,7 +1689,7 @@ class ConversationsApi {
   }
 
   /// &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, keep it as the user message&#39;s attachment, transcribe it, run through the orchestrator, and stream the response as SSE.
-  /// The message text is the transcript, or &#x60;[Voice message]&#x60; when no transcription provider is configured or transcription fails.
+  /// The message text is the transcript, or &#x60;[Voice message]&#x60; when no transcription provider is configured or transcription fails.  The turn runs like &#x60;POST /api/conversations/{id}/messages&#x60;: the response carries the run id in &#x60;X-Run-Id&#x60;, the stream opens with &#x60;run_started&#x60; and the &#x60;transcript&#x60; frame, every frame is persisted for replay through &#x60;GET .../runs/{run_id}/events/stream&#x60;, &#x60;POST .../turns/{run_id}/cancel&#x60; stops it, and it ends in &#x60;done&#x60; or &#x60;agent_error&#x60;.
   ///
   /// Parameters:
   /// * [id] - Conversation ID

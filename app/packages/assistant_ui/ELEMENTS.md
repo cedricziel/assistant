@@ -68,7 +68,7 @@ The list keeps the old numbering. Three prerequisites are now owned by siblings.
 
 | #   | Element       | Verdict                             | Flutter element                 | Note                                                                       |
 | --- | ------------- | ----------------------------------- | ------------------------------- | -------------------------------------------------------------------------- |
-| 19  | Data table    | **Adopt via tool-result-renderers** | `DataTableResultView` (sibling) | Generic `data_table` contract; first producers `list-tasks` and `process`. |
+| 19  | Data table    | Adopt (have)                        | `DataTableResultView`           | Generic `data_table` contract; first producers `list-tasks` and `process`. |
 | 20  | Number ticker | **Decline**                         | —                               | Animation with nothing to animate.                                         |
 
 ## Agents (6)
@@ -118,7 +118,7 @@ Stay card · table reservation · order tracking · flight tracker · portfolio 
 `ConversationSearchResultsView`, `HighlightedSegments`, `GenericToolResultView`, `ToolStatusIcon`, `MessageActionButton`, `TimelineEntryView` and the scopes (`ThreadDensityScope`, `ChatMarkdownScope`, `ToolResultRendererScope`) are seams or primitives with no assistant-ui counterpart. They are in `kAssistantUiElements` and the gallery, but they have no verdict row.
 `GenericToolResultView`, `ToolStatusIcon`, `MessageActionButton`, `CodeBlock`, `TimelineEntryView` and the scopes (`ThreadDensityScope`, `ChatMarkdownScope`, `ToolResultRendererScope`) are seams or primitives with no assistant-ui counterpart. They are in `kAssistantUiElements` and the gallery, but they have no verdict row.
 `GenericToolResultView`, `ToolStatusIcon`, `MessageActionButton`, `TimelineEntryView`, `PermissionRuleTile` (a saved tool-permission rule row for settings, with an optional `ownerLabel` for the admin group; tool-approval-prompts PR 14b) and the scopes (`ThreadDensityScope`, `ChatMarkdownScope`, `ToolResultRendererScope`) are seams or primitives with no assistant-ui counterpart. They are in `kAssistantUiElements` and the gallery, but they have no verdict row.
-`CompactExpandable` (a one-line tool result summary that a tap swaps for the full view at compact density; tool-result-renderers PR C2), `GenericToolResultView`, `QueuedMessageBubble` (a ghost user bubble for a message waiting in the send queue; `onLongPress` opens the app's remove sheet, PR 11c), `ToolStatusIcon`, `MessageActionButton`, `TimelineEntryView` and the scopes (`ThreadDensityScope`, `ChatMarkdownScope`, `ToolResultRendererScope`) are seams or primitives with no assistant-ui counterpart. They are in `kAssistantUiElements` and the gallery, but they have no verdict row.
+`CompactExpandable` (a one-line tool result summary that a tap swaps for the full view at compact density; tool-result-renderers PR C2), `GenericToolResultView`, `JsonTreeView` (a collapsible tree of a tool record's structured `data`, shown by the generic view; tool-result-renderers PR C2b), `QueuedMessageBubble` (a ghost user bubble for a message waiting in the send queue; `onLongPress` opens the app's remove sheet, PR 11c), `ToolStatusIcon`, `MessageActionButton`, `TimelineEntryView` and the scopes (`ThreadDensityScope`, `ChatMarkdownScope`, `ToolResultRendererScope`) are seams or primitives with no assistant-ui counterpart. They are in `kAssistantUiElements` and the gallery, but they have no verdict row.
 
 ## Tally
 
