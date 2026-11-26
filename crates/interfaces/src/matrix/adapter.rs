@@ -449,7 +449,7 @@ impl ChannelAdapter for MatrixAdapter {
                     .await?;
 
                 // Route audio files to send_audio, images to send_image
-                if is_audio_mime_type(&mime_type) {
+                if assistant_transcription::is_audio_mime(&mime_type) {
                     self.client
                         .send_audio(room_id, &mxc_uri, &filename, &mime_type, size, None)
                         .await?;
@@ -555,22 +555,6 @@ impl ChannelAdapter for MatrixAdapter {
             .await;
         Ok(())
     }
-}
-
-/// Check if a MIME type represents an audio file.
-fn is_audio_mime_type(mime_type: &str) -> bool {
-    matches!(
-        mime_type,
-        "audio/ogg"
-            | "audio/mpeg"
-            | "audio/wav"
-            | "audio/webm"
-            | "audio/mp4"
-            | "audio/aac"
-            | "audio/flac"
-            | "audio/x-wav"
-            | "audio/opus"
-    ) || mime_type.starts_with("audio/")
 }
 
 fn build_message(

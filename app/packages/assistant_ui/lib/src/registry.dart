@@ -10,4 +10,5 @@ const List<String> kAssistantUiElements = [
   'QueuedMessageBubble',
   'StarterPrompts',
   'SuggestionChips',
+  'ThreadDensityScope',
 ];

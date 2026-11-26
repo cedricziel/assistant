@@ -14,6 +14,8 @@ class _$MessageSummary extends MessageSummary {
   @override
   final DateTime createdAt;
   @override
+  final MessageFeedbackSummary? feedback;
+  @override
   final String? finishReason;
   @override
   final String id;
@@ -35,6 +37,7 @@ class _$MessageSummary extends MessageSummary {
       {this.attachments,
       required this.content,
       required this.createdAt,
+      this.feedback,
       this.finishReason,
       required this.id,
       required this.role,
@@ -57,6 +60,7 @@ class _$MessageSummary extends MessageSummary {
         attachments == other.attachments &&
         content == other.content &&
         createdAt == other.createdAt &&
+        feedback == other.feedback &&
         finishReason == other.finishReason &&
         id == other.id &&
         role == other.role &&
@@ -72,6 +76,7 @@ class _$MessageSummary extends MessageSummary {
     _$hash = $jc(_$hash, attachments.hashCode);
     _$hash = $jc(_$hash, content.hashCode);
     _$hash = $jc(_$hash, createdAt.hashCode);
+    _$hash = $jc(_$hash, feedback.hashCode);
     _$hash = $jc(_$hash, finishReason.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, role.hashCode);
@@ -89,6 +94,7 @@ class _$MessageSummary extends MessageSummary {
           ..add('attachments', attachments)
           ..add('content', content)
           ..add('createdAt', createdAt)
+          ..add('feedback', feedback)
           ..add('finishReason', finishReason)
           ..add('id', id)
           ..add('role', role)
@@ -117,6 +123,12 @@ class MessageSummaryBuilder
   DateTime? _createdAt;
   DateTime? get createdAt => _$this._createdAt;
   set createdAt(DateTime? createdAt) => _$this._createdAt = createdAt;
+
+  MessageFeedbackSummaryBuilder? _feedback;
+  MessageFeedbackSummaryBuilder get feedback =>
+      _$this._feedback ??= MessageFeedbackSummaryBuilder();
+  set feedback(MessageFeedbackSummaryBuilder? feedback) =>
+      _$this._feedback = feedback;
 
   String? _finishReason;
   String? get finishReason => _$this._finishReason;
@@ -158,6 +170,7 @@ class MessageSummaryBuilder
       _attachments = $v.attachments?.toBuilder();
       _content = $v.content;
       _createdAt = $v.createdAt;
+      _feedback = $v.feedback?.toBuilder();
       _finishReason = $v.finishReason;
       _id = $v.id;
       _role = $v.role;
@@ -193,6 +206,7 @@ class MessageSummaryBuilder
                 content, r'MessageSummary', 'content'),
             createdAt: BuiltValueNullFieldError.checkNotNull(
                 createdAt, r'MessageSummary', 'createdAt'),
+            feedback: _feedback?.build(),
             finishReason: finishReason,
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'MessageSummary', 'id'),
@@ -210,6 +224,9 @@ class MessageSummaryBuilder
       try {
         _$failedField = 'attachments';
         _attachments?.build();
+
+        _$failedField = 'feedback';
+        _feedback?.build();
 
         _$failedField = 'toolCalls';
         _toolCalls?.build();

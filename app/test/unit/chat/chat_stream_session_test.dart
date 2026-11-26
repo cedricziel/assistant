@@ -1,19 +1,21 @@
+import 'dart:async';
+
 import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_stream_session.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('ChatStreamSession.beginTurn', () {
-    test('resets cancellation, run id, cursor and deferred reconnect', () {
+    test('resets detach, run id, cursor and deferred reconnect', () {
       final session = ChatStreamSession()
-        ..cancelled = true
+        ..detach()
         ..runId = 'run-1'
         ..lastSeq = 9
         ..markDisconnected(userMsgId: 'u1', conversationId: 'c1');
 
       session.beginTurn();
 
-      expect(session.cancelled, isFalse);
+      expect(session.detached, isFalse);
       expect(session.runId, isNull);
       expect(session.lastSeq, 0);
       expect(session.needsReconnect, isFalse);
@@ -24,6 +26,41 @@ void main() {
       final session = ChatStreamSession()..draining = true;
       session.beginTurn();
       expect(session.draining, isTrue);
+    });
+  });
+
+  group('ChatStreamSession.untilDetached', () {
+    test('closes the stream on detach without another source event', () async {
+      final session = ChatStreamSession();
+      final source = StreamController<int>();
+      final received = <int>[];
+      final done = Completer<void>();
+      session
+          .untilDetached(source.stream)
+          .listen(received.add, onDone: done.complete);
+
+      source.add(1);
+      await Future<void>.delayed(Duration.zero);
+      session.detach();
+      await done.future.timeout(const Duration(seconds: 1));
+
+      expect(received, [1]);
+      expect(source.hasListener, isFalse);
+      expect(session.detached, isTrue);
+    });
+
+    test('passes events and completion through when never detached', () async {
+      final session = ChatStreamSession();
+      final out = await session
+          .untilDetached(Stream.fromIterable([1, 2, 3]))
+          .toList();
+      expect(out, [1, 2, 3]);
+    });
+
+    test('a new turn gets a fresh detach', () {
+      final session = ChatStreamSession()..detach();
+      session.beginTurn();
+      expect(session.detached, isFalse);
     });
   });
 

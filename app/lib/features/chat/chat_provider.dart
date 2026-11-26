@@ -245,6 +245,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     required String userMsgId,
   }) {
     _session.closeThinking();
+    _session.terminalFrameSeen = true;
     state = AsyncData(switch (event.reason) {
       AgentErrorReason.cancelled => stoppedTurnState(
         chatState,
@@ -260,6 +261,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         clearTurnStatus: true,
       ),
     });
+  }
+
+  /// Remember the run id for replay and Stop, and deliver a Stop that was
+  /// tapped before the id was known.
+  void _captureRunId(RunStartedEvent event) {
+    _session.runId = event.runId;
+    _session.advance(event);
+    if (_session.stopRequested) unawaited(_requestServerCancel());
   }
 
   /// Store the synthesized-audio id on the streaming assistant placeholder.
@@ -281,6 +290,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   @override
   Future<ChatState> build() async {
+    ref.onDispose(_session.cancelStopTimer);
     return const ChatState();
   }
 
@@ -312,7 +322,70 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (current == null || !current.isSending || current.isStopping) return;
     _session.stopRequested = true;
     state = AsyncData(current.copyWith(isStopping: true));
+    // The ceiling counts from the tap, whether or not the run id is known.
+    _session.stopTimer = Timer(ChatStreamSession.stopGrace, _onStopGrace);
     if (_session.runId != null) unawaited(_requestServerCancel());
+  }
+
+  /// [ChatStreamSession.stopGrace] expired without a terminal frame. Probe the
+  /// run once: a running (or unreachable) server is wedged, so the partial is
+  /// kept as the stopped reply; anything else has an outcome the stream failed
+  /// to deliver, so show what the server persisted.
+  Future<void> _onStopGrace() async {
+    if (!ref.mounted || _session.detached) return;
+    final turn = _session.turnSeq;
+    final api = _api;
+    final runId = _session.runId;
+    final conversationId = _session.conversationId;
+    if (api == null || runId == null || conversationId == null) {
+      await _detachTurn(error: _noRunIdStopError);
+      return;
+    }
+    final status = await api.turnStatus(conversationId, runId);
+    if (!_stopStillPending(turn)) return;
+    if (status == TurnState.running || status == null) {
+      await _detachTurn(error: _unconfirmedStopError);
+    } else {
+      await _detachTurn(refresh: true);
+    }
+  }
+
+  /// Retries of an unanswered cancel request, after the first attempt.
+  static const _cancelRetries = 2;
+
+  static const _noRunIdStopError =
+      "Couldn't confirm the stop. The reply may still finish.";
+  static const _unconfirmedStopError =
+      "The server hasn't confirmed the stop. The reply may still finish.";
+  static const _unreachableStopError =
+      "Couldn't reach the server to stop this reply. It may still finish.";
+
+  /// Whether the Stop of turn [turn] is still waiting for its outcome.
+  bool _stopStillPending(int turn) =>
+      ref.mounted &&
+      _session.turnSeq == turn &&
+      !_session.detached &&
+      (state.value?.isStopping ?? false);
+
+  /// Give up on the server's terminal frame: end the stream loops at once,
+  /// keep the streamed text as a stopped reply (the user message stays `ok`,
+  /// the server may have it), surface [error] and, with [refresh], replace
+  /// the messages with the server's. The queue drains right after.
+  Future<void> _detachTurn({String? error, bool refresh = false}) async {
+    final current = state.value;
+    if (!ref.mounted || _session.detached || current == null) return;
+    final conversationId = _session.conversationId;
+    _session.detach();
+    _session.closeThinking();
+    final stopped = stoppedTurnState(
+      current,
+      userMsgId: _session.userMsgId ?? '',
+      partialContent: '',
+    );
+    state = AsyncData(error == null ? stopped : stopped.copyWith(error: error));
+    if (refresh && conversationId != null) {
+      await _refreshFromServer(conversationId);
+    }
   }
 
   /// Load an existing conversation by ID.
@@ -363,14 +436,33 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     state = AsyncData(current.copyWith(clearError: true));
   }
 
-  /// Ask the server to cancel the current run. The `agent_error` frame that
-  /// follows reconciles the turn; this call only delivers the request.
+  /// Ask the server to cancel the current run. The terminal frame that follows
+  /// reconciles the turn; this call only delivers the request.
+  ///
+  /// A request the server never answered is retried twice (1 s, 2 s apart)
+  /// before detaching with an error; `unknown` (no such run) detaches and
+  /// refreshes. Any other answer leaves the outcome to the stream.
   Future<void> _requestServerCancel() async {
     final api = _api;
     final runId = _session.runId;
     final convId = state.value?.conversationId;
     if (api == null || runId == null || convId == null) return;
-    await api.cancelTurn(convId, runId);
+    final turn = _session.turnSeq;
+    for (var attempt = 0; ; attempt++) {
+      final result = await api.cancelTurn(convId, runId);
+      if (!_stopStillPending(turn)) return;
+      if (result == TurnState.unknown) {
+        await _detachTurn(refresh: true);
+        return;
+      }
+      if (result != null) return;
+      if (attempt == _cancelRetries) {
+        await _detachTurn(error: _unreachableStopError);
+        return;
+      }
+      await Future<void>.delayed(ChatStreamSession.retryDelay(attempt));
+      if (!_stopStillPending(turn)) return;
+    }
   }
 
   /// Set the active conversation ID without loading history.
@@ -500,6 +592,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     int since,
   ) async {
     final current = state.value ?? const ChatState();
+    _session.conversationId = conversationId;
+    _session.userMsgId = userMsgId;
 
     // Put the user message back into sending state and add streaming placeholder.
     final msgs = List<ChatMessage>.from(current.messages);
@@ -526,12 +620,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
 
     try {
-      await for (final event in api.streamEventsFrom(
-        conversationId,
-        runId,
-        since: since,
+      await for (final event in _session.untilDetached(
+        api.streamEventsFrom(conversationId, runId, since: since),
       )) {
-        if (_session.cancelled) break;
         final chatState = state.value ?? const ChatState();
 
         if (_applyTurnEvent(chatState, event)) {
@@ -624,6 +715,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     // Show a placeholder user message while transcribing.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
+    _session.conversationId = conversationId;
+    _session.userMsgId = userMsgId;
     final userMsg = ChatMessage(
       id: userMsgId,
       role: 'user',
@@ -653,26 +746,32 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // of [ChatStreamSession.initialStallTimeout] probes the server: a `running` reply keeps
     // the sink open (iOS Dio buffering safety net), anything else recovers.
     var sawProgress = false;
-    final source = api
-        .sendVoiceMessage(conversationId, audioBytes, mimeType)
-        .timeout(
-          ChatStreamSession.initialStallTimeout,
-          onTimeout: (sink) {
-            if (sawProgress) return;
-            unawaited(
-              _probeOrRecover(
-                conversationId: conversationId,
-                userMsgId: userMsgId,
-                sink: sink,
-                sawProgress: () => sawProgress,
-              ),
-            );
-          },
-        );
+    final source = _session.untilDetached(
+      api
+          .sendVoiceMessage(conversationId, audioBytes, mimeType)
+          .timeout(
+            ChatStreamSession.initialStallTimeout,
+            onTimeout: (sink) {
+              if (sawProgress) return;
+              unawaited(
+                _probeOrRecover(
+                  conversationId: conversationId,
+                  userMsgId: userMsgId,
+                  sink: sink,
+                  sawProgress: () => sawProgress,
+                ),
+              );
+            },
+          ),
+    );
 
     try {
       await for (final event in source) {
-        if (_session.cancelled) break;
+        // The run id header arrives before the body: not progress.
+        if (event is RunStartedEvent) {
+          _captureRunId(event);
+          continue;
+        }
         sawProgress = true;
         final chatState = state.value ?? const ChatState();
 
@@ -709,9 +808,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           return;
         }
       }
+      // Detached: no terminal frame will come, so release the token stream.
+      unawaited(tokenController.close());
     } catch (e) {
       unawaited(tokenController.close());
       await _handleStreamFailure(api, e, conversationId, userMsgId);
+    } finally {
+      _session.cancelStopTimer();
     }
   }
 
@@ -734,6 +837,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     // Add user message with status=sending and assistant streaming placeholder.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
+    _session.conversationId = conversationId;
+    _session.userMsgId = userMsgId;
     final userMsg = ChatMessage(
       id: userMsgId,
       role: 'user',
@@ -766,38 +871,37 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // byte-level heartbeat (90 s) handles longer silences that may
     // legitimately occur during tool execution.
     var sawProgress = false;
-    final source = api
-        .streamMessages(
-          conversationId,
-          message,
-          attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
-        )
-        .timeout(
-          ChatStreamSession.initialStallTimeout,
-          onTimeout: (sink) {
-            if (sawProgress) return;
-            unawaited(
-              _probeOrRecover(
-                conversationId: conversationId,
-                userMsgId: userMsgId,
-                sink: sink,
-                sawProgress: () => sawProgress,
-              ),
-            );
-          },
-        );
+    final source = _session.untilDetached(
+      api
+          .streamMessages(
+            conversationId,
+            message,
+            attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
+          )
+          .timeout(
+            ChatStreamSession.initialStallTimeout,
+            onTimeout: (sink) {
+              if (sawProgress) return;
+              unawaited(
+                _probeOrRecover(
+                  conversationId: conversationId,
+                  userMsgId: userMsgId,
+                  sink: sink,
+                  sawProgress: () => sawProgress,
+                ),
+              );
+            },
+          ),
+    );
 
     // Stream SSE events.
     try {
       await for (final event in source) {
-        if (_session.cancelled) break;
         final chatState = state.value ?? const ChatState();
 
         if (event is RunStartedEvent) {
           // Capture the run ID for potential reconnect; don't change UI.
-          _session.runId = event.runId;
-          _session.advance(event);
-          if (_session.stopRequested) unawaited(_requestServerCancel());
+          _captureRunId(event);
           // Open the turn-status snapshot used by the progress card.
           state = AsyncData(
             chatState.copyWith(
@@ -871,6 +975,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     } catch (e) {
       unawaited(tokenController.close());
       await _handleStreamFailure(api, e, conversationId, userMsgId);
+    } finally {
+      _session.cancelStopTimer();
     }
   }
 
@@ -895,7 +1001,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         attempt++
       ) {
         await Future<void>.delayed(ChatStreamSession.retryDelay(attempt));
-        if (!ref.mounted) return;
+        if (!ref.mounted || _session.detached) return;
         if (_session.stopRequested) {
           // Stopped while the stream was down: the cancel was sent, so do not
           // replay again; keep what streamed so far as the stopped reply.
@@ -908,7 +1014,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           );
           return;
         }
-        if (_session.cancelled) return;
 
         final replayed = await _replayRun(
           api,
@@ -917,7 +1022,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _session.runId!,
           _session.lastSeq,
         );
-        if (replayed) return;
+        if (replayed || _session.terminalFrameSeen) return;
       }
 
       // All retries exhausted — defer to app resume.
@@ -962,7 +1067,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     required EventSink<StreamEvent> sink,
     required bool Function() sawProgress,
   }) async {
-    if (sawProgress() || _session.cancelled) return;
+    if (sawProgress() || _session.detached) return;
     final api = _api;
     final runId = _session.runId;
     if (api == null || runId == null) {
@@ -970,11 +1075,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // Fall back to the legacy recovery path so the dots state still
       // resolves within the watchdog window.
       await _recoverStalledStream(conversationId, userMsgId);
-      if (!_session.cancelled) sink.close();
+      if (!_session.detached) sink.close();
       return;
     }
     final state = await api.turnStatus(conversationId, runId);
-    if (sawProgress() || _session.cancelled) return;
+    if (sawProgress() || _session.detached) return;
     if (state == TurnState.running) {
       // Server says the turn is still in flight — leave the sink open.
       // The chat-stream-progress-ux card already shows a stalled UI past
@@ -984,7 +1089,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     }
     // completed / errored / unknown / null (probe failed) → recover.
     await _recoverStalledStream(conversationId, userMsgId);
-    if (!_session.cancelled) sink.close();
+    if (!_session.detached) sink.close();
   }
 
   /// Recover from a stalled SSE stream by fetching the conversation
@@ -1000,8 +1105,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     String conversationId,
     String userMsgId,
   ) async {
-    if (_session.cancelled || !ref.mounted) return;
-    _session.cancelled = true; // stop the await-for loop on its next iteration
+    if (_session.detached || !ref.mounted) return;
+    _session.detach(); // end the stream loop at once
 
     // Step 1: clear the placeholder synchronously so the user immediately
     // sees that the stream stalled and gets out of the dots state.
@@ -1015,6 +1120,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // Step 2: in the background, fetch the conversation from the server.
     // The user reported that a manual reload surfaces the actual reply, so
     // a direct GET typically resolves the missing message.
+    await _refreshFromServer(conversationId);
+  }
+
+  /// Replace the messages with the server's persisted ones, keeping
+  /// [ChatState.pendingQueue]. `loadConversation` is not used because it
+  /// builds a fresh state and drops the queue. On failure the state is left
+  /// as it is.
+  Future<void> _refreshFromServer(String conversationId) async {
     final api = _api;
     if (api == null) return;
     try {
@@ -1028,11 +1141,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // loop may have advanced to the next pending message and started
       // a new stream. Overwriting state here would silently wipe that
       // in-flight placeholder. The new stream is the freshest truth —
-      // discard the stale recovery snapshot instead.
+      // discard the stale snapshot instead.
       //
       // Reproducer / regression test:
-      //   test/unit/chat/chat_provider_test.dart group 12 — "stalled
-      //   recovery does not clobber a concurrently-started stream".
+      //   test/unit/chat/chat_provider_test.dart — "stopTurn — bounded wait"
+      //   "cancel unknown detaches and refreshes".
       if (latest.isSending) return;
       state = AsyncData(
         ChatState(
@@ -1042,8 +1155,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     } catch (_) {
-      // Fetch failed — keep the cleared placeholder and the error message
-      // already surfaced above so the user can retry.
+      // Fetch failed — keep the current state (and any error already shown)
+      // so the user can retry.
     }
   }
 

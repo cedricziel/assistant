@@ -4,9 +4,7 @@
 //! puts it here against the assistant message id. Conversation history reads
 //! the whole conversation's timings in one call.
 //!
-//! The table references `conversations` but not `messages`, so
-//! `replace_history` (context compaction) keeps the timing of every message
-//! it keeps.
+//! The table references `conversations` but not `messages`.
 
 use std::collections::HashMap;
 

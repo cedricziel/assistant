@@ -81,6 +81,7 @@ impl StreamProjector for SseProjector {
                 result,
                 tool_call_id,
                 data,
+                app,
             } => {
                 let mut p = json!({ "tool_name": tool_name, "status": status });
                 if let Some(args) = arguments {
@@ -94,6 +95,9 @@ impl StreamProjector for SseProjector {
                 }
                 if let Some(data) = data {
                     p["data"] = data.clone();
+                }
+                if let Some(app) = app.as_ref().and_then(|app| serde_json::to_value(app).ok()) {
+                    p["app"] = app;
                 }
                 SseFrame {
                     event: "tool_result".to_string(),
@@ -236,6 +240,7 @@ fn project_subagent_inner(inner: &OrchestratorEvent) -> (&'static str, Value) {
             // Subagent tool calls stay compact rows: `data` is deliberately
             // not forwarded, so it is not stored twice in the event log.
             data: _,
+            app: _,
         } => {
             let mut d = json!({
                 "tool_name": tool_name,
@@ -307,6 +312,7 @@ mod tests {
                 result: Some("contents".into()),
                 tool_call_id: Some("call_2".into()),
                 data: None,
+                app: None,
             },
             OrchestratorEvent::SkillComplete {
                 skill_name: "tdd".into(),
@@ -363,6 +369,7 @@ mod tests {
                 result: Some("a.txt".into()),
                 tool_call_id: Some("call_1".into()),
                 data: None,
+                app: None,
             },
             OrchestratorEvent::SubagentEvent {
                 agent_id: "a1".into(),
@@ -373,6 +380,7 @@ mod tests {
                     result: Some("<html>".into()),
                     tool_call_id: Some("call_2".into()),
                     data: None,
+                    app: None,
                 }),
             },
         ]
@@ -406,10 +414,37 @@ mod tests {
             result: None,
             tool_call_id: None,
             data: Some(json!({"kind": "terminal"})),
+            app: None,
         });
         assert_eq!(frame.event, "tool_result");
         assert_eq!(frame.log_payload["data"], json!({"kind": "terminal"}));
         assert_eq!(frame.sse_data, frame.log_payload.to_string());
+    }
+
+    #[test]
+    fn tool_result_with_an_app_projects_an_app_field() {
+        let app = assistant_core::mcp_app::McpApp {
+            server: "weather".into(),
+            resource_uri: "ui://weather/forecast".into(),
+            html: "<p>sunny</p>".into(),
+            csp: Default::default(),
+            permissions: Default::default(),
+            prefers_border: Some(true),
+        };
+        let frame = only(OrchestratorEvent::ToolResult {
+            tool_name: "mcp__weather__forecast".into(),
+            status: "ok".into(),
+            arguments: None,
+            result: None,
+            tool_call_id: None,
+            data: None,
+            app: Some(app.clone()),
+        });
+        assert_eq!(
+            frame.log_payload["app"],
+            serde_json::to_value(&app).unwrap()
+        );
+        assert!(frame.log_payload.get("data").is_none());
     }
 
     #[test]
@@ -421,6 +456,7 @@ mod tests {
             result: None,
             tool_call_id: None,
             data: None,
+            app: None,
         });
         assert!(frame.log_payload.get("data").is_none());
     }
@@ -446,6 +482,7 @@ mod tests {
                             result,
                             tool_call_id,
                             data: Some(json!({"kind": "terminal"})),
+                            app: None,
                         },
                         other => other,
                     };
@@ -535,6 +572,7 @@ mod tests {
                     result: None,
                     tool_call_id: None,
                     data: None,
+                    app: None,
                 },
                 "tool_result",
             ),

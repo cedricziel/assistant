@@ -28,7 +28,7 @@ pub use anthropic::{AnthropicConfig, AnthropicProvider};
 pub use moonshot::MoonshotProvider;
 pub use ollama::{OllamaConfig, OllamaProvider};
 pub use openai::{OAuthManager, OpenAIProvider, OpenAIProviderConfig};
-pub use openrouter::OpenRouterProvider;
+pub use openrouter::{OpenRouterEmbedder, OpenRouterProvider};
 pub use scripted::{RecordedCall, ScriptedLlmProvider};
 pub use voyage::{VoyageConfig, VoyageEmbedder};
 

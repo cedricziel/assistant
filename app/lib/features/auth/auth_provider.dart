@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../contexts/models/context_model.dart';
@@ -29,6 +30,27 @@ class OAuthLoginSuccess extends OAuthLoginState {
 class OAuthLoginError extends OAuthLoginState {
   const OAuthLoginError(this.message);
   final String message;
+}
+
+/// Turns an unexpected sign-in failure into a message for the login screen.
+String loginErrorMessage(Object error) {
+  if (error is DioException) {
+    switch (error.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return 'The server took too long to respond. Try again in a moment.';
+      case DioExceptionType.connectionError:
+        return "Couldn't reach the server. Check the address and your "
+            'connection.';
+      case DioExceptionType.badResponse:
+        return 'The server responded with HTTP '
+            '${error.response?.statusCode}.';
+      default:
+        break;
+    }
+  }
+  return 'Login failed: $error';
 }
 
 /// Builds the [OAuthService] for a server URL. Tests override it.
@@ -92,7 +114,7 @@ class OAuthLoginNotifier extends Notifier<OAuthLoginState> {
     } on OAuthException catch (e) {
       state = OAuthLoginError(e.message);
     } catch (e) {
-      state = OAuthLoginError('Login failed: $e');
+      state = OAuthLoginError(loginErrorMessage(e));
     }
   }
 
@@ -140,7 +162,7 @@ class OAuthLoginNotifier extends Notifier<OAuthLoginState> {
     } on OAuthException catch (e) {
       state = OAuthLoginError(e.message);
     } catch (e) {
-      state = OAuthLoginError('Login failed: $e');
+      state = OAuthLoginError(loginErrorMessage(e));
     }
   }
 

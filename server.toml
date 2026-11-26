@@ -38,10 +38,10 @@
 # command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/user/docs"]
 # trust = "trust"              # read-only server, skip confirmation
 #
-# HTTP/SSE transport — connect to a remote server:
+# Streamable HTTP transport — connect to a remote server:
 # [[mcp.servers]]
 # name = "remote-db"
-# url = "https://db.example.com/mcp/sse"
+# url = "https://db.example.com/mcp"
 # [mcp.servers.headers]
 # Authorization = "Bearer ${DB_TOKEN}"
 

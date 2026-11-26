@@ -49,7 +49,7 @@ class _LoginCallbackScreenState extends ConsumerState<LoginCallbackScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
+                      SelectableText(
                         loginState.message,
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.error,

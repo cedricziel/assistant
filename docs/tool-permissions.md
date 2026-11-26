@@ -16,7 +16,7 @@ Checks run in this order. The first one that decides wins.
 
 1. **Deny rules.** Built-in hard-deny rules, then your `deny` rules. A match denies the call.
 2. **Confinement.** For `file-read`, `file-write`, `file-edit` and `file-glob`, a path outside the workspace roots is denied. No allow rule overrides this. To open another directory, add it to `workspace_roots`.
-3. **Ask rules.** Your `ask` rules. A match sends the call to a human.
+3. **Ask rules.** Built-in ask rules, then your `ask` rules. A match sends the call to a human.
 4. **Allow rules.** Built-in allow rules, then your `allow` rules. A match allows the call.
 5. **Decision model.** A call no rule decided goes to the decision model when `[permissions.decision_model] enabled = true`. A call whose tool flags it as requiring confirmation skips the model and goes to a human. The model can approve a call and nothing else.
 6. **Human.** Anything still undecided goes to a human. This is also the path when no model is configured.
@@ -30,7 +30,7 @@ Only the CLI REPL turn is interactive. Calls over MCP are never interactive.
 
 The final outcome is `allow`, `deny` or `ask`. `ask` is the label for "a human decides, or denial if nobody can be asked".
 
-Config rules add to the built-in rules. They cannot remove a built-in deny.
+Config rules add to the built-in rules. They cannot remove a built-in deny or ask rule.
 
 ## Decision model
 
@@ -231,6 +231,14 @@ Credential stores. `bash` is denied when the command contains one of these paths
 
 The credential rules for file tools cover reads too, so `file-read` of `~/.ssh/id_ed25519` is denied.
 
+### Ask
+
+These always go to a human, whatever your allow rules say:
+
+- `bash(*/mcp-skills/*)` and `process(*/mcp-skills/*)`
+
+Skills that external MCP servers publish are cached under `~/.assistant/cache/mcp-skills/` and are untrusted, so a command that runs one of their scripts asks first. On a turn that cannot prompt, the call is denied. The rule matches the command text, so a command that never names that directory is left to the rest of the checks. See [MCP](mcp.md#skills-from-external-servers).
+
 ### Allow
 
 These tools run without a rule of yours:
@@ -278,4 +286,6 @@ The default console filter is `info`, so the events show up without extra setup.
 
 ## MCP server
 
-Tool calls that arrive over MCP (`tools/call`, including `install-skill`) pass the same policy. An MCP caller cannot be prompted, so a call no rule allows is refused. The refusal comes back as a tool result with `isError: true` and the reason as text. `run-prompt` runs a normal turn, so the tools it calls pass the orchestrator's check.
+Tool calls that arrive over MCP (`tools/call`, including `install-skill`) pass the same policy, over stdio (`assistant mcp`) and over HTTP (`/mcp`). An MCP caller cannot be prompted, so a call no rule allows is refused. The refusal comes back as a tool result with `isError: true` and the reason as text. `run-prompt` runs a normal turn, so the tools it calls pass the orchestrator's check.
+
+The call runs as the caller. Over stdio that is the local system identity in the `default` space. Over HTTP it is the user behind the token or API key, in the space the request selects, and the `[permissions]` of that space's org apply. A caller with the `viewer` role cannot call tools at all. See [MCP](mcp.md).

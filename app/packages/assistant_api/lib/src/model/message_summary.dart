@@ -5,6 +5,7 @@
 // ignore_for_file: unused_element
 import 'package:built_collection/built_collection.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
+import 'package:assistant_api/src/model/message_feedback_summary.dart';
 import 'package:assistant_api/src/model/attachment_meta_response.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
@@ -17,6 +18,7 @@ part 'message_summary.g.dart';
 /// * [attachments] - Attachments linked to this message.
 /// * [content]
 /// * [createdAt]
+/// * [feedback] - The calling user's verdict on this message. Omitted when the caller has not rated it.
 /// * [finishReason] - Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message.
 /// * [id]
 /// * [role]
@@ -36,6 +38,10 @@ abstract class MessageSummary
 
   @BuiltValueField(wireName: r'created_at')
   DateTime get createdAt;
+
+  /// The calling user's verdict on this message. Omitted when the caller has not rated it.
+  @BuiltValueField(wireName: r'feedback')
+  MessageFeedbackSummary? get feedback;
 
   /// Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message.
   @BuiltValueField(wireName: r'finish_reason')
@@ -106,6 +112,13 @@ class _$MessageSummarySerializer
       object.createdAt,
       specifiedType: const FullType(DateTime),
     );
+    if (object.feedback != null) {
+      yield r'feedback';
+      yield serializers.serialize(
+        object.feedback,
+        specifiedType: const FullType.nullable(MessageFeedbackSummary),
+      );
+    }
     if (object.finishReason != null) {
       yield r'finish_reason';
       yield serializers.serialize(
@@ -194,6 +207,14 @@ class _$MessageSummarySerializer
             specifiedType: const FullType(DateTime),
           ) as DateTime;
           result.createdAt = valueDes;
+          break;
+        case r'feedback':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(MessageFeedbackSummary),
+          ) as MessageFeedbackSummary?;
+          if (valueDes == null) continue;
+          result.feedback.replace(valueDes);
           break;
         case r'finish_reason':
           final valueDes = serializers.deserialize(

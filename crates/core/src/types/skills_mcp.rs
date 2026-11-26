@@ -115,9 +115,9 @@ pub enum McpTransportConfig {
         /// Command and its arguments (e.g. `["npx", "-y", "@mcp/server-github"]`).
         command: Vec<String>,
     },
-    /// Connect to a remote HTTP endpoint (SSE or Streamable HTTP).
+    /// Connect to a remote Streamable HTTP endpoint.
     Http {
-        /// Server URL (e.g. `"https://example.com/mcp/sse"`).
+        /// Server URL (e.g. `"https://example.com/mcp"`).
         url: String,
         /// Extra HTTP headers sent with every request.
         /// Values may reference environment variables with `${VAR}` syntax.
@@ -183,7 +183,7 @@ mod tests {
         let toml_str = r#"
             [[servers]]
             name = "remote-db"
-            url = "https://db.example.com/mcp/sse"
+            url = "https://db.example.com/mcp"
             trust = "trust"
 
             [servers.headers]
@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(s.trust, McpTrustLevel::Trust);
         match &s.transport {
             McpTransportConfig::Http { url, headers } => {
-                assert_eq!(url, "https://db.example.com/mcp/sse");
+                assert_eq!(url, "https://db.example.com/mcp");
                 assert_eq!(headers.get("Authorization").unwrap(), "Bearer secret");
             }
             other => panic!("expected Http, got {other:?}"),
