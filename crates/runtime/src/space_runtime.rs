@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio::sync::OnceCell;
@@ -29,6 +30,7 @@ use assistant_storage::{
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{AudioStore, TtsProvider};
 
+use crate::interaction::{InteractionBroker, InteractionKinds};
 use crate::orchestrator::{ConfirmationCallback, Orchestrator};
 use crate::org_context::{OrgContext, OrgContexts};
 
@@ -48,6 +50,9 @@ pub struct SpaceRuntime {
     pub executor: Arc<ToolExecutor>,
     pub orchestrator: Arc<Orchestrator>,
     pub bus: Arc<dyn MessageBus>,
+    /// Asks the turn's owner questions (ADR-0017). `None` unless the runtimes
+    /// were built with [`SpaceRuntimes::with_interactions`].
+    pub interactions: Option<Arc<InteractionBroker>>,
 }
 
 impl SpaceRuntime {
@@ -72,6 +77,7 @@ impl SpaceRuntime {
             executor,
             orchestrator,
             bus,
+            interactions: None,
         }
     }
 }
@@ -85,6 +91,7 @@ pub struct SpaceRuntimes {
     voice: Option<Arc<dyn TtsProvider>>,
     shared_bus: Option<Arc<dyn MessageBus>>,
     submit_timeout_secs: Option<u64>,
+    interactions: bool,
     turn_tool_source: Option<Arc<dyn TurnToolSource>>,
     ambient_tools: RwLock<Vec<Arc<dyn ToolHandler>>>,
     /// Skills each external MCP server publishes, keyed by server name.
@@ -107,6 +114,7 @@ impl SpaceRuntimes {
             voice: None,
             shared_bus: None,
             submit_timeout_secs: None,
+            interactions: false,
             turn_tool_source: None,
             ambient_tools: RwLock::new(Vec::new()),
             ambient_skills: RwLock::new(HashMap::new()),
@@ -138,6 +146,14 @@ impl SpaceRuntimes {
     /// persona or defaults to three hours.
     pub fn with_submit_timeout(mut self, secs: u64) -> Self {
         self.submit_timeout_secs = Some(secs);
+        self
+    }
+
+    /// Give every space an [`InteractionBroker`] over its own `space.db`, with
+    /// the org's `interaction_timeout_secs`. Production bootstraps leave this
+    /// off until the client can answer interactions (ADR-0017, D9).
+    pub fn with_interactions(mut self) -> Self {
+        self.interactions = true;
         self
     }
 
@@ -324,6 +340,18 @@ impl SpaceRuntimes {
             executor.register_voice_response(tts.clone(), store.clone());
         }
 
+        let interactions = self.interactions.then(|| {
+            Arc::new(
+                InteractionBroker::new(
+                    Arc::new(storage.interaction_store()),
+                    Arc::new(InteractionKinds::with_builtin()),
+                )
+                .with_timeout(Duration::from_secs(
+                    config.permissions.interaction_timeout_secs,
+                )),
+            )
+        });
+
         info!(org = org_slug, space = space_slug, "built space runtime");
         Ok(Arc::new(SpaceRuntime {
             org_slug: org_slug.to_owned(),
@@ -335,6 +363,7 @@ impl SpaceRuntimes {
             executor,
             orchestrator,
             bus,
+            interactions,
         }))
     }
 
@@ -464,6 +493,81 @@ mod tests {
         assert_eq!(acme.config.agent.id, "ops");
         assert_eq!(globex.llm.model_name(), "globex-model");
         assert_eq!(globex.config.agent.id, "dev");
+    }
+
+    #[tokio::test]
+    async fn interactions_are_dormant_until_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plain = runtimes(tmp.path()).get("acme", "main").await.unwrap();
+        assert!(
+            plain.interactions.is_none(),
+            "no broker without the builder"
+        );
+    }
+
+    #[tokio::test]
+    async fn with_interactions_gives_every_space_a_broker_over_its_own_store() {
+        use crate::interaction::InteractionRequest;
+        use assistant_storage::InteractionStore as _;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = OrgConfig::default();
+        config.memory.enabled = false;
+        config.permissions.interaction_timeout_secs = 120;
+        let runtimes = SpaceRuntimes::new(
+            Arc::new(OrgPoolFactory::new(tmp.path())),
+            Arc::new(OrgContexts::fixed(
+                config,
+                Arc::new(ScriptedLlmProvider::new()),
+            )),
+            None,
+        )
+        .with_interactions();
+
+        let main = runtimes.get("acme", "main").await.unwrap();
+        let other = runtimes.get("acme", "other").await.unwrap();
+        let broker = main.interactions.clone().expect("broker built");
+
+        let waiting = tokio::spawn(async move {
+            broker
+                .request(
+                    InteractionRequest {
+                        conversation_id: "c".into(),
+                        run_id: "r".into(),
+                        user_id: "u".into(),
+                        kind: "question".into(),
+                        tool_call_id: None,
+                        request: serde_json::json!({"questions": []}),
+                        turn_deadline: None,
+                    },
+                    None,
+                )
+                .await
+        });
+        let row = loop {
+            let rows = main
+                .storage
+                .interaction_store()
+                .list_for_conversation("c", None)
+                .await
+                .unwrap();
+            if let Some(row) = rows.into_iter().next() {
+                break row;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!((row.expires_at - row.created_at).num_seconds(), 120);
+        assert!(
+            other
+                .storage
+                .interaction_store()
+                .list_for_conversation("c", None)
+                .await
+                .unwrap()
+                .is_empty(),
+            "another space's store never sees it"
+        );
+        waiting.abort();
     }
 
     #[tokio::test]

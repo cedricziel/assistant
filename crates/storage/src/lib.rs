@@ -224,6 +224,11 @@ impl StorageLayer {
         SqliteSkillExecutionStore::new(self.pool.clone())
     }
 
+    /// Convenience: build an `InteractionStore` backed by this pool.
+    pub fn interaction_store(&self) -> SqliteInteractionStore {
+        SqliteInteractionStore::new(self.pool.clone())
+    }
+
     /// Convenience: build a `ToolPermissionRuleStore` backed by this pool.
     pub fn tool_permission_rule_store(&self) -> SqliteToolPermissionRuleStore {
         SqliteToolPermissionRuleStore::new(self.pool.clone())
