@@ -5,14 +5,15 @@ import 'dart:typed_data';
 
 import 'package:assistant_app/api/models/server_capabilities.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
-import 'package:assistant_app/features/chat/message_meta_actions.dart';
+import 'package:assistant_app/features/chat/message_actions_builder.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../support/fake_audioplayers.dart';
 import '../../support/golden.dart';
 
-// Before-image of MetaActionRow (chat-element-library PR 1b).
+// Before-image of the message action row (chat-element-library PR 1b), now
+// rendered by `buildMessageActions` with the images unchanged.
 
 const _size = Size(420, 80);
 
@@ -24,7 +25,7 @@ Widget _row(
   ServerCapabilities capabilities = ServerCapabilities.disabled,
 }) => Padding(
   padding: const EdgeInsets.all(12),
-  child: MetaActionRow(
+  child: buildMessageActions(
     message: message,
     capabilities: capabilities,
     fetchMessageAudio: _noAudio,
