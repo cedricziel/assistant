@@ -178,8 +178,9 @@ void main() {
   // -- Model tests (pure, no async) -------------------------------------------
 
   group('MessageStatus enum', () {
-    test('has three values: sending, ok, failed', () {
-      expect(MessageStatus.values.length, 3);
+    test('has four values: sending, ok, failed, stopped', () {
+      expect(MessageStatus.values.length, 4);
+      expect(MessageStatus.values, contains(MessageStatus.stopped));
       expect(MessageStatus.values, contains(MessageStatus.sending));
       expect(MessageStatus.values, contains(MessageStatus.ok));
       expect(MessageStatus.values, contains(MessageStatus.failed));
@@ -3221,6 +3222,191 @@ void main() {
 
       expect(textSnapshot, isNotEmpty);
       expect(voiceSnapshot, textSnapshot);
+    });
+  });
+
+  // -- agent_error reconciliation ----------------------------------------------
+  //
+  // The terminal `agent_error` frame must reconcile the turn the same way on
+  // the text, voice and replay paths.
+
+  group('ChatNotifier — agent_error reconciliation', () {
+    for (final path in ['text', 'voice', 'replay']) {
+      Future<({ChatNotifier notifier, _FakeApiClient api})> run(
+        WidgetTester tester,
+        List<StreamEvent> events,
+      ) async {
+        final fakeApi = _FakeApiClient();
+        final ChatNotifier notifier;
+        switch (path) {
+          case 'text':
+            final ctrl = fakeApi.enqueueStream();
+            notifier = await _pumpTestApp(tester, fakeApi);
+            unawaited(notifier.sendMessage('go'));
+            await tester.pump();
+            await tester.runAsync(() async {
+              for (final e in events) {
+                ctrl.add(e);
+                await Future<void>.delayed(Duration.zero);
+              }
+              await ctrl.close();
+              await Future<void>.delayed(Duration.zero);
+            });
+          case 'voice':
+            final ctrl = fakeApi.enqueueVoiceStream();
+            notifier = await _pumpTestApp(tester, fakeApi);
+            unawaited(
+              notifier.sendVoiceMessage(
+                Uint8List.fromList([1, 2, 3]),
+                'audio/webm',
+              ),
+            );
+            await tester.pump();
+            await tester.runAsync(() async {
+              for (final e in events) {
+                ctrl.add(e);
+                await Future<void>.delayed(Duration.zero);
+              }
+              await ctrl.close();
+              await Future<void>.delayed(Duration.zero);
+            });
+          default:
+            final ctrl1 = fakeApi.enqueueStream();
+            final replay = fakeApi.enqueueReplayStream();
+            for (final e in events) {
+              replay.add(e);
+            }
+            unawaited(replay.close());
+            notifier = await _pumpTestApp(tester, fakeApi);
+            unawaited(notifier.sendMessage('go'));
+            await tester.pump();
+            await tester.runAsync(() async {
+              ctrl1.add(const RunStartedEvent('run-abc'));
+              await Future<void>.delayed(Duration.zero);
+              ctrl1.addError(const SocketException('network drop'));
+              await ctrl1.close();
+              await Future<void>.delayed(Duration.zero);
+              await Future<void>.delayed(Duration.zero);
+            });
+            await tester.pump(const Duration(seconds: 2));
+        }
+        await tester.pumpAndSettle();
+        return (notifier: notifier, api: fakeApi);
+      }
+
+      const cancelled = AgentErrorEvent(
+        reason: AgentErrorReason.cancelled,
+        message: 'Turn cancelled',
+        partialContent: 'The capital',
+        messageId: 'M',
+      );
+
+      testWidgets('$path: cancelled keeps the partial as a stopped message', (
+        tester,
+      ) async {
+        final r = await run(tester, [
+          const TokenEvent('The capital'),
+          cancelled,
+        ]);
+
+        final s = r.notifier.state.value!;
+        final assistant = s.messages.where((m) => !m.isUser).single;
+        expect(assistant.id, 'M');
+        expect(assistant.content, 'The capital');
+        expect(assistant.status, MessageStatus.stopped);
+        expect(s.messages.firstWhere((m) => m.isUser).status, MessageStatus.ok);
+        expect(s.error, isNull);
+        expect(s.isSending, isFalse);
+      });
+
+      testWidgets('$path: cancelled with the _Stopped._ placeholder', (
+        tester,
+      ) async {
+        final r = await run(tester, [
+          const AgentErrorEvent(
+            reason: AgentErrorReason.cancelled,
+            message: 'Turn cancelled',
+            partialContent: '_Stopped._',
+            messageId: 'M',
+          ),
+        ]);
+
+        final assistant = r.notifier.state.value!.messages
+            .where((m) => !m.isUser)
+            .single;
+        expect(assistant.id, 'M');
+        expect(assistant.content, '_Stopped._');
+        expect(assistant.status, MessageStatus.stopped);
+      });
+
+      testWidgets('$path: cancelled before the user message was persisted', (
+        tester,
+      ) async {
+        final r = await run(tester, [
+          const AgentErrorEvent(
+            reason: AgentErrorReason.cancelled,
+            message: 'Turn cancelled',
+            userMessagePersisted: false,
+          ),
+        ]);
+
+        final s = r.notifier.state.value!;
+        expect(s.messages.where((m) => !m.isUser), isEmpty);
+        expect(s.messages.single.status, MessageStatus.failed);
+        expect(s.error, isNull);
+        expect(s.isSending, isFalse);
+      });
+
+      testWidgets('$path: error fails the user message and surfaces it', (
+        tester,
+      ) async {
+        final r = await run(tester, [
+          const AgentErrorEvent(
+            reason: AgentErrorReason.error,
+            message: 'LLM timeout',
+          ),
+        ]);
+
+        final s = r.notifier.state.value!;
+        expect(s.messages.where((m) => !m.isUser), isEmpty);
+        expect(s.messages.single.status, MessageStatus.failed);
+        expect(s.error, 'LLM timeout');
+        expect(s.isSending, isFalse);
+      });
+    }
+
+    testWidgets('a cancelled frame during replay is not retried', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl1 = fakeApi.enqueueStream();
+      fakeApi.enqueueReplayStream()
+        ..add(
+          const AgentErrorEvent(
+            reason: AgentErrorReason.cancelled,
+            message: 'Turn cancelled',
+            partialContent: 'part',
+            messageId: 'M',
+          ),
+        )
+        ..close();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('go'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        ctrl1.add(const RunStartedEvent('run-abc'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl1.addError(const SocketException('network drop'));
+        await ctrl1.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle(const Duration(seconds: 10));
+
+      expect(fakeApi.replayCallCount, 1);
+      expect(notifier.needsReconnect, isFalse);
     });
   });
 }

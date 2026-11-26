@@ -163,6 +163,7 @@ mod tests {
             turn: 0,
             interface: Interface::Scheduler,
             interactive: false,
+            run_id: None,
             allowed_tools: None,
             depth: 0,
             user_id: None,
@@ -257,6 +258,7 @@ mod tests {
         let ctx = ExecutionContext {
             user_id: user.map(UserId::from),
             interactive,
+            run_id: None,
             ..ctx()
         };
         let params = json!({ "command": command });

@@ -88,8 +88,13 @@ pub struct ExecutionContext {
     pub turn: i64,
     /// The interface this turn originated from (cli, signal, mcp)
     pub interface: Interface,
-    /// Whether the skill can prompt the user for confirmation
+    /// Whether a human is waiting on this turn and can answer prompts. Set by
+    /// the submitter (`SubmitOptions`), never derived from `interface`.
     pub interactive: bool,
+    /// The run this turn belongs to: the bus `batch_id` of its request, which
+    /// is also the SSE `run_id` for streaming web turns. `None` for tool
+    /// calls outside a bus-submitted turn (scheduler, tests).
+    pub run_id: Option<Uuid>,
     /// When `Some`, only tools whose names appear in this list may be executed.
     /// `None` means all registered tools are available (the default).
     pub allowed_tools: Option<Vec<String>>,
@@ -127,7 +132,8 @@ impl ExecutionContext {
 }
 
 /// Lightweight bundle of optional identity fields threaded through the
-/// orchestrator turn pipeline.
+/// orchestrator turn pipeline, plus the two per-turn flags the worker takes
+/// from the bus request (`interactive`, `run_id`).
 ///
 /// Callers that have an authenticated user populate this from
 /// [`AuthContext`](crate::auth::AuthContext); legacy / system turns use
@@ -137,6 +143,10 @@ pub struct TurnIdentity {
     pub user_id: Option<crate::identity::UserId>,
     pub org_id: Option<crate::identity::OrgId>,
     pub space_id: Option<crate::identity::SpaceId>,
+    /// Whether a human is waiting on the turn (see [`ExecutionContext::interactive`]).
+    pub interactive: bool,
+    /// The run id (see [`ExecutionContext::run_id`]).
+    pub run_id: Option<Uuid>,
 }
 
 impl TurnIdentity {
@@ -145,7 +155,7 @@ impl TurnIdentity {
         Self {
             user_id: Some(auth.user_id.clone()),
             org_id: Some(auth.org_id.clone()),
-            space_id: None,
+            ..Self::default()
         }
     }
 }

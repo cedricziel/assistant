@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// Sealed class hierarchy representing a single SSE event from the chat API.
 ///
 /// Events arrive from `POST /api/conversations/{id}/messages` as a
@@ -325,14 +327,69 @@ class SkillCompleteEvent extends StreamEvent {
   }
 }
 
-/// The orchestrator encountered a critical error.
-///
-/// Corresponds to `event:agent_error` in the SSE stream.  The data is a
-/// plain-text error message.
-class AgentErrorEvent extends StreamEvent {
-  const AgentErrorEvent(this.message, {super.sequenceId});
+/// Why a turn ended with an `agent_error` frame.
+enum AgentErrorReason {
+  /// The turn was cancelled (Stop, another client, `/stop`, shutdown).
+  cancelled,
 
+  /// The turn failed. Also the fallback for unknown reasons.
+  error,
+}
+
+/// The turn ended with a terminal `agent_error` frame.
+///
+/// Corresponds to `event:agent_error` in the SSE stream. The data is a JSON
+/// object `{"reason","message","partial_content","message_id",
+/// "user_message_persisted"}`; a non-JSON body is treated as an error whose
+/// message is the body.
+class AgentErrorEvent extends StreamEvent {
+  const AgentErrorEvent({
+    required this.reason,
+    required this.message,
+    this.partialContent = '',
+    this.messageId,
+    this.userMessagePersisted = true,
+    super.sequenceId,
+  });
+
+  /// Parse the `data:` body of an `agent_error` frame.
+  factory AgentErrorEvent.fromData(String body, {int? sequenceId}) {
+    try {
+      final json = jsonDecode(body);
+      if (json is Map<String, dynamic>) {
+        return AgentErrorEvent(
+          reason: json['reason'] == 'cancelled'
+              ? AgentErrorReason.cancelled
+              : AgentErrorReason.error,
+          message: json['message'] as String? ?? '',
+          partialContent: json['partial_content'] as String? ?? '',
+          messageId: json['message_id'] as String?,
+          userMessagePersisted: json['user_message_persisted'] as bool? ?? true,
+          sequenceId: sequenceId,
+        );
+      }
+    } on FormatException {
+      // Fall through to the plain-text form.
+    }
+    return AgentErrorEvent(
+      reason: AgentErrorReason.error,
+      message: body,
+      sequenceId: sequenceId,
+    );
+  }
+
+  final AgentErrorReason reason;
   final String message;
+
+  /// Text streamed before the turn ended; the server's "_Stopped._"
+  /// placeholder when nothing streamed.
+  final String partialContent;
+
+  /// Id of the persisted partial reply, when the server could persist it.
+  final String? messageId;
+
+  /// False when the turn was cancelled before the user message was saved.
+  final bool userMessagePersisted;
 }
 
 /// An incremental text token produced by a running subagent.

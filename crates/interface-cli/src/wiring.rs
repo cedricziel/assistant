@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use assistant_core::types::agent::OrgConfig;
-use assistant_runtime::BinaryRole;
+use assistant_runtime::{BinaryRole, SubmitOptions};
 
 use crate::args::Command;
 use crate::cli_helpers::interface_selected;
@@ -150,6 +150,16 @@ pub fn uses_auto_deny_confirmation(command: Option<&Command>, no_repl: bool) -> 
     dedicated || no_repl
 }
 
+/// How a turn submitted by the CLI binary is flagged. Only a REPL turn has a
+/// human at the terminal who can answer prompts: the one-shot `skill generate`
+/// command and a `--no-repl` process do not.
+pub fn cli_submit_options(command: Option<&Command>, no_repl: bool) -> SubmitOptions {
+    let one_shot = matches!(command, Some(Command::Skill { .. }));
+    SubmitOptions {
+        interactive: !one_shot && !no_repl,
+    }
+}
+
 /// Messengers to start in background mode, in start order.
 pub fn background_messengers(config: &OrgConfig, selection: &HashSet<String>) -> Vec<Messenger> {
     Messenger::ALL
@@ -234,6 +244,26 @@ mod tests {
     fn no_repl_auto_denies() {
         assert!(auto_deny(&["orchestrator", "run", "--no-repl"], true));
         assert!(!auto_deny(&["orchestrator", "run"], false));
+    }
+
+    fn submit_options(args: &[&str], no_repl: bool) -> SubmitOptions {
+        cli_submit_options(parse(args).command.as_ref(), no_repl)
+    }
+
+    #[test]
+    fn repl_turns_are_interactive() {
+        assert!(submit_options(&[], false).interactive);
+        assert!(submit_options(&["orchestrator", "run"], false).interactive);
+    }
+
+    #[test]
+    fn one_shot_command_turns_are_not_interactive() {
+        assert!(!submit_options(&["skill", "generate", "greet people"], false).interactive);
+    }
+
+    #[test]
+    fn no_repl_turns_are_not_interactive() {
+        assert!(!submit_options(&["orchestrator", "run", "--no-repl"], true).interactive);
     }
 
     #[cfg(feature = "mcp")]

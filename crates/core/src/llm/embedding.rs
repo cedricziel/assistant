@@ -361,6 +361,7 @@ mod tests {
             ChatOptionsSupport {
                 tool_choice: true,
                 parallel_tool_calls: true,
+                json_schema: false,
             }
         }
 

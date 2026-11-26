@@ -10,6 +10,7 @@ ToolCallStatus parseToolStatus(String status) {
     'ok' => ToolCallStatus.ok,
     'error' => ToolCallStatus.error,
     'denied' => ToolCallStatus.denied,
+    'cancelled' => ToolCallStatus.cancelled,
     _ => ToolCallStatus.ok,
   };
 }

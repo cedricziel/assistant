@@ -30,10 +30,11 @@ pub use assistant_storage::{
     InMemoryConversationEventStore, InMemoryConversationStore, InMemoryInteractionStore,
     InMemoryMemoryChunkStore, InMemoryMessageBus, InMemoryPersonaSkillAccessStore,
     InMemoryPersonaStore, InMemoryPushSubscriptionStore, InMemoryRefinementsStore,
-    InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore, InMemoryWebhookStore,
-    InMemoryWorkflowStore, InteractionStore, MemoryChunkStore, PersonaSkillAccessStore,
-    PersonaStore, PushSubscriptionStore, RefinementsStore, ScheduledTaskStore,
-    SlackActiveThreadStore, WebhookStore, WorkflowStore,
+    InMemoryScheduledTaskStore, InMemorySlackActiveThreadStore, InMemoryToolPermissionRuleStore,
+    InMemoryWebhookStore, InMemoryWorkflowStore, InteractionStore, MemoryChunkStore,
+    PersonaSkillAccessStore, PersonaStore, PushSubscriptionStore, RefinementsStore,
+    ScheduledTaskStore, SlackActiveThreadStore, ToolPermissionRuleStore, WebhookStore,
+    WorkflowStore,
 };
 pub use assistant_storage::{InMemorySkillCatalog, SkillCatalog};
 pub use assistant_storage::{InMemorySurfaceStore, SurfaceStore};

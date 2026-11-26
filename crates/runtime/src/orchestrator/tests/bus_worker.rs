@@ -65,6 +65,7 @@ async fn run_worker_processes_turn_request() {
         timestamp: None,
         traceparent: None,
         attachment_ids: vec![],
+        interactive: false,
         user_id: None,
         org_id: None,
         space_id: None,
@@ -139,6 +140,7 @@ async fn submit_turn_publishes_and_waits_for_result() {
             conv_id,
             Interface::Cli,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await
         .unwrap();
@@ -166,6 +168,7 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
         timestamp: None,
         traceparent: None,
         attachment_ids: vec![],
+        interactive: false,
         user_id: None,
         org_id: None,
         space_id: None,
@@ -231,9 +234,16 @@ async fn a_completed_turn_is_announced_on_turn_completed() {
     let _worker = tokio::spawn(async move { worker_orch.run_worker("test-worker").await });
     let conv_id = Uuid::new_v4();
 
-    orch.submit_turn(&AuthContext::system(), "hi", conv_id, Interface::Web, None)
-        .await
-        .unwrap();
+    orch.submit_turn(
+        &AuthContext::system(),
+        "hi",
+        conv_id,
+        Interface::Web,
+        None,
+        crate::orchestrator::SubmitOptions::default(),
+    )
+    .await
+    .unwrap();
 
     let announced = orch
         .bus()
@@ -274,6 +284,7 @@ async fn submit_turn_with_worker_returns_result() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await;
 
@@ -303,6 +314,7 @@ async fn submit_turn_without_worker_times_out() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         ),
     )
     .await;
@@ -362,6 +374,7 @@ async fn with_submit_timeout_respected() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         ),
     )
     .await;
@@ -440,6 +453,7 @@ async fn persistent_transient_error_stops_at_redelivery_cap() {
             Uuid::new_v4(),
             Interface::Cli,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await;
     worker.abort();
@@ -563,6 +577,7 @@ async fn timeout_cancels_in_flight_worker_turn() {
             conv_id,
             Interface::Slack,
             None,
+            crate::orchestrator::SubmitOptions::default(),
         )
         .await;
     let elapsed = start.elapsed();
@@ -750,6 +765,7 @@ async fn cancel_turn_aborts_inflight_submit() {
                 Interface::Web,
                 None,
                 vec![],
+                crate::orchestrator::SubmitOptions::default(),
             )
             .await
     });
@@ -819,6 +835,7 @@ async fn submit_unclaimed(
                 Interface::Web,
                 None,
                 vec![],
+                crate::orchestrator::SubmitOptions::default(),
             )
             .await
     });
@@ -1175,6 +1192,7 @@ async fn worker_touches_the_claimed_message_while_a_turn_runs() {
         timestamp: None,
         traceparent: None,
         attachment_ids: vec![],
+        interactive: false,
         user_id: None,
         org_id: None,
         space_id: None,
