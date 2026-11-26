@@ -2,9 +2,15 @@
 //! unified API gateway.
 //!
 //! OpenRouter provides access to 300+ models from multiple providers through
-//! a single OpenAI-compatible Chat Completions endpoint.  This provider
-//! delegates all Chat Completions logic to [`ChatCompletionsProvider`] and
-//! injects the required `HTTP-Referer` and `X-Title` headers.
+//! a single OpenAI-compatible Chat Completions endpoint. Non-streaming
+//! calls use the OpenRouter wire client in this module, which keeps fields
+//! a generic client drops, such as `usage.cost`. Streaming still goes
+//! through [`ChatCompletionsProvider`]. Both send the configured
+//! `HTTP-Referer` and `X-Title` headers.
+
+mod client;
+mod request;
+mod wire;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -17,6 +23,9 @@ use assistant_core::{
 
 use crate::chat_completions::{ChatCompletionsConfig, ChatCompletionsProvider};
 
+use self::client::OpenRouterClient;
+use self::request::build_chat_request;
+
 // ── Defaults ────────────────────────────────────────────────────────────────
 
 const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
@@ -26,10 +35,10 @@ const DEFAULT_MAX_TOKENS: u32 = 8192;
 
 /// [`LlmProvider`] backed by the OpenRouter Chat Completions API.
 ///
-/// Delegates all chat / streaming to [`ChatCompletionsProvider`].
-/// Injects `HTTP-Referer` and `X-Title` headers per OpenRouter requirements.
 pub struct OpenRouterProvider {
-    /// Shared Chat Completions client (handles standard chat + streaming).
+    /// OpenRouter wire client for non-streaming calls.
+    client: OpenRouterClient,
+    /// Shared Chat Completions client, used for streaming.
     inner: ChatCompletionsProvider,
 }
 
@@ -83,7 +92,14 @@ impl OpenRouterProvider {
             "Creating OpenRouter provider"
         );
 
+        let client = OpenRouterClient::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+            config.timeout_secs,
+            config.extra_headers.clone(),
+        )?;
         Ok(Self {
+            client,
             inner: ChatCompletionsProvider::new(config)?,
         })
     }
@@ -109,9 +125,15 @@ impl LlmProvider for OpenRouterProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        self.inner
-            .chat_non_streaming(system_prompt, history, tools)
-            .await
+        let config = &self.inner.config;
+        let request = build_chat_request(
+            &config.model,
+            config.max_tokens,
+            system_prompt,
+            history,
+            tools,
+        );
+        self.client.chat(&request).await
     }
 
     async fn chat_streaming(
@@ -384,6 +406,176 @@ mod tests {
             }
             other => panic!("expected ToolCalls, got {other:?}"),
         }
+    }
+
+    // ── Wiremock: OpenRouter wire format ────────────────────────────────
+
+    async fn mount_once(server: &MockServer, body: Value) {
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    async fn sent_body(server: &MockServer) -> Value {
+        let requests = server.received_requests().await.unwrap();
+        serde_json::from_slice(&requests[0].body).unwrap()
+    }
+
+    fn read_tool() -> ToolSpec {
+        ToolSpec {
+            name: "file-read".into(),
+            description: "Read a file".into(),
+            params_schema: json!({"type": "object"}),
+            is_mutating: false,
+            requires_confirmation: false,
+            requires_rich_client: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn request_carries_messages_tools_and_max_completion_tokens() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let history = [ChatHistoryMessage::Text {
+            role: assistant_core::ChatRole::User,
+            content: "hi".into(),
+        }];
+
+        make_provider(&server.uri())
+            .chat("sys", &history, &[read_tool()])
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(body["model"], LlmConfig::default().model);
+        assert_eq!(body["max_completion_tokens"], 4096);
+        assert_eq!(
+            body["messages"],
+            json!([
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hi"},
+            ])
+        );
+        assert_eq!(
+            body["tools"],
+            json!([{"type": "function", "function": {
+                "name": "file-read",
+                "description": "Read a file",
+                "parameters": {"type": "object"},
+            }}])
+        );
+        for absent in [
+            "stream",
+            "tool_choice",
+            "parallel_tool_calls",
+            "response_format",
+        ] {
+            assert!(
+                body.get(absent).is_none(),
+                "{absent} must not be sent: {body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn request_without_tools_omits_the_tools_field() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+
+        make_provider(&server.uri())
+            .chat("", &[], &[])
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert!(body.get("tools").is_none(), "{body}");
+        assert_eq!(body["messages"], json!([]), "no system message when empty");
+    }
+
+    #[tokio::test]
+    async fn response_reports_served_model_and_full_usage() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({
+                "id": "gen-1",
+                "model": "anthropic/claude-sonnet-4.5",
+                "choices": [{"finish_reason": "stop", "message": {
+                    "role": "assistant", "content": "Hello"
+                }}],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                    "cost": 0.00123,
+                    "prompt_tokens_details": {"cached_tokens": 40, "cache_write_tokens": 10},
+                    "completion_tokens_details": {"reasoning_tokens": 5},
+                },
+            }),
+        )
+        .await;
+
+        let response = make_provider(&server.uri())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+        let LlmResponse::FinalAnswer(text, meta) = response else {
+            panic!("expected a final answer, got {response:?}");
+        };
+        assert_eq!(text, "Hello");
+        assert_eq!(meta.model.as_deref(), Some("anthropic/claude-sonnet-4.5"));
+        assert_eq!(meta.response_id.as_deref(), Some("gen-1"));
+        assert_eq!(meta.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(meta.input_tokens, Some(100));
+        assert_eq!(meta.output_tokens, Some(20));
+        assert_eq!(meta.cached_input_tokens, Some(40));
+        assert_eq!(meta.cache_write_input_tokens, Some(10));
+        assert_eq!(meta.reasoning_tokens, Some(5));
+        assert_eq!(meta.cost_usd, Some(0.00123));
+    }
+
+    #[tokio::test]
+    async fn several_tool_calls_keep_order_ids_and_arguments() {
+        let server = MockServer::start().await;
+        mount_once(
+            &server,
+            json!({
+                "id": "gen-2",
+                "model": "openai/gpt-4o",
+                "choices": [{"finish_reason": "tool_calls", "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {"id": "call_a", "type": "function", "function": {
+                            "name": "file-read", "arguments": "{\"path\":\"/a\"}"}},
+                        {"id": "call_b", "type": "function", "function": {
+                            "name": "file-read", "arguments": "not json"}},
+                    ],
+                }}],
+            }),
+        )
+        .await;
+
+        let response = make_provider(&server.uri())
+            .chat("sys", &[], &[read_tool()])
+            .await
+            .unwrap();
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        let ids: Vec<_> = calls.items.iter().map(|c| c.id.as_deref()).collect();
+        assert_eq!(ids, [Some("call_a"), Some("call_b")]);
+        assert_eq!(calls.items[0].params, json!({"path": "/a"}));
+        assert_eq!(
+            calls.items[1].params,
+            json!({}),
+            "bad arguments become an empty object"
+        );
+        assert_eq!(calls.meta.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(calls.meta.input_tokens, None, "no usage reported");
     }
 
     // ── Wiremock: streaming SSE ─────────────────────────────────────────

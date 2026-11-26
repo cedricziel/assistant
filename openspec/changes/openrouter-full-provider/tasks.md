@@ -47,8 +47,8 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 7. OpenRouter wire client
 
-- [ ] 7.1 Write failing wiremock tests for non-streaming chat: request shape (messages, tools, `max_completion_tokens`), served model in meta, tool-call parsing, text answer, and usage including `cost`. Confirm red.
-- [ ] 7.2 Implement `wire.rs`, `request.rs` and non-streaming `chat`. Verify 5.1.
+- [x] 7.1 Write failing wiremock tests for non-streaming chat: request shape (messages, tools, `max_completion_tokens`), served model in meta, tool-call parsing, text answer, and usage including `cost`. Confirm red.
+- [x] 7.2 Implement `wire.rs`, `request.rs` and non-streaming `chat`. Verify 5.1.
 - [ ] 7.3 Write failing SSE tests covering comment lines, text deltas, tool-call deltas, the final usage chunk, mid-stream `error` with `finish_reason: "error"`, and `[DONE]`. Confirm red. Implement `stream.rs`, then verify.
 - [ ] 7.4 Write failing error tests for the 402, 403 moderation reasons, 429 with `Retry-After`, 503 retried, 400 not retried, and a 200 body with `error`. Confirm red. Implement `errors.rs` on top of task 2, then verify.
 - [ ] 7.5 Write failing tests for the `HTTP-Referer`, `X-OpenRouter-Title` and `X-OpenRouter-Categories` headers, and config rejection of more than two categories. Confirm red. Implement, then verify.
