@@ -114,12 +114,36 @@ the `OPENROUTER_API_KEY` environment variable.
 
 ## Capabilities
 
-| Capability   | Value                 |
-| ------------ | --------------------- |
-| Tool calling | Native                |
-| Streaming    | Yes                   |
-| Vision       | Yes (model-dependent) |
-| Embeddings   | No                    |
+The provider reads what the configured model can do from OpenRouter's
+model catalog. When the provider is built, it fetches `{base_url}/models`
+and `{base_url}/models/{model}/endpoints` in the background. The first
+chat call waits for that fetch for at most 5 seconds.
+
+| Capability     | Value                                                                    |
+| -------------- | ------------------------------------------------------------------------ |
+| Tool calling   | Native when the model lists `tools` in `supported_parameters`, else none |
+| Streaming      | Yes                                                                      |
+| Vision         | Yes when the model lists `image` in its input modalities                 |
+| Context window | Smallest `context_length` among the endpoints routing can select         |
+| Embeddings     | No                                                                       |
+
+History compaction reads the context window on every turn.
+`[llm.openrouter.provider]` decides which endpoints count:
+
+- `ignore` removes the named providers.
+- `only` keeps only the named providers.
+- `order` keeps only the named providers when `allow_fallbacks = false`.
+
+A slug names an endpoint when it equals the endpoint's tag, is the start
+of a tag variant (`deepinfra` matches `deepinfra/fp8`), or equals its
+provider name. Without endpoint data, the model's own `context_length`
+is used.
+
+Until the catalog loads, or when it can't be reached, the provider
+reports native tools, no vision, and an unknown context window. A failed
+fetch is retried on a chat call, no sooner than 10 minutes later. Once a
+fetch succeeds, the catalog is not fetched again for the life of the
+provider.
 
 Since OpenRouter does not expose an embeddings endpoint, configure a
 dedicated embedding provider if you need vector search:
@@ -263,10 +287,26 @@ Increase the timeout:
 timeout_secs = 300
 ```
 
-### Model not found
+### "OpenRouter has no model `<slug>`"
 
-Verify the model slug at [openrouter.ai/models](https://openrouter.ai/models).
-Model slugs use `provider/model-name` format (e.g. `anthropic/claude-sonnet-4-20250514`).
+The catalog does not list the configured model. The provider logs
+`OpenRouter has no such model; chat calls will fail`, and every chat call
+fails without sending anything to OpenRouter. The catalog is not fetched
+again, so fix the slug and restart.
+
+Check the slug at [openrouter.ai/models](https://openrouter.ai/models).
+Slugs use the `provider/model-name` format (e.g.
+`anthropic/claude-sonnet-4-20250514`).
+
+### "OpenRouter model catalog unavailable; using conservative capabilities"
+
+The catalog fetch failed. Chat still works, with native tools, no vision,
+and an unknown context window. The provider retries on a chat call at least 10
+minutes later. Check the network path to OpenRouter and the API key.
+
+If the catalog is only slow, the first chat call logs
+`OpenRouter model catalog is slow; continuing without it` after 5
+seconds and goes ahead without it.
 
 ### Rate limiting (429)
 

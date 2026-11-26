@@ -7,6 +7,7 @@
 //! and sends the configured attribution headers, routing preferences and
 //! fallback models.
 
+mod catalog;
 mod client;
 mod errors;
 mod request;
@@ -19,9 +20,13 @@ use tracing::debug;
 
 use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, LlmProvider, LlmResponse, StreamChunk, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, Clock, LlmProvider, LlmResponse, StreamChunk, SystemClock,
+    ToolSpec, ToolSupport,
 };
 
+use std::sync::Arc;
+
+use self::catalog::OpenRouterCatalog;
 use self::client::OpenRouterClient;
 use self::request::{RequestSettings, build_chat_request};
 
@@ -36,6 +41,7 @@ const DEFAULT_MAX_TOKENS: u32 = 8192;
 ///
 pub struct OpenRouterProvider {
     client: OpenRouterClient,
+    catalog: Arc<OpenRouterCatalog>,
     settings: RequestSettings,
     base_url: String,
 }
@@ -47,6 +53,12 @@ impl OpenRouterProvider {
     /// var.  Falls back to `DEFAULT_BASE_URL` when the base URL is the Ollama
     /// default (i.e. not explicitly configured).
     pub fn from_llm_config(cfg: &LlmConfig) -> anyhow::Result<Self> {
+        Self::with_clock(cfg, Arc::new(SystemClock))
+    }
+
+    /// Like [`from_llm_config`](Self::from_llm_config), timing catalog
+    /// retries with `clock`.
+    fn with_clock(cfg: &LlmConfig, clock: Arc<dyn Clock>) -> anyhow::Result<Self> {
         let api_key = resolve_openrouter_key(None, cfg, OPENROUTER_API_KEY_ENV, |name| {
             std::env::var(name).ok()
         })
@@ -84,6 +96,14 @@ impl OpenRouterProvider {
         debug!(model = %cfg.model, base_url = %base_url, "Creating OpenRouter provider");
 
         Ok(Self {
+            catalog: OpenRouterCatalog::new(
+                base_url.clone(),
+                api_key.clone(),
+                cfg.timeout_secs,
+                cfg.model.clone(),
+                cfg.openrouter.provider.clone(),
+                clock,
+            )?,
             client: OpenRouterClient::new(
                 base_url.clone(),
                 api_key,
@@ -103,15 +123,19 @@ impl OpenRouterProvider {
 
 #[async_trait]
 impl LlmProvider for OpenRouterProvider {
+    /// From the model catalog once it has loaded. Until then, and when it
+    /// can't be reached: native tools, no vision, unknown context window.
     fn capabilities(&self) -> Capabilities {
+        let info = self.catalog.info();
         Capabilities {
-            tools: ToolSupport::Native,
+            tools: match info.as_deref() {
+                Some(info) if !info.tools => ToolSupport::None,
+                _ => ToolSupport::Native,
+            },
             streaming: true,
-            // Model-dependent, but safe to declare — the Chat Completions layer
-            // handles multimodal content blocks regardless.
-            vision: true,
+            vision: info.as_deref().is_some_and(|i| i.vision),
             hosted_tools: vec![],
-            context_window_tokens: None, // varies by model
+            context_window_tokens: info.and_then(|i| i.context_window_tokens),
         }
     }
 
@@ -121,6 +145,8 @@ impl LlmProvider for OpenRouterProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
+        self.catalog.wait_ready().await;
+        self.catalog.check_model()?;
         let request = build_chat_request(&self.settings, system_prompt, history, tools);
         self.client.chat(&request).await
     }
@@ -132,6 +158,8 @@ impl LlmProvider for OpenRouterProvider {
         tools: &[ToolSpec],
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
+        self.catalog.wait_ready().await;
+        self.catalog.check_model()?;
         let mut request = build_chat_request(&self.settings, system_prompt, history, tools);
         request.stream = true;
         self.client.chat_stream(&request, chunk_sink).await
@@ -236,7 +264,8 @@ mod tests {
         let caps = provider.capabilities();
         assert_eq!(caps.tools, ToolSupport::Native);
         assert!(caps.streaming);
-        assert!(caps.vision);
+        assert!(!caps.vision, "conservative until the catalog loads");
+        assert_eq!(caps.context_window_tokens, None);
     }
 
     #[test]
@@ -410,8 +439,19 @@ mod tests {
             .await;
     }
 
+    /// The chat requests the server received, ignoring catalog fetches.
+    async fn chat_requests(server: &MockServer) -> Vec<wiremock::Request> {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/chat/completions")
+            .collect()
+    }
+
     async fn sent_body(server: &MockServer) -> Value {
-        let requests = server.received_requests().await.unwrap();
+        let requests = chat_requests(server).await;
         serde_json::from_slice(&requests[0].body).unwrap()
     }
 
@@ -690,7 +730,7 @@ mod tests {
             .await
             .unwrap();
 
-        let requests = server.received_requests().await.unwrap();
+        let requests = chat_requests(&server).await;
         let value = requests[0].headers.get("x-openrouter-categories").unwrap();
         assert_eq!(value.to_str().unwrap(), "cli-agent,chat");
     }
@@ -765,6 +805,316 @@ mod tests {
         let body = sent_body(&server).await;
         assert_eq!(body["session_id"], conversation_id.to_string());
         assert_eq!(body["user"], "abc123");
+    }
+
+    // ── Wiremock: model catalog ─────────────────────────────────────────
+
+    const MODEL: &str = "anthropic/claude-sonnet-4.5";
+
+    /// Serves `model` from `/models` and `endpoints` from its endpoints route.
+    async fn mount_catalog(server: &MockServer, model: Value, endpoints: Value) {
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                {"id": "other/model", "context_length": 1000},
+                model,
+            ]})))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/models/{MODEL}/endpoints")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"data": {"id": MODEL, "endpoints": endpoints}})),
+            )
+            .mount(server)
+            .await;
+    }
+
+    fn catalog_model(input: &[&str], params: &[&str]) -> Value {
+        json!({
+            "id": MODEL,
+            "context_length": 200_000,
+            "architecture": {"input_modalities": input, "output_modalities": ["text"]},
+            "supported_parameters": params,
+        })
+    }
+
+    fn endpoint(provider: &str, tag: &str, context_length: u64) -> Value {
+        json!({"provider_name": provider, "tag": tag, "context_length": context_length})
+    }
+
+    /// Capabilities after the first chat call, which waits for the catalog.
+    async fn caps_after_first_call(
+        server: &MockServer,
+        options: OpenRouterOptions,
+    ) -> Capabilities {
+        mount_once(server, chat_response("OK")).await;
+        let provider = provider_with(&server.uri(), options);
+        provider.chat("sys", &[], &[]).await.unwrap();
+        provider.capabilities()
+    }
+
+    #[tokio::test]
+    async fn catalog_sets_context_window_vision_and_tools() {
+        let server = MockServer::start().await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text", "image"], &["tools", "tool_choice"]),
+            json!([
+                endpoint("Anthropic", "anthropic", 200_000),
+                endpoint("Google", "google-vertex", 128_000)
+            ]),
+        )
+        .await;
+
+        let caps = caps_after_first_call(&server, OpenRouterOptions::default()).await;
+        assert_eq!(
+            caps.context_window_tokens,
+            Some(128_000),
+            "smallest selectable endpoint"
+        );
+        assert!(caps.vision);
+        assert_eq!(caps.tools, ToolSupport::Native);
+    }
+
+    #[tokio::test]
+    async fn text_only_model_without_tools() {
+        let server = MockServer::start().await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text"], &["temperature"]),
+            json!([endpoint("Anthropic", "anthropic", 200_000)]),
+        )
+        .await;
+
+        let caps = caps_after_first_call(&server, OpenRouterOptions::default()).await;
+        assert!(!caps.vision);
+        assert_eq!(caps.tools, ToolSupport::None);
+    }
+
+    fn routing(routing: assistant_core::types::llm::OpenRouterRouting) -> OpenRouterOptions {
+        OpenRouterOptions {
+            provider: Some(routing),
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    async fn two_endpoint_catalog(server: &MockServer) {
+        mount_catalog(
+            server,
+            catalog_model(&["text"], &["tools"]),
+            json!([
+                endpoint("Anthropic", "anthropic", 200_000),
+                endpoint("Google", "google-vertex", 128_000)
+            ]),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn only_restricts_the_selectable_endpoints() {
+        use assistant_core::types::llm::OpenRouterRouting;
+        let server = MockServer::start().await;
+        two_endpoint_catalog(&server).await;
+
+        let options = routing(OpenRouterRouting {
+            only: Some(vec!["anthropic".into()]),
+            ..OpenRouterRouting::default()
+        });
+        let caps = caps_after_first_call(&server, options).await;
+        assert_eq!(caps.context_window_tokens, Some(200_000));
+    }
+
+    #[tokio::test]
+    async fn order_restricts_only_without_fallbacks() {
+        use assistant_core::types::llm::OpenRouterRouting;
+        let server = MockServer::start().await;
+        two_endpoint_catalog(&server).await;
+        let order = Some(vec!["anthropic".into()]);
+
+        let with_fallbacks = routing(OpenRouterRouting {
+            order: order.clone(),
+            ..OpenRouterRouting::default()
+        });
+        let caps = caps_after_first_call(&server, with_fallbacks).await;
+        assert_eq!(
+            caps.context_window_tokens,
+            Some(128_000),
+            "fallbacks may reach google"
+        );
+
+        let server = MockServer::start().await;
+        two_endpoint_catalog(&server).await;
+        let pinned = routing(OpenRouterRouting {
+            order,
+            allow_fallbacks: Some(false),
+            ..OpenRouterRouting::default()
+        });
+        let caps = caps_after_first_call(&server, pinned).await;
+        assert_eq!(caps.context_window_tokens, Some(200_000));
+    }
+
+    #[tokio::test]
+    async fn ignored_endpoints_do_not_count() {
+        use assistant_core::types::llm::OpenRouterRouting;
+        let server = MockServer::start().await;
+        two_endpoint_catalog(&server).await;
+
+        let options = routing(OpenRouterRouting {
+            ignore: Some(vec!["google-vertex".into()]),
+            ..OpenRouterRouting::default()
+        });
+        let caps = caps_after_first_call(&server, options).await;
+        assert_eq!(caps.context_window_tokens, Some(200_000));
+    }
+
+    #[tokio::test]
+    async fn first_call_waits_for_a_slow_catalog() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_millis(300))
+                    .set_body_json(
+                        json!({"data": [catalog_model(&["text", "image"], &["tools"])]}),
+                    ),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/models/{MODEL}/endpoints")))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"data": {"endpoints": [
+                    endpoint("Anthropic", "anthropic", 64_000)
+                ]}})),
+            )
+            .mount(&server)
+            .await;
+
+        let caps = caps_after_first_call(&server, OpenRouterOptions::default()).await;
+        assert_eq!(caps.context_window_tokens, Some(64_000));
+    }
+
+    #[tokio::test]
+    async fn catalog_failure_keeps_conservative_capabilities() {
+        let server = MockServer::start().await;
+        // No catalog mocks: /models answers 404.
+
+        let caps = caps_after_first_call(&server, OpenRouterOptions::default()).await;
+        assert_eq!(caps.tools, ToolSupport::Native);
+        assert!(!caps.vision);
+        assert_eq!(caps.context_window_tokens, None);
+    }
+
+    async fn catalog_fetches(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/models")
+            .count()
+    }
+
+    #[tokio::test]
+    async fn unknown_model_fails_every_call_without_an_upstream_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                {"id": "other/model"}
+            ]})))
+            .mount(&server)
+            .await;
+        let provider = provider_with(&server.uri(), OpenRouterOptions::default());
+
+        for _ in 0..2 {
+            let err = provider
+                .chat("sys", &[], &[])
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("no model `anthropic/claude-sonnet-4.5`"),
+                "{err}"
+            );
+        }
+        let err = provider
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no model"), "{err}");
+        assert_eq!(request_count(&server).await, 0, "nothing is sent upstream");
+        assert_eq!(
+            catalog_fetches(&server).await,
+            1,
+            "an unknown model is not refetched"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_outage_is_retried_after_ten_minutes() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        mount_catalog(
+            &server,
+            catalog_model(&["text", "image"], &["tools"]),
+            json!([endpoint("Anthropic", "anthropic", 64_000)]),
+        )
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(chat_response("OK")))
+            .mount(&server)
+            .await;
+        let clock = assistant_core::FakeClock::new_at_seed();
+        let cfg = LlmConfig {
+            provider: LlmProviderKind::OpenRouter,
+            model: MODEL.to_string(),
+            api_key: Some(Secret::new("test-key")),
+            base_url: server.uri(),
+            ..LlmConfig::default()
+        };
+        let provider =
+            OpenRouterProvider::with_clock(&cfg, std::sync::Arc::new(clock.clone())).unwrap();
+
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert!(
+            !provider.capabilities().vision,
+            "conservative during the outage"
+        );
+        assert_eq!(catalog_fetches(&server).await, 1);
+
+        clock.advance(std::time::Duration::from_secs(9 * 60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(
+            catalog_fetches(&server).await,
+            1,
+            "no retry before ten minutes"
+        );
+
+        clock.advance(std::time::Duration::from_secs(60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(catalog_fetches(&server).await, 2);
+        let caps = provider.capabilities();
+        assert!(caps.vision, "capabilities update once a fetch succeeds");
+        assert_eq!(caps.context_window_tokens, Some(64_000));
+
+        clock.advance(std::time::Duration::from_secs(60 * 60));
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert_eq!(
+            catalog_fetches(&server).await,
+            2,
+            "a loaded catalog is not refetched"
+        );
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────
@@ -934,7 +1284,7 @@ mod tests {
     }
 
     async fn request_count(server: &MockServer) -> usize {
-        server.received_requests().await.unwrap().len()
+        chat_requests(server).await.len()
     }
 
     #[tokio::test]
