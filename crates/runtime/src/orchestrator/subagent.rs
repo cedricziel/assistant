@@ -9,7 +9,7 @@ use assistant_core::{
     AgentReport, AgentReportStatus, AgentSpawn, ChatHistoryMessage, ChatRole, LlmResponse,
     StreamChunk, SubagentRunner, ToolOutput, types::conversation::DEFAULT_MAX_AGENT_DEPTH,
     types::conversation::ExecutionContext, types::conversation::Interface,
-    types::conversation::Message,
+    types::conversation::Message, types::conversation::TurnIdentity,
 };
 use assistant_storage::{AgentStore, ConversationStore};
 use async_trait::async_trait;
@@ -163,6 +163,7 @@ impl SubagentRunner for Orchestrator {
                 Vec::new(),
                 &[],
                 &execution_agent_id,
+                &TurnIdentity::default(),
             )
             .await?;
 

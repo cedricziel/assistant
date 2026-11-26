@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use super::relay::{COALESCE_WINDOW, RelayTarget, spawn_relay_sink};
 use super::turn_cancellations::Claim;
 use super::{
     ExtensionRegistration, Orchestrator, SubmitTurn, TurnLease, TurnMode, TurnResult,
@@ -279,7 +280,24 @@ impl Orchestrator {
 
                     // Check for registered side-channel resources.
                     let ext = self.extension_registrations.write().await.remove(&conv_id);
-                    let token_sink = self.token_sinks.write().await.remove(&conv_id);
+                    let mut token_sink = self.token_sinks.write().await.remove(&conv_id);
+
+                    // A turn whose submitter streams from another process has
+                    // no local sink: relay its events over the bus instead.
+                    let relay = (token_sink.is_none() && turn_req.relay_events).then(|| {
+                        spawn_relay_sink(
+                            RelayTarget {
+                                bus: self.bus.clone(),
+                                agent_id: self.agent_id.clone(),
+                                conversation_id: conv_id,
+                                run_id,
+                            },
+                            COALESCE_WINDOW,
+                        )
+                    });
+                    if let Some(relay) = &relay {
+                        token_sink = relay.sender();
+                    }
 
                     // Keep a clone of extension registrations so we can
                     // re-register them if this turn fails transiently and
@@ -288,12 +306,19 @@ impl Orchestrator {
 
                     // Extract identity from the bus message so tools see who
                     // initiated this turn.
+                    // The run's identity is fixed here, before the first run, so
+                    // a redelivery (same `batch_id` / bus id) rebuilds the same
+                    // rows: the run id stamps every row, and the user row keeps
+                    // one id unless the producer pre-assigned another.
+                    let run_id = msg.batch_id.unwrap_or(msg.id);
                     let identity = TurnIdentity {
                         user_id: turn_req.user_id.map(UserId::from),
                         org_id: turn_req.org_id.map(OrgId::from),
                         space_id: turn_req.space_id.map(SpaceId::from),
                         interactive: turn_req.interactive,
-                        run_id: msg.batch_id,
+                        run_id: Some(run_id),
+                        anchor: turn_req.anchor.clone(),
+                        user_message_id: turn_req.user_message_id.or(Some(run_id)),
                         model_override: turn_req.model_override.clone(),
                     };
 
@@ -378,6 +403,11 @@ impl Orchestrator {
                             continue;
                         }
                     };
+
+                    // The relayed events go out before the result does.
+                    if let Some(relay) = relay {
+                        relay.finish().await;
+                    }
 
                     match result {
                         Ok(turn_result) => {

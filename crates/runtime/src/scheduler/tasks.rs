@@ -211,6 +211,7 @@ pub(super) async fn dispatch_scheduler_turn_request(
         traceparent: traceparent_from_context(interface_cx),
         attachment_ids: vec![],
         interactive: false,
+        relay_events: false,
         anchor: bus_messages::TurnAnchor::Append,
         user_message_id: None,
         model_override: None,

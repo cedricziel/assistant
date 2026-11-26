@@ -73,8 +73,8 @@ pub use llm::stream_chunk::StreamChunk;
 pub use llm::structured::chat_structured;
 pub use llm::tool_spec::ToolSpec;
 pub use llm::types::{
-    ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ProviderState,
-    ToolCallItem, ToolCallResponse, TurnTiming,
+    ChatHistoryMessage, ChatRole, ContentBlock, GeneratedMedia, LlmResponse, LlmResponseMeta,
+    MediaKind, ProviderState, ToolCallItem, ToolCallResponse, TurnTiming,
 };
 pub use memory::{
     MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,

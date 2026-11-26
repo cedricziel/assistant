@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use assistant_storage::{InteractionRow, InteractionStatus};
@@ -24,7 +25,8 @@ const TRUNCATION_MARKER: &str = "…[truncated]";
 // -- Types --
 
 /// How an interaction ended.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum InteractionOutcome {
     /// The owner answered. `response` is the validated, kind-specific answer.
     Resolved {
