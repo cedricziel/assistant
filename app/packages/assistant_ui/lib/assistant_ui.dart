@@ -8,14 +8,14 @@ library;
 // export 'src/bodies/subagent_body.dart'; // slot: chat-element-library 7b
 // export 'src/branch_picker.dart'; // slot: message-branching 9
 // export 'src/code/code_block.dart'; // slot: chat-a11y-and-code-blocks C4
-// export 'src/composer/attachment_tray.dart'; // slot: chat-element-library 11b
-// export 'src/composer/composer_voice_button.dart'; // slot: chat-element-library 11b
 export 'src/bodies/thinking_body.dart';
 export 'src/bodies/tool_call_body.dart';
 export 'src/bodies/tool_status_icon.dart';
 export 'src/branch_picker.dart';
 export 'src/code/code_block.dart';
+export 'src/composer/attachment_tray.dart';
 export 'src/composer/composer.dart';
+export 'src/composer/composer_voice_button.dart';
 export 'src/composer/queued_message_bubble.dart';
 export 'src/composer/slash_command_menu.dart';
 export 'src/conversations/conversation_list_view.dart';
@@ -53,12 +53,11 @@ export 'src/tool_results/code_file_result_view.dart';
 export 'src/tool_results/compact_expandable.dart';
 export 'src/tool_results/data_table_result_view.dart';
 export 'src/tool_results/generic_tool_result_view.dart';
+export 'src/tool_results/json_tree_view.dart';
 export 'src/tool_results/tool_result_renderer.dart';
 export 'src/tool_results/tool_result_renderer_registry.dart';
 export 'src/turn/turn_progress_card.dart';
 export 'src/turn/turn_status_label.dart';
-
-// export 'src/tool_results/json_tree_view.dart'; // slot: tool-result-renderers C2b
 
 // export 'src/tool_results/link_preview_result_view.dart'; // slot: tool-result-renderers C5
 
