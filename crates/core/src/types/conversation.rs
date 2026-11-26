@@ -68,6 +68,10 @@ pub struct Message {
     /// dispatch). Client-only; never sent to the model.
     #[serde(default)]
     pub tool_data_json: Option<String>,
+    /// For final assistant answers: the W3C `traceparent` of the LLM span
+    /// that produced the reply. `None` when tracing was off or for legacy rows.
+    #[serde(default)]
+    pub traceparent: Option<String>,
 }
 
 impl Message {
@@ -88,6 +92,7 @@ impl Message {
             tool_call_id: None,
             tool_status: None,
             tool_data_json: None,
+            traceparent: None,
         }
     }
 
