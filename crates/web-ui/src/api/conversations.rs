@@ -7,7 +7,7 @@
 //! - `POST   /api/conversations`           — create a new conversation
 //! - `GET    /api/conversations/{id}`      — get a conversation with its history
 //! - `DELETE /api/conversations/{id}`      — delete a conversation
-//! - `PATCH  /api/conversations/{id}`      — update a conversation's title or pin state
+//! - `PATCH  /api/conversations/{id}`      — update a conversation's title, pin or archive state
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -85,6 +85,9 @@ pub struct ConversationSummary {
     /// When the conversation was pinned; absent when it is not pinned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinned_at: Option<DateTime<Utc>>,
+    /// When the conversation was archived; absent when it is not archived.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 impl From<&ConversationRecord> for ConversationSummary {
@@ -95,6 +98,7 @@ impl From<&ConversationRecord> for ConversationSummary {
             created_at: record.created_at,
             updated_at: record.updated_at,
             pinned_at: record.pinned_at,
+            archived_at: record.archived_at,
         }
     }
 }
@@ -153,6 +157,9 @@ pub struct ConversationSearchSummary {
     /// When the conversation was pinned; absent when it is not pinned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinned_at: Option<DateTime<Utc>>,
+    /// When the conversation was archived; absent when it is not archived.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<DateTime<Utc>>,
     /// The title split into highlighted and plain runs.
     pub title_segments: Vec<SearchSegment>,
     /// Up to 3 matching messages, best first; empty when only the title
@@ -168,6 +175,7 @@ impl From<ConversationSearchHit> for ConversationSearchSummary {
             created_at,
             updated_at,
             pinned_at,
+            archived_at,
         } = ConversationSummary::from(&hit.record);
         Self {
             id,
@@ -175,6 +183,7 @@ impl From<ConversationSearchHit> for ConversationSearchSummary {
             created_at,
             updated_at,
             pinned_at,
+            archived_at,
             title_segments: hit.title_segments.into_iter().map(Into::into).collect(),
             matches: hit.matches.into_iter().map(Into::into).collect(),
         }
@@ -420,14 +429,18 @@ pub struct UpdateConversationRequest {
     pub title: Option<String>,
     /// `true` pins the conversation, `false` unpins it.
     pub pinned: Option<bool>,
+    /// `true` archives the conversation (clearing its pin), `false` unarchives
+    /// it. Pinning an archived conversation also unarchives it. Combining
+    /// `pinned: true` with `archived: true` is rejected.
+    pub archived: Option<bool>,
 }
 
 impl UpdateConversationRequest {
     /// Validate the request and turn it into a storage patch, or the message
     /// for the `400` response.
     fn into_patch(self) -> Result<ConversationPatch, &'static str> {
-        if self.title.is_none() && self.pinned.is_none() {
-            return Err("Nothing to update: provide title or pinned");
+        if self.title.is_none() && self.pinned.is_none() && self.archived.is_none() {
+            return Err("Nothing to update: provide title, pinned or archived");
         }
         let title = match self.title {
             Some(raw) => {
@@ -445,30 +458,49 @@ impl UpdateConversationRequest {
         Ok(ConversationPatch {
             title,
             pinned: self.pinned,
-            archived: None,
+            archived: self.archived,
         })
     }
 }
 
 // -- Handlers ----------------------------------------------------------------
 
-/// `GET /api/conversations` — list all conversations, newest first.
+/// Query parameters for `GET /api/conversations`.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct ListConversationsQuery {
+    /// `true` lists only archived conversations, newest archive first. Absent
+    /// or `false` lists the unarchived ones, pinned first.
+    pub archived: Option<bool>,
+}
+
+/// `GET /api/conversations` — list conversations: the unarchived ones by
+/// default, the archived ones with `?archived=true`.
 #[utoipa::path(
     get,
     path = "/api/conversations",
     tag = "conversations",
+    params(ListConversationsQuery),
     responses(
         (status = 200, description = "List of conversations", body = Vec<ConversationSummary>),
         (status = 401, description = "Unauthorized"),
     ),
     security(("bearer_token" = []))
 )]
-pub async fn list_conversations(ctx: SpaceCtx, State(state): State<ApiState>) -> Response {
+pub async fn list_conversations(
+    ctx: SpaceCtx,
+    State(state): State<ApiState>,
+    Query(query): Query<ListConversationsQuery>,
+) -> Response {
     if let Err(denied) = ctx.require(Access::Read) {
         return denied.into_response();
     }
     let store = caller_store(&ctx, &state).await;
-    match store.list_conversations().await {
+    let listed = if query.archived == Some(true) {
+        store.list_archived_conversations().await
+    } else {
+        store.list_conversations().await
+    };
+    match listed {
         Ok(convs) => {
             let summaries: Vec<ConversationSummary> =
                 convs.iter().map(ConversationSummary::from).collect();
@@ -624,12 +656,25 @@ pub async fn stream_conversations(
         }
     };
 
+    // Deleted events carry no owner, so remember which ids belong to the
+    // caller and forward only those. Seed from every owned id, not the
+    // snapshot: the snapshot omits archived conversations, and deleting one
+    // must still reach the client that has it cached.
+    let mut owned: std::collections::HashSet<Uuid> = match store.list_owned_ids().await {
+        Ok(ids) => ids.into_iter().collect(),
+        Err(e) => {
+            warn!("Failed to list owned conversation ids for stream: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to fetch conversations",
+            )
+                .into_response();
+        }
+    };
+
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
     tokio::spawn(async move {
-        // Deleted events carry no owner, so remember which ids belong to the
-        // caller and forward only those.
-        let mut owned: std::collections::HashSet<Uuid> = snapshot.iter().map(|c| c.id).collect();
         let snapshot: Vec<ConversationSummary> =
             snapshot.iter().map(ConversationSummary::from).collect();
 
@@ -937,10 +982,11 @@ pub async fn delete_conversation(
     }
 }
 
-/// `PATCH /api/conversations/{id}` — update a conversation's title and/or pin state.
+/// `PATCH /api/conversations/{id}` — update a conversation's title, pin and/or archive state.
 ///
-/// Neither change moves the conversation in the list: only new messages bump
-/// `updated_at`.
+/// None of these changes moves the conversation in the list: only new messages
+/// bump `updated_at`. Archiving clears the pin; pinning an archived
+/// conversation unarchives it.
 #[utoipa::path(
     patch,
     path = "/api/conversations/{id}",
@@ -1999,6 +2045,234 @@ mod tests {
         let (status, json) = patch_as(state, viewer, &id, r#"{"title":"x"}"#).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert!(json["error"].is_string(), "missing error key: {json}");
+    }
+
+    // -- Archive via PATCH and archived listing --------------------------------
+
+    /// `GET {uri}` as the default system caller, returning status and JSON.
+    async fn get_json(state: super::super::ApiState, uri: &str) -> (StatusCode, serde_json::Value) {
+        let resp = app(state)
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        (status, body_json(resp.into_body()).await)
+    }
+
+    fn ids(list: &serde_json::Value) -> Vec<String> {
+        list.as_array()
+            .expect("array")
+            .iter()
+            .map(|c| c["id"].as_str().expect("id").to_owned())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn patch_archived_returns_archived_at_and_no_pinned_at() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let (status, json) = patch(state.clone(), &id, r#"{"pinned":true}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["pinned_at"].is_string());
+
+        let (status, json) = patch(state.clone(), &id, r#"{"archived":true}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            json["archived_at"].is_string(),
+            "missing archived_at: {json}"
+        );
+        assert!(
+            json.get("pinned_at").is_none(),
+            "archiving must clear the pin: {json}"
+        );
+
+        let (_, json) = patch(state, &id, r#"{"archived":false}"#).await;
+        assert!(
+            json.get("archived_at").is_none(),
+            "unarchive must drop archived_at: {json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_pinned_and_archived_together_returns_400_with_error_key() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let (status, json) = patch(state, &id, r#"{"pinned":true,"archived":true}"#).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json["error"].is_string(), "missing error key: {json}");
+    }
+
+    #[tokio::test]
+    async fn patch_pinned_on_an_archived_conversation_unarchives_it_with_one_event() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await.to_string();
+        let (status, _) = patch(state.clone(), &id, r#"{"archived":true}"#).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let mut rx = state
+            .conversation_broadcasters
+            .for_space("default", "default")
+            .subscribe();
+        let (status, json) = patch(state.clone(), &id, r#"{"pinned":true}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["pinned_at"].is_string(), "missing pinned_at: {json}");
+        assert!(
+            json.get("archived_at").is_none(),
+            "pinning must unarchive: {json}"
+        );
+
+        let (_, list) = get_json(state, "/conversations").await;
+        assert_eq!(
+            ids(&list),
+            vec![id],
+            "pinned conversation is in the main list"
+        );
+        assert!(list[0]["pinned_at"].is_string());
+
+        match rx.try_recv().expect("one upserted event") {
+            assistant_storage::ConversationEvent::Upserted(rec) => {
+                assert!(rec.pinned_at.is_some());
+                assert!(rec.archived_at.is_none());
+            }
+            other => panic!("expected Upserted, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "exactly one event");
+    }
+
+    #[tokio::test]
+    async fn archived_conversations_leave_the_main_list_and_appear_with_archived_true() {
+        let (state, storage) = event_log_state().await;
+        let kept = seed_conversation(&storage).await.to_string();
+        let archived = seed_conversation(&storage).await.to_string();
+        patch(state.clone(), &archived, r#"{"archived":true}"#).await;
+
+        let (status, main) = get_json(state.clone(), "/conversations").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            ids(&main),
+            vec![kept.clone()],
+            "main list excludes archived"
+        );
+
+        let (status, only) = get_json(state.clone(), "/conversations?archived=true").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(ids(&only), vec![archived.clone()]);
+        assert!(only[0]["archived_at"].is_string(), "missing archived_at");
+
+        let (_, explicit_false) = get_json(state, "/conversations?archived=false").await;
+        assert_eq!(ids(&explicit_false), vec![kept]);
+    }
+
+    #[tokio::test]
+    async fn archiving_emits_upserted_with_archived_at_not_deleted() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await;
+        let mut rx = state
+            .conversation_broadcasters
+            .for_space("default", "default")
+            .subscribe();
+        patch(state.clone(), &id.to_string(), r#"{"archived":true}"#).await;
+        match rx.try_recv().expect("an event") {
+            assistant_storage::ConversationEvent::Upserted(rec) => {
+                assert!(rec.archived_at.is_some());
+            }
+            other => panic!("expected Upserted, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "exactly one event");
+    }
+
+    #[tokio::test]
+    async fn stream_snapshot_excludes_archived_conversations() {
+        let (state, storage) = event_log_state().await;
+        seed_conversation(&storage).await;
+        let archived = seed_conversation(&storage).await.to_string();
+        patch(state.clone(), &archived, r#"{"archived":true}"#).await;
+
+        let router = app(state);
+        let handle = tokio::spawn(async move {
+            let resp = router
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            body_bytes(resp.into_body()).await
+        });
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("stream finishes once the router drops")
+            .expect("no panic");
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("event: snapshot"), "no snapshot: {text}");
+        assert!(
+            !text.contains(&archived),
+            "snapshot must not list the archived conversation: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_forwards_deleted_for_a_conversation_archived_before_it_opened() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_conversation(&storage).await;
+        patch(state.clone(), &id.to_string(), r#"{"archived":true}"#).await;
+        let broadcaster = state
+            .conversation_broadcasters
+            .for_space("default", "default");
+
+        let router = app(state);
+        let handle = tokio::spawn(async move {
+            let resp = router
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            body_bytes(resp.into_body()).await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Another client deletes the archived conversation.
+        let other = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system")
+            .with_broadcaster(broadcaster);
+        other.delete_conversation(id).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(other);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("stream should finish")
+            .expect("no panic");
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("event: deleted") && text.contains(&id.to_string()),
+            "the stream must forward deleted for an archived conversation: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_summary_carries_archived_at() {
+        let (state, storage) = event_log_state().await;
+        let id = seed_with_message(
+            &storage,
+            "system",
+            Some("Quarterly planning"),
+            "budget numbers",
+        )
+        .await;
+        patch(state.clone(), &id.to_string(), r#"{"archived":true}"#).await;
+        let (status, json) = search(state, "q=planning").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            json[0]["archived_at"].is_string(),
+            "archived conversations stay searchable and say so: {json}"
+        );
     }
 
     #[tokio::test]
