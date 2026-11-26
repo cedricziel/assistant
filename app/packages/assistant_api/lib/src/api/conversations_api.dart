@@ -733,7 +733,7 @@ class ConversationsApi {
     );
   }
 
-  /// &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it as &#x60;audio/mpeg&#x60;.
+  /// &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it in the configured &#x60;[tts] format&#x60;.
   ///
   ///
   /// Parameters:
