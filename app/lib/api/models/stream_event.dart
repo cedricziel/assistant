@@ -131,7 +131,7 @@ class StatusEvent extends StreamEvent {
 /// A tool execution completed.
 ///
 /// Corresponds to `event:tool_result` in the SSE stream.  The JSON body is
-/// `{"tool_name":"...","status":"ok"|"error"|"denied","arguments":{...},"result":"...","tool_call_id":"..."}`.
+/// `{"tool_name":"...","status":"ok"|"error"|"denied","arguments":{...},"result":"...","tool_call_id":"...","data":{...}}`; `data` is optional.
 class ToolResultEvent extends StreamEvent {
   const ToolResultEvent({
     required this.toolName,
@@ -139,6 +139,7 @@ class ToolResultEvent extends StreamEvent {
     this.arguments,
     this.result,
     this.toolCallId,
+    this.data,
     super.sequenceId,
   });
 
@@ -158,6 +159,10 @@ class ToolResultEvent extends StreamEvent {
   /// `null` for providers that do not use IDs (Ollama) or older servers.
   final String? toolCallId;
 
+  /// Structured output of the tool, a JSON object with a `kind` tag.
+  /// `null` when the frame has no `data`, or `data` is not a JSON object.
+  final Map<String, Object?>? data;
+
   factory ToolResultEvent.fromJson(Map<String, dynamic> json) {
     return ToolResultEvent(
       toolName: json['tool_name'] as String? ?? '',
@@ -165,9 +170,14 @@ class ToolResultEvent extends StreamEvent {
       arguments: json['arguments'] as Map<String, dynamic>?,
       result: json['result'] as String?,
       toolCallId: json['tool_call_id'] as String?,
+      data: _toolDataFromJson(json['data']),
     );
   }
 }
+
+/// Returns [value] as a JSON object, or `null` when it is any other type.
+Map<String, Object?>? _toolDataFromJson(Object? value) =>
+    value is Map ? value.cast<String, Object?>() : null;
 
 /// The stream is complete; contains the full, canonical reply.
 ///
