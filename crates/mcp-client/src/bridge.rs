@@ -14,7 +14,7 @@ use tracing::{debug, warn};
 use assistant_core::types::conversation::ExecutionContext;
 use assistant_core::{Attachment, ToolHandler, ToolOutput};
 
-use crate::apps::{resolve_app, ui_field, ui_resource_uri};
+use crate::apps::{resolve_app, ui_resource_uri, visible_to};
 use crate::client::McpClient;
 
 /// Format a namespaced tool name: `mcp__{server}__{tool}`.
@@ -268,19 +268,10 @@ pub fn model_visible_handlers<'a>(
         })
 }
 
-/// Whether the Persona may be offered `tool`.
-///
-/// MCP Apps visibility lives in `_meta.ui.visibility` (the deprecated flat
-/// `_meta["ui/visibility"]` is accepted too) and defaults to
-/// `["model", "app"]`; a tool without `"model"` there is for apps only.
+/// Whether the Persona may be offered `tool`: a tool without `"model"` in
+/// its MCP Apps visibility is for apps only.
 fn is_model_visible(tool: &Tool) -> bool {
-    let Some(meta) = &tool.meta else {
-        return true;
-    };
-    match ui_field(meta, "visibility").and_then(serde_json::Value::as_array) {
-        Some(audiences) => audiences.iter().any(|a| a.as_str() == Some("model")),
-        None => true,
-    }
+    visible_to(tool, "model")
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ use assistant_core::integrations::{
     IntegrationLayer, IntegrationPolicy, IntegrationStore, IntegrationTrust, SecretBox,
     StoredCredential, credential_aad,
 };
+use assistant_core::mcp_app::{McpAppServers, McpAppTool};
 use assistant_core::secret::Secret;
 use assistant_core::store::{InMemoryOrgStore, InMemorySpaceStore, OrgStore, Organization, Space};
 use assistant_core::tool::{ToolHandler, TurnScope, TurnToolSource};
@@ -324,6 +325,57 @@ async fn a_tool_only_an_app_may_call_is_not_offered_to_the_persona() {
     assert_eq!(
         world.names(Some(U), "eng").await,
         vec!["mcp__org_linear__ping"]
+    );
+}
+
+#[tokio::test]
+async fn an_app_reaches_its_integration_with_the_callers_own_access() {
+    let server = serve_with(Server {
+        delay: None,
+        healthy: true,
+        list_delay: Arc::default(),
+        app_only_tool: true,
+    })
+    .await;
+    let world = World::new(ConnectionsConfig::default()).await;
+    world
+        .open(
+            "int_u",
+            IntegrationLayer::User,
+            &server.uri(),
+            IntegrationTrust::Confirm,
+        )
+        .await;
+    let (u, v) = (UserId::from(U), UserId::from(V));
+    let scope = |user| TurnScope {
+        org_slug: "acme",
+        space_slug: "eng",
+        user_id: Some(user),
+    };
+
+    let found = world
+        .source
+        .server(&scope(&u), "user_linear")
+        .await
+        .unwrap()
+        .expect("the owner reaches their integration");
+    assert_eq!(
+        found.tool("widget"),
+        Some(McpAppTool {
+            visible_to_app: true,
+            read_only: false,
+            requires_confirmation: true,
+        }),
+        "an app-only tool is listed for the app, and trust decides confirmation"
+    );
+    assert!(
+        world
+            .source
+            .server(&scope(&v), "user_linear")
+            .await
+            .unwrap()
+            .is_none(),
+        "another user cannot reach it"
     );
 }
 

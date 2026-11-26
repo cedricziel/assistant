@@ -6,9 +6,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use assistant_core::ToolHandler;
-use assistant_core::mcp_app::{McpApp, McpAppCsp, McpAppPermissions};
+use assistant_core::mcp_app::{McpApp, McpAppCsp, McpAppPermissions, McpAppServer, McpAppTool};
 use assistant_core::types::conversation::{ExecutionContext, Interface};
 use assistant_mcp_client::StaleTools;
+use assistant_mcp_client::apps::ClientAppServer;
 use assistant_mcp_client::bridge::McpToolHandler;
 use assistant_mcp_client::client::McpClient;
 use rmcp::model::{
@@ -161,18 +162,22 @@ impl ServerHandler for AppServer {
     }
 }
 
-async fn handler(name: &str) -> McpToolHandler {
+async fn connect() -> Arc<McpClient> {
     let (server_io, client_io) = tokio::io::duplex(65536);
     tokio::spawn(async move {
         if let Ok(running) = AppServer.serve(server_io).await {
             let _ = running.waiting().await;
         }
     });
-    let client = Arc::new(
+    Arc::new(
         McpClient::connect("weather", client_io, StaleTools::default())
             .await
             .expect("the client connects"),
-    );
+    )
+}
+
+async fn handler(name: &str) -> McpToolHandler {
+    let client = connect().await;
     let tool = client
         .list_tools()
         .await
@@ -283,4 +288,38 @@ async fn non_ui_scheme_attaches_nothing() {
 #[tokio::test]
 async fn tool_without_a_ui_resource_attaches_nothing() {
     assert_eq!(app_after_calling("bare").await, None);
+}
+
+// ── App-initiated calls ──────────────────────────────────────────────────────
+
+async fn app_server(requires_confirmation: bool) -> ClientAppServer {
+    let client = connect().await;
+    let tools = client.list_tools().await.unwrap();
+    ClientAppServer::new(client, tools.into(), requires_confirmation)
+}
+
+#[tokio::test]
+async fn app_server_describes_its_tools() {
+    let server = app_server(true).await;
+    assert_eq!(
+        server.tool("forecast"),
+        Some(McpAppTool {
+            visible_to_app: true,
+            read_only: false,
+            requires_confirmation: true,
+        })
+    );
+    assert_eq!(server.tool("nope"), None);
+}
+
+#[tokio::test]
+async fn app_server_calls_tools_and_reads_resources() {
+    let server = app_server(false).await;
+    let result = server
+        .call_tool("forecast", serde_json::Map::new())
+        .await
+        .unwrap();
+    assert_eq!(result["content"][0]["text"], "21 degrees");
+    let read = server.read_resource("ui://weather/plain").await.unwrap();
+    assert_eq!(read["contents"][0]["text"], "<p>sunny</p>");
 }

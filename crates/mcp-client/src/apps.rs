@@ -1,12 +1,20 @@
 //! MCP Apps on the client side: resolving the `ui://` resource a tool
-//! declares into an [`McpApp`].
+//! declares into an [`McpApp`], and serving the calls an app makes back to
+//! its server.
+
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
 use rmcp::model::{MetaObject, ResourceContents, Tool};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tracing::{debug, warn};
 
-use assistant_core::mcp_app::{McpApp, McpAppCsp, McpAppPermissions};
+use assistant_core::mcp_app::{
+    McpApp, McpAppCsp, McpAppPermissions, McpAppServer, McpAppServers, McpAppTool,
+};
+use assistant_core::tool::TurnScope;
+use assistant_core::types::skills_mcp::McpTrustLevel;
 
 use crate::client::McpClient;
 
@@ -31,6 +39,20 @@ pub(crate) fn ui_field<'a>(meta: &'a MetaObject, field: &str) -> Option<&'a Valu
         .get("ui")
         .and_then(|ui| ui.get(field))
         .or_else(|| meta.0.get(&format!("ui/{field}")))
+}
+
+/// Whether `audience` (`model` or `app`) may use `tool`.
+///
+/// MCP Apps visibility lives in `_meta.ui.visibility` and defaults to
+/// `["model", "app"]`.
+pub(crate) fn visible_to(tool: &Tool, audience: &str) -> bool {
+    let Some(meta) = &tool.meta else {
+        return true;
+    };
+    match ui_field(meta, "visibility").and_then(Value::as_array) {
+        Some(audiences) => audiences.iter().any(|a| a.as_str() == Some(audience)),
+        None => true,
+    }
 }
 
 /// The app at `uri` on `client`'s server, or `None` (with a warning) when it
@@ -150,5 +172,120 @@ fn permissions(permissions: &Value) -> McpAppPermissions {
         microphone: requested("microphone"),
         geolocation: requested("geolocation"),
         clipboard_write: requested("clipboardWrite"),
+    }
+}
+
+// -- App-initiated calls --
+
+/// What an app may do with `tool` on a server whose tools need confirmation
+/// when `requires_confirmation` is set.
+fn app_tool(tool: &Tool, requires_confirmation: bool) -> McpAppTool {
+    McpAppTool {
+        visible_to_app: visible_to(tool, "app"),
+        read_only: tool
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.read_only_hint)
+            == Some(true),
+        requires_confirmation,
+    }
+}
+
+/// A connected server and its tool listing, serving an app's calls.
+pub struct ClientAppServer {
+    client: Arc<McpClient>,
+    tools: Arc<[Tool]>,
+    requires_confirmation: bool,
+}
+
+impl ClientAppServer {
+    pub fn new(client: Arc<McpClient>, tools: Arc<[Tool]>, requires_confirmation: bool) -> Self {
+        Self {
+            client,
+            tools,
+            requires_confirmation,
+        }
+    }
+}
+
+#[async_trait]
+impl McpAppServer for ClientAppServer {
+    fn tool(&self, name: &str) -> Option<McpAppTool> {
+        self.tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .map(|tool| app_tool(tool, self.requires_confirmation))
+    }
+
+    async fn call_tool(&self, name: &str, arguments: Map<String, Value>) -> Result<Value> {
+        let arguments = (!arguments.is_empty()).then_some(arguments);
+        let result = self.client.call_tool(name, arguments).await?;
+        Ok(serde_json::to_value(result)?)
+    }
+
+    async fn read_resource(&self, uri: &str) -> Result<Value> {
+        let result = self.client.read_resource(uri).await?;
+        Ok(serde_json::to_value(result)?)
+    }
+}
+
+#[async_trait]
+impl McpAppServers for crate::manager::McpClientManager {
+    async fn server(
+        &self,
+        _scope: &TurnScope<'_>,
+        server: &str,
+    ) -> Result<Option<Arc<dyn McpAppServer>>> {
+        let Some((client, trust)) = self.connected(server).await else {
+            return Ok(None);
+        };
+        let tools = client.list_tools().await?;
+        Ok(Some(Arc::new(ClientAppServer::new(
+            client,
+            tools.into(),
+            trust != McpTrustLevel::Trust,
+        ))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::sync::Arc;
+
+    use rmcp::model::ToolAnnotations;
+    use serde_json::json;
+
+    fn tool(meta: Value) -> Tool {
+        let mut tool = Tool::new("t", "d", Arc::new(serde_json::Map::new()));
+        if let Value::Object(meta) = meta {
+            tool = tool.with_meta(MetaObject(meta));
+        }
+        tool
+    }
+
+    #[test]
+    fn tools_are_visible_to_apps_by_default() {
+        assert!(app_tool(&tool(Value::Null), false).visible_to_app);
+    }
+
+    #[test]
+    fn model_only_tool_is_not_visible_to_apps() {
+        let tool = tool(json!({"ui": {"visibility": ["model"]}}));
+        assert!(!app_tool(&tool, false).visible_to_app);
+    }
+
+    #[test]
+    fn deprecated_flat_visibility_applies_to_apps() {
+        let tool = tool(json!({"ui/visibility": ["app"]}));
+        assert!(app_tool(&tool, false).visible_to_app);
+    }
+
+    #[test]
+    fn read_only_comes_from_the_hint() {
+        let hinted = tool(Value::Null).with_annotations(ToolAnnotations::new().read_only(true));
+        assert!(app_tool(&hinted, false).read_only);
+        assert!(!app_tool(&tool(Value::Null), false).read_only);
     }
 }
