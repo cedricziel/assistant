@@ -34,7 +34,7 @@ const STORE_POLL_EVERY: Duration = Duration::from_secs(1);
 /// How often a waiter proves it is alive.
 const WAITER_TOUCH_EVERY: Duration = Duration::from_secs(15);
 /// A `pending` row unseen for this long has no live waiter.
-const WAITER_STALE_AFTER: Duration = Duration::from_secs(45);
+pub const WAITER_STALE_AFTER: Duration = Duration::from_secs(45);
 
 /// What a turn asks its owner.
 #[derive(Debug, Clone)]
@@ -316,6 +316,16 @@ impl InteractionBroker {
         }
     }
 
+    /// End of run: cancel every `pending` interaction of `run_id` and return
+    /// each row of the run whose resolution is not yet in the event log, in
+    /// creation order. That includes a row whose answer won the
+    /// compare-and-set just before the turn was cancelled; its waiter never
+    /// emitted the resolution.
+    pub async fn abandon_run(&self, run_id: &str) -> Result<Vec<InteractionRow>> {
+        self.store.cancel_pending_for_run(run_id).await?;
+        self.store.list_unemitted_for_run(run_id).await
+    }
+
     /// The reply to an answer for a row that already left `pending`.
     fn settled_reply(
         row: InteractionRow,
@@ -327,6 +337,18 @@ impl InteractionBroker {
             _ => Err(RespondError::Gone),
         }
     }
+}
+
+/// The `InteractionResolved` event for a settled `row`, or `None` while it is
+/// still `pending`. The end-of-run cleanup and the restart sweep use it to
+/// write resolutions the waiter never got to emit.
+pub fn resolved_event(row: &InteractionRow) -> Option<OrchestratorEvent> {
+    Some(OrchestratorEvent::InteractionResolved {
+        interaction_id: row.id.clone(),
+        kind: row.kind.clone(),
+        resolved_at: row.resolved_at.unwrap_or_else(Utc::now),
+        outcome: InteractionOutcome::from_row(row)?,
+    })
 }
 
 /// Send `event` to the turn's sink, if it has one. A closed sink is not an
@@ -487,6 +509,43 @@ mod tests {
         assert!(renders_card);
         assert_eq!(request["tool_name"], "bash");
         assert!(expires_at > created_at);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn abandon_run_cancels_pending_and_returns_every_unemitted_row() {
+        let mut f = fixture();
+        let (pending, _task) = start(&mut f, request()).await;
+        // A second row of the run whose answer won just before the turn ended.
+        let (answered, task) = start(&mut f, request()).await;
+        f.broker
+            .respond(&owner(), &answered, allow())
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+        while f.rx.try_recv().is_ok() {}
+        // A third, already written to the log, and one of another run.
+        let (logged, task) = start(&mut f, request()).await;
+        f.broker.respond(&owner(), &logged, allow()).await.unwrap();
+        task.await.unwrap().unwrap();
+        while f.rx.try_recv().is_ok() {}
+        f.store.mark_emitted(&logged).await.unwrap();
+        let mut other = request();
+        other.run_id = "other-run".into();
+        let (elsewhere, _t) = start(&mut f, other).await;
+
+        let rows = f.broker.abandon_run("run").await.unwrap();
+
+        let got: Vec<(&str, InteractionStatus)> =
+            rows.iter().map(|r| (r.id.as_str(), r.status)).collect();
+        assert_eq!(
+            got,
+            vec![
+                (pending.as_str(), InteractionStatus::Cancelled),
+                (answered.as_str(), InteractionStatus::Resolved),
+            ],
+            "the cancelled row and the won-then-cancelled row, not the emitted or foreign ones"
+        );
+        assert_eq!(status(&f, &elsewhere).await, InteractionStatus::Pending);
     }
 
     #[tokio::test(start_paused = true)]
