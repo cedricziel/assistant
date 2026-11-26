@@ -166,6 +166,7 @@ import 'package:assistant_api/src/model/stream_run_events_query.dart';
 import 'package:assistant_api/src/model/string_list.dart';
 import 'package:assistant_api/src/model/subscribe_request.dart';
 import 'package:assistant_api/src/model/subscription_response.dart';
+import 'package:assistant_api/src/model/surface_summary.dart';
 import 'package:assistant_api/src/model/task.dart';
 import 'package:assistant_api/src/model/task_artifact_update_event.dart';
 import 'package:assistant_api/src/model/task_push_notification_config.dart';
@@ -365,6 +366,7 @@ part 'serializers.g.dart';
   StringList,
   SubscribeRequest,
   SubscriptionResponse,
+  SurfaceSummary,
   Task,
   TaskArtifactUpdateEvent,
   TaskPushNotificationConfig,

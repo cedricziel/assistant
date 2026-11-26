@@ -378,6 +378,7 @@ Class | Method | HTTP request | Description
  - [StringList](doc/StringList.md)
  - [SubscribeRequest](doc/SubscribeRequest.md)
  - [SubscriptionResponse](doc/SubscriptionResponse.md)
+ - [SurfaceSummary](doc/SurfaceSummary.md)
  - [Task](doc/Task.md)
  - [TaskArtifactUpdateEvent](doc/TaskArtifactUpdateEvent.md)
  - [TaskPushNotificationConfig](doc/TaskPushNotificationConfig.md)

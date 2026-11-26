@@ -615,6 +615,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "assistant-a2a-json-schema",
+ "assistant-a2ui",
  "assistant-auth",
  "assistant-bus-nats",
  "assistant-core",

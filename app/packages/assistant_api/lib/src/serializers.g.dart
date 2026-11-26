@@ -162,6 +162,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(StringList.serializer)
       ..add(SubscribeRequest.serializer)
       ..add(SubscriptionResponse.serializer)
+      ..add(SurfaceSummary.serializer)
       ..add(Task.serializer)
       ..add(TaskArtifactUpdateEvent.serializer)
       ..add(TaskPushNotificationConfig.serializer)
@@ -238,8 +239,14 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(IntegrationSummary)]),
           () => ListBuilder<IntegrationSummary>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(JsonObject)]),
+          () => ListBuilder<JsonObject>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(MessageSummary)]),
           () => ListBuilder<MessageSummary>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SurfaceSummary)]),
+          () => ListBuilder<SurfaceSummary>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
           () => ListBuilder<PersonaFileSlot>())
