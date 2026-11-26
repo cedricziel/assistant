@@ -4,6 +4,7 @@ import 'components/approval_card.dart';
 import 'components/message_timing_indicator.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
+import 'components/thread_density_scope.dart';
 import 'components/unknown_interaction_card.dart';
 
 /// One component per `kAssistantUiElements` entry, named after the element and
@@ -13,5 +14,6 @@ final List<WidgetbookComponent> kComponents = [
   messageTimingIndicatorComponent,
   starterPromptsComponent,
   suggestionChipsComponent,
+  threadDensityScopeComponent,
   unknownInteractionCardComponent,
 ];

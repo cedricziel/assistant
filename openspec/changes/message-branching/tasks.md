@@ -60,7 +60,7 @@ Layer: server (docs only)
 Depends on: none
 Parallel with: everything. Land in wave 1 together with ADR-0017 (`tool-approval-prompts` PR 1) and ADR-0019 (`generative-ui-a2ui` PR 1).
 
-- [ ] 0.1 Write `docs/adr/adr-0018-conversation-message-tree.md` covering design.md D1 (adjacency list, no self-cascade, `run_id`), D2/D3/D3a (append-at-leaf, anchored turns, redelivery), D5 (non-destructive compaction), D7/D7a (turn registry, its per-process limitation, auto-cancel of a pending approval) and D14 (attachment links), with the rejected alternatives. Cite `adr-0011-tool-permission-decision-model.md` by filename where relevant.
+- [ ] 0.1 Write `docs/adr/adr-0018-conversation-message-tree.md` covering design.md D1 (adjacency list, no self-cascade, `run_id`), D2/D3/D3a (append-at-leaf, anchored turns, redelivery), D5 (non-destructive compaction), D7/D7a (turn registry, its per-process limitation, auto-cancel of a pending approval) and D14 (attachment links), with the rejected alternatives. Cite `adr-0023-tool-permission-decision-model.md` by filename where relevant.
 - [ ] 0.2 Add "Branch", "Active path" and "Active leaf" to `docs/glossary.md`.
 
 ## PR 1 — `feat(storage): persist messages as a tree with an active leaf`

@@ -8,6 +8,7 @@ import 'package:assistant_api/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**app** | [**McpAppView**](McpAppView.md) | The MCP App the tool declared for its result. Absent for tools without one. | [optional] 
 **arguments** | [**JsonObject**](.md) |  | [optional] 
 **data** | [**JsonObject**](.md) | Structured output of the tool, a JSON object with a `kind` tag. Absent when the tool returned text only, the data exceeded the size limit, or the call predates structured data. Each `kind` is defined by a JSON Schema in `schemas/tool-results/`. | [optional] 
 **name** | **String** | The tool that was called. | 

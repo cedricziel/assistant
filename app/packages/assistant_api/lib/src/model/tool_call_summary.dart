@@ -3,6 +3,7 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:assistant_api/src/model/mcp_app_view.dart';
 import 'package:built_value/json_object.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
@@ -12,6 +13,7 @@ part 'tool_call_summary.g.dart';
 /// Summary of a single tool invocation within an assistant message.
 ///
 /// Properties:
+/// * [app] - The MCP App the tool declared for its result. Absent for tools without one.
 /// * [arguments]
 /// * [data] - Structured output of the tool, a JSON object with a `kind` tag. Absent when the tool returned text only, the data exceeded the size limit, or the call predates structured data. Each `kind` is defined by a JSON Schema in `schemas/tool-results/`.
 /// * [name] - The tool that was called.
@@ -21,6 +23,10 @@ part 'tool_call_summary.g.dart';
 @BuiltValue()
 abstract class ToolCallSummary
     implements Built<ToolCallSummary, ToolCallSummaryBuilder> {
+  /// The MCP App the tool declared for its result. Absent for tools without one.
+  @BuiltValueField(wireName: r'app')
+  McpAppView? get app;
+
   @BuiltValueField(wireName: r'arguments')
   JsonObject? get arguments;
 
@@ -70,6 +76,13 @@ class _$ToolCallSummarySerializer
     ToolCallSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
+    if (object.app != null) {
+      yield r'app';
+      yield serializers.serialize(
+        object.app,
+        specifiedType: const FullType.nullable(McpAppView),
+      );
+    }
     if (object.arguments != null) {
       yield r'arguments';
       yield serializers.serialize(
@@ -133,6 +146,14 @@ class _$ToolCallSummarySerializer
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'app':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(McpAppView),
+          ) as McpAppView?;
+          if (valueDes == null) continue;
+          result.app.replace(valueDes);
+          break;
         case r'arguments':
           final valueDes = serializers.deserialize(
             value,

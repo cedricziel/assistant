@@ -2,6 +2,7 @@ import 'package:assistant_api/assistant_api.dart'
     show AssistantApi, ClientRegistrationSchema, OauthApi, TokenResponse;
 import 'package:built_collection/built_collection.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'oauth_credentials.dart';
 import 'pkce.dart';
@@ -16,14 +17,28 @@ import 'pkce.dart';
 /// via [Dio]. Token storage is handled by the caller ([ContextRepository]).
 class OAuthService {
   OAuthService({required this.serverUrl, Dio? dio}) {
-    // Tests pass a Dio with a mock interceptor.
-    _api = AssistantApi(dio: dio, basePathOverride: serverUrl);
+    // Tests pass a Dio with a mock interceptor. Without one, the generated
+    // client's own default gives up after 3 seconds.
+    _api = AssistantApi(
+      dio:
+          dio ??
+          Dio(
+            BaseOptions(
+              connectTimeout: const Duration(seconds: 15),
+              receiveTimeout: const Duration(seconds: 60),
+            ),
+          ),
+      basePathOverride: serverUrl,
+    );
     _oauthApi = _api.getOauthApi();
   }
 
   final String serverUrl;
   late final AssistantApi _api;
   late final OauthApi _oauthApi;
+
+  @visibleForTesting
+  Dio get dio => _api.dio;
 
   // -- Dynamic Client Registration (RFC 7591) --------------------------------
 
