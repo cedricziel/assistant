@@ -1780,6 +1780,128 @@ mod tests {
         assert!(err.contains("token budget"), "{err}");
     }
 
+    // ── Wiremock: reasoning continuity ──────────────────────────────────
+
+    fn stored_details() -> Value {
+        json!([
+            {"type": "reasoning.text", "text": "Checking the file first", "signature": "sig-a", "index": 0},
+            {"type": "reasoning.encrypted", "data": "c2VjcmV0", "index": 1},
+        ])
+    }
+
+    fn state(provider: &str, model: &str) -> assistant_core::ProviderState {
+        assistant_core::ProviderState {
+            provider: provider.into(),
+            model: model.into(),
+            data: json!({"reasoning_details": stored_details()}),
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_call_reasoning_details_become_provider_state() {
+        let server = MockServer::start().await;
+        let mut body = reasoning_tool_call();
+        body["choices"][0]["message"]["reasoning_details"] = stored_details();
+        mount_once(&server, body).await;
+
+        let response = provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &[], &[read_tool()])
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        assert_eq!(calls.provider_state, Some(state("openrouter", MODEL)));
+    }
+
+    #[tokio::test]
+    async fn streamed_reasoning_details_are_merged_by_index() {
+        let server = MockServer::start().await;
+        mount_sse(
+            &server,
+            &[
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"Checking the ","index":0}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"file first","signature":"sig-a","index":0}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"c2VjcmV0","index":1}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"file-read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+                "data: [DONE]",
+            ],
+        )
+        .await;
+
+        let response = provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat_streaming("sys", &[], &[read_tool()], None)
+            .await
+            .unwrap();
+
+        let LlmResponse::ToolCalls(calls) = response else {
+            panic!("expected tool calls, got {response:?}");
+        };
+        assert_eq!(calls.provider_state, Some(state("openrouter", MODEL)));
+    }
+
+    fn tool_loop_history(
+        provider_state: Option<assistant_core::ProviderState>,
+    ) -> Vec<ChatHistoryMessage> {
+        vec![
+            ChatHistoryMessage::Text {
+                role: assistant_core::ChatRole::User,
+                content: "read it".into(),
+            },
+            ChatHistoryMessage::AssistantToolCalls {
+                items: vec![assistant_core::ToolCallItem {
+                    name: "file-read".into(),
+                    params: json!({}),
+                    id: Some("call_1".into()),
+                }],
+                provider_state,
+            },
+            ChatHistoryMessage::ToolResult {
+                name: "file-read".into(),
+                content: "contents".into(),
+            },
+        ]
+    }
+
+    async fn sent_assistant_message(state: Option<assistant_core::ProviderState>) -> Value {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &tool_loop_history(state), &[read_tool()])
+            .await
+            .unwrap();
+        let body = sent_body(&server).await;
+        body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "assistant")
+            .cloned()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stored_reasoning_details_are_sent_back_unchanged_and_in_order() {
+        let message = sent_assistant_message(Some(state("openrouter", MODEL))).await;
+        assert_eq!(message["reasoning_details"], stored_details());
+        assert_eq!(message["tool_calls"][0]["id"], "call_1");
+    }
+
+    #[tokio::test]
+    async fn reasoning_from_another_provider_or_model_is_not_sent() {
+        for foreign in [
+            state("anthropic", MODEL),
+            state("openrouter", "openai/gpt-4o"),
+        ] {
+            let message = sent_assistant_message(Some(foreign.clone())).await;
+            assert!(
+                message.get("reasoning_details").is_none(),
+                "{foreign:?}: {message}"
+            );
+        }
+    }
+
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────
 
     async fn mount_sse(server: &MockServer, events: &[&str]) {
