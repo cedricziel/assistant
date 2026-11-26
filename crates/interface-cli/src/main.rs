@@ -240,6 +240,7 @@ async fn main() -> Result<()> {
         .context("Failed to seed the default org and space")?;
     let messenger_deps = messengers::MessengerDeps {
         config: &bs.config,
+        install_root: &assistant_dir,
         runtimes: bs.runtimes.clone(),
         org_storage: org_storage.clone(),
         default_space: default_space.clone(),
