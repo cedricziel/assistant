@@ -1,0 +1,5 @@
+{
+  "kind": "sources",
+  "query": "q",
+  "results": [{ "title": "No link", "domain": "example.com" }]
+}
