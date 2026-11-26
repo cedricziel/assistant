@@ -429,6 +429,37 @@ async fn replace_history_rechains_the_new_rows(store: Box<dyn ConversationStore>
     assert_eq!(loaded[2].parent_id, Some(replacement[1].id));
 }
 
+async fn tool_result_metadata_roundtrips(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("Tool")).await.unwrap();
+    store
+        .save_message(&user_msg(conv.id, "run it", 0))
+        .await
+        .unwrap();
+    let mut tool = Message::new(conv.id, MessageRole::Tool, "stdout:\nhi");
+    tool.skill_name = Some("bash".into());
+    tool.tool_call_id = Some("call_1".into());
+    tool.tool_status = Some("error".into());
+    tool.tool_data_json = Some(r#"{"kind":"terminal","exit_code":1}"#.into());
+    store.save_message(&tool).await.unwrap();
+
+    let history = store.load_history(conv.id).await.unwrap();
+    let loaded = &history[1];
+    assert_eq!(loaded.tool_call_id.as_deref(), Some("call_1"));
+    assert_eq!(loaded.tool_status.as_deref(), Some("error"));
+    assert_eq!(
+        loaded.tool_data_json.as_deref(),
+        Some(r#"{"kind":"terminal","exit_code":1}"#)
+    );
+
+    let by_id = store.get_message(tool.id).await.unwrap().unwrap();
+    assert_eq!(by_id.tool_call_id.as_deref(), Some("call_1"));
+    assert_eq!(by_id.tool_status.as_deref(), Some("error"));
+    assert!(by_id.tool_data_json.is_some());
+
+    let plain = store.load_history(conv.id).await.unwrap();
+    assert!(plain[0].tool_call_id.is_none() && plain[0].tool_data_json.is_none());
+}
+
 // -- Branching --
 
 fn ids(messages: &[Message]) -> Vec<Uuid> {
@@ -835,6 +866,11 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_replace_history_rechains_the_new_rows() {
                 replace_history_rechains_the_new_rows($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_tool_result_metadata_roundtrips() {
+                tool_result_metadata_roundtrips($constructor).await;
             }
 
             #[tokio::test]

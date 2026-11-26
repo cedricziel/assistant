@@ -386,3 +386,163 @@ async fn failed_output_with_content_is_error_and_failed_skill_execution() {
         "a failed output counts as a failed skill execution"
     );
 }
+
+// ── persisted tool-row metadata ───────────────────────────────────────────
+
+impl Run {
+    /// The persisted tool rows as `(tool_call_id, tool_status, tool_data)`.
+    async fn persisted_tool_meta(&self) -> Vec<(Option<String>, Option<String>, Option<Value>)> {
+        self.storage
+            .conversation_store()
+            .load_history(self.conversation_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|m| matches!(m.role, MessageRole::Tool))
+            .map(|m| {
+                (
+                    m.tool_call_id,
+                    m.tool_status,
+                    m.tool_data_json
+                        .map(|raw| serde_json::from_str(&raw).unwrap()),
+                )
+            })
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn ok_call_persists_id_status_and_data() {
+    let run = run(
+        "probe",
+        Box::new(|| ToolOutput::success("hi").with_data(json!({"kind": "terminal"}))),
+    )
+    .await;
+    assert_eq!(
+        run.persisted_tool_meta().await,
+        vec![(
+            Some("call_1".to_string()),
+            Some("ok".to_string()),
+            Some(json!({"kind": "terminal"}))
+        )]
+    );
+}
+
+#[tokio::test]
+async fn data_over_the_cap_is_not_persisted() {
+    let big = "x".repeat(40 * 1024);
+    let run = run(
+        "probe",
+        Box::new(move || ToolOutput::success("hi").with_data(json!({"blob": big.clone()}))),
+    )
+    .await;
+    let meta = run.persisted_tool_meta().await;
+    assert_eq!(meta[0].1.as_deref(), Some("ok"));
+    assert_eq!(meta[0].2, None, "oversized data is dropped, not persisted");
+}
+
+#[tokio::test]
+async fn tool_error_output_persists_status_error() {
+    let run = run("probe", Box::new(|| ToolOutput::error("boom"))).await;
+    assert_eq!(
+        run.persisted_tool_meta().await,
+        vec![(Some("call_1".to_string()), Some("error".to_string()), None)]
+    );
+}
+
+/// A handler whose execution fails outright.
+struct FailingTool;
+
+#[async_trait]
+impl ToolHandler for FailingTool {
+    fn name(&self) -> &str {
+        "probe"
+    }
+    fn description(&self) -> &str {
+        "always fails"
+    }
+    fn params_schema(&self) -> Value {
+        json!({"type": "object", "properties": {}, "required": []})
+    }
+    async fn run(
+        &self,
+        _params: HashMap<String, Value>,
+        _ctx: &ExecutionContext,
+    ) -> anyhow::Result<ToolOutput> {
+        anyhow::bail!("exploded")
+    }
+}
+
+#[tokio::test]
+async fn executor_err_persists_status_error() {
+    let llm = Arc::new(ScriptedLlmProvider::new().with_canned_responses(vec![
+        call("probe"),
+        LlmResponse::FinalAnswer("done".to_string(), LlmResponseMeta::default()),
+    ]));
+    let llm_dyn: Arc<dyn LlmProvider> = llm.clone();
+    let mut config = OrgConfig::default();
+    config.memory.enabled = false;
+    config.permissions.allow = vec!["*".parse().expect("valid rule")];
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let executor = Arc::new(ToolExecutor::new(
+        storage.clone(),
+        llm_dyn.clone(),
+        registry.clone(),
+        Arc::new(config.clone()),
+    ));
+    executor.register_ambient_tool(Arc::new(FailingTool));
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+    let orch = Orchestrator::new(llm_dyn, storage.clone(), executor, registry, bus, &config);
+
+    let conversation_id = Uuid::new_v4();
+    let (tx, _rx) = tokio::sync::mpsc::channel::<OrchestratorEvent>(64);
+    orch.run_turn_with_tools_streaming(
+        "go",
+        conversation_id,
+        Interface::Cli,
+        vec![],
+        None,
+        vec![],
+        tx,
+        vec![],
+        TurnIdentity::default(),
+    )
+    .await
+    .unwrap();
+
+    let run = Run {
+        events: Vec::new(),
+        storage,
+        llm,
+        conversation_id,
+    };
+    assert_eq!(
+        run.persisted_tool_meta().await,
+        vec![(Some("call_1".to_string()), Some("error".to_string()), None)]
+    );
+}
+
+#[tokio::test]
+async fn denied_call_persists_status_denied_without_data() {
+    let run = run_with(
+        vec![],
+        "probe",
+        Box::new(|| ToolOutput::success("x").with_data(json!({"kind": "terminal"}))),
+        true,
+    )
+    .await;
+    assert_eq!(
+        run.persisted_tool_meta().await,
+        vec![(Some("call_1".to_string()), Some("denied".to_string()), None)]
+    );
+}
+
+#[tokio::test]
+async fn end_turn_row_persists_status_ok_without_data() {
+    let run = run("end_turn", Box::new(|| ToolOutput::success("unused"))).await;
+    let meta = run.persisted_tool_meta().await;
+    assert_eq!(meta.len(), 1, "one end_turn tool row");
+    assert_eq!(meta[0].1.as_deref(), Some("ok"));
+    assert_eq!(meta[0].2, None);
+}

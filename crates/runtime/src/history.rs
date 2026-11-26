@@ -253,6 +253,9 @@ mod tests {
             sender_user_id: None,
             parent_id: None,
             run_id: None,
+            tool_call_id: None,
+            tool_status: None,
+            tool_data_json: None,
         }
     }
 
@@ -270,6 +273,9 @@ mod tests {
             sender_user_id: None,
             parent_id: None,
             run_id: None,
+            tool_call_id: None,
+            tool_status: None,
+            tool_data_json: None,
         }
     }
 
