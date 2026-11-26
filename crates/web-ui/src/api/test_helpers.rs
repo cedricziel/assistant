@@ -136,6 +136,23 @@ impl TranscriptionProvider for StubTranscriptionProvider {
     }
 }
 
+/// Stub transcription provider whose every call fails.
+pub(crate) struct FailingTranscriptionProvider;
+
+#[async_trait]
+impl TranscriptionProvider for FailingTranscriptionProvider {
+    fn name(&self) -> &str {
+        "failing-stub"
+    }
+
+    async fn transcribe(
+        &self,
+        _request: TranscriptionRequest,
+    ) -> anyhow::Result<TranscriptionResult> {
+        anyhow::bail!("stub transcription failure")
+    }
+}
+
 // -- HTTP / LLM fixtures -------------------------------------------------------
 
 /// Minimal LLM mock: returns a static assistant reply.

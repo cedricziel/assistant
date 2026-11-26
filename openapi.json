@@ -2201,7 +2201,8 @@
         "tags": [
           "conversations"
         ],
-        "summary": "`POST /api/conversations/{id}/voice` — upload audio, transcribe it, run\nthrough the orchestrator, and stream the response as SSE.",
+        "summary": "`POST /api/conversations/{id}/voice` — upload audio, keep it as the user\nmessage's attachment, transcribe it, run through the orchestrator, and\nstream the response as SSE.",
+        "description": "The message text is the transcript, or `[Voice message]` when no\ntranscription provider is configured or transcription fails.",
         "operationId": "send_voice_message",
         "parameters": [
           {
@@ -2275,9 +2276,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "Voice not configured"
           }
         },
         "security": [

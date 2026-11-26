@@ -46,7 +46,7 @@ pub use bus_messages::{
     TurnRequest, TurnResult, TurnStatus, topic,
 };
 pub use catalog::{CatalogEntry, CatalogResolver, CatalogResourceType};
-pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
+pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser, VOICE_PLACEHOLDER};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use command::{CommandArg, CommandDef, CommandResult, ConversationConfig};
 pub use config::{load_org_config, load_server_config, org_config_path, server_config_path};
