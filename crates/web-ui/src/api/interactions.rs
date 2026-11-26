@@ -392,7 +392,7 @@ pub async fn respond_to_interaction(
 }
 
 /// A body the JSON extractor refused. Shape errors are `400`, not axum's `422`.
-fn rejection_status(rejection: &JsonRejection) -> StatusCode {
+pub(crate) fn rejection_status(rejection: &JsonRejection) -> StatusCode {
     match rejection.status() {
         StatusCode::UNPROCESSABLE_ENTITY => StatusCode::BAD_REQUEST,
         other => other,

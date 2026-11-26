@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-11-26
 **Builds on**: [ADR-0009](adr-0009-testability-architecture.md), [ADR-0011](adr-0011-message-bus-delivery-tracking-and-nack-delay.md), [ADR-0013](adr-0013-per-space-runtimes.md)
-**Related**: [ADR-0011](adr-0011-tool-permission-decision-model.md) (tool approvals), which D7a below interacts with
+**Related**: [ADR-0023](adr-0023-tool-permission-decision-model.md) (tool approvals), which D7a below interacts with
 
 ## Context
 
@@ -125,7 +125,7 @@ A `TurnRegistry` on `Orchestrator` replaces the three `active_turns` maps. `Comm
 3. Otherwise it cancels those runs through the path `/stop` uses. The run's end-of-run cleanup resolves the interactions as `cancelled`, so the gated tool call never runs, and the cancelled-reply persistence records the stop on the branch being left.
 4. It waits for the leases to be released, up to 10 seconds, and tries `try_begin(Exclusive)` once more. A timeout returns 409.
 
-A turn blocked on the user cannot make progress, and the only way to unblock it is to answer a prompt on a branch the user is leaving. Returning 409 would trap the user between a card they no longer want and an edit they cannot submit. A turn that is still working is not cancelled: that stays a 409 and the user can press Stop. The approval gate itself, with its confirmation callback and `interactive` flag, is the one described in [adr-0011-tool-permission-decision-model.md](adr-0011-tool-permission-decision-model.md). The interactions store and the run cleanup that step 2 and step 3 rely on come with the turn-interactions ADR and are not in the code yet.
+A turn blocked on the user cannot make progress, and the only way to unblock it is to answer a prompt on a branch the user is leaving. Returning 409 would trap the user between a card they no longer want and an edit they cannot submit. A turn that is still working is not cancelled: that stays a 409 and the user can press Stop. The approval gate itself, with its confirmation callback and `interactive` flag, is the one described in [adr-0023-tool-permission-decision-model.md](adr-0023-tool-permission-decision-model.md). The interactions store and the run cleanup that step 2 and step 3 rely on come with the turn-interactions ADR and are not in the code yet.
 
 **Alternatives.** Denying the approval and letting the turn continue is rejected, because the model would run on, possibly acting on a branch that is no longer shown. Blocking until the approval times out is rejected, because that takes ten minutes.
 
