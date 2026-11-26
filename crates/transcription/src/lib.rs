@@ -13,6 +13,7 @@
 
 pub mod audio_store;
 mod converter;
+mod converting;
 mod deepgram;
 mod deepgram_tts;
 mod ollama;
@@ -28,7 +29,8 @@ use assistant_core::types::transcription::{
 };
 
 pub use audio_store::AudioStore;
-pub use converter::{AudioConverter, AudioFormat, ConversionResult};
+pub use converter::AudioFormat;
+pub use converting::ConvertingTranscriber;
 pub use deepgram::DeepgramProvider;
 pub use deepgram_tts::DeepgramTtsProvider;
 pub use ollama::OllamaTranscriptionProvider;
@@ -166,7 +168,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
         TranscriptionProviderKind::Ollama => {
             let mut provider = OllamaTranscriptionProvider::new()?;
@@ -176,7 +178,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
         TranscriptionProviderKind::Deepgram => {
             let api_key = config
@@ -198,9 +200,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            // Enable audio conversion for formats not supported by Deepgram (e.g., M4A)
-            provider = provider.with_audio_conversion(AudioConverter::new());
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
     }
 }
