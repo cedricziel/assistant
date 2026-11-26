@@ -7,8 +7,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use assistant_core::bus_messages::TurnAnchor;
 use assistant_core::llm::call_context::LlmCallContext;
-use assistant_core::types::conversation::{ExecutionContext, Interface, Message, TurnIdentity};
+use assistant_core::types::conversation::{
+    ExecutionContext, Interface, Message, MessageRole, TurnIdentity,
+};
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider,
     LlmResponse, MemoryLoader, MessageBus, StreamChunk, ToolHandler, ToolSpec, TurnScope,
@@ -17,7 +20,7 @@ use assistant_core::{
 };
 use assistant_storage::{
     AttachmentStore as _AttachmentStoreTrait, SkillRegistry, StorageLayer,
-    conversations::{ConversationStore, SqliteConversationStore},
+    conversations::ConversationStore,
 };
 use assistant_tool_executor::{ToolExecutor, ToolOverlay};
 use assistant_transcription::AudioStore;
@@ -32,6 +35,7 @@ use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 use crate::history::{FinalAnswerMeta, TurnHistory, persist_final_answer};
+pub(crate) use turn_store::TurnStore;
 use turn_timing::{CallMarks, TurnTimer};
 
 // ── Submodules ────────────────────────────────────────────────────────────────
@@ -39,12 +43,15 @@ use turn_timing::{CallMarks, TurnTimer};
 mod branch;
 mod dispatch;
 mod prompt;
+mod relay;
 mod surface_hook;
 use self::surface_hook::{SurfaceCall, SurfaceTurn};
 pub mod stream_event;
+mod turn_anchor;
 mod turn_cancellations;
 mod turn_control;
 mod turn_registry;
+mod turn_store;
 mod turn_timing;
 
 mod subagent;
@@ -55,6 +62,7 @@ mod worker;
 mod tests;
 
 pub use branch::{BRANCH_CANCEL_WAIT, BranchConflict};
+pub use relay::RunEventRelay;
 pub use stream_event::OrchestratorEvent;
 pub use submit::SubmitTurn;
 pub use turn_registry::{TurnLease, TurnMode, TurnRegistry};
@@ -523,6 +531,12 @@ impl Orchestrator {
         &self.bus
     }
 
+    /// Reader for the events a worker in another process relays for the run
+    /// `run_id` of `conversation_id` (see [`SubmitTurn::relay_events`]).
+    pub fn run_event_relay(&self, conversation_id: Uuid, run_id: Uuid) -> RunEventRelay {
+        RunEventRelay::new(self.bus.clone(), &self.agent_id, conversation_id, run_id)
+    }
+
     /// Cancel an in-flight turn by `request_id` (the same UUID `submit`
     /// assigned, also used as the SSE `run_id` when callers pass it through
     /// [`Self::submit`]).
@@ -952,6 +966,7 @@ impl Orchestrator {
                 attachments,
                 &attachment_ids,
                 &self.agent_id,
+                &identity,
             )
             .await?;
         let summary_store = self.storage.conversation_summary_store();
@@ -1125,7 +1140,7 @@ impl Orchestrator {
             }
 
             match response {
-                LlmResponse::FinalAnswer(text, _meta) => {
+                LlmResponse::FinalAnswer(text, meta) => {
                     let outcome = Self::handle_final_answer_with_extensions(
                         replied,
                         &text,
@@ -1147,6 +1162,14 @@ impl Orchestrator {
                     .await?;
                     match outcome {
                         FinalAnswerOutcome::Done(mut result) => {
+                            self.persist_response_media(
+                                conversation_id,
+                                result.message_id,
+                                meta.media,
+                                &mut turn_attachments,
+                                &mut turn_attachment_ids,
+                            )
+                            .await;
                             result.attachments = turn_attachments;
                             result.attachment_ids = turn_attachment_ids;
                             return Ok(result);
@@ -1398,6 +1421,7 @@ impl Orchestrator {
                 Vec::new(),
                 &attachment_ids,
                 &self.agent_id,
+                &identity,
             )
             .await?;
         let summary_store = self.storage.conversation_summary_store();
@@ -1587,7 +1611,7 @@ impl Orchestrator {
             }
 
             match response {
-                LlmResponse::FinalAnswer(text, _meta) => {
+                LlmResponse::FinalAnswer(text, meta) => {
                     info!(iteration, "LLM returned final answer");
 
                     let (saved_message_id, timing) = if !text.trim().is_empty() {
@@ -1640,6 +1664,14 @@ impl Orchestrator {
                         );
                     }
 
+                    self.persist_response_media(
+                        conversation_id,
+                        saved_message_id,
+                        meta.media,
+                        &mut turn_attachments,
+                        &mut turn_attachment_ids,
+                    )
+                    .await;
                     return Ok(TurnResult {
                         answer: text,
                         attachments: turn_attachments,
@@ -1774,25 +1806,84 @@ impl Orchestrator {
 
     // ── Attachment helpers ─────────────────────────────────────────────────────
 
+    /// Stores media generated with a final answer as attachments of
+    /// `message_id`, the saved assistant message, and adds them to the
+    /// turn's attachments so interfaces deliver them like tool output.
+    async fn persist_response_media(
+        &self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        media: Vec<assistant_core::GeneratedMedia>,
+        attachments: &mut Vec<assistant_core::Attachment>,
+        attachment_ids: &mut Vec<Uuid>,
+    ) {
+        let store = self.storage.attachment_store();
+        for (index, item) in media.into_iter().enumerate() {
+            let kind = match item.kind {
+                assistant_core::MediaKind::Image => "image",
+                assistant_core::MediaKind::Audio => "audio",
+            };
+            let filename = format!(
+                "{kind}-{}.{}",
+                index + 1,
+                assistant_core::attachment::extension_for_mime(&item.mime)
+            );
+            let meta = assistant_core::AttachmentMeta {
+                id: Uuid::new_v4(),
+                message_id,
+                conversation_id,
+                agent_id: self.agent_id.clone(),
+                filename: filename.clone(),
+                mime_type: item.mime.clone(),
+                size_bytes: item.data.len() as u64,
+                created_at: self.clock.now(),
+            };
+            match store.store(&meta, &item.data).await {
+                Ok(()) => {
+                    debug!(attachment_id = %meta.id, %filename, "Persisted generated media");
+                    attachment_ids.push(meta.id);
+                    attachments.push(assistant_core::Attachment::new(
+                        filename,
+                        item.mime,
+                        item.data.to_vec(),
+                    ));
+                }
+                Err(e) => warn!(%filename, error = %e, "Failed to persist generated media"),
+            }
+        }
+    }
+
     /// Build a map of `message_id → [ContentBlock]` for all attachments in a
     /// conversation that are linked to a message.  Used to replay attachments
     /// in chat history so the LLM can reference previously-sent content.
+    ///
+    /// A user message in `path` also gets the attachments an edit carried
+    /// forward to it, which belong to an earlier version of the message.
     ///
     /// Images are resized and encoded as `ContentBlock::Image`.  PDFs become
     /// `ContentBlock::Document`.  Text files are inlined as `ContentBlock::Text`.
     async fn build_attachment_map(
         &self,
         conversation_id: Uuid,
+        path: &[Message],
     ) -> anyhow::Result<crate::history::AttachmentMap> {
         let store = self.storage.attachment_store();
-        let all_atts = store.list_for_conversation(conversation_id).await?;
+        let mut owned: Vec<(Uuid, AttachmentMeta)> = store
+            .list_for_conversation(conversation_id)
+            .await?
+            .into_iter()
+            .filter_map(|meta| Some((meta.message_id?, meta)))
+            .collect();
+        for message in path.iter().filter(|m| m.role == MessageRole::User) {
+            for meta in store.list_for_message(message.id).await? {
+                if meta.message_id != Some(message.id) {
+                    owned.push((message.id, meta));
+                }
+            }
+        }
 
         let mut map = crate::history::AttachmentMap::new();
-        for meta in all_atts {
-            let msg_id = match meta.message_id {
-                Some(id) => id,
-                None => continue,
-            };
+        for (msg_id, meta) in owned {
             if !is_supported_mime_type(&meta.mime_type) {
                 continue;
             }
@@ -1823,34 +1914,40 @@ impl Orchestrator {
         attachments: Vec<ContentBlock>,
         attachment_ids: &[Uuid],
         agent_id: &str,
-    ) -> Result<(SqliteConversationStore, TurnHistory, i64)> {
-        // Note: returns the concrete SqliteConversationStore because the
-        // function is an internal helper called only from this impl. External
-        // consumer signatures (helper fns in dispatch.rs, turn_control.rs,
-        // history.rs, web-ui handlers) take `&dyn ConversationStore`; the
-        // trait is what crosses crate / function-API boundaries.
-        let conv_store = self.storage.conversation_store_for_agent(agent_id);
+        identity: &TurnIdentity,
+    ) -> Result<(TurnStore, TurnHistory, i64)> {
+        // Note: returns the concrete `TurnStore` because the function is an
+        // internal helper called only from this impl. External consumer
+        // signatures (helper fns in dispatch.rs, turn_control.rs, history.rs,
+        // web-ui handlers) take `&dyn ConversationStore`; the trait is what
+        // crosses crate / function-API boundaries.
+        let conv_store = TurnStore::new(
+            self.storage.conversation_store_for_agent(agent_id),
+            identity.run_id,
+        );
         conv_store
             .create_conversation_with_id(conversation_id, None)
             .await?;
 
-        let prior = conv_store.load_history(conversation_id).await?;
-        let base_turn = prior.len() as i64;
+        let turn_anchor::AnchoredTurn {
+            prior,
+            base_turn,
+            user,
+            regenerated,
+            carried,
+        } = self
+            .begin_anchored_turn(&conv_store, conversation_id, user_message, identity)
+            .await?;
 
-        if base_turn == 0 {
+        if base_turn == 0 && identity.anchor == TurnAnchor::Append {
             self.metrics.conversation_count.add(1, &[]);
         }
 
-        let user_msg = {
-            let mut m = Message::user(conversation_id, user_message);
-            m.turn = base_turn;
-            m
-        };
-        conv_store.save_message(&user_msg).await?;
-
         // Link uploaded attachments to the persisted user message so that
         // `build_attachment_map()` can find them on subsequent turns.
-        if !attachment_ids.is_empty() {
+        if let Some(user_msg) = &user
+            && !attachment_ids.is_empty()
+        {
             let store = self.storage.attachment_store();
             for &att_id in attachment_ids {
                 if let Err(e) = store.link_to_message(att_id, user_msg.id).await {
@@ -1865,10 +1962,13 @@ impl Orchestrator {
         }
 
         // Build an attachment map for history replay: load all attachments
-        // linked to messages in this conversation and base64-encode them so
-        // the LLM sees previously-sent images.
+        // linked to messages on this path and base64-encode them so the LLM
+        // sees previously-sent images. A regenerate also needs the map for
+        // the user message it answers.
+        let mut map_path = prior.clone();
+        map_path.extend(regenerated.clone());
         let att_map = self
-            .build_attachment_map(conversation_id)
+            .build_attachment_map(conversation_id, &map_path)
             .await
             .unwrap_or_default();
 
@@ -1878,11 +1978,31 @@ impl Orchestrator {
                 .await?;
         crate::history::sanitize_history(&mut history);
 
+        // The turn's user message: the prompt, or for a regenerate the stored
+        // message with the attachments it already has.
+        let (user_message, mut all_attachments) = match &regenerated {
+            Some(user) => (
+                user.content.as_str(),
+                att_map.get(&user.id).cloned().unwrap_or_default(),
+            ),
+            None => (user_message, attachments),
+        };
+
         // Load stored attachments by ID and convert to the appropriate ContentBlock.
-        let mut all_attachments = attachments;
-        if !attachment_ids.is_empty() {
+        // A regenerate has no new attachments: the stored message has its own.
+        let new_ids: &[Uuid] = if regenerated.is_some() {
+            &[]
+        } else {
+            attachment_ids
+        };
+        let to_load: Vec<Uuid> = new_ids
+            .iter()
+            .copied()
+            .chain(carried.into_iter().filter(|id| !new_ids.contains(id)))
+            .collect();
+        if !to_load.is_empty() {
             let store = self.storage.attachment_store();
-            for &att_id in attachment_ids {
+            for &att_id in &to_load {
                 match store.load_bytes(att_id).await {
                     Ok(bytes) => {
                         let meta = store.get_meta(att_id).await?;
@@ -1909,20 +2029,21 @@ impl Orchestrator {
             }
         }
 
+        let user_row_id = user.as_ref().or(regenerated.as_ref()).map(|m| m.id);
         if all_attachments.is_empty() {
             history.push(
                 ChatHistoryMessage::Text {
                     role: ChatRole::User,
                     content: user_message.to_string(),
                 },
-                Some(user_msg.id),
+                user_row_id,
             );
         } else {
             let mut blocks = vec![ContentBlock::Text(user_message.to_string())];
             blocks.extend(all_attachments);
             history.push(
                 ChatHistoryMessage::MultimodalUser { content: blocks },
-                Some(user_msg.id),
+                user_row_id,
             );
         }
 

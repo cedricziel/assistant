@@ -118,18 +118,18 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 - [x] 16.2 Write failing wiremock tests: request body with `speed` and `instructions`; request voice overrides config; the native format is requested when the model supports it. Confirm red. Implement `openrouter_tts.rs`, then verify.
 - [x] 16.3 Write failing tests for format selection and transcoding: a PCM-only HeyGen model read at 44.1 kHz and returned as mp3; Gemini to ogg via wav; the `pcm_sample_rate` override; missing ffmpeg fails the build. Confirm red. Implement, then verify.
 - [x] 16.4 Write failing tests for catalog validation: unknown voice, speed out of range, unsupported `instructions`, a request-level voice rejected without an upstream call, and a catalog outage that skips validation. Confirm red. Implement, then verify.
-- [ ] 16.5 Write failing tests: `voice_response` uses the configured format; `/api/messages/{id}/tts` returns the provider MIME type. Confirm red. Implement, make `build_tts_provider(cfg, llm)` async with the OpenRouter variant, and update the call site. Verify.
-- [ ] 16.6 Update `docs/transcription.md` (TTS) and `docs/openrouter.md`.
+- [x] 16.5 Write failing tests: `voice_response` uses the configured format; `/api/messages/{id}/tts` returns the provider MIME type. Confirm red. Implement, make `build_tts_provider(cfg, llm)` async with the OpenRouter variant, and update the call site. Verify.
+- [x] 16.6 Update `docs/transcription.md` (TTS) and `docs/openrouter.md`.
 
 ## 17. Generated media on responses
 
-- [ ] 17.1 Write failing tests: `GeneratedMedia` on `LlmResponseMeta` clones cheaply (`Bytes`), and the orchestrator stores final-answer media as attachments of the assistant message, with the IDs included in `TurnResult.attachment_ids`. Confirm red. Implement, then verify.
-- [ ] 17.2 Write a failing adapter-level test that an audio attachment from response media takes the same `channel-audio-outbound` path as `voice_response` audio. Confirm red, or green if this is already covered, and fix any gap.
+- [x] 17.1 Write failing tests: `GeneratedMedia` on `LlmResponseMeta` clones cheaply (`Bytes`), and the orchestrator stores final-answer media as attachments of the assistant message, with the IDs included in `TurnResult.attachment_ids`. Confirm red. Implement, then verify.
+- [x] 17.2 Write a failing adapter-level test that an audio attachment from response media takes the same `channel-audio-outbound` path as `voice_response` audio. Confirm red, or green if this is already covered, and fix any gap.
 
 ## 18. Image generation
 
-- [ ] 18.1 Write failing tests for `[images]` config parsing, including key reuse and routing keys. Confirm red. Implement, then verify.
-- [ ] 18.2 Write failing wiremock tests for the OpenRouter images provider: request shape with `b64_json`; `url` entries downloaded; `session_id` and `user` from `LlmCallContext`; 402 and 429 handling; cost recorded. Confirm red. Implement `images/`, then verify.
+- [x] 18.1 Write failing tests for `[images]` config parsing, including key reuse and routing keys. Confirm red. Implement, then verify.
+- [x] 18.2 Write failing wiremock tests for the OpenRouter images provider: request shape with `b64_json`; `url` entries downloaded; `session_id` and `user` from `LlmCallContext`; 402 and 429 handling; cost recorded. Confirm red. Implement `images/`, then verify.
 - [ ] 18.3 Write failing tests for `/images/models` validation: unknown model fails the build; enum, range and unlisted parameters are rejected without an upstream call; reference images are rejected for models without image input. Confirm red. Implement, then verify.
 - [ ] 18.4 Write failing tests for the `image-generate` tool: parameter schema; `reference_attachment_ids` resolved to data URIs, non-images rejected, at most 16; attachments returned; fewer images than requested reported; the tool is absent when `[images]` is unset. Confirm red. Implement and register it in `space_runtime`, then verify.
 - [ ] 18.5 Write `docs/images.md` and link it from `docs/openrouter.md`.

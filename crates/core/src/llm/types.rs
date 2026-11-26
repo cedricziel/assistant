@@ -106,6 +106,23 @@ pub struct ProviderState {
 ///
 /// Fields are best-effort: providers populate what they can, leaving the rest
 /// as `None` / `0`.  The struct is intentionally cheap to clone.
+/// What a [`GeneratedMedia`] item is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaKind {
+    Image,
+    Audio,
+}
+
+/// Media a model generated alongside its answer, such as an image or a
+/// spoken reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedMedia {
+    pub kind: MediaKind,
+    pub mime: String,
+    /// Shared on clone, so copies of the response metadata stay cheap.
+    pub data: bytes::Bytes,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LlmResponseMeta {
     /// Model identifier echoed by the provider (e.g. `"qwen2.5:7b"`).
@@ -126,6 +143,8 @@ pub struct LlmResponseMeta {
     pub finish_reason: Option<String>,
     /// Provider-assigned response/message ID.
     pub response_id: Option<String>,
+    /// Images and audio generated with the answer.
+    pub media: Vec<GeneratedMedia>,
 }
 
 /// How long one turn took, measured by the orchestrator.
@@ -184,5 +203,28 @@ impl LlmResponse {
             LlmResponse::FinalAnswer(_, m) => m,
             LlmResponse::Thinking(_, m) => m,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GeneratedMedia, LlmResponseMeta, MediaKind};
+
+    #[test]
+    fn generated_media_clones_share_their_bytes() {
+        let meta = LlmResponseMeta {
+            media: vec![GeneratedMedia {
+                kind: MediaKind::Image,
+                mime: "image/png".into(),
+                data: bytes::Bytes::from(vec![0u8; 1024]),
+            }],
+            ..LlmResponseMeta::default()
+        };
+        let copy = meta.clone();
+        assert_eq!(
+            copy.media[0].data.as_ptr(),
+            meta.media[0].data.as_ptr(),
+            "the clone shares the buffer"
+        );
     }
 }

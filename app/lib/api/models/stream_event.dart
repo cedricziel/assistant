@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:assistant_ui/models.dart' show McpApp;
+
 /// Sealed class hierarchy representing a single SSE event from the chat API.
 ///
 /// Events arrive from `POST /api/conversations/{id}/messages` as a
@@ -140,6 +142,7 @@ class ToolResultEvent extends StreamEvent {
     this.result,
     this.toolCallId,
     this.data,
+    this.app,
     super.sequenceId,
   });
 
@@ -163,6 +166,9 @@ class ToolResultEvent extends StreamEvent {
   /// `null` when the frame has no `data`, or `data` is not a JSON object.
   final Map<String, Object?>? data;
 
+  /// The MCP App the tool declared for its result, if any.
+  final McpApp? app;
+
   factory ToolResultEvent.fromJson(Map<String, dynamic> json) {
     return ToolResultEvent(
       toolName: json['tool_name'] as String? ?? '',
@@ -171,6 +177,7 @@ class ToolResultEvent extends StreamEvent {
       result: json['result'] as String?,
       toolCallId: json['tool_call_id'] as String?,
       data: _toolDataFromJson(json['data']),
+      app: McpApp.fromJson(json['app']),
     );
   }
 }

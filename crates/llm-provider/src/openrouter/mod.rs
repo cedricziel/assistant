@@ -11,7 +11,7 @@ mod catalog;
 mod citations;
 mod client;
 mod embedder;
-mod errors;
+pub(crate) mod errors;
 mod reasoning;
 mod request;
 mod stream;

@@ -73,6 +73,7 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
               result: tc.result,
               toolCallId: tc.toolCallId,
               data: tc.data?.asMap.cast<String, Object?>(),
+              app: tc.app == null ? null : _mcpAppFromView(tc.app!),
             ),
           ],
         ),
@@ -110,3 +111,22 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
   }
   return messages;
 }
+
+McpApp _mcpAppFromView(McpAppView view) => McpApp(
+  server: view.server,
+  resourceUri: view.resourceUri,
+  html: view.html,
+  csp: McpAppCsp(
+    connectDomains: view.csp.connectDomains?.toList() ?? const [],
+    resourceDomains: view.csp.resourceDomains?.toList() ?? const [],
+    frameDomains: view.csp.frameDomains?.toList() ?? const [],
+    baseUriDomains: view.csp.baseUriDomains?.toList() ?? const [],
+  ),
+  permissions: McpAppPermissions(
+    camera: view.permissions.camera,
+    microphone: view.permissions.microphone,
+    geolocation: view.permissions.geolocation,
+    clipboardWrite: view.permissions.clipboardWrite,
+  ),
+  prefersBorder: view.prefersBorder,
+);

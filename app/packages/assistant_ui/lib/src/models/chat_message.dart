@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'mcp_app.dart';
 import 'message_rating.dart';
 import 'message_timing.dart';
 
@@ -35,6 +36,7 @@ class ToolCallRecord {
     this.arguments,
     this.result,
     this.data,
+    this.app,
     DateTime? startedAt,
     this.duration,
   }) : startedAt = startedAt ?? DateTime.now();
@@ -60,6 +62,9 @@ class ToolCallRecord {
   /// Null while pending, for text-only tools, when the server dropped
   /// oversized data, and for calls that predate structured data.
   Map<String, Object?>? data;
+
+  /// The MCP App the tool declared for its result, rendered below the chip.
+  McpApp? app;
 
   /// When this tool call started (set on StatusEvent).
   final DateTime startedAt;

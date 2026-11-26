@@ -10,15 +10,16 @@ use assistant_core::permission::PermissionPolicy;
 use assistant_core::tool::ToolDispatcher;
 use assistant_core::types::permissions::PermissionsConfig;
 use assistant_mcp_server::{
-    AssistantMcpServer, ListChangeListeners, serve_transport, with_identity,
+    AssistantMcpServer, ListChangeListeners, TaskStore, serve_transport, with_identity,
 };
 use assistant_runtime::{OrchestrationEngine, StubOrchestrationEngine, TurnResult};
 use assistant_skills::{SkillDef, SkillSource};
 use assistant_storage::{InMemorySkillCatalog, SkillCatalog, SkillRegistry, StorageLayer};
 use assistant_tool_executor::StubToolDispatcher;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ClientConfig, ContentBlock, ErrorCode,
-    ProgressNotificationParam, ProtocolVersion, ReadResourceResult, ResourceContents,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ClientConfig,
+    ContentBlock, CreateTaskResult, ErrorCode, GetTaskParams, ProgressNotificationParam,
+    ProtocolVersion, ReadResourceResult, ResourceContents, TaskPayload,
 };
 use rmcp::service::{NotificationContext, RoleClient, RunningService, ServiceError};
 use rmcp::{ClientHandler, ErrorData, ServiceExt};
@@ -66,6 +67,7 @@ pub struct Stubs {
     pub executor: Arc<dyn ToolDispatcher>,
     pub catalog: Arc<dyn SkillCatalog>,
     pub listeners: ListChangeListeners,
+    pub tasks: TaskStore,
 }
 
 pub fn default_stubs() -> Stubs {
@@ -74,6 +76,7 @@ pub fn default_stubs() -> Stubs {
         executor: Arc::new(StubToolDispatcher::new()),
         catalog: Arc::new(InMemorySkillCatalog::new()),
         listeners: ListChangeListeners::default(),
+        tasks: TaskStore::default(),
     }
 }
 
@@ -93,6 +96,11 @@ impl Stubs {
         self
     }
 
+    pub fn tasks(mut self, tasks: TaskStore) -> Self {
+        self.tasks = tasks;
+        self
+    }
+
     pub fn skills(mut self, skills: Vec<SkillDef>) -> Self {
         self.catalog = Arc::new(InMemorySkillCatalog::with_skills(skills));
         self
@@ -107,6 +115,7 @@ impl Stubs {
             policy,
             skills_dir,
             self.listeners,
+            self.tasks,
         )
     }
 
@@ -289,6 +298,43 @@ impl ClientHandler for Recorder {
     ) {
         self.record(Received::Progress(params));
     }
+}
+
+/// A client that declares the Tasks extension.
+pub struct TaskAwareClient;
+
+impl ClientHandler for TaskAwareClient {
+    fn get_info(&self) -> ClientConfig {
+        let mut config = ClientConfig::default();
+        config.protocol_version = ProtocolVersion::V_2025_11_25;
+        config.capabilities = ClientCapabilities::builder().enable_tasks().build();
+        config
+    }
+}
+
+pub type TaskClient = RunningService<RoleClient, TaskAwareClient>;
+
+/// Starts `run-prompt` as a task.
+pub async fn start_task(client: &TaskClient) -> CreateTaskResult {
+    let call = client.call_tool_once(call_params("run-prompt", json!({"prompt": "hi"})));
+    let response = tokio::time::timeout(std::time::Duration::from_secs(5), call)
+        .await
+        .expect("run-prompt answers within five seconds")
+        .expect("run-prompt");
+    match response {
+        CallToolResponse::Task(task) => task,
+        other => panic!("expected a task, got {other:?}"),
+    }
+}
+
+/// The current state of `task_id`.
+pub async fn task_payload(client: &TaskClient, task_id: &str) -> TaskPayload {
+    client
+        .get_task(GetTaskParams::new(task_id))
+        .await
+        .expect("tasks/get")
+        .task
+        .payload
 }
 
 /// Receives the next recorded notification, failing after five seconds.
