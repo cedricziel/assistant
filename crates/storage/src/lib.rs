@@ -773,4 +773,280 @@ mod tests {
     fn temp_db_path() -> PathBuf {
         std::env::temp_dir().join(format!("assistant-storage-migration-{}.db", Uuid::new_v4()))
     }
+
+    /// Migration 066 backfills `messages_fts` with the indexing predicate:
+    /// user and assistant prose only, never thinking, tool, system or blank
+    /// rows, with the snippet sentinels blanked in the indexed copy.
+    #[tokio::test]
+    async fn messages_fts_migration_backfills_indexable_rows_only() -> Result<()> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
+        sqlx::raw_sql("PRAGMA foreign_keys=ON;")
+            .execute(&pool)
+            .await?;
+        let (before, from) = SPACE_MIGRATIONS
+            .split_at(SPACE_MIGRATIONS.partition_point(|(name, _)| *name < "066_messages_fts"));
+        assert_eq!(
+            from.first().map(|(name, _)| *name),
+            Some("066_messages_fts"),
+            "migration 066 is registered"
+        );
+        for &(_, sql) in before {
+            sqlx::raw_sql(sql).execute(&pool).await?;
+        }
+
+        sqlx::query("INSERT INTO conversations (id) VALUES ('c1')")
+            .execute(&pool)
+            .await?;
+        let rows = [
+            ("u", "user", "Lisbon trip"),
+            ("a", "assistant", "Lisbon is lovely"),
+            ("t", "tool", "Lisbon tool output"),
+            ("s", "system", "Lisbon system prompt"),
+            ("k", "assistant", "<think>Lisbon…</think>"),
+            ("e", "assistant", ""),
+            ("w", "user", "   "),
+            ("x", "user", "pre\u{E000}Lisbon\u{E001}post"),
+        ];
+        for (i, (id, role, content)) in rows.into_iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO messages (id, conversation_id, role, content, turn) \
+                 VALUES (?, 'c1', ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(role)
+            .bind(content)
+            .bind(i as i64)
+            .execute(&pool)
+            .await?;
+        }
+
+        sqlx::raw_sql(from[0].1).execute(&pool).await?;
+
+        let mut indexed: Vec<(String, String)> = sqlx::query_as(
+            "SELECT message_id, content FROM messages_fts WHERE messages_fts MATCH 'lisbon'",
+        )
+        .fetch_all(&pool)
+        .await?;
+        indexed.sort();
+        assert_eq!(
+            indexed,
+            vec![
+                ("a".to_string(), "Lisbon is lovely".to_string()),
+                ("u".to_string(), "Lisbon trip".to_string()),
+                ("x".to_string(), "pre Lisbon post".to_string()),
+            ]
+        );
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages_fts")
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(total, 3, "no other row is indexed");
+        let mapped: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM messages_fts_map m \
+             JOIN messages_fts f ON f.rowid = m.fts_rowid AND f.message_id = m.message_id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(mapped, 3, "every indexed row is mapped");
+        sqlx::query("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+            .execute(&pool)
+            .await?;
+        Ok(())
+    }
+
+    /// `assistant backup` snapshots with `VACUUM INTO`, which may renumber
+    /// `messages` rowids. The contentful index must keep pointing at the right
+    /// messages in the copy, and its triggers must keep working there.
+    #[tokio::test]
+    async fn messages_fts_survives_vacuum_into_round_trip() -> Result<()> {
+        use assistant_core::types::conversation::Message;
+
+        use crate::conversations::ConversationStore;
+
+        let dir = tempfile::tempdir()?;
+        let source = StorageLayer::new(&dir.path().join("space.db")).await?;
+        let store = source.conversation_store();
+        // Conversation `gone` is saved first and deleted by cascade, so every
+        // surviving row sits after a gap in the `messages` rowids.
+        let gone = store.create_conversation(None).await?;
+        for i in 0..4 {
+            store
+                .save_message(&Message::user(gone.id, format!("lisbon gone {i}")))
+                .await?;
+        }
+        let conv = store.create_conversation(None).await?;
+        let mut keep = Vec::new();
+        for i in 0..6 {
+            let msg = Message::user(conv.id, format!("lisbon note {i}"));
+            store.save_message(&msg).await?;
+            keep.push(msg.id.to_string());
+        }
+        store.delete_conversation(gone.id).await?;
+
+        let copy_path = dir.path().join("snapshot.db");
+        sqlx::query("VACUUM INTO ?1")
+            .bind(copy_path.to_string_lossy().to_string())
+            .execute(&source.pool)
+            .await?;
+        let copy = StorageLayer::new(&copy_path).await?;
+
+        let ids = |rows: Vec<String>| {
+            let mut rows = rows;
+            rows.sort();
+            rows
+        };
+        let query_ids = || async {
+            Ok::<_, sqlx::Error>(ids(sqlx::query_scalar(
+                "SELECT message_id FROM messages_fts WHERE messages_fts MATCH 'lisbon'",
+            )
+            .fetch_all(&copy.pool)
+            .await?))
+        };
+        let mut expected = keep.clone();
+        expected.sort();
+        assert_eq!(
+            query_ids().await?,
+            expected,
+            "restored index finds survivors"
+        );
+
+        // Edit the first message and delete the last (a leaf) inside the copy.
+        sqlx::query("UPDATE messages SET content = 'madrid note' WHERE id = ?")
+            .bind(&keep[0])
+            .execute(&copy.pool)
+            .await?;
+        sqlx::query("DELETE FROM messages WHERE id = ?")
+            .bind(&keep[5])
+            .execute(&copy.pool)
+            .await?;
+        sqlx::query("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+            .execute(&copy.pool)
+            .await?;
+        assert_eq!(query_ids().await?, ids(keep[1..5].to_vec()));
+        let madrid: Vec<String> = sqlx::query_scalar(
+            "SELECT message_id FROM messages_fts WHERE messages_fts MATCH 'madrid'",
+        )
+        .fetch_all(&copy.pool)
+        .await?;
+        assert_eq!(madrid, vec![keep[0].clone()]);
+        Ok(())
+    }
+
+    /// Task 5.5 measurement, run on demand:
+    /// `cargo test -p assistant-storage --release messages_fts_measure -- --ignored --nocapture`.
+    /// Prints the migration time, the database size delta and the time of a
+    /// cascade delete of one 200-message conversation on a 10k-message space.
+    #[tokio::test]
+    #[ignore = "measurement, not a regression test"]
+    async fn messages_fts_measure_backfill_size_and_cascade_delete() -> Result<()> {
+        use std::time::{Duration, Instant};
+
+        /// Process CPU time (user + system) from `/proc/self/stat`, in 10 ms
+        /// ticks; zero where `/proc` is unavailable. Wall-clock time is
+        /// meaningless on a busy host, CPU time is not.
+        fn cpu() -> Duration {
+            let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+            // Fields after the parenthesised command name; utime and stime are
+            // the 12th and 13th of them.
+            let ticks: u64 = stat
+                .rsplit_once(')')
+                .map(|(_, rest)| rest.split_whitespace().skip(11).take(2))
+                .map(|f| f.filter_map(|v| v.parse::<u64>().ok()).sum())
+                .unwrap_or(0);
+            Duration::from_millis(ticks * 10)
+        }
+
+        let dir = tempfile::tempdir()?;
+        let pool = SqlitePool::connect(&format!(
+            "sqlite://{}?mode=rwc",
+            dir.path().join("space.db").display()
+        ))
+        .await?;
+        sqlx::raw_sql("PRAGMA foreign_keys=ON;")
+            .execute(&pool)
+            .await?;
+        let split = SPACE_MIGRATIONS.partition_point(|(name, _)| *name < "066_messages_fts");
+        for &(_, sql) in &SPACE_MIGRATIONS[..split] {
+            sqlx::raw_sql(sql).execute(&pool).await?;
+        }
+
+        let words = [
+            "lisbon",
+            "hotel",
+            "budget",
+            "flight",
+            "kubernetes",
+            "recipe",
+            "invoice",
+            "meeting",
+            "design",
+            "database",
+            "weather",
+            "garden",
+            "python",
+            "travel",
+            "summary",
+            "plan",
+        ];
+        let mut tx = pool.begin().await?;
+        for c in 0..50 {
+            sqlx::query("INSERT INTO conversations (id) VALUES (?)")
+                .bind(format!("c{c}"))
+                .execute(&mut *tx)
+                .await?;
+            for m in 0..200 {
+                let text: Vec<&str> = (0..60).map(|k| words[(c * 7 + m * 3 + k) % 16]).collect();
+                sqlx::query(
+                    "INSERT INTO messages (id, conversation_id, role, content, turn) \
+                     VALUES (?, ?, ?, ?, ?)",
+                )
+                .bind(format!("c{c}-m{m}"))
+                .bind(format!("c{c}"))
+                .bind(if m % 2 == 0 { "user" } else { "assistant" })
+                .bind(text.join(" "))
+                .bind(m as i64)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        tx.commit().await?;
+
+        let size = || async {
+            let (pages, page_size): (i64, i64) = (
+                sqlx::query_scalar("PRAGMA page_count")
+                    .fetch_one(&pool)
+                    .await?,
+                sqlx::query_scalar("PRAGMA page_size")
+                    .fetch_one(&pool)
+                    .await?,
+            );
+            Ok::<i64, sqlx::Error>(pages * page_size)
+        };
+        let before = size().await?;
+        let (wall, busy) = (Instant::now(), cpu());
+        sqlx::query("DELETE FROM conversations WHERE id = 'c10'")
+            .execute(&pool)
+            .await?;
+        let baseline_cascade = (wall.elapsed(), cpu() - busy);
+        let (wall, busy) = (Instant::now(), cpu());
+        sqlx::raw_sql(SPACE_MIGRATIONS[split].1)
+            .execute(&pool)
+            .await?;
+        let migration = (wall.elapsed(), cpu() - busy);
+        let after = size().await?;
+
+        let (wall, busy) = (Instant::now(), cpu());
+        sqlx::query("DELETE FROM conversations WHERE id = 'c25'")
+            .execute(&pool)
+            .await?;
+        let cascade = (wall.elapsed(), cpu() - busy);
+
+        println!("messages: 10000, migration (wall, cpu): {migration:?}");
+        println!("db size: {before} -> {after} bytes (+{})", after - before);
+        println!("cascade delete of 200 messages (wall, cpu): {cascade:?}");
+        println!("same delete without the index (wall, cpu): {baseline_cascade:?}");
+        Ok(())
+    }
 }

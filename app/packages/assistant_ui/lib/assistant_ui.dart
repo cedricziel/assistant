@@ -4,6 +4,7 @@
 library;
 
 export 'src/branch_picker.dart';
+export 'src/composer/queued_message_bubble.dart';
 export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
 export 'src/interactions/approval_card.dart';
