@@ -87,9 +87,9 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 12. PDFs
 
-- [ ] 12.1 Write failing tests: a PDF becomes a `file` part with a data URI, and the default filename is `document.pdf`. Confirm red. Implement, then verify.
-- [ ] 12.2 Write failing tests for the `pdf_engine` plugin, the `cloudflare-ai` default for models without native file input, no plugin for native models, and coexistence with the web plugin. Confirm red. Implement, then verify.
-- [ ] 12.3 Document PDFs in `docs/openrouter.md`.
+- [x] 12.1 Write failing tests: a PDF becomes a `file` part with a data URI, and the default filename is `document.pdf`. Confirm red. Implement, then verify.
+- [x] 12.2 Write failing tests for the `pdf_engine` plugin, the `cloudflare-ai` default for models without native file input, no plugin for native models, and coexistence with the web plugin. Confirm red. Implement, then verify.
+- [x] 12.3 Document PDFs in `docs/openrouter.md`.
 
 ## 13. Embeddings
 
