@@ -34,8 +34,8 @@ pub struct OpenRouterTtsSettings {
 pub struct OpenRouterTts {
     http: ClientWithMiddleware,
     settings: OpenRouterTtsSettings,
-    /// The model's `response_format` values, when the catalog was reachable.
-    native_formats: Option<Vec<TtsFormat>>,
+    /// The model's catalog entry, when the catalog was reachable.
+    catalog: Option<SpeechModel>,
     pipeline: AudioPipeline,
 }
 
@@ -49,17 +49,26 @@ impl OpenRouterTts {
         pipeline: AudioPipeline,
     ) -> anyhow::Result<Self> {
         let http = assistant_llm_provider::http::build_http_client(60, &RetryConfig::default())?;
-        let native_formats = match fetch_formats(&http, &settings).await {
-            Ok(formats) => Some(formats),
+        let catalog_http =
+            assistant_llm_provider::http::build_http_client(10, &RetryConfig::disabled())?;
+        let catalog = match fetch_model(&catalog_http, &settings).await {
+            Ok(model) => {
+                model.validate(&settings)?;
+                Some(model)
+            }
             Err(e) => {
-                warn!(model = %settings.model, error = %e, "OpenRouter speech catalog unavailable; requesting formats directly");
+                warn!(
+                    model = %settings.model,
+                    error = %e,
+                    "OpenRouter speech catalog unavailable; skipping validation and requesting formats directly"
+                );
                 None
             }
         };
         let tts = Self {
             http,
             settings,
-            native_formats,
+            catalog,
             pipeline,
         };
         let plan = tts.plan(tts.settings.format)?;
@@ -80,7 +89,7 @@ impl OpenRouterTts {
 
     /// Which format to request on the wire for delivering `target`.
     fn plan(&self, target: TtsFormat) -> anyhow::Result<Plan> {
-        let wire = match &self.native_formats {
+        let wire = match self.catalog.as_ref().map(|c| &c.formats) {
             Some(native) if native.contains(&target) => target,
             Some(native) => *[TtsFormat::Wav, TtsFormat::Mp3, TtsFormat::Pcm]
                 .iter()
@@ -126,10 +135,14 @@ impl TtsProvider for OpenRouterTts {
             None => self.settings.format,
         };
         let plan = self.plan(target)?;
+        let voice = request.voice.as_deref().unwrap_or(&self.settings.voice);
+        if let Some(catalog) = &self.catalog {
+            catalog.check_voice(&self.settings.model, voice)?;
+        }
         let mut body = json!({
             "model": self.settings.model,
             "input": request.text,
-            "voice": request.voice.as_deref().unwrap_or(&self.settings.voice),
+            "voice": voice,
             "response_format": plan.wire.as_str(),
         });
         if let Some(speed) = request.speed.or(self.settings.speed) {
@@ -200,11 +213,93 @@ fn audio_format(format: TtsFormat) -> AudioFormat {
     }
 }
 
-/// The model's `response_format` values from the speech-model catalog.
-async fn fetch_formats(
+/// What the speech-model catalog says about the configured model.
+#[derive(Debug, Clone)]
+struct SpeechModel {
+    formats: Vec<TtsFormat>,
+    /// The documented voices, when the catalog lists them as an enum.
+    voices: Option<Vec<String>>,
+    speed: Option<(f64, f64)>,
+    instructions: bool,
+}
+
+impl SpeechModel {
+    fn parse(entry: &Value) -> anyhow::Result<Self> {
+        let params: Vec<&Value> = entry["output_modalities"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|m| &m["supported_parameters"])
+            .collect();
+        let strings = |key: &str| -> Vec<String> {
+            params
+                .iter()
+                .filter_map(|p| p[key]["values"].as_array())
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        };
+        let formats: Vec<TtsFormat> = strings("response_format")
+            .iter()
+            .filter_map(|name| TtsFormat::parse(name).ok())
+            .collect();
+        if formats.is_empty() {
+            anyhow::bail!("the speech catalog lists no response formats");
+        }
+        let voices = params
+            .iter()
+            .any(|p| p["voice"]["type"] == "enum")
+            .then(|| strings("voice"));
+        let speed = params.iter().find_map(|p| {
+            let range = &p["speed"];
+            Some((range["min"].as_f64()?, range["max"].as_f64()?))
+        });
+        Ok(Self {
+            formats,
+            voices,
+            speed,
+            instructions: params.iter().any(|p| p.get("instructions").is_some()),
+        })
+    }
+
+    /// Fails when `settings` asks for something the model doesn't offer.
+    fn validate(&self, settings: &OpenRouterTtsSettings) -> anyhow::Result<()> {
+        self.check_voice(&settings.model, &settings.voice)?;
+        if let (Some(speed), Some((min, max))) = (settings.speed, self.speed) {
+            let speed = decimal(speed);
+            if !(min..=max).contains(&speed) {
+                anyhow::bail!(
+                    "[tts] speed {speed} is outside OpenRouter model `{}`'s range of {min} to {max}",
+                    settings.model
+                );
+            }
+        }
+        if settings.instructions.is_some() && !self.instructions {
+            anyhow::bail!(
+                "OpenRouter model `{}` does not accept [tts] instructions",
+                settings.model
+            );
+        }
+        Ok(())
+    }
+
+    /// Fails when the model lists its voices and `voice` isn't one of them.
+    fn check_voice(&self, model: &str, voice: &str) -> anyhow::Result<()> {
+        match &self.voices {
+            Some(voices) if !voices.iter().any(|v| v == voice) => anyhow::bail!(
+                "OpenRouter model `{model}` has no voice `{voice}`; its voices are {}",
+                voices.join(", ")
+            ),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// The model's entry from the speech-model catalog.
+async fn fetch_model(
     http: &ClientWithMiddleware,
     settings: &OpenRouterTtsSettings,
-) -> anyhow::Result<Vec<TtsFormat>> {
+) -> anyhow::Result<SpeechModel> {
     let url = format!(
         "{}/audio/speech/models/{}",
         settings.base_url.trim_end_matches('/'),
@@ -219,22 +314,11 @@ async fn fetch_formats(
     if !resp.status().is_success() {
         anyhow::bail!("OpenRouter speech catalog returned {}", resp.status());
     }
-    let model: Value = resp
+    let entry: Value = resp
         .json()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to parse the OpenRouter speech catalog: {e}"))?;
-    let values = model["output_modalities"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m["supported_parameters"]["response_format"]["values"].as_array())
-        .flatten()
-        .filter_map(|v| v.as_str().and_then(|name| TtsFormat::parse(name).ok()))
-        .collect::<Vec<_>>();
-    if values.is_empty() {
-        anyhow::bail!("the speech catalog lists no response formats");
-    }
-    Ok(values)
+    SpeechModel::parse(&entry)
 }
 
 #[cfg(test)]
@@ -273,6 +357,7 @@ mod tests {
                 "id": model,
                 "output_modalities": [{"type": "speech", "supported_parameters": {
                     "response_format": {"type": "enum", "values": formats},
+                    "instructions": {"type": "unknown"},
                 }}],
             })))
             .mount(server)
@@ -484,6 +569,136 @@ mod tests {
             .expect("must fail")
             .to_string();
         assert!(err.contains("ffmpeg"), "{err}");
+    }
+
+    /// Serves `model` with voices, a speed range and optional instructions.
+    async fn mount_model_with(server: &MockServer, model: &str, instructions: bool) {
+        let mut params = json!({
+            "response_format": {"type": "enum", "values": ["mp3"]},
+            "voice": {"type": "enum", "values": ["en_paul_neutral", "en_amy_bright"]},
+            "speed": {"type": "range", "min": 0.7, "max": 1.2},
+        });
+        if instructions {
+            params["instructions"] = json!({"type": "unknown"});
+        }
+        Mock::given(method("GET"))
+            .and(path(format!("/audio/speech/models/{model}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": model,
+                "output_modalities": [{"type": "speech", "supported_parameters": params}],
+            })))
+            .mount(server)
+            .await;
+    }
+
+    const VOXTRAL: &str = "mistralai/voxtral-mini-tts-2603";
+
+    async fn connect_err(settings: OpenRouterTtsSettings) -> String {
+        OpenRouterTts::connect(settings, AudioPipeline::default())
+            .await
+            .err()
+            .expect("must fail")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn unknown_voice_fails_the_build_listing_the_voices() {
+        let server = MockServer::start().await;
+        mount_model_with(&server, VOXTRAL, false).await;
+        let mut settings = settings(&server, VOXTRAL, TtsFormat::Mp3);
+        settings.voice = "nova".into();
+
+        let err = connect_err(settings).await;
+        assert!(
+            err.contains("nova") && err.contains("en_paul_neutral, en_amy_bright"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn speed_out_of_range_fails_the_build_stating_the_range() {
+        let server = MockServer::start().await;
+        mount_model_with(&server, VOXTRAL, false).await;
+        let mut settings = settings(&server, VOXTRAL, TtsFormat::Mp3);
+        settings.voice = "en_paul_neutral".into();
+        settings.speed = Some(1.5);
+
+        let err = connect_err(settings).await;
+        assert!(err.contains("0.7") && err.contains("1.2"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn instructions_need_model_support() {
+        let server = MockServer::start().await;
+        mount_model_with(&server, VOXTRAL, false).await;
+        let mut settings = settings(&server, VOXTRAL, TtsFormat::Mp3);
+        settings.voice = "en_paul_neutral".into();
+        settings.instructions = Some("Speak calmly".into());
+
+        let err = connect_err(settings).await;
+        assert!(err.contains("instructions"), "{err}");
+
+        let server = MockServer::start().await;
+        mount_model_with(&server, VOXTRAL, true).await;
+        let mut settings = settings_for(&server);
+        settings.instructions = Some("Speak calmly".into());
+        OpenRouterTts::connect(settings, AudioPipeline::default())
+            .await
+            .expect("a model listing instructions accepts them");
+    }
+
+    fn settings_for(server: &MockServer) -> OpenRouterTtsSettings {
+        let mut settings = settings(server, VOXTRAL, TtsFormat::Mp3);
+        settings.voice = "en_paul_neutral".into();
+        settings
+    }
+
+    #[tokio::test]
+    async fn request_voice_outside_the_enum_fails_without_calling_openrouter() {
+        let server = MockServer::start().await;
+        mount_model_with(&server, VOXTRAL, false).await;
+        mount_speech(&server, b"ID3".to_vec(), "audio/mpeg").await;
+        let tts = OpenRouterTts::connect(settings_for(&server), AudioPipeline::default())
+            .await
+            .unwrap();
+
+        let err = tts
+            .synthesize(TtsRequest {
+                voice: Some("nova".into()),
+                ..say("Hi")
+            })
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("nova") && err.contains("en_paul_neutral"),
+            "{err}"
+        );
+        assert!(
+            speech_bodies(&server).await.is_empty(),
+            "no speech request was sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_outage_skips_validation() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/audio/speech/models/{VOXTRAL}")))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        mount_speech(&server, b"ID3".to_vec(), "audio/mpeg").await;
+        let mut settings = settings(&server, VOXTRAL, TtsFormat::Mp3);
+        settings.voice = "anything".into();
+        settings.speed = Some(9.0);
+
+        let tts = OpenRouterTts::connect(settings, AudioPipeline::default())
+            .await
+            .expect("builds without validation");
+        tts.synthesize(say("Hi")).await.unwrap();
+        assert_eq!(speech_bodies(&server).await[0]["response_format"], "mp3");
     }
 
     #[tokio::test]
