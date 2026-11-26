@@ -7,12 +7,14 @@ use assistant_core::auth::AuthContext;
 use assistant_core::bus_messages::{TurnAnchor, TurnRequest};
 use assistant_core::types::conversation::{Interface, TurnIdentity};
 
+use super::TurnLease;
+
 /// One turn to submit through [`Orchestrator::submit`](super::Orchestrator::submit).
 ///
 /// [`SubmitTurn::new`] is a plain, non-interactive append from an
 /// unauthenticated producer; the `with_*` methods and the public fields
 /// override what differs.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SubmitTurn {
     /// The user's prompt text.
     pub prompt: String,
@@ -41,6 +43,11 @@ pub struct SubmitTurn {
     pub user_message_id: Option<Uuid>,
     /// Model for this turn only, overriding the conversation and org defaults.
     pub model_override: Option<String>,
+    /// The lease the caller already holds for this turn. [`Orchestrator::submit`]
+    /// takes a shared lease itself when this is `None`.
+    ///
+    /// [`Orchestrator::submit`]: super::Orchestrator::submit
+    pub lease: Option<TurnLease>,
 }
 
 impl SubmitTurn {
@@ -58,6 +65,7 @@ impl SubmitTurn {
             anchor: TurnAnchor::default(),
             user_message_id: None,
             model_override: None,
+            lease: None,
         }
     }
 
@@ -82,6 +90,14 @@ impl SubmitTurn {
     /// Use `request_id` as the turn's request (and run) id.
     pub fn with_request_id(mut self, request_id: Uuid) -> Self {
         self.request_id = Some(request_id);
+        self
+    }
+
+    /// Run the turn under a lease the caller took, such as an exclusive lease
+    /// for an edit. The lease is released when the turn ends. Its request id is
+    /// the turn's request id unless [`Self::with_request_id`] says otherwise.
+    pub fn with_lease(mut self, lease: TurnLease) -> Self {
+        self.lease = Some(lease);
         self
     }
 

@@ -10,6 +10,7 @@
 mod catalog;
 mod citations;
 mod client;
+mod embedder;
 mod errors;
 mod reasoning;
 mod request;
@@ -31,12 +32,16 @@ use std::sync::Arc;
 
 use self::catalog::OpenRouterCatalog;
 use self::client::OpenRouterClient;
-use self::request::{RequestSettings, apply_options, build_chat_request};
+pub use self::embedder::OpenRouterEmbedder;
+use self::request::{ModelInputs, RequestSettings, apply_options, build_chat_request};
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
-const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
+/// OpenRouter API base URL used when none is configured.
+pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const DEFAULT_MAX_TOKENS: u32 = 8192;
+/// Embedding model used when `[llm] embedding_model` is unset.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "openai/text-embedding-3-small";
 
 // ── OpenRouterProvider ──────────────────────────────────────────────────────
 
@@ -44,6 +49,7 @@ const DEFAULT_MAX_TOKENS: u32 = 8192;
 ///
 pub struct OpenRouterProvider {
     client: OpenRouterClient,
+    embedding_model: String,
     catalog: Arc<OpenRouterCatalog>,
     settings: RequestSettings,
     base_url: String,
@@ -61,8 +67,12 @@ impl OpenRouterProvider {
     ) -> anyhow::Result<LlmResponse> {
         self.catalog.wait_ready().await;
         self.catalog.check_model()?;
-        let vision = self.capabilities().vision;
-        let mut request = build_chat_request(&self.settings, system_prompt, history, tools, vision);
+        let info = self.catalog.info();
+        let inputs = ModelInputs {
+            vision: info.as_deref().is_some_and(|i| i.vision),
+            file_input: info.as_deref().is_some_and(|i| i.file_input),
+        };
+        let mut request = build_chat_request(&self.settings, system_prompt, history, tools, inputs);
         request.stream = stream;
         apply_options(&mut request, options);
         if stream {
@@ -136,6 +146,10 @@ impl OpenRouterProvider {
                 cfg.timeout_secs,
                 extra_headers,
             )?,
+            embedding_model: cfg
+                .embedding_model
+                .clone()
+                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
             settings: RequestSettings {
                 model: cfg.model.clone(),
                 max_tokens,
@@ -144,6 +158,7 @@ impl OpenRouterProvider {
                 reasoning: cfg.openrouter.reasoning.clone(),
                 cache: cfg.openrouter.cache.clone(),
                 web_search: cfg.openrouter.web_search.clone(),
+                pdf_engine: cfg.openrouter.pdf_engine,
             },
             base_url,
         })
@@ -243,11 +258,16 @@ impl LlmProvider for OpenRouterProvider {
             .await
     }
 
-    async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
-        Err(anyhow::anyhow!(
-            "OpenRouter does not support embeddings directly. \
-             Configure a dedicated embedding provider under [llm.embeddings]."
-        ))
+    async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        self.client
+            .embed(&self.embedding_model, &[text], None)
+            .await?
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("OpenRouter returned no embedding"))
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        self.client.embed(&self.embedding_model, texts, None).await
     }
 
     fn provider_name(&self) -> &str {
@@ -2087,6 +2107,280 @@ mod tests {
             text,
             "the persisted answer equals what was streamed"
         );
+    }
+
+    // ── Wiremock: PDFs ──────────────────────────────────────────────────
+
+    fn pdf_message() -> Vec<ChatHistoryMessage> {
+        vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                assistant_core::ContentBlock::Text("summarize this".into()),
+                assistant_core::ContentBlock::Document {
+                    media_type: "application/pdf".into(),
+                    data: "JVBERi0=".into(),
+                },
+            ],
+        }]
+    }
+
+    /// The body sent for `history` to a model with `inputs` in the catalog.
+    async fn body_for(
+        inputs: &[&str],
+        options: OpenRouterOptions,
+        history: &[ChatHistoryMessage],
+    ) -> Value {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        mount_catalog(
+            &server,
+            catalog_model(inputs, &["tools"]),
+            json!([endpoint("Anthropic", "anthropic", 200_000)]),
+        )
+        .await;
+        provider_with(&server.uri(), options)
+            .chat("sys", history, &[])
+            .await
+            .unwrap();
+        sent_body(&server).await
+    }
+
+    fn file_parser(engine: &str) -> Value {
+        json!({"id": "file-parser", "pdf": {"engine": engine}})
+    }
+
+    #[tokio::test]
+    async fn pdf_is_sent_as_a_file_part() {
+        // Without the cache breakpoint Anthropic models put on the last part.
+        let options = OpenRouterOptions {
+            cache: assistant_core::types::llm::OpenRouterCache {
+                enabled: false,
+                ..Default::default()
+            },
+            ..OpenRouterOptions::default()
+        };
+        let body = body_for(&["text", "file"], options, &pdf_message()).await;
+
+        let parts = body["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(
+            parts[1],
+            json!({"type": "file", "file": {
+                "filename": "document.pdf",
+                "file_data": "data:application/pdf;base64,JVBERi0=",
+            }})
+        );
+    }
+
+    #[tokio::test]
+    async fn native_file_input_needs_no_parser() {
+        let body = body_for(
+            &["text", "file"],
+            OpenRouterOptions::default(),
+            &pdf_message(),
+        )
+        .await;
+        assert!(body.get("plugins").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn model_without_file_input_gets_cloudflare_ai() {
+        let body = body_for(&["text"], OpenRouterOptions::default(), &pdf_message()).await;
+        assert_eq!(body["plugins"], json!([file_parser("cloudflare-ai")]));
+    }
+
+    #[tokio::test]
+    async fn configured_engine_is_used_for_any_model() {
+        let options = OpenRouterOptions {
+            pdf_engine: Some(assistant_core::types::llm::OpenRouterPdfEngine::MistralOcr),
+            ..OpenRouterOptions::default()
+        };
+        let body = body_for(&["text", "file"], options, &pdf_message()).await;
+        assert_eq!(body["plugins"], json!([file_parser("mistral-ocr")]));
+    }
+
+    #[tokio::test]
+    async fn no_parser_without_a_pdf() {
+        let options = OpenRouterOptions {
+            pdf_engine: Some(assistant_core::types::llm::OpenRouterPdfEngine::MistralOcr),
+            ..OpenRouterOptions::default()
+        };
+        let history = [ChatHistoryMessage::Text {
+            role: assistant_core::ChatRole::User,
+            content: "hi".into(),
+        }];
+        let body = body_for(&["text"], options, &history).await;
+        assert!(body.get("plugins").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn parser_and_web_plugins_coexist() {
+        let options = OpenRouterOptions {
+            web_search: assistant_core::types::llm::OpenRouterWebSearch {
+                enabled: true,
+                ..Default::default()
+            },
+            ..OpenRouterOptions::default()
+        };
+        let body = body_for(&["text"], options, &pdf_message()).await;
+        assert_eq!(
+            body["plugins"],
+            json!([{"id": "web"}, file_parser("cloudflare-ai")])
+        );
+    }
+
+    #[tokio::test]
+    async fn other_documents_are_not_sent() {
+        let history = [ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                assistant_core::ContentBlock::Text("read".into()),
+                assistant_core::ContentBlock::Document {
+                    media_type: "application/msword".into(),
+                    data: "AAAA".into(),
+                },
+            ],
+        }];
+        let body = body_for(&["text", "file"], OpenRouterOptions::default(), &history).await;
+        let parts = body["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 1, "{parts:?}");
+        assert!(body.get("plugins").is_none(), "{body}");
+    }
+
+    // ── Wiremock: embeddings ────────────────────────────────────────────
+
+    /// Answers each embeddings request with one vector per input, `[i, len]`,
+    /// listed in reverse order to check reordering by `index`.
+    async fn mount_embeddings(server: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path("/embeddings"))
+            .respond_with(|req: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&req.body).unwrap();
+                let count = body["input"].as_array().unwrap().len();
+                let data: Vec<Value> = (0..count)
+                    .rev()
+                    .map(|i| json!({"object": "embedding", "index": i, "embedding": [i as f32, count as f32]}))
+                    .collect();
+                ResponseTemplate::new(200).set_body_json(json!({"object": "list", "data": data}))
+            })
+            .mount(server)
+            .await;
+    }
+
+    async fn embedding_bodies(server: &MockServer) -> Vec<Value> {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/embeddings")
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn embed_batch_sends_one_request_and_returns_input_order() {
+        let server = MockServer::start().await;
+        mount_embeddings(&server).await;
+
+        let vectors = make_provider(&server.uri())
+            .embed_batch(&["a", "b", "c"])
+            .await
+            .unwrap();
+
+        assert_eq!(vectors, [vec![0.0, 3.0], vec![1.0, 3.0], vec![2.0, 3.0]]);
+        let bodies = embedding_bodies(&server).await;
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(
+            bodies[0],
+            json!({"model": "openai/text-embedding-3-small", "input": ["a", "b", "c"], "encoding_format": "float"})
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_returns_one_vector_with_the_configured_model() {
+        let server = MockServer::start().await;
+        mount_embeddings(&server).await;
+        let cfg = LlmConfig {
+            provider: LlmProviderKind::OpenRouter,
+            api_key: Some(Secret::new("test-key")),
+            base_url: server.uri(),
+            embedding_model: Some("qwen/qwen3-embedding-8b".into()),
+            ..LlmConfig::default()
+        };
+
+        let vector = OpenRouterProvider::from_llm_config(&cfg)
+            .unwrap()
+            .embed("hello")
+            .await
+            .unwrap();
+
+        assert_eq!(vector, [0.0, 1.0]);
+        assert_eq!(
+            embedding_bodies(&server).await[0]["model"],
+            "qwen/qwen3-embedding-8b"
+        );
+    }
+
+    #[tokio::test]
+    async fn batches_over_2048_texts_are_split() {
+        let server = MockServer::start().await;
+        mount_embeddings(&server).await;
+        let texts: Vec<String> = (0..2050).map(|i| format!("t{i}")).collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+
+        let vectors = make_provider(&server.uri())
+            .embed_batch(&refs)
+            .await
+            .unwrap();
+
+        assert_eq!(vectors.len(), 2050);
+        assert_eq!(
+            vectors[2049],
+            [1.0, 2.0],
+            "the second request's second vector"
+        );
+        let sizes: Vec<usize> = embedding_bodies(&server)
+            .await
+            .iter()
+            .map(|b| b["input"].as_array().unwrap().len())
+            .collect();
+        assert_eq!(sizes, [2048, 2]);
+    }
+
+    #[tokio::test]
+    async fn embedding_count_mismatch_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/embeddings"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+                {"index": 0, "embedding": [1.0]}
+            ]})))
+            .mount(&server)
+            .await;
+
+        let err = make_provider(&server.uri())
+            .embed_batch(&["a", "b"])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("1") && err.contains("2"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn unknown_embedding_model_error_names_the_model() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/embeddings"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({"error": {
+                "code": 404, "message": "No endpoints found"
+            }})))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = make_provider(&server.uri()).embed("x").await.unwrap_err();
+        let err = format!("{err:#}");
+        assert!(err.contains("openai/text-embedding-3-small"), "{err}");
+        assert!(err.contains("No endpoints found"), "{err}");
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────

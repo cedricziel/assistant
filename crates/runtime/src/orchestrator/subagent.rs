@@ -348,6 +348,7 @@ impl SubagentRunner for Orchestrator {
                                 FinalAnswerMeta {
                                     traceparent: llm_traceparent,
                                     timing: None,
+                                    model: Some(self.llm.model_name().to_string()),
                                 },
                             )
                             .instrument(iteration_span.clone())
@@ -388,7 +389,7 @@ impl SubagentRunner for Orchestrator {
                                     tool_count: subagent_tool_count,
                                     had_errors: subagent_had_errors,
                                     active_skill: None,
-                                    history: history.clone(),
+                                    history: history.to_vec(),
                                 },
                                 self.learning_config.clone(),
                                 std::sync::Arc::clone(&self.storage),
@@ -558,6 +559,7 @@ impl SubagentRunner for Orchestrator {
                                 &mut subagent_active_skill,
                                 child_event_sink.as_ref(),
                                 tool_call_id.as_deref(),
+                                None,
                             )
                             .await;
 
@@ -586,10 +588,13 @@ impl SubagentRunner for Orchestrator {
                         if let Err(e) = conv_store.save_message(&thinking_msg).await {
                             warn!("Failed to persist subagent thinking step: {e}");
                         }
-                        history.push(ChatHistoryMessage::Text {
-                            role: ChatRole::Assistant,
-                            content: text,
-                        });
+                        history.push(
+                            ChatHistoryMessage::Text {
+                                role: ChatRole::Assistant,
+                                content: text,
+                            },
+                            Some(thinking_msg.id),
+                        );
                     }
                 }
             }

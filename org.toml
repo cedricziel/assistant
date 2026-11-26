@@ -64,12 +64,12 @@ timeout_secs = 120
 # citations.enabled = true
 
 # ── Dedicated embedding provider ──────────────────────────────────────────────
-# Ollama and OpenAI support embeddings natively — no extra config needed.
+# Ollama, OpenAI and OpenRouter support embeddings natively — no extra config needed.
 # For Anthropic (which has no built-in embeddings), or when you want a
 # specialised embedding model, add an [llm.embeddings] section.
 #
-# Supported providers: "ollama", "openai", "voyage"
-# API keys fall back to env vars: OPENAI_API_KEY, VOYAGE_API_KEY
+# Supported providers: "ollama", "openai", "openrouter", "voyage"
+# API keys fall back to env vars: OPENAI_API_KEY, OPENROUTER_API_KEY, VOYAGE_API_KEY
 #
 # Voyage AI (recommended by Anthropic):
 # [llm.embeddings]
@@ -88,6 +88,14 @@ timeout_secs = 120
 # provider = "openai"
 # model    = "text-embedding-3-small" # default; also text-embedding-3-large
 # # api_key = "sk-..."               # or set OPENAI_API_KEY env var
+#
+# OpenRouter (works with any chat provider):
+# [llm.embeddings]
+# provider = "openrouter"
+# model    = "openai/text-embedding-3-small" # default
+# # api_key = "sk-or-..."            # or the [llm] key when it is OpenRouter, or OPENROUTER_API_KEY
+# # [llm.embeddings.openrouter.provider] # routing, same keys as [llm.openrouter.provider]
+# # data_collection = "deny"
 
 # ── OpenAI cloud provider ─────────────────────────────────────────────────────
 # To use OpenAI instead of a local Ollama model, replace the [llm] block above
@@ -145,6 +153,7 @@ timeout_secs = 120
 # categories      = ["cli-agent"]                  # X-OpenRouter-Categories header, at most two
 # max_tokens      = 8192                           # sent as max_completion_tokens
 # fallback_models = ["openai/gpt-4o"]              # tried in order after `model`
+# pdf_engine      = "mistral-ocr"                  # "native" | "cloudflare-ai" | "mistral-ocr"
 #
 # # Provider routing, sent as the request's `provider` object. Only set keys
 # # are sent; unknown keys fail config load. See docs/openrouter.md.

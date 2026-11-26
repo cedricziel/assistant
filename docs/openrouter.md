@@ -48,6 +48,7 @@ sections in `~/.assistant/orgs/default/org.toml`.
 | `categories`      | `[]`     | `X-OpenRouter-Categories` header, comma-joined. At most two; more fails config load                |
 | `max_tokens`      | `8192`   | Maximum completion tokens per response, sent as `max_completion_tokens`                            |
 | `fallback_models` | `[]`     | Models to try in order when `model` fails. Sent as `models` with `model` first; omitted when empty |
+| `pdf_engine`      | unset    | PDF parser: `"native"`, `"cloudflare-ai"` or `"mistral-ocr"`. See [PDFs](#pdfs)                    |
 
 ### `[llm.openrouter.provider]` section
 
@@ -134,6 +135,36 @@ there is no title. Brackets in titles are escaped. URLs the answer
 already links inline are not listed again. Responses that call tools
 get no list. When streaming, the list is the last text chunk, so the
 saved answer matches what was streamed.
+
+## PDFs
+
+A PDF attachment goes in the user message as a `file` part:
+
+```json
+{
+  "type": "file",
+  "file": {
+    "filename": "document.pdf",
+    "file_data": "data:application/pdf;base64,..."
+  }
+}
+```
+
+Attachments carry no filename, so it is always `document.pdf`. Other
+document types are not sent.
+
+A request with a PDF carries
+`plugins: [{"id": "file-parser", "pdf": {"engine": ...}}]`:
+
+- With `pdf_engine` set, that engine is used for every model. Use
+  `"mistral-ocr"` for scanned PDFs.
+- With `pdf_engine` unset, a model whose catalog entry lists `file` in
+  its input modalities reads the PDF itself and gets no plugin. Other
+  models get `"cloudflare-ai"`. Until the catalog loads, or when it
+  can't be reached, every model counts as having no `file` input.
+
+Requests without a PDF get no parser plugin. With web search on, both
+plugins are sent, `web` first.
 
 ## Request identity
 
@@ -241,9 +272,10 @@ chat call waits for that fetch for at most 5 seconds.
 | Tool calling   | Native when the model lists `tools` in `supported_parameters`, else none                                                                                                                                                           |
 | Streaming      | Yes                                                                                                                                                                                                                                |
 | Vision         | Yes when the model lists `image` in its input modalities; otherwise each image is replaced by a short text note                                                                                                                    |
+| PDF input      | Native when the model lists `file` in its input modalities; otherwise parsed by the `file-parser` plugin. See [PDFs](#pdfs)                                                                                                        |
 | Context window | Smallest `context_length` among the endpoints routing can select                                                                                                                                                                   |
 | Chat options   | `tool_choice`, `parallel_tool_calls` and JSON schemas are sent natively when the model lists them in `supported_parameters`, with `provider.require_parameters = true`; otherwise `tool_choice` falls back to a prompt instruction |
-| Embeddings     | No                                                                                                                                                                                                                                 |
+| Embeddings     | Yes, through OpenRouter's embeddings endpoint                                                                                                                                                                                      |
 
 History compaction reads the context window on every turn.
 `[llm.openrouter.provider]` decides which endpoints count:
@@ -263,15 +295,37 @@ fetch is retried on a chat call, no sooner than 10 minutes later. Once a
 fetch succeeds, the catalog is not fetched again for the life of the
 provider.
 
-Since OpenRouter does not expose an embeddings endpoint, configure a
-dedicated embedding provider if you need vector search:
+## Embeddings
+
+With `[llm] provider = "openrouter"` and no `[llm.embeddings]` section,
+vector search embeds through OpenRouter's `/embeddings` endpoint, using
+the chat key and `base_url`. The model is `[llm] embedding_model`, or
+`openai/text-embedding-3-small` when it is unset.
+
+To embed through OpenRouter while chatting with any provider, set
+`[llm.embeddings] provider = "openrouter"`:
 
 ```toml
 [llm.embeddings]
-provider = "voyage"
-model    = "voyage-3-lite"
-# api_key = "pa-..."  # or set VOYAGE_API_KEY env var
+provider = "openrouter"
+model    = "openai/text-embedding-3-small" # default
+# base_url = "https://openrouter.ai/api/v1" # default
+# api_key  = "sk-or-..."
+
+[llm.embeddings.openrouter.provider]
+data_collection = "deny"
 ```
+
+The key is `[llm.embeddings] api_key`, else the `[llm]` key when
+`[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`.
+`[llm.embeddings.openrouter.provider]` takes the same keys as
+`[llm.openrouter.provider]` and is sent as the request's `provider`.
+Chat routing does not apply to embeddings.
+
+Each request posts `model`, `input` and `encoding_format = "float"`.
+More than 2048 texts are split across requests. Vectors come back in
+input order, and a response with the wrong number of vectors is an
+error. Errors and retries work as for chat, and errors name the model.
 
 ## Models
 

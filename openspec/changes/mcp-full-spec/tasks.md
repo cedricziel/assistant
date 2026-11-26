@@ -23,10 +23,10 @@ Each numbered group is one PR in the stack, in order.
 
 ## 4. Prompts, completions, list changes, progress and cancellation (PR 4)
 
-- [ ] 4.1 Add failing tests for `prompts/list`, `prompts/get` with and without `input`, and `completion/complete` for prompt names and the skill template; confirm red
-- [ ] 4.2 Implement prompts and completions from the skill catalog and verify the tests pass
-- [ ] 4.3 Add a failing test: a client listening for tool and prompt list changes receives notifications after `install-skill`; implement change fan-out and verify it passes
-- [ ] 4.4 Add failing tests for `run-prompt` progress notifications with a progress token and turn cancellation on request cancel (using `StubOrchestrationEngine`); implement and verify they pass
+- [x] 4.1 Add failing tests for `prompts/list`, `prompts/get` with and without `input`, and `completion/complete` for prompt names and the skill template; confirm red
+- [x] 4.2 Implement prompts and completions from the skill catalog and verify the tests pass
+- [x] 4.3 Add a failing test: a client listening for tool and prompt list changes receives notifications after `install-skill`; implement change fan-out and verify it passes
+- [x] 4.4 Add failing tests for `run-prompt` progress notifications with a progress token and turn cancellation on request cancel (using `StubOrchestrationEngine`); implement and verify they pass
 
 ## 5. Audience-bound tokens and `mcp:execute` (PR 5)
 
@@ -37,11 +37,11 @@ Each numbered group is one PR in the stack, in order.
 
 ## 6. Streamable HTTP `/mcp` endpoint (PR 6)
 
-- [ ] 6.1 Add failing web-ui integration tests: 401 with `resource_metadata` challenge without a token; 403 `insufficient_scope` for a token without `mcp:execute`; 401 for an API-audience JWT; 200 tool list for an MCP-audience token and for an API key with `mcp:execute`; 403 for a foreign `Origin`; confirm red
-- [ ] 6.2 Add `/.well-known/oauth-protected-resource/mcp` with a failing test first, then implement it with OpenAPI docs
-- [ ] 6.3 Mount rmcp `StreamableHttpService` at `/mcp` behind an MCP auth middleware that inserts `AuthContext`, enable `server-side-http`, and verify 6.1 passes
-- [ ] 6.4 Add a test that a space-restricted user cannot reach another space's data through `/mcp`; make it pass
-- [ ] 6.5 Run `make dump-openapi` and `make generate-flutter-client`; verify the generated client builds with `make lint-flutter`
+- [x] 6.1 Add failing web-ui integration tests: 401 with `resource_metadata` challenge without a token; 403 `insufficient_scope` for a token without `mcp:execute`; 401 for an API-audience JWT; 200 tool list for an MCP-audience token and for an API key with `mcp:execute`; 403 for a foreign `Origin`; confirm red
+- [x] 6.2 Add `/.well-known/oauth-protected-resource/mcp` with a failing test first, then implement it with OpenAPI docs
+- [x] 6.3 Mount rmcp `StreamableHttpService` at `/mcp` behind an MCP auth middleware that inserts `AuthContext`, enable `server-side-http`, and verify 6.1 passes
+- [x] 6.4 Add a test that a space-restricted user cannot reach another space's data through `/mcp`; make it pass
+- [x] 6.5 Run `make dump-openapi` and `make generate-flutter-client`; verify the generated client builds with `make lint-flutter`
 
 ## 7. Server Tasks (PR 7)
 
@@ -84,7 +84,7 @@ Each numbered group is one PR in the stack, in order.
 
 ## 13. Docs and ADR (PR 13)
 
-- [ ] 13.1 Add `docs/adr/adr-0017-mcp-on-rmcp.md` covering the rmcp migration, audience-bound tokens and the opaque-origin app sandbox
+- [x] 13.1 Add `docs/adr/adr-0022-mcp-on-rmcp.md` (0017 was taken) covering the rmcp migration, audience-bound tokens and the opaque-origin app sandbox
 - [ ] 13.2 Write `docs/mcp.md` (stdio and HTTP setup, OAuth/DCR and API keys, tasks, remote skills, MCP Apps and their limitation) and update `docs/tool-permissions.md`, `docs/authentication.md` and `docs/operations/configuration.md`; check every claim against the code
 
 ## 14. Verification
