@@ -5,9 +5,12 @@
 
 pub mod catalog;
 pub mod messages;
+mod safety;
+pub mod validate;
 
 pub use catalog::{CATALOG_ID, Catalog, ValidationIssue};
 pub use messages::{
     Component, CreateSurface, DataUpdate, Message, MessageBody, ProtocolVersion, SurfaceDraft,
     SurfaceMessages, SurfacePatch, UpdateComponents, UpdateDataModel,
 };
+pub use validate::{UrlPolicy, ValidSurface, validate};

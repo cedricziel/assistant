@@ -83,7 +83,7 @@ Each provider applies its own default (see the `openrouter-embeddings` spec).
 - Options are at their defaults: delegate to `chat_streaming`.
 - `tool_choice` is `required` or a specific tool on a provider without native support: apply the prompt-and-retry fallback.
 
-Every in-tree provider overrides `chat_with` where its API has native fields. `chat` and `chat_streaming` stay as thin wrappers that pass default options, so the roughly 10 test fakes keep compiling unchanged.
+Anthropic and OpenAI override `chat_with` with their native fields. Moonshot keeps the fallback: Kimi models with thinking enabled, the default for recent models, reject a forced tool, and support for `required` varies by model. Ollama has no native fields. `chat` and `chat_streaming` stay as thin wrappers that pass default options, so the roughly 10 test fakes keep compiling unchanged.
 
 *Alternative:* change the signatures of `chat` and `chat_streaming`. Rejected because it churns every fake for no behavior gain.
 
@@ -137,7 +137,7 @@ One additive `space.db` migration (a nullable column). Config changes are additi
 2. `Retry-After`-aware retry, plus extended usage in `LlmResponseMeta` and OTel (all providers).
 3. `ProviderState` refactor and storage migration (no behavior change).
 4. `LlmCallContext` task-local, plus per-turn context-window read.
-5. `ChatOptions` trait method, native `tool_choice` and `parallel_tool_calls` for Anthropic, OpenAI, Moonshot and Ollama, the prompt fallback, and `[llm] parallel_tool_calls`.
+5. `ChatOptions` trait method, native `tool_choice` and `parallel_tool_calls` for Anthropic and OpenAI, the prompt fallback, and `[llm] parallel_tool_calls`.
 6. Structured output in core, with skill judges migrated (Anthropic, OpenAI and the fallbacks).
 7. OpenRouter wire client: chat, streaming, errors, attribution, routing, fallbacks, identity, and native chat options and structured output.
 8. Catalog and capabilities, including chat-option support.
