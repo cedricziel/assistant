@@ -64,12 +64,12 @@ timeout_secs = 120
 # citations.enabled = true
 
 # ── Dedicated embedding provider ──────────────────────────────────────────────
-# Ollama and OpenAI support embeddings natively — no extra config needed.
+# Ollama, OpenAI and OpenRouter support embeddings natively — no extra config needed.
 # For Anthropic (which has no built-in embeddings), or when you want a
 # specialised embedding model, add an [llm.embeddings] section.
 #
-# Supported providers: "ollama", "openai", "voyage"
-# API keys fall back to env vars: OPENAI_API_KEY, VOYAGE_API_KEY
+# Supported providers: "ollama", "openai", "openrouter", "voyage"
+# API keys fall back to env vars: OPENAI_API_KEY, OPENROUTER_API_KEY, VOYAGE_API_KEY
 #
 # Voyage AI (recommended by Anthropic):
 # [llm.embeddings]
@@ -88,6 +88,14 @@ timeout_secs = 120
 # provider = "openai"
 # model    = "text-embedding-3-small" # default; also text-embedding-3-large
 # # api_key = "sk-..."               # or set OPENAI_API_KEY env var
+#
+# OpenRouter (works with any chat provider):
+# [llm.embeddings]
+# provider = "openrouter"
+# model    = "openai/text-embedding-3-small" # default
+# # api_key = "sk-or-..."            # or the [llm] key when it is OpenRouter, or OPENROUTER_API_KEY
+# # [llm.embeddings.openrouter.provider] # routing, same keys as [llm.openrouter.provider]
+# # data_collection = "deny"
 
 # ── OpenAI cloud provider ─────────────────────────────────────────────────────
 # To use OpenAI instead of a local Ollama model, replace the [llm] block above
@@ -242,8 +250,8 @@ timeout_secs = 120
 # boot_path = "~/.assistant/agents/default/BOOT.md"
 
 # ── Transcription (speech-to-text) ────────────────────────────────────────────
-# Providers: "whisper" (OpenAI), "ollama" (local), "deepgram"
-# API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY
+# Providers: "whisper" (OpenAI), "ollama" (local), "deepgram", "openrouter"
+# API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY, OPENROUTER_API_KEY
 #
 # [transcription]
 # provider = "whisper"
@@ -251,6 +259,15 @@ timeout_secs = 120
 # # api_key = "sk-..."                 # or set OPENAI_API_KEY env var
 # # base_url = "https://api.openai.com/v1"
 # # language = "en"                    # optional BCP-47 language hint
+#
+# [transcription]
+# provider = "openrouter"
+# model    = "openai/whisper-1"         # default
+# # api_key = "sk-or-..."              # else the [llm] key, else OPENROUTER_API_KEY
+# # base_url = "https://openrouter.ai/api/v1"
+# # language = "en"
+# # prompt = "Names: Acme"             # vocabulary hint
+# # max_chunk_secs = 50                # split longer audio; capped at 55
 
 # ── Text-to-speech (TTS) ─────────────────────────────────────────────────────
 # Providers: "openai", "deepgram"

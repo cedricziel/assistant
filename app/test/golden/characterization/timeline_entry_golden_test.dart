@@ -4,6 +4,7 @@ library;
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/command_event_tile.dart';
 import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -99,10 +100,9 @@ Future<void> _golden(
 }) async {
   await pumpGolden(
     tester,
-    StreamingTimelineEntry(
-      message: message,
+    ThreadDensityScope(
       density: density,
-      entryState: state,
+      child: StreamingTimelineEntry(message: message, entryState: state),
     ),
     size: _size,
     brightness: brightness,
@@ -273,10 +273,7 @@ void main() {
     testWidgets('StreamingTimelineEntry renders nothing', (tester) async {
       await pumpGolden(
         tester,
-        StreamingTimelineEntry(
-          message: _command(),
-          density: TimelineDensity.normal,
-        ),
+        StreamingTimelineEntry(message: _command()),
         size: _size,
       );
       expect(find.byType(Text), findsNothing);

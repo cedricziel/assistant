@@ -34,6 +34,7 @@ import 'package:assistant_api/src/model/attachment_meta_response.dart';
 import 'package:assistant_api/src/model/authentication_info.dart';
 import 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/binding_response.dart';
+import 'package:assistant_api/src/model/call_mcp_app_tool_request.dart';
 import 'package:assistant_api/src/model/cancel_task_request.dart';
 import 'package:assistant_api/src/model/catalog_auth_kind_response.dart';
 import 'package:assistant_api/src/model/catalog_auth_response.dart';
@@ -89,9 +90,13 @@ import 'package:assistant_api/src/model/interaction_status_view.dart';
 import 'package:assistant_api/src/model/interface_instance_response.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
 import 'package:assistant_api/src/model/list_tasks_response.dart';
+import 'package:assistant_api/src/model/mcp_app_csp_view.dart';
+import 'package:assistant_api/src/model/mcp_app_permissions_view.dart';
+import 'package:assistant_api/src/model/mcp_app_view.dart';
 import 'package:assistant_api/src/model/member_entry.dart';
 import 'package:assistant_api/src/model/message.dart';
 import 'package:assistant_api/src/model/message_feedback_response.dart';
+import 'package:assistant_api/src/model/message_feedback_summary.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
@@ -117,6 +122,7 @@ import 'package:assistant_api/src/model/put_org_oidc_config_request.dart';
 import 'package:assistant_api/src/model/question_answer.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
+import 'package:assistant_api/src/model/read_mcp_app_resource_request.dart';
 import 'package:assistant_api/src/model/register_agent_request.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of.dart';
@@ -124,6 +130,7 @@ import 'package:assistant_api/src/model/respond_to_interaction_request_one_of1.d
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.dart';
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
+import 'package:assistant_api/src/model/rule_scope.dart';
 import 'package:assistant_api/src/model/security_requirement.dart';
 import 'package:assistant_api/src/model/security_scheme.dart';
 import 'package:assistant_api/src/model/send_message_configuration.dart';
@@ -170,6 +177,7 @@ import 'package:assistant_api/src/model/test_integration_response.dart';
 import 'package:assistant_api/src/model/token_response.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
 import 'package:assistant_api/src/model/tool_decision.dart';
+import 'package:assistant_api/src/model/tool_permission_rule_summary.dart';
 import 'package:assistant_api/src/model/turn_state.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
 import 'package:assistant_api/src/model/unsubscribe_request.dart';
@@ -225,6 +233,7 @@ part 'serializers.g.dart';
   AuthenticationInfo,
   AuthorizationCodeOAuthFlow,
   BindingResponse,
+  CallMcpAppToolRequest,
   CancelTaskRequest,
   CatalogAuthKindResponse,
   CatalogAuthResponse,
@@ -280,9 +289,13 @@ part 'serializers.g.dart';
   InterfaceInstanceResponse,
   ListTaskPushNotificationConfigsResponse,
   ListTasksResponse,
+  McpAppCspView,
+  McpAppPermissionsView,
+  McpAppView,
   MemberEntry,
   Message,
   MessageFeedbackResponse,
+  MessageFeedbackSummary,
   MessageSummary,
   ModelPart,
   MutualTlsSecurityScheme,
@@ -308,6 +321,7 @@ part 'serializers.g.dart';
   QuestionAnswer,
   QuickMessageRequest,
   QuickMessageResponse,
+  ReadMcpAppResourceRequest,
   RegisterAgentRequest,
   RespondToInteractionRequest,
   RespondToInteractionRequestOneOf,
@@ -315,6 +329,7 @@ part 'serializers.g.dart';
   RespondToInteractionRequestOneOf2,
   Role,
   RotateSecretResponse,
+  RuleScope,
   SecurityRequirement,
   SecurityScheme,
   SendMessageConfiguration,
@@ -361,6 +376,7 @@ part 'serializers.g.dart';
   TokenResponse,
   ToolCallSummary,
   ToolDecision,
+  ToolPermissionRuleSummary,
   TurnState,
   TurnStatusResponse,
   UnsubscribeRequest,
@@ -421,6 +437,10 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(MemberEntry)]),
         () => ListBuilder<MemberEntry>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(ToolPermissionRuleSummary)]),
+        () => ListBuilder<ToolPermissionRuleSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(InterfaceInstanceResponse)]),

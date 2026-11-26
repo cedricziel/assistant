@@ -275,7 +275,7 @@ chat call waits for that fetch for at most 5 seconds.
 | PDF input      | Native when the model lists `file` in its input modalities; otherwise parsed by the `file-parser` plugin. See [PDFs](#pdfs)                                                                                                        |
 | Context window | Smallest `context_length` among the endpoints routing can select                                                                                                                                                                   |
 | Chat options   | `tool_choice`, `parallel_tool_calls` and JSON schemas are sent natively when the model lists them in `supported_parameters`, with `provider.require_parameters = true`; otherwise `tool_choice` falls back to a prompt instruction |
-| Embeddings     | No                                                                                                                                                                                                                                 |
+| Embeddings     | Yes, through OpenRouter's embeddings endpoint                                                                                                                                                                                      |
 
 History compaction reads the context window on every turn.
 `[llm.openrouter.provider]` decides which endpoints count:
@@ -295,15 +295,41 @@ fetch is retried on a chat call, no sooner than 10 minutes later. Once a
 fetch succeeds, the catalog is not fetched again for the life of the
 provider.
 
-Since OpenRouter does not expose an embeddings endpoint, configure a
-dedicated embedding provider if you need vector search:
+## Embeddings
+
+With `[llm] provider = "openrouter"` and no `[llm.embeddings]` section,
+vector search embeds through OpenRouter's `/embeddings` endpoint, using
+the chat key and `base_url`. The model is `[llm] embedding_model`, or
+`openai/text-embedding-3-small` when it is unset.
+
+To embed through OpenRouter while chatting with any provider, set
+`[llm.embeddings] provider = "openrouter"`:
 
 ```toml
 [llm.embeddings]
-provider = "voyage"
-model    = "voyage-3-lite"
-# api_key = "pa-..."  # or set VOYAGE_API_KEY env var
+provider = "openrouter"
+model    = "openai/text-embedding-3-small" # default
+# base_url = "https://openrouter.ai/api/v1" # default
+# api_key  = "sk-or-..."
+
+[llm.embeddings.openrouter.provider]
+data_collection = "deny"
 ```
+
+The key is `[llm.embeddings] api_key`, else the `[llm]` key when
+`[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`.
+`[llm.embeddings.openrouter.provider]` takes the same keys as
+`[llm.openrouter.provider]` and is sent as the request's `provider`.
+Chat routing does not apply to embeddings.
+
+Each request posts `model`, `input` and `encoding_format = "float"`.
+More than 2048 texts are split across requests. Vectors come back in
+input order, and a response with the wrong number of vectors is an
+error. Errors and retries work as for chat, and errors name the model.
+
+## Transcription
+
+`[transcription] provider = "openrouter"` transcribes voice messages through OpenRouter's `/audio/transcriptions` endpoint, by default with `openai/whisper-1`. The key is `[transcription] api_key`, else the `[llm]` key when `[llm] provider = "openrouter"`, else `OPENROUTER_API_KEY`. See [Voice Transcription](transcription.md#openrouter).
 
 ## Models
 

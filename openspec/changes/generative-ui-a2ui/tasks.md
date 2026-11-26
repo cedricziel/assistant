@@ -27,7 +27,7 @@ Layer: docs
 Depends on: none
 Parallel with: everything; lands in wave 1 with tool-approval PR 1 (ADR-0017) and message-branching PR 0 (ADR-0018)
 
-- [ ] 1.1 Write `docs/adr/adr-0019-generative-ui-a2ui.md`. Record the protocol choice (A2UI v1.0), the `genui` → `a2ui_flutter`/`a2ui_core` succession with versions, tool-built surfaces versus streamed JSONL (D2), server-side validation incl. regex safety (D3), interactive-web gating (D4), anchored persistence outside the event log (D6), the two action routes over the `surface_action` interaction kind (D8), the answerable-until-next-user-turn window (D8), the synthesized LLM block, the renderer living in `app/` (D9), the Material-everywhere styling deviation (D10), and the link-confirmation policy with the `[ui] link_hosts` allowlist and the any-`https:` image-host default with its beacon trade-off (D7). Reference `adr-0009-testability-architecture.md`, `adr-0011-tool-permission-decision-model.md` (by filename: two ADR-0011 files exist), `adr-0017` and `adr-0018`.
+- [ ] 1.1 Write `docs/adr/adr-0019-generative-ui-a2ui.md`. Record the protocol choice (A2UI v1.0), the `genui` → `a2ui_flutter`/`a2ui_core` succession with versions, tool-built surfaces versus streamed JSONL (D2), server-side validation incl. regex safety (D3), interactive-web gating (D4), anchored persistence outside the event log (D6), the two action routes over the `surface_action` interaction kind (D8), the answerable-until-next-user-turn window (D8), the synthesized LLM block, the renderer living in `app/` (D9), the Material-everywhere styling deviation (D10), and the link-confirmation policy with the `[ui] link_hosts` allowlist and the any-`https:` image-host default with its beacon trade-off (D7). Reference `adr-0009-testability-architecture.md`, `adr-0023-tool-permission-decision-model.md`, `adr-0017` and `adr-0018`.
 - [ ] 1.2 Add ADR-0019 to the ADR index if one exists, and to `docs/glossary.md` (term: _Surface_). Glossary conflicts with ADR-0017/0018 are trivial; rebase.
 
 ## PR 2 — feat(a2ui): A2UI v1.0 types and assistant catalog
@@ -132,8 +132,8 @@ Layer: server
 Depends on: message-branching PR 5 (`stream_turn_to_sse`)
 Parallel with: 2–9
 
-- [ ] 10.1 RED: runner test with a scripted turn that emits three frames; drop the SSE receiver after the first. Assert all frames and the terminal frame are in the event log with consecutive seq ids and reach a live-tail subscriber.
-- [ ] 10.2 In `stream_turn_to_sse`, a failed `sse_tx.send` sets a `client_gone` flag and stops forwarding only; the loop keeps draining `event_rx`, persisting and broadcasting until the turn ends (today it `break`s, `messages.rs:351–362`). GREEN. Coordinate with tool-approval PR 7.4 (`abandon_run` before the terminal frame) and follow-up-suggestions PR 3; they edit the same runner after this.
+- [x] 10.1 RED: runner test with a scripted turn that emits three frames; drop the SSE receiver after the first. Assert all frames and the terminal frame are in the event log with consecutive seq ids and reach a live-tail subscriber.
+- [x] 10.2 In `stream_turn_to_sse`, a failed `sse_tx.send` sets a `client_gone` flag and stops forwarding only; the loop keeps draining `event_rx`, persisting and broadcasting until the turn ends (today it `break`s, `messages.rs:351–362`). GREEN. Coordinate with tool-approval PR 7.4 (`abandon_run` before the terminal frame) and follow-up-suggestions PR 3; they edit the same runner after this.
 
 ## PR 11 — feat(web-ui): post-turn surface actions
 

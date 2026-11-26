@@ -41,14 +41,14 @@ pub fn org_config_path(base_dir: &Path, org_slug: &str) -> Result<PathBuf> {
 
 /// Load `server.toml` from the install root `base_dir`.
 ///
-/// Fails when an MCP server is named with a prefix reserved for integration
-/// tools (see [`RESERVED_MCP_SERVER_PREFIXES`](crate::types::skills_mcp::RESERVED_MCP_SERVER_PREFIXES)).
+/// Fails when [`McpConfig::validate`](crate::types::skills_mcp::McpConfig::validate)
+/// rejects the `[mcp]` servers.
 pub fn load_server_config(base_dir: &Path) -> Result<ServerConfig> {
     let path = server_config_path(base_dir);
     let config: ServerConfig = load_toml(&path)?;
     config
         .mcp
-        .check_names()
+        .validate()
         .with_context(|| format!("Invalid [[mcp.servers]] in {}", path.display()))?;
     Ok(config)
 }
@@ -158,6 +158,19 @@ vapid_public_key = "pub"
             assert!(err.contains("reserved"), "says why: {err}");
             assert!(err.contains("server.toml"), "names the file: {err}");
         }
+    }
+
+    #[test]
+    fn a_zero_mcp_tool_timeout_is_rejected_with_a_clear_error() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &server_config_path(dir.path()),
+            "[[mcp.servers]]\nname = \"slow\"\ncommand = [\"x\"]\ntool_timeout_secs = 0\n",
+        );
+        let err = format!("{:#}", load_server_config(dir.path()).unwrap_err());
+        assert!(err.contains("'slow'"), "names the server: {err}");
+        assert!(err.contains("tool_timeout_secs"), "names the key: {err}");
+        assert!(err.contains("server.toml"), "names the file: {err}");
     }
 
     #[test]

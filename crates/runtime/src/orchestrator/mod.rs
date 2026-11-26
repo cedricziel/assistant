@@ -36,6 +36,7 @@ use turn_timing::{CallMarks, TurnTimer};
 
 // ── Submodules ────────────────────────────────────────────────────────────────
 
+mod branch;
 mod dispatch;
 mod prompt;
 mod surface_hook;
@@ -53,6 +54,7 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
+pub use branch::{BRANCH_CANCEL_WAIT, BranchConflict};
 pub use stream_event::OrchestratorEvent;
 pub use submit::SubmitTurn;
 pub use turn_registry::{TurnLease, TurnMode, TurnRegistry};
@@ -326,6 +328,9 @@ pub struct Orchestrator {
     pub(crate) turn_cancellations: tokio::sync::RwLock<turn_cancellations::TurnCancellations>,
     /// The turns running in this process, per conversation.
     pub(crate) turn_registry: TurnRegistry,
+    /// Where pending interactions of a turn are recorded. Branch operations
+    /// read it to tell a turn waiting for the user from one still working.
+    pub(crate) interactions: Arc<dyn assistant_storage::InteractionStore>,
     /// How long the worker defers a turn that claims a conversation held by an
     /// exclusive (branching) turn. Tests shorten it with `with_turn_defer_delay`.
     pub(crate) turn_defer_delay: Duration,
@@ -397,6 +402,7 @@ impl Orchestrator {
         let compaction_config = config.compaction.clone();
 
         let skill_executions = Arc::new(storage.skill_execution_store());
+        let interactions = Arc::new(storage.interaction_store());
         let surface_store = Arc::new(storage.surface_store());
 
         Self {
@@ -415,6 +421,7 @@ impl Orchestrator {
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             turn_cancellations: tokio::sync::RwLock::new(Default::default()),
             turn_registry: TurnRegistry::default(),
+            interactions,
             turn_defer_delay: DEFAULT_TURN_DEFER_DELAY,
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
@@ -499,6 +506,15 @@ impl Orchestrator {
     /// behavior against virtual time.
     pub fn with_clock(mut self, clock: Arc<dyn assistant_core::clock::Clock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Read pending interactions from `store` instead of the space database.
+    pub fn with_interaction_store(
+        mut self,
+        store: Arc<dyn assistant_storage::InteractionStore>,
+    ) -> Self {
+        self.interactions = store;
         self
     }
 
@@ -938,6 +954,7 @@ impl Orchestrator {
                 &self.agent_id,
             )
             .await?;
+        let summary_store = self.storage.conversation_summary_store();
 
         // 4. Load global tool specs and merge with extensions.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
@@ -989,7 +1006,7 @@ impl Orchestrator {
                         &mut history,
                         &llm,
                         &compaction_config,
-                        Some((&conv_store, conversation_id)),
+                        Some((&summary_store, conversation_id)),
                     )
                     .await;
                 }
@@ -1102,7 +1119,7 @@ impl Orchestrator {
                     &mut history,
                     &llm,
                     &compaction_config,
-                    Some((&conv_store, conversation_id)),
+                    Some((&summary_store, conversation_id)),
                 )
                 .await;
             }
@@ -1383,6 +1400,7 @@ impl Orchestrator {
                 &self.agent_id,
             )
             .await?;
+        let summary_store = self.storage.conversation_summary_store();
 
         // 4. Load all registered tool specs.
         let llm = self
@@ -1423,7 +1441,7 @@ impl Orchestrator {
                         &mut history,
                         &llm,
                         &compaction_config,
-                        Some((&conv_store, conversation_id)),
+                        Some((&summary_store, conversation_id)),
                     )
                     .await;
                 }
@@ -1563,7 +1581,7 @@ impl Orchestrator {
                     &mut history,
                     &llm,
                     &compaction_config,
-                    Some((&conv_store, conversation_id)),
+                    Some((&summary_store, conversation_id)),
                 )
                 .await;
             }

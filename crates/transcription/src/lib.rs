@@ -13,33 +13,40 @@
 
 pub mod audio_store;
 mod converter;
+mod converting;
 mod deepgram;
 mod deepgram_tts;
 mod ollama;
 mod openai_tts;
+mod openrouter;
+pub mod pipeline;
 mod provider;
 mod whisper;
 
 use std::sync::Arc;
 
+use assistant_core::types::llm::{LlmConfig, OPENROUTER_API_KEY_ENV, resolve_openrouter_key};
 use assistant_core::types::transcription::{
     TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsProviderKind,
 };
 
 pub use audio_store::AudioStore;
-pub use converter::{AudioConverter, AudioFormat, ConversionResult};
+pub use converter::AudioFormat;
+pub use converting::ConvertingTranscriber;
 pub use deepgram::DeepgramProvider;
 pub use deepgram_tts::DeepgramTtsProvider;
 pub use ollama::OllamaTranscriptionProvider;
 pub use openai_tts::OpenAITtsProvider;
+pub use openrouter::OpenRouterTranscriber;
 pub use provider::{
     TranscriptionProvider, TranscriptionRequest, TranscriptionResult, TtsProvider, TtsRequest,
     TtsResult,
 };
 pub use whisper::WhisperProvider;
 
-/// MIME type prefixes recognised as audio attachments.
-pub const AUDIO_MIME_PREFIXES: &[&str] = &[
+/// MIME types transcribed as audio. Video containers are included because
+/// only their audio stream is used.
+pub const AUDIO_MIME_TYPES: &[&str] = &[
     "audio/ogg",
     "audio/opus",
     "audio/mpeg",
@@ -49,17 +56,35 @@ pub const AUDIO_MIME_PREFIXES: &[&str] = &[
     "audio/x-m4a",
     "audio/wav",
     "audio/x-wav",
+    "audio/wave",
     "audio/flac",
     "audio/x-flac",
     "audio/webm",
     "audio/aac",
+    "audio/amr",
+    "audio/amr-wb",
+    "audio/3gpp",
+    "audio/3gpp2",
+    "audio/x-caf",
+    "audio/aiff",
+    "audio/x-aiff",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
 ];
 
-/// Returns `true` if the given MIME type is a recognised audio format.
+/// `mime` lowercased, without parameters such as `; codecs=opus`.
+pub fn essence(mime: &str) -> String {
+    mime.split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase()
+}
+
+/// Returns `true` if `mime` is an audio (or video) type to transcribe.
 pub fn is_audio_mime(mime: &str) -> bool {
-    AUDIO_MIME_PREFIXES
-        .iter()
-        .any(|prefix| mime.starts_with(prefix))
+    AUDIO_MIME_TYPES.contains(&essence(mime).as_str())
 }
 
 /// Build a [`TtsProvider`] from the assistant TTS configuration.
@@ -118,14 +143,44 @@ pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvi
     }
 }
 
-/// Build a [`TranscriptionProvider`] from the assistant configuration.
-///
-/// Returns `None` when `config` is `None` (transcription not configured).
-/// Returns an error if the configuration is invalid (e.g. missing API key).
-pub fn build_provider(
+/// Build a [`TranscriptionProvider`] from `[transcription]`. `llm` supplies
+/// the OpenRouter key when `[transcription]` has none. Every provider is
+/// wrapped in a [`ConvertingTranscriber`]. Fails when the configuration is
+/// invalid, e.g. a missing API key.
+pub async fn build_provider(
     config: &TranscriptionConfig,
+    llm: &LlmConfig,
 ) -> anyhow::Result<Arc<dyn TranscriptionProvider>> {
     match config.provider {
+        TranscriptionProviderKind::OpenRouter => {
+            let api_key = resolve_openrouter_key(
+                config.api_key.as_ref(),
+                llm,
+                OPENROUTER_API_KEY_ENV,
+                |name| std::env::var(name).ok(),
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "OpenRouter transcription requires an API key. Set api_key in \
+                     [transcription] or [llm], or the OPENROUTER_API_KEY env var."
+                )
+            })?;
+            let base_url = config.base_url.clone().unwrap_or_else(|| {
+                assistant_llm_provider::openrouter::DEFAULT_BASE_URL.to_string()
+            });
+            let mut provider =
+                OpenRouterTranscriber::new(base_url, api_key, config.effective_max_chunk_secs())?;
+            if let Some(ref model) = config.model {
+                provider = provider.with_model(model);
+            }
+            if let Some(ref language) = config.language {
+                provider = provider.with_language(language);
+            }
+            if let Some(ref prompt) = config.prompt {
+                provider = provider.with_prompt(prompt);
+            }
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
+        }
         TranscriptionProviderKind::Whisper => {
             let api_key = config
                 .api_key
@@ -146,7 +201,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
         TranscriptionProviderKind::Ollama => {
             let mut provider = OllamaTranscriptionProvider::new()?;
@@ -156,7 +211,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
         TranscriptionProviderKind::Deepgram => {
             let api_key = config
@@ -178,9 +233,7 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
-            // Enable audio conversion for formats not supported by Deepgram (e.g., M4A)
-            provider = provider.with_audio_conversion(AudioConverter::new());
-            Ok(Arc::new(provider))
+            Ok(Arc::new(ConvertingTranscriber::new(provider)))
         }
     }
 }

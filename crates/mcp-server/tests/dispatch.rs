@@ -18,7 +18,9 @@ use assistant_core::tool::ToolOutput;
 use assistant_runtime::StubOrchestrationEngine;
 use assistant_tool_executor::StubToolDispatcher;
 use common::*;
-use rmcp::model::{ClientRequest, ErrorCode, ReadResourceRequestParams, ServerResult};
+use rmcp::model::{
+    ClientRequest, ErrorCode, GetTaskParams, ReadResourceRequestParams, ServerResult,
+};
 use serde_json::json;
 
 fn read(uri: &str) -> ReadResourceRequestParams {
@@ -165,6 +167,7 @@ async fn tools_call_install_skill_installs_from_a_local_path() {
         stubs.catalog,
         allow_everything(),
         skills_dir.path().to_path_buf(),
+        stubs.listeners,
     )
     .with_install_registry(install_registry().await);
     let client = connect(server).await;
@@ -206,7 +209,10 @@ async fn tools_call_unknown_tool_is_not_a_protocol_error() {
 #[tokio::test]
 async fn unimplemented_method_returns_method_not_found() {
     let client = default_stubs().connect().await;
-    let err = client.list_prompts(None).await.unwrap_err();
+    let err = client
+        .get_task(GetTaskParams::new("no-such-task"))
+        .await
+        .unwrap_err();
     assert_eq!(code(err), ErrorCode::METHOD_NOT_FOUND);
 }
 

@@ -291,6 +291,11 @@ pub(crate) async fn stream_turn_to_sse(
         let mut thinking_token_count: usize = 0;
         const THINKING_BATCH_SIZE: usize = 20;
 
+        // A closed SSE channel only stops forwarding. The loop keeps draining
+        // `event_rx` so the durable log and live tail see the whole turn, and
+        // a reconnecting client can resume from `events/stream?since=N`.
+        let mut client_gone = false;
+
         while let Some(orch_event) = event_rx.recv().await {
             // Serialization is owned by the shared projection layer; this loop
             // keeps only transport concerns (batching, persistence, push, seq).
@@ -371,8 +376,8 @@ pub(crate) async fn stream_turn_to_sse(
                 let e = Event::default()
                     .event("thinking")
                     .data(frame.sse_data.clone());
-                if sse_tx.send(Ok(e)).await.is_err() {
-                    break;
+                if !client_gone && sse_tx.send(Ok(e)).await.is_err() {
+                    client_gone = true;
                 }
                 if let Some(content) = frame.log_payload["content"].as_str() {
                     thinking_buf.push_str(content);
@@ -425,8 +430,8 @@ pub(crate) async fn stream_turn_to_sse(
                 .id(seq.to_string());
             seq += 1;
 
-            if sse_tx.send(Ok(sse_event)).await.is_err() {
-                break;
+            if !client_gone && sse_tx.send(Ok(sse_event)).await.is_err() {
+                client_gone = true;
             }
         }
 
@@ -542,7 +547,7 @@ pub(crate) async fn stream_turn_to_sse(
             .event(event_type)
             .data(payload.to_string())
             .id(seq.to_string());
-        let client_present_at_done = sse_tx.send(Ok(terminal_sse)).await.is_ok();
+        let client_present_at_done = !client_gone && sse_tx.send(Ok(terminal_sse)).await.is_ok();
 
         // Fire Web Push notification after emitting the SSE done event, ahead
         // of the suggestion phase so its latency never delays the push.
@@ -704,6 +709,9 @@ pub struct SseToolResultEvent {
     /// Each `kind` is defined by a JSON Schema in `schemas/tool-results/`.
     #[schema(value_type = Option<Object>)]
     pub data: Option<serde_json::Value>,
+    /// The MCP App the tool declared for its result. Absent for tools
+    /// without one, and on subagent tool results.
+    pub app: Option<super::mcp_apps::McpAppView>,
 }
 
 /// SSE `suggestions` event: tappable follow-up prompts for a finished turn.
@@ -2033,6 +2041,74 @@ mod tests {
             serde_json::json!([attachment_id.to_string()])
         );
         assert_eq!(event_log(&storage, &run_id).await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn runner_keeps_persisting_and_broadcasting_after_the_client_disconnects() {
+        use assistant_runtime::OrchestratorEvent::Token;
+
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        let run_id = Uuid::new_v4();
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
+        let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
+
+        let resp = stream_turn_to_sse(
+            &system_ctx(&storage),
+            &state,
+            run_id,
+            conv_id,
+            RunOptions { push: false },
+            event_rx,
+            turn_rx,
+        )
+        .await;
+        // The client goes away after run_started; subscribe a live tail first.
+        let mut live = state
+            .run_broadcaster
+            .subscribe(&run_id)
+            .await
+            .expect("run is registered once the runner returns");
+        drop(resp);
+
+        for part in ["a", "b", "c"] {
+            // The runner must still be draining; a closed channel is the bug.
+            event_tx
+                .send(Token(part.into()))
+                .await
+                .unwrap_or_else(|_| panic!("runner stopped draining after the disconnect"));
+        }
+        drop(event_tx);
+        let _ = turn_tx.send(Ok(turn_result("abc")));
+
+        let mut tailed = vec![];
+        while let Some(event) = tokio::time::timeout(std::time::Duration::from_secs(5), live.recv())
+            .await
+            .expect("live tail stalled")
+            .ok()
+        {
+            tailed.push((event.sequence, event.event_type));
+        }
+        let expected: Vec<(i64, String)> = [(1, "token"), (2, "token"), (3, "token"), (4, "done")]
+            .into_iter()
+            .map(|(seq, kind)| (seq, kind.to_string()))
+            .collect();
+        assert_eq!(
+            tailed, expected,
+            "live tail sees every frame and the terminal"
+        );
+
+        let logged: Vec<(i64, String)> = event_log(&storage, &run_id.to_string())
+            .await
+            .into_iter()
+            .map(|(seq, kind, _)| (seq, kind))
+            .collect();
+        let mut all = vec![(0, "run_started".to_string())];
+        all.extend(expected);
+        assert_eq!(
+            logged, all,
+            "the event log has consecutive seq ids to the terminal"
+        );
     }
 
     #[tokio::test]

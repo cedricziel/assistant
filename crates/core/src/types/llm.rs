@@ -58,6 +58,8 @@ pub enum EmbeddingProviderKind {
     /// Voyage AI embeddings (default model: `voyage-3-lite`).
     /// Recommended by Anthropic for use alongside Claude.
     Voyage,
+    /// OpenRouter embeddings (default model: `openai/text-embedding-3-small`).
+    OpenRouter,
 }
 
 // ── Embedding config ──────────────────────────────────────────────────────────
@@ -83,8 +85,21 @@ pub struct EmbeddingConfig {
     /// Base URL override (uses provider-specific default if omitted).
     pub base_url: Option<String>,
     /// API key (also checked via provider-specific env vars:
-    /// `OPENAI_API_KEY`, `VOYAGE_API_KEY`).
+    /// `OPENAI_API_KEY`, `VOYAGE_API_KEY`; OpenRouter also reuses the
+    /// `[llm]` OpenRouter key).
     pub api_key: Option<Secret>,
+    /// OpenRouter-only settings (`[llm.embeddings.openrouter]`).
+    #[serde(default)]
+    pub openrouter: EmbeddingOpenRouterOptions,
+}
+
+/// `[llm.embeddings.openrouter]`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmbeddingOpenRouterOptions {
+    /// Provider routing for embedding requests, with the same keys as
+    /// `[llm.openrouter.provider]`.
+    pub provider: Option<OpenRouterRouting>,
 }
 
 // ── LLM config ────────────────────────────────────────────────────────────────
