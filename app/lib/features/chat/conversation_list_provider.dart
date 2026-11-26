@@ -11,6 +11,22 @@ import '../spaces/space_provider.dart';
 
 // -- Conversation list -------------------------------------------------------
 
+/// Orders conversations the way the server does: pinned first by `pinnedAt`
+/// (newest pin first), then everything by `updatedAt` (newest first).
+int compareConversations(ConversationListEntry a, ConversationListEntry b) {
+  final pinA = a.pinnedAt;
+  final pinB = b.pinnedAt;
+  if (pinA != null && pinB != null) {
+    final byPin = pinB.compareTo(pinA);
+    if (byPin != 0) return byPin;
+  } else if (pinA != null) {
+    return -1;
+  } else if (pinB != null) {
+    return 1;
+  }
+  return b.updatedAt.compareTo(a.updatedAt);
+}
+
 /// State for the conversation list.
 class ConversationListState {
   const ConversationListState({
@@ -160,7 +176,7 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     final updated =
         current.conversations.where((c) => !ids.contains(c.id)).toList()
           ..addAll(_pendingUpserts.values)
-          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+          ..sort(compareConversations);
     _pendingUpserts.clear();
     state = AsyncData(current.copyWith(conversations: updated));
   }
@@ -169,7 +185,7 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     final current = state.value ?? const ConversationListState();
     final updated = current.conversations.where((c) => c.id != conv.id).toList()
       ..insert(0, conv)
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      ..sort(compareConversations);
     state = AsyncData(current.copyWith(conversations: updated));
   }
 
@@ -223,6 +239,7 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
         title: conv.title,
         createdAt: conv.createdAt.toUtc(),
         updatedAt: conv.updatedAt.toUtc(),
+        pinnedAt: conv.pinnedAt?.toUtc(),
       ),
     );
   }

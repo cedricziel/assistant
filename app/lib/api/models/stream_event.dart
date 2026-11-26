@@ -72,12 +72,16 @@ class ConversationListEntry {
     required this.title,
     required this.createdAt,
     required this.updatedAt,
+    this.pinnedAt,
   });
 
   final String id;
   final String title;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// When the conversation was pinned, or `null` when it is not pinned.
+  final DateTime? pinnedAt;
 
   factory ConversationListEntry.fromJson(Map<String, dynamic> json) {
     final id = json['id'] as String?;
@@ -89,6 +93,10 @@ class ConversationListEntry {
       title: json['title'] as String? ?? 'Untitled',
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
+      pinnedAt: switch (json['pinned_at']) {
+        final String at => DateTime.parse(at),
+        _ => null,
+      },
     );
   }
 }
