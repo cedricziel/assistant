@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../../shared/platform/adaptive_dialog.dart';
 import 'chat_provider.dart';
+import 'conversation_row_actions.dart';
 
 /// Sidebar/drawer pane that shows the list of conversations.
 ///
@@ -103,8 +103,10 @@ class ConversationListPane extends ConsumerWidget {
           },
           onDelete: (id) {
             final title = items.where((i) => i.id == id).firstOrNull?.title;
-            return _confirmAndDelete(context, ref, id, title ?? '');
+            return confirmAndDeleteConversation(context, ref, id, title ?? '');
           },
+          onRequestActions: (request) =>
+              showConversationRowActions(context, ref, request),
         );
       },
     );
@@ -144,29 +146,5 @@ class ConversationListPane extends ConsumerWidget {
         const Divider(height: 8),
       ],
     );
-  }
-
-  /// Confirms, then deletes. Resolves `false` on decline or failure so the
-  /// row stays in the list.
-  Future<bool> _confirmAndDelete(
-    BuildContext context,
-    WidgetRef ref,
-    String id,
-    String title,
-  ) async {
-    final confirm = await showAdaptiveConfirmDialog(
-      context: context,
-      title: 'Delete conversation?',
-      content: '"$title" will be permanently deleted.',
-      confirmLabel: 'Delete',
-      isDestructive: true,
-    );
-    if (!confirm) return false;
-    try {
-      await ref.read(conversationListProvider.notifier).deleteConversation(id);
-      return true;
-    } catch (_) {
-      return false;
-    }
   }
 }
