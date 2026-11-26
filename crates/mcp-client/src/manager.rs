@@ -147,7 +147,7 @@ impl McpClientManager {
         tools_changed: &Arc<Notify>,
     ) -> Result<(McpClient, Vec<Tool>)> {
         let stale = StaleTools::waking(tools_changed.clone());
-        let client = match &entry.transport {
+        let mut client = match &entry.transport {
             McpTransportConfig::Stdio { command } => {
                 let resolved_env = resolve_env_vars(&entry.env);
 
@@ -216,6 +216,9 @@ impl McpClientManager {
                     })?
             }
         };
+        if let Some(secs) = entry.tool_timeout_secs {
+            client = client.with_tool_timeout(Duration::from_secs(secs));
+        }
 
         let tools = client
             .list_tools()
