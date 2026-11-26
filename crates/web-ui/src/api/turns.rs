@@ -2,7 +2,7 @@
 //!
 //! - `GET /api/conversations/{conversation_id}/turns/{turn_id}/status`
 //!   returns the authoritative server-side state of a single turn
-//!   (running, completed, errored, or unknown). The client polls this
+//!   (running, awaiting_input, completed, errored, or unknown). The client polls this
 //!   when it suspects a stream has stalled — replacing the byte-watchdog
 //!   driven cancellation heuristic with an explicit health probe.
 //!
@@ -16,6 +16,8 @@
 //!
 //! Spec: `openspec/changes/turn-status-endpoint/specs/turn-status-api/spec.md`
 
+use std::collections::HashSet;
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -25,7 +27,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use assistant_storage::ConversationEventStore as _;
+use assistant_storage::{ConversationEventRow, ConversationEventStore as _};
 
 use super::ApiState;
 use super::conversations::{caller_store, owned_conversation};
@@ -34,7 +36,7 @@ use crate::space::{Access, SpaceCtx};
 
 /// Closed enum of turn states surfaced by the status endpoint.
 ///
-/// Anything not in this set must round-trip to one of these four when
+/// Anything not in this set must round-trip to one of these five when
 /// serialised — the client's switch is exhaustive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -42,6 +44,9 @@ pub enum TurnState {
     /// The turn is being processed by the runtime (LLM in flight, tool
     /// invocation, subagent task — anything that hasn't terminated).
     Running,
+    /// The turn is suspended on an interaction (such as a tool approval) that
+    /// its owner has not answered yet.
+    AwaitingInput,
     /// The turn finished cleanly; a `done` event was persisted.
     Completed,
     /// The turn terminated with an `agent_error` event; a partial reply
@@ -175,15 +180,17 @@ async fn turn_status(
     let last_kind = last.event_type.clone();
     let last_at = last.created_at.to_rfc3339();
 
-    // Terminal rows decide the state, not the last row: events such as
-    // `suggestions` are persisted after `done`. Precedence, highest first:
-    // `errored` > `completed` > `running`. A later non-terminal state
-    // (`awaiting_input`) ranks below `completed` and above `running`.
+    // Which rows are present decides the state, not the last row: events such
+    // as `suggestions` are persisted after `done`, and `status` or
+    // `surface_update` after `interaction_requested`. Precedence, highest
+    // first: `errored` > `completed` > `awaiting_input` > `running`.
     let has_kind = |kind: &str| events.iter().any(|e| e.event_type == kind);
     let derived_state = if has_kind("agent_error") {
         TurnState::Errored
     } else if has_kind("done") {
         TurnState::Completed
+    } else if has_unresolved_interaction(&events) {
+        TurnState::AwaitingInput
     } else {
         TurnState::Running
     };
@@ -195,6 +202,26 @@ async fn turn_status(
         last_event_at: Some(last_at),
         last_event_kind: Some(last_kind),
     })
+}
+
+/// True when some `interaction_requested` row has no `interaction_resolved`
+/// row with the same `interaction_id`.
+fn has_unresolved_interaction(events: &[ConversationEventRow]) -> bool {
+    let id_of = |e: &ConversationEventRow| {
+        e.payload
+            .get("interaction_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+    };
+    let resolved: HashSet<String> = events
+        .iter()
+        .filter(|e| e.event_type == "interaction_resolved")
+        .filter_map(id_of)
+        .collect();
+    events
+        .iter()
+        .filter(|e| e.event_type == "interaction_requested")
+        .any(|e| id_of(e).is_none_or(|id| !resolved.contains(&id)))
 }
 
 /// True when the run's recorded events belong to `conversation_id`. A run with
@@ -517,6 +544,108 @@ mod tests {
         let body = body_json(resp.into_body()).await;
         assert_eq!(body["state"], "errored");
         assert_eq!(body["last_event_kind"], "suggestions");
+    }
+
+    /// Append `(kind, payload)` rows to a fresh run and return its status body.
+    async fn status_after(rows: &[(&str, serde_json::Value)]) -> serde_json::Value {
+        let (state, storage) = event_log_state().await;
+        let conv_id = seed_conversation(&storage).await;
+        let turn_id = Uuid::new_v4();
+        for (seq, (kind, payload)) in rows.iter().enumerate() {
+            storage
+                .conversation_event_store()
+                .append_event(
+                    &turn_id.to_string(),
+                    &conv_id.to_string(),
+                    seq as i64,
+                    kind,
+                    payload,
+                )
+                .await
+                .unwrap();
+        }
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(url(&conv_id, &turn_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        body_json(resp.into_body()).await
+    }
+
+    fn requested(id: &str) -> (&'static str, serde_json::Value) {
+        (
+            "interaction_requested",
+            serde_json::json!({"interaction_id": id}),
+        )
+    }
+
+    fn resolved(id: &str) -> (&'static str, serde_json::Value) {
+        (
+            "interaction_resolved",
+            serde_json::json!({"interaction_id": id}),
+        )
+    }
+
+    fn row(kind: &'static str) -> (&'static str, serde_json::Value) {
+        (kind, serde_json::json!({}))
+    }
+
+    /// An unanswered `interaction_requested` makes the turn `awaiting_input`.
+    #[tokio::test]
+    async fn returns_awaiting_input_while_an_interaction_is_unresolved() {
+        let body = status_after(&[row("run_started"), requested("i1")]).await;
+        assert_eq!(body["state"], "awaiting_input");
+        assert_eq!(body["last_event_kind"], "interaction_requested");
+    }
+
+    /// Presence decides, not recency: a later `status` or `surface_update` row
+    /// does not hide the pending interaction.
+    #[tokio::test]
+    async fn returns_awaiting_input_when_a_later_row_follows_the_request() {
+        let body = status_after(&[
+            row("run_started"),
+            requested("i1"),
+            row("status"),
+            row("surface_update"),
+        ])
+        .await;
+        assert_eq!(body["state"], "awaiting_input");
+        assert_eq!(body["last_event_kind"], "surface_update");
+    }
+
+    /// A matching `interaction_resolved` puts the turn back to `running`.
+    #[tokio::test]
+    async fn returns_running_once_the_interaction_is_resolved() {
+        let body = status_after(&[row("run_started"), requested("i1"), resolved("i1")]).await;
+        assert_eq!(body["state"], "running");
+        assert_eq!(body["last_event_kind"], "interaction_resolved");
+    }
+
+    /// With two interactions, one resolution is not enough.
+    #[tokio::test]
+    async fn returns_awaiting_input_while_any_of_several_interactions_is_open() {
+        let body = status_after(&[
+            row("run_started"),
+            requested("i1"),
+            requested("i2"),
+            resolved("i1"),
+        ])
+        .await;
+        assert_eq!(body["state"], "awaiting_input");
+    }
+
+    /// `errored` and `completed` outrank `awaiting_input`.
+    #[tokio::test]
+    async fn terminal_rows_outrank_awaiting_input() {
+        let body = status_after(&[requested("i1"), row("agent_error")]).await;
+        assert_eq!(body["state"], "errored");
+        let body = status_after(&[requested("i1"), row("done")]).await;
+        assert_eq!(body["state"], "completed");
     }
 
     /// A turn id that was never seeded → `unknown`. The endpoint returns 200,

@@ -19,6 +19,7 @@ Method | HTTP request | Description
 [**getConversation**](ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
 [**getMessageAudio**](ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it in the configured &#x60;[tts] format&#x60;.
 [**getTurnStatus**](ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
+[**listConversationInteractions**](ConversationsApi.md#listconversationinteractions) | **GET** /api/conversations/{conversation_id}/interactions | &#x60;GET /api/conversations/{conversation_id}/interactions&#x60;
 [**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list conversations, newest first.
 [**readMcpAppResource**](ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
 [**respondToInteraction**](ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
@@ -466,6 +467,53 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**TurnStatusResponse**](TurnStatusResponse.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **listConversationInteractions**
+> BuiltList<InteractionDetail> listConversationInteractions(conversationId, status, xSpaceId)
+
+`GET /api/conversations/{conversation_id}/interactions`
+
+The interactions of one of the caller's conversations, oldest first, as a bare array. `?status=pending` narrows it to those still waiting, which is how a client that opens a conversation finds a run to attach to.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String conversationId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation UUID
+final InteractionStatusView status = ; // InteractionStatusView | Only interactions in this state, such as `pending`.
+final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+
+try {
+    final response = api.listConversationInteractions(conversationId, status, xSpaceId);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->listConversationInteractions: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **conversationId** | **String**| Conversation UUID | 
+ **status** | [**InteractionStatusView**](.md)| Only interactions in this state, such as `pending`. | [optional] 
+ **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
+
+### Return type
+
+[**BuiltList&lt;InteractionDetail&gt;**](InteractionDetail.md)
 
 ### Authorization
 

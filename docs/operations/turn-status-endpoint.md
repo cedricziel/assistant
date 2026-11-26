@@ -19,7 +19,7 @@ the `X-Run-Id` response header on the streaming send endpoint).
 {
   "turn_id": "8c1f5e0e-…",
   "conversation_id": "0a2b…",
-  "state": "running" | "completed" | "errored" | "unknown",
+  "state": "running" | "awaiting_input" | "completed" | "errored" | "unknown",
   "last_event_at": "2026-05-18T07:30:00Z" | null,
   "last_event_kind": "token" | "tool_result" | "done" | "agent_error" | … | null
 }
@@ -69,14 +69,17 @@ turn, not from the kind of the last row:
 
 - any `agent_error` row → `errored`
 - else any `done` row → `completed`
+- else any `interaction_requested` row without an `interaction_resolved` row
+  of the same `interaction_id` → `awaiting_input`
 - else → `running`
 - no events for the turn id → `unknown`
 - conversation id on the first row doesn't match the path → `unknown`
   (guards against turn-id collision across conversations)
 
-Terminal rows take precedence over non-terminal ones. A state added later for
-a non-terminal condition (such as `awaiting_input`) ranks below `completed`
-and above `running`: `errored` > `completed` > `awaiting_input` > `running`.
+Terminal rows take precedence over non-terminal ones:
+`errored` > `completed` > `awaiting_input` > `running`. `awaiting_input` depends
+on which rows exist, not on the last one, so a later `status` or
+`surface_update` row does not hide a pending interaction.
 
 `last_event_kind` and `last_event_at` describe the most recent row, and
 `done` is no longer always the last frame of a run. A completed turn can end

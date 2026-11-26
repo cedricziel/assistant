@@ -307,6 +307,10 @@ pub fn api_router() -> Router<ApiState> {
         )
         .merge(tool_permission_rules::tool_permission_rules_router())
         .route(
+            "/conversations/{conversation_id}/interactions",
+            get(interactions::list_conversation_interactions),
+        )
+        .route(
             "/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond",
             post(interactions::respond_to_interaction)
                 .layer(DefaultBodyLimit::max(interactions::MAX_RESPOND_BODY_BYTES)),

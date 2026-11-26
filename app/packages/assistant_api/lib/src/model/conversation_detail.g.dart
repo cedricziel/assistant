@@ -12,6 +12,8 @@ class _$ConversationDetail extends ConversationDetail {
   @override
   final String id;
   @override
+  final BuiltList<InteractionDetail> interactions;
+  @override
   final BuiltList<MessageSummary> messages;
   @override
   final BuiltList<SurfaceSummary> surfaces;
@@ -27,6 +29,7 @@ class _$ConversationDetail extends ConversationDetail {
   _$ConversationDetail._(
       {required this.createdAt,
       required this.id,
+      required this.interactions,
       required this.messages,
       required this.surfaces,
       required this.title,
@@ -47,6 +50,7 @@ class _$ConversationDetail extends ConversationDetail {
     return other is ConversationDetail &&
         createdAt == other.createdAt &&
         id == other.id &&
+        interactions == other.interactions &&
         messages == other.messages &&
         surfaces == other.surfaces &&
         title == other.title &&
@@ -58,6 +62,7 @@ class _$ConversationDetail extends ConversationDetail {
     var _$hash = 0;
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
+    _$hash = $jc(_$hash, interactions.hashCode);
     _$hash = $jc(_$hash, messages.hashCode);
     _$hash = $jc(_$hash, surfaces.hashCode);
     _$hash = $jc(_$hash, title.hashCode);
@@ -71,6 +76,7 @@ class _$ConversationDetail extends ConversationDetail {
     return (newBuiltValueToStringHelper(r'ConversationDetail')
           ..add('createdAt', createdAt)
           ..add('id', id)
+          ..add('interactions', interactions)
           ..add('messages', messages)
           ..add('surfaces', surfaces)
           ..add('title', title)
@@ -90,6 +96,12 @@ class ConversationDetailBuilder
   String? _id;
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
+
+  ListBuilder<InteractionDetail>? _interactions;
+  ListBuilder<InteractionDetail> get interactions =>
+      _$this._interactions ??= ListBuilder<InteractionDetail>();
+  set interactions(ListBuilder<InteractionDetail>? interactions) =>
+      _$this._interactions = interactions;
 
   ListBuilder<MessageSummary>? _messages;
   ListBuilder<MessageSummary> get messages =>
@@ -120,6 +132,7 @@ class ConversationDetailBuilder
     if ($v != null) {
       _createdAt = $v.createdAt;
       _id = $v.id;
+      _interactions = $v.interactions.toBuilder();
       _messages = $v.messages.toBuilder();
       _surfaces = $v.surfaces.toBuilder();
       _title = $v.title;
@@ -151,6 +164,7 @@ class ConversationDetailBuilder
                 createdAt, r'ConversationDetail', 'createdAt'),
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'ConversationDetail', 'id'),
+            interactions: interactions.build(),
             messages: messages.build(),
             surfaces: surfaces.build(),
             title: BuiltValueNullFieldError.checkNotNull(
@@ -161,6 +175,8 @@ class ConversationDetailBuilder
     } catch (_) {
       late String _$failedField;
       try {
+        _$failedField = 'interactions';
+        interactions.build();
         _$failedField = 'messages';
         messages.build();
         _$failedField = 'surfaces';
