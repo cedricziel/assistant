@@ -12102,6 +12102,31 @@
           }
         }
       },
+      "MessageFeedbackSummary": {
+        "type": "object",
+        "description": "The calling user's feedback on a message, as embedded in history.",
+        "required": [
+          "rating",
+          "updated_at"
+        ],
+        "properties": {
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional free-text comment. Omitted when none was given."
+          },
+          "rating": {
+            "type": "string",
+            "description": "`\"positive\"` or `\"negative\"`."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "MessageSummary": {
         "type": "object",
         "description": "A single message in a conversation.",
@@ -12127,6 +12152,17 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "feedback": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageFeedbackSummary",
+                "description": "The calling user's verdict on this message. Omitted when the caller has\nnot rated it."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "finish_reason": {
             "type": [

@@ -295,6 +295,7 @@ Class | Method | HTTP request | Description
  - [MemberEntry](doc/MemberEntry.md)
  - [Message](doc/Message.md)
  - [MessageFeedbackResponse](doc/MessageFeedbackResponse.md)
+ - [MessageFeedbackSummary](doc/MessageFeedbackSummary.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
  - [MutualTlsSecurityScheme](doc/MutualTlsSecurityScheme.md)

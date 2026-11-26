@@ -89,6 +89,7 @@ doc/MemberEntry.md
 doc/MembersApi.md
 doc/Message.md
 doc/MessageFeedbackResponse.md
+doc/MessageFeedbackSummary.md
 doc/MessageSummary.md
 doc/MessagesApi.md
 doc/ModelPart.md
@@ -313,6 +314,7 @@ lib/src/model/list_tasks_response.dart
 lib/src/model/member_entry.dart
 lib/src/model/message.dart
 lib/src/model/message_feedback_response.dart
+lib/src/model/message_feedback_summary.dart
 lib/src/model/message_summary.dart
 lib/src/model/model_part.dart
 lib/src/model/mutual_tls_security_scheme.dart

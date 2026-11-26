@@ -42,8 +42,8 @@ use crate::a2a::handlers;
 use crate::api::attachments::AttachmentMetaResponse;
 use crate::api::capabilities::ServerCapabilities;
 use crate::api::conversations::{
-    ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
-    ToolCallSummary, UpdateConversationRequest,
+    ConversationDetail, ConversationSummary, CreateConversationRequest, MessageFeedbackSummary,
+    MessageSummary, ToolCallSummary, UpdateConversationRequest,
 };
 use crate::api::messages::{
     QuickMessageRequest, QuickMessageResponse, SendMessageRequest as ApiSendMessageRequest,
@@ -495,6 +495,7 @@ pub struct ApiErrorResponse {
             StreamRunEventsQuery,
             ConversationDetail,
             MessageSummary,
+            MessageFeedbackSummary,
             ToolCallSummary,
             CreateConversationRequest,
             UpdateConversationRequest,
