@@ -7,13 +7,13 @@ library;
 
 // export 'src/bodies/subagent_body.dart'; // slot: chat-element-library 7b
 // export 'src/bodies/thinking_body.dart'; // slot: chat-element-library 7a
-// export 'src/bodies/tool_call_body.dart'; // slot: chat-element-library 6
-// export 'src/bodies/tool_status_icon.dart'; // slot: chat-element-library 6
 // export 'src/branch_picker.dart'; // slot: message-branching 9
 // export 'src/code/code_block.dart'; // slot: chat-a11y-and-code-blocks C4
 // export 'src/composer/attachment_tray.dart'; // slot: chat-element-library 11b
 // export 'src/composer/composer.dart'; // slot: chat-element-library 11a
 // export 'src/composer/composer_voice_button.dart'; // slot: chat-element-library 11b
+export 'src/bodies/tool_call_body.dart';
+export 'src/bodies/tool_status_icon.dart';
 export 'src/branch_picker.dart';
 export 'src/code/code_block.dart';
 export 'src/composer/queued_message_bubble.dart';
@@ -30,6 +30,7 @@ export 'src/message_actions.dart';
 export 'src/message_editor.dart';
 export 'src/registry.dart';
 export 'src/scopes/thread_density_scope.dart';
+export 'src/scopes/tool_result_renderer_scope.dart';
 export 'src/suggestions/starter_prompts.dart';
 export 'src/suggestions/suggestion_chips.dart';
 export 'src/theme/assistant_ui_colors.dart';
@@ -39,6 +40,7 @@ export 'src/thread/thread_empty_state.dart';
 export 'src/thread/thread_error_banner.dart';
 export 'src/timeline/timeline_entry_shell.dart';
 export 'src/timing/message_timing_indicator.dart';
+export 'src/tool_results/generic_tool_result_view.dart';
 export 'src/turn/turn_progress_card.dart';
 export 'src/turn/turn_status_label.dart';
 
@@ -49,8 +51,6 @@ export 'src/turn/turn_status_label.dart';
 // export 'src/tool_results/compact_expandable.dart'; // slot: tool-result-renderers C2
 
 // export 'src/tool_results/data_table_result_view.dart'; // slot: tool-result-renderers C6
-
-// export 'src/tool_results/generic_tool_result_view.dart'; // slot: chat-element-library 6
 
 // export 'src/tool_results/json_tree_view.dart'; // slot: tool-result-renderers C2b
 
