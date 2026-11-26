@@ -225,6 +225,30 @@ void main() {
     });
   });
 
+  testWidgets('build installs as the scope resolver', (tester) async {
+    final ToolResultBuilder resolve = registry.build;
+    Widget? built;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ToolResultRendererScope(
+            resolve: resolve,
+            child: Builder(
+              builder: (context) {
+                built = ToolResultRendererScope.of(context)
+                    ?.call(context, _record());
+                return built ?? const SizedBox();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('fake full v ok'), findsOneWidget);
+  });
+
   test('defaultToolResultRenderers is empty until the views land', () {
     expect(defaultToolResultRenderers(), isEmpty);
   });
