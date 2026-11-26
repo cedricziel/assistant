@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 
 use assistant_core::llm::call_context::LlmCallContext;
 use assistant_core::types::llm::{
-    OpenRouterCache, OpenRouterCacheTtl, OpenRouterPdfEngine, OpenRouterReasoning,
-    OpenRouterRouting, OpenRouterWebSearch,
+    OpenRouterCache, OpenRouterCacheTtl, OpenRouterImageConfig, OpenRouterPdfEngine,
+    OpenRouterReasoning, OpenRouterRouting, OpenRouterWebSearch,
 };
 use assistant_core::{
     ChatHistoryMessage, ChatOptions, ContentBlock, ResponseFormat, ToolChoice, ToolSpec,
@@ -26,6 +26,8 @@ pub struct RequestSettings {
     pub cache: OpenRouterCache,
     pub web_search: OpenRouterWebSearch,
     pub pdf_engine: Option<OpenRouterPdfEngine>,
+    pub image_output: bool,
+    pub image_config: Option<OpenRouterImageConfig>,
 }
 
 /// OpenRouter's `web` plugin with the configured options, when enabled.
@@ -114,6 +116,15 @@ pub fn build_chat_request(
             .search_context_size
             .filter(|_| settings.web_search.enabled)
             .map(|size| json!({ "search_context_size": size })),
+        modalities: if settings.image_output {
+            vec!["image", "text"]
+        } else {
+            Vec::new()
+        },
+        image_config: settings
+            .image_config
+            .clone()
+            .filter(|_| settings.image_output),
     }
 }
 

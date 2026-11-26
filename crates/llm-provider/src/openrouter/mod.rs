@@ -12,6 +12,7 @@ mod citations;
 mod client;
 mod embedder;
 pub(crate) mod errors;
+mod media;
 mod reasoning;
 mod request;
 mod stream;
@@ -30,7 +31,7 @@ use assistant_core::{
 
 use std::sync::Arc;
 
-use self::catalog::OpenRouterCatalog;
+use self::catalog::{OpenRouterCatalog, Requirements};
 use self::client::OpenRouterClient;
 pub use self::embedder::OpenRouterEmbedder;
 use self::request::{ModelInputs, RequestSettings, apply_options, build_chat_request};
@@ -137,7 +138,10 @@ impl OpenRouterProvider {
                 cfg.timeout_secs,
                 cfg.model.clone(),
                 cfg.openrouter.provider.clone(),
-                cfg.openrouter.reasoning.as_ref().and_then(|r| r.effort),
+                Requirements {
+                    effort: cfg.openrouter.reasoning.as_ref().and_then(|r| r.effort),
+                    image_output: cfg.openrouter.image_output,
+                },
                 clock,
             )?,
             client: OpenRouterClient::new(
@@ -159,6 +163,8 @@ impl OpenRouterProvider {
                 cache: cfg.openrouter.cache.clone(),
                 web_search: cfg.openrouter.web_search.clone(),
                 pdf_engine: cfg.openrouter.pdf_engine,
+                image_output: cfg.openrouter.image_output,
+                image_config: cfg.openrouter.image_config.clone(),
             },
             base_url,
         })
@@ -2710,6 +2716,193 @@ mod tests {
         let provider = make_provider(&server.uri());
         let result = provider.chat("sys", &[], &[]).await;
         assert!(result.is_err(), "should propagate API error");
+    }
+
+    // ── Wiremock: chat image output ─────────────────────────────────────
+
+    fn image_output(
+        config: Option<assistant_core::types::llm::OpenRouterImageConfig>,
+    ) -> OpenRouterOptions {
+        OpenRouterOptions {
+            image_output: true,
+            image_config: config,
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    async fn image_model_provider(server: &MockServer, outputs: &[&str]) -> OpenRouterProvider {
+        let mut model = catalog_model(&["text", "image"], &["tools"]);
+        model["architecture"]["output_modalities"] = json!(outputs);
+        mount_catalog(
+            server,
+            model,
+            json!([endpoint("Google", "google-vertex", 200_000)]),
+        )
+        .await;
+        provider_with(
+            &server.uri(),
+            image_output(Some(assistant_core::types::llm::OpenRouterImageConfig {
+                aspect_ratio: Some("16:9".into()),
+                image_size: Some("2K".into()),
+            })),
+        )
+    }
+
+    fn png_data_uri(data: &[u8]) -> String {
+        use base64::Engine as _;
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(data)
+        )
+    }
+
+    fn answer_with_images(urls: &[&str]) -> Value {
+        let mut body = chat_response("Here you go");
+        body["choices"][0]["message"]["images"] = Value::Array(
+            urls.iter()
+                .map(|u| json!({"type": "image_url", "image_url": {"url": u}}))
+                .collect(),
+        );
+        body
+    }
+
+    fn media(response: LlmResponse) -> Vec<(String, Vec<u8>)> {
+        let meta = match response {
+            LlmResponse::FinalAnswer(_, meta) => meta,
+            other => panic!("expected FinalAnswer, got {other:?}"),
+        };
+        meta.media
+            .into_iter()
+            .map(|m| {
+                assert_eq!(m.kind, assistant_core::MediaKind::Image);
+                (m.mime, m.data.to_vec())
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn image_output_sends_modalities_and_image_config() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = image_model_provider(&server, &["image", "text"]).await;
+
+        provider.chat("sys", &[], &[]).await.unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(body["modalities"], json!(["image", "text"]));
+        assert_eq!(
+            body["image_config"],
+            json!({"aspect_ratio": "16:9", "image_size": "2K"})
+        );
+    }
+
+    #[tokio::test]
+    async fn no_modalities_without_image_output() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+
+        provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &[], &[])
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert!(body.get("modalities").is_none(), "{body}");
+        assert!(body.get("image_config").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn image_output_on_a_text_only_model_fails_every_call() {
+        let server = MockServer::start().await;
+        let provider = image_model_provider(&server, &["text"]).await;
+
+        for _ in 0..2 {
+            let err = provider
+                .chat("sys", &[], &[])
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(MODEL), "names the model: {err}");
+            assert!(err.contains("image_output"), "names the setting: {err}");
+        }
+        assert_eq!(request_count(&server).await, 0, "nothing is sent upstream");
+    }
+
+    #[tokio::test]
+    async fn data_uri_images_become_media() {
+        let server = MockServer::start().await;
+        mount_once(&server, answer_with_images(&[&png_data_uri(b"png-bytes")])).await;
+        let provider = image_model_provider(&server, &["image", "text"]).await;
+
+        let response = provider.chat("sys", &[], &[]).await.unwrap();
+
+        assert_eq!(
+            media(response),
+            [("image/png".to_string(), b"png-bytes".to_vec())]
+        );
+    }
+
+    #[tokio::test]
+    async fn image_urls_are_downloaded() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/generated/cat.webp"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(b"webp-bytes".to_vec(), "image/webp"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let url = format!("{}/generated/cat.webp", server.uri());
+        mount_once(&server, answer_with_images(&[&url])).await;
+        let provider = image_model_provider(&server, &["image", "text"]).await;
+
+        let response = provider.chat("sys", &[], &[]).await.unwrap();
+
+        assert_eq!(
+            media(response),
+            [("image/webp".to_string(), b"webp-bytes".to_vec())]
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_images_from_deltas_and_the_final_message_are_not_duplicated() {
+        let server = MockServer::start().await;
+        let first = png_data_uri(b"first");
+        let second = png_data_uri(b"second");
+        let image = |url: &str| json!({"type": "image_url", "image_url": {"url": url}});
+        let chunks = [
+            json!({"choices": [{"delta": {"content": "Here", "images": [image(&first)]}}]}),
+            json!({"choices": [{
+                "delta": {"content": " you go"},
+                "message": {"images": [image(&first), image(&second)]},
+                "finish_reason": "stop",
+            }]}),
+        ];
+        let sse: String = chunks
+            .iter()
+            .map(|c| format!("data: {c}\n\n"))
+            .chain(["data: [DONE]\n\n".to_string()])
+            .collect();
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(sse, "text/event-stream"))
+            .mount(&server)
+            .await;
+        let provider = image_model_provider(&server, &["image", "text"]).await;
+
+        let response = provider
+            .chat_streaming("sys", &[], &[], None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            media(response),
+            [
+                ("image/png".to_string(), b"first".to_vec()),
+                ("image/png".to_string(), b"second".to_vec()),
+            ]
+        );
     }
 
     // ── Live integration test ───────────────────────────────────────────

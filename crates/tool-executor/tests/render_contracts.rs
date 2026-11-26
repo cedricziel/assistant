@@ -6,9 +6,13 @@ use std::collections::HashMap;
 use assistant_core::types::conversation::{ExecutionContext, Interface};
 use assistant_core::{ToolHandler, ToolOutput};
 use assistant_tool_executor::builtins::bash::BashHandler;
+use assistant_tool_executor::builtins::file_read::FileReadHandler;
+use assistant_tool_executor::builtins::plan_update::PlanUpdateHandler;
+use assistant_tool_executor::builtins::web_fetch::WebFetchHandler;
 use assistant_tool_executor::builtins::web_search::WebSearchHandler;
 use serde_json::{Value, json};
-use wiremock::matchers::method;
+use tempfile::TempDir;
+use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn ctx() -> ExecutionContext {
@@ -193,4 +197,320 @@ async fn web_search_empty_results_publish_an_empty_list() {
     assert!(out.success);
     assert_eq!(data["results"], json!([]));
     assert_eq!(data["query"], "nothing");
+}
+
+// -- web-fetch ---------------------------------------------------------------
+
+async fn fetch(server: &MockServer, route: &str) -> (WebFetchHandler, ToolOutput) {
+    let handler = WebFetchHandler::new();
+    let out = handler
+        .run(
+            params(&[("url", json!(format!("{}{route}", server.uri())))]),
+            &ctx(),
+        )
+        .await
+        .unwrap();
+    (handler, out)
+}
+
+#[tokio::test]
+async fn web_fetch_publishes_link_preview_data() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/page"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            format!(
+                "<html><head><title>  Hello page </title></head><body><p>{}</p></body></html>",
+                "word ".repeat(200)
+            ),
+            "text/html; charset=utf-8",
+        ))
+        .mount(&server)
+        .await;
+    let (handler, out) = fetch(&server, "/page").await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(data["kind"], "link_preview");
+    assert_eq!(data["url"], format!("{}/page", server.uri()));
+    assert_eq!(data["final_url"], format!("{}/page", server.uri()));
+    assert_eq!(data["status"], 200);
+    assert_eq!(data["title"], "Hello page");
+    assert_eq!(data["content_type"], "text/html; charset=utf-8");
+    let excerpt = data["excerpt"].as_str().unwrap();
+    assert!(excerpt.starts_with("word word"));
+    assert!(excerpt.chars().count() <= 280, "excerpt is too long");
+}
+
+#[tokio::test]
+async fn web_fetch_caps_the_title_at_200_chars() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+            "<html><head><title>{}</title></head><body>x</body></html>",
+            "é".repeat(500)
+        )))
+        .mount(&server)
+        .await;
+    let (handler, out) = fetch(&server, "/").await;
+    let data = validated_data(&handler, &out);
+    assert_eq!(data["title"].as_str().unwrap().chars().count(), 200);
+}
+
+#[tokio::test]
+async fn web_fetch_redirect_reports_both_urls() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/old"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/new"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/new"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<p>moved</p>"))
+        .mount(&server)
+        .await;
+    let (handler, out) = fetch(&server, "/old").await;
+    let data = validated_data(&handler, &out);
+    assert_eq!(data["url"], format!("{}/old", server.uri()));
+    assert_eq!(data["final_url"], format!("{}/new", server.uri()));
+    assert_eq!(data["status"], 200);
+}
+
+#[tokio::test]
+async fn web_fetch_404_is_an_error_with_link_preview_data() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("nope"))
+        .mount(&server)
+        .await;
+    let (handler, out) = fetch(&server, "/missing").await;
+    let data = validated_data(&handler, &out);
+    assert!(!out.success, "a 404 must be an error");
+    assert_eq!(data["kind"], "link_preview");
+    assert_eq!(data["status"], 404);
+    assert_eq!(data["final_url"], format!("{}/missing", server.uri()));
+    assert!(
+        data.get("excerpt").is_none(),
+        "no excerpt for an error page"
+    );
+}
+
+// -- file-read ---------------------------------------------------------------
+
+async fn read_file(
+    name: &str,
+    content: &str,
+    limit: Option<u64>,
+) -> (FileReadHandler, ToolOutput, TempDir) {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join(name);
+    tokio::fs::write(&file, content).await.unwrap();
+    let handler =
+        FileReadHandler::new().with_extra_roots(vec![dir.path().to_string_lossy().into_owned()]);
+    let mut pairs = vec![("path", json!(file.to_string_lossy()))];
+    if let Some(l) = limit {
+        pairs.push(("limit", json!(l)));
+    }
+    let out = handler.run(params(&pairs), &ctx()).await.unwrap();
+    (handler, out, dir)
+}
+
+#[tokio::test]
+async fn file_read_publishes_code_file_data() {
+    let (handler, out, dir) = read_file("main.rs", "fn main() {}\n", None).await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(data["kind"], "code_file");
+    assert_eq!(
+        data["path"],
+        dir.path().join("main.rs").to_string_lossy().as_ref()
+    );
+    assert_eq!(data["language"], "rust");
+    assert_eq!(data["content"], "fn main() {}");
+    assert_eq!(data["truncated"], false);
+    assert_eq!(data["total_chars"], 13);
+}
+
+#[tokio::test]
+async fn file_read_unknown_extension_has_no_language() {
+    let (handler, out, _dir) = read_file("notes.xyz", "hello", None).await;
+    let data = validated_data(&handler, &out);
+    assert!(data.get("language").is_none());
+}
+
+#[tokio::test]
+async fn file_read_over_limit_is_truncated() {
+    let (handler, out, _dir) = read_file("big.txt", &"a".repeat(500), Some(100)).await;
+    let data = validated_data(&handler, &out);
+    assert_eq!(data["truncated"], true);
+    assert_eq!(data["content"].as_str().unwrap().chars().count(), 100);
+    assert_eq!(data["total_chars"], 500);
+    assert!(
+        out.content
+            .contains("[Content truncated at 100 characters]")
+    );
+}
+
+#[tokio::test]
+async fn file_read_huge_limit_stays_within_the_render_budget() {
+    let (handler, out, _dir) = read_file("big.txt", &"é".repeat(100_000), Some(1_000_000)).await;
+    let data = validated_data(&handler, &out);
+    let content = data["content"].as_str().unwrap();
+    assert!(
+        content.len() <= 24 * 1024,
+        "content is {} bytes",
+        content.len()
+    );
+    assert!(!content.contains('\u{fffd}'));
+    assert_eq!(data["truncated"], true);
+    assert_eq!(data["total_chars"], 100_000);
+    assert!(
+        out.content.matches('é').count() == 100_000,
+        "the observation must still honour the limit"
+    );
+}
+
+// -- plan-update -------------------------------------------------------------
+
+async fn run_plan(args: &[(&str, Value)]) -> (PlanUpdateHandler, ToolOutput) {
+    let handler = PlanUpdateHandler::new();
+    let out = handler.run(params(args), &ctx()).await.unwrap();
+    (handler, out)
+}
+
+fn steps(statuses: &[&str]) -> Value {
+    Value::Array(
+        statuses
+            .iter()
+            .enumerate()
+            .map(|(i, s)| json!({"title": format!("Step {i}"), "status": s}))
+            .collect(),
+    )
+}
+
+#[tokio::test]
+async fn plan_update_publishes_plan_data() {
+    let (handler, out) = run_plan(&[
+        ("title", json!("Ship it")),
+        (
+            "steps",
+            steps(&[
+                "completed",
+                "completed",
+                "completed",
+                "in_progress",
+                "pending",
+            ]),
+        ),
+    ])
+    .await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(out.content, "Plan updated: 3/5 steps completed");
+    assert_eq!(data["kind"], "plan");
+    assert_eq!(data["title"], "Ship it");
+    assert_eq!(data["steps"].as_array().unwrap().len(), 5);
+    assert_eq!(data["steps"][3]["status"], "in_progress");
+}
+
+#[tokio::test]
+async fn plan_update_without_title_omits_it() {
+    let (handler, out) = run_plan(&[("steps", steps(&["pending"]))]).await;
+    let data = validated_data(&handler, &out);
+    assert!(data.get("title").is_none());
+}
+
+#[tokio::test]
+async fn plan_update_accepts_an_empty_plan() {
+    let (handler, out) = run_plan(&[("steps", json!([]))]).await;
+    let data = validated_data(&handler, &out);
+    assert!(out.success);
+    assert_eq!(out.content, "Plan updated: 0/0 steps completed");
+    assert_eq!(data["steps"], json!([]));
+}
+
+#[tokio::test]
+async fn plan_update_rejects_an_unknown_status() {
+    let (_, out) = run_plan(&[("steps", steps(&["done"]))]).await;
+    assert!(!out.success);
+    assert!(out.data.is_none());
+    assert!(
+        out.content.contains("status"),
+        "error should name the field: {}",
+        out.content
+    );
+}
+
+#[tokio::test]
+async fn plan_update_rejects_missing_or_malformed_steps() {
+    for args in [
+        vec![],
+        vec![("steps", json!("nope"))],
+        vec![("steps", json!([{"title": "no status"}]))],
+        vec![("steps", json!([{"status": "pending"}]))],
+        vec![("title", json!(5)), ("steps", json!([]))],
+    ] {
+        let (_, out) = run_plan(&args).await;
+        assert!(!out.success, "{args:?} should be rejected");
+        assert!(out.data.is_none());
+    }
+}
+
+#[tokio::test]
+async fn plan_update_enforces_the_size_budgets() {
+    let too_many = steps(&vec!["pending"; 51]);
+    let long_step = json!([{"title": "x".repeat(201), "status": "pending"}]);
+    for (args, field) in [
+        (vec![("steps", too_many)], "steps"),
+        (vec![("steps", long_step)], "title"),
+        (
+            vec![("title", json!("y".repeat(121))), ("steps", json!([]))],
+            "title",
+        ),
+    ] {
+        let (_, out) = run_plan(&args).await;
+        assert!(!out.success, "{field} budget violation must be rejected");
+        assert!(out.data.is_none());
+        assert!(out.content.contains(field), "{}", out.content);
+    }
+}
+
+#[tokio::test]
+async fn plan_update_accepts_the_budget_limits() {
+    let max_steps: Vec<Value> = (0..50)
+        .map(|_| json!({"title": "x".repeat(200), "status": "skipped"}))
+        .collect();
+    let (handler, out) = run_plan(&[
+        ("title", json!("y".repeat(120))),
+        ("steps", Value::Array(max_steps)),
+    ])
+    .await;
+    let data = validated_data(&handler, &out);
+    let size = serde_json::to_vec(&data).unwrap().len();
+    assert!(size < 32 * 1024, "plan data is {size} bytes");
+}
+
+#[tokio::test]
+async fn plan_update_is_registered_by_the_executor() {
+    use std::sync::Arc;
+
+    use assistant_core::types::agent::OrgConfig;
+    use assistant_llm_provider::ScriptedLlmProvider;
+    use assistant_storage::StorageLayer;
+    use assistant_storage::registry::SkillRegistry;
+    use assistant_tool_executor::ToolExecutor;
+
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let executor = ToolExecutor::new(
+        storage,
+        Arc::new(ScriptedLlmProvider::new()),
+        registry,
+        Arc::new(OrgConfig::default()),
+    );
+    assert!(executor.handler("plan-update").is_some());
+    assert!(
+        executor.to_specs().iter().any(|s| s.name == "plan-update"),
+        "plan-update missing from tool definitions"
+    );
 }

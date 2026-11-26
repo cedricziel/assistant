@@ -1,5 +1,6 @@
 import { test, expect, Page } from "@playwright/test";
 
+import { enableAccessibility } from "./support/flutter";
 import { mockEverything } from "./support/integration-mocks";
 
 /**
@@ -428,9 +429,7 @@ test.describe("Authenticated pages", () => {
     // Flutter builds its semantics tree only after the (off-screen)
     // accessibility placeholder is activated; the tile then shows up as a
     // button whose label holds its text.
-    await page
-      .getByRole("button", { name: "Enable accessibility" })
-      .evaluate((el) => (el as HTMLElement).click());
+    await enableAccessibility(page);
     await page
       .getByRole("button", { name: /Linear/ })
       .first()
