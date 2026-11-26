@@ -150,6 +150,11 @@ pub async fn send_message(
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
     };
+    let events = TurnEvents {
+        rx: event_rx,
+        sink: event_tx.downgrade(),
+        orchestrator: orchestrator.clone(),
+    };
     orchestrator.register_token_sink(conv_id, event_tx).await;
     let user_attachment_ids = body.attachment_ids;
     // Use `run_id` as the orchestrator's `request_id` so external cancel
@@ -179,7 +184,7 @@ pub async fn send_message(
         run_id,
         conv_id,
         RunOptions { push: true },
-        event_rx,
+        events,
         turn_result_rx,
     )
     .await
@@ -192,13 +197,26 @@ pub(crate) struct RunOptions {
     pub push: bool,
 }
 
+/// The orchestrator events of one turn, plus what the runner needs to release
+/// the turn's token sink when the turn ends before a worker ever consumed it.
+pub(crate) struct TurnEvents {
+    /// Receiving end of the sink registered with the orchestrator.
+    pub rx: mpsc::Receiver<OrchestratorEvent>,
+    /// Weak handle to the registered sink. It must not keep `rx` open: a
+    /// worker drops the sink when its turn ends, which closes the stream.
+    pub sink: mpsc::WeakSender<OrchestratorEvent>,
+    pub orchestrator: std::sync::Arc<assistant_runtime::Orchestrator>,
+}
+
 /// Drive one turn to its SSE response: emit `run_started` (sequence 0), forward
 /// orchestrator events as SSE frames while persisting them to the durable run
 /// log and the live broadcaster, then emit the terminal frame (`done`, or
 /// `agent_error` for a cancelled or failed turn) and send the completion push.
 ///
-/// The caller has already registered the token sink behind `event_rx` and
-/// submitted the turn whose outcome arrives on `turn_result_rx`. The returned response
+/// The caller has already registered the token sink behind `events` and
+/// submitted the turn whose outcome arrives on `turn_result_rx`. A turn that is
+/// cancelled before any worker claims it ends the stream at once: no worker
+/// will ever consume its sink, so the runner does not wait for it to close. The returned response
 /// carries the run id in `X-Run-Id` for clients that drop the stream before
 /// `run_started` arrives.
 pub(crate) async fn stream_turn_to_sse(
@@ -207,9 +225,16 @@ pub(crate) async fn stream_turn_to_sse(
     run_id: Uuid,
     conv_id: Uuid,
     opts: RunOptions,
-    mut event_rx: mpsc::Receiver<OrchestratorEvent>,
-    turn_result_rx: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+    events: TurnEvents,
+    mut turn_result_rx: tokio::sync::oneshot::Receiver<
+        anyhow::Result<assistant_runtime::TurnResult>,
+    >,
 ) -> Response {
+    let TurnEvents {
+        rx: mut event_rx,
+        sink,
+        orchestrator,
+    } = events;
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
     let push_dispatcher_for_sse = state.push_dispatcher.clone().filter(|_| opts.push);
@@ -258,7 +283,33 @@ pub(crate) async fn stream_turn_to_sse(
         let mut thinking_token_count: usize = 0;
         const THINKING_BATCH_SIZE: usize = 20;
 
-        while let Some(orch_event) = event_rx.recv().await {
+        // The turn's outcome, once it arrived before `event_rx` closed.
+        let mut early_result = None;
+        let mut cancelled_early = false;
+        loop {
+            // Events first (`biased`), so tokens buffered ahead of the result
+            // are never dropped. A normal turn's sink closes after its result,
+            // so keep draining to the close. A cancel before claim leaves the
+            // sink registered and open: only drain what is buffered.
+            let next = if cancelled_early {
+                event_rx.try_recv().ok()
+            } else if early_result.is_some() {
+                event_rx.recv().await
+            } else {
+                tokio::select! {
+                    biased;
+                    event = event_rx.recv() => event,
+                    result = &mut turn_result_rx => {
+                        cancelled_early = matches!(
+                            &result,
+                            Ok(Err(e)) if e.to_string().contains(assistant_runtime::TURN_CANCELLED_MARKER)
+                        );
+                        early_result = Some(result);
+                        continue;
+                    }
+                }
+            };
+            let Some(orch_event) = next else { break };
             // Serialization is owned by the shared projection layer; this loop
             // keeps only transport concerns (batching, persistence, push, seq).
             // A single OrchestratorEvent yields exactly one SSE frame today.
@@ -422,33 +473,47 @@ pub(crate) async fn stream_turn_to_sse(
         // a structured terminal rather than a `done` with empty content.
         enum TerminalKind {
             Done,
-            Cancelled,
+            Cancelled {
+                /// The turn never started, so its user message was not saved.
+                before_start: bool,
+            },
             Errored(String),
         }
-        let (reply_text, reply_message_id, reply_attachment_ids, terminal) =
-            match turn_result_rx.await {
-                Ok(Ok(result)) => (
-                    result.answer,
-                    result.message_id,
-                    result.attachment_ids,
-                    TerminalKind::Done,
-                ),
-                Ok(Err(e)) => {
-                    let msg = e.to_string();
-                    let kind = if msg.contains(assistant_runtime::TURN_CANCELLED_MARKER) {
-                        TerminalKind::Cancelled
-                    } else {
-                        TerminalKind::Errored(msg)
-                    };
-                    (full_text, None, vec![], kind)
-                }
-                Err(_) => (
-                    full_text,
-                    None,
-                    vec![],
-                    TerminalKind::Errored("submit_turn channel dropped".to_string()),
-                ),
-            };
+        if cancelled_early && let Some(sink) = sink.upgrade() {
+            // No worker consumed the sink: free it so a newer turn of this
+            // conversation is not routed here.
+            orchestrator.release_token_sink(conv_id, &sink).await;
+        }
+        let turn_result = match early_result {
+            Some(result) => result,
+            None => turn_result_rx.await,
+        };
+        let (reply_text, reply_message_id, reply_attachment_ids, terminal) = match turn_result {
+            Ok(Ok(result)) => (
+                result.answer,
+                result.message_id,
+                result.attachment_ids,
+                TerminalKind::Done,
+            ),
+            Ok(Err(e)) => {
+                let msg = e.to_string();
+                let kind = if msg.contains(assistant_runtime::TURN_CANCELLED_MARKER) {
+                    TerminalKind::Cancelled {
+                        before_start: msg
+                            .contains(assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER),
+                    }
+                } else {
+                    TerminalKind::Errored(msg)
+                };
+                (full_text, None, vec![], kind)
+            }
+            Err(_) => (
+                full_text,
+                None,
+                vec![],
+                TerminalKind::Errored("submit_turn channel dropped".to_string()),
+            ),
+        };
 
         let (event_type, payload) = match &terminal {
             TerminalKind::Done => {
@@ -469,14 +534,17 @@ pub(crate) async fn stream_turn_to_sse(
                 }
                 ("done", done_data)
             }
-            TerminalKind::Cancelled => (
-                "agent_error",
-                serde_json::json!({
+            TerminalKind::Cancelled { before_start } => {
+                let mut cancelled = serde_json::json!({
                     "reason": "cancelled",
                     "message": "Turn cancelled by user",
                     "partial_content": reply_text,
-                }),
-            ),
+                });
+                if *before_start {
+                    cancelled["user_message_persisted"] = serde_json::Value::Bool(false);
+                }
+                ("agent_error", cancelled)
+            }
             TerminalKind::Errored(msg) => (
                 "agent_error",
                 serde_json::json!({
@@ -1508,13 +1576,8 @@ mod tests {
             .clone()
     }
 
-    /// Wait until a worker has claimed the turn and called the LLM at `llm`,
-    /// then cancel it.
-    ///
-    /// Cancelling earlier would hit the cancel-before-claim path, which leaves
-    /// the turn's token sink registered so the stream never ends; that is
-    /// current behaviour, owned by the `chat-stop-cancels-turn` change.
-    async fn cancel_when_running(
+    /// Wait until a worker has claimed the turn and called the LLM at `llm`.
+    async fn wait_until_running(
         orchestrator: &assistant_runtime::Orchestrator,
         llm: &MockServer,
         run_id: Uuid,
@@ -1533,6 +1596,15 @@ mod tests {
             orchestrator.is_turn_in_flight(run_id).await,
             "precondition: the turn is in flight"
         );
+    }
+
+    /// Wait until a worker has claimed the turn, then cancel it.
+    async fn cancel_when_running(
+        orchestrator: &assistant_runtime::Orchestrator,
+        llm: &MockServer,
+        run_id: Uuid,
+    ) {
+        wait_until_running(orchestrator, llm, run_id).await;
         orchestrator.cancel_turn(run_id).await;
     }
 
@@ -1659,6 +1731,94 @@ mod tests {
         assert_eq!(last_payload["reason"], "cancelled");
     }
 
+    /// Wait until `run_id` is registered with the orchestrator, claimed or not.
+    async fn wait_until_in_flight(orchestrator: &assistant_runtime::Orchestrator, run_id: Uuid) {
+        for _ in 0..200 {
+            if orchestrator.is_turn_in_flight(run_id).await {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("run {run_id} was never registered with the orchestrator");
+    }
+
+    #[tokio::test]
+    async fn send_message_cancelled_before_a_worker_claims_it_ends_the_stream_at_once() {
+        let server = MockServer::start().await;
+        mount_llm_hang(&server).await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let busy_conv = new_conversation(&storage).await;
+        let queued_conv = new_conversation(&storage).await;
+
+        // The only worker is stuck on a turn in another conversation.
+        let busy = post_message(state.clone(), busy_conv, "occupy the worker").await;
+        let busy_run = Uuid::parse_str(&run_id_of(&busy)).unwrap();
+        wait_until_running(&orchestrator, &server, busy_run).await;
+
+        // This turn waits for a worker. Cancel it before one claims it.
+        let queued = post_message(state.clone(), queued_conv, "never starts").await;
+        let queued_run = Uuid::parse_str(&run_id_of(&queued)).unwrap();
+        wait_until_in_flight(&orchestrator, queued_run).await;
+        orchestrator.cancel_turn(queued_run).await;
+
+        let frames = tokio::time::timeout(std::time::Duration::from_secs(3), sse_frames(queued))
+            .await
+            .expect("the stream ends without waiting for a worker");
+
+        let (event, data, _) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["reason"], "cancelled");
+        assert_eq!(
+            payload["user_message_persisted"], false,
+            "nothing of the turn ran, so the user message was not saved"
+        );
+        assert!(
+            payload.get("message_id").is_none(),
+            "no assistant message exists for a turn that never started"
+        );
+
+        let history = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{queued_conv}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let history = body_json(history.into_body()).await;
+        assert_eq!(
+            history["messages"].as_array().map(Vec::len),
+            Some(0),
+            "the cancelled turn left no user row: {history}"
+        );
+
+        orchestrator.cancel_turn(busy_run).await;
+    }
+
+    #[tokio::test]
+    async fn runner_streams_every_buffered_token_before_done_when_the_result_is_ready() {
+        let (state, storage) = event_log_state().await;
+        let tokens: Vec<_> = (0..20)
+            .map(|i| assistant_runtime::OrchestratorEvent::Token(format!("t{i} ")))
+            .collect();
+
+        let (_, frames) = run_runner(
+            &state,
+            &storage,
+            RunOptions { push: false },
+            tokens,
+            Some(Ok(turn_result("done text"))),
+        )
+        .await;
+
+        let streamed = frames.iter().filter(|(ev, _, _)| ev == "token").count();
+        assert_eq!(streamed, 20, "every buffered token precedes the terminal");
+        assert_eq!(frames.last().unwrap().0, "done");
+    }
+
     #[tokio::test]
     async fn send_message_ends_with_error_agent_error_when_turn_fails() {
         use wiremock::matchers::{method, path};
@@ -1775,7 +1935,7 @@ mod tests {
 
     // -- stream_turn_to_sse driven directly -----------------------------------
 
-    use super::{RunOptions, stream_turn_to_sse};
+    use super::{RunOptions, TurnEvents, stream_turn_to_sse};
 
     fn system_ctx(storage: &Arc<StorageLayer>) -> crate::space::SpaceCtx {
         crate::space::SpaceCtx {
@@ -1801,6 +1961,7 @@ mod tests {
         for event in events {
             event_tx.send(event).await.unwrap();
         }
+        let sink = event_tx.downgrade();
         drop(event_tx);
         let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
         match outcome {
@@ -1817,7 +1978,11 @@ mod tests {
             run_id,
             conv_id,
             opts,
-            event_rx,
+            TurnEvents {
+                rx: event_rx,
+                sink,
+                orchestrator: default_orchestrator(state).await,
+            },
             turn_rx,
         )
         .await;

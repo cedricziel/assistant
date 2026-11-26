@@ -735,7 +735,7 @@
           "conversations"
         ],
         "summary": "`POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`",
-        "description": "Idempotent: triggers `Orchestrator::cancel_turn` if a matching token is\nregistered, otherwise no-op. Always returns 200 with the current turn\nstatus — the cancellation propagates asynchronously through the worker's\n`tokio::select!`, the SSE stream's terminal `agent_error` event, and the\n`event_store`. Clients should poll `GET .../status` (or wait for the\nstream's `agent_error`) to observe the transition.",
+        "description": "Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this\nconversation and a matching token is registered, otherwise no-op. The cancel\nalso covers a turn no worker has claimed yet: its stream ends at once with\n`agent_error {\"reason\":\"cancelled\",\"user_message_persisted\":false}`. Always returns 200 with the current turn\nstatus — the cancellation propagates asynchronously through the worker's\n`tokio::select!`, the SSE stream's terminal `agent_error` event, and the\n`event_store`. Clients should poll `GET .../status` (or wait for the\nstream's `agent_error`) to observe the transition.",
         "operationId": "cancel_turn",
         "parameters": [
           {

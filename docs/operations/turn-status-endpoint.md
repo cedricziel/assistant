@@ -37,6 +37,10 @@ asynchronously — see [State machine](#state-machine).
 Cancelling a turn that is already `completed`, `errored`, or
 `unknown` is a no-op that simply returns the current status.
 
+The server fires the cancellation only when the run's recorded
+conversation matches `{conversation_id}`. Naming another conversation's
+run id returns `state: "unknown"` and leaves that run untouched.
+
 ## State machine
 
 ```
@@ -105,6 +109,30 @@ When `cancel_turn` is invoked on a registered turn:
 
 5. The event is persisted to `conversation_events` so subsequent
    status reads return `state=errored` with `last_event_kind=agent_error`.
+
+### Cancel before a worker claims the turn
+
+A cancel also takes effect while the turn request is still waiting for
+a worker (every worker busy). The worker that later claims the request
+acknowledges and skips it without running the LLM or any tool, and
+touches no other turn's token sink. The SSE stream does not wait for
+that: the runner races the turn result against the event stream and
+ends at once with
+
+```json
+event: agent_error
+data: {
+  "reason": "cancelled",
+  "message": "Turn cancelled by user",
+  "partial_content": "",
+  "user_message_persisted": false
+}
+```
+
+`user_message_persisted: false` is present only for this case. The turn
+never started, so its user message was never saved; clients show the
+message as failed with a Retry action. The field is omitted for a turn
+cancelled after it started.
 
 ### Partial-output preservation
 
