@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'branch_info.dart';
 import 'mcp_app.dart';
 import 'message_timing.dart';
 
@@ -125,6 +126,9 @@ class ChatMessage {
     this.commandName,
     this.commandAckText,
     this.timing,
+    this.parentId,
+    this.branch,
+    this.replyBranch,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -206,6 +210,17 @@ class ChatMessage {
   /// Mutable like [content], so a finished stream can attach it in place.
   MessageTiming? timing;
 
+  /// The message this one follows in the conversation tree; null for a root
+  /// and for messages that are not persisted yet.
+  final String? parentId;
+
+  /// This message's place among its sibling versions; null without siblings.
+  final BranchInfo? branch;
+
+  /// On a user message whose reply has no visible assistant row: the versions
+  /// of that reply.
+  final BranchInfo? replyBranch;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -247,6 +262,9 @@ class ChatMessage {
       subagentTask: subagentTask ?? this.subagentTask,
       subagentSummary: subagentSummary ?? this.subagentSummary,
       timing: timing ?? this.timing,
+      parentId: parentId,
+      branch: branch,
+      replyBranch: replyBranch,
     );
   }
 }

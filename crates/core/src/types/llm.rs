@@ -435,6 +435,31 @@ pub struct OpenRouterOptions {
     pub image_output: bool,
     /// Sent as `image_config` when `image_output` is on.
     pub image_config: Option<OpenRouterImageConfig>,
+    /// Voice notes sent to the model as audio (`[llm.openrouter.audio_input]`).
+    #[serde(default)]
+    pub audio_input: OpenRouterAudioInput,
+}
+
+/// `[llm.openrouter.audio_input]`. The model must list audio input in the
+/// catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OpenRouterAudioInput {
+    pub enabled: bool,
+    /// Formats sent unchanged; others are converted to WAV.
+    pub formats: Vec<String>,
+    /// Longer recordings are sent as text only.
+    pub max_secs: u32,
+}
+
+impl Default for OpenRouterAudioInput {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            formats: vec!["wav".into(), "mp3".into()],
+            max_secs: 600,
+        }
+    }
 }
 
 /// `[llm.openrouter.image_config]`.
@@ -827,6 +852,25 @@ mod tests {
                 Some(OpenRouterPdfEngine::MistralOcr)
             );
             assert!(parse("pdf_engine = \"tesseract\"").is_err());
+        }
+
+        #[test]
+        fn audio_input_defaults_and_overrides() {
+            let unset = parse("").unwrap().audio_input;
+            assert!(!unset.enabled);
+            assert_eq!(unset.formats, ["wav", "mp3"]);
+            assert_eq!(unset.max_secs, 600);
+
+            let set = parse("[audio_input]\nenabled = true\nformats = [\"wav\"]\nmax_secs = 30")
+                .unwrap()
+                .audio_input;
+            assert!(set.enabled);
+            assert_eq!(set.formats, ["wav"]);
+            assert_eq!(set.max_secs, 30);
+            assert!(
+                parse("[audio_input]\nmax_seconds = 30").is_err(),
+                "unknown key"
+            );
         }
 
         #[test]

@@ -2,11 +2,15 @@ import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
+import 'components/conversation_list_view.dart';
+import 'components/feedback_buttons.dart';
+import 'components/feedback_comment_field.dart';
 import 'components/message_action_button.dart';
 import 'components/message_actions.dart';
 import 'components/message_editor.dart';
 import 'components/message_timing_indicator.dart';
 import 'components/permission_rule_tile.dart';
+import 'components/question_card.dart';
 import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
@@ -51,7 +55,6 @@ final List<WidgetbookComponent> kComponents = [
   // compactExpandableComponent, // slot: tool-result-renderers C2
   // composerComponent, // slot: chat-element-library 11a
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
-  // conversationListViewComponent, // slot: chat-element-library 12
   // conversationSearchResultsViewComponent, // slot: conversation-list-management 14
   // dataTableResultViewComponent, // slot: tool-result-renderers C6
   // feedbackButtonsComponent, // slot: message-feedback 5
@@ -65,7 +68,6 @@ final List<WidgetbookComponent> kComponents = [
   // messageEditorComponent, // slot: message-branching 9
   // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
   // planResultViewComponent, // slot: tool-result-renderers C5
-  // questionCardComponent, // slot: tool-approval-prompts 14a
   // regenerateMenuButtonComponent, // slot: message-branching 10
   // slashCommandMenuComponent, // slot: chat-element-library 11a
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
@@ -84,11 +86,15 @@ final List<WidgetbookComponent> kComponents = [
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   branchPickerComponent,
+  conversationListViewComponent,
+  feedbackButtonsComponent,
+  feedbackCommentFieldComponent,
   messageActionButtonComponent,
   messageActionsComponent,
   messageEditorComponent,
   messageTimingIndicatorComponent,
   permissionRuleTileComponent,
+  questionCardComponent,
   queuedMessageBubbleComponent,
   starterPromptsComponent,
   suggestionChipsComponent,

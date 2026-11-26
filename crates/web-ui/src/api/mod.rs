@@ -260,6 +260,10 @@ pub fn api_router() -> Router<ApiState> {
             "/conversations/stream",
             get(conversations::stream_conversations),
         )
+        .route(
+            "/conversations/search",
+            get(conversations::search_conversations),
+        )
         .route("/conversations", post(conversations::create_conversation))
         .route("/conversations/{id}", get(conversations::get_conversation))
         .route(
