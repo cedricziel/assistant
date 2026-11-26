@@ -51,13 +51,12 @@ export 'src/timing/message_timing_indicator.dart';
 export 'src/tool_results/code_diff_result_view.dart';
 export 'src/tool_results/code_file_result_view.dart';
 export 'src/tool_results/compact_expandable.dart';
+export 'src/tool_results/data_table_result_view.dart';
 export 'src/tool_results/generic_tool_result_view.dart';
 export 'src/tool_results/tool_result_renderer.dart';
 export 'src/tool_results/tool_result_renderer_registry.dart';
 export 'src/turn/turn_progress_card.dart';
 export 'src/turn/turn_status_label.dart';
-
-// export 'src/tool_results/data_table_result_view.dart'; // slot: tool-result-renderers C6
 
 // export 'src/tool_results/json_tree_view.dart'; // slot: tool-result-renderers C2b
 

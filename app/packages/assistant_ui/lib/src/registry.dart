@@ -19,6 +19,7 @@ const List<String> kAssistantUiElements = [
   'Composer',
   'ConversationListView',
   'ConversationSearchResultsView',
+  'DataTableResultView',
   'FeedbackButtons',
   'FeedbackCommentField',
   'GenericToolResultView',
@@ -50,7 +51,6 @@ const List<String> kAssistantUiElements = [
   // 'BranchPicker', // slot: message-branching 9
   // 'CommandBody', // slot: chat-element-library 7b
   // 'ComposerVoiceButton', // slot: chat-element-library 11b
-  // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
   // 'JsonTreeView', // slot: tool-result-renderers C2b
