@@ -57,6 +57,41 @@ pub struct Message {
     /// otherwise the bus message id. `None` for legacy rows.
     #[serde(default)]
     pub run_id: Option<Uuid>,
+    /// Why this persisted reply ended early. `None` for an ordinary message.
+    #[serde(default)]
+    pub finish_reason: Option<MessageFinishReason>,
+}
+
+/// Why a persisted assistant reply ended, when it did not end normally.
+///
+/// Not to be confused with the LLM response's `finish_reason`, which says why
+/// the model stopped generating. This one describes the stored message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageFinishReason {
+    /// The user stopped the turn; the content is the partial reply.
+    Cancelled,
+}
+
+impl MessageFinishReason {
+    /// The value stored in `messages.finish_reason` and returned by the API.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    /// Parse a stored value. An unknown value reads as `None` and is logged,
+    /// so a newer writer's rows do not break an older reader.
+    pub fn from_stored(value: &str) -> Option<Self> {
+        match value {
+            "cancelled" => Some(Self::Cancelled),
+            other => {
+                tracing::warn!(finish_reason = %other, "unknown message finish_reason, ignoring");
+                None
+            }
+        }
+    }
 }
 
 impl Message {
@@ -74,6 +109,7 @@ impl Message {
             sender_user_id: None,
             parent_id: None,
             run_id: None,
+            finish_reason: None,
         }
     }
 
@@ -212,5 +248,31 @@ impl std::fmt::Display for ChannelType {
             ChannelType::Signal => write!(f, "signal"),
             ChannelType::Custom(name) => write!(f, "{name}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod finish_reason_tests {
+    use super::*;
+
+    #[test]
+    fn stored_value_round_trips() {
+        let stored = MessageFinishReason::Cancelled.as_str();
+        assert_eq!(stored, "cancelled");
+        assert_eq!(
+            MessageFinishReason::from_stored(stored),
+            Some(MessageFinishReason::Cancelled)
+        );
+    }
+
+    #[test]
+    fn unknown_stored_value_reads_as_none() {
+        assert_eq!(MessageFinishReason::from_stored("something_new"), None);
+    }
+
+    #[test]
+    fn new_message_has_no_finish_reason() {
+        let m = Message::assistant(Uuid::new_v4(), "hi");
+        assert_eq!(m.finish_reason, None);
     }
 }

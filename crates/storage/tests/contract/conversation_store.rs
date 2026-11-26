@@ -4,7 +4,7 @@
 //! (`SqliteConversationStore` + `InMemoryConversationStore`).  Any
 //! observable divergence between impls fails CI.
 
-use assistant_core::types::conversation::{Message, MessageRole};
+use assistant_core::types::conversation::{Message, MessageFinishReason, MessageRole};
 use assistant_storage::{
     ConversationStore, InMemoryConversationStore, SqliteConversationStore, StorageLayer,
 };
@@ -307,10 +307,66 @@ async fn replace_history_rechains_the_new_rows(store: Box<dyn ConversationStore>
     assert_eq!(loaded[2].parent_id, Some(replacement[1].id));
 }
 
+async fn finish_reason_round_trips(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("t")).await.unwrap();
+    let user = user_msg(conv.id, "hi", 0);
+    let mut stopped = assistant_msg(conv.id, "partial", 1);
+    stopped.finish_reason = Some(MessageFinishReason::Cancelled);
+    let plain = assistant_msg(conv.id, "full", 2);
+    for m in [&user, &stopped, &plain] {
+        store.save_message(m).await.unwrap();
+    }
+
+    let history = store.load_history(conv.id).await.unwrap();
+    assert_eq!(history[0].finish_reason, None, "user message has none");
+    assert_eq!(
+        history[1].finish_reason,
+        Some(MessageFinishReason::Cancelled),
+        "load_history keeps the finish reason"
+    );
+    assert_eq!(history[2].finish_reason, None, "unmarked message has none");
+
+    let tail = store.last_messages(conv.id, 2).await.unwrap();
+    assert_eq!(
+        tail[0].finish_reason,
+        Some(MessageFinishReason::Cancelled),
+        "last_messages keeps the finish reason"
+    );
+    let single = store.get_message(stopped.id).await.unwrap().unwrap();
+    assert_eq!(single.finish_reason, Some(MessageFinishReason::Cancelled));
+}
+
+async fn replace_history_keeps_finish_reason(store: Box<dyn ConversationStore>) {
+    let conv = store.create_conversation(Some("t")).await.unwrap();
+    let mut stopped = assistant_msg(conv.id, "partial", 0);
+    stopped.finish_reason = Some(MessageFinishReason::Cancelled);
+    store
+        .replace_history(conv.id, std::slice::from_ref(&stopped))
+        .await
+        .unwrap();
+
+    let history = store.load_history(conv.id).await.unwrap();
+    assert_eq!(
+        history[0].finish_reason,
+        Some(MessageFinishReason::Cancelled),
+        "replace_history preserves the finish reason"
+    );
+}
+
 macro_rules! contract_tests {
     ($store_name:ident, $constructor:expr) => {
         mod $store_name {
             use super::*;
+
+            #[tokio::test]
+            async fn t_finish_reason_round_trips() {
+                finish_reason_round_trips($constructor).await;
+            }
+
+            #[tokio::test]
+            async fn t_replace_history_keeps_finish_reason() {
+                replace_history_keeps_finish_reason($constructor).await;
+            }
 
             #[tokio::test]
             async fn t_create_and_get_roundtrip() {

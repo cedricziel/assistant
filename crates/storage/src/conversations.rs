@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use assistant_core::clock::{Clock, SystemClock};
-use assistant_core::types::conversation::{Message, MessageRole};
+use assistant_core::types::conversation::{Message, MessageFinishReason, MessageRole};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
@@ -474,8 +474,8 @@ impl ConversationStore for SqliteConversationStore {
 
         let insert = sqlx::query(
             "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id, parent_id, run_id, provider_state_json, finish_reason) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -490,6 +490,7 @@ impl ConversationStore for SqliteConversationStore {
         .bind(&leaf)
         .bind(msg.run_id.map(|r| r.to_string()))
         .bind(&msg.provider_state_json)
+        .bind(msg.finish_reason.map(MessageFinishReason::as_str))
         .execute(&mut *tx)
         .await?;
         let inserted = insert.rows_affected() > 0;
@@ -539,7 +540,7 @@ impl ConversationStore for SqliteConversationStore {
     /// Fetch a single message by its ID (agent-scoped via the conversation join).
     async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.finish_reason \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
@@ -890,7 +891,7 @@ const ACTIVE_PATH_SQL: &str = "\
         FROM path p \
         INNER JOIN messages m ON m.id = p.parent_id \
     ) \
-    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json \
+    SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id, m.parent_id, m.run_id, m.provider_state_json, m.finish_reason \
     FROM path \
     INNER JOIN messages m ON m.id = path.id \
     ORDER BY path.depth ASC \
@@ -902,6 +903,7 @@ fn message_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Message> {
     let role_str: String = r.get("role");
     let parent_str: Option<String> = r.get("parent_id");
     let run_str: Option<String> = r.get("run_id");
+    let finish_str: Option<String> = r.get("finish_reason");
     Ok(Message {
         id: Uuid::parse_str(&id_str)?,
         conversation_id: Uuid::parse_str(&conv_str)?,
@@ -915,6 +917,9 @@ fn message_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Message> {
         sender_user_id: r.get("sender_user_id"),
         parent_id: parent_str.as_deref().map(Uuid::parse_str).transpose()?,
         run_id: run_str.as_deref().map(Uuid::parse_str).transpose()?,
+        finish_reason: finish_str
+            .as_deref()
+            .and_then(MessageFinishReason::from_stored),
     })
 }
 

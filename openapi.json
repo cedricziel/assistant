@@ -11699,6 +11699,13 @@
             "type": "string",
             "format": "date-time"
           },
+          "finish_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the reply ended early; `\"cancelled\"` for a reply the user stopped.\nOmitted for every other message."
+          },
           "id": {
             "type": "string",
             "format": "uuid"
