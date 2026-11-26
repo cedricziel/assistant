@@ -348,6 +348,7 @@ impl SubagentRunner for Orchestrator {
                                 FinalAnswerMeta {
                                     traceparent: llm_traceparent,
                                     timing: None,
+                                    model: Some(self.llm.model_name().to_string()),
                                 },
                             )
                             .instrument(iteration_span.clone())

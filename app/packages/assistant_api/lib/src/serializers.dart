@@ -83,6 +83,9 @@ import 'package:assistant_api/src/model/integration_policy_response.dart';
 import 'package:assistant_api/src/model/integration_status.dart';
 import 'package:assistant_api/src/model/integration_summary.dart';
 import 'package:assistant_api/src/model/integration_trust.dart';
+import 'package:assistant_api/src/model/interaction_detail.dart';
+import 'package:assistant_api/src/model/interaction_outcome_view.dart';
+import 'package:assistant_api/src/model/interaction_status_view.dart';
 import 'package:assistant_api/src/model/interface_instance_response.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
 import 'package:assistant_api/src/model/list_tasks_response.dart';
@@ -108,12 +111,18 @@ import 'package:assistant_api/src/model/persona_file_slot.dart';
 import 'package:assistant_api/src/model/persona_from_template_response.dart';
 import 'package:assistant_api/src/model/persona_skill_access.dart';
 import 'package:assistant_api/src/model/persona_summary.dart';
+import 'package:assistant_api/src/model/protected_resource_metadata.dart';
 import 'package:assistant_api/src/model/publish_catalog_item_request.dart';
 import 'package:assistant_api/src/model/push_notification_config.dart';
 import 'package:assistant_api/src/model/put_org_oidc_config_request.dart';
+import 'package:assistant_api/src/model/question_answer.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
 import 'package:assistant_api/src/model/register_agent_request.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of1.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.dart';
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
 import 'package:assistant_api/src/model/security_requirement.dart';
@@ -134,6 +143,8 @@ import 'package:assistant_api/src/model/space_access_entry.dart';
 import 'package:assistant_api/src/model/space_access_mode.dart';
 import 'package:assistant_api/src/model/space_detail.dart';
 import 'package:assistant_api/src/model/space_summary.dart';
+import 'package:assistant_api/src/model/sse_interaction_requested_event.dart';
+import 'package:assistant_api/src/model/sse_interaction_resolved_event.dart';
 import 'package:assistant_api/src/model/sse_status_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_completed_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_started_event.dart';
@@ -159,6 +170,7 @@ import 'package:assistant_api/src/model/template_response.dart';
 import 'package:assistant_api/src/model/test_integration_response.dart';
 import 'package:assistant_api/src/model/token_response.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
+import 'package:assistant_api/src/model/tool_decision.dart';
 import 'package:assistant_api/src/model/turn_state.dart';
 import 'package:assistant_api/src/model/turn_status_response.dart';
 import 'package:assistant_api/src/model/unsubscribe_request.dart';
@@ -263,6 +275,9 @@ part 'serializers.g.dart';
   IntegrationStatus,
   IntegrationSummary,
   IntegrationTrust,
+  InteractionDetail,
+  InteractionOutcomeView,
+  InteractionStatusView,
   InterfaceInstanceResponse,
   ListTaskPushNotificationConfigsResponse,
   ListTasksResponse,
@@ -288,12 +303,18 @@ part 'serializers.g.dart';
   PersonaFromTemplateResponse,
   PersonaSkillAccess,
   PersonaSummary,
+  ProtectedResourceMetadata,
   PublishCatalogItemRequest,
   PushNotificationConfig,
   PutOrgOidcConfigRequest,
+  QuestionAnswer,
   QuickMessageRequest,
   QuickMessageResponse,
   RegisterAgentRequest,
+  RespondToInteractionRequest,
+  RespondToInteractionRequestOneOf,
+  RespondToInteractionRequestOneOf1,
+  RespondToInteractionRequestOneOf2,
   Role,
   RotateSecretResponse,
   SecurityRequirement,
@@ -314,6 +335,8 @@ part 'serializers.g.dart';
   SpaceAccessMode,
   SpaceDetail,
   SpaceSummary,
+  SseInteractionRequestedEvent,
+  SseInteractionResolvedEvent,
   SseStatusEvent,
   SseSubagentCompletedEvent,
   SseSubagentStartedEvent,
@@ -339,6 +362,7 @@ part 'serializers.g.dart';
   TestIntegrationResponse,
   TokenResponse,
   ToolCallSummary,
+  ToolDecision,
   TurnState,
   TurnStatusResponse,
   UnsubscribeRequest,

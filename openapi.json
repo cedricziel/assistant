@@ -65,6 +65,30 @@
         ]
       }
     },
+    "/.well-known/oauth-protected-resource/mcp": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "GET /.well-known/oauth-protected-resource/mcp",
+        "operationId": "protected_resource_metadata",
+        "responses": {
+          "200": {
+            "description": "Protected resource metadata for the MCP endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedResourceMetadata"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/agent/authenticatedExtendedCard": {
       "get": {
         "tags": [
@@ -767,6 +791,153 @@
           },
           "404": {
             "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond`",
+        "description": "The turn's owner answers a pending interaction. The answer is validated by\nthe interaction kind's handler. Answering is a compare-and-set on `pending`:\nrepeating the same answer returns `200` with the stored resolution, a\ndifferent answer after resolution returns `409`, and an expired or\ncancelled interaction (or one whose turn process stopped waiting) returns\n`410`.",
+        "operationId": "respond_to_interaction",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "description": "Turn (run) UUID — matches the SSE run_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "description": "Interaction id from `interaction_requested`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespondToInteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The interaction as resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The answer does not fit the interaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewer access, or missing conversations:write scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation, run or interaction not found, or not the caller's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already resolved with a different answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Expired, cancelled, or no turn is waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body larger than 64 KiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -11902,6 +12073,103 @@
           "trust"
         ]
       },
+      "InteractionDetail": {
+        "type": "object",
+        "description": "A turn interaction: the request the turn put to its owner and, once it\nended, how.",
+        "required": [
+          "interaction_id",
+          "conversation_id",
+          "run_id",
+          "kind",
+          "status",
+          "renders_card",
+          "request",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "interaction_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`tool_approval`, `question`, or a kind a newer server added."
+          },
+          "renders_card": {
+            "type": "boolean",
+            "description": "Whether the kind renders a card in the timeline."
+          },
+          "request": {
+            "type": "object",
+            "description": "The kind-specific request (for `tool_approval`: `tool_name`,\n`arguments`, `arguments_truncated`, `reason`, `options`,\n`suggested_rule`; for `question`: `questions`)."
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "response": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The owner's answer. Present once `status` is `resolved`."
+          },
+          "rule_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Id of the permission rule an \"always\" answer saved."
+          },
+          "run_id": {
+            "type": "string",
+            "description": "The run (turn) that asked."
+          },
+          "status": {
+            "$ref": "#/components/schemas/InteractionStatusView"
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider id of the tool call this interaction belongs to, if any."
+          }
+        }
+      },
+      "InteractionOutcomeView": {
+        "type": "string",
+        "description": "How an interaction ended.",
+        "enum": [
+          "resolved",
+          "cancelled",
+          "expired"
+        ]
+      },
+      "InteractionStatusView": {
+        "type": "string",
+        "description": "Lifecycle state of an interaction.",
+        "enum": [
+          "pending",
+          "resolved",
+          "cancelled",
+          "expired"
+        ]
+      },
       "InterfaceInstanceResponse": {
         "type": "object",
         "required": [
@@ -12686,6 +12954,41 @@
           }
         }
       },
+      "ProtectedResourceMetadata": {
+        "type": "object",
+        "description": "OAuth 2.0 protected resource metadata for `/mcp` (RFC 9728).",
+        "required": [
+          "resource",
+          "authorization_servers",
+          "scopes_supported",
+          "bearer_methods_supported"
+        ],
+        "properties": {
+          "authorization_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Authorization servers that issue tokens for this resource."
+          },
+          "bearer_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resource": {
+            "type": "string",
+            "description": "Canonical URL of the MCP endpoint; tokens must be issued for it."
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "PublishCatalogItemRequest": {
         "type": "object",
         "required": [
@@ -12778,6 +13081,34 @@
           }
         }
       },
+      "QuestionAnswer": {
+        "type": "object",
+        "description": "The owner's answer to one question of a `question` interaction.",
+        "required": [
+          "question_id"
+        ],
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "description": "Id of the question being answered."
+          },
+          "selected_option_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the chosen options. Empty when the answer is free text only."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free-text answer, at most 4000 characters, where the question allows it."
+          }
+        },
+        "additionalProperties": false
+      },
       "QuickMessageRequest": {
         "type": "object",
         "description": "Body for `POST /api/quick-message`.",
@@ -12850,6 +13181,67 @@
             "description": "If `true`, make this agent the default after registration."
           }
         }
+      },
+      "RespondToInteractionRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Answers a `tool_approval` interaction with one of its offered options.",
+            "required": [
+              "decision",
+              "kind"
+            ],
+            "properties": {
+              "decision": {
+                "$ref": "#/components/schemas/ToolDecision"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tool_approval"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Answers a `question` interaction.",
+            "required": [
+              "answers",
+              "kind"
+            ],
+            "properties": {
+              "answers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/QuestionAnswer"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "question"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "\"I won't answer\", for any kind. For an approval this means reject once.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "decline"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Body of the respond route, tagged by `kind`. Unknown fields are rejected,\nso a client cannot smuggle in a field such as a permission rule: the saved\nrule comes from the stored interaction, never from the body."
       },
       "RevokeRequest": {
         "type": "object",
@@ -13361,6 +13753,92 @@
           },
           "slug": {
             "type": "string"
+          }
+        }
+      },
+      "SseInteractionRequestedEvent": {
+        "allOf": [
+          {
+            "type": "object",
+            "description": "The kind-specific request fields, flattened into the event object."
+          },
+          {
+            "type": "object",
+            "required": [
+              "interaction_id",
+              "kind",
+              "created_at",
+              "expires_at",
+              "renders_card"
+            ],
+            "properties": {
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "interaction_id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "`tool_approval`, `question`, or a kind a newer server added."
+              },
+              "renders_card": {
+                "type": "boolean",
+                "description": "Whether the kind renders a card in the timeline."
+              },
+              "tool_call_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Provider id of the tool call this belongs to, when there is one."
+              }
+            }
+          }
+        ],
+        "description": "SSE `interaction_requested` event: a running turn asks its owner something.\nThe kind-specific request fields sit next to the common ones, as in\n[`InteractionDetail::request`]."
+      },
+      "SseInteractionResolvedEvent": {
+        "type": "object",
+        "description": "SSE `interaction_resolved` event: exactly one per interaction of a live run.",
+        "required": [
+          "interaction_id",
+          "kind",
+          "outcome",
+          "resolved_at"
+        ],
+        "properties": {
+          "interaction_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/InteractionOutcomeView"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "response": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The owner's answer. Only when `outcome` is `resolved`."
+          },
+          "rule_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Id of the permission rule an \"always\" answer saved."
           }
         }
       },
@@ -14068,6 +14546,16 @@
             "description": "Provider-assigned id of the call, when the provider supplied one."
           }
         }
+      },
+      "ToolDecision": {
+        "type": "string",
+        "description": "What the owner decided about a tool call.",
+        "enum": [
+          "allow_once",
+          "allow_always",
+          "reject_once",
+          "reject_always"
+        ]
       },
       "TurnState": {
         "type": "string",

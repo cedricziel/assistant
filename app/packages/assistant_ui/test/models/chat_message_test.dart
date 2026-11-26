@@ -149,6 +149,7 @@ void main() {
         'toolCall',
         'subagent',
         'command',
+        'interaction',
       ]);
     });
 
