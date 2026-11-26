@@ -49,6 +49,9 @@ pub enum OrchestratorEvent {
         /// `None` when the tool produced none, the data was over the cap, or
         /// the call was denied. Never reaches the LLM, webhooks or adapters.
         data: Option<serde_json::Value>,
+        /// The MCP App the tool declared, taken out of `ToolOutput.data`
+        /// before the cap. Client-only, like `data`.
+        app: Option<assistant_core::mcp_app::McpApp>,
     },
 
     /// A skill run completed (success or failure).
@@ -283,6 +286,7 @@ mod tests {
             result: Some("contents".to_string()),
             tool_call_id: Some("call_xyz789".to_string()),
             data: None,
+            app: None,
         };
         match event {
             OrchestratorEvent::ToolResult { tool_call_id, .. } => {
@@ -303,6 +307,7 @@ mod tests {
                 result: Some("Found results".to_string()),
                 tool_call_id: Some("call_inner_123".to_string()),
                 data: None,
+                app: None,
             }),
         };
         match event {

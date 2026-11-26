@@ -506,6 +506,13 @@ impl McpClientManager {
         })
     }
 
+    /// The client and trust level of `server`, if it is connected.
+    pub(crate) async fn connected(&self, server: &str) -> Option<(Arc<McpClient>, McpTrustLevel)> {
+        let servers = self.servers.read().await;
+        let state = servers.get(server)?;
+        Some((state.client.clone()?, state.entry.trust.clone()))
+    }
+
     /// Every configured server with its client, `None` while disconnected.
     pub async fn connections(&self) -> Vec<(String, Option<Arc<McpClient>>)> {
         let mut connections: Vec<_> = self

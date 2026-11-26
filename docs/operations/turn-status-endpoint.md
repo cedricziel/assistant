@@ -83,7 +83,7 @@ and above `running`: `errored` > `completed` > `awaiting_input` > `running`.
 with `last_event_kind: "suggestions"`, for example. The status stays
 `completed`. The POST stream still closes at `done`; the run's replay stream
 stays open until the run finishes (see
-[ADR-0021](../adr/adr-0021-run-bounds-replay-stream.md)).
+[ADR-0024](../adr/adr-0024-run-bounds-replay-stream.md)).
 
 ## Cancel semantics
 

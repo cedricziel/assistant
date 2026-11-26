@@ -192,7 +192,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           color: Theme.of(context).colorScheme.errorContainer,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Text(
+                        child: SelectableText(
                           loginState.message,
                           style: TextStyle(
                             color: Theme.of(context)

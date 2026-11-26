@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
@@ -460,116 +461,119 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
                     // Message list.
                     Expanded(
-                      child: Stack(
-                        children: [
-                          chatState.messages.isEmpty &&
-                                  chatState.pendingQueue.isEmpty
-                              ? const EmptyChat()
-                              : ListView.builder(
-                                  controller: _scrollController,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                    horizontal: 12,
-                                  ),
-                                  itemCount:
-                                      chatState.messages.length +
-                                      chatState.pendingQueue.length,
-                                  itemBuilder: (context, index) {
-                                    // Render queued ghost bubbles after the
-                                    // committed messages, in send order. The
-                                    // actively-streaming message is already in
-                                    // `messages` (it was popped from the queue
-                                    // when its stream started), so ghost
-                                    // bubbles represent only the truly-waiting
-                                    // items.
-                                    if (index >= chatState.messages.length) {
-                                      final queueIdx =
-                                          index - chatState.messages.length;
-                                      final pending =
-                                          chatState.pendingQueue[queueIdx];
-                                      return QueuedMessageBubble(
-                                        message: pending,
-                                        index: queueIdx,
-                                      );
-                                    }
+                      child: ThreadDensityScope.fromWidth(
+                        width: MediaQuery.sizeOf(context).width,
+                        child: Stack(
+                          children: [
+                            chatState.messages.isEmpty &&
+                                    chatState.pendingQueue.isEmpty
+                                ? const EmptyChat()
+                                : ListView.builder(
+                                    controller: _scrollController,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                      horizontal: 12,
+                                    ),
+                                    itemCount:
+                                        chatState.messages.length +
+                                        chatState.pendingQueue.length,
+                                    itemBuilder: (context, index) {
+                                      // Render queued ghost bubbles after the
+                                      // committed messages, in send order. The
+                                      // actively-streaming message is already in
+                                      // `messages` (it was popped from the queue
+                                      // when its stream started), so ghost
+                                      // bubbles represent only the truly-waiting
+                                      // items.
+                                      if (index >= chatState.messages.length) {
+                                        final queueIdx =
+                                            index - chatState.messages.length;
+                                        final pending =
+                                            chatState.pendingQueue[queueIdx];
+                                        return QueuedMessageBubble(
+                                          message: pending,
+                                          index: queueIdx,
+                                        );
+                                      }
 
-                                    final msg = chatState.messages[index];
+                                      final msg = chatState.messages[index];
 
-                                    // Render command events as compact
-                                    // system-event tiles.
-                                    if (msg.timelineType ==
-                                        TimelineEntryType.command) {
-                                      return CommandEventTile(message: msg);
-                                    }
+                                      // Render command events as compact
+                                      // system-event tiles.
+                                      if (msg.timelineType ==
+                                          TimelineEntryType.command) {
+                                        return CommandEventTile(message: msg);
+                                      }
 
-                                    // Render non-message timeline entries
-                                    // (thinking, tool call, subagent) as
-                                    // streaming-aware adaptive sections.
-                                    if (msg.timelineType !=
-                                        TimelineEntryType.message) {
-                                      final density = TimelineDensity.fromWidth(
-                                        MediaQuery.of(context).size.width,
-                                      );
-                                      return StreamingTimelineEntry(
+                                      // Render non-message timeline entries
+                                      // (thinking, tool call, subagent) as
+                                      // streaming-aware adaptive sections.
+                                      if (msg.timelineType !=
+                                          TimelineEntryType.message) {
+                                        return StreamingTimelineEntry(
+                                          message: msg,
+                                          entryState: msg.isStale
+                                              ? EntryState.stale
+                                              : msg.isStreaming
+                                              ? EntryState.active
+                                              : EntryState.complete,
+                                        );
+                                      }
+
+                                      final prevMsg = index > 0
+                                          ? chatState.messages[index - 1]
+                                          : null;
+                                      final isGrouped =
+                                          prevMsg != null &&
+                                          prevMsg.role == msg.role &&
+                                          !prevMsg.isStreaming;
+                                      return MessageBubble(
                                         message: msg,
-                                        density: density,
-                                        entryState: msg.isStale
-                                            ? EntryState.stale
-                                            : msg.isStreaming
-                                            ? EntryState.active
-                                            : EntryState.complete,
-                                      );
-                                    }
-
-                                    final prevMsg = index > 0
-                                        ? chatState.messages[index - 1]
-                                        : null;
-                                    final isGrouped =
-                                        prevMsg != null &&
-                                        prevMsg.role == msg.role &&
-                                        !prevMsg.isStreaming;
-                                    return MessageBubble(
-                                      message: msg,
-                                      isGrouped: isGrouped,
-                                      capabilities: capabilities,
-                                      onRetry:
-                                          msg.status == MessageStatus.failed
-                                          ? () => ref
-                                                .read(chatProvider.notifier)
-                                                .retryMessage(msg)
-                                          : null,
-                                      isStopping: chatState.isStopping,
-                                      onStop: () => ref
-                                          .read(chatProvider.notifier)
-                                          .stopTurn(),
-                                      fetchMessageAudio: () {
-                                        final api = ref.read(apiClientProvider);
-                                        final audioId = msg.audioId;
-                                        if (audioId != null) {
-                                          return api?.fetchAudio(audioId) ??
+                                        isGrouped: isGrouped,
+                                        capabilities: capabilities,
+                                        onRetry:
+                                            msg.status == MessageStatus.failed
+                                            ? () => ref
+                                                  .read(chatProvider.notifier)
+                                                  .retryMessage(msg)
+                                            : null,
+                                        isStopping: chatState.isStopping,
+                                        onStop: () => ref
+                                            .read(chatProvider.notifier)
+                                            .stopTurn(),
+                                        fetchMessageAudio: () {
+                                          final api = ref.read(
+                                            apiClientProvider,
+                                          );
+                                          final audioId = msg.audioId;
+                                          if (audioId != null) {
+                                            return api?.fetchAudio(audioId) ??
+                                                Future.value(null);
+                                          }
+                                          // On-demand TTS synthesis.
+                                          return api?.fetchMessageAudio(
+                                                msg.id,
+                                              ) ??
                                               Future.value(null);
-                                        }
-                                        // On-demand TTS synthesis.
-                                        return api?.fetchMessageAudio(msg.id) ??
-                                            Future.value(null);
-                                      },
-                                      imageBaseUrl: imageBaseUrl,
-                                      imageAuthToken: imageAuthToken,
-                                    );
-                                  },
+                                        },
+                                        imageBaseUrl: imageBaseUrl,
+                                        imageAuthToken: imageAuthToken,
+                                      );
+                                    },
+                                  ),
+                            if (!_atBottom)
+                              Positioned(
+                                bottom: 8,
+                                right: 8,
+                                child: FloatingActionButton.small(
+                                  key: const Key('scroll_to_bottom_button'),
+                                  onPressed: _scrollToBottom,
+                                  tooltip: 'Scroll to bottom',
+                                  child: const Icon(Icons.keyboard_arrow_down),
                                 ),
-                          if (!_atBottom)
-                            Positioned(
-                              bottom: 8,
-                              right: 8,
-                              child: FloatingActionButton.small(
-                                key: const Key('scroll_to_bottom_button'),
-                                onPressed: _scrollToBottom,
-                                tooltip: 'Scroll to bottom',
-                                child: const Icon(Icons.keyboard_arrow_down),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
 

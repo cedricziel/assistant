@@ -9,4 +9,5 @@ const List<String> kAssistantUiElements = [
   'MessageTimingIndicator',
   'StarterPrompts',
   'SuggestionChips',
+  'ThreadDensityScope',
 ];
