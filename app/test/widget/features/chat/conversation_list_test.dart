@@ -33,7 +33,7 @@ void main() {
       routes: [
         GoRoute(
           path: '/',
-          builder: (_, _) => const Scaffold(body: ConversationList()),
+          builder: (_, _) => const Scaffold(body: ConversationListPane()),
         ),
         GoRoute(
           path: '/chat/:id',

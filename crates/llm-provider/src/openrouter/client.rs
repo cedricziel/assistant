@@ -69,12 +69,13 @@ impl OpenRouterClient {
         Ok(response)
     }
 
-    /// Streams `request`, forwarding text deltas to `sink`.
+    /// Streams `request`, forwarding text deltas to `sink`. Returns the
+    /// response and the PCM16 of a spoken reply, if the stream carried one.
     pub async fn chat_stream(
         &self,
         request: &ChatRequest,
         sink: Option<mpsc::Sender<StreamChunk>>,
-    ) -> anyhow::Result<LlmResponse> {
+    ) -> anyhow::Result<(LlmResponse, Option<Vec<u8>>)> {
         let mut bytes = self.send(request).await?.bytes_stream();
         let mut lines = LineBuffer::default();
         let mut acc = StreamAccumulator::new(&request.model, shows_reasoning(request));
@@ -95,8 +96,9 @@ impl OpenRouterClient {
             }
         }
         let image_urls = acc.take_image_urls();
+        let pcm = acc.take_audio();
         let response = finish(acc, sink.as_ref()).await?;
-        self.with_images(response, &image_urls).await
+        Ok((self.with_images(response, &image_urls).await?, pcm))
     }
 
     /// Posts a chat `request`, retrying transient failures.

@@ -8,11 +8,13 @@
 //! fallback models.
 
 mod audio_input;
+mod audio_output;
 mod catalog;
 mod citations;
 mod client;
 mod embedder;
 pub(crate) mod errors;
+mod key;
 mod media;
 mod reasoning;
 mod request;
@@ -33,9 +35,11 @@ use assistant_core::{
 use std::sync::Arc;
 
 use self::audio_input::AudioInput;
+use self::audio_output::AudioOutput;
 use self::catalog::{OpenRouterCatalog, Requirements};
 use self::client::OpenRouterClient;
 pub use self::embedder::OpenRouterEmbedder;
+pub use self::key::{KeyStatus, key_status};
 use self::request::{ModelInputs, RequestSettings, apply_options, build_chat_request};
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -57,6 +61,7 @@ pub struct OpenRouterProvider {
     settings: RequestSettings,
     base_url: String,
     audio_input: AudioInput,
+    audio_output: AudioOutput,
 }
 
 impl OpenRouterProvider {
@@ -97,6 +102,24 @@ impl OpenRouterProvider {
             .await;
         match result {
             Err(e)
+                if options.audio_reply.is_some() && self.audio_output.reject_if_audio_error(&e) =>
+            {
+                let text_only = ChatOptions {
+                    audio_reply: None,
+                    ..options.clone()
+                };
+                self.dispatch(
+                    system_prompt,
+                    &history,
+                    tools,
+                    &text_only,
+                    stream,
+                    chunk_sink,
+                    inputs,
+                )
+                .await
+            }
+            Err(e)
                 if audio_input::has_audio(&history)
                     && self.audio_input.reject_if_audio_error(&e) =>
             {
@@ -131,11 +154,19 @@ impl OpenRouterProvider {
         let mut request = build_chat_request(&self.settings, system_prompt, history, tools, inputs);
         request.stream = stream;
         apply_options(&mut request, options);
-        if stream {
-            self.client.chat_stream(&request, chunk_sink).await
-        } else {
-            self.client.chat(&request).await
+        if options.audio_reply.is_some() {
+            self.audio_output.request(&mut request);
         }
+        if !request.stream {
+            return self.client.chat(&request).await;
+        }
+        let (mut response, pcm) = self.client.chat_stream(&request, chunk_sink).await?;
+        if let (Some(pcm), Some(format)) = (pcm, options.audio_reply)
+            && let Some(clip) = self.audio_output.clip(pcm, format).await
+        {
+            response.meta_mut().media.push(clip);
+        }
+        Ok(response)
     }
 
     /// Create from the unified [`LlmConfig`].
@@ -223,6 +254,7 @@ impl OpenRouterProvider {
             },
             base_url,
             audio_input: AudioInput::new(cfg.openrouter.audio_input.clone()),
+            audio_output: AudioOutput::new(cfg.openrouter.audio_output.clone()),
         })
     }
 }
@@ -285,6 +317,7 @@ impl LlmProvider for OpenRouterProvider {
                 parallel_tool_calls: info.parallel_tool_calls,
                 json_schema: info.json_schema,
                 audio_input: self.audio_input.enabled(info.audio_input),
+                audio_output: self.audio_output.enabled(info.audio_output),
             })
     }
 
@@ -315,6 +348,7 @@ impl LlmProvider for OpenRouterProvider {
             } else {
                 ResponseFormat::Text
             },
+            audio_reply: options.audio_reply.filter(|_| support.audio_output),
         };
         let stream = chunk_sink.is_some();
         self.send(system_prompt, history, tools, &native, stream, chunk_sink)
@@ -1348,6 +1382,7 @@ mod tests {
                     parallel_tool_calls: true,
                     json_schema: true,
                     audio_input: false,
+                    audio_output: false,
                 },
             ),
             (
@@ -3158,6 +3193,217 @@ mod tests {
         assert!(!sent_audio(1), "the repeat has no audio");
         assert!(!sent_audio(2), "audio stays off");
         assert!(!provider.chat_options_support().audio_input);
+    }
+
+    // ── Wiremock: audio output ──────────────────────────────────────────
+
+    fn speaking() -> OpenRouterOptions {
+        OpenRouterOptions {
+            audio_output: assistant_core::types::llm::OpenRouterAudioOutput {
+                enabled: true,
+                ..Default::default()
+            },
+            ..OpenRouterOptions::default()
+        }
+    }
+
+    fn spoken_reply(format: assistant_core::types::transcription::TtsFormat) -> ChatOptions {
+        ChatOptions {
+            audio_reply: Some(format),
+            ..ChatOptions::default()
+        }
+    }
+
+    async fn speaking_provider(server: &MockServer, outputs: &[&str]) -> OpenRouterProvider {
+        let mut model = catalog_model(&["text", "audio"], &["tools"]);
+        model["architecture"]["output_modalities"] = json!(outputs);
+        mount_catalog(
+            server,
+            model,
+            json!([endpoint("OpenAI", "openai", 128_000)]),
+        )
+        .await;
+        provider_with(&server.uri(), speaking())
+    }
+
+    /// An SSE body carrying `chunks` as `data:` lines, then `[DONE]`.
+    fn sse(chunks: &[Value]) -> String {
+        chunks
+            .iter()
+            .map(|c| format!("data: {c}\n\n"))
+            .chain(["data: [DONE]\n\n".to_string()])
+            .collect()
+    }
+
+    /// 0.1 s of 24 kHz PCM silence, split into two base64 deltas.
+    fn pcm_deltas(transcript: &[&str]) -> Vec<Value> {
+        let pcm = vec![0u8; 4800];
+        let (a, b) = pcm.split_at(2400);
+        vec![
+            json!({"choices": [{"delta": {"audio": {"data": b64(a), "transcript": transcript[0]}}}]}),
+            json!({"choices": [{"delta": {"audio": {"data": b64(b), "transcript": transcript[1]}}, "finish_reason": "stop"}]}),
+        ]
+    }
+
+    async fn mount_sse_body(server: &MockServer, body: String) {
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+            .mount(server)
+            .await;
+    }
+
+    fn has_ffmpeg() -> bool {
+        std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
+    #[tokio::test]
+    async fn audio_output_support_needs_the_setting_and_the_catalog() {
+        for (outputs, expected) in [(vec!["text", "audio"], true), (vec!["text"], false)] {
+            let server = MockServer::start().await;
+            mount_once(&server, chat_response("OK")).await;
+            let provider = speaking_provider(&server, &outputs).await;
+            provider.chat("sys", &[], &[]).await.unwrap();
+            assert_eq!(
+                provider.chat_options_support().audio_output,
+                expected,
+                "{outputs:?}"
+            );
+        }
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let mut model = catalog_model(&["text"], &["tools"]);
+        model["architecture"]["output_modalities"] = json!(["text", "audio"]);
+        mount_catalog(&server, model, json!([endpoint("OpenAI", "openai", 1)])).await;
+        let provider = provider_with(&server.uri(), OpenRouterOptions::default());
+        provider.chat("sys", &[], &[]).await.unwrap();
+        assert!(
+            !provider.chat_options_support().audio_output,
+            "off by default"
+        );
+    }
+
+    #[tokio::test]
+    async fn spoken_reply_streams_with_the_audio_modality() {
+        use assistant_core::types::transcription::TtsFormat;
+        let server = MockServer::start().await;
+        mount_sse_body(
+            &server,
+            sse(&[json!({"choices": [{"delta": {"content": "hi"}, "finish_reason": "stop"}]})]),
+        )
+        .await;
+        let provider = speaking_provider(&server, &["text", "audio"]).await;
+
+        provider
+            .chat_with("sys", &[], &[], &spoken_reply(TtsFormat::Mp3), None)
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert_eq!(body["stream"], true, "audio comes only from a stream");
+        assert_eq!(body["modalities"], json!(["text", "audio"]));
+        assert_eq!(body["audio"], json!({"voice": "alloy", "format": "pcm16"}));
+    }
+
+    #[tokio::test]
+    async fn without_a_spoken_reply_no_audio_is_requested() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = speaking_provider(&server, &["text", "audio"]).await;
+
+        provider
+            .chat_with("sys", &[], &[], &ChatOptions::default(), None)
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        assert!(body.get("audio").is_none(), "{body}");
+        assert!(body.get("modalities").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn streamed_audio_becomes_a_clip_and_its_transcript_the_answer() {
+        use assistant_core::types::transcription::TtsFormat;
+        if !has_ffmpeg() {
+            eprintln!("skipped: ffmpeg is not installed");
+            return;
+        }
+        let server = MockServer::start().await;
+        mount_sse_body(&server, sse(&pcm_deltas(&["It is ", "sunny."]))).await;
+        let provider = speaking_provider(&server, &["text", "audio"]).await;
+
+        let response = provider
+            .chat_with("sys", &[], &[], &spoken_reply(TtsFormat::Ogg), None)
+            .await
+            .unwrap();
+
+        let LlmResponse::FinalAnswer(text, meta) = response else {
+            panic!("expected a final answer");
+        };
+        assert_eq!(text, "It is sunny.");
+        assert_eq!(meta.media.len(), 1, "{:?}", meta.media);
+        assert_eq!(meta.media[0].kind, assistant_core::MediaKind::Audio);
+        assert_eq!(meta.media[0].mime, "audio/ogg");
+        assert_eq!(&meta.media[0].data[..4], b"OggS");
+    }
+
+    #[tokio::test]
+    async fn text_content_wins_over_the_transcript() {
+        use assistant_core::types::transcription::TtsFormat;
+        if !has_ffmpeg() {
+            eprintln!("skipped: ffmpeg is not installed");
+            return;
+        }
+        let server = MockServer::start().await;
+        let mut chunks = vec![json!({"choices": [{"delta": {"content": "Sunny."}}]})];
+        chunks.extend(pcm_deltas(&["It is ", "sunny."]));
+        mount_sse_body(&server, sse(&chunks)).await;
+        let provider = speaking_provider(&server, &["text", "audio"]).await;
+
+        let response = provider
+            .chat_with("sys", &[], &[], &spoken_reply(TtsFormat::Mp3), None)
+            .await
+            .unwrap();
+
+        let LlmResponse::FinalAnswer(text, meta) = response else {
+            panic!("expected a final answer");
+        };
+        assert_eq!(text, "Sunny.");
+        assert_eq!(meta.media[0].mime, "audio/mpeg");
+    }
+
+    #[tokio::test]
+    async fn rejected_audio_output_is_retried_once_without_it_and_then_disabled() {
+        use assistant_core::types::transcription::TtsFormat;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": {"code": 400, "message": "audio output is not supported with tools"}
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        mount_once(&server, chat_response("OK")).await;
+        let provider = speaking_provider(&server, &["text", "audio"]).await;
+
+        let response = provider
+            .chat_with("sys", &[], &[], &spoken_reply(TtsFormat::Mp3), None)
+            .await
+            .unwrap();
+
+        assert!(matches!(response, LlmResponse::FinalAnswer(ref t, _) if t == "OK"));
+        let requests = chat_requests(&server).await;
+        assert_eq!(requests.len(), 2, "the rejected call and its repeat");
+        let repeat: Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert!(repeat.get("audio").is_none(), "{repeat}");
+        assert!(
+            !provider.chat_options_support().audio_output,
+            "audio stays off"
+        );
     }
 
     // ── Live integration test ───────────────────────────────────────────

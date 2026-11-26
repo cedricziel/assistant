@@ -2,6 +2,8 @@
 
 use serde_json::Value;
 
+use crate::types::transcription::TtsFormat;
+
 /// Which tools the model may or must call.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ToolChoice {
@@ -37,6 +39,9 @@ pub struct ChatOptions {
     /// `None` keeps the provider's default.
     pub parallel_tool_calls: Option<bool>,
     pub response_format: ResponseFormat,
+    /// Speak the answer too, encoded as this format. Only providers that
+    /// report [`ChatOptionsSupport::audio_output`] send it; others ignore it.
+    pub audio_reply: Option<TtsFormat>,
 }
 
 /// Which [`ChatOptions`] a provider sends natively. Unsupported options are
@@ -48,4 +53,6 @@ pub struct ChatOptionsSupport {
     pub json_schema: bool,
     /// The model hears [`ContentBlock::Audio`](crate::ContentBlock::Audio).
     pub audio_input: bool,
+    /// The model can speak its answer ([`ChatOptions::audio_reply`]).
+    pub audio_output: bool,
 }

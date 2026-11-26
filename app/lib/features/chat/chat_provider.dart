@@ -18,6 +18,7 @@ import 'chat_stream_session.dart';
 import 'chat_timeline_reducers.dart';
 import 'chat_turn_transitions.dart';
 import 'conversation_list_provider.dart';
+import 'follow_up_listener.dart';
 import 'message_feedback_provider.dart';
 import 'turn_progress_card.dart' show kTurnStallThreshold;
 
@@ -30,6 +31,10 @@ export 'conversation_list_provider.dart';
 /// Manages the active chat conversation.
 class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
   final _session = ChatStreamSession();
+
+  /// Waits for follow-up suggestions after the last `done`. Independent of
+  /// [_session]: the next turn resets that, this one is only cancelled.
+  FollowUpListener? _followUps;
 
   final _lifecycle = StreamController<ChatLifecycleEvent>.broadcast(sync: true);
   Timer? _stallTimer;
@@ -345,6 +350,51 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     state = AsyncData(chatState.copyWith(messages: msgs));
   }
 
+  /// Start waiting for follow-up suggestions on [runId]'s replay stream after
+  /// its `done` frame. Does nothing without a message id to tie them to.
+  void _startFollowUps(
+    ApiClient api,
+    DoneEvent done, {
+    required String conversationId,
+    required String? runId,
+  }) {
+    final messageId = done.messageId;
+    if (messageId == null || runId == null) return;
+    _cancelFollowUps();
+    _followUps = FollowUpListener(
+      api: api,
+      conversationId: conversationId,
+      runId: runId,
+      since: _session.lastSeq,
+      messageId: messageId,
+      wrapSource: _session.untilDetached,
+      onSuggestions: (prompts) =>
+          _applySuggestions(conversationId, messageId, prompts),
+    )..start();
+  }
+
+  void _cancelFollowUps() {
+    _followUps?.cancel();
+    _followUps = null;
+  }
+
+  /// Show [prompts] only while [messageId] is still the last assistant
+  /// message of the idle conversation they were generated for.
+  void _applySuggestions(
+    String conversationId,
+    String messageId,
+    List<String> prompts,
+  ) {
+    final current = state.value;
+    if (!ref.mounted || current == null) return;
+    if (current.isSending || current.conversationId != conversationId) return;
+    final lastAssistant = current.messages
+        .where((m) => m.role == 'assistant')
+        .lastOrNull;
+    if (lastAssistant?.id != messageId) return;
+    state = AsyncData(current.copyWith(suggestions: prompts));
+  }
+
   /// Whether a transient stream interruption occurred that should be retried
   /// on app resume.
   bool get needsReconnect => _session.needsReconnect;
@@ -352,6 +402,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
   @override
   Future<ChatState> build() async {
     ref.onDispose(() {
+      _cancelFollowUps();
       _session.cancelStopTimer();
       _stallTimer?.cancel();
       unawaited(_lifecycle.close());
@@ -457,10 +508,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
   /// Load an existing conversation by ID.
   Future<void> loadConversation(String conversationId) async {
     _session.clearDisconnected();
+    _cancelFollowUps();
     state = AsyncData(
       (state.value ?? const ChatState()).copyWith(
         isLoadingHistory: true,
         clearError: true,
+        clearSuggestions: true,
       ),
     );
 
@@ -604,6 +657,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
   /// Start a fresh conversation (no conversation ID set).
   void clearConversation() {
     _session.clearDisconnected();
+    _cancelFollowUps();
     state = const AsyncData(ChatState());
   }
 
@@ -692,9 +746,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     if (conversationId == null) return;
 
     // Append message to pending queue, capturing conversationId at enqueue time.
+    _cancelFollowUps();
     final afterCreate = state.value ?? const ChatState();
     state = AsyncData(
       afterCreate.copyWith(
+        clearSuggestions: true,
         pendingQueue: [
           ...afterCreate.pendingQueue,
           PendingMessage(
@@ -793,6 +849,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
         messages: msgs,
         isSending: true,
         streamingContent: hasPlaceholder ? current.streamingContent : '',
+        clearSuggestions: true,
       ),
     );
 
@@ -814,6 +871,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
             conversationId: conversationId,
             userMsgId: userMsgId,
             source: TurnSource.replay,
+          );
+          _startFollowUps(
+            api,
+            event,
+            conversationId: conversationId,
+            runId: runId,
           );
           return true;
         } else if (event is AgentErrorEvent) {
@@ -884,6 +947,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     if (api == null) return;
 
     // Reset per-turn state so Stop never targets the previous turn's run id.
+    _cancelFollowUps();
     _session.beginTurn();
     final current = state.value ?? const ChatState();
 
@@ -915,6 +979,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
         messages: [...current.messages, userMsg, assistantPlaceholder],
         isSending: true,
         streamingContent: '',
+        clearSuggestions: true,
       ),
     );
     _beginLifecycle();
@@ -1008,6 +1073,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     final api = _api;
     if (api == null) return;
 
+    _cancelFollowUps();
     _session.beginTurn();
     final current = state.value ?? const ChatState();
 
@@ -1039,6 +1105,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
         messages: [...current.messages, userMsg, assistantPlaceholder],
         isSending: true,
         streamingContent: '',
+        clearSuggestions: true,
       ),
     );
     _beginLifecycle();
@@ -1110,6 +1177,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
             conversationId: conversationId,
             userMsgId: userMsgId,
             source: TurnSource.live,
+          );
+          _startFollowUps(
+            api,
+            event,
+            conversationId: conversationId,
+            runId: _session.runId,
           );
           return;
         } else if (event is ErrorEvent) {

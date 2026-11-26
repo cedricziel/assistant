@@ -437,6 +437,7 @@ impl LlmProvider for OpenAIProvider {
             parallel_tool_calls: true,
             json_schema: true,
             audio_input: false,
+            audio_output: false,
         }
     }
 
