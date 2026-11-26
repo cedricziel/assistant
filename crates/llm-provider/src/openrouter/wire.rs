@@ -45,6 +45,8 @@ pub struct ChatRequest {
     pub modalities: Vec<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_config: Option<OpenRouterImageConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]

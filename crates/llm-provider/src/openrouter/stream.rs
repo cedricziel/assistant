@@ -76,6 +76,17 @@ struct Delta {
     annotations: Vec<Value>,
     #[serde(default)]
     images: Vec<ImageEntry>,
+    #[serde(default)]
+    audio: Option<AudioDelta>,
+}
+
+/// A piece of a spoken reply: base64 PCM16 and the words it says.
+#[derive(Debug, Default, Deserialize)]
+struct AudioDelta {
+    #[serde(default)]
+    data: Option<String>,
+    #[serde(default)]
+    transcript: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,6 +127,9 @@ pub struct StreamAccumulator {
     reasoning_details: Vec<Value>,
     annotations: Vec<Value>,
     image_urls: Vec<String>,
+    /// PCM16 of a spoken reply, in arrival order.
+    audio: Vec<u8>,
+    transcript: String,
 }
 
 impl StreamAccumulator {
@@ -163,6 +177,7 @@ impl StreamAccumulator {
 
         let mut text = String::new();
         let mut thinking = String::new();
+        let mut transcript_chunk = String::new();
         for choice in chunk.choices {
             let reasoning = visible_text(
                 &choice.delta.reasoning_details,
@@ -188,6 +203,24 @@ impl StreamAccumulator {
             }
             if let Some(content) = choice.delta.content {
                 text.push_str(&content);
+            }
+            if let Some(audio) = choice.delta.audio {
+                if let Some(data) = audio.data {
+                    use base64::Engine as _;
+                    let pcm = base64::engine::general_purpose::STANDARD
+                        .decode(data.trim())
+                        .map_err(|e| {
+                            anyhow::anyhow!("OpenRouter returned invalid base64 audio: {e}")
+                        })?;
+                    self.audio.extend_from_slice(&pcm);
+                }
+                if let Some(words) = audio.transcript {
+                    self.transcript.push_str(&words);
+                    // A spoken reply's text arrives as its transcript.
+                    if self.text.is_empty() && text.is_empty() {
+                        transcript_chunk.push_str(&words);
+                    }
+                }
             }
             for delta in choice.delta.tool_calls {
                 if self.tool_calls.len() <= delta.index {
@@ -215,6 +248,8 @@ impl StreamAccumulator {
         }
         if !text.is_empty() {
             chunks.push(StreamChunk::Text(text));
+        } else if !transcript_chunk.is_empty() {
+            chunks.push(StreamChunk::Text(transcript_chunk));
         }
         Ok(chunks)
     }
@@ -228,6 +263,11 @@ impl StreamAccumulator {
         sources_block(&self.text, &self.annotations)
     }
 
+    /// The PCM16 of the spoken reply streamed so far, if any.
+    pub fn take_audio(&mut self) -> Option<Vec<u8>> {
+        (!self.audio.is_empty()).then(|| std::mem::take(&mut self.audio))
+    }
+
     /// The URLs of the images streamed so far, without duplicates.
     pub fn take_image_urls(&mut self) -> Vec<String> {
         std::mem::take(&mut self.image_urls)
@@ -235,7 +275,10 @@ impl StreamAccumulator {
 
     /// The response, once the stream has ended. A stream that ends without
     /// `[DONE]` or a finish reason was cut off.
-    pub fn finish(self) -> anyhow::Result<LlmResponse> {
+    pub fn finish(mut self) -> anyhow::Result<LlmResponse> {
+        if self.text.is_empty() {
+            self.text = std::mem::take(&mut self.transcript);
+        }
         let sources = self.sources_block().unwrap_or_default();
         if !self.done && self.meta.finish_reason.is_none() {
             anyhow::bail!("OpenRouter stream ended before the response was complete");

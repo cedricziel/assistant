@@ -40,14 +40,11 @@ impl AudioInput {
     /// Stops sending audio when `error` is the upstream rejecting it, and
     /// says whether it was.
     pub fn reject_if_audio_error(&self, error: &anyhow::Error) -> bool {
-        let Some(http) = error.downcast_ref::<ProviderHttpError>() else {
+        let Some(reason) = is_audio_rejection(error) else {
             return false;
         };
-        if http.status != 400 || !http.message.to_lowercase().contains("audio") {
-            return false;
-        }
         if !self.rejected.swap(true, Ordering::Relaxed) {
-            warn!(error = %http, "OpenRouter rejected audio input; sending voice notes as text from now on");
+            warn!(error = %reason, "OpenRouter rejected audio input; sending voice notes as text from now on");
         }
         true
     }
@@ -149,6 +146,14 @@ impl AudioInput {
             data: base64::engine::general_purpose::STANDARD.encode(wav),
         })
     }
+}
+
+/// The upstream error, when `error` is a 400 about audio or modalities.
+pub fn is_audio_rejection(error: &anyhow::Error) -> Option<&ProviderHttpError> {
+    let http = error.downcast_ref::<ProviderHttpError>()?;
+    let message = http.message.to_lowercase();
+    (http.status == 400 && (message.contains("audio") || message.contains("modalit")))
+        .then_some(http)
 }
 
 /// `history` without recordings; their text stands in.

@@ -146,8 +146,8 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 - [x] 20.1a Write failing tests: the orchestrator keeps audio only for the current turn and only for providers with audio input support; `history.rs` drops `Audio` from past messages; the Anthropic, OpenAI, Moonshot and Ollama builders drop `Audio`. Confirm red. Implement, then verify.
 - [x] 20.1b Write failing tests for OpenRouter audio input: `audio_input` config parsing; an `input_audio` part with conversion to WAV for formats outside `formats`; the transcript part prefixed "Transcript (may contain errors):"; `max_secs` cutoff; a 400 on `input_audio` leads to one repeat without audio, then disabled. Confirm red. Implement, then verify.
 - [x] 20.2 Write failing tests: a voice turn with audio-capable provider support requests audio options; a non-voice turn does not. Confirm red. Implement in the orchestrator, then verify.
-- [ ] 20.3 Write failing SSE fixture tests for the OpenRouter client: `delta.audio.data` concatenated, transcript used when there is no content, PCM read at `pcm_sample_rate` and transcoded to `[tts] format`, attached as `GeneratedMedia::Audio`. Confirm red. Implement, then verify.
-- [ ] 20.4 Write failing tests: a 400 on the audio modality repeats the call once without audio and disables audio for the provider instance; TTS fallback synthesizes the clip; text only when `[tts]` is absent. Confirm red. Implement, then verify.
+- [x] 20.3 Write failing SSE fixture tests for the OpenRouter client: `delta.audio.data` concatenated, transcript used when there is no content, PCM read at `pcm_sample_rate` and transcoded to `[tts] format`, attached as `GeneratedMedia::Audio`. Confirm red. Implement, then verify.
+- [x] 20.4 Write failing tests: a 400 on the audio modality repeats the call once without audio and disables audio for the provider instance; TTS fallback synthesizes the clip; text only when `[tts]` is absent. Confirm red. Implement, then verify.
 - [ ] 20.5 Document voice-native chat (audio input and replies) in `docs/openrouter.md` and `docs/transcription.md`.
 
 ## 21. Doctor and final docs
