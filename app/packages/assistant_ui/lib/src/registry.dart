@@ -14,6 +14,7 @@ const List<String> kAssistantUiElements = [
   'MessageActions',
   'MessageEditor',
   'MessageTimingIndicator',
+  'PermissionRuleTile',
   'QueuedMessageBubble',
   'StarterPrompts',
   'SuggestionChips',
