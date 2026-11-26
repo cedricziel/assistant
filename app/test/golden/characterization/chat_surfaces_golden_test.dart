@@ -3,9 +3,9 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:assistant_app/api/models/server_capabilities.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
-import 'package:assistant_app/features/chat/chat_input_row.dart';
+import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/conversation_list.dart';
 import 'package:assistant_app/features/chat/empty_chat.dart';
@@ -15,10 +15,10 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../support/golden.dart';
 
-// Before-image of ChatInputRow, TurnProgressCard, ConversationList and
+// Before-image of the composer (formerly ChatInputRow), TurnProgressCard, ConversationList and
 // EmptyChat (chat-element-library PR 1b).
 
-// -- ChatInputRow ----------------------------------------------------------
+// -- Composer ----------------------------------------------------------
 
 const _inputSize = Size(420, 160);
 
@@ -40,20 +40,33 @@ Future<void> _pumpInput(
 
   await pumpGolden(
     tester,
-    ChatInputRow(
+    Composer(
       controller: controller,
       focusNode: focusNode,
       isSending: isSending,
       pendingQueueCount: queued,
       pendingAttachments: attachments,
-      capabilities: ServerCapabilities.disabled,
       commands: commands,
+      inputBuilder: (context, controller, focusNode, placeholder, onSubmit) =>
+          AdaptiveTextField(
+            key: const Key('message_input'),
+            controller: controller,
+            focusNode: focusNode,
+            placeholder: placeholder,
+            cursorColor: Theme.of(context).colorScheme.primary,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 10,
+            ),
+            minLines: 1,
+            maxLines: 6,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => onSubmit(),
+          ),
       onSend: () {},
       onStop: () {},
-      onVoiceRecorded: (_, _) {},
       onPickImage: () {},
       onRemoveAttachment: (_) {},
-      onPasteImage: (_) {},
     ),
     size: size,
     alignment: alignment,
@@ -149,7 +162,7 @@ ConversationListEntry _entry(String id, String title, Duration ago) {
 }
 
 void main() {
-  group('ChatInputRow', () {
+  group('Composer', () {
     testWidgets('idle', (tester) async {
       await _pumpInput(tester);
       await expectGolden('input_idle');

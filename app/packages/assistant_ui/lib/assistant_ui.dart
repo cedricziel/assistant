@@ -12,10 +12,11 @@ library;
 // export 'src/branch_picker.dart'; // slot: message-branching 9
 // export 'src/code/code_block.dart'; // slot: chat-a11y-and-code-blocks C4
 // export 'src/composer/attachment_tray.dart'; // slot: chat-element-library 11b
-// export 'src/composer/composer.dart'; // slot: chat-element-library 11a
 // export 'src/composer/composer_voice_button.dart'; // slot: chat-element-library 11b
 export 'src/branch_picker.dart';
+export 'src/composer/composer.dart';
 export 'src/composer/queued_message_bubble.dart';
+export 'src/composer/slash_command_menu.dart';
 export 'src/highlight/code_token.dart';
 export 'src/highlight/highlight_code.dart';
 export 'src/interactions/approval_card.dart';
