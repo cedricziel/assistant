@@ -14,11 +14,12 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::types::embeddings::CreateEmbeddingRequestArgs;
 use async_openai::types::responses::{
-    CreateResponseArgs, EasyInputMessage, FunctionCallOutput, FunctionCallOutputItemParam,
-    FunctionTool, FunctionToolCall, InputContent, InputItem, InputParam, InputTextContent, Item,
-    MessageType, OutputItem, OutputMessage, OutputMessageContent, OutputStatus, Response, Role,
-    Tool, WebSearchApproximateLocation, WebSearchApproximateLocationType, WebSearchTool,
-    WebSearchToolSearchContextSize,
+    CreateResponse, CreateResponseArgs, EasyInputMessage, FunctionCallOutput,
+    FunctionCallOutputItemParam, FunctionTool, FunctionToolCall, InputContent, InputItem,
+    InputParam, InputTextContent, Item, MessageType, OutputItem, OutputMessage,
+    OutputMessageContent, OutputStatus, Response, Role, Tool, ToolChoiceFunction,
+    ToolChoiceOptions, ToolChoiceParam, WebSearchApproximateLocation,
+    WebSearchApproximateLocationType, WebSearchTool, WebSearchToolSearchContextSize,
 };
 use async_trait::async_trait;
 use futures::StreamExt as _;
@@ -30,8 +31,9 @@ use assistant_core::Secret;
 use assistant_core::types::llm::LlmConfig;
 use assistant_core::types::llm::OpenAIUserLocation;
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatOptions, ChatOptionsSupport, ChatRole, ContentBlock,
+    HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem,
+    ToolCallResponse, ToolChoice, ToolSpec, ToolSupport,
 };
 
 use crate::http::build_reqwest_client;
@@ -212,25 +214,19 @@ impl OpenAIProvider {
         tools
     }
 
-    // ── Non-streaming chat ────────────────────────────────────────────────
-
-    async fn chat_non_streaming(
+    fn build_request(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-    ) -> anyhow::Result<LlmResponse> {
-        self.ensure_fresh_client().await?;
-
-        debug!(model = %self.config.model, tools = tools.len(), "Sending Responses API request to OpenAI");
-
-        let input_items = build_input_items(history);
+        options: &ChatOptions,
+    ) -> anyhow::Result<CreateResponse> {
         let api_tools = self.build_tools(tools);
 
         let mut builder = CreateResponseArgs::default();
         builder
             .model(&self.config.model)
-            .input(InputParam::Items(input_items))
+            .input(InputParam::Items(build_input_items(history)))
             .max_output_tokens(self.config.max_tokens)
             .store(false);
 
@@ -239,11 +235,33 @@ impl OpenAIProvider {
         }
         if !api_tools.is_empty() {
             builder.tools(api_tools);
+            if let Some(choice) = openai_tool_choice(&options.tool_choice) {
+                builder.tool_choice(choice);
+            }
+            if let Some(parallel) = options.parallel_tool_calls {
+                builder.parallel_tool_calls(parallel);
+            }
         }
 
-        let request = builder
+        builder
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build OpenAI Responses request: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("Failed to build OpenAI Responses request: {e}"))
+    }
+
+    // ── Non-streaming chat ────────────────────────────────────────────────
+
+    async fn chat_non_streaming(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+    ) -> anyhow::Result<LlmResponse> {
+        self.ensure_fresh_client().await?;
+
+        debug!(model = %self.config.model, tools = tools.len(), "Sending Responses API request to OpenAI");
+
+        let request = self.build_request(system_prompt, history, tools, options)?;
 
         let retry_config = RetryConfig::default();
         let response = with_retry(
@@ -277,32 +295,14 @@ impl OpenAIProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
+        options: &ChatOptions,
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         self.ensure_fresh_client().await?;
 
         debug!(model = %self.config.model, "Sending streaming Responses API request to OpenAI");
 
-        let input_items = build_input_items(history);
-        let api_tools = self.build_tools(tools);
-
-        let mut builder = CreateResponseArgs::default();
-        builder
-            .model(&self.config.model)
-            .input(InputParam::Items(input_items))
-            .max_output_tokens(self.config.max_tokens)
-            .store(false);
-
-        if !system_prompt.is_empty() {
-            builder.instructions(system_prompt);
-        }
-        if !api_tools.is_empty() {
-            builder.tools(api_tools);
-        }
-
-        let request = builder.build().map_err(|e| {
-            anyhow::anyhow!("Failed to build OpenAI streaming Responses request: {e}")
-        })?;
+        let request = self.build_request(system_prompt, history, tools, options)?;
 
         let retry_config = RetryConfig::default();
         let mut stream = with_retry(
@@ -387,7 +387,8 @@ impl LlmProvider for OpenAIProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_non_streaming(system_prompt, history, tools).await
+        self.chat_non_streaming(system_prompt, history, tools, &ChatOptions::default())
+            .await
     }
 
     async fn chat_streaming(
@@ -397,8 +398,42 @@ impl LlmProvider for OpenAIProvider {
         tools: &[ToolSpec],
         chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_sse(system_prompt, history, tools, chunk_sink)
-            .await
+        self.chat_sse(
+            system_prompt,
+            history,
+            tools,
+            &ChatOptions::default(),
+            chunk_sink,
+        )
+        .await
+    }
+
+    fn chat_options_support(&self) -> ChatOptionsSupport {
+        ChatOptionsSupport {
+            tool_choice: true,
+            parallel_tool_calls: true,
+            json_schema: false,
+        }
+    }
+
+    async fn chat_with(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        options: &ChatOptions,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
+    ) -> anyhow::Result<LlmResponse> {
+        match chunk_sink {
+            Some(sink) => {
+                self.chat_sse(system_prompt, history, tools, options, Some(sink))
+                    .await
+            }
+            None => {
+                self.chat_non_streaming(system_prompt, history, tools, options)
+                    .await
+            }
+        }
     }
 
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
@@ -753,6 +788,18 @@ fn normalise_base_url(url: &str) -> String {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+/// The Responses API `tool_choice` for `choice`, or `None` to send the default.
+fn openai_tool_choice(choice: &ToolChoice) -> Option<ToolChoiceParam> {
+    match choice {
+        ToolChoice::Auto => None,
+        ToolChoice::None => Some(ToolChoiceParam::Option(ToolChoiceOptions::None)),
+        ToolChoice::Required => Some(ToolChoiceParam::Option(ToolChoiceOptions::Required)),
+        ToolChoice::Tool(name) => Some(ToolChoiceParam::Function(ToolChoiceFunction {
+            name: name.clone(),
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1083,5 +1130,89 @@ mod tests {
         // call_1 is matched, call_2 is unmatched → should return call_2
         let id = find_preceding_call_id(&items);
         assert_eq!(id, "call_2");
+    }
+
+    mod chat_options {
+        use serde_json::{Value, json};
+
+        use assistant_core::{ChatHistoryMessage, ChatOptions, ChatRole, ToolChoice, ToolSpec};
+
+        use super::super::{OpenAIProvider, OpenAIProviderConfig};
+
+        fn request(tools: &[ToolSpec], options: ChatOptions) -> Value {
+            let provider = OpenAIProvider::new(OpenAIProviderConfig::default(), "test").unwrap();
+            let history = [ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "hi".into(),
+            }];
+            let request = provider
+                .build_request("sys", &history, tools, &options)
+                .unwrap();
+            serde_json::to_value(request).unwrap()
+        }
+
+        fn tool() -> ToolSpec {
+            ToolSpec {
+                name: "submit".into(),
+                description: "Submit".into(),
+                params_schema: json!({"type": "object"}),
+                is_mutating: false,
+                requires_confirmation: false,
+            }
+        }
+
+        fn choose(tool_choice: ToolChoice) -> ChatOptions {
+            ChatOptions {
+                tool_choice,
+                ..ChatOptions::default()
+            }
+        }
+
+        #[test]
+        fn default_options_send_neither_field() {
+            let body = request(&[tool()], ChatOptions::default());
+            assert!(body.get("tool_choice").is_none(), "{body}");
+            assert!(body.get("parallel_tool_calls").is_none(), "{body}");
+        }
+
+        #[test]
+        fn tool_choices_map_to_responses_values() {
+            let cases = [
+                (ToolChoice::None, json!("none")),
+                (ToolChoice::Required, json!("required")),
+                (
+                    ToolChoice::Tool("submit".into()),
+                    json!({"type": "function", "name": "submit"}),
+                ),
+            ];
+            for (choice, expected) in cases {
+                let body = request(&[tool()], choose(choice.clone()));
+                assert_eq!(body["tool_choice"], expected, "{choice:?}");
+            }
+        }
+
+        #[test]
+        fn parallel_tool_calls_is_sent() {
+            let options = ChatOptions {
+                parallel_tool_calls: Some(false),
+                ..ChatOptions::default()
+            };
+            assert_eq!(
+                request(&[tool()], options)["parallel_tool_calls"],
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn no_options_without_tools() {
+            let options = ChatOptions {
+                tool_choice: ToolChoice::Required,
+                parallel_tool_calls: Some(false),
+                ..ChatOptions::default()
+            };
+            let body = request(&[], options);
+            assert!(body.get("tool_choice").is_none(), "{body}");
+            assert!(body.get("parallel_tool_calls").is_none(), "{body}");
+        }
     }
 }

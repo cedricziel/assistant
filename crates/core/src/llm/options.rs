@@ -1,5 +1,7 @@
 //! Per-call options for [`LlmProvider::chat_with`](crate::LlmProvider::chat_with).
 
+use serde_json::Value;
+
 /// Which tools the model may or must call.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ToolChoice {
@@ -14,12 +16,27 @@ pub enum ToolChoice {
     Tool(String),
 }
 
+/// The shape of the final answer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ResponseFormat {
+    #[default]
+    Text,
+    /// JSON matching `schema`. Only providers that report
+    /// [`ChatOptionsSupport::json_schema`] send it; others ignore it.
+    JsonSchema {
+        name: String,
+        schema: Value,
+        strict: bool,
+    },
+}
+
 /// Options for one chat call. The default is today's behavior.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChatOptions {
     pub tool_choice: ToolChoice,
     /// `None` keeps the provider's default.
     pub parallel_tool_calls: Option<bool>,
+    pub response_format: ResponseFormat,
 }
 
 /// Which [`ChatOptions`] a provider sends natively. Unsupported options are
@@ -28,4 +45,5 @@ pub struct ChatOptions {
 pub struct ChatOptionsSupport {
     pub tool_choice: bool,
     pub parallel_tool_calls: bool,
+    pub json_schema: bool,
 }

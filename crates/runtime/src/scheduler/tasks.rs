@@ -210,6 +210,7 @@ pub(super) async fn dispatch_scheduler_turn_request(
         timestamp: Some(orchestrator.clock.now()),
         traceparent: traceparent_from_context(interface_cx),
         attachment_ids: vec![],
+        interactive: false,
         user_id: persona_owner,
         org_id: None,
         space_id: None,
