@@ -1,4 +1,4 @@
-# ADR 0021: The Run, Not `done`, Bounds the Replay Stream
+# ADR 0024: The Run, Not `done`, Bounds the Replay Stream
 
 **Status**: Accepted
 **Date**: 2026-11-26

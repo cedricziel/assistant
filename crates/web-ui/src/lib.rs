@@ -324,6 +324,8 @@ async fn run_with_args(args: Args) -> Result<()> {
         Arc::new(assistant_core::clock::SystemClock),
     ));
 
+    let mut mcp_app_servers: Vec<Arc<dyn assistant_core::mcp_app::McpAppServers>> =
+        vec![integration_tools.clone()];
     let mut runtimes = SpaceRuntimes::new(pool_factory.clone(), orgs.clone(), None)
         .with_audio_store(audio_store.clone())
         .with_turn_tool_source(integration_tools);
@@ -341,6 +343,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         let mcp_manager = Arc::new(
             assistant_mcp_client::McpClientManager::start(&server_config.mcp.servers).await?,
         );
+        mcp_app_servers.insert(0, mcp_manager.clone());
         let mcp_tools = mcp_manager.tool_handlers().await;
         for handler in &mcp_tools {
             runtimes.register_ambient_tool(handler.clone());
@@ -475,18 +478,17 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     // -- Build transcription provider (for voice message STT) ----------------
-    let transcription_provider = config
-        .transcription
-        .as_ref()
-        .map(|tc| {
-            let provider = build_transcription_provider(tc)?;
+    let transcription_provider = match config.transcription.as_ref() {
+        Some(tc) => {
+            let provider = build_transcription_provider(tc, &config.llm).await?;
             info!(
                 provider = provider.name(),
                 "Audio transcription enabled (web UI)"
             );
-            Ok::<_, anyhow::Error>(provider)
-        })
-        .transpose()?;
+            Some(provider)
+        }
+        None => None,
+    };
 
     // -- Spawn TTL sweep task ------------------------------------------------
     {
@@ -505,7 +507,10 @@ async fn run_with_args(args: Args) -> Result<()> {
             space_resolver.clone(),
             runtimes.clone(),
             state.agent_id.clone(),
-        );
+        )
+        .with_mcp_apps(Arc::new(assistant_core::mcp_app::McpAppServerChain::new(
+            mcp_app_servers,
+        )));
         if let Some(ref d) = state.push_dispatcher {
             s = s.with_push_dispatcher(d.clone());
         }

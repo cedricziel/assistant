@@ -31,6 +31,7 @@ import 'package:assistant_api/src/api/skills_api.dart';
 import 'package:assistant_api/src/api/spaces_api.dart';
 import 'package:assistant_api/src/api/tasks_api.dart';
 import 'package:assistant_api/src/api/templates_api.dart';
+import 'package:assistant_api/src/api/tool_permission_rules_api.dart';
 import 'package:assistant_api/src/api/users_api.dart';
 import 'package:assistant_api/src/api/web_push_api.dart';
 import 'package:assistant_api/src/api/webhooks_api.dart';
@@ -286,6 +287,12 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   TemplatesApi getTemplatesApi() {
     return TemplatesApi(dio, serializers);
+  }
+
+  /// Get ToolPermissionRulesApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  ToolPermissionRulesApi getToolPermissionRulesApi() {
+    return ToolPermissionRulesApi(dio, serializers);
   }
 
   /// Get UsersApi instance, base route and serializer can be overridden by a given but be careful,

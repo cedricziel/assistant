@@ -248,6 +248,7 @@ fn make_tool_result_message_records_tool_name_and_content() {
             tool_call_id: Some("call_9"),
             status: "ok",
             data: Some(&serde_json::json!({"kind": "terminal"})),
+            app: None,
         },
     );
     assert_eq!(msg.conversation_id, conv);
