@@ -347,6 +347,7 @@ impl UpdateConversationRequest {
         Ok(ConversationPatch {
             title,
             pinned: self.pinned,
+            archived: None,
         })
     }
 }
@@ -797,6 +798,10 @@ pub async fn update_conversation(
             Json(ConversationSummary::from(&record)).into_response()
         }
         Ok(MetadataUpdate::NotFound) => json_error(StatusCode::NOT_FOUND, "Conversation not found"),
+        Ok(MetadataUpdate::Invalid) => json_error(
+            StatusCode::BAD_REQUEST,
+            "A conversation cannot be pinned and archived at once",
+        ),
         Err(e) => {
             warn!("Failed to update conversation {conv_id}: {e}");
             json_error(
@@ -2136,6 +2141,7 @@ mod tests {
                 assistant_storage::ConversationPatch {
                     title: None,
                     pinned: Some(true),
+                    archived: None,
                 },
             )
             .await
@@ -2162,6 +2168,7 @@ mod tests {
                 assistant_storage::ConversationPatch {
                     title: Some("Renamed".into()),
                     pinned: None,
+                    archived: None,
                 },
             )
             .await
@@ -2268,6 +2275,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 pinned_at: None,
+                archived_at: None,
             },
         ));
 
@@ -2282,6 +2290,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 pinned_at: None,
+                archived_at: None,
             },
         ));
 
@@ -2406,6 +2415,7 @@ mod tests {
             created_at,
             updated_at: created_at + chrono::Duration::hours(1),
             pinned_at: None,
+            archived_at: None,
         }
     }
 
