@@ -31,6 +31,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
+use crate::history::{FinalAnswerMeta, persist_final_answer};
+
 // ── Submodules ────────────────────────────────────────────────────────────────
 
 mod dispatch;
@@ -955,6 +957,7 @@ impl Orchestrator {
                 &history,
                 &all_specs,
             );
+            let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
@@ -1046,6 +1049,9 @@ impl Orchestrator {
                         &ext_map,
                         &conv_store,
                         turn_had_errors,
+                        FinalAnswerMeta {
+                            traceparent: llm_traceparent,
+                        },
                     )
                     .await?;
                     match outcome {
@@ -1370,6 +1376,7 @@ impl Orchestrator {
                 &history,
                 &tool_specs,
             );
+            let llm_traceparent = crate::otel_spans::traceparent_from_span(&llm_span);
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
@@ -1466,10 +1473,15 @@ impl Orchestrator {
                             m
                         };
                         let msg_id = assistant_msg.id;
-                        conv_store
-                            .save_message(&assistant_msg)
-                            .instrument(iteration_span.clone())
-                            .await?;
+                        persist_final_answer(
+                            &conv_store,
+                            assistant_msg,
+                            FinalAnswerMeta {
+                                traceparent: llm_traceparent,
+                            },
+                        )
+                        .instrument(iteration_span.clone())
+                        .await?;
                         Some(msg_id)
                     } else {
                         None

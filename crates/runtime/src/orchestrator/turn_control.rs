@@ -17,6 +17,8 @@ use opentelemetry::trace::Span as _;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::history::{FinalAnswerMeta, persist_final_answer};
+
 use super::dispatch::ToolResultMeta;
 use super::{EndTurnOutcome, FinalAnswerOutcome, Orchestrator, TurnResult};
 
@@ -40,6 +42,7 @@ impl Orchestrator {
         ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
         conv_store: &dyn ConversationStore,
         turn_had_errors: bool,
+        meta: FinalAnswerMeta,
     ) -> Result<FinalAnswerOutcome> {
         let turn_index = base_turn + iteration as i64 + 1;
 
@@ -47,7 +50,7 @@ impl Orchestrator {
             if !text.trim().is_empty() {
                 let mut m = Message::assistant(conversation_id, text);
                 m.turn = turn_index;
-                if let Err(e) = conv_store.save_message(&m).await {
+                if let Err(e) = persist_final_answer(conv_store, m, meta).await {
                     warn!("Failed to persist post-reply assistant message: {e}");
                 }
             }
@@ -71,7 +74,7 @@ impl Orchestrator {
 
         let mut m = Message::assistant(conversation_id, text);
         m.turn = turn_index;
-        conv_store.save_message(&m).await?;
+        persist_final_answer(conv_store, m, meta).await?;
 
         // Collect candidates and sort deterministically so the chosen tool
         // doesn't depend on HashMap iteration order.
