@@ -8,6 +8,8 @@ part of 'server_capabilities.dart';
 
 class _$ServerCapabilities extends ServerCapabilities {
   @override
+  final UiCapabilities ui;
+  @override
   final bool voiceReceive;
   @override
   final bool voiceSend;
@@ -16,7 +18,8 @@ class _$ServerCapabilities extends ServerCapabilities {
           [void Function(ServerCapabilitiesBuilder)? updates]) =>
       (ServerCapabilitiesBuilder()..update(updates))._build();
 
-  _$ServerCapabilities._({required this.voiceReceive, required this.voiceSend})
+  _$ServerCapabilities._(
+      {required this.ui, required this.voiceReceive, required this.voiceSend})
       : super._();
   @override
   ServerCapabilities rebuild(
@@ -31,6 +34,7 @@ class _$ServerCapabilities extends ServerCapabilities {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is ServerCapabilities &&
+        ui == other.ui &&
         voiceReceive == other.voiceReceive &&
         voiceSend == other.voiceSend;
   }
@@ -38,6 +42,7 @@ class _$ServerCapabilities extends ServerCapabilities {
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, ui.hashCode);
     _$hash = $jc(_$hash, voiceReceive.hashCode);
     _$hash = $jc(_$hash, voiceSend.hashCode);
     _$hash = $jf(_$hash);
@@ -47,6 +52,7 @@ class _$ServerCapabilities extends ServerCapabilities {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'ServerCapabilities')
+          ..add('ui', ui)
           ..add('voiceReceive', voiceReceive)
           ..add('voiceSend', voiceSend))
         .toString();
@@ -56,6 +62,10 @@ class _$ServerCapabilities extends ServerCapabilities {
 class ServerCapabilitiesBuilder
     implements Builder<ServerCapabilities, ServerCapabilitiesBuilder> {
   _$ServerCapabilities? _$v;
+
+  UiCapabilitiesBuilder? _ui;
+  UiCapabilitiesBuilder get ui => _$this._ui ??= UiCapabilitiesBuilder();
+  set ui(UiCapabilitiesBuilder? ui) => _$this._ui = ui;
 
   bool? _voiceReceive;
   bool? get voiceReceive => _$this._voiceReceive;
@@ -72,6 +82,7 @@ class ServerCapabilitiesBuilder
   ServerCapabilitiesBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _ui = $v.ui.toBuilder();
       _voiceReceive = $v.voiceReceive;
       _voiceSend = $v.voiceSend;
       _$v = null;
@@ -93,13 +104,27 @@ class ServerCapabilitiesBuilder
   ServerCapabilities build() => _build();
 
   _$ServerCapabilities _build() {
-    final _$result = _$v ??
-        _$ServerCapabilities._(
-          voiceReceive: BuiltValueNullFieldError.checkNotNull(
-              voiceReceive, r'ServerCapabilities', 'voiceReceive'),
-          voiceSend: BuiltValueNullFieldError.checkNotNull(
-              voiceSend, r'ServerCapabilities', 'voiceSend'),
-        );
+    _$ServerCapabilities _$result;
+    try {
+      _$result = _$v ??
+          _$ServerCapabilities._(
+            ui: ui.build(),
+            voiceReceive: BuiltValueNullFieldError.checkNotNull(
+                voiceReceive, r'ServerCapabilities', 'voiceReceive'),
+            voiceSend: BuiltValueNullFieldError.checkNotNull(
+                voiceSend, r'ServerCapabilities', 'voiceSend'),
+          );
+    } catch (_) {
+      late String _$failedField;
+      try {
+        _$failedField = 'ui';
+        ui.build();
+      } catch (e) {
+        throw BuiltValueNestedFieldError(
+            r'ServerCapabilities', _$failedField, e.toString());
+      }
+      rethrow;
+    }
     replace(_$result);
     return _$result;
   }
