@@ -41,6 +41,9 @@ pub struct Message {
     /// `Vec<ToolCallItem>` JSON.  Populated when the LLM response was a
     /// `ToolCalls` variant; `None` for plain text messages.
     pub tool_calls_json: Option<String>,
+    /// For assistant tool-call messages: serialised
+    /// [`ProviderState`](crate::ProviderState) to send back on later calls.
+    pub provider_state_json: Option<String>,
     pub turn: i64,
     pub created_at: DateTime<Utc>,
     /// The user who sent this message (multi-user scoping).
@@ -57,6 +60,7 @@ impl Message {
             content: content.into(),
             skill_name: None,
             tool_calls_json: None,
+            provider_state_json: None,
             turn: 0,
             created_at: SystemClock.now(),
             sender_user_id: None,

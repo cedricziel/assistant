@@ -1,157 +1,132 @@
 # Element Index
 
-Every element in the [assistant-ui Elements](https://www.assistant-ui.com/elements)
-catalogue (59), with an explicit verdict. This file is the living record of what
-the `assistant_ui` package adopts and what it deliberately does not.
+This file lists every element in the [assistant-ui Elements](https://www.assistant-ui.com/elements) catalogue (59: 37 individual rows plus one category row for the 22 Generative elements) with an explicit verdict. It is the standing record of what the `assistant_ui` package adopts, what sibling changes adopt through its seams, and what is deliberately left out.
 
-**On PR 1 this file moves to `app/packages/assistant_ui/ELEMENTS.md`** and is
-maintained there. Adding an element to the package without adding its row is a
-review failure; so is adopting something previously marked Decline without
-changing its verdict here first.
+**PR 1 moves this file to `app/packages/assistant_ui/ELEMENTS.md`**, and it is maintained there from then on. Adding an element without adding its row fails review. So does adopting a Decline without first changing its verdict here.
 
 ## Verdicts
 
-| Verdict          | Meaning                                                                    |
-| ---------------- | -------------------------------------------------------------------------- |
-| **Adopt**        | In scope for `chat-element-library`.                                       |
-| **Adopt (have)** | Already implemented in `features/chat`; this change packages and names it. |
-| **Defer**        | Wanted, blocked on a named prerequisite.                                   |
-| **Decline**      | Not wanted. Reason given.                                                  |
+| Verdict                | Meaning                                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| **Adopt (have)**       | Already implemented in `features/chat`. This change packages and names it.                      |
+| **Adopt (scoped)**     | Packaged by this change in a deliberately reduced form; the reason is in the row.               |
+| **Adopt via <change>** | Built by the named sibling change on a seam this change provides. The seam is named in the row. |
+| **Defer**              | Wanted, but blocked on a named prerequisite.                                                    |
+| **Decline**            | Not wanted. The row gives the reason.                                                           |
 
-Five prerequisites are referenced repeatedly. Each names a specific missing
-capability, so a Defer says _what would unblock it_ rather than merely "no":
+### Prerequisites
 
-- **P1 — tool structured data.** `ToolOutput.data` exists on every tool but is
-  dropped at `OrchestratorEvent::ToolResult`, which carries only a truncated
-  `result: Option<String>`. Six builtins (`bash`, `process`, `web_search`,
-  `file_glob`, `agent_spawn`, `voice_response`) already populate shapes that map
-  directly onto elements below.
-- **P2 — client→server return channel.** `ConfirmationCallback::confirm() -> bool`
-  is synchronous and a turn cannot suspend. `crates/web-ui/src/lib.rs:530`
-  hardwires `AutoDenyConfirmation`, so every gated tool is silently denied for
-  every web user. This is a live defect, tracked separately.
-- **P3 — agent-composed block vocabulary.** A closed, versioned set of semantic
-  blocks a tool can return, degrading to text for the CLI/Slack/Matrix/Signal
-  interfaces. Depends on P1 and P2.
-- **P4 — live per-conversation token usage.** Token counts exist only as
-  analytics aggregates (`token_usage_over_time`, `total_tokens_in/out`). No
-  stream event reports usage for the conversation in flight, so nothing can
-  render a fill level or a proximity-to-limit warning.
-- **P5 — reasoning step boundaries.** The runtime emits `Thinking(String)` as an
-  undifferentiated token stream, and `ChatMessage.thinkingContent` is a flat
-  `String?`. There is no step delimiter and no per-step clock, so a reasoning
-  _timeline_ cannot be rendered without inventing boundaries. Unblocking means
-  either delimited steps on the wire or a `ReasoningStep` model with defined
-  boundary and timing semantics.
+The list keeps the old numbering. Three prerequisites are now owned by siblings.
+
+- **P1: tool structured data.** `ToolOutput.data` is discarded when building `OrchestratorEvent::ToolResult` (`crates/runtime/src/orchestrator/dispatch.rs:283,452`), which carries only a truncated `result` string. **Owned by tool-result-renderers.** It renders through `ToolResultRendererScope` (PR 6), installed by the app as `ToolResultRendererScope(resolve: registry.build)`.
+- **P2: client→server return channel.** `ConfirmationCallback::confirm()` is synchronous (`crates/runtime/src/orchestrator/mod.rs:53`), and web turns hardwire `AutoDenyConfirmation` (`crates/web-ui/src/lib.rs:329`, `space_tasks.rs:157`). **Owned by tool-approval-prompts** (the interaction channel). It renders through the tool call entry footer (`TimelineEntryShell.footer`, forwarded by `TimelineEntryView`) and `EntryState.awaitingInput`.
+- **P3: agent-composed UI.** **Owned by generative-ui-a2ui** (A2UI protocol and Flutter genui). It renders through its own `SurfaceFrame` hosted in the shell `body` slot and `MessageBubble.extensions`.
+- **P4: live per-conversation token usage.** Nothing on the web API reports token usage: `grep -rn "token_usage\|input_tokens" crates/web-ui/src app/lib` is empty. The only token figure in the runtime is the compaction estimate (`crates/runtime/src/compaction.rs:64`). chat-a11y-and-code-blocks adds per-message timing, including tokens per second. That covers part of P4, but not a context fill level.
+- **P5: reasoning step boundaries.** `OrchestratorEvent::Thinking(String)` is undelimited (`stream_event.rs:70`), and `ChatMessage.thinkingContent` is a flat `String?`. A step timeline would invent boundaries.
 
 ---
 
 ## Reasoning (5)
 
-| #   | Element            | Verdict            | Flutter element    | Note                                                                                                                                                                                                                                                        |
-| --- | ------------------ | ------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Loading state      | Adopt (have)       | `TurnProgressCard` | Drops its 3 `ref` reads.                                                                                                                                                                                                                                    |
-| 2   | Thinking indicator | Adopt (have)       | `TurnStatusLabel`  |                                                                                                                                                                                                                                                             |
-| 3   | Reasoning panel    | **Adopt (scoped)** | `ReasoningPanel`   | New, but **not** the step timeline: `thinkingContent` is a flat `String?` and the runtime emits undifferentiated `Thinking(String)`. Adopted as a collapsible reasoning section with _total_ elapsed time. The per-step timeline is deferred behind **P5**. |
-| 4   | Streaming text     | Adopt (have)       | `MessageBody`      | Via `flutter_smooth_markdown`.                                                                                                                                                                                                                              |
-| 5   | Typing indicator   | Adopt (have)       | `TypingIndicator`  | Extracted from `_Dot` in `chat_screen.dart`.                                                                                                                                                                                                                |
+| #   | Element            | Verdict            | Flutter element    | Note                                                                                                           |
+| --- | ------------------ | ------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| 1   | Loading state      | Adopt (have)       | `TurnProgressCard` | Drops its 2 `ref` reads (`turn_progress_card.dart:65,135`) and takes `status`, `showSkip` and `onSkip`. PR 9.  |
+| 2   | Thinking indicator | Adopt (have)       | `TurnProgressCard` | Label via `turnStatusLabel` / `stalledTurnStatusLabel` (`turn_status_label.dart`). PR 9.                       |
+| 3   | Reasoning panel    | **Adopt (scoped)** | `ThinkingBody`     | The collapsible section with an optional `elapsed` ("Thought for 4s"). No step timeline; that is **P5**. PR 7a. |
+| 4   | Streaming text     | Adopt (have)       | `MessageBody`      | `StreamMarkdown` / `SmoothMarkdown` via `ChatMarkdownScope`. PR 8b.                                            |
+| 5   | Typing indicator   | Adopt (have)       | `TypingIndicator`  | From `typing_dots.dart`. PR 8b.                                                                                |
 
 ## Messages (5)
 
-| #   | Element               | Verdict      | Flutter element     | Note                                                                                             |
-| --- | --------------------- | ------------ | ------------------- | ------------------------------------------------------------------------------------------------ |
-| 6   | Message pair          | Adopt (have) | `MessageBody`       | Extracted from `_MessageBubble`.                                                                 |
-| 7   | Message branches      | **Decline**  | —                   | No branch/regeneration concept server-side. Would need a conversation-tree model, not a widget.  |
-| 8   | Message actions       | Adopt (have) | `MessageActions`    | From `_MetaActionRow`. Copy + read-aloud only; rate and regenerate have no endpoint.             |
-| 9   | Follow-up suggestions | **Decline**  | —                   | Nothing produces suggestions. Would need either P3 or a client heuristic; neither is wanted now. |
-| 10  | Error state           | **Adopt**    | `ThreadErrorBanner` | Non-modal banner with retry over the existing send path.                                         |
+| #   | Element               | Verdict                             | Flutter element                                               | Note                                                                                                                                                                       |
+| --- | --------------------- | ----------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6   | Message pair          | Adopt (have)                        | `MessageBubble`                                               | From `message_bubble.dart`. Media and context menus come through slots. PR 8b.                                                                                             |
+| 7   | Message branches      | **Adopt via message-branching**     | `BranchPicker` (sibling) in `MessageActions.leading`          | Edit and resend, regenerate, branch navigation. The data model is that change's (ADR-0018).                                                                                |
+| 8   | Message actions       | Adopt (have)                        | `MessageActions`, `MessageActionButton`                       | From `MetaActionRow` / `MetaActionButton`. The app decides which actions apply. Rate is added by **message-feedback**; edit and regenerate by **message-branching**. PR 8a.|
+| 9   | Follow-up suggestions | **Adopt via follow-up-suggestions** | `ChatThreadLayout.aboveComposer`, `ThreadEmptyState.starters` | Chips after a turn, plus per-Persona starter prompts.                                                                                                                      |
+| 10  | Error state           | Adopt (have)                        | `ThreadErrorBanner`                                           | From the inline banner at `chat_screen.dart:415-456` (dismiss). Message-level retry stays on `MessageActions`. PR 9.                                                       |
 
 ## Tool use (4)
 
-| #   | Element        | Verdict        | Flutter element                 | Note                                                                                          |
-| --- | -------------- | -------------- | ------------------------------- | --------------------------------------------------------------------------------------------- |
-| 11  | Tool call      | Adopt (have)   | `ToolCallChip` + `ToolCallBody` | The generic fallback renderer.                                                                |
-| 12  | Tool timeline  | Adopt (have)   | `TimelineEntryShell`            | Session view is the shell over a list.                                                        |
-| 13  | Terminal block | **Defer — P1** | —                               | `bash` already emits `{exit_code, stdout, stderr}`. Renderer is trivial once the field ships. |
-| 14  | Code diff      | **Defer — P1** | —                               | Also needs `file_edit` to populate `.data`, which it currently does not.                      |
+| #   | Element        | Verdict                             | Flutter element                           | Note                                                                                                                                                |
+| --- | -------------- | ----------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 11  | Tool call      | Adopt (have)                        | `ToolCallBody`, `GenericToolResultView`   | Generic fallback. Per-tool views plug into `ToolResultRendererScope`. PR 6.                                                                         |
+| 12  | Tool timeline  | Adopt (have)                        | `TimelineEntryShell`, `TimelineEntryView` | PR 5b and PR 7c.                                                                                                                                    |
+| 13  | Terminal block | **Adopt via tool-result-renderers** | `TerminalResultView` (sibling)            | `terminal` contract over `bash` `.data`, resolved through `ToolResultRendererScope`.                                                                |
+| 14  | Code diff      | **Adopt via tool-result-renderers** | `CodeDiffResultView` (sibling)            | `code_diff` contract; that change makes `file-edit` / `file-write` populate `.data`. Highlighting comes from chat-a11y-and-code-blocks `CodeBlock`. |
 
 ## Knowledge (4)
 
-| #   | Element          | Verdict        | Flutter element        | Note                                                                   |
-| --- | ---------------- | -------------- | ---------------------- | ---------------------------------------------------------------------- |
-| 15  | Web search       | **Defer — P1** | —                      | `web_search` already emits `{results: [{title, url, snippet}]}`.       |
-| 16  | Sources          | **Defer — P1** | —                      | Same payload as #15; also needs `web_fetch` to populate `.data`.       |
-| 17  | Inline citation  | **Defer — P1** | —                      | Additionally needs the model to emit citation markers in message text. |
-| 18  | Image generation | Adopt (have)   | `AttachmentThumbnails` | Attachments already stream and render.                                 |
+| #   | Element          | Verdict                             | Flutter element                                        | Note                                                                                                             |
+| --- | ---------------- | ----------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| 15  | Web search       | **Adopt via tool-result-renderers** | `SourcesResultView` (sibling)                          | `sources` contract over `web-search` `.data`.                                                                    |
+| 16  | Sources          | **Adopt via tool-result-renderers** | `SourcesResultView`, `LinkPreviewResultView` (sibling) | `sources` and `link_preview` contracts; that change makes `web-fetch` populate `.data`.                          |
+| 17  | Inline citation  | **Defer: P1 + citation markers**    | —                                                      | Also needs the model to emit citation markers in message text. A candidate for `MessageBubble.extensions` later. |
+| 18  | Image generation | Adopt (have)                        | `MessageBubble.attachments` slot                       | The app supplies `MessageAttachments` (I/O: `http`, `cached_network_image`, share). PR 8b.                       |
 
 ## Structured output (2)
 
-| #   | Element       | Verdict        | Flutter element | Note                                                                                      |
-| --- | ------------- | -------------- | --------------- | ----------------------------------------------------------------------------------------- |
-| 19  | Data table    | **Defer — P1** | —               | Needs a generic `{columns, rows}` shape; no builtin emits one yet.                        |
-| 20  | Number ticker | **Decline**    | —               | Animation flourish with no data to animate. Revisit only if a metric lands in the stream. |
+| #   | Element       | Verdict                             | Flutter element                 | Note                                                                       |
+| --- | ------------- | ----------------------------------- | ------------------------------- | -------------------------------------------------------------------------- |
+| 19  | Data table    | **Adopt via tool-result-renderers** | `DataTableResultView` (sibling) | Generic `data_table` contract; first producers `list-tasks` and `process`. |
+| 20  | Number ticker | **Decline**                         | —                               | Animation with nothing to animate.                                         |
 
 ## Agents (6)
 
-| #   | Element             | Verdict           | Flutter element    | Note                                                                                                              |
-| --- | ------------------- | ----------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| 21  | Agent plan          | **Decline**       | —                  | Read-only variant needs P1; interactive checkboxes need P2. No plan concept exists in the runtime.                |
-| 22  | Subagent list       | Adopt (have)      | `SubagentBody`     | `SubagentStarted`/`SubagentCompleted` events already stream.                                                      |
-| 23  | Agent status        | Adopt (have)      | `TurnProgressCard` |                                                                                                                   |
-| 24  | Approval card       | **Defer — P2**    | —                  | ⚠ The server already gates on `requires_confirmation`; the web client cannot answer. Highest-value deferred item. |
-| 25  | Recommendation card | **Defer — P2/P3** | —                  | Accept/reject is a return channel.                                                                                |
-| 26  | Artifact card       | **Decline**       | —                  | No versioned-artifact concept in the runtime. Product decision, not a UI one.                                     |
+| #   | Element             | Verdict                                         | Flutter element                                                                     | Note                                                                                                         |
+| --- | ------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 21  | Agent plan          | **Adopt via tool-result-renderers** (read-only) | `PlanResultView` (sibling)                                                          | `plan` contract, read-only, reachable via MCP `structuredContent`. Interactive checkboxes stay out of scope. |
+| 22  | Subagent list       | Adopt (have)                                    | `SubagentBody`                                                                      | Inner tool calls stay compact rows (name and status), as today. PR 7b.                                                |
+| 23  | Agent status        | Adopt (have)                                    | `TurnProgressCard`                                                                  | PR 9.                                                                                                        |
+| 24  | Approval card       | **Adopt via tool-approval-prompts**             | Tool call entry footer (`TimelineEntryView.footer` → `TimelineEntryShell.footer`), `EntryState.awaitingInput` | `ApprovalCard` in the footer of the matching tool call entry; ask-the-user `QuestionCard` in the footer of the ask-user tool call. `TimelineEntryType.interaction` only when the provider gives no `tool_call_id`. Over the interaction channel (ADR-0017). |
+| 25  | Recommendation card | **Adopt via generative-ui-a2ui**                | `SurfaceFrame` (sibling)                                                            | An A2UI surface answered over the interaction channel, not a hand-built widget.                              |
+| 26  | Artifact card       | **Decline**                                     | —                                                                                   | The runtime has no versioned-artifact concept. That is a product decision, not a UI one.                     |
 
 ## Composer (7)
 
-| #   | Element              | Verdict        | Flutter element       | Note                                                                                                                                                         |
-| --- | -------------------- | -------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 27  | Composer             | Adopt (have)   | `Composer`            | From `_InputRow` — already 13 constructor params, all callbacks out, zero `ref`.                                                                             |
-| 28  | Slash commands       | Adopt (have)   | `SlashCommandMenu`    | From `command_autocomplete.dart`. Command list supplied by the app.                                                                                          |
-| 29  | Mentions             | **Decline**    | —                     | No mentionable-entity concept: `grep -rn "mention"` over `app/lib` and `crates/web-ui` returns nothing.                                                      |
-| 30  | Attachments          | Adopt (have)   | `AttachmentTray`      | Presentation only — `file_picker` / `desktop_drop` I/O stays in the app.                                                                                     |
-| 31  | Model picker         | **Decline**    | —                     | Persona switching already exists in the nav bar. Moving it into the composer is a UX change, not an extraction.                                              |
-| 32  | Voice                | Adopt (have)   | `ComposerVoiceButton` | Presentation split from I/O: mic affordance, countdown and stop live in the package; `record` stays in the app.                                              |
-| 33  | Context (token ring) | **Defer — P4** | —                     | Not tool output data: this needs live per-conversation usage on the stream. Today token counts exist only as analytics aggregates (`token_usage_over_time`). |
+| #   | Element              | Verdict                | Flutter element       | Note                                                                                                                                        |
+| --- | -------------------- | ---------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 27  | Composer             | Adopt (have)           | `Composer`            | From `ChatInputRow` (`chat_input_row.dart`). `inputBuilder` and `voiceButton` slots. PR 11a.                                                |
+| 28  | Slash commands       | Adopt (have)           | `SlashCommandMenu`    | From `CommandAutocompletePopup`. PR 11a.                                                                                                    |
+| 29  | Mentions             | **Decline**            | —                     | There is no mentionable-entity concept (`grep -rni mention app/lib crates/web-ui/src` is empty).                                            |
+| 30  | Attachments          | Adopt (have)           | `AttachmentTray`      | Presentation only. `file_picker` and `desktop_drop` stay in the app. PR 11b.                                                                |
+| 31  | Model picker         | **Decline** (composer) | —                     | Persona switching lives in the nav bar. message-branching's "regenerate with another model" is a per-message action, not a composer picker. |
+| 32  | Voice                | Adopt (have)           | `ComposerVoiceButton` | Presentation half. The `record` driver stays in the app. PR 11b.                                                                            |
+| 33  | Context (token ring) | **Defer: P4**          | —                     | Needs live usage on the stream.                                                                                                             |
 
 ## Thread (4)
 
-| #   | Element       | Verdict      | Flutter element      | Note                                                                          |
-| --- | ------------- | ------------ | -------------------- | ----------------------------------------------------------------------------- |
-| 34  | Chat panel    | Adopt (have) | `ConversationThread` |                                                                               |
-| 35  | Empty state   | Adopt (have) | `ThreadEmptyState`   | From `_EmptyChat`.                                                            |
-| 36  | Thread list   | Adopt (have) | `ConversationList`   | Drops its 5 `ref` reads; the app supplies the list.                           |
-| 37  | Scroll anchor | **Adopt**    | `ThreadViewport`     | New. Today's `_atBottom` logic has no recovery affordance when scrolled away. |
+| #   | Element       | Verdict      | Flutter element        | Note                                                                                                                   |
+| --- | ------------- | ------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 34  | Chat panel    | Adopt (have) | `ChatThreadLayout`     | Banners, thread, `aboveComposer`, composer. PR 10.                                                                     |
+| 35  | Empty state   | Adopt (have) | `ThreadEmptyState`     | From `empty_chat.dart`. The `starters` slot is filled by follow-up-suggestions. PR 9.                                  |
+| 36  | Thread list   | Adopt (have) | `ConversationListView` | From `ConversationList`. Rename, search and pin are added by conversation-list-management. PR 12.                      |
+| 37  | Scroll anchor | Adopt (have) | `ThreadViewport`       | `scroll_to_bottom_button` already exists (`chat_screen.dart:565`, spec `chat-auto-scroll`). Packaged unchanged. PR 10. |
 
 ## Generative (22)
 
-Stay card · table reservation · order tracking · flight tracker · portfolio
-overview · event creation · event viewing · weather · ride status · email
-composer · shopping cart · playlist · channel message · purchase receipt · area
-chart · line chart · bar chart · player card · conference session · confirmation
-dialog · task creation · software purchase
+Stay card · table reservation · order tracking · flight tracker · portfolio overview · event creation · event viewing · weather · ride status · email composer · shopping cart · playlist · channel message · purchase receipt · area chart · line chart · bar chart · player card · conference session · confirmation dialog · task creation · software purchase
 
-| Verdict              | Note                                                                                                                                                                                                                                                                                                                                            |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Decline (all 22)** | These are demonstrations of _generative UI_, not chat chrome: the agent composes a bespoke surface per response. That is P3, and P3 depends on P1 and P2. Adopting any one of them as a hand-built widget would encode a domain this product does not have. Revisit as a category once a block vocabulary exists — never as individual widgets. |
+| Verdict                                             | Note                                                                                                                                                                                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Adopt via generative-ui-a2ui (category, all 22)** | Adopted as a category through the A2UI protocol and the genui catalog, hosted in the sibling's `SurfaceFrame` via the shell `body` slot / `MessageBubble.extensions`. None of these is ever built as an individual hand-written widget in this package. |
 
 ---
 
+## Package-only elements (no catalogue row)
+
+`GenericToolResultView`, `ToolStatusIcon`, `MessageActionButton`, `TimelineEntryView` and the scopes (`ThreadDensityScope`, `ChatMarkdownScope`, `ToolResultRendererScope`) are seams or primitives with no assistant-ui counterpart. They are in `kAssistantUiElements` and the gallery, but they have no verdict row.
+
 ## Tally
 
-|                                        | Count  |
-| -------------------------------------- | ------ |
-| Adopt (new)                            | 3      |
-| Adopt (have — packaged by this change) | 18     |
-| Defer — P1 (tool structured data)      | 6      |
-| Defer — P2 / P2+P3 (return channel)    | 2      |
-| Defer — P4 (live token usage)          | 1      |
-| Decline                                | 29     |
-| **Total**                              | **59** |
+| Verdict                                       | Count  |
+| --------------------------------------------- | ------ |
+| Adopt (have), packaged by this change         | 20     |
+| Adopt (scoped)                                | 1      |
+| Adopt via sibling change, individual elements | 10     |
+| Adopt via generative-ui-a2ui, category        | 22     |
+| Defer                                         | 2      |
+| Decline                                       | 4      |
+| **Total**                                     | **59** |
 
-Of the 3 new adoptions, one (`ReasoningPanel`) is scoped: the collapsible
-section ships, the per-step timeline is held behind **P5**. Decline covers 7
-individual elements plus the 22-element generative category.
-
-This table is derived from the rows above and must be recomputed whenever a
-verdict changes — task 13.2 reconciles it before the change is archived.
+The tally is derived from the rows above. Recompute it whenever a verdict changes. Task 13.5 reconciles it before archive, and each sibling reconciles its own rows when it archives.
