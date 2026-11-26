@@ -141,6 +141,7 @@ impl OpenRouterProvider {
                 fallback_models: cfg.openrouter.fallback_models.clone(),
                 routing: cfg.openrouter.provider.clone(),
                 reasoning: cfg.openrouter.reasoning.clone(),
+                cache: cfg.openrouter.cache.clone(),
             },
             base_url,
         })
@@ -1190,6 +1191,15 @@ mod tests {
 
     // ── Wiremock: native chat options ───────────────────────────────────
 
+    /// The system prompt text, whether sent as a string or as text parts.
+    fn system_text(body: &Value) -> String {
+        let content = &body["messages"][0]["content"];
+        match content.as_array() {
+            Some(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect(),
+            None => content.as_str().unwrap_or_default().to_owned(),
+        }
+    }
+
     fn submit_tool() -> ToolSpec {
         ToolSpec {
             name: "submit".into(),
@@ -1296,10 +1306,7 @@ mod tests {
             json!({"data_collection": "deny", "require_parameters": true}),
             "configured routing is kept"
         );
-        assert_eq!(
-            body["messages"][0]["content"], "sys",
-            "no prompt instruction"
-        );
+        assert_eq!(system_text(&body), "sys", "no prompt instruction");
     }
 
     #[tokio::test]
@@ -1429,7 +1436,7 @@ mod tests {
         let body = sent_body(&server).await;
         assert!(body.get("tool_choice").is_none(), "{body}");
         assert!(body.get("provider").is_none(), "{body}");
-        let system = body["messages"][0]["content"].as_str().unwrap();
+        let system = system_text(&body);
         assert!(system.contains("`submit`"), "{system}");
     }
 
@@ -1900,6 +1907,32 @@ mod tests {
                 "{foreign:?}: {message}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn anthropic_requests_carry_cache_breakpoints() {
+        let server = MockServer::start().await;
+        mount_once(&server, chat_response("OK")).await;
+        let history = [ChatHistoryMessage::Text {
+            role: assistant_core::ChatRole::User,
+            content: "hi".into(),
+        }];
+
+        provider_with(&server.uri(), OpenRouterOptions::default())
+            .chat("sys", &history, &[])
+            .await
+            .unwrap();
+
+        let body = sent_body(&server).await;
+        let ephemeral = json!({"type": "ephemeral"});
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"],
+            ephemeral
+        );
+        assert_eq!(
+            body["messages"][1]["content"][0]["cache_control"],
+            ephemeral
+        );
     }
 
     // ── Wiremock: OpenRouter SSE ────────────────────────────────────────

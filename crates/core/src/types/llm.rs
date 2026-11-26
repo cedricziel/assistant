@@ -402,6 +402,38 @@ pub struct OpenRouterOptions {
     pub provider: Option<OpenRouterRouting>,
     /// Reasoning controls, sent as the request's `reasoning` object.
     pub reasoning: Option<OpenRouterReasoning>,
+    /// Prompt-cache breakpoints (`[llm.openrouter.cache]`).
+    #[serde(default)]
+    pub cache: OpenRouterCache,
+}
+
+/// `[llm.openrouter.cache]`: where models that need explicit breakpoints
+/// get `cache_control`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterCache {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub ttl: OpenRouterCacheTtl,
+}
+
+impl Default for OpenRouterCache {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl: OpenRouterCacheTtl::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpenRouterCacheTtl {
+    #[default]
+    #[serde(rename = "5m")]
+    FiveMinutes,
+    #[serde(rename = "1h")]
+    OneHour,
 }
 
 /// `[llm.openrouter.reasoning]`. `effort` and `max_tokens` are exclusive.
@@ -613,6 +645,18 @@ mod tests {
                 serde_json::to_value(reasoning).unwrap(),
                 serde_json::json!({"effort": "high", "exclude": true})
             );
+        }
+
+        #[test]
+        fn cache_defaults_on_with_five_minutes() {
+            use super::super::{OpenRouterCache, OpenRouterCacheTtl};
+
+            assert_eq!(parse("").unwrap().cache, OpenRouterCache::default());
+            let cache = parse("[cache]\nttl = \"1h\"").unwrap().cache;
+            assert!(cache.enabled);
+            assert_eq!(cache.ttl, OpenRouterCacheTtl::OneHour);
+            assert!(parse("[cache]\nttl = \"2h\"").is_err());
+            assert!(!parse("[cache]\nenabled = false").unwrap().cache.enabled);
         }
 
         #[test]

@@ -75,9 +75,9 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 10. Prompt caching
 
-- [ ] 10.1 Write failing table tests for breakpoint placement on Anthropic, Google, Qwen and OpenAI, with caching disabled, and with `ttl = "1h"`. Confirm red. Implement, then verify.
-- [ ] 10.2 Write a failing test that cached and cache-write tokens reach meta. Confirm red. Implement, then verify.
-- [ ] 10.3 Document caching in `docs/openrouter.md`.
+- [x] 10.1 Write failing table tests for breakpoint placement on Anthropic, Google, Qwen and OpenAI, with caching disabled, and with `ttl = "1h"`. Confirm red. Implement, then verify.
+- [x] 10.2 Write a failing test that cached and cache-write tokens reach meta. Confirm red. Implement, then verify.
+- [x] 10.3 Document caching in `docs/openrouter.md`.
 
 ## 11. Web search
 
