@@ -1887,6 +1887,7 @@ mod tests {
     fn system_ctx(storage: &Arc<StorageLayer>) -> crate::space::SpaceCtx {
         crate::space::SpaceCtx {
             auth: assistant_core::auth::AuthContext::system(),
+            space_id: assistant_core::identity::SpaceId::from("default"),
             org_slug: "default".into(),
             space_slug: "default".into(),
             role: assistant_core::identity::Role::OrgAdmin,
