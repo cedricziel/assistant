@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use assistant_core::auth::AuthContext;
 use assistant_core::types::conversation::Interface;
-use assistant_runtime::{Orchestrator, SpaceRef, SpaceTaskSpawner, SubmitOptions};
+use assistant_runtime::{Orchestrator, SpaceRef, SpaceTaskSpawner, SubmitTurn};
 use assistant_workflow::{
     AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
     spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
@@ -31,13 +31,9 @@ impl AssistantTurnClient for OrchestratorTurnClient {
     async fn submit_turn(&self, prompt: &str, conversation_id: Uuid) -> Result<String> {
         let result = self
             .orchestrator
-            .submit_turn(
-                &self.auth,
-                prompt,
-                conversation_id,
-                Interface::Scheduler,
-                None,
-                SubmitOptions::default(),
+            .submit(
+                SubmitTurn::new(prompt, conversation_id, Interface::Scheduler)
+                    .with_auth(&self.auth),
             )
             .await?;
         Ok(result.answer)

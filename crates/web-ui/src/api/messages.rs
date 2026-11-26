@@ -26,7 +26,7 @@ use assistant_core::auth::AuthContext;
 use assistant_core::identity::{Action, ResourceKind};
 use assistant_core::types::conversation::Interface;
 use assistant_runtime::OrchestratorEvent;
-use assistant_runtime::SubmitOptions;
+use assistant_runtime::SubmitTurn;
 use assistant_runtime::projection::{SseProjector, StreamProjector};
 use assistant_storage::{
     ConversationEventStore as _, ConversationStore, PushSubscriptionStore, SqliteConversationStore,
@@ -161,15 +161,11 @@ pub async fn send_message(
         let submit_request_id = run_id;
         tokio::spawn(async move {
             let result = orchestrator
-                .submit_turn_with_request_id(
-                    &auth,
-                    submit_request_id,
-                    &content,
-                    conv_id,
-                    Interface::Web,
-                    None,
-                    user_attachment_ids,
-                    SubmitOptions::default(),
+                .submit(
+                    SubmitTurn::new(content, conv_id, Interface::Web)
+                        .with_auth(&auth)
+                        .with_request_id(submit_request_id)
+                        .with_attachments(user_attachment_ids),
                 )
                 .await;
             let _ = tx.send(result);
@@ -859,14 +855,7 @@ pub async fn quick_message(
 
     // Submit the turn and await the full result (synchronous).
     let result = orchestrator
-        .submit_turn(
-            &auth,
-            &prompt,
-            conv.id,
-            Interface::Web,
-            None,
-            SubmitOptions::default(),
-        )
+        .submit(SubmitTurn::new(prompt, conv.id, Interface::Web).with_auth(&auth))
         .await;
 
     match result {
@@ -1038,14 +1027,7 @@ pub async fn send_voice_message(
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
             let result = orchestrator
-                .submit_turn(
-                    &auth,
-                    &content,
-                    conv_id,
-                    Interface::Web,
-                    None,
-                    SubmitOptions::default(),
-                )
+                .submit(SubmitTurn::new(content, conv_id, Interface::Web).with_auth(&auth))
                 .await;
             let _ = tx.send(result);
         });

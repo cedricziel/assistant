@@ -22,7 +22,7 @@ use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 
-use super::super::Orchestrator;
+use super::super::{Orchestrator, SubmitTurn};
 use super::{build, build_with_config, mount_answer, ollama_answer, ollama_tool_calls};
 
 #[test]
@@ -66,6 +66,9 @@ async fn run_worker_processes_turn_request() {
         traceparent: None,
         attachment_ids: vec![],
         interactive: false,
+        anchor: bus_messages::TurnAnchor::Append,
+        user_message_id: None,
+        model_override: None,
         user_id: None,
         org_id: None,
         space_id: None,
@@ -134,13 +137,9 @@ async fn submit_turn_publishes_and_waits_for_result() {
 
     let conv_id = Uuid::new_v4();
     let result = orch
-        .submit_turn(
-            &AuthContext::system(),
-            "hello via submit",
-            conv_id,
-            Interface::Cli,
-            None,
-            crate::orchestrator::SubmitOptions::default(),
+        .submit(
+            SubmitTurn::new("hello via submit", conv_id, Interface::Cli)
+                .with_auth(&AuthContext::system()),
         )
         .await
         .unwrap();
@@ -169,6 +168,9 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
         traceparent: None,
         attachment_ids: vec![],
         interactive: false,
+        anchor: bus_messages::TurnAnchor::Append,
+        user_message_id: None,
+        model_override: None,
         user_id: None,
         org_id: None,
         space_id: None,
@@ -234,16 +236,9 @@ async fn a_completed_turn_is_announced_on_turn_completed() {
     let _worker = tokio::spawn(async move { worker_orch.run_worker("test-worker").await });
     let conv_id = Uuid::new_v4();
 
-    orch.submit_turn(
-        &AuthContext::system(),
-        "hi",
-        conv_id,
-        Interface::Web,
-        None,
-        crate::orchestrator::SubmitOptions::default(),
-    )
-    .await
-    .unwrap();
+    orch.submit(SubmitTurn::new("hi", conv_id, Interface::Web).with_auth(&AuthContext::system()))
+        .await
+        .unwrap();
 
     let announced = orch
         .bus()
@@ -278,13 +273,9 @@ async fn submit_turn_with_worker_returns_result() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let result = orch
-        .submit_turn(
-            &AuthContext::system(),
-            "test message",
-            conv_id,
-            Interface::Slack,
-            None,
-            crate::orchestrator::SubmitOptions::default(),
+        .submit(
+            SubmitTurn::new("test message", conv_id, Interface::Slack)
+                .with_auth(&AuthContext::system()),
         )
         .await;
 
@@ -308,13 +299,9 @@ async fn submit_turn_without_worker_times_out() {
     // No worker spawned — simulates the bug condition.
     let result = tokio::time::timeout(
         Duration::from_secs(2),
-        orch.submit_turn(
-            &AuthContext::system(),
-            "test message",
-            conv_id,
-            Interface::Slack,
-            None,
-            crate::orchestrator::SubmitOptions::default(),
+        orch.submit(
+            SubmitTurn::new("test message", conv_id, Interface::Slack)
+                .with_auth(&AuthContext::system()),
         ),
     )
     .await;
@@ -368,13 +355,9 @@ async fn with_submit_timeout_respected() {
     // inner deadline is accidentally the 3-hour default.
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        orch.submit_turn(
-            &AuthContext::system(),
-            "test message",
-            conv_id,
-            Interface::Slack,
-            None,
-            crate::orchestrator::SubmitOptions::default(),
+        orch.submit(
+            SubmitTurn::new("test message", conv_id, Interface::Slack)
+                .with_auth(&AuthContext::system()),
         ),
     )
     .await;
@@ -447,13 +430,9 @@ async fn persistent_transient_error_stops_at_redelivery_cap() {
     });
 
     let result = orch
-        .submit_turn(
-            &AuthContext::system(),
-            "hello",
-            Uuid::new_v4(),
-            Interface::Cli,
-            None,
-            crate::orchestrator::SubmitOptions::default(),
+        .submit(
+            SubmitTurn::new("hello", Uuid::new_v4(), Interface::Cli)
+                .with_auth(&AuthContext::system()),
         )
         .await;
     worker.abort();
@@ -571,13 +550,9 @@ async fn timeout_cancels_in_flight_worker_turn() {
     let conv_id = Uuid::new_v4();
     let start = std::time::Instant::now();
     let result = orch
-        .submit_turn(
-            &AuthContext::system(),
-            "slow task",
-            conv_id,
-            Interface::Slack,
-            None,
-            crate::orchestrator::SubmitOptions::default(),
+        .submit(
+            SubmitTurn::new("slow task", conv_id, Interface::Slack)
+                .with_auth(&AuthContext::system()),
         )
         .await;
     let elapsed = start.elapsed();
@@ -698,7 +673,7 @@ async fn cancel_turn_unknown_request_id_returns_not_found() {
 
 /// Cancelling a turn that's been launched with a caller-supplied request_id
 /// reports `Cancelled`, aborts the in-flight worker future, and unblocks
-/// `submit_turn_with_request_id` promptly with the `turn_cancelled` marker.
+/// `submit` promptly with the `turn_cancelled` marker.
 #[tokio::test]
 async fn cancel_turn_aborts_inflight_submit() {
     // LLM never responds — without cancellation submit_turn would wait the
@@ -752,26 +727,21 @@ async fn cancel_turn_aborts_inflight_submit() {
     let conv_id = Uuid::new_v4();
     let request_id = Uuid::new_v4();
 
-    // Fire submit_turn_with_request_id in the background — it will block on
+    // Fire submit in the background — it will block on
     // the slow LLM call until we cancel.
     let orch_for_submit = orch.clone();
     let handle = tokio::spawn(async move {
         orch_for_submit
-            .submit_turn_with_request_id(
-                &AuthContext::system(),
-                request_id,
-                "say hi",
-                conv_id,
-                Interface::Web,
-                None,
-                vec![],
-                crate::orchestrator::SubmitOptions::default(),
+            .submit(
+                SubmitTurn::new("say hi", conv_id, Interface::Web)
+                    .with_auth(&AuthContext::system())
+                    .with_request_id(request_id),
             )
             .await
     });
 
     // Wait until the orchestrator has registered the cancellation token —
-    // i.e. submit_turn_internal has reached the body. Bounded to keep the
+    // i.e. submit has reached the body. Bounded to keep the
     // test from hanging if registration ever regresses.
     let registration_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while !orch.is_turn_in_flight(request_id).await {
@@ -789,7 +759,7 @@ async fn cancel_turn_aborts_inflight_submit() {
         "cancel_turn must report Cancelled when a token is registered"
     );
 
-    // submit_turn_with_request_id should return promptly with the cancelled
+    // submit should return promptly with the cancelled
     // marker — well under the 30 s submit_timeout configured above.
     let result = tokio::time::timeout(Duration::from_secs(10), handle)
         .await
@@ -816,7 +786,7 @@ async fn cancel_turn_aborts_inflight_submit() {
 
 // -- Cancel before a worker claims the turn --
 
-/// Spawn `submit_turn_with_request_id` in the background (no worker running),
+/// Spawn `submit` in the background (no worker running),
 /// returning once the turn has registered its cancellation entry.
 async fn submit_unclaimed(
     orch: &Arc<Orchestrator>,
@@ -827,15 +797,10 @@ async fn submit_unclaimed(
     let orch_for_submit = orch.clone();
     let handle = tokio::spawn(async move {
         orch_for_submit
-            .submit_turn_with_request_id(
-                &AuthContext::system(),
-                request_id,
-                prompt,
-                conversation_id,
-                Interface::Web,
-                None,
-                vec![],
-                crate::orchestrator::SubmitOptions::default(),
+            .submit(
+                SubmitTurn::new(prompt, conversation_id, Interface::Web)
+                    .with_auth(&AuthContext::system())
+                    .with_request_id(request_id),
             )
             .await
     });
@@ -1193,6 +1158,9 @@ async fn worker_touches_the_claimed_message_while_a_turn_runs() {
         traceparent: None,
         attachment_ids: vec![],
         interactive: false,
+        anchor: bus_messages::TurnAnchor::Append,
+        user_message_id: None,
+        model_override: None,
         user_id: None,
         org_id: None,
         space_id: None,

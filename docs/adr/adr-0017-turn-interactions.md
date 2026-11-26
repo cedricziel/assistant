@@ -100,7 +100,7 @@ assumes nothing else is shared.
   whose `waiter_seen_at` is older than 45 s has no live waiter, so the route
   sets it to `expired` and answers `410`.
 - **A run event relay carries events across the boundary.** `send_message` sets
-  `SubmitOptions { relay_events: true }`. When the worker finds no local sink
+  the `SubmitTurn` option `relay_events: true`. When the worker finds no local sink
   for such a turn it publishes each `OrchestratorEvent` on bus topic
   `turn.event` with `batch_id = run_id` (the run id is the orchestrator
   `request_id` and the bus `batch_id`). `Token` and `Thinking` events are
@@ -158,7 +158,7 @@ scanning JSON.
   `RejectAlways`, `Expired` or `Cancelled`.
 - `ExecutionContext.interactive` stops being derived from `Interface`. It comes
   from `TurnRequest.interactive`, which the submitter sets through
-  `SubmitOptions { interactive, relay_events }`. The shared turn runner sets it
+  the `SubmitTurn` fields `interactive` and `relay_events`. The shared turn runner sets it
   for send, edit and regenerate, and the CLI REPL sets it. The one-shot CLI
   command, quick-message, voice, A2A, scheduler, messenger and Subagent Process
   turns leave it `false`. Quick-message and voice use `Interface::Web` like

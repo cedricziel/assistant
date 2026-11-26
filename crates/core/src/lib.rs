@@ -40,8 +40,8 @@ pub use bus::{
     BusMessage, ClaimFilter, MAX_TURN_REDELIVERIES, MessageBus, MessageStatus, PublishRequest,
 };
 pub use bus_messages::{
-    AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase, TurnRequest,
-    TurnResult, TurnStatus, topic,
+    AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnAnchor, TurnPhase,
+    TurnRequest, TurnResult, TurnStatus, topic,
 };
 pub use catalog::{CatalogEntry, CatalogResolver, CatalogResourceType};
 pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
