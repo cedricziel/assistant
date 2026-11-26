@@ -638,6 +638,9 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
             arguments: json['arguments'] as Map<String, dynamic>?,
             result: json['result'] as String?,
             toolCallId: json['tool_call_id'] as String?,
+            data: json['data'] is Map
+                ? (json['data'] as Map).cast<String, Object?>()
+                : null,
             sequenceId: seq,
           );
         } catch (_) {

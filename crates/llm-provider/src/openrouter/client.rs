@@ -46,7 +46,7 @@ impl OpenRouterClient {
             .map_err(|e| anyhow::anyhow!("Failed to read OpenRouter response: {e}"))?;
         let response: ChatResponse = serde_json::from_str(&body)
             .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter response: {e}"))?;
-        response.into_llm_response()
+        response.into_llm_response(shows_reasoning(request))
     }
 
     /// Streams `request`, forwarding text deltas to `sink`.
@@ -57,14 +57,14 @@ impl OpenRouterClient {
     ) -> anyhow::Result<LlmResponse> {
         let mut bytes = self.send(request).await?.bytes_stream();
         let mut lines = LineBuffer::default();
-        let mut acc = StreamAccumulator::default();
+        let mut acc = StreamAccumulator::new(shows_reasoning(request));
         while let Some(chunk) = bytes.next().await {
             let chunk = chunk.map_err(|e| anyhow::anyhow!("OpenRouter stream failed: {e}"))?;
             for line in lines.push(&chunk) {
-                if let Some(text) = acc.feed_line(&line)?
-                    && let Some(sink) = &sink
-                {
-                    let _ = sink.send(StreamChunk::Text(text)).await;
+                for chunk in acc.feed_line(&line)? {
+                    if let Some(sink) = &sink {
+                        let _ = sink.send(chunk).await;
+                    }
                 }
                 if acc.is_done() {
                     return acc.finish();
@@ -115,4 +115,13 @@ impl OpenRouterClient {
         }
         Ok(resp)
     }
+}
+
+/// Reasoning is shown unless `[llm.openrouter.reasoning] exclude` is set.
+fn shows_reasoning(request: &ChatRequest) -> bool {
+    !request
+        .reasoning
+        .as_ref()
+        .and_then(|r| r.exclude)
+        .unwrap_or(false)
 }

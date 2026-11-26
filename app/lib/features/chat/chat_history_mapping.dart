@@ -49,6 +49,8 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
               status: parseToolStatus(tc.status),
               arguments: tc.arguments?.asMap.cast<String, dynamic>(),
               result: tc.result,
+              toolCallId: tc.toolCallId,
+              data: tc.data?.asMap.cast<String, Object?>(),
             ),
           ],
         ),

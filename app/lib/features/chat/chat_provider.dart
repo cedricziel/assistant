@@ -225,11 +225,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       abortedTurnState(
         chatState,
         failedUserMsgId: userMsgId,
-        error: event.message,
+        error: _stoppedBeforeRunId ? null : event.message,
         clearTurnStatus: true,
       ),
     );
   }
+
+  /// Whether the user tapped Stop before the turn got a run id: the failure
+  /// is then the expected outcome, so it is not surfaced as an error banner.
+  bool get _stoppedBeforeRunId =>
+      _session.stopRequested && _session.runId == null;
 
   /// Reconcile a terminal `agent_error` frame on any of the three stream
   /// paths: a cancelled turn keeps its partial reply as a stopped message,
@@ -296,23 +301,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     state = AsyncData(current.copyWith(pendingQueue: next));
   }
 
-  /// Cancel the current in-progress streaming response.
+  /// Stop the in-flight turn by asking the server to cancel it.
   ///
-  /// Queued messages in [ChatState.pendingQueue] are preserved and will
-  /// continue to drain after the cancel.
-  void cancelStream() {
-    _session.cancelled = true;
-    final current = state.value ?? const ChatState();
-    final msgs = List<ChatMessage>.from(current.messages)
-      ..removeWhere((m) => m.id == streamingPlaceholderId);
-    state = AsyncData(
-      current.copyWith(
-        messages: msgs,
-        isSending: false,
-        streamingContent: '',
-        clearStatusMessage: true,
-      ),
-    );
+  /// The stream stays open: the terminal frame (cancelled, or `done` when the
+  /// turn won the race) reconciles the turn. [ChatState.isStopping] is true
+  /// until then, and further calls are ignored. Before the run id is known
+  /// the cancel is deferred to `RunStartedEvent`. Queued messages are kept.
+  void stopTurn() {
+    final current = state.value;
+    if (current == null || !current.isSending || current.isStopping) return;
+    _session.stopRequested = true;
+    state = AsyncData(current.copyWith(isStopping: true));
+    if (_session.runId != null) unawaited(_requestServerCancel());
   }
 
   /// Load an existing conversation by ID.
@@ -363,25 +363,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     state = AsyncData(current.copyWith(clearError: true));
   }
 
-  /// Ask the server to cancel the currently in-flight turn.
-  ///
-  /// Best-effort: does nothing if no turn is in flight (no run id captured)
-  /// or if the client isn't connected. The server-side cancellation
-  /// propagates asynchronously — the SSE stream emits an `agent_error` event
-  /// with `{"reason": "cancelled"}` and the await-for loop here cleans up
-  /// state the same way it would for any other agent-terminated turn.
-  ///
-  /// Returns the post-cancel server-reported state for callers that want
-  /// to wait on the reconciled result; returns `null` when the cancel
-  /// call could not be made (no run id, no client, or transport error).
-  Future<TurnState?> requestCancelTurn() async {
+  /// Ask the server to cancel the current run. The `agent_error` frame that
+  /// follows reconciles the turn; this call only delivers the request.
+  Future<void> _requestServerCancel() async {
     final api = _api;
     final runId = _session.runId;
     final convId = state.value?.conversationId;
-    if (api == null || runId == null || convId == null) {
-      return null;
-    }
-    return api.cancelTurn(convId, runId);
+    if (api == null || runId == null || convId == null) return;
+    await api.cancelTurn(convId, runId);
   }
 
   /// Set the active conversation ID without loading history.
@@ -625,7 +614,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final api = _api;
     if (api == null) return;
 
-    _session.cancelled = false;
+    // Reset per-turn state so Stop never targets the previous turn's run id.
+    _session.beginTurn();
     final current = state.value ?? const ChatState();
 
     // Create a broadcast stream controller for token-by-token rendering.
@@ -807,6 +797,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           // Capture the run ID for potential reconnect; don't change UI.
           _session.runId = event.runId;
           _session.advance(event);
+          if (_session.stopRequested) unawaited(_requestServerCancel());
           // Open the turn-status snapshot used by the progress card.
           state = AsyncData(
             chatState.copyWith(
@@ -904,7 +895,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         attempt++
       ) {
         await Future<void>.delayed(ChatStreamSession.retryDelay(attempt));
-        if (_session.cancelled || !ref.mounted) return;
+        if (!ref.mounted) return;
+        if (_session.stopRequested) {
+          // Stopped while the stream was down: the cancel was sent, so do not
+          // replay again; keep what streamed so far as the stopped reply.
+          state = AsyncData(
+            stoppedTurnState(
+              state.value ?? const ChatState(),
+              userMsgId: userMsgId,
+              partialContent: '',
+            ),
+          );
+          return;
+        }
+        if (_session.cancelled) return;
 
         final replayed = await _replayRun(
           api,
@@ -936,7 +940,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       abortedTurnState(
         state.value ?? const ChatState(),
         failedUserMsgId: userMsgId,
-        error: friendlyStreamErrorMessage(error),
+        error: _stoppedBeforeRunId ? null : friendlyStreamErrorMessage(error),
         clearTurnStatus: true,
       ),
     );

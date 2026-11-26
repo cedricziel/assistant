@@ -3,7 +3,7 @@
 use serde_json::json;
 
 use assistant_core::llm::call_context::LlmCallContext;
-use assistant_core::types::llm::OpenRouterRouting;
+use assistant_core::types::llm::{OpenRouterReasoning, OpenRouterRouting};
 use assistant_core::{
     ChatHistoryMessage, ChatOptions, ContentBlock, ResponseFormat, ToolChoice, ToolSpec,
 };
@@ -18,6 +18,7 @@ pub struct RequestSettings {
     /// Fallback models after the primary one; empty when none are set.
     pub fallback_models: Vec<String>,
     pub routing: Option<OpenRouterRouting>,
+    pub reasoning: Option<OpenRouterReasoning>,
 }
 
 /// Stands in for an image sent to a model that doesn't accept images.
@@ -68,6 +69,7 @@ pub fn build_chat_request(
         stream: false,
         models,
         provider: settings.routing.clone(),
+        reasoning: settings.reasoning.clone(),
         session_id: context.as_ref().map(|c| c.conversation_id.to_string()),
         user: context.and_then(|c| c.user_hash),
         tool_choice: None,

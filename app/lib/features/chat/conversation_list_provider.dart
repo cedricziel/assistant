@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:dio/dio.dart' show DioException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
@@ -224,6 +225,43 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
         updatedAt: conv.updatedAt.toUtc(),
       ),
     );
+  }
+
+  /// Rename a conversation (`PATCH` with only `title`).
+  ///
+  /// Returns `null` on success, or a user-presentable error message. The list
+  /// is not updated here: the stream delivers the resulting `upserted` event.
+  Future<String?> renameConversation(String id, String title) =>
+      _patch(id, (b) => b.title = title);
+
+  /// Pin or unpin a conversation (`PATCH` with only `pinned`).
+  ///
+  /// Returns `null` on success, or a user-presentable error message. The list
+  /// is not updated here: the stream delivers the resulting `upserted` event.
+  Future<String?> setPinned(String id, bool pinned) =>
+      _patch(id, (b) => b.pinned = pinned);
+
+  Future<String?> _patch(
+    String id,
+    void Function(UpdateConversationRequestBuilder) updates,
+  ) async {
+    final api = _api;
+    if (api == null) return 'Not connected';
+    try {
+      await api.conversations.updateConversation(
+        id: id,
+        updateConversationRequest: UpdateConversationRequest(updates),
+      );
+      return null;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map && data['error'] is String) {
+        return data['error'] as String;
+      }
+      return e.message ?? 'Request failed';
+    } catch (e) {
+      return 'Request failed: $e';
+    }
   }
 
   /// Delete a conversation by ID.

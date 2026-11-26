@@ -16,6 +16,7 @@ Widget _wrap(
   ServerCapabilities capabilities = ServerCapabilities.disabled,
   VoidCallback? onRetry,
   VoidCallback? onStop,
+  bool isStopping = false,
   Widget? timing,
   Widget? feedback,
 }) => MaterialApp(
@@ -28,6 +29,7 @@ Widget _wrap(
         fetchMessageAudio: () async => (bytes: Uint8List(0), mimeType: ''),
         onRetry: onRetry,
         onStop: onStop,
+        isStopping: isStopping,
         timing: timing,
         feedback: feedback,
       ),
@@ -113,6 +115,27 @@ void main() {
 
       expect(find.byKey(const Key('stop_action')), findsOneWidget);
       expect(find.byKey(const Key('copy_action')), findsNothing);
+    });
+
+    testWidgets('a stopping message shows a disabled Stopping… action', (
+      tester,
+    ) async {
+      var stops = 0;
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(isStreaming: true),
+          onStop: () => stops++,
+          isStopping: true,
+        ),
+      );
+
+      expect(find.text('Stopping…'), findsOneWidget);
+      final stop = tester.widget<MessageActionButton>(
+        find.byKey(const Key('stop_action')),
+      );
+      expect(stop.onPressed, isNull);
+      await tester.tap(find.byKey(const Key('stop_action')));
+      expect(stops, 0);
     });
 
     testWidgets('a streaming message without onStop renders nothing', (

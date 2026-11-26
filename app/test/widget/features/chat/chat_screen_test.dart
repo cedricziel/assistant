@@ -28,6 +28,11 @@ class _FakeChatNotifier extends ChatNotifier {
 
   void push(ChatState s) => state = AsyncData(s);
 
+  int stopCalls = 0;
+
+  @override
+  void stopTurn() => stopCalls++;
+
   @override
   Future<void> sendMessage(
     String message, {
@@ -659,6 +664,70 @@ void main() {
         findsOneWidget,
         reason: 'Should return to idle state after error dismissal',
       );
+    });
+
+    testWidgets('tapping stop_button and stop_action each call stopTurn', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [
+            ChatMessage(
+              id: streamingPlaceholderId,
+              role: 'assistant',
+              content: 'Generating...',
+              isStreaming: true,
+            ),
+          ],
+          isSending: true,
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('stop_button')));
+      await tester.pump();
+      expect(res.notifier.stopCalls, 1);
+
+      await tester.tap(find.byKey(const Key('stop_action')));
+      await tester.pump();
+      expect(res.notifier.stopCalls, 2);
+    });
+
+    testWidgets('while stopping, stop_button and stop_action are disabled', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [
+            ChatMessage(
+              id: streamingPlaceholderId,
+              role: 'assistant',
+              content: 'Generating...',
+              isStreaming: true,
+            ),
+          ],
+          isSending: true,
+          isStopping: true,
+        ),
+      );
+      await tester.pump();
+
+      final button = tester.widget<IconButton>(
+        find.byKey(const Key('stop_button')),
+      );
+      expect(button.onPressed, isNull);
+      expect(find.bySemanticsLabel(RegExp('Stopping')), findsWidgets);
+
+      await tester.tap(find.byKey(const Key('stop_button')));
+      await tester.tap(find.byKey(const Key('stop_action')));
+      await tester.pump();
+      expect(res.notifier.stopCalls, 0);
+      semantics.dispose();
     });
 
     testWidgets('stop action shown during streaming', (tester) async {

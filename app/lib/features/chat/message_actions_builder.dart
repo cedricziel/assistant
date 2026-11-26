@@ -10,7 +10,7 @@ import 'read_aloud_action.dart';
 /// Builds the action row shown below a message bubble.
 ///
 /// Decides which actions apply to [message] (Stop, Stopped, Read aloud, Copy,
-/// Share, Save, Retry) and feeds them to [MessageActions]. [timing] and
+/// Share, Save, Retry; [isStopping] keeps Stop visible but disabled) and feeds them to [MessageActions]. [timing] and
 /// [feedback] fill the trailing slot, in that order, once the features that
 /// supply them exist.
 Widget buildMessageActions({
@@ -20,6 +20,7 @@ Widget buildMessageActions({
   fetchMessageAudio,
   VoidCallback? onRetry,
   VoidCallback? onStop,
+  bool isStopping = false,
   Widget? timing,
   Widget? feedback,
 }) {
@@ -33,8 +34,8 @@ Widget buildMessageActions({
         MessageActionButton(
           key: const Key('stop_action'),
           icon: Icons.stop_rounded,
-          label: 'Stop',
-          onPressed: onStop,
+          label: isStopping ? 'Stopping…' : 'Stop',
+          onPressed: isStopping ? null : onStop,
         ),
       ],
     );

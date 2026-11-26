@@ -27,7 +27,9 @@ class MessageActionButton extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onPressed;
+
+  /// Null disables the button.
+  final VoidCallback? onPressed;
   final MessageActionTone tone;
   final bool selected;
 

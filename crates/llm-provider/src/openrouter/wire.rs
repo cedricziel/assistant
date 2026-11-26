@@ -3,10 +3,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use assistant_core::types::llm::OpenRouterRouting;
+use assistant_core::types::llm::{OpenRouterReasoning, OpenRouterRouting};
 use assistant_core::{LlmResponse, LlmResponseMeta, ToolCallItem, ToolCallResponse};
 
 use super::errors::{ErrorBody, body_error};
+use super::reasoning::{budget_exhausted, visible_text};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatRequest {
@@ -22,6 +23,8 @@ pub struct ChatRequest {
     pub models: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<OpenRouterRouting>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<OpenRouterReasoning>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,6 +66,10 @@ pub struct Message {
     pub content: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    #[serde(default)]
+    pub reasoning_details: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,7 +132,9 @@ impl Usage {
 }
 
 impl ChatResponse {
-    pub fn into_llm_response(self) -> anyhow::Result<LlmResponse> {
+    /// The response; reasoning becomes the tool calls' thinking unless
+    /// `show_reasoning` is off. A final answer has no slot for thinking.
+    pub fn into_llm_response(self, show_reasoning: bool) -> anyhow::Result<LlmResponse> {
         if let Some(error) = &self.error
             && self.choices.is_empty()
         {
@@ -144,21 +153,30 @@ impl ChatResponse {
             .into_iter()
             .next()
             .ok_or_else(|| anyhow::anyhow!("OpenRouter returned no choices"))?;
+        let message = choice.message;
+        let thinking = visible_text(&message.reasoning_details, message.reasoning.as_deref());
+        let items = tool_call_items(message.tool_calls);
+        let answer = message.content.unwrap_or_default();
+        let reasoned = !thinking.is_empty() || meta.reasoning_tokens.unwrap_or(0) > 0;
+        if let Some(error) = budget_exhausted(
+            choice.finish_reason.as_deref(),
+            &answer,
+            !items.is_empty(),
+            reasoned,
+        ) {
+            return Err(error);
+        }
         meta.finish_reason = choice.finish_reason;
 
-        let items = tool_call_items(choice.message.tool_calls);
         if !items.is_empty() {
             return Ok(LlmResponse::ToolCalls(ToolCallResponse {
                 items,
                 meta,
-                thinking: None,
+                thinking: (show_reasoning && !thinking.is_empty()).then_some(thinking),
                 provider_state: None,
             }));
         }
-        Ok(LlmResponse::FinalAnswer(
-            choice.message.content.unwrap_or_default(),
-            meta,
-        ))
+        Ok(LlmResponse::FinalAnswer(answer, meta))
     }
 }
 
