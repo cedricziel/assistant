@@ -33,20 +33,46 @@ class McpAppFrame extends StatelessWidget {
     final app = toolCall.app;
     if (app == null) return const SizedBox.shrink();
     return _McpAppFrameBody(
-      // A different call, app or conversation at the same position needs its
-      // own surface and bridge, not this one's.
-      key: ValueKey((
-        toolCall.toolCallId,
-        conversationId,
-        app.server,
-        app.resourceUri,
-        app.html,
-      )),
+      key: ValueKey(_identity(toolCall, app, conversationId)),
       app: app,
       toolCall: toolCall,
       conversationId: conversationId,
     );
   }
+}
+
+/// Everything a frame's surface and bridge are built from. A different call,
+/// app, policy or conversation at the same position needs its own surface and
+/// bridge. A call without an id is told apart by its input and result too;
+/// one with an id keeps its frame while its result arrives.
+Object _identity(ToolCallRecord toolCall, McpApp app, String? conversationId) {
+  final csp = app.csp;
+  final permissions = app.permissions;
+  return (
+    toolCall.toolCallId,
+    conversationId,
+    app.server,
+    app.resourceUri,
+    app.html,
+    Object.hashAll([
+      ...csp.connectDomains,
+      '|',
+      ...csp.resourceDomains,
+      '|',
+      ...csp.frameDomains,
+      '|',
+      ...csp.baseUriDomains,
+    ]),
+    (
+      permissions.camera,
+      permissions.microphone,
+      permissions.geolocation,
+      permissions.clipboardWrite,
+    ),
+    toolCall.toolCallId == null
+        ? (jsonEncode(toolCall.arguments), toolCall.result)
+        : null,
+  );
 }
 
 class _McpAppFrameBody extends ConsumerStatefulWidget {

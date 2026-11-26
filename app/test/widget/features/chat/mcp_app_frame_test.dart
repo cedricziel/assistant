@@ -128,6 +128,48 @@ void main() {
       await _unmount(tester);
     });
 
+    testWidgets('rebinds when the app policy or an id-less call changes', (
+      tester,
+    ) async {
+      ToolCallRecord untracked(McpApp app, {String? result}) => ToolCallRecord(
+        toolName: 'mcp__weather__forecast',
+        status: ToolCallStatus.ok,
+        result: result,
+        app: app,
+      );
+      const narrowed = McpApp(
+        server: 'weather',
+        resourceUri: 'ui://weather/forecast',
+        html: '<p>Sunny</p>',
+        csp: McpAppCsp(connectDomains: ['api.weather.example']),
+        permissions: McpAppPermissions(geolocation: true),
+      );
+      const sameButNarrowed = McpApp(
+        server: 'weather',
+        resourceUri: 'ui://weather/forecast',
+        html: '<p>Sunny</p>',
+        csp: McpAppCsp(connectDomains: ['api.weather.example']),
+      );
+      await _pump(tester, child: McpAppFrame(toolCall: untracked(narrowed)));
+      // Same policy, new instance: keeps the surface.
+      await _pump(tester, child: McpAppFrame(toolCall: untracked(narrowed)));
+      await _pump(
+        tester,
+        child: McpAppFrame(toolCall: untracked(sameButNarrowed)),
+      );
+      await _pump(
+        tester,
+        child: McpAppFrame(
+          toolCall: untracked(sameButNarrowed, result: 'Rain'),
+        ),
+      );
+
+      expect(FakeMcpAppSurface.created, hasLength(3));
+      expect(FakeMcpAppSurface.created[1].app.permissions.geolocation, isFalse);
+
+      await _unmount(tester);
+    });
+
     testWidgets('sends app calls to the backend current at call time', (
       tester,
     ) async {
