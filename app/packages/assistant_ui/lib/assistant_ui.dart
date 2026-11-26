@@ -23,6 +23,7 @@ export 'src/interactions/permission_rule_tile.dart';
 export 'src/interactions/unknown_interaction_card.dart';
 export 'src/message_actions.dart';
 export 'src/message_editor.dart';
+export 'src/regenerate_menu_button.dart';
 export 'src/registry.dart';
 export 'src/scopes/thread_density_scope.dart';
 export 'src/suggestions/starter_prompts.dart';

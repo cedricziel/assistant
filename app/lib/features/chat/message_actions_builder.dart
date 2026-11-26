@@ -13,6 +13,15 @@ import 'read_aloud_action.dart';
 /// Share, Save, Retry; [isStopping] keeps Stop visible but disabled) and feeds them to [MessageActions]. [timing] and
 /// [feedback] fill the trailing slot, in that order, once the features that
 /// supply them exist.
+///
+/// Branching: Edit ([onEdit]) is offered for persisted user messages and
+/// Regenerate ([onRegenerate]) for persisted assistant messages, only while no
+/// turn works ([turnWorking] is false while idle and while a turn only waits
+/// for the user). [onRegenerateWith] adds a model menu when [regenerateModels]
+/// has two or more entries. A [branch] puts a [BranchPicker] in the leading
+/// slot, wired to [onSwitchBranch] with the new zero-based index; the picker is
+/// busy while [turnWorking]. All of these stay off until their callbacks are
+/// supplied.
 Widget buildMessageActions({
   required ChatMessage message,
   required ServerCapabilities capabilities,
@@ -23,6 +32,14 @@ Widget buildMessageActions({
   bool isStopping = false,
   Widget? timing,
   Widget? feedback,
+  bool isPersisted = false,
+  bool turnWorking = false,
+  ({int index, int count})? branch,
+  VoidCallback? onEdit,
+  VoidCallback? onRegenerate,
+  ValueChanged<String>? onRegenerateWith,
+  List<RegenerateModel> regenerateModels = const [],
+  ValueChanged<int>? onSwitchBranch,
 }) {
   final isUser = message.isUser;
   final alignment = isUser ? WrapAlignment.end : WrapAlignment.start;
@@ -43,6 +60,14 @@ Widget buildMessageActions({
 
   final hasContent = message.content.isNotEmpty;
   final isFailed = message.status == MessageStatus.failed;
+  final canBranch = isPersisted && !turnWorking;
+  final showEdit = canBranch && isUser && onEdit != null;
+  final showRegenerate = canBranch && !isUser && onRegenerate != null;
+  final showRegenerateMenu =
+      canBranch &&
+      !isUser &&
+      onRegenerateWith != null &&
+      regenerateModels.length >= 2;
 
   return Builder(
     builder: (context) {
@@ -51,6 +76,15 @@ Widget buildMessageActions({
 
       return MessageActions(
         alignment: alignment,
+        leading: branch != null && onSwitchBranch != null
+            ? BranchPicker(
+                index: branch.index,
+                count: branch.count,
+                busy: turnWorking,
+                onPrevious: () => onSwitchBranch(branch.index - 1),
+                onNext: () => onSwitchBranch(branch.index + 1),
+              )
+            : null,
         actions: [
           // Stopped: the reply was cut short by Stop.
           if (!isUser && message.status == MessageStatus.stopped)
@@ -115,6 +149,27 @@ Widget buildMessageActions({
                     'assistant-message-${DateTime.now().toIso8601String().split('T').first}.md',
                 sharePositionOrigin: _origin(context),
               ),
+            ),
+          // Edit and Regenerate: persisted messages, while no turn works.
+          if (showEdit)
+            MessageActionButton(
+              key: const Key('edit_action'),
+              icon: Icons.edit_outlined,
+              label: 'Edit',
+              onPressed: onEdit,
+            ),
+          if (showRegenerate)
+            MessageActionButton(
+              key: const Key('regenerate_action'),
+              icon: Icons.refresh,
+              label: 'Regenerate',
+              onPressed: onRegenerate,
+            ),
+          if (showRegenerateMenu)
+            RegenerateMenuButton(
+              key: const Key('regenerate_with_action'),
+              models: regenerateModels,
+              onSelected: onRegenerateWith,
             ),
           // Retry: failed messages only.
           if (isFailed && onRetry != null)

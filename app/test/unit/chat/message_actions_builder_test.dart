@@ -19,6 +19,14 @@ Widget _wrap(
   bool isStopping = false,
   Widget? timing,
   Widget? feedback,
+  bool isPersisted = false,
+  bool turnWorking = false,
+  ({int index, int count})? branch,
+  VoidCallback? onEdit,
+  VoidCallback? onRegenerate,
+  ValueChanged<String>? onRegenerateWith,
+  List<RegenerateModel> regenerateModels = const [],
+  ValueChanged<int>? onSwitchBranch,
 }) => MaterialApp(
   home: Scaffold(
     body: Align(
@@ -32,10 +40,30 @@ Widget _wrap(
         isStopping: isStopping,
         timing: timing,
         feedback: feedback,
+        isPersisted: isPersisted,
+        turnWorking: turnWorking,
+        branch: branch,
+        onEdit: onEdit,
+        onRegenerate: onRegenerate,
+        onRegenerateWith: onRegenerateWith,
+        regenerateModels: regenerateModels,
+        onSwitchBranch: onSwitchBranch,
       ),
     ),
   ),
 );
+
+ChatMessage _user({List<ChatAttachment>? attachments}) => ChatMessage(
+  id: 'u',
+  role: 'user',
+  content: 'A question',
+  attachments: attachments,
+);
+
+const _models = [
+  RegenerateModel(name: 'model-a', isDefault: true),
+  RegenerateModel(name: 'model-b'),
+];
 
 ChatMessage _assistant({
   String content = 'A reply',
@@ -196,6 +224,221 @@ void main() {
 
       expect(find.byKey(const Key('stopped_label')), findsNothing);
       expect(find.byKey(const Key('copy_action')), findsOneWidget);
+    });
+  });
+
+  group('buildMessageActions branch entries', () {
+    final edit = find.byKey(const Key('edit_action'));
+    final regenerate = find.byKey(const Key('regenerate_action'));
+
+    testWidgets('a persisted user message offers Edit', (tester) async {
+      var edited = 0;
+      await tester.pumpWidget(
+        _wrap(_user(), isPersisted: true, onEdit: () => edited++),
+      );
+
+      expect(edit, findsOneWidget);
+      await tester.tap(edit);
+      expect(edited, 1);
+      expect(regenerate, findsNothing);
+    });
+
+    testWidgets('Edit is offered for a user message with attachments', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          _user(
+            attachments: const [
+              ChatAttachment(
+                id: 'f',
+                filename: 'a.png',
+                mimeType: 'image/png',
+                url: '/a.png',
+              ),
+            ],
+          ),
+          isPersisted: true,
+          onEdit: () {},
+        ),
+      );
+
+      expect(edit, findsOneWidget);
+    });
+
+    testWidgets('an unpersisted user message offers no Edit', (tester) async {
+      await tester.pumpWidget(_wrap(_user(), onEdit: () {}));
+
+      expect(edit, findsNothing);
+    });
+
+    testWidgets('a persisted assistant message offers Regenerate, not Edit', (
+      tester,
+    ) async {
+      var regenerated = 0;
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(),
+          isPersisted: true,
+          onEdit: () {},
+          onRegenerate: () => regenerated++,
+        ),
+      );
+
+      expect(regenerate, findsOneWidget);
+      await tester.tap(regenerate);
+      expect(regenerated, 1);
+      expect(edit, findsNothing);
+    });
+
+    testWidgets('a user message offers no Regenerate', (tester) async {
+      await tester.pumpWidget(
+        _wrap(_user(), isPersisted: true, onRegenerate: () {}),
+      );
+
+      expect(regenerate, findsNothing);
+    });
+
+    testWidgets('no callbacks, no entries', (tester) async {
+      await tester.pumpWidget(_wrap(_user(), isPersisted: true));
+      expect(edit, findsNothing);
+
+      await tester.pumpWidget(_wrap(_assistant(), isPersisted: true));
+      expect(regenerate, findsNothing);
+    });
+
+    testWidgets('both are withheld while a turn works', (tester) async {
+      await tester.pumpWidget(
+        _wrap(_user(), isPersisted: true, turnWorking: true, onEdit: () {}),
+      );
+      expect(edit, findsNothing);
+
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(),
+          isPersisted: true,
+          turnWorking: true,
+          onRegenerate: () {},
+        ),
+      );
+      expect(regenerate, findsNothing);
+    });
+
+    testWidgets('both are offered when no turn works, as while awaitingInput', (
+      tester,
+    ) async {
+      // `turnWorking` is false both when idle and when the turn only waits
+      // for the user, so the same call covers both states.
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(),
+          isPersisted: true,
+          turnWorking: false,
+          onRegenerate: () {},
+        ),
+      );
+
+      expect(regenerate, findsOneWidget);
+    });
+
+    testWidgets('leading is a BranchPicker when the message has a branch', (
+      tester,
+    ) async {
+      final switched = <int>[];
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(),
+          isPersisted: true,
+          branch: (index: 1, count: 3),
+          onSwitchBranch: switched.add,
+        ),
+      );
+
+      final picker = tester.widget<BranchPicker>(find.byType(BranchPicker));
+      expect((picker.index, picker.count, picker.busy), (1, 3, false));
+      expect(
+        tester.widget<MessageActions>(find.byType(MessageActions)).leading,
+        isA<BranchPicker>(),
+      );
+      picker.onPrevious();
+      picker.onNext();
+      expect(switched, [0, 2]);
+    });
+
+    testWidgets('the picker is busy only while a turn works', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          _user(),
+          isPersisted: true,
+          turnWorking: true,
+          branch: (index: 0, count: 2),
+          onSwitchBranch: (_) {},
+        ),
+      );
+
+      expect(
+        tester.widget<BranchPicker>(find.byType(BranchPicker)).busy,
+        isTrue,
+      );
+    });
+
+    testWidgets('no picker without a branch', (tester) async {
+      await tester.pumpWidget(
+        _wrap(_assistant(), isPersisted: true, onSwitchBranch: (_) {}),
+      );
+
+      expect(find.byType(BranchPicker), findsNothing);
+    });
+
+    testWidgets('the regenerate menu needs the callback and two models', (
+      tester,
+    ) async {
+      final picked = <String>[];
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(),
+          isPersisted: true,
+          onRegenerateWith: picked.add,
+          regenerateModels: _models,
+        ),
+      );
+      expect(find.byType(RegenerateMenuButton), findsOneWidget);
+
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(),
+          isPersisted: true,
+          onRegenerateWith: picked.add,
+          regenerateModels: _models.take(1).toList(),
+        ),
+      );
+      expect(find.byType(PopupMenuButton<String>), findsNothing);
+
+      await tester.pumpWidget(
+        _wrap(_assistant(), isPersisted: true, regenerateModels: _models),
+      );
+      expect(find.byType(RegenerateMenuButton), findsNothing);
+
+      await tester.pumpWidget(
+        _wrap(
+          _user(),
+          isPersisted: true,
+          onRegenerateWith: picked.add,
+          regenerateModels: _models,
+        ),
+      );
+      expect(find.byType(RegenerateMenuButton), findsNothing);
+
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(),
+          isPersisted: true,
+          turnWorking: true,
+          onRegenerateWith: picked.add,
+          regenerateModels: _models,
+        ),
+      );
+      expect(find.byType(RegenerateMenuButton), findsNothing);
     });
   });
 }
