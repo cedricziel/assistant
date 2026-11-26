@@ -167,7 +167,26 @@ All unmatched paths are handled by the embedded Flutter web app (SPA
 fallback). The app uses the REST API below to drive the chat,
 persona switching, and skills views.
 
-### Persona starter prompts
+### Suggestions and starter prompts
+
+#### Follow-up chips
+
+After a turn finishes, the server can propose up to three follow-up prompts.
+The app shows them as chips above the composer, below the reconnect banner and
+the turn progress card. A tap sends the prompt as the next message. The chips
+disappear as soon as a message is sent or queued, while a turn is running, and
+when the conversation changes. A conversation that is reopened later shows no
+chips: suggestions belong to the live turn only.
+
+The chips arrive on the finished run's replay stream (`GET
+/api/conversations/{id}/runs/{run}/events/stream?since=N+1`) as a `suggestions`
+frame that follows `done`. The app listens for at most 20 seconds, which is
+the server's 15 second ceiling plus latency, and shows nothing when no frame
+arrives. An org turns the feature off with `enabled = false` in the
+`[suggestions]` section of `org.toml`; `max_suggestions` (1 to 5, default 3)
+and `timeout_secs` (1 to 15, default 10) tune it.
+
+#### Persona starter prompts
 
 A Persona can carry up to 4 starter prompts that the app shows as suggestions
 in an empty chat. The Persona detail screen has a "Starter prompts" section
