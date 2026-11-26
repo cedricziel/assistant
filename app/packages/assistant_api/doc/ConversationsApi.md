@@ -20,7 +20,7 @@ Method | HTTP request | Description
 [**getConversation**](ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
 [**getMessageAudio**](ConversationsApi.md#getmessageaudio) | **GET** /api/messages/{id}/audio | &#x60;GET /api/messages/{id}/audio&#x60; — synthesize TTS audio for an assistant message and return it in the configured &#x60;[tts] format&#x60;.
 [**getTurnStatus**](ConversationsApi.md#getturnstatus) | **GET** /api/conversations/{conversation_id}/turns/{turn_id}/status | &#x60;GET /api/conversations/{conversation_id}/turns/{turn_id}/status&#x60;
-[**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
+[**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list conversations, newest first.
 [**readMcpAppResource**](ConversationsApi.md#readmcpappresource) | **POST** /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read | &#x60;POST /api/conversations/{conversation_id}/tool-calls/{tool_call_id}/app/resources-read&#x60;
 [**regenerateMessage**](ConversationsApi.md#regeneratemessage) | **POST** /api/conversations/{id}/messages/{message_id}/regenerate | &#x60;POST /api/conversations/{id}/messages/{message_id}/regenerate&#x60; — answer a user message again and stream the new reply.
 [**respondToInteraction**](ConversationsApi.md#respondtointeraction) | **POST** /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond | &#x60;POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond&#x60;
@@ -31,7 +31,7 @@ Method | HTTP request | Description
 [**streamConversations**](ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [**streamRunEvents**](ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [**switchConversationBranch**](ConversationsApi.md#switchconversationbranch) | **POST** /api/conversations/{id}/switch-branch | &#x60;POST /api/conversations/{id}/switch-branch&#x60; — make another version of a message the active one.
-[**updateConversation**](ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title and/or pin state.
+[**updateConversation**](ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title, pin and/or archive state.
 
 
 # **callMcpAppTool**
@@ -88,7 +88,7 @@ Name | Type | Description  | Notes
 
 `POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`
 
-Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this conversation and a matching token is registered, otherwise no-op. The cancel also covers a turn no worker has claimed yet: its stream ends at once with `agent_error {\"reason\":\"cancelled\",\"user_message_persisted\":false}`. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker's `tokio::select!`, the SSE stream's terminal `agent_error` event, and the `event_store`. Clients should poll `GET .../status` (or wait for the stream's `agent_error`) to observe the transition.
+Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this conversation and a matching token is registered, otherwise no-op. The cancel also covers a turn no worker has claimed yet: its stream ends at once with `agent_error {\"reason\":\"cancelled\",\"user_message_persisted\":false}`. A turn cancelled after it started keeps its streamed text as an assistant message with `finish_reason: \"cancelled\"` (the placeholder `_Stopped._` when nothing streamed), reported as `message_id` on the terminal `agent_error`. Always returns 200 with the current turn status — the cancellation propagates asynchronously through the worker's `tokio::select!`, the SSE stream's terminal `agent_error` event, and the `event_store`. Clients should poll `GET .../status` (or wait for the stream's `agent_error`) to observe the transition.
 
 ### Example
 ```dart
@@ -529,19 +529,22 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listConversations**
-> BuiltList<ConversationSummary> listConversations(xSpaceId)
+> BuiltList<ConversationSummary> listConversations(archived, xSpaceId)
 
-`GET /api/conversations` — list all conversations, newest first.
+`GET /api/conversations` — list conversations, newest first.
+
+Returns the unarchived conversations, pinned first. With `?archived=true` it returns the archived ones instead, most recently archived first.
 
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
+final bool archived = true; // bool | `true` lists only archived conversations, newest archive first. Absent or `false` lists the unarchived ones, pinned first.
 final String xSpaceId = xSpaceId_example; // String | Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
 
 try {
-    final response = api.listConversations(xSpaceId);
+    final response = api.listConversations(archived, xSpaceId);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->listConversations: $e\n');
@@ -552,6 +555,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **archived** | **bool**| `true` lists only archived conversations, newest archive first. Absent or `false` lists the unarchived ones, pinned first. | [optional] 
  **xSpaceId** | **String**| Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter. | [optional] 
 
 ### Return type
@@ -1043,9 +1047,9 @@ Name | Type | Description  | Notes
 # **updateConversation**
 > ConversationSummary updateConversation(id, updateConversationRequest, xSpaceId)
 
-`PATCH /api/conversations/{id}` — update a conversation's title and/or pin state.
+`PATCH /api/conversations/{id}` — update a conversation's title, pin and/or archive state.
 
-Neither change moves the conversation in the list: only new messages bump `updated_at`.
+None of these changes moves the conversation in the list: only new messages bump `updated_at`. Archiving clears the pin; pinning an archived conversation unarchives it.
 
 ### Example
 ```dart

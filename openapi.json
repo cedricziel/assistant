@@ -591,9 +591,22 @@
         "tags": [
           "conversations"
         ],
-        "summary": "`GET /api/conversations` — list all conversations, newest first.",
+        "summary": "`GET /api/conversations` — list conversations, newest first.",
+        "description": "Returns the unarchived conversations, pinned first. With `?archived=true`\nit returns the archived ones instead, most recently archived first.",
         "operationId": "list_conversations",
         "parameters": [
+          {
+            "name": "archived",
+            "in": "query",
+            "description": "`true` lists only archived conversations, newest archive first. Absent\nor `false` lists the unarchived ones, pinned first.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
           {
             "name": "X-Space-Id",
             "in": "header",
@@ -1101,7 +1114,7 @@
           "conversations"
         ],
         "summary": "`POST /api/conversations/{conversation_id}/turns/{turn_id}/cancel`",
-        "description": "Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this\nconversation and a matching token is registered, otherwise no-op. The cancel\nalso covers a turn no worker has claimed yet: its stream ends at once with\n`agent_error {\"reason\":\"cancelled\",\"user_message_persisted\":false}`. Always returns 200 with the current turn\nstatus — the cancellation propagates asynchronously through the worker's\n`tokio::select!`, the SSE stream's terminal `agent_error` event, and the\n`event_store`. Clients should poll `GET .../status` (or wait for the\nstream's `agent_error`) to observe the transition.",
+        "description": "Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this\nconversation and a matching token is registered, otherwise no-op. The cancel\nalso covers a turn no worker has claimed yet: its stream ends at once with\n`agent_error {\"reason\":\"cancelled\",\"user_message_persisted\":false}`.\nA turn cancelled after it started keeps its streamed text as an assistant\nmessage with `finish_reason: \"cancelled\"` (the placeholder `_Stopped._` when\nnothing streamed), reported as `message_id` on the terminal `agent_error`.\nAlways returns 200 with the current turn\nstatus — the cancellation propagates asynchronously through the worker's\n`tokio::select!`, the SSE stream's terminal `agent_error` event, and the\n`event_store`. Clients should poll `GET .../status` (or wait for the\nstream's `agent_error`) to observe the transition.",
         "operationId": "cancel_turn",
         "parameters": [
           {
@@ -1511,8 +1524,8 @@
         "tags": [
           "conversations"
         ],
-        "summary": "`PATCH /api/conversations/{id}` — update a conversation's title and/or pin state.",
-        "description": "Neither change moves the conversation in the list: only new messages bump\n`updated_at`.",
+        "summary": "`PATCH /api/conversations/{id}` — update a conversation's title, pin and/or archive state.",
+        "description": "None of these changes moves the conversation in the list: only new messages\nbump `updated_at`. Archiving clears the pin; pinning an archived\nconversation unarchives it.",
         "operationId": "update_conversation",
         "parameters": [
           {
@@ -11999,6 +12012,14 @@
           "matches"
         ],
         "properties": {
+          "archived_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the conversation was archived; absent when it is not archived."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -12048,6 +12069,14 @@
           "updated_at"
         ],
         "properties": {
+          "archived_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the conversation was archived; absent when it is not archived."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -16031,6 +16060,13 @@
         "type": "object",
         "description": "Body for `PATCH /api/conversations/{id}`. At least one field is required.",
         "properties": {
+          "archived": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`true` archives the conversation (clearing its pin), `false` unarchives\nit. Pinning an archived conversation also unarchives it. Combining\n`pinned: true` with `archived: true` is rejected."
+          },
           "pinned": {
             "type": [
               "boolean",

@@ -724,7 +724,7 @@ impl Orchestrator {
 
     /// Publish a turn's result on [`topic::TURN_COMPLETED`] for background
     /// consumers, leaving the `turn.result` reply to the submitter alone.
-    async fn announce_completed_turn(
+    pub(super) async fn announce_completed_turn(
         &self,
         payload: serde_json::Value,
         conversation_id: Uuid,

@@ -8,6 +8,7 @@ import 'package:assistant_api/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**archivedAt** | [**DateTime**](DateTime.md) | When the conversation was archived; absent when it is not archived. | [optional] 
 **createdAt** | [**DateTime**](DateTime.md) |  | 
 **id** | **String** |  | 
 **pinnedAt** | [**DateTime**](DateTime.md) | When the conversation was pinned; absent when it is not pinned. | [optional] 

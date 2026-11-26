@@ -10,14 +10,17 @@ library;
 // export 'src/branch_picker.dart'; // slot: message-branching 9
 // export 'src/code/code_block.dart'; // slot: chat-a11y-and-code-blocks C4
 // export 'src/composer/attachment_tray.dart'; // slot: chat-element-library 11b
-// export 'src/composer/composer.dart'; // slot: chat-element-library 11a
 // export 'src/composer/composer_voice_button.dart'; // slot: chat-element-library 11b
 export 'src/bodies/tool_call_body.dart';
 export 'src/bodies/tool_status_icon.dart';
 export 'src/branch_picker.dart';
 export 'src/code/code_block.dart';
+export 'src/composer/composer.dart';
 export 'src/composer/queued_message_bubble.dart';
+export 'src/composer/slash_command_menu.dart';
 export 'src/conversations/conversation_list_view.dart';
+export 'src/conversations/conversation_search_results_view.dart';
+export 'src/conversations/highlighted_segments.dart';
 export 'src/feedback/feedback_buttons.dart';
 export 'src/feedback/feedback_comment_field.dart';
 export 'src/highlight/code_token.dart';
@@ -28,6 +31,7 @@ export 'src/interactions/question_card.dart';
 export 'src/interactions/unknown_interaction_card.dart';
 export 'src/message_actions.dart';
 export 'src/message_editor.dart';
+export 'src/regenerate_menu_button.dart';
 export 'src/registry.dart';
 export 'src/scopes/thread_density_scope.dart';
 export 'src/scopes/tool_result_renderer_scope.dart';
@@ -37,15 +41,20 @@ export 'src/surface_frame.dart';
 export 'src/theme/assistant_ui_colors.dart';
 export 'src/theme/assistant_ui_spacing.dart';
 export 'src/theme/code_theme.dart';
+export 'src/thread/thread_empty_state.dart';
+export 'src/thread/thread_error_banner.dart';
 export 'src/timeline/timeline_entry_shell.dart';
 export 'src/timing/message_timing_indicator.dart';
+export 'src/tool_results/compact_expandable.dart';
 export 'src/tool_results/generic_tool_result_view.dart';
+export 'src/tool_results/tool_result_renderer.dart';
+export 'src/tool_results/tool_result_renderer_registry.dart';
+export 'src/turn/turn_progress_card.dart';
+export 'src/turn/turn_status_label.dart';
 
 // export 'src/tool_results/code_diff_result_view.dart'; // slot: tool-result-renderers C7
 
 // export 'src/tool_results/code_file_result_view.dart'; // slot: tool-result-renderers C7
-
-// export 'src/tool_results/compact_expandable.dart'; // slot: tool-result-renderers C2
 
 // export 'src/tool_results/data_table_result_view.dart'; // slot: tool-result-renderers C6
 
@@ -58,5 +67,3 @@ export 'src/tool_results/generic_tool_result_view.dart';
 // export 'src/tool_results/sources_result_view.dart'; // slot: tool-result-renderers C4
 
 // export 'src/tool_results/terminal_result_view.dart'; // slot: tool-result-renderers C4
-
-// export 'src/turn/turn_progress_card.dart'; // slot: chat-element-library 9
