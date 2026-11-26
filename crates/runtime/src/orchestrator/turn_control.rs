@@ -57,6 +57,7 @@ impl Orchestrator {
                 attachment_ids: Vec::new(),
                 message_id: None,
                 had_errors: turn_had_errors,
+                timing: None,
             }));
         }
 
@@ -150,6 +151,7 @@ impl Orchestrator {
             attachment_ids: Vec::new(),
             message_id: None,
             had_errors: turn_had_errors,
+            timing: None,
         }))
     }
 
