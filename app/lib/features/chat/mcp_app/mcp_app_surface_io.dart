@@ -49,6 +49,7 @@ class _WebViewSurface implements McpAppSurface, McpAppPort {
         _channel,
         onMessageReceived: (message) {
           try {
+            if (_incoming.isClosed) return;
             _incoming.add(jsonDecode(message.message));
           } on FormatException {
             // Not a JSON-RPC message.
