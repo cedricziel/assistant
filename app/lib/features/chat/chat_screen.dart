@@ -22,7 +22,6 @@ import '../personas/personas_provider.dart';
 import 'attachment_provider.dart';
 import 'chat_announcer.dart';
 import 'chat_provider.dart';
-import 'chat_input_row.dart';
 import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
@@ -31,6 +30,7 @@ import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
 import 'reconnect_banner.dart';
 import 'streaming_timeline_entry.dart';
+import 'voice_recorder_button.dart';
 
 /// Feature flag for the stall-state "Skip" button that triggers
 /// `POST /api/conversations/{c}/turns/{t}/cancel`.
@@ -614,34 +614,53 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ),
 
                         // Input row.
-                        ChatInputRow(
+                        Composer(
                           controller: _inputController,
                           focusNode: _inputFocus,
                           isSending: chatState.isSending,
                           isStopping: chatState.isStopping,
                           pendingQueueCount: chatState.pendingQueue.length,
                           pendingAttachments: pendingAttachments,
-                          capabilities: capabilities,
                           commands: commands,
+                          showVoice: capabilities.voiceSend,
+                          voiceButton: VoiceRecorderButton(
+                            onRecordingComplete: _sendVoiceMessage,
+                            onError: (err) {
+                              ScaffoldMessenger.of(context)
+                                  .showSnackBar(SnackBar(content: Text(err)));
+                            },
+                          ),
+                          inputBuilder:
+                              (
+                                context,
+                                controller,
+                                focusNode,
+                                placeholder,
+                                onSubmit,
+                              ) => AdaptiveTextField(
+                                key: const Key('message_input'),
+                                controller: controller,
+                                focusNode: focusNode,
+                                placeholder: placeholder,
+                                cursorColor: Theme.of(context)
+                                    .colorScheme
+                                    .primary,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                minLines: 1,
+                                maxLines: 6,
+                                textInputAction: TextInputAction.send,
+                                onSubmitted: (_) => onSubmit(),
+                              ),
                           onSend: _sendMessage,
                           onStop: () =>
                               ref.read(chatProvider.notifier).stopTurn(),
-                          onVoiceRecorded: _sendVoiceMessage,
                           onPickImage: _pickImages,
                           onRemoveAttachment: (i) => ref
                               .read(pendingAttachmentsProvider.notifier)
                               .removeAt(i),
-                          onPasteImage: (bytes) {
-                            ref
-                                .read(pendingAttachmentsProvider.notifier)
-                                .add(
-                                  PendingAttachment(
-                                    bytes: bytes,
-                                    filename: 'pasted_image.png',
-                                    mimeType: 'image/png',
-                                  ),
-                                );
-                          },
                         ),
                       ],
                     ),

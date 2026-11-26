@@ -1,12 +1,16 @@
-import 'package:assistant_ui/models.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// Floating autocomplete popup for slash commands.
+import '../models/command_entry.dart';
+import '../theme/assistant_ui_spacing.dart';
+
+/// Floating menu of slash commands.
 ///
-/// Shown above the input field when the user types `/` as the first character.
-/// Filters commands by prefix and invokes [onSelect] when a command is tapped.
-class CommandAutocompletePopup extends StatelessWidget {
-  const CommandAutocompletePopup({
+/// Shown above the input while the text starts with `/`. Lists the [commands]
+/// whose name starts with [filter] and calls [onSelect] when one is tapped.
+/// The menu never dispatches a command; the caller decides what selecting
+/// one means.
+class SlashCommandMenu extends StatelessWidget {
+  const SlashCommandMenu({
     super.key,
     required this.commands,
     required this.filter,
@@ -16,11 +20,11 @@ class CommandAutocompletePopup extends StatelessWidget {
   /// All available commands.
   final List<CommandEntry> commands;
 
-  /// Current text after the `/` (e.g. "mo" for "/mo").
+  /// Current text after the `/` (for example "mo" for "/mo").
   final String filter;
 
   /// Called when the user taps a command.
-  final void Function(CommandEntry command) onSelect;
+  final ValueChanged<CommandEntry> onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +42,7 @@ class CommandAutocompletePopup extends StatelessWidget {
         constraints: const BoxConstraints(maxHeight: 240),
         child: ListView.builder(
           shrinkWrap: true,
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: AssistantUiSpacing.xs),
           itemCount: filtered.length,
           itemBuilder: (context, index) {
             final cmd = filtered[index];
@@ -46,8 +50,8 @@ class CommandAutocompletePopup extends StatelessWidget {
               onTap: () => onSelect(cmd),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: AssistantUiSpacing.md,
+                  vertical: AssistantUiSpacing.sm,
                 ),
                 child: Row(
                   children: [
@@ -58,7 +62,7 @@ class CommandAutocompletePopup extends StatelessWidget {
                         color: colorScheme.onSurface,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: AssistantUiSpacing.md),
                     Expanded(
                       child: Text(
                         cmd.description,
