@@ -13,6 +13,7 @@ mod citations;
 mod client;
 mod embedder;
 pub(crate) mod errors;
+mod key;
 mod media;
 mod reasoning;
 mod request;
@@ -36,6 +37,7 @@ use self::audio_input::AudioInput;
 use self::catalog::{OpenRouterCatalog, Requirements};
 use self::client::OpenRouterClient;
 pub use self::embedder::OpenRouterEmbedder;
+pub use self::key::{KeyStatus, key_status};
 use self::request::{ModelInputs, RequestSettings, apply_options, build_chat_request};
 
 // ── Defaults ────────────────────────────────────────────────────────────────

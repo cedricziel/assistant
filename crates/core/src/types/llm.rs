@@ -202,11 +202,37 @@ pub fn resolve_openrouter_key(
     env_var: &str,
     env: impl Fn(&str) -> Option<String>,
 ) -> Option<Secret> {
-    section
+    openrouter_key_with_source(section, llm, env_var, env).map(|(key, _)| key)
+}
+
+/// Where a resolved OpenRouter key came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeySource {
+    /// The feature's own section.
+    Section,
+    /// The `[llm]` OpenRouter key.
+    Llm,
+    /// The named environment variable.
+    Env(String),
+}
+
+/// Like [`resolve_openrouter_key`], also saying where the key came from.
+pub fn openrouter_key_with_source(
+    section: Option<&Secret>,
+    llm: &LlmConfig,
+    env_var: &str,
+    env: impl Fn(&str) -> Option<String>,
+) -> Option<(Secret, KeySource)> {
+    if let Some(key) = section.filter(|s| !s.is_blank()) {
+        return Some((key.clone(), KeySource::Section));
+    }
+    if let Some(key) = llm.openrouter_api_key().filter(|s| !s.is_blank()) {
+        return Some((key.clone(), KeySource::Llm));
+    }
+    env(env_var)
+        .map(Secret::from)
         .filter(|s| !s.is_blank())
-        .or_else(|| llm.openrouter_api_key().filter(|s| !s.is_blank()))
-        .cloned()
-        .or_else(|| env(env_var).map(Secret::from).filter(|s| !s.is_blank()))
+        .map(|key| (key, KeySource::Env(env_var.to_owned())))
 }
 
 // ── Anthropic-specific options ────────────────────────────────────────────────
@@ -728,8 +754,8 @@ pub struct OpenRouterMaxPrice {
 #[cfg(test)]
 mod tests {
     use super::{
-        EmbeddingConfig, EmbeddingProviderKind, LlmConfig, LlmProviderKind, OPENROUTER_API_KEY_ENV,
-        resolve_openrouter_key,
+        EmbeddingConfig, EmbeddingProviderKind, KeySource, LlmConfig, LlmProviderKind,
+        OPENROUTER_API_KEY_ENV, openrouter_key_with_source, resolve_openrouter_key,
     };
     use crate::secret::Secret;
 
@@ -979,6 +1005,31 @@ mod tests {
         );
         let off: LlmConfig = toml::from_str("parallel_tool_calls = false").unwrap();
         assert_eq!(off.parallel_tool_calls, Some(false));
+    }
+
+    #[test]
+    fn key_source_names_where_the_key_came_from() {
+        let or = llm(LlmProviderKind::OpenRouter, Some("llm-key"));
+        let none = llm(LlmProviderKind::Anthropic, Some("sk-ant"));
+        let section = Secret::new("own");
+        let source = |section: Option<&Secret>, llm: &LlmConfig, env: Option<&'static str>| {
+            openrouter_key_with_source(section, llm, OPENROUTER_API_KEY_ENV, env_with(env))
+                .map(|(key, source)| (key.expose().to_string(), source))
+        };
+
+        assert_eq!(
+            source(Some(&section), &or, None),
+            Some(("own".into(), KeySource::Section))
+        );
+        assert_eq!(
+            source(None, &or, Some("env")),
+            Some(("llm-key".into(), KeySource::Llm))
+        );
+        assert_eq!(
+            source(None, &none, Some("env")),
+            Some(("env".into(), KeySource::Env(OPENROUTER_API_KEY_ENV.into())))
+        );
+        assert_eq!(source(None, &none, None), None);
     }
 
     #[test]
