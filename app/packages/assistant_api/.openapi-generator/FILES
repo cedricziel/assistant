@@ -173,6 +173,7 @@ doc/StreamRunEventsQuery.md
 doc/StringList.md
 doc/SubscribeRequest.md
 doc/SubscriptionResponse.md
+doc/SurfaceSummary.md
 doc/Task.md
 doc/TaskArtifactUpdateEvent.md
 doc/TaskPushNotificationConfig.md
@@ -190,6 +191,7 @@ doc/ToolPermissionRuleSummary.md
 doc/ToolPermissionRulesApi.md
 doc/TurnState.md
 doc/TurnStatusResponse.md
+doc/UiCapabilities.md
 doc/UnsubscribeRequest.md
 doc/UpdateAgentRequest.md
 doc/UpdateConversationRequest.md
@@ -412,6 +414,7 @@ lib/src/model/stream_run_events_query.dart
 lib/src/model/string_list.dart
 lib/src/model/subscribe_request.dart
 lib/src/model/subscription_response.dart
+lib/src/model/surface_summary.dart
 lib/src/model/task.dart
 lib/src/model/task_artifact_update_event.dart
 lib/src/model/task_push_notification_config.dart
@@ -426,6 +429,7 @@ lib/src/model/tool_decision.dart
 lib/src/model/tool_permission_rule_summary.dart
 lib/src/model/turn_state.dart
 lib/src/model/turn_status_response.dart
+lib/src/model/ui_capabilities.dart
 lib/src/model/unsubscribe_request.dart
 lib/src/model/update_agent_request.dart
 lib/src/model/update_conversation_request.dart

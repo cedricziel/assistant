@@ -246,6 +246,7 @@ mod subagent;
 mod summary_history;
 mod surfaces;
 mod tool_data;
+mod turn_anchors;
 mod turn_options;
 mod turn_timing;
 mod turn_tools;

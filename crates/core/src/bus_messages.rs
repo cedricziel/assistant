@@ -40,6 +40,10 @@ pub mod topic {
     /// is waiting for. Payload: [`TurnResult`](super::TurnResult).
     pub const TURN_COMPLETED: &str = "turn.completed";
     pub const TURN_STATUS: &str = "turn.status";
+    /// One `OrchestratorEvent` of a running turn, relayed from the process
+    /// that runs the turn to the process that streams it. `batch_id` is the
+    /// run id. Payload: a serialized `OrchestratorEvent`.
+    pub const TURN_EVENT: &str = "turn.event";
     pub const TOOL_EXECUTE: &str = "tool.execute";
     pub const TOOL_RESULT: &str = "tool.result";
     pub const AGENT_SPAWN: &str = "agent.spawn";
@@ -89,6 +93,11 @@ pub struct TurnRequest {
     /// submitter decides; the worker copies it to `ExecutionContext`.
     #[serde(default)]
     pub interactive: bool,
+    /// The submitter streams this turn from another process. When no local
+    /// event sink is registered, the worker relays each event on
+    /// [`topic::TURN_EVENT`] with `batch_id` set to the run id.
+    #[serde(default)]
+    pub relay_events: bool,
     /// Where in the conversation tree the turn's rows attach. Carried, not yet
     /// acted on by the worker.
     #[serde(default)]
@@ -121,9 +130,13 @@ pub enum TurnAnchor {
     /// Append the prompt after the conversation's current leaf.
     #[default]
     Append,
-    /// Replace an earlier user message: the prompt becomes a sibling branch
-    /// under `parent_message_id` (`None` for a first message).
-    Edit { parent_message_id: Option<Uuid> },
+    /// Replace the earlier user message `edited_message_id`: the prompt
+    /// becomes a sibling branch under `parent_message_id` (`None` for a first
+    /// message), and the attachments of the edited message carry forward.
+    Edit {
+        parent_message_id: Option<Uuid>,
+        edited_message_id: Uuid,
+    },
     /// Re-run the reply to an existing user message without a new user row.
     Regenerate { user_message_id: Uuid },
 }
@@ -311,6 +324,7 @@ mod tests {
             ),
             attachment_ids: vec![],
             interactive: true,
+            relay_events: false,
             anchor: TurnAnchor::Append,
             user_message_id: None,
             model_override: None,
@@ -409,9 +423,11 @@ mod tests {
             TurnAnchor::Append,
             TurnAnchor::Edit {
                 parent_message_id: Some(parent),
+                edited_message_id: user_message_id,
             },
             TurnAnchor::Edit {
                 parent_message_id: None,
+                edited_message_id: user_message_id,
             },
             TurnAnchor::Regenerate {
                 user_message_id: parent,
@@ -425,6 +441,7 @@ mod tests {
                 traceparent: None,
                 attachment_ids: vec![],
                 interactive: false,
+                relay_events: false,
                 anchor: anchor.clone(),
                 user_message_id: Some(user_message_id),
                 model_override: Some("gpt-x".into()),

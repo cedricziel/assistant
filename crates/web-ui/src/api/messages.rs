@@ -153,7 +153,6 @@ pub async fn send_message(
     let events = TurnEvents {
         rx: event_rx,
         sink: event_tx.downgrade(),
-        orchestrator: orchestrator.clone(),
     };
     orchestrator.register_token_sink(conv_id, event_tx).await;
     let user_attachment_ids = body.attachment_ids;
@@ -170,7 +169,10 @@ pub async fn send_message(
                     SubmitTurn::new(content, conv_id, Interface::Web)
                         .with_auth(&auth)
                         .with_request_id(submit_request_id)
-                        .with_attachments(user_attachment_ids),
+                        .with_attachments(user_attachment_ids)
+                        // The turn may run in another process, which has no
+                        // access to the sink registered above.
+                        .with_relay_events(true),
                 )
                 .await;
             let _ = tx.send(result);
@@ -197,15 +199,15 @@ pub(crate) struct RunOptions {
     pub push: bool,
 }
 
-/// The orchestrator events of one turn, plus what the runner needs to release
-/// the turn's token sink when the turn ends before a worker ever consumed it.
+/// The orchestrator events of one turn, plus the handle the runner needs to
+/// release the turn's token sink when the turn ends before a worker ever
+/// consumed it.
 pub(crate) struct TurnEvents {
     /// Receiving end of the sink registered with the orchestrator.
     pub rx: mpsc::Receiver<OrchestratorEvent>,
     /// Weak handle to the registered sink. It must not keep `rx` open: a
     /// worker drops the sink when its turn ends, which closes the stream.
     pub sink: mpsc::WeakSender<OrchestratorEvent>,
-    pub orchestrator: std::sync::Arc<assistant_runtime::Orchestrator>,
 }
 
 /// Drive one turn to its SSE response: emit `run_started` (sequence 0), forward
@@ -226,15 +228,9 @@ pub(crate) async fn stream_turn_to_sse(
     conv_id: Uuid,
     opts: RunOptions,
     events: TurnEvents,
-    mut turn_result_rx: tokio::sync::oneshot::Receiver<
-        anyhow::Result<assistant_runtime::TurnResult>,
-    >,
+    turn_result_rx: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
 ) -> Response {
-    let TurnEvents {
-        rx: mut event_rx,
-        sink,
-        orchestrator,
-    } = events;
+    let TurnEvents { rx: event_rx, sink } = events;
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
     let push_dispatcher_for_sse = state.push_dispatcher.clone().filter(|_| opts.push);
@@ -242,6 +238,19 @@ pub(crate) async fn stream_turn_to_sse(
         std::sync::Arc::new(ctx.storage.push_subscription_store());
     let event_store = ctx.storage.conversation_event_store();
     let run_broadcaster = state.run_broadcaster.clone();
+    // Events of a turn another process runs arrive over the bus; the stream
+    // ends with the turn either way.
+    let orchestrator = match state.runtime(ctx).await {
+        Ok(runtime) => Some(runtime.orchestrator.clone()),
+        Err(_) => {
+            warn!("No runtime to relay events for run {run_id}; streaming local events only");
+            None
+        }
+    };
+    let relay = orchestrator
+        .as_ref()
+        .map(|orchestrator| orchestrator.run_event_relay(conv_id, run_id));
+    let mut run_events = RunEvents::new(event_rx, relay, turn_result_rx);
 
     // Emit run_started event (sequence 0) to the durable log.
     let run_id_str = run_id.to_string();
@@ -284,37 +293,11 @@ pub(crate) async fn stream_turn_to_sse(
         const THINKING_BATCH_SIZE: usize = 20;
 
         // A closed SSE channel only stops forwarding. The loop keeps draining
-        // `event_rx` so the durable log and live tail see the whole turn, and
+        // `run_events` so the durable log and live tail see the whole turn, and
         // a reconnecting client can resume from `events/stream?since=N`.
         let mut client_gone = false;
 
-        // The turn's outcome, once it arrived before `event_rx` closed.
-        let mut early_result = None;
-        let mut cancelled_early = false;
-        loop {
-            // Events first (`biased`), so tokens buffered ahead of the result
-            // are never dropped. A normal turn's sink closes after its result,
-            // so keep draining to the close. A cancel before claim leaves the
-            // sink registered and open: only drain what is buffered.
-            let next = if cancelled_early {
-                event_rx.try_recv().ok()
-            } else if early_result.is_some() {
-                event_rx.recv().await
-            } else {
-                tokio::select! {
-                    biased;
-                    event = event_rx.recv() => event,
-                    result = &mut turn_result_rx => {
-                        cancelled_early = matches!(
-                            &result,
-                            Ok(Err(e)) if e.to_string().contains(assistant_runtime::TURN_CANCELLED_MARKER)
-                        );
-                        early_result = Some(result);
-                        continue;
-                    }
-                }
-            };
-            let Some(orch_event) = next else { break };
+        while let Some(orch_event) = run_events.next().await {
             // Serialization is owned by the shared projection layer; this loop
             // keeps only transport concerns (batching, persistence, push, seq).
             // A single OrchestratorEvent yields exactly one SSE frame today.
@@ -484,15 +467,17 @@ pub(crate) async fn stream_turn_to_sse(
             },
             Errored(String),
         }
-        if cancelled_early && let Some(sink) = sink.upgrade() {
-            // No worker consumed the sink: free it so a newer turn of this
-            // conversation is not routed here.
+        let turn_result = run_events.into_turn_result().await;
+        if matches!(
+            &turn_result,
+            Ok(Err(e)) if e.to_string().contains(assistant_runtime::TURN_CANCELLED_MARKER)
+        ) && let (Some(orchestrator), Some(sink)) = (&orchestrator, sink.upgrade())
+        {
+            // A turn cancelled before a worker claimed it leaves its sink
+            // registered. Free it so a newer turn of this conversation is not
+            // routed here.
             orchestrator.release_token_sink(conv_id, &sink).await;
         }
-        let turn_result = match early_result {
-            Some(result) => result,
-            None => turn_result_rx.await,
-        };
         let (reply_text, reply_message_id, reply_attachment_ids, terminal) = match turn_result {
             Ok(Ok(result)) => (
                 result.answer,
@@ -603,6 +588,90 @@ pub(crate) async fn stream_turn_to_sse(
         response.headers_mut().insert("X-Run-Id", hv);
     }
     response
+}
+
+/// How often the runner looks for relayed events while the turn is quiet.
+/// Events that arrive back to back are read without waiting.
+const RELAY_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+type TurnOutcome =
+    Result<anyhow::Result<assistant_runtime::TurnResult>, tokio::sync::oneshot::error::RecvError>;
+
+/// The events of one turn, from whichever side delivers them: the local sink
+/// when a worker in this process runs the turn, the bus relay when a worker in
+/// another process does. It ends with the turn's outcome, not with the sink,
+/// because a sink nobody consumes never closes.
+struct RunEvents {
+    local: mpsc::Receiver<OrchestratorEvent>,
+    local_open: bool,
+    relay: Option<assistant_runtime::RunEventRelay>,
+    /// The last poll of the relay returned an event, so the next one goes
+    /// straight back without waiting.
+    relay_busy: bool,
+    turn_result: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+    outcome: Option<TurnOutcome>,
+}
+
+impl RunEvents {
+    fn new(
+        local: mpsc::Receiver<OrchestratorEvent>,
+        relay: Option<assistant_runtime::RunEventRelay>,
+        turn_result: tokio::sync::oneshot::Receiver<anyhow::Result<assistant_runtime::TurnResult>>,
+    ) -> Self {
+        Self {
+            local,
+            local_open: true,
+            relay,
+            relay_busy: false,
+            turn_result,
+            outcome: None,
+        }
+    }
+
+    /// The next event, or `None` once the turn has ended and every event it
+    /// emitted has been handed out.
+    async fn next(&mut self) -> Option<OrchestratorEvent> {
+        while self.outcome.is_none() {
+            if self.relay_busy {
+                match self.poll_relay().await {
+                    Some(event) => return Some(event),
+                    None => self.relay_busy = false,
+                }
+            }
+            tokio::select! {
+                event = self.local.recv(), if self.local_open => match event {
+                    Some(event) => return Some(event),
+                    None => self.local_open = false,
+                },
+                outcome = &mut self.turn_result => self.outcome = Some(outcome),
+                _ = tokio::time::sleep(RELAY_POLL_INTERVAL), if self.relay.is_some() => {
+                    if let Some(event) = self.poll_relay().await {
+                        return Some(event);
+                    }
+                }
+            }
+        }
+        // The turn is over. Everything it emitted was queued before its
+        // outcome was sent, so draining both sides now loses nothing.
+        if let Ok(event) = self.local.try_recv() {
+            return Some(event);
+        }
+        self.poll_relay().await
+    }
+
+    async fn poll_relay(&mut self) -> Option<OrchestratorEvent> {
+        let event = self.relay.as_ref()?.next().await;
+        self.relay_busy = event.is_some();
+        event
+    }
+
+    /// The turn's outcome, waiting for it if the events ended first.
+    async fn into_turn_result(self) -> TurnOutcome {
+        match self.outcome {
+            Some(outcome) => outcome,
+            None => self.turn_result.await,
+        }
+    }
 }
 
 // -- Run event replay / tail -------------------------------------------------
@@ -1988,11 +2057,7 @@ mod tests {
             run_id,
             conv_id,
             opts,
-            TurnEvents {
-                rx: event_rx,
-                sink,
-                orchestrator: default_orchestrator(state).await,
-            },
+            TurnEvents { rx: event_rx, sink },
             turn_rx,
         )
         .await;
@@ -2064,7 +2129,6 @@ mod tests {
             TurnEvents {
                 rx: event_rx,
                 sink: event_tx.downgrade(),
-                orchestrator: default_orchestrator(&state).await,
             },
             turn_rx,
         )
@@ -2441,6 +2505,83 @@ mod tests {
             replayed_frames, live_frames,
             "replayed tool_result must equal the live frame; replay: {replayed}"
         );
+    }
+
+    // -- split topology: the worker runs in another runtime ---------------------
+
+    /// Two runtimes over one `space.db` and one bus: the first serves HTTP and
+    /// runs no worker, the second runs the turn worker, as in the packaged
+    /// install where the web process and the orchestrator are separate.
+    async fn split_topology(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let mut config = assistant_core::types::agent::OrgConfig::default();
+        config.memory.enabled = false;
+        config.permissions.allow = vec!["*".parse().unwrap()];
+        let root = std::path::Path::new("/nonexistent/assistant-test-root");
+        let (web, _) = state_over_config(
+            root,
+            llm_url,
+            &[default_space(&storage)],
+            false,
+            config.clone(),
+        )
+        .await;
+        let (worker, _) =
+            state_over_config(root, llm_url, &[default_space(&storage)], true, config).await;
+        worker.runtimes.register_ambient_tool(Arc::new(DataTool));
+        // Keep the worker's runtimes alive for as long as the test runs.
+        std::mem::forget(worker);
+        (web, storage)
+    }
+
+    #[tokio::test]
+    async fn a_turn_run_by_another_runtime_streams_to_the_sse_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "model": "test",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "data-stub", "arguments": {}}}]
+                },
+                "done": true
+            })))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        mount_llm_reply(&server, "all done").await;
+        let (state, storage) = split_topology(&server.uri()).await;
+        let conv_id = seed_conversation(&storage).await;
+
+        let resp = post_message(state, conv_id, "run the stub").await;
+        let frames = tokio::time::timeout(std::time::Duration::from_secs(15), sse_frames(resp))
+            .await
+            .expect("the stream ends with the turn");
+
+        let events: Vec<&str> = frames.iter().map(|(event, _, _)| event.as_str()).collect();
+        assert!(
+            events.contains(&"tool_result"),
+            "tool result relayed: {events:?}"
+        );
+        let tokens: String = frames
+            .iter()
+            .filter(|(event, _, _)| event == "token")
+            .map(|(_, data, _)| data.as_str())
+            .collect();
+        assert_eq!(tokens, "all done", "tokens relayed: {events:?}");
+        let (last, data, _) = frames.last().unwrap();
+        assert_eq!(
+            last, "done",
+            "the turn's own terminal frame closes the stream"
+        );
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(payload["content"], "all done");
+        let sequences: Vec<_> = frames.iter().filter_map(|(_, _, id)| *id).collect();
+        let expected: Vec<i64> = (0..frames.len() as i64).collect();
+        assert_eq!(sequences, expected, "one writer numbers the frames");
     }
 
     /// A persisted `surface_update` frame replays with the exact `data:` bytes
