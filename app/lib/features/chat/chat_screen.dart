@@ -20,6 +20,7 @@ import '../connection/connection_provider.dart';
 import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
 import 'attachment_provider.dart';
+import 'chat_announcer.dart';
 import 'chat_provider.dart';
 import 'chat_input_row.dart';
 import 'command_event_tile.dart';
@@ -28,7 +29,7 @@ import 'conversation_list.dart';
 import 'empty_chat.dart';
 import 'message_bubble.dart';
 import 'image_utils.dart';
-import 'queued_message_bubble.dart';
+import 'queued_message_remove_sheet.dart';
 import 'reconnect_banner.dart';
 import 'streaming_timeline_entry.dart';
 import 'turn_progress_card.dart';
@@ -57,10 +58,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
   final _inputFocus = FocusNode();
   bool _atBottom = true;
+  StreamSubscription<ChatLifecycleEvent>? _lifecycleSub;
 
   @override
   void initState() {
     super.initState();
+    // Turn lifecycle events, never token frames, drive screen-reader
+    // announcements; the streaming bubble is not a live region.
+    _lifecycleSub = ref
+        .read(chatProvider.notifier)
+        .lifecycle
+        .listen(ref.read(chatAnnouncerProvider).handle);
     _inputFocus.addListener(_onInputFocusChange);
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -140,6 +148,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    unawaited(_lifecycleSub?.cancel());
     _inputFocus.removeListener(_onInputFocusChange);
     _scrollController.removeListener(_onScroll);
     _inputController.dispose();
@@ -509,7 +518,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                                 .pendingQueue[queueIdx];
                                             return QueuedMessageBubble(
                                               message: pending,
-                                              index: queueIdx,
+                                              onLongPress: () =>
+                                                  showQueuedMessageRemoveSheet(
+                                                    context,
+                                                    ref,
+                                                    pending,
+                                                    queueIdx,
+                                                  ),
                                             );
                                           }
 

@@ -8,6 +8,7 @@ import 'package:assistant_api/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**ui** | [**UiCapabilities**](UiCapabilities.md) | Generative-UI settings of the selected space's org. | 
 **voiceReceive** | **bool** | Whether the server can serve TTS audio for messages (TTS configured). | 
 **voiceSend** | **bool** | Whether the server can accept voice messages (STT configured). | 
 

@@ -33,6 +33,14 @@ pub enum SurfaceStatus {
 }
 
 impl SurfaceStatus {
+    /// The wire and column form of the status.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Submitted => "submitted",
+        }
+    }
+
     fn parse(s: &str) -> Result<Self> {
         match s {
             "active" => Ok(Self::Active),
