@@ -222,6 +222,44 @@ void main() {
       await _unmount(tester);
     });
 
+    testWidgets('sends the new structured content after an id-less data '
+        'change', (tester) async {
+      ToolCallRecord untracked(Map<String, Object?> data) => ToolCallRecord(
+        toolName: 'mcp__weather__forecast',
+        status: ToolCallStatus.ok,
+        data: data,
+        app: _app,
+      );
+      await _pump(
+        tester,
+        child: McpAppFrame(toolCall: untracked({'temperature': 21})),
+      );
+      await _pump(
+        tester,
+        child: McpAppFrame(toolCall: untracked({'temperature': 5})),
+      );
+
+      expect(FakeMcpAppSurface.created, hasLength(2));
+      final port = FakeMcpAppSurface.created.last.port;
+      port.request(1, 'ui/initialize', {
+        'protocolVersion': '2026-01-26',
+        'appInfo': {'name': 'weather', 'version': '1'},
+        'appCapabilities': <String, Object?>{},
+      });
+      await tester.pump();
+      port.notify('ui/notifications/initialized');
+      await tester.pump();
+
+      final result = port.sent.singleWhere(
+        (m) => m['method'] == 'ui/notifications/tool-result',
+      );
+      expect((result['params']! as Map)['structuredContent'], {
+        'temperature': 5,
+      });
+
+      await _unmount(tester);
+    });
+
     testWidgets('sends app calls to the backend current at call time', (
       tester,
     ) async {
