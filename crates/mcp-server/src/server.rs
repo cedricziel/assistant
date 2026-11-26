@@ -232,6 +232,16 @@ pub(crate) fn server_info() -> ServerConfig {
     ))
 }
 
+/// The notifications a `subscriptions/listen` stream may carry. rmcp narrows
+/// this to what the client requested.
+pub(crate) fn listenable() -> SubscriptionFilter {
+    SubscriptionFilter::builder()
+        .tools_list_changed()
+        .prompts_list_changed()
+        .resources_list_changed()
+        .build()
+}
+
 impl ServerHandler for AssistantMcpServer {
     fn get_info(&self) -> ServerConfig {
         server_info()
@@ -376,14 +386,7 @@ impl ServerHandler for AssistantMcpServer {
         &self,
         _requested: &SubscriptionFilter,
     ) -> Option<SubscriptionFilter> {
-        // rmcp narrows this to what the client requested.
-        Some(
-            SubscriptionFilter::builder()
-                .tools_list_changed()
-                .prompts_list_changed()
-                .resources_list_changed()
-                .build(),
-        )
+        Some(listenable())
     }
 
     async fn listen(&self, subscription: SubscriptionContext) -> Result<(), ErrorData> {

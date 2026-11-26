@@ -219,6 +219,8 @@ mod tests {
     use axum::http::{HeaderValue, Method, Request, StatusCode, header};
     use http_body_util::BodyExt;
     use rmcp::ServiceExt;
+    use rmcp::model::{ErrorCode, GetPromptRequestParams, ProtocolVersion, SubscriptionFilter};
+    use rmcp::service::{ClientLifecycleMode, ServiceError, serve_client_with_lifecycle};
     use rmcp::transport::StreamableHttpClientTransport;
     use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
     use serde_json::{Value, json};
@@ -395,12 +397,13 @@ mod tests {
             format!("http://{addr}/mcp")
         }
 
-        /// List the tools over Streamable HTTP with rmcp's client.
-        async fn list_tools(
+        /// A Streamable HTTP transport to `/mcp` carrying `token`, selecting
+        /// `space` when given.
+        async fn transport(
             &self,
             token: &str,
             space: Option<&str>,
-        ) -> Result<Vec<String>, rmcp::service::ClientInitializeError> {
+        ) -> StreamableHttpClientTransport<reqwest::Client> {
             let mut headers = HashMap::new();
             if let Some(space) = space {
                 headers.insert(
@@ -411,7 +414,16 @@ mod tests {
             let config = StreamableHttpClientTransportConfig::with_uri(self.serve().await)
                 .auth_header(token)
                 .custom_headers(headers);
-            let client = ().serve(StreamableHttpClientTransport::from_config(config)).await?;
+            StreamableHttpClientTransport::from_config(config)
+        }
+
+        /// List the tools over Streamable HTTP with rmcp's client.
+        async fn list_tools(
+            &self,
+            token: &str,
+            space: Option<&str>,
+        ) -> Result<Vec<String>, rmcp::service::ClientInitializeError> {
+            let client = ().serve(self.transport(token, space).await).await?;
             let tools = client.list_all_tools().await.unwrap();
             Ok(tools.into_iter().map(|t| t.name.into_owned()).collect())
         }
@@ -554,6 +566,60 @@ mod tests {
             .expect("an API key with mcp:execute is accepted");
 
         assert!(tools.iter().any(|t| t == "run-prompt"), "{tools:?}");
+    }
+
+    // -- Prompts, completions and subscriptions ---------------------------------------
+
+    #[tokio::test]
+    async fn prompts_and_completions_reach_the_space_server() {
+        let fx = Fixture::new().await;
+        let client = ().serve(fx.transport(&fx.mcp_token("alice"), None).await).await.unwrap();
+
+        client.list_all_prompts().await.unwrap();
+        let error = client
+            .get_prompt(GetPromptRequestParams::new("no-such-skill"))
+            .await
+            .unwrap_err();
+        let ServiceError::McpError(error) = error else {
+            panic!("expected a protocol error, got {error:?}");
+        };
+        assert_eq!(
+            error.code,
+            ErrorCode::INVALID_PARAMS,
+            "the space server answers prompts/get: {error:?}"
+        );
+        client
+            .complete_resource_simple("skills://{name}/{category}/{+path}", "name", "x")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn listen_subscriptions_reach_the_space_server() {
+        let fx = Fixture::new().await;
+        let modern = ClientLifecycleMode::Discover {
+            preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+        };
+        let client = serve_client_with_lifecycle(
+            (),
+            fx.transport(&fx.mcp_token("alice"), None).await,
+            modern,
+        )
+        .await
+        .unwrap();
+
+        let subscription = client
+            .listen(
+                SubscriptionFilter::builder()
+                    .tools_list_changed()
+                    .prompts_list_changed()
+                    .build(),
+            )
+            .await
+            .expect("subscriptions/listen is served");
+
+        assert_eq!(subscription.acknowledged().tools_list_changed, Some(true));
+        assert_eq!(subscription.acknowledged().prompts_list_changed, Some(true));
     }
 
     // -- Transport -----------------------------------------------------------------
