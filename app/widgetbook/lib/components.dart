@@ -10,6 +10,7 @@ import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/thread_density_scope.dart';
+import 'components/timeline_entry_shell.dart';
 import 'components/unknown_interaction_card.dart';
 
 // import 'components/thread_empty_state.dart'; // slot: chat-element-library 9
@@ -90,5 +91,6 @@ final List<WidgetbookComponent> kComponents = [
   starterPromptsComponent,
   suggestionChipsComponent,
   threadDensityScopeComponent,
+  timelineEntryShellComponent,
   unknownInteractionCardComponent,
 ];

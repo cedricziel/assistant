@@ -18,6 +18,7 @@ const List<String> kAssistantUiElements = [
   'StarterPrompts',
   'SuggestionChips',
   'ThreadDensityScope',
+  'TimelineEntryShell',
   'UnknownInteractionCard',
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
