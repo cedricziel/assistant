@@ -60,6 +60,10 @@ The message that `conversations.active_leaf_id` points to, the tip of the Active
 
 A typed question that a running turn puts to the turn's owner, such as a tool approval or a question from the `ask-user` tool. It has an id, a `kind`, a kind-specific request, and at most one response. Stored in `space.db` and carried to the browser as `interaction_requested` and `interaction_resolved` events. See [ADR-0017](adr/adr-0017-turn-interactions.md).
 
+## Surface
+
+Model-authored interactive UI (a form, card or choice list) shown in the web chat. A Persona builds one with the `render-surface` tool from the assistant catalog, a trimmed A2UI v1.0 component set. The server validates and stores it, and the user answers it directly instead of replying in prose. See [ADR-0019](adr/adr-0019-generative-ui-a2ui.md).
+
 ## Naming Rules
 
 - Prefer explicit terms: `Persona`, `Subagent Process`, `A2A Profile`.

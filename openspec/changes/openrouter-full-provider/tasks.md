@@ -27,9 +27,9 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 4. Per-call context and per-turn context window
 
-- [ ] 4.1 Write failing tests for `LlmCallContext::scope` and `try_current`, and for `user_hash` (stable, org-scoped, not equal to the raw ID). Confirm red. Implement in core, then verify.
-- [ ] 4.2 Write a failing orchestrator test: a scripted provider observes the conversation ID inside a turn and none in a background job. Confirm red. Wrap the turn LLM calls in `scope`, then verify.
-- [ ] 4.3 Write a failing test: a provider whose `context_window_tokens` changes after construction affects compaction on the next turn. Confirm red. Move the adjustment into per-turn setup, then verify.
+- [x] 4.1 Write failing tests for `LlmCallContext::scope` and `try_current`, and for `user_hash` (stable, org-scoped, not equal to the raw ID). Confirm red. Implement in core, then verify.
+- [x] 4.2 Write a failing orchestrator test: a scripted provider observes the conversation ID inside a turn and none in a background job. Confirm red. Wrap the turn LLM calls in `scope`, then verify.
+- [x] 4.3 Write a failing test: a provider whose `context_window_tokens` changes after construction affects compaction on the next turn. Confirm red. Move the adjustment into per-turn setup, then verify.
 
 ## 5. Chat options (all providers)
 

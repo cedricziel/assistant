@@ -24,6 +24,7 @@ pub mod catalog_item_store;
 pub mod command_events;
 pub mod conversation_broadcaster;
 pub mod conversation_events;
+pub mod conversation_search;
 pub mod conversations;
 pub mod integration_store;
 pub mod interface_instance_store;
@@ -44,6 +45,7 @@ pub mod skill_executions;
 pub mod skill_stats;
 pub mod slack_threads;
 pub mod space_store;
+pub mod surfaces;
 pub mod user_store;
 pub mod webhooks;
 pub mod workflows;
@@ -109,6 +111,10 @@ pub use slack_threads::{
     InMemorySlackActiveThreadStore, SlackActiveThreadStore, SqliteSlackActiveThreadStore,
 };
 pub use space_store::{SqliteMembershipStore, SqliteSpaceStore};
+pub use surfaces::{
+    InMemorySurfaceStore, NewSurface, SqliteSurfaceStore, Surface, SurfaceChanges, SurfaceStatus,
+    SurfaceStore, Transition,
+};
 pub use user_store::SqliteUserStore;
 pub use webhooks::{InMemoryWebhookStore, SqliteWebhookStore, WebhookRecord, WebhookStore};
 pub use workflows::{
@@ -190,6 +196,11 @@ impl StorageLayer {
     /// Convenience: build a `RefinementsStore` backed by this pool.
     pub fn refinements_store(&self) -> SqliteRefinementsStore {
         SqliteRefinementsStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `SurfaceStore` backed by this pool.
+    pub fn surface_store(&self) -> SqliteSurfaceStore {
+        SqliteSurfaceStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `SkillExecutionStore` backed by this pool.
@@ -475,6 +486,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "046_message_provider_state",
             include_str!("../../../migrations/046_message_provider_state.sql"),
+        ),
+        (
+            "049_ui_surfaces",
+            include_str!("../../../migrations/049_ui_surfaces.sql"),
         ),
     ];
 

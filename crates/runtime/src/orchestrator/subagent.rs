@@ -469,6 +469,8 @@ impl SubagentRunner for Orchestrator {
                                     &ctx,
                                     requires_confirm,
                                     super::dispatch::task_context(&history),
+                                    None,
+                                    None,
                                 )
                                 .await;
 

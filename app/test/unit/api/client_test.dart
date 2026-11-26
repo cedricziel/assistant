@@ -303,6 +303,7 @@ void main() {
           'summary': 'ok',
         }),
         const AgentErrorEvent('err'),
+        const SuggestionsEvent(messageId: 'm', prompts: ['p']),
       ];
 
       int count = 0;
@@ -325,6 +326,7 @@ void main() {
           case SubagentThinkingEvent():
           case SubagentToolResultEvent():
           case SubagentStatusEvent():
+          case SuggestionsEvent():
             count++;
         }
       }

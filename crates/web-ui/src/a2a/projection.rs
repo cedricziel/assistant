@@ -145,6 +145,7 @@ mod tests {
                 arguments: Some(json!({"path": "/x"})),
                 result: Some("contents".into()),
                 tool_call_id: None,
+                data: None,
             },
             OrchestratorEvent::SkillComplete {
                 skill_name: "tdd".into(),

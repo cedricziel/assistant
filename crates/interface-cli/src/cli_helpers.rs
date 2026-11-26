@@ -2,27 +2,61 @@
 
 use std::collections::HashSet;
 use std::io::{self, Write as IoWrite};
+use std::sync::Arc;
 
-use assistant_runtime::orchestrator::ConfirmationCallback;
+use async_trait::async_trait;
+
+use assistant_runtime::orchestrator::{
+    ConfirmationAnswer, ConfirmationCallback, ConfirmationRequest,
+};
+
+/// Source of one line of operator input; blocking.
+type ReadLine = dyn Fn() -> io::Result<String> + Send + Sync;
 
 /// Interactive confirmation callback for tool execution — prints a prompt
-/// and reads a line from stdin.
-pub struct CliConfirmation;
+/// and reads a line from stdin without blocking the async runtime.
+///
+/// Offers only the once answers: a terminal has no store for saved rules.
+pub struct CliConfirmation {
+    read_line: Arc<ReadLine>,
+}
 
+impl CliConfirmation {
+    /// Read answers from the process's stdin.
+    pub fn stdin() -> Self {
+        Self::with_reader(|| {
+            let mut buf = String::new();
+            io::stdin().read_line(&mut buf)?;
+            Ok(buf)
+        })
+    }
+
+    /// Read answers from `read_line`, which may block.
+    pub fn with_reader(read_line: impl Fn() -> io::Result<String> + Send + Sync + 'static) -> Self {
+        Self {
+            read_line: Arc::new(read_line),
+        }
+    }
+}
+
+#[async_trait]
 impl ConfirmationCallback for CliConfirmation {
-    fn confirm(&self, skill_name: &str, params: &serde_json::Value) -> bool {
-        let params_str = serde_json::to_string_pretty(params).unwrap_or_default();
+    async fn confirm(&self, req: ConfirmationRequest<'_>) -> ConfirmationAnswer {
+        let params_str = serde_json::to_string_pretty(req.params).unwrap_or_default();
         print!(
             "\nTool '{}' requires confirmation.\nParams: {}\nProceed? [y/N] ",
-            skill_name, params_str
+            req.tool_name, params_str
         );
         io::stdout().flush().ok();
 
-        let mut buf = String::new();
-        if io::stdin().read_line(&mut buf).is_err() {
-            return false;
+        let read_line = self.read_line.clone();
+        match tokio::task::spawn_blocking(move || read_line()).await {
+            Ok(Ok(line)) if matches!(line.trim().to_lowercase().as_str(), "y" | "yes") => {
+                ConfirmationAnswer::AllowOnce
+            }
+            Ok(_) => ConfirmationAnswer::RejectOnce,
+            Err(_) => ConfirmationAnswer::Cancelled,
         }
-        matches!(buf.trim().to_lowercase().as_str(), "y" | "yes")
     }
 }
 
@@ -58,6 +92,95 @@ pub fn interface_selected(selected: &HashSet<String>, interface: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use assistant_core::types::conversation::{ExecutionContext, Interface};
+    use assistant_runtime::orchestrator::ApprovalOptions;
+    use uuid::Uuid;
+
+    async fn ask(cb: &CliConfirmation) -> ConfirmationAnswer {
+        let ctx = ExecutionContext {
+            conversation_id: Uuid::new_v4(),
+            agent_id: "cli-test".into(),
+            turn: 0,
+            interface: Interface::Cli,
+            interactive: true,
+            allowed_tools: None,
+            depth: 0,
+            user_id: None,
+            org_id: None,
+            space_id: None,
+        };
+        cb.confirm(ConfirmationRequest {
+            tool_name: "bash",
+            params: &serde_json::json!({ "command": "ls" }),
+            ctx: &ctx,
+            tool_call_id: None,
+            reason: "undecided",
+            options: ApprovalOptions::once_only(),
+            event_sink: None,
+        })
+        .await
+    }
+
+    fn typed(line: &'static str) -> CliConfirmation {
+        CliConfirmation::with_reader(move || Ok(line.to_string()))
+    }
+
+    #[tokio::test]
+    async fn yes_answers_allow_once() {
+        for line in ["y\n", "YES\n", " yes \n"] {
+            assert_eq!(
+                ask(&typed(line)).await,
+                ConfirmationAnswer::AllowOnce,
+                "{line:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn anything_else_rejects_once() {
+        for line in ["n\n", "\n", "", "always\n"] {
+            assert_eq!(
+                ask(&typed(line)).await,
+                ConfirmationAnswer::RejectOnce,
+                "{line:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_error_rejects_once() {
+        let cb = CliConfirmation::with_reader(|| Err(io::Error::other("closed")));
+        assert_eq!(ask(&cb).await, ConfirmationAnswer::RejectOnce);
+    }
+
+    #[tokio::test]
+    async fn a_panicking_reader_cancels() {
+        let cb = CliConfirmation::with_reader(|| panic!("reader crashed"));
+        assert_eq!(ask(&cb).await, ConfirmationAnswer::Cancelled);
+    }
+
+    /// On a single-threaded runtime a blocking read on the runtime thread
+    /// would starve the task that unblocks it, so this only finishes when the
+    /// read runs off the async runtime.
+    #[tokio::test(flavor = "current_thread")]
+    async fn reading_does_not_block_the_async_runtime() {
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let rx = std::sync::Mutex::new(rx);
+        let cb = CliConfirmation::with_reader(move || {
+            rx.lock()
+                .map_err(|_| io::Error::other("poisoned"))?
+                .recv()
+                .map_err(io::Error::other)
+        });
+        let typer = tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            tx.send("y\n".to_string()).ok();
+        });
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(5), ask(&cb)).await;
+        typer.await.unwrap();
+        assert_eq!(answer.unwrap(), ConfirmationAnswer::AllowOnce);
+    }
 
     #[test]
     fn normalize_worker_interface_canonicalises_known_names() {
