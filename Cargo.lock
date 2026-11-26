@@ -595,6 +595,7 @@ dependencies = [
  "assistant-core",
  "assistant-llm-provider",
  "async-trait",
+ "base64 0.23.1",
  "reqwest",
  "reqwest-middleware",
  "serde",
