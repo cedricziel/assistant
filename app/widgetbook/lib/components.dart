@@ -5,6 +5,7 @@ import 'components/code_block.dart';
 import 'components/message_action_button.dart';
 import 'components/message_actions.dart';
 import 'components/message_timing_indicator.dart';
+import 'components/queued_message_bubble.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/thread_density_scope.dart';
@@ -17,6 +18,7 @@ final List<WidgetbookComponent> kComponents = [
   messageActionButtonComponent,
   messageActionsComponent,
   messageTimingIndicatorComponent,
+  queuedMessageBubbleComponent,
   starterPromptsComponent,
   suggestionChipsComponent,
   threadDensityScopeComponent,

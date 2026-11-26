@@ -114,10 +114,10 @@ Each numbered section is one stacked PR. Every PR ends with `make lint && make f
 
 ## 16. OpenRouter TTS
 
-- [ ] 16.1 Write failing tests: format config parsing (mp3, wav, ogg, pcm; others rejected), and the MIME type always matches the delivered format. Confirm red. Implement, then verify.
-- [ ] 16.2 Write failing wiremock tests: request body with `speed` and `instructions`; request voice overrides config; the native format is requested when the model supports it. Confirm red. Implement `openrouter_tts.rs`, then verify.
-- [ ] 16.3 Write failing tests for format selection and transcoding: a PCM-only HeyGen model read at 44.1 kHz and returned as mp3; Gemini to ogg via wav; the `pcm_sample_rate` override; missing ffmpeg fails the build. Confirm red. Implement, then verify.
-- [ ] 16.4 Write failing tests for catalog validation: unknown voice, speed out of range, unsupported `instructions`, a request-level voice rejected without an upstream call, and a catalog outage that skips validation. Confirm red. Implement, then verify.
+- [x] 16.1 Write failing tests: format config parsing (mp3, wav, ogg, pcm; others rejected), and the MIME type always matches the delivered format. Confirm red. Implement, then verify.
+- [x] 16.2 Write failing wiremock tests: request body with `speed` and `instructions`; request voice overrides config; the native format is requested when the model supports it. Confirm red. Implement `openrouter_tts.rs`, then verify.
+- [x] 16.3 Write failing tests for format selection and transcoding: a PCM-only HeyGen model read at 44.1 kHz and returned as mp3; Gemini to ogg via wav; the `pcm_sample_rate` override; missing ffmpeg fails the build. Confirm red. Implement, then verify.
+- [x] 16.4 Write failing tests for catalog validation: unknown voice, speed out of range, unsupported `instructions`, a request-level voice rejected without an upstream call, and a catalog outage that skips validation. Confirm red. Implement, then verify.
 - [ ] 16.5 Write failing tests: `voice_response` uses the configured format; `/api/messages/{id}/tts` returns the provider MIME type. Confirm red. Implement, make `build_tts_provider(cfg, llm)` async with the OpenRouter variant, and update the call site. Verify.
 - [ ] 16.6 Update `docs/transcription.md` (TTS) and `docs/openrouter.md`.
 
