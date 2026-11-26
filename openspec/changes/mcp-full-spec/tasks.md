@@ -68,11 +68,11 @@ Each numbered group is one PR in the stack, in order.
 
 ## 11. MCP Apps resolution and API (PR 11)
 
-- [ ] 11.1 Add failing mcp-client tests: a tool with `_meta.ui.resourceUri` (and the deprecated flat key) attaches `McpApp` after the call; a resource without `text/html;profile=mcp-app` attaches nothing; confirm red
-- [ ] 11.2 Implement app resolution in the bridge and verify the tests pass
-- [ ] 11.3 Add failing runtime and web-ui tests: the `tool_result` SSE frame and message history carry `app`; implement persistence and projection and verify they pass
-- [ ] 11.4 Add failing web-ui tests for `POST .../app/tools-call` and `.../app/resources-read`: same-server only, `app` visibility enforced, permission pipeline applied; implement with OpenAPI docs and verify they pass
-- [ ] 11.5 Run `make dump-openapi` and `make generate-flutter-client`; verify the generated models include `app`
+- [x] 11.1 Add failing mcp-client tests: a tool with `_meta.ui.resourceUri` (and the deprecated flat key) attaches `McpApp` after the call; a resource without `text/html;profile=mcp-app` attaches nothing; confirm red
+- [x] 11.2 Implement app resolution in the bridge and verify the tests pass
+- [x] 11.3 Add failing runtime and web-ui tests: the `tool_result` SSE frame and message history carry `app`; implement persistence and projection and verify they pass
+- [x] 11.4 Add failing web-ui tests for `POST .../app/tools-call` and `.../app/resources-read`: same-server only, `app` visibility enforced, permission pipeline applied; implement with OpenAPI docs and verify they pass
+- [x] 11.5 Run `make dump-openapi` and `make generate-flutter-client`; verify the generated models include `app`
 
 ## 12. MCP Apps rendering in Flutter (PR 12)
 
