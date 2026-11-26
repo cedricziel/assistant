@@ -291,6 +291,8 @@ pub struct ApiErrorResponse {
         crate::api::turns::get_turn_status,
         crate::api::turns::cancel_turn,
         crate::api::interactions::respond_to_interaction,
+        crate::api::mcp_apps::call_mcp_app_tool,
+        crate::api::mcp_apps::read_mcp_app_resource,
         crate::api::audio::get_message_audio,
         crate::api::audio::get_audio,
         crate::api::attachments::upload_attachment,
@@ -565,6 +567,11 @@ pub struct ApiErrorResponse {
             crate::api::turns::TurnStatusResponse,
             // Turn interaction types
             crate::api::interactions::RespondToInteractionRequest,
+            crate::api::mcp_apps::CallMcpAppToolRequest,
+            crate::api::mcp_apps::ReadMcpAppResourceRequest,
+            crate::api::mcp_apps::McpAppView,
+            crate::api::mcp_apps::McpAppCspView,
+            crate::api::mcp_apps::McpAppPermissionsView,
             crate::api::interactions::ToolDecision,
             crate::api::interactions::QuestionAnswer,
             crate::api::interactions::InteractionDetail,
@@ -924,6 +931,25 @@ mod tests {
             data_doc.contains("schemas/tool-results/"),
             "data must point at schemas/tool-results/: {data_doc}"
         );
+    }
+
+    /// History summaries and `tool_result` frames expose the MCP App as a
+    /// typed model, so generated clients get its HTML, CSP and permissions.
+    #[test]
+    fn tool_results_document_the_mcp_app() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let schemas = &spec["components"]["schemas"];
+        for owner in ["ToolCallSummary", "SseToolResultEvent"] {
+            let app = serde_json::to_string(&schemas[owner]["properties"]["app"]).unwrap();
+            assert!(
+                app.contains("#/components/schemas/McpAppView"),
+                "{owner}.app must reference McpAppView: {app}"
+            );
+        }
+        let props = &schemas["McpAppView"]["properties"];
+        for field in ["server", "resource_uri", "html", "csp", "permissions"] {
+            assert!(props[field].is_object(), "McpAppView.{field} is documented");
+        }
     }
 
     /// History summaries expose tool data as an object and the call id.

@@ -399,6 +399,7 @@ async fn tool_result_metadata_roundtrips(store: Box<dyn ConversationStore>) {
     tool.tool_call_id = Some("call_1".into());
     tool.tool_status = Some("error".into());
     tool.tool_data_json = Some(r#"{"kind":"terminal","exit_code":1}"#.into());
+    tool.tool_app_json = Some(r#"{"server":"weather"}"#.into());
     store.save_message(&tool).await.unwrap();
 
     let history = store.load_history(conv.id).await.unwrap();
@@ -414,6 +415,12 @@ async fn tool_result_metadata_roundtrips(store: Box<dyn ConversationStore>) {
     assert_eq!(by_id.tool_call_id.as_deref(), Some("call_1"));
     assert_eq!(by_id.tool_status.as_deref(), Some("error"));
     assert!(by_id.tool_data_json.is_some());
+    assert_eq!(
+        loaded.tool_app_json.as_deref(),
+        Some(r#"{"server":"weather"}"#),
+        "the MCP app is stored with the tool row"
+    );
+    assert_eq!(by_id.tool_app_json, loaded.tool_app_json);
 
     let plain = store.load_history(conv.id).await.unwrap();
     assert!(plain[0].tool_call_id.is_none() && plain[0].tool_data_json.is_none());
