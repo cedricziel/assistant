@@ -1,5 +1,6 @@
 import 'dart:async' show Timer, unawaited;
 
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -62,14 +63,6 @@ class _VoiceRecorderButtonState extends ConsumerState<VoiceRecorderButton> {
     _countdownTimer?.cancel();
     _recorder.dispose();
     super.dispose();
-  }
-
-  Future<void> _toggle() async {
-    if (_isRecording) {
-      await _stop();
-    } else {
-      await _start();
-    }
   }
 
   /// Returns the best available encoder and its MIME type for the current
@@ -182,45 +175,12 @@ class _VoiceRecorderButtonState extends ConsumerState<VoiceRecorderButton> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isRecording) {
-      final remaining = _maxSeconds - _secondsElapsed;
-      final minutes = remaining ~/ 60;
-      final secs = remaining % 60;
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.error,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            '$minutes:${secs.toString().padLeft(2, '0')}',
-            style: TextStyle(
-              fontSize: 13,
-              color: Theme.of(context).colorScheme.error,
-            ),
-          ),
-          const SizedBox(width: 4),
-          IconButton(
-            icon: Icon(
-              Icons.stop_circle_outlined,
-              color: Theme.of(context).colorScheme.error,
-            ),
-            onPressed: _stop,
-            tooltip: 'Stop recording',
-          ),
-        ],
-      );
-    }
-    return IconButton(
-      icon: const Icon(Icons.mic_none_outlined),
-      tooltip: 'Send voice message',
-      onPressed: _toggle,
+    return ComposerVoiceButton(
+      isRecording: _isRecording,
+      elapsed: Duration(seconds: _secondsElapsed),
+      maxDuration: const Duration(seconds: _maxSeconds),
+      onStart: _start,
+      onStop: _stop,
     );
   }
 }

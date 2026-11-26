@@ -274,9 +274,9 @@ Layer: client
 Depends on: PR 11a
 Parallel with: the timeline chain, PR 8a, PR 9, PR 10, PR 11c, PR 12
 
-- [ ] 11b.1 Test first: `AttachmentTray` (`remove_attachment_0` fires `onRemove(0)` and the list is unchanged; image thumbnail versus file tile) and `ComposerVoiceButton` (`onStart`; recording shows elapsed and stop). Confirm RED.
-- [ ] 11b.2 Extract `AttachmentTray` from the composer's private tray (formerly `chat_input_row.dart:149-217`). Split `VoiceRecorderButton`: its presentation becomes `ComposerVoiceButton`, and the `record`-backed driver stays in `features/chat/voice_recorder_button.dart`, which renders `ComposerVoiceButton`. Confirm GREEN, characterization goldens unchanged.
-- [ ] 11b.3 Use-cases and goldens for both.
+- [x] 11b.1 Test first: `AttachmentTray` (`remove_attachment_0` fires `onRemove(0)` and the list is unchanged; image thumbnail versus file tile) and `ComposerVoiceButton` (`onStart`; recording shows elapsed and stop). Confirm RED.
+- [x] 11b.2 Extract `AttachmentTray` from the composer's private tray (formerly `chat_input_row.dart:149-217`). Split `VoiceRecorderButton`: its presentation becomes `ComposerVoiceButton`, and the `record`-backed driver stays in `features/chat/voice_recorder_button.dart`, which renders `ComposerVoiceButton`. Confirm GREEN, characterization goldens unchanged.
+- [x] 11b.3 Use-cases and goldens for both.
 
 ## PR 11c — refactor(app): QueuedMessageBubble in assistant_ui
 

@@ -9,10 +9,12 @@
 /// `golden` test for each entry.
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
+  'AttachmentTray',
   'BranchPicker',
   'CodeBlock',
   'CompactExpandable',
   'Composer',
+  'ComposerVoiceButton',
   'ConversationListView',
   'ConversationSearchResultsView',
   'FeedbackButtons',
@@ -40,13 +42,11 @@ const List<String> kAssistantUiElements = [
   'ToolStatusIcon',
   'TurnProgressCard',
   'UnknownInteractionCard',
-  // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
   // 'ChatThreadLayout', // slot: chat-element-library 10
   // 'CodeDiffResultView', // slot: tool-result-renderers C7
   // 'CodeFileResultView', // slot: tool-result-renderers C7
   // 'CommandBody', // slot: chat-element-library 7b
-  // 'ComposerVoiceButton', // slot: chat-element-library 11b
   // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5

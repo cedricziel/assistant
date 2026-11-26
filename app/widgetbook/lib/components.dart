@@ -1,10 +1,12 @@
 import 'package:widgetbook/widgetbook.dart';
 
 import 'components/approval_card.dart';
+import 'components/attachment_tray.dart';
 import 'components/branch_picker.dart';
 import 'components/code_block.dart';
 import 'components/compact_expandable.dart';
 import 'components/composer.dart';
+import 'components/composer_voice_button.dart';
 import 'components/conversation_list_view.dart';
 import 'components/conversation_search_results_view.dart';
 import 'components/feedback_buttons.dart';
@@ -49,13 +51,11 @@ import 'components/unknown_interaction_card.dart';
 /// To add an element, uncomment its slot line (and add a slot if missing).
 /// Keep one blank line between entries so parallel PRs don't conflict.
 final List<WidgetbookComponent> kComponents = [
-  // attachmentTrayComponent, // slot: chat-element-library 11b
   // branchPickerComponent, // slot: message-branching 9
   // chatThreadLayoutComponent, // slot: chat-element-library 10
   // codeDiffResultViewComponent, // slot: tool-result-renderers C7
   // codeFileResultViewComponent, // slot: tool-result-renderers C7
   // commandBodyComponent, // slot: chat-element-library 7b
-  // composerVoiceButtonComponent, // slot: chat-element-library 11b
   // dataTableResultViewComponent, // slot: tool-result-renderers C6
   // feedbackButtonsComponent, // slot: message-feedback 5
   // feedbackCommentFieldComponent, // slot: message-feedback 5
@@ -76,10 +76,12 @@ final List<WidgetbookComponent> kComponents = [
   // typingIndicatorComponent, // slot: chat-element-library 8b
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
+  attachmentTrayComponent,
   branchPickerComponent,
   codeBlockComponent,
   compactExpandableComponent,
   composerComponent,
+  composerVoiceButtonComponent,
   conversationListViewComponent,
   conversationSearchResultsViewComponent,
   feedbackButtonsComponent,
