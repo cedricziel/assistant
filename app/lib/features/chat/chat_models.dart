@@ -23,6 +23,7 @@ class ChatState {
     this.isSending = false,
     this.isStopping = false,
     this.isLoadingHistory = false,
+    this.isSwitchingBranch = false,
     this.isReconnecting = false,
     this.streamingContent = '',
     this.statusMessage,
@@ -41,6 +42,10 @@ class ChatState {
   /// Further Stop requests are ignored while set.
   final bool isStopping;
   final bool isLoadingHistory;
+
+  /// True while a switch-branch request is pending; the branch pickers are
+  /// busy meanwhile.
+  final bool isSwitchingBranch;
 
   /// True while [ChatNotifier.attemptReconnect] is actively recovering an
   /// interrupted stream — drives the "Reconnecting…" banner.
@@ -82,6 +87,7 @@ class ChatState {
     bool? isSending,
     bool? isStopping,
     bool? isLoadingHistory,
+    bool? isSwitchingBranch,
     bool? isReconnecting,
     String? streamingContent,
     String? statusMessage,
@@ -104,6 +110,7 @@ class ChatState {
       isSending: isSending ?? this.isSending,
       isStopping: isStopping ?? this.isStopping,
       isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
+      isSwitchingBranch: isSwitchingBranch ?? this.isSwitchingBranch,
       isReconnecting: isReconnecting ?? this.isReconnecting,
       streamingContent: streamingContent ?? this.streamingContent,
       statusMessage: clearStatusMessage
