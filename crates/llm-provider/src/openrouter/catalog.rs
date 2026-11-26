@@ -32,6 +32,8 @@ pub struct ModelInfo {
     /// The smallest context length among the endpoints routing can select.
     pub context_window_tokens: Option<u64>,
     pub vision: bool,
+    /// The model reads PDFs itself (`file` input).
+    pub file_input: bool,
     pub tools: bool,
     pub tool_choice: bool,
     pub parallel_tool_calls: bool,
@@ -326,6 +328,7 @@ fn model_info(
     ModelInfo {
         context_window_tokens,
         vision: inputs.iter().any(|m| m == "image"),
+        file_input: inputs.iter().any(|m| m == "file"),
         tools: has("tools"),
         tool_choice: has("tool_choice"),
         parallel_tool_calls: has("parallel_tool_calls"),
