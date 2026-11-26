@@ -4,6 +4,7 @@ import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
+import 'package:assistant_app/features/chat/conversation_list_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/spaces/space_provider.dart';
 import 'package:dio/dio.dart';
@@ -131,12 +132,14 @@ ConversationListEntry _makeEntry({
   required String id,
   String title = 'Test',
   DateTime? updatedAt,
+  DateTime? pinnedAt,
 }) {
   return ConversationListEntry(
     id: id,
     title: title,
     createdAt: DateTime(2024, 1, 1),
     updatedAt: updatedAt ?? DateTime(2024, 1, 1),
+    pinnedAt: pinnedAt,
   );
 }
 
@@ -193,6 +196,116 @@ final _apiClientHolderProvider = NotifierProvider<_ApiClientHolder, ApiClient?>(
 // Tests
 
 void main() {
+  group('ConversationListEntry.fromJson', () {
+    Map<String, dynamic> json({String? pinnedAt}) => {
+      'id': 'c1',
+      'title': 'T',
+      'created_at': '2024-01-01T00:00:00Z',
+      'updated_at': '2024-01-02T00:00:00Z',
+      'pinned_at': ?pinnedAt,
+    };
+
+    test('parses pinned_at', () {
+      final entry = ConversationListEntry.fromJson(
+        json(pinnedAt: '2024-03-01T00:00:00Z'),
+      );
+      expect(entry.pinnedAt, DateTime.utc(2024, 3, 1));
+    });
+
+    test('pinned_at is null when absent', () {
+      expect(ConversationListEntry.fromJson(json()).pinnedAt, isNull);
+    });
+  });
+
+  group('compareConversations', () {
+    // The server orders pinned_at IS NULL, pinned_at DESC, updated_at DESC.
+    // This shared fixture is listed in server order.
+    final serverOrder = [
+      _makeEntry(
+        id: 'pin-new',
+        pinnedAt: DateTime(2024, 5, 2),
+        updatedAt: DateTime(2024, 1, 1),
+      ),
+      _makeEntry(
+        id: 'pin-old',
+        pinnedAt: DateTime(2024, 5, 1),
+        updatedAt: DateTime(2024, 6, 1),
+      ),
+      _makeEntry(id: 'recent', updatedAt: DateTime(2024, 4, 1)),
+      _makeEntry(id: 'older', updatedAt: DateTime(2024, 3, 1)),
+    ];
+
+    test('sorting a shuffled list reproduces the server order', () {
+      final shuffled = [
+        serverOrder[3],
+        serverOrder[1],
+        serverOrder[2],
+        serverOrder[0],
+      ]..sort(compareConversations);
+
+      expect(shuffled.map((c) => c.id), serverOrder.map((c) => c.id));
+    });
+
+    test('an upserted pin moves the entry to the top', () async {
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+      await container.read(conversationListProvider.future);
+
+      controller.add(ConversationSnapshotEvent(serverOrder));
+      await Future<void>.delayed(Duration.zero);
+
+      controller.add(
+        ConversationUpsertedEvent(
+          _makeEntry(
+            id: 'older',
+            updatedAt: DateTime(2024, 3, 1),
+            pinnedAt: DateTime(2024, 7, 1),
+          ),
+        ),
+      );
+      await _waitForDebounce();
+
+      final ids = container
+          .read(conversationListProvider)
+          .value!
+          .conversations
+          .map((c) => c.id);
+      expect(ids, ['older', 'pin-new', 'pin-old', 'recent']);
+    });
+
+    test('an upserted unpin drops the entry back by updatedAt', () async {
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+      await container.read(conversationListProvider.future);
+
+      controller.add(ConversationSnapshotEvent(serverOrder));
+      await Future<void>.delayed(Duration.zero);
+
+      controller.add(
+        ConversationUpsertedEvent(
+          _makeEntry(id: 'pin-new', updatedAt: DateTime(2024, 1, 1)),
+        ),
+      );
+      await _waitForDebounce();
+
+      final ids = container
+          .read(conversationListProvider)
+          .value!
+          .conversations
+          .map((c) => c.id);
+      expect(ids, ['pin-old', 'recent', 'older', 'pin-new']);
+    });
+  });
   group('ConversationListNotifier', () {
     // -----------------------------------------------------------------------
     // Null client (context not yet loaded)
