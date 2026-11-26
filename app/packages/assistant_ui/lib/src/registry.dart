@@ -10,6 +10,7 @@
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
   'BranchPicker',
+  'GenericToolResultView',
   'MessageActionButton',
   'MessageActions',
   'MessageEditor',
@@ -20,6 +21,9 @@ const List<String> kAssistantUiElements = [
   'SuggestionChips',
   'ThreadDensityScope',
   'TimelineEntryShell',
+  'ToolCallBody',
+  'ToolResultRendererScope',
+  'ToolStatusIcon',
   'UnknownInteractionCard',
   // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
@@ -36,7 +40,6 @@ const List<String> kAssistantUiElements = [
   // 'DataTableResultView', // slot: tool-result-renderers C6
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
-  // 'GenericToolResultView', // slot: chat-element-library 6
   // 'HighlightedSegments', // slot: conversation-list-management 14
   // 'JsonTreeView', // slot: tool-result-renderers C2b
   // 'LinkPreviewResultView', // slot: tool-result-renderers C5
@@ -58,8 +61,6 @@ const List<String> kAssistantUiElements = [
   // 'ThreadViewport', // slot: chat-element-library 10
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c
-  // 'ToolCallBody', // slot: chat-element-library 6
-  // 'ToolStatusIcon', // slot: chat-element-library 6
   // 'TurnProgressCard', // slot: chat-element-library 9
   // 'TypingIndicator', // slot: chat-element-library 8b
   // 'UnknownInteractionCard', // slot: tool-approval-prompts 13b
