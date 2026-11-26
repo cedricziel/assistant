@@ -4,6 +4,7 @@
 //! result recording (metrics, OTel, persistence), and tool-call history helpers.
 
 use assistant_core::mcp_app::McpApp;
+use assistant_core::permission::suggest_rule;
 use assistant_core::{
     Attachment, Capabilities, ChatHistoryMessage, ChatRole, HostedTool, ProviderState,
     ToolCallItem, ToolSpec,
@@ -520,6 +521,11 @@ impl Orchestrator {
             && ctx.interactive
             && let Some(cb) = &self.confirmation_callback
         {
+            let suggested = resolution
+                .offers_always
+                .then(|| suggest_rule(name, params))
+                .flatten()
+                .map(|rule| rule.to_string());
             let answer = cb
                 .confirm(ConfirmationRequest {
                     tool_name: name,
@@ -527,7 +533,12 @@ impl Orchestrator {
                     ctx,
                     tool_call_id,
                     reason: &resolution.decision.reason,
-                    options: ApprovalOptions::once_only(),
+                    options: if suggested.is_some() {
+                        ApprovalOptions::with_always()
+                    } else {
+                        ApprovalOptions::once_only()
+                    },
+                    suggested_rule: suggested.as_deref(),
                     event_sink,
                 })
                 .await;

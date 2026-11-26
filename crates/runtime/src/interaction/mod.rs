@@ -2,18 +2,21 @@
 //! waits for the answer (ADR-0017).
 //!
 //! - [`broker`] persists interactions and waits for their answers.
+//! - [`confirmation`] answers tool approvals through the broker.
 //! - [`kinds`] is the registry of interaction kinds (`tool_approval`,
 //!   `question`, `surface_action`, and whatever siblings add).
 
 pub mod broker;
+pub mod confirmation;
 pub mod kinds;
 
 pub use broker::{
     InteractionBroker, InteractionRequest, RespondError, Responder, WAITER_STALE_AFTER,
     resolved_event,
 };
+pub use confirmation::{InteractiveConfirmation, RoutedConfirmation};
 pub use kinds::{
     InteractionKindHandler, InteractionKinds, InteractionOutcome, MAX_ANSWER_CHARS,
-    MAX_ARGUMENTS_BYTES, MAX_SURFACE_ACTION_BYTES, PushCopy, QuestionKind, SurfaceActionKind,
-    ToolApprovalKind, cap_arguments,
+    MAX_ARGUMENTS_BYTES, MAX_SURFACE_ACTION_BYTES, PushCopy, QuestionKind, SavedRule,
+    SurfaceActionKind, ToolApprovalKind, cap_arguments,
 };

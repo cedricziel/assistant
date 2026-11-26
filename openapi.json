@@ -2631,7 +2631,7 @@
           "conversations"
         ],
         "summary": "`POST /api/conversations/{id}/voice` — upload audio, keep it as the user\nmessage's attachment, transcribe it, run through the orchestrator, and\nstream the response as SSE.",
-        "description": "The message text is the transcript, or `[Voice message]` when no\ntranscription provider is configured or transcription fails.",
+        "description": "The message text is the transcript, or `[Voice message]` when no\ntranscription provider is configured or transcription fails.\n\nThe turn runs like `POST /api/conversations/{id}/messages`: the response\ncarries the run id in `X-Run-Id`, the stream opens with `run_started` and\nthe `transcript` frame, every frame is persisted for replay through\n`GET .../runs/{run_id}/events/stream`, `POST .../turns/{run_id}/cancel`\nstops it, and it ends in `done` or `agent_error`.",
         "operationId": "send_voice_message",
         "parameters": [
           {

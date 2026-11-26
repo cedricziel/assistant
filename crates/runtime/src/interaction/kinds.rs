@@ -12,7 +12,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use assistant_storage::{InteractionRow, InteractionStatus};
+use assistant_storage::{InteractionRow, InteractionStatus, RuleEffect};
 
 /// Longest free-text answer, in characters.
 pub const MAX_ANSWER_CHARS: usize = 4000;
@@ -74,6 +74,14 @@ pub struct PushCopy {
     pub body: String,
 }
 
+/// A permission rule an answer asks the runtime to save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedRule {
+    pub effect: RuleEffect,
+    /// Rule text in the permission grammar, taken from the stored request.
+    pub rule: String,
+}
+
 /// One kind of interaction.
 pub trait InteractionKindHandler: Send + Sync {
     /// The `kind` tag on the wire and in the `interactions` table.
@@ -93,6 +101,12 @@ pub trait InteractionKindHandler: Send + Sync {
 
     /// Whether the kind renders a card in the timeline.
     fn renders_card(&self) -> bool;
+
+    /// The rule a valid `response` asks to save. The text comes from the
+    /// stored `request`, never from the response, so a client cannot widen it.
+    fn saved_rule(&self, _request: &Value, _response: &Value) -> Option<SavedRule> {
+        None
+    }
 }
 
 // -- Registry --
@@ -200,6 +214,16 @@ impl InteractionKindHandler for ToolApprovalKind {
 
     fn renders_card(&self) -> bool {
         true
+    }
+
+    fn saved_rule(&self, request: &Value, response: &Value) -> Option<SavedRule> {
+        let effect = match response["decision"].as_str()? {
+            "allow_always" => RuleEffect::Allow,
+            "reject_always" => RuleEffect::Deny,
+            _ => return None,
+        };
+        let rule = request["suggested_rule"].as_str()?.to_owned();
+        Some(SavedRule { effect, rule })
     }
 }
 
