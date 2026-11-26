@@ -5,6 +5,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../shared/platform/adaptive_dialog.dart';
 import 'chat_provider.dart';
+import 'conversation_search_field.dart';
+import 'conversation_search_provider.dart';
 
 /// Sidebar/drawer pane that shows the list of conversations.
 ///
@@ -12,7 +14,14 @@ import 'chat_provider.dart';
 /// [conversationListProvider], maps entries to [ConversationListItem]s, and
 /// supplies navigation, the "New Chat" button and the delete confirmation.
 class ConversationListPane extends ConsumerWidget {
-  const ConversationListPane({super.key, this.onConversationSelected});
+  const ConversationListPane({
+    super.key,
+    this.onConversationSelected,
+    this.selectedId,
+  });
+
+  /// Id of the open conversation, highlighted in the list.
+  final String? selectedId;
 
   /// Optional callback invoked when a conversation is tapped (e.g. to close
   /// the drawer on mobile).
@@ -20,49 +29,60 @@ class ConversationListPane extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final listAsync = ref.watch(conversationListProvider);
-    final header = _buildHeader(context, ref);
+    final searching = ref.watch(
+      conversationSearchQueryProvider.select((q) => q.trim().isNotEmpty),
+    );
+    // Watched even while idle so the search provider exists before the first
+    // keystroke and sees the query change.
+    final search = ref.watch(conversationSearchProvider);
+    // The header stays outside the swapped body so the search field keeps its
+    // state and focus while results replace the list.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildHeader(context, ref),
+        Expanded(
+          child: searching
+              ? _buildSearchBody(context, ref, search)
+              : _buildListBody(context, ref),
+        ),
+      ],
+    );
+  }
 
-    return listAsync.when(
-      loading: () => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          header,
-          const Expanded(
-            child: Center(child: CircularProgressIndicator.adaptive()),
-          ),
-        ],
+  Widget _buildSearchBody(
+    BuildContext context,
+    WidgetRef ref,
+    ConversationSearchState search,
+  ) {
+    return switch (search) {
+      ConversationSearchIdle() || ConversationSearchLoading() => const Center(
+        child: CircularProgressIndicator.adaptive(),
       ),
-      error: (err, _) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          header,
-          Expanded(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Failed to load conversations',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onErrorContainer,
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () =>
-                        ref.read(conversationListProvider.notifier).refresh(),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+      ConversationSearchError() => _errorBody(
+        context,
+        'Search failed',
+        ref.read(conversationSearchProvider.notifier).retry,
+      ),
+      ConversationSearchData(:final results) => ConversationSearchResultsView(
+        results: results,
+        onSelect: (id) {
+          ref.read(conversationSearchQueryProvider.notifier).clear();
+          context.go('/chat/$id');
+          onConversationSelected?.call();
+        },
+      ),
+    };
+  }
+
+  Widget _buildListBody(BuildContext context, WidgetRef ref) {
+    final listAsync = ref.watch(conversationListProvider);
+    return listAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator.adaptive()),
+      error: (err, _) => _errorBody(
+        context,
+        'Failed to load conversations',
+        ref.read(conversationListProvider.notifier).refresh,
       ),
       data: (listState) {
         final items = [
@@ -71,11 +91,12 @@ class ConversationListPane extends ConsumerWidget {
               id: conv.id,
               title: conv.title,
               updatedAt: conv.updatedAt,
+              pinnedAt: conv.pinnedAt,
             ),
         ];
         return ConversationListView(
           items: items,
-          header: header,
+          selectedId: selectedId,
           emptyState: Center(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -98,6 +119,25 @@ class ConversationListPane extends ConsumerWidget {
           },
         );
       },
+    );
+  }
+
+  Widget _errorBody(BuildContext context, String message, VoidCallback retry) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onErrorContainer,
+            ),
+          ),
+          TextButton(onPressed: retry, child: const Text('Retry')),
+        ],
+      ),
     );
   }
 
@@ -132,6 +172,7 @@ class ConversationListPane extends ConsumerWidget {
             label: const Text('New Chat'),
           ),
         ),
+        const ConversationSearchField(),
         const Divider(height: 8),
       ],
     );

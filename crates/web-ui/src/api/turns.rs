@@ -254,7 +254,11 @@ async fn run_belongs_to(
 /// Idempotent: triggers `Orchestrator::cancel_turn` if the run belongs to this
 /// conversation and a matching token is registered, otherwise no-op. The cancel
 /// also covers a turn no worker has claimed yet: its stream ends at once with
-/// `agent_error {"reason":"cancelled","user_message_persisted":false}`. Always returns 200 with the current turn
+/// `agent_error {"reason":"cancelled","user_message_persisted":false}`.
+/// A turn cancelled after it started keeps its streamed text as an assistant
+/// message with `finish_reason: "cancelled"` (the placeholder `_Stopped._` when
+/// nothing streamed), reported as `message_id` on the terminal `agent_error`.
+/// Always returns 200 with the current turn
 /// status — the cancellation propagates asynchronously through the worker's
 /// `tokio::select!`, the SSE stream's terminal `agent_error` event, and the
 /// `event_store`. Clients should poll `GET .../status` (or wait for the

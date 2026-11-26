@@ -3,6 +3,8 @@ import 'package:widgetbook/widgetbook.dart';
 import 'components/approval_card.dart';
 import 'components/branch_picker.dart';
 import 'components/code_block.dart';
+import 'components/compact_expandable.dart';
+import 'components/composer.dart';
 import 'components/conversation_list_view.dart';
 import 'components/conversation_search_results_view.dart';
 import 'components/feedback_buttons.dart';
@@ -16,6 +18,8 @@ import 'components/message_timing_indicator.dart';
 import 'components/permission_rule_tile.dart';
 import 'components/question_card.dart';
 import 'components/queued_message_bubble.dart';
+import 'components/regenerate_menu_button.dart';
+import 'components/slash_command_menu.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/surface_frame.dart';
@@ -51,8 +55,6 @@ final List<WidgetbookComponent> kComponents = [
   // codeDiffResultViewComponent, // slot: tool-result-renderers C7
   // codeFileResultViewComponent, // slot: tool-result-renderers C7
   // commandBodyComponent, // slot: chat-element-library 7b
-  // compactExpandableComponent, // slot: tool-result-renderers C2
-  // composerComponent, // slot: chat-element-library 11a
   // composerVoiceButtonComponent, // slot: chat-element-library 11b
   // dataTableResultViewComponent, // slot: tool-result-renderers C6
   // feedbackButtonsComponent, // slot: message-feedback 5
@@ -64,8 +66,6 @@ final List<WidgetbookComponent> kComponents = [
   // messageEditorComponent, // slot: message-branching 9
   // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
   // planResultViewComponent, // slot: tool-result-renderers C5
-  // regenerateMenuButtonComponent, // slot: message-branching 10
-  // slashCommandMenuComponent, // slot: chat-element-library 11a
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
   // subagentBodyComponent, // slot: chat-element-library 7b
   // terminalResultViewComponent, // slot: tool-result-renderers C4
@@ -78,6 +78,8 @@ final List<WidgetbookComponent> kComponents = [
   approvalCardComponent,
   branchPickerComponent,
   codeBlockComponent,
+  compactExpandableComponent,
+  composerComponent,
   conversationListViewComponent,
   conversationSearchResultsViewComponent,
   feedbackButtonsComponent,
@@ -91,6 +93,8 @@ final List<WidgetbookComponent> kComponents = [
   permissionRuleTileComponent,
   questionCardComponent,
   queuedMessageBubbleComponent,
+  regenerateMenuButtonComponent,
+  slashCommandMenuComponent,
   starterPromptsComponent,
   suggestionChipsComponent,
   surfaceFrameComponent,

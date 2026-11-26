@@ -381,6 +381,37 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("chat page with Persona starter prompts", async ({ page }) => {
+    // The empty chat shows the active Persona's starters. Patch the real
+    // Persona detail response instead of storing prompts on the seeded Persona.
+    await page.route(/\/api\/personas\/[^/?]+(\?.*)?$/, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = await route.fetch();
+      const body = await response.json().catch(() => null);
+      if (!response.ok() || body === null || typeof body.id !== "string") {
+        return route.fulfill({ response });
+      }
+      return route.fulfill({
+        response,
+        json: {
+          ...body,
+          starter_prompts: [
+            "Plan my week",
+            "Summarize my inbox",
+            "Draft a status update",
+            "Explain what you can do",
+          ],
+          can_edit_starter_prompts: true,
+        },
+      });
+    });
+    await navigateAndSettle(page, "/chat");
+    await expect(page).toHaveScreenshot("empty-chat-starters.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
   test("skills list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/skills");
     await expect(page).toHaveScreenshot("skills-empty.png", {
