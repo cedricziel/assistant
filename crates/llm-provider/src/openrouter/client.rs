@@ -9,6 +9,7 @@ use assistant_core::types::llm::OpenRouterRouting;
 use assistant_core::{LlmResponse, Secret, StreamChunk};
 
 use super::errors::http_error;
+use super::media;
 use super::stream::{LineBuffer, StreamAccumulator};
 use super::wire::{ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse};
 
@@ -48,9 +49,24 @@ impl OpenRouterClient {
             .text()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to read OpenRouter response: {e}"))?;
-        let response: ChatResponse = serde_json::from_str(&body)
+        let mut response: ChatResponse = serde_json::from_str(&body)
             .map_err(|e| anyhow::anyhow!("Failed to parse OpenRouter response: {e}"))?;
-        response.into_llm_response(&request.model, shows_reasoning(request))
+        let image_urls = response.take_image_urls();
+        let response = response.into_llm_response(&request.model, shows_reasoning(request))?;
+        self.with_images(response, &image_urls).await
+    }
+
+    /// Attaches the images at `urls` to `response`.
+    async fn with_images(
+        &self,
+        mut response: LlmResponse,
+        urls: &[String],
+    ) -> anyhow::Result<LlmResponse> {
+        if !urls.is_empty() {
+            let images = media::resolve(&self.http, urls).await?;
+            response.meta_mut().media.extend(images);
+        }
+        Ok(response)
     }
 
     /// Streams `request`, forwarding text deltas to `sink`.
@@ -71,11 +87,16 @@ impl OpenRouterClient {
                     }
                 }
                 if acc.is_done() {
-                    return finish(acc, sink.as_ref()).await;
+                    break;
                 }
             }
+            if acc.is_done() {
+                break;
+            }
         }
-        finish(acc, sink.as_ref()).await
+        let image_urls = acc.take_image_urls();
+        let response = finish(acc, sink.as_ref()).await?;
+        self.with_images(response, &image_urls).await
     }
 
     /// Posts a chat `request`, retrying transient failures.

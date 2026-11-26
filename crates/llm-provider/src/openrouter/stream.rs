@@ -7,6 +7,7 @@ use assistant_core::{LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, To
 
 use super::citations::sources_block;
 use super::errors::{ErrorBody, body_error};
+use super::media::{ImageEntry, collect_urls};
 use super::reasoning::{budget_exhausted, merge_detail, provider_state, visible_text};
 use super::wire::Usage;
 
@@ -50,6 +51,15 @@ struct ChunkChoice {
     delta: Delta,
     #[serde(default)]
     finish_reason: Option<String>,
+    /// Some upstreams repeat the full message in the last chunk.
+    #[serde(default)]
+    message: Option<ChunkMessage>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ChunkMessage {
+    #[serde(default)]
+    images: Vec<ImageEntry>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -64,6 +74,8 @@ struct Delta {
     reasoning_details: Vec<Value>,
     #[serde(default)]
     annotations: Vec<Value>,
+    #[serde(default)]
+    images: Vec<ImageEntry>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,6 +115,7 @@ pub struct StreamAccumulator {
     model: String,
     reasoning_details: Vec<Value>,
     annotations: Vec<Value>,
+    image_urls: Vec<String>,
 }
 
 impl StreamAccumulator {
@@ -163,6 +176,10 @@ impl StreamAccumulator {
                 merge_detail(&mut self.reasoning_details, detail);
             }
             self.annotations.extend(choice.delta.annotations);
+            collect_urls(&mut self.image_urls, choice.delta.images);
+            if let Some(message) = choice.message {
+                collect_urls(&mut self.image_urls, message.images);
+            }
             if let Some(reason) = choice.finish_reason {
                 if reason == "error" {
                     anyhow::bail!("OpenRouter stream finished with an error");
@@ -209,6 +226,11 @@ impl StreamAccumulator {
             return None;
         }
         sources_block(&self.text, &self.annotations)
+    }
+
+    /// The URLs of the images streamed so far, without duplicates.
+    pub fn take_image_urls(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.image_urls)
     }
 
     /// The response, once the stream has ended. A stream that ends without
