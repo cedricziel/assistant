@@ -122,6 +122,23 @@ class SettingsScreen extends ConsumerWidget {
                       ref.invalidate(notificationPreferencesProvider);
                     },
                   ),
+                  AdaptiveSwitchTile(
+                    leading: const AdaptiveIcon(
+                      cupertino: CupertinoIcons.checkmark_shield,
+                      material: Icons.verified_user_outlined,
+                    ),
+                    title: const Text('Approval requests'),
+                    subtitle: const Text(
+                      'Notify when the assistant needs your approval or an '
+                      'answer',
+                    ),
+                    value: prefs.notifyApprovalRequests,
+                    onChanged: (value) async {
+                      if (isAppleTouch) HapticFeedback.lightImpact();
+                      await prefs.setNotifyApprovalRequests(value);
+                      ref.invalidate(notificationPreferencesProvider);
+                    },
+                  ),
                   AdaptiveListTile(
                     leading: const AdaptiveIcon(
                       cupertino: CupertinoIcons.bell,

@@ -16,11 +16,17 @@ class _FakeNotificationService extends NotificationService {
 
   final List<({String title, String body, String? conversationId})> calls = [];
 
+  /// Pretend the browser already holds a Web Push subscription.
+  bool activePushSubscription = false;
+
   @override
   Future<void> initialize() async {}
 
   @override
   Future<bool> requestPermission() async => true;
+
+  @override
+  Future<bool> hasActivePushSubscription() async => activePushSubscription;
 
   @override
   Future<void> show(String title, String body, {String? conversationId}) async {
@@ -36,6 +42,9 @@ class _FakeChatNotifier extends ChatNotifier {
   Future<ChatState> build() async => const ChatState();
 
   void push(ChatState s) => state = AsyncData(s);
+
+  @override
+  Future<void> attemptReconnect() async {}
 }
 
 // ---------------------------------------------------------------------------
@@ -52,6 +61,21 @@ class _SyncPrefsNotifier extends NotificationPreferencesNotifier {
 }
 
 // ---------------------------------------------------------------------------
+
+InteractionRecord _approvalRequest({
+  String id = 'int-1',
+  String? toolName = 'bash',
+  InteractionKind kind = InteractionKind.toolApproval,
+  List<QuestionItem> questions = const [],
+}) => InteractionRecord(
+  id: id,
+  kind: kind,
+  status: InteractionStatus.pending,
+  createdAt: DateTime.utc(2026),
+  expiresAt: DateTime.utc(2026, 1, 1, 0, 10),
+  toolName: toolName,
+  questions: questions,
+);
 
 void main() {
   late SharedPreferences mockPrefs;
@@ -143,5 +167,124 @@ void main() {
     expect(ns.calls, hasLength(1));
     expect(ns.calls.first.title, equals('Assistant error'));
     expect(ns.calls.first.body, equals('Something went wrong'));
+  });
+
+  testWidgets(
+    'shows "Approval needed" with the conversation when backgrounded',
+    (tester) async {
+      final (:chatNotifier, :ns) = await pump(tester);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+
+      chatNotifier.push(
+        ChatState(
+          conversationId: 'conv-7',
+          lastInteractionRequest: _approvalRequest(),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(ns.calls, hasLength(1));
+      expect(ns.calls.first.title, equals('Approval needed'));
+      expect(ns.calls.first.body, equals('bash'));
+      expect(ns.calls.first.conversationId, equals('conv-7'));
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    },
+  );
+
+  testWidgets('shows the question copy for an ask-user request', (
+    tester,
+  ) async {
+    final (:chatNotifier, :ns) = await pump(tester);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    chatNotifier.push(
+      ChatState(
+        conversationId: 'conv-8',
+        lastInteractionRequest: _approvalRequest(
+          id: 'int-2',
+          toolName: null,
+          kind: InteractionKind.question,
+          questions: const [
+            QuestionItem(id: 'q1', prompt: 'Which environment?'),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(ns.calls, hasLength(1));
+    expect(ns.calls.first.title, equals('Your assistant has a question'));
+    expect(ns.calls.first.body, equals('Which environment?'));
+    expect(ns.calls.first.conversationId, equals('conv-8'));
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  });
+
+  testWidgets('stays silent when the app is resumed', (tester) async {
+    final (:chatNotifier, :ns) = await pump(tester);
+
+    chatNotifier.push(
+      ChatState(
+        conversationId: 'conv-7',
+        lastInteractionRequest: _approvalRequest(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(ns.calls, isEmpty);
+  });
+
+  testWidgets('stays silent when approval notifications are off', (
+    tester,
+  ) async {
+    await mockPrefs.setBool('notifications.approval_requests', false);
+    final (:chatNotifier, :ns) = await pump(tester);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    chatNotifier.push(
+      ChatState(
+        conversationId: 'conv-7',
+        lastInteractionRequest: _approvalRequest(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(ns.calls, isEmpty);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  });
+
+  testWidgets('stays silent on web with an active push subscription', (
+    tester,
+  ) async {
+    final (:chatNotifier, :ns) = await pump(tester);
+    ns.activePushSubscription = true;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    chatNotifier.push(
+      ChatState(
+        conversationId: 'conv-7',
+        lastInteractionRequest: _approvalRequest(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(ns.calls, isEmpty);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   });
 }

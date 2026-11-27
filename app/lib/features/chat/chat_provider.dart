@@ -149,8 +149,12 @@ class ChatNotifier extends AsyncNotifier<ChatState>
   ) {
     final msgs = List<ChatMessage>.from(chatState.messages);
     applyInteractionRequested(msgs, event);
-    state = AsyncData(withInteractionMessages(chatState, msgs));
     final record = findInteraction(msgs, event.interactionId);
+    var next = withInteractionMessages(chatState, msgs);
+    if (record != null) {
+      next = next.copyWith(lastInteractionRequest: record);
+    }
+    state = AsyncData(next);
     if (_turnInFlight && record != null) {
       final announcement = interactionKindSpec(record).announcement;
       _emit((at) => TurnAwaitingInput(announcement: announcement, at: at));
