@@ -396,6 +396,7 @@ Class | Method | HTTP request | Description
  - [StringList](doc/StringList.md)
  - [SubscribeRequest](doc/SubscribeRequest.md)
  - [SubscriptionResponse](doc/SubscriptionResponse.md)
+ - [SurfaceActionRequest](doc/SurfaceActionRequest.md)
  - [SurfaceSummary](doc/SurfaceSummary.md)
  - [SwitchBranchRequest](doc/SwitchBranchRequest.md)
  - [Task](doc/Task.md)

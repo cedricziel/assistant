@@ -27,27 +27,80 @@ use crate::orchestrator::TurnStore;
 /// Text) before replaying history.
 pub(crate) type AttachmentMap = HashMap<Uuid, Vec<ContentBlock>>;
 
+/// Synthesized `[surface_action …]` blocks keyed by the user message that
+/// carried the action (design D8). Built from the stored `ui_surfaces` rows on
+/// every history rebuild, so the visible message text stays untouched.
+pub(crate) type SurfaceActionMap = HashMap<Uuid, String>;
+
+/// The `[surface_action …]` block for one submitted surface, or `None` when
+/// the stored action cannot name itself.
+fn surface_action_block(surface_id: Uuid, action: &serde_json::Value) -> Option<String> {
+    let name = action.get("name")?.as_str()?;
+    let context = action
+        .get("context")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut block =
+        format!("[surface_action surface_id={surface_id} name={name}]\ncontext: {context}");
+    if let Some(model) = action.get("data_model") {
+        block.push_str(&format!("\ndata_model: {model}"));
+    }
+    Some(block)
+}
+
+/// Build the surface-action map for `conversation_id`. A store failure yields
+/// an empty map: the turn still runs, only without the structured blocks.
+pub(crate) async fn build_surface_action_map(
+    store: &dyn assistant_storage::SurfaceStore,
+    conversation_id: Uuid,
+) -> SurfaceActionMap {
+    match store.action_message_map(conversation_id).await {
+        Ok(rows) => rows
+            .into_iter()
+            .filter_map(|(message_id, surface)| {
+                surface_action_block(surface.id, surface.action.as_ref()?).map(|b| (message_id, b))
+            })
+            .collect(),
+        Err(e) => {
+            warn!(conversation_id = %conversation_id, error = %e, "Failed to load surface actions for history");
+            SurfaceActionMap::new()
+        }
+    }
+}
+
 /// Convert a sequence of persisted [`Message`] records into
 /// [`ChatHistoryMessage`] values suitable for sending to the LLM.
 ///
 /// When `attachment_map` is non-empty, user messages whose ID appears in the
 /// map are emitted as [`ChatHistoryMessage::MultimodalUser`] with inline
 /// image blocks so the LLM can see previously-sent images on history replay.
+/// `surface_actions` prefixes the user messages that carried a surface action.
 #[cfg(test)]
 pub(crate) fn messages_to_chat_history(
     messages: Vec<Message>,
     attachment_map: &AttachmentMap,
+    surface_actions: &SurfaceActionMap,
 ) -> Vec<ChatHistoryMessage> {
     messages
         .into_iter()
-        .filter_map(|m| message_to_chat(m, attachment_map))
+        .filter_map(|m| message_to_chat(m, attachment_map, surface_actions))
         .collect()
 }
 
 /// Convert one persisted [`Message`]; `None` for roles the LLM never sees.
-fn message_to_chat(m: Message, attachment_map: &AttachmentMap) -> Option<ChatHistoryMessage> {
+fn message_to_chat(
+    m: Message,
+    attachment_map: &AttachmentMap,
+    surface_actions: &SurfaceActionMap,
+) -> Option<ChatHistoryMessage> {
     match m.role {
         MessageRole::User => {
+            // The visible text is server-built; the block is synthesized on
+            // every rebuild and never stored on the message itself.
+            let content = match surface_actions.get(&m.id) {
+                Some(block) => format!("{block}\n{}", m.content),
+                None => m.content,
+            };
             // Audio is heard only in its own turn; the text stands in later.
             let replayed: Vec<ContentBlock> = attachment_map
                 .get(&m.id)
@@ -57,13 +110,13 @@ fn message_to_chat(m: Message, attachment_map: &AttachmentMap) -> Option<ChatHis
                 .cloned()
                 .collect();
             if !replayed.is_empty() {
-                let mut blocks = vec![ContentBlock::Text(m.content)];
+                let mut blocks = vec![ContentBlock::Text(content)];
                 blocks.extend(replayed);
                 return Some(ChatHistoryMessage::MultimodalUser { content: blocks });
             }
             Some(ChatHistoryMessage::Text {
                 role: ChatRole::User,
-                content: m.content,
+                content,
             })
         }
         MessageRole::Assistant => {
@@ -209,6 +262,7 @@ pub(crate) async fn build_turn_history(
     conversation_id: Uuid,
     summaries: &dyn ConversationSummaryStore,
     attachment_map: &AttachmentMap,
+    surface_actions: &SurfaceActionMap,
 ) -> Result<TurnHistory> {
     let path_ids: Vec<Uuid> = path.iter().map(|m| m.id).collect();
     let summary = summaries.newest_on_path(conversation_id, &path_ids).await?;
@@ -226,7 +280,7 @@ pub(crate) async fn build_turn_history(
     }
     for message in rows {
         let id = message.id;
-        if let Some(entry) = message_to_chat(message, attachment_map) {
+        if let Some(entry) = message_to_chat(message, attachment_map, surface_actions) {
             history.push(entry, Some(id));
         }
     }
@@ -506,6 +560,113 @@ mod tests {
         m
     }
 
+    // -- surface actions -------------------------------------------------------
+
+    fn surface_action_block() -> String {
+        "[surface_action surface_id=00000000-0000-0000-0000-000000000001 name=submit_form]\n\
+         context: {\"date\":\"2026-01-01\"}\n\
+         data_model: {\"name\":\"Ada\"}"
+            .to_string()
+    }
+
+    #[test]
+    fn surface_action_block_precedes_the_linked_user_message() {
+        let id = Uuid::new_v4();
+        let mut map = SurfaceActionMap::new();
+        map.insert(id, surface_action_block());
+
+        let history = messages_to_chat_history(
+            vec![make_user_msg(id, "Submitted “Trip”")],
+            &AttachmentMap::new(),
+            &map,
+        );
+
+        let content = text_of(&history[0]);
+        assert!(
+            content.starts_with("[surface_action surface_id="),
+            "{content}"
+        );
+        assert!(content.contains("name=submit_form"), "{content}");
+        assert!(content.contains("context: "), "{content}");
+        assert!(content.contains("data_model: "), "{content}");
+        assert!(content.ends_with("\nSubmitted “Trip”"), "{content}");
+    }
+
+    #[test]
+    fn unlinked_user_messages_keep_their_text_alone() {
+        let mut map = SurfaceActionMap::new();
+        map.insert(Uuid::new_v4(), surface_action_block());
+
+        let history = messages_to_chat_history(
+            vec![make_user_msg(Uuid::new_v4(), "hello")],
+            &AttachmentMap::new(),
+            &map,
+        );
+
+        assert_eq!(text_of(&history[0]), "hello");
+    }
+
+    #[tokio::test]
+    async fn build_surface_action_map_reads_the_submitted_action() {
+        use assistant_storage::{
+            ConversationStore as _, NewSurface, StorageLayer, SurfaceStore as _,
+        };
+        use serde_json::json;
+
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.surface_store();
+        let conv = storage
+            .conversation_store()
+            .create_conversation(None)
+            .await
+            .unwrap()
+            .id;
+        let message_id = Uuid::new_v4();
+        let surface = store
+            .create(&NewSurface {
+                id: Uuid::new_v4(),
+                conversation_id: conv,
+                turn: 1,
+                anchor_message_id: Uuid::new_v4(),
+                anchor_call_index: 0,
+                tool_call_id: None,
+                title: "Trip".into(),
+                fallback_text: "Pick a date".into(),
+                catalog_id: "cat".into(),
+                protocol_version: "1.0".into(),
+                components: json!([]),
+                data_model: json!({"name": "Ada"}),
+                send_data_model: true,
+            })
+            .await
+            .unwrap();
+        store
+            .mark_submitted(
+                surface.id,
+                &json!({
+                    "name": "submit_form",
+                    "context": {"date": "2026-01-01"},
+                    "data_model": {"name": "Ada"},
+                }),
+                message_id,
+            )
+            .await
+            .unwrap();
+
+        let map = build_surface_action_map(&store, conv).await;
+
+        let block = map.get(&message_id).expect("the action message is keyed");
+        assert_eq!(
+            block,
+            &format!(
+                "[surface_action surface_id={} name=submit_form]\n\
+                 context: {{\"date\":\"2026-01-01\"}}\n\
+                 data_model: {{\"name\":\"Ada\"}}",
+                surface.id
+            )
+        );
+    }
+
     // -- build_turn_history ---------------------------------------------------
 
     fn path_of(contents: &[&str]) -> Vec<Message> {
@@ -538,11 +699,21 @@ mod tests {
         let conv = path[0].conversation_id;
         let summaries = assistant_storage::InMemoryConversationSummaryStore::new();
 
-        let built = build_turn_history(path.clone(), conv, &summaries, &AttachmentMap::new())
-            .await
-            .unwrap();
+        let built = build_turn_history(
+            path.clone(),
+            conv,
+            &summaries,
+            &AttachmentMap::new(),
+            &SurfaceActionMap::new(),
+        )
+        .await
+        .unwrap();
 
-        let expected = messages_to_chat_history(path.clone(), &AttachmentMap::new());
+        let expected = messages_to_chat_history(
+            path.clone(),
+            &AttachmentMap::new(),
+            &SurfaceActionMap::new(),
+        );
         assert_eq!(
             format!("{:?}", built.messages()),
             format!("{expected:?}"),
@@ -565,9 +736,15 @@ mod tests {
             .await
             .unwrap();
 
-        let built = build_turn_history(path.clone(), conv, &summaries, &AttachmentMap::new())
-            .await
-            .unwrap();
+        let built = build_turn_history(
+            path.clone(),
+            conv,
+            &summaries,
+            &AttachmentMap::new(),
+            &SurfaceActionMap::new(),
+        )
+        .await
+        .unwrap();
 
         let texts: Vec<&str> = built.messages().iter().map(text_of).collect();
         assert_eq!(texts.len(), 4, "summary plus the three rows after a1");
@@ -593,9 +770,15 @@ mod tests {
             .await
             .unwrap();
 
-        let built = build_turn_history(path, conv, &summaries, &AttachmentMap::new())
-            .await
-            .unwrap();
+        let built = build_turn_history(
+            path,
+            conv,
+            &summaries,
+            &AttachmentMap::new(),
+            &SurfaceActionMap::new(),
+        )
+        .await
+        .unwrap();
 
         let texts: Vec<&str> = built.messages().iter().map(text_of).collect();
         assert_eq!(texts, ["q1", "a1"]);
@@ -663,6 +846,7 @@ mod tests {
                 r#"{"provider":"openrouter","model":"m","data":{"reasoning_details":[{"type":"reasoning.text","text":"x"}]}}"#,
             ))],
             &AttachmentMap::new(),
+            &SurfaceActionMap::new(),
         );
         let ChatHistoryMessage::AssistantToolCalls {
             items,
@@ -679,8 +863,11 @@ mod tests {
 
     #[test]
     fn history_keeps_tool_calls_when_provider_state_is_unreadable() {
-        let history =
-            messages_to_chat_history(vec![tool_call_msg(Some("not json"))], &AttachmentMap::new());
+        let history = messages_to_chat_history(
+            vec![tool_call_msg(Some("not json"))],
+            &AttachmentMap::new(),
+            &SurfaceActionMap::new(),
+        );
         assert!(
             matches!(
                 &history[0],
@@ -698,7 +885,7 @@ mod tests {
             make_assistant_msg("hi there"),
         ];
         let map = AttachmentMap::new();
-        let history = messages_to_chat_history(msgs, &map);
+        let history = messages_to_chat_history(msgs, &map, &SurfaceActionMap::new());
 
         assert_eq!(history.len(), 2);
         assert!(matches!(
@@ -724,7 +911,7 @@ mod tests {
             }],
         );
 
-        let history = messages_to_chat_history(msgs, &map);
+        let history = messages_to_chat_history(msgs, &map, &SurfaceActionMap::new());
         assert_eq!(history.len(), 2);
 
         match &history[0] {
@@ -753,7 +940,11 @@ mod tests {
             }],
         );
 
-        let history = messages_to_chat_history(vec![make_user_msg(msg_id, "hello")], &map);
+        let history = messages_to_chat_history(
+            vec![make_user_msg(msg_id, "hello")],
+            &map,
+            &SurfaceActionMap::new(),
+        );
 
         match &history[0] {
             ChatHistoryMessage::Text { content, .. } => assert_eq!(content, "hello"),
@@ -775,7 +966,7 @@ mod tests {
             }],
         );
 
-        let history = messages_to_chat_history(msgs, &map);
+        let history = messages_to_chat_history(msgs, &map, &SurfaceActionMap::new());
         match &history[0] {
             ChatHistoryMessage::MultimodalUser { content } => {
                 assert_eq!(content.len(), 2, "text + document");
@@ -802,7 +993,7 @@ mod tests {
             )],
         );
 
-        let history = messages_to_chat_history(msgs, &map);
+        let history = messages_to_chat_history(msgs, &map, &SurfaceActionMap::new());
         match &history[0] {
             ChatHistoryMessage::MultimodalUser { content } => {
                 assert_eq!(content.len(), 2, "text + inlined file");
@@ -820,7 +1011,7 @@ mod tests {
         let mut map = AttachmentMap::new();
         map.insert(msg_id, vec![]);
 
-        let history = messages_to_chat_history(msgs, &map);
+        let history = messages_to_chat_history(msgs, &map, &SurfaceActionMap::new());
         assert!(matches!(
             &history[0],
             ChatHistoryMessage::Text {

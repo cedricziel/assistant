@@ -2095,9 +2095,19 @@ impl Orchestrator {
             .unwrap_or_default();
 
         let summaries = self.storage.conversation_summary_store();
-        let mut history =
-            crate::history::build_turn_history(prior, conversation_id, &summaries, &att_map)
-                .await?;
+        let surface_actions = crate::history::build_surface_action_map(
+            &self.storage.surface_store(),
+            conversation_id,
+        )
+        .await;
+        let mut history = crate::history::build_turn_history(
+            prior,
+            conversation_id,
+            &summaries,
+            &att_map,
+            &surface_actions,
+        )
+        .await?;
         crate::history::sanitize_history(&mut history);
 
         // The turn's user message: the prompt, or for a regenerate the stored
@@ -2152,16 +2162,22 @@ impl Orchestrator {
         }
 
         let user_row_id = user.as_ref().or(regenerated.as_ref()).map(|m| m.id);
+        // The current message gets the same synthesized block a later rebuild
+        // will add; the stored content is the visible text only.
+        let history_text = match user_row_id.and_then(|id| surface_actions.get(&id)) {
+            Some(block) => format!("{block}\n{user_message}"),
+            None => user_message.to_string(),
+        };
         if all_attachments.is_empty() {
             history.push(
                 ChatHistoryMessage::Text {
                     role: ChatRole::User,
-                    content: user_message.to_string(),
+                    content: history_text,
                 },
                 user_row_id,
             );
         } else {
-            let mut blocks = vec![ContentBlock::Text(user_message.to_string())];
+            let mut blocks = vec![ContentBlock::Text(history_text)];
             blocks.extend(all_attachments);
             history.push(
                 ChatHistoryMessage::MultimodalUser { content: blocks },

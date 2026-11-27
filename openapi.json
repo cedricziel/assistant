@@ -1985,7 +1985,7 @@
             }
           },
           "400": {
-            "description": "Invalid ID or empty message"
+            "description": "Invalid ID, empty message, or a surface action that cannot be used"
           },
           "401": {
             "description": "Unauthorized"
@@ -2004,7 +2004,27 @@
             }
           },
           "409": {
-            "description": "An edit or regenerate is running in this conversation",
+            "description": "An edit or regenerate is running, a turn is in flight, or the surface was already submitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The surface is closed by a later user message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The surface action payload is larger than 64 KiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -11399,7 +11419,18 @@
           },
           "message": {
             "type": "string",
-            "description": "The message text to send to the assistant."
+            "description": "The message text to send to the assistant. Empty when `surface_action`\ncarries the turn."
+          },
+          "surface_action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SurfaceActionRequest",
+                "description": "Answers an active surface after its turn ended. When present,\n`message` must be empty; the server builds the visible text."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -15755,6 +15786,42 @@
           },
           "id": {
             "type": "string"
+          }
+        }
+      },
+      "SurfaceActionRequest": {
+        "type": "object",
+        "description": "The action a user took on an A2UI surface, after the turn that rendered it\nended (design D8).",
+        "required": [
+          "surface_id",
+          "name",
+          "source_component_id",
+          "context"
+        ],
+        "properties": {
+          "context": {
+            "type": "object",
+            "description": "The action's context payload."
+          },
+          "data_model": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The surface's data model at the time of the action."
+          },
+          "name": {
+            "type": "string",
+            "description": "The action name, which the surface must declare on a Button."
+          },
+          "source_component_id": {
+            "type": "string",
+            "description": "Id of the Button component that fired the action."
+          },
+          "surface_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The surface the action belongs to."
           }
         }
       },
