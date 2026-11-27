@@ -330,6 +330,9 @@ impl SpaceRuntimes {
                 )),
             )
         });
+        if let Some(broker) = &interactions {
+            orchestrator = orchestrator.with_interaction_broker(broker.clone());
+        }
         if let Some(callback) = self.confirmation_for(interactions.as_ref()) {
             orchestrator = orchestrator.with_confirmation_callback(callback);
         }

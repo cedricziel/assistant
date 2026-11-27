@@ -399,6 +399,9 @@ pub struct Orchestrator {
     /// Where each turn gets the tools only it may see, with the space it is
     /// asked for.
     pub(crate) turn_tool_source: Option<TurnToolBinding>,
+    /// Where interactive web turns put questions to their owner. `None`
+    /// leaves the `ask-user` tool out of every turn.
+    pub(crate) interaction_broker: Option<Arc<crate::interaction::InteractionBroker>>,
     /// Where `render-surface` results are persisted (see `surface_hook`).
     pub(crate) surface_store: Arc<dyn assistant_storage::SurfaceStore>,
 }
@@ -467,6 +470,7 @@ impl Orchestrator {
             learning_config: config.learning.clone(),
             clock: Arc::new(assistant_core::clock::SystemClock),
             turn_tool_source: None,
+            interaction_broker: None,
             surface_store,
         }
     }
@@ -495,17 +499,38 @@ impl Orchestrator {
         self
     }
 
-    /// The tools this turn alone may use.
-    async fn turn_overlay(&self, identity: &TurnIdentity) -> ToolOverlay {
-        let Some(binding) = &self.turn_tool_source else {
-            return ToolOverlay::default();
+    /// Offer the `ask-user` tool to interactive web turns, answered through
+    /// `broker`.
+    pub fn with_interaction_broker(
+        mut self,
+        broker: Arc<crate::interaction::InteractionBroker>,
+    ) -> Self {
+        self.interaction_broker = Some(broker);
+        self
+    }
+
+    /// The tools this turn alone may use: its user's integrations, and
+    /// `ask-user` when someone is watching a rich client.
+    async fn turn_overlay(&self, identity: &TurnIdentity, interface: &Interface) -> ToolOverlay {
+        let mut tools = match &self.turn_tool_source {
+            Some(binding) => {
+                let scope = TurnScope {
+                    org_slug: &binding.org_slug,
+                    space_slug: &binding.space_slug,
+                    user_id: identity.user_id.as_ref(),
+                };
+                binding.source.tools_for_turn(&scope).await
+            }
+            None => Vec::new(),
         };
-        let scope = TurnScope {
-            org_slug: &binding.org_slug,
-            space_slug: &binding.space_slug,
-            user_id: identity.user_id.as_ref(),
-        };
-        ToolOverlay::new(binding.source.tools_for_turn(&scope).await)
+        if let Some(broker) = &self.interaction_broker
+            && Self::rich_client_turn(interface, identity.interactive, 0)
+        {
+            tools.push(Arc::new(crate::interaction::AskUserTool::new(
+                broker.clone(),
+            )));
+        }
+        ToolOverlay::new(tools)
     }
 
     /// Override the `submit` timeout for this orchestrator instance.
@@ -1032,7 +1057,7 @@ impl Orchestrator {
         let chat_options = self.turn_chat_options(voice_turn, llm.as_ref());
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
-        let overlay = self.turn_overlay(&identity).await;
+        let overlay = self.turn_overlay(&identity, &interface).await;
         let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
         let global_specs = Self::filter_tool_specs(
             self.executor.to_specs_with(&overlay),
@@ -1488,7 +1513,7 @@ impl Orchestrator {
         let chat_options = self.turn_chat_options(voice_turn, llm.as_ref());
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
-        let overlay = self.turn_overlay(&identity).await;
+        let overlay = self.turn_overlay(&identity, &interface).await;
         let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
         let tool_specs = Self::filter_tool_specs(
             self.executor.to_specs_with(&overlay),
