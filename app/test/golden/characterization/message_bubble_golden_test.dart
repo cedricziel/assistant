@@ -29,7 +29,7 @@ Widget _bubble(
   ServerCapabilities capabilities = ServerCapabilities.disabled,
 }) => Padding(
   padding: const EdgeInsets.symmetric(horizontal: 12),
-  child: MessageBubble(
+  child: ChatMessageBubbleAdapter(
     message: message,
     capabilities: capabilities,
     fetchMessageAudio: _noAudio,

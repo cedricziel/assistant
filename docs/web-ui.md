@@ -73,6 +73,80 @@ right to expand, left to collapse. Mouse drags are ignored.
 Collapse state persists across reloads under the `SharedPreferences` key
 `assistant.sidebarCollapsed` (localStorage on web).
 
+## Conversation list
+
+The sidebar lists the caller's conversations for the active Persona, newest
+first. Tapping a row opens the conversation. A new chat starts untitled and the
+title worker names it after the first turns unless you rename it first. The list
+updates live through `GET /api/conversations/stream`: renames, pins, archives
+and new messages reach other tabs and devices without a reload.
+
+### Rename, pin and archive
+
+Row actions are available from the row's context menu or action sheet:
+
+- **Rename** opens a dialog prefilled with the current title. The title is
+  trimmed and must be 1 to 200 characters. Renaming locks the title, so the
+  title worker will not replace it later.
+- **Pin** / **Unpin** — pinned conversations sit above the rest under a
+  "Pinned" header, newest pin first. Re-pinning keeps the original pin time.
+- **Archive** / **Unarchive** — archived conversations leave the main list and
+  the stream snapshot. They appear in a collapsed "Archived" section below the
+  list, most recently archived first, and search still finds them with an
+  "Archived" badge.
+- **Delete** permanently deletes the conversation.
+
+Pin and archive are exclusive. Pinning an archived conversation unarchives it
+and pins it; archiving a pinned conversation unpins it. Sending a new user
+message unarchives the conversation, while an assistant reply leaves it
+archived.
+
+Renaming, pinning, archiving and auto-titling do not change a conversation's
+recency. Only a new message bumps `updated_at`, so metadata edits do not
+reorder the list.
+
+### Row gestures
+
+| Input                                     | Presentation |
+| ----------------------------------------- | ------------ |
+| Right-click a row, or the overflow button | Context menu |
+| Long-press a row on touch                 | Action sheet |
+
+The overflow button (labelled "Conversation actions") appears while a row is
+hovered, focused or selected. Keyboard activation follows the platform: a menu
+on desktop and web, an action sheet on iOS and Android. The only swipe is
+end-to-start, which deletes after confirmation; pin and archive are offered in
+the menu and sheet only. Rows in the "Archived" section offer the same actions,
+where Pin means unarchive and pin.
+
+### Search
+
+The search field above the list replaces the list with results while the query
+is non-empty. Each result shows the title with matches highlighted and up to
+three matching message excerpts. Selecting a result opens the conversation and
+clears the query; Esc clears the field.
+
+Search rules:
+
+- The query is split on whitespace into at most 8 terms.
+- Every term must appear somewhere in the conversation, but not necessarily in
+  the same message. One term can match the title and another a later message.
+- A term matches as a prefix of a word in message text (`lisb` matches
+  "Lisbon") and as a substring of the title.
+- Titles and messages fold case and diacritics together, so `arzte` matches
+  "Ärztetermin" and `lisboa` matches "Lisbôa". FTS5 operators such as `OR` and
+  `*` are ordinary text.
+- One-character terms match titles only. When the query also has a term of two
+  or more characters, one-character terms do not narrow the result.
+- Only `user` and `assistant` messages are searched. Thinking steps and tool
+  output are never matched.
+- A conversation with a title match ranks above one that matched only in a
+  message. A conversation appears at most once, with at most 3 message matches.
+  The API returns 20 results by default and caps `limit` at 50.
+
+Search covers archived conversations too. Results are scoped to the caller and
+the active Persona, like the list.
+
 ## Theme
 
 The Flutter app's theme is centralised in `app/lib/shared/theme/`. Use the
@@ -167,7 +241,26 @@ All unmatched paths are handled by the embedded Flutter web app (SPA
 fallback). The app uses the REST API below to drive the chat,
 persona switching, and skills views.
 
-### Persona starter prompts
+### Suggestions and starter prompts
+
+#### Follow-up chips
+
+After a turn finishes, the server can propose up to three follow-up prompts.
+The app shows them as chips above the composer, below the reconnect banner and
+the turn progress card. A tap sends the prompt as the next message. The chips
+disappear as soon as a message is sent or queued, while a turn is running, and
+when the conversation changes. A conversation that is reopened later shows no
+chips: suggestions belong to the live turn only.
+
+The chips arrive on the finished run's replay stream (`GET
+/api/conversations/{id}/runs/{run}/events/stream?since=N+1`) as a `suggestions`
+frame that follows `done`. The app listens for at most 20 seconds, which is
+the server's 15 second ceiling plus latency, and shows nothing when no frame
+arrives. An org turns the feature off with `enabled = false` in the
+`[suggestions]` section of `org.toml`; `max_suggestions` (1 to 5, default 3)
+and `timeout_secs` (1 to 15, default 10) tune it.
+
+#### Persona starter prompts
 
 A Persona can carry up to 4 starter prompts that the app shows as suggestions
 in an empty chat. The Persona detail screen has a "Starter prompts" section
@@ -193,37 +286,45 @@ the org-owned Personas.
 
 These endpoints power the Flutter app and are also consumable directly:
 
-| Route                                  | Method | Description                                    |
-| -------------------------------------- | ------ | ---------------------------------------------- |
-| `/api/conversations`                   | GET    | List conversations                             |
-| `/api/conversations`                   | POST   | Create conversation                            |
-| `/api/conversations/{id}`              | GET    | Get conversation with messages                 |
-| `/api/conversations/{id}`              | PATCH  | Rename conversation                            |
-| `/api/conversations/{id}`              | DELETE | Delete conversation                            |
-| `/api/conversations/{id}/messages`     | POST   | Send message (SSE streaming response)          |
-| `/api/personas`                        | GET    | List personas                                  |
-| `/api/personas/active`                 | POST   | Switch active persona                          |
-| `/api/personas/{id}`                   | PATCH  | Update a persona's starter prompts             |
-| `/api/personas/{id}/skills`            | GET    | List skills for a persona                      |
-| `/api/orgs`                            | GET    | List organizations (filtered by user access)   |
-| `/api/orgs`                            | POST   | Create organization                            |
-| `/api/orgs/{id}`                       | GET    | Get organization details                       |
-| `/api/orgs/{id}`                       | PATCH  | Update organization settings                   |
-| `/api/orgs/{org}/users`                | GET    | List users in org                              |
-| `/api/orgs/{org}/users`                | POST   | Invite user to org                             |
-| `/api/orgs/{org}/users/{uid}`          | GET    | Get user details                               |
-| `/api/orgs/{org}/users/{uid}`          | PATCH  | Update user (name, role)                       |
-| `/api/orgs/{org}/users/{uid}`          | DELETE | Remove user from org                           |
-| `/api/orgs/{org}/spaces`               | GET    | List spaces (filtered by membership)           |
-| `/api/orgs/{org}/spaces`               | POST   | Create space                                   |
-| `/api/orgs/{org}/spaces/{sid}`         | GET    | Get space details                              |
-| `/api/orgs/{org}/spaces/{sid}`         | PATCH  | Update space                                   |
-| `/api/orgs/{org}/spaces/{sid}`         | DELETE | Delete space (org-admin only)                  |
-| `/api/orgs/{org}/spaces/{sid}/members` | GET    | List space members                             |
-| `/api/orgs/{org}/spaces/{sid}/members` | POST   | Add user to space with role                    |
-| `/api/users/me/api-keys`               | GET    | List API keys (prefix + name, no secrets)      |
-| `/api/users/me/api-keys`               | POST   | Create scoped API key (returns plaintext once) |
-| `/api/users/me/api-keys/{kid}`         | DELETE | Revoke API key                                 |
+| Route                                  | Method | Description                                               |
+| -------------------------------------- | ------ | --------------------------------------------------------- |
+| `/api/conversations`                   | GET    | List conversations (`?archived=true` lists archived ones) |
+| `/api/conversations`                   | POST   | Create conversation                                       |
+| `/api/conversations/stream`            | GET    | Stream conversation list changes (SSE)                    |
+| `/api/conversations/search`            | GET    | Search titles and message text (`?q=…&limit=…`)           |
+| `/api/conversations/{id}`              | GET    | Get conversation with messages                            |
+| `/api/conversations/{id}`              | PATCH  | Update title, pin or archive state                        |
+| `/api/conversations/{id}`              | DELETE | Delete conversation                                       |
+| `/api/conversations/{id}/messages`     | POST   | Send message (SSE streaming response)                     |
+| `/api/personas`                        | GET    | List personas                                             |
+| `/api/personas/active`                 | POST   | Switch active persona                                     |
+| `/api/personas/{id}`                   | PATCH  | Update a persona's starter prompts                        |
+| `/api/personas/{id}/skills`            | GET    | List skills for a persona                                 |
+| `/api/orgs`                            | GET    | List organizations (filtered by user access)              |
+| `/api/orgs`                            | POST   | Create organization                                       |
+| `/api/orgs/{id}`                       | GET    | Get organization details                                  |
+| `/api/orgs/{id}`                       | PATCH  | Update organization settings                              |
+| `/api/orgs/{org}/users`                | GET    | List users in org                                         |
+| `/api/orgs/{org}/users`                | POST   | Invite user to org                                        |
+| `/api/orgs/{org}/users/{uid}`          | GET    | Get user details                                          |
+| `/api/orgs/{org}/users/{uid}`          | PATCH  | Update user (name, role)                                  |
+| `/api/orgs/{org}/users/{uid}`          | DELETE | Remove user from org                                      |
+| `/api/orgs/{org}/spaces`               | GET    | List spaces (filtered by membership)                      |
+| `/api/orgs/{org}/spaces`               | POST   | Create space                                              |
+| `/api/orgs/{org}/spaces/{sid}`         | GET    | Get space details                                         |
+| `/api/orgs/{org}/spaces/{sid}`         | PATCH  | Update space                                              |
+| `/api/orgs/{org}/spaces/{sid}`         | DELETE | Delete space (org-admin only)                             |
+| `/api/orgs/{org}/spaces/{sid}/members` | GET    | List space members                                        |
+| `/api/orgs/{org}/spaces/{sid}/members` | POST   | Add user to space with role                               |
+| `/api/users/me/api-keys`               | GET    | List API keys (prefix + name, no secrets)                 |
+| `/api/users/me/api-keys`               | POST   | Create scoped API key (returns plaintext once)            |
+| `/api/users/me/api-keys/{kid}`         | DELETE | Revoke API key                                            |
+
+`PATCH /api/conversations/{id}` takes optional `title`, `pinned` and
+`archived` fields; at least one is required. A title is trimmed and limited to
+200 characters. Every 4xx response from this route uses the `{"error": "…"}`
+envelope. List and search results omit `pinned_at` and `archived_at` when
+unset.
 
 Full OpenAPI spec is served at `/api/openapi.json`; Swagger UI at `/api/docs`.
 

@@ -30,6 +30,8 @@ class _$MessageSummary extends MessageSummary {
   @override
   final String? skillName;
   @override
+  final MessageTimingSummary? timing;
+  @override
   final BuiltList<ToolCallSummary>? toolCalls;
   @override
   final bool ttsAvailable;
@@ -51,6 +53,7 @@ class _$MessageSummary extends MessageSummary {
       this.replyBranch,
       required this.role,
       this.skillName,
+      this.timing,
       this.toolCalls,
       required this.ttsAvailable,
       required this.turn})
@@ -77,6 +80,7 @@ class _$MessageSummary extends MessageSummary {
         replyBranch == other.replyBranch &&
         role == other.role &&
         skillName == other.skillName &&
+        timing == other.timing &&
         toolCalls == other.toolCalls &&
         ttsAvailable == other.ttsAvailable &&
         turn == other.turn;
@@ -96,6 +100,7 @@ class _$MessageSummary extends MessageSummary {
     _$hash = $jc(_$hash, replyBranch.hashCode);
     _$hash = $jc(_$hash, role.hashCode);
     _$hash = $jc(_$hash, skillName.hashCode);
+    _$hash = $jc(_$hash, timing.hashCode);
     _$hash = $jc(_$hash, toolCalls.hashCode);
     _$hash = $jc(_$hash, ttsAvailable.hashCode);
     _$hash = $jc(_$hash, turn.hashCode);
@@ -117,6 +122,7 @@ class _$MessageSummary extends MessageSummary {
           ..add('replyBranch', replyBranch)
           ..add('role', role)
           ..add('skillName', skillName)
+          ..add('timing', timing)
           ..add('toolCalls', toolCalls)
           ..add('ttsAvailable', ttsAvailable)
           ..add('turn', turn))
@@ -178,6 +184,11 @@ class MessageSummaryBuilder
   String? get skillName => _$this._skillName;
   set skillName(String? skillName) => _$this._skillName = skillName;
 
+  MessageTimingSummaryBuilder? _timing;
+  MessageTimingSummaryBuilder get timing =>
+      _$this._timing ??= MessageTimingSummaryBuilder();
+  set timing(MessageTimingSummaryBuilder? timing) => _$this._timing = timing;
+
   ListBuilder<ToolCallSummary>? _toolCalls;
   ListBuilder<ToolCallSummary> get toolCalls =>
       _$this._toolCalls ??= ListBuilder<ToolCallSummary>();
@@ -210,6 +221,7 @@ class MessageSummaryBuilder
       _replyBranch = $v.replyBranch?.toBuilder();
       _role = $v.role;
       _skillName = $v.skillName;
+      _timing = $v.timing?.toBuilder();
       _toolCalls = $v.toolCalls?.toBuilder();
       _ttsAvailable = $v.ttsAvailable;
       _turn = $v.turn;
@@ -251,6 +263,7 @@ class MessageSummaryBuilder
             role: BuiltValueNullFieldError.checkNotNull(
                 role, r'MessageSummary', 'role'),
             skillName: skillName,
+            timing: _timing?.build(),
             toolCalls: _toolCalls?.build(),
             ttsAvailable: BuiltValueNullFieldError.checkNotNull(
                 ttsAvailable, r'MessageSummary', 'ttsAvailable'),
@@ -271,6 +284,8 @@ class MessageSummaryBuilder
         _$failedField = 'replyBranch';
         _replyBranch?.build();
 
+        _$failedField = 'timing';
+        _timing?.build();
         _$failedField = 'toolCalls';
         _toolCalls?.build();
       } catch (e) {

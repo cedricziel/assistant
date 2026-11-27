@@ -9,14 +9,18 @@
 /// `golden` test for each entry.
 const List<String> kAssistantUiElements = [
   'ApprovalCard',
+  'AttachmentTray',
   'BranchPicker',
   'ChatMarkdownScope',
   'ChatThreadLayout',
   'CodeBlock',
   'CodeDiffResultView',
   'CodeFileResultView',
+  'CommandBody',
   'CompactExpandable',
   'Composer',
+  'ComposerVoiceButton',
+  'ConversationArchivedSection',
   'ConversationListView',
   'ConversationSearchResultsView',
   'DataTableResultView',
@@ -24,8 +28,11 @@ const List<String> kAssistantUiElements = [
   'FeedbackCommentField',
   'GenericToolResultView',
   'HighlightedSegments',
+  'JsonTreeView',
   'MessageActionButton',
   'MessageActions',
+  'MessageBody',
+  'MessageBubble',
   'MessageEditor',
   'MessageTimingIndicator',
   'PermissionRuleTile',
@@ -34,6 +41,7 @@ const List<String> kAssistantUiElements = [
   'RegenerateMenuButton',
   'SlashCommandMenu',
   'StarterPrompts',
+  'SubagentBody',
   'SuggestionChips',
   'SurfaceFrame',
   'ThinkingBody',
@@ -46,25 +54,18 @@ const List<String> kAssistantUiElements = [
   'ToolResultRendererScope',
   'ToolStatusIcon',
   'TurnProgressCard',
+  'TypingIndicator',
   'UnknownInteractionCard',
-  // 'AttachmentTray', // slot: chat-element-library 11b
   // 'BranchPicker', // slot: message-branching 9
-  // 'CommandBody', // slot: chat-element-library 7b
-  // 'ComposerVoiceButton', // slot: chat-element-library 11b
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
-  // 'JsonTreeView', // slot: tool-result-renderers C2b
   // 'LinkPreviewResultView', // slot: tool-result-renderers C5
-  // 'MessageBody', // slot: chat-element-library 8b
-  // 'MessageBubble', // slot: chat-element-library 8b
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
   // 'SourcesResultView', // slot: tool-result-renderers C4
-  // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c
-  // 'TypingIndicator', // slot: chat-element-library 8b
   // 'UnknownInteractionCard', // slot: tool-approval-prompts 13b
 ];

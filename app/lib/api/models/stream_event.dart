@@ -73,6 +73,7 @@ class ConversationListEntry {
     required this.createdAt,
     required this.updatedAt,
     this.pinnedAt,
+    this.archivedAt,
   });
 
   final String id;
@@ -82,6 +83,9 @@ class ConversationListEntry {
 
   /// When the conversation was pinned, or `null` when it is not pinned.
   final DateTime? pinnedAt;
+
+  /// When the conversation was archived, or `null` when it is not archived.
+  final DateTime? archivedAt;
 
   factory ConversationListEntry.fromJson(Map<String, dynamic> json) {
     final id = json['id'] as String?;
@@ -94,6 +98,10 @@ class ConversationListEntry {
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
       pinnedAt: switch (json['pinned_at']) {
+        final String at => DateTime.parse(at),
+        _ => null,
+      },
+      archivedAt: switch (json['archived_at']) {
         final String at => DateTime.parse(at),
         _ => null,
       },
@@ -230,13 +238,19 @@ class DoneEvent extends StreamEvent {
 /// The server has started a new orchestrator run.
 ///
 /// Corresponds to `event:run_started` in the SSE stream.  The JSON body is
-/// `{"run_id":"<uuid>"}`.  Clients should store this ID so they can reconnect
-/// via the event-log replay endpoint if the connection drops.
+/// `{"run_id":"<uuid>","user_message_id":"<uuid>"}`.  Clients should store the
+/// run ID so they can reconnect via the event-log replay endpoint if the
+/// connection drops.
 class RunStartedEvent extends StreamEvent {
-  const RunStartedEvent(this.runId, {super.sequenceId});
+  const RunStartedEvent(this.runId, {this.userMessageId, super.sequenceId});
 
   /// The UUID of the orchestrator run.
   final String runId;
+
+  /// The id the run persists its user row under (the existing user message for
+  /// a regenerate). `null` for voice runs and servers that do not send it. The
+  /// run may fail before the row is saved, so it is not proof the row exists.
+  final String? userMessageId;
 }
 
 /// An error that occurred while processing the stream.
@@ -244,9 +258,18 @@ class RunStartedEvent extends StreamEvent {
 /// May be produced by the client-side SSE parser when the stream closes
 /// unexpectedly or when an HTTP error status is received.
 class ErrorEvent extends StreamEvent {
-  const ErrorEvent(this.message, {super.sequenceId});
+  const ErrorEvent(this.message, {this.statusCode, super.sequenceId});
 
   final String message;
+
+  /// The HTTP status of a rejected request, `null` for transport failures.
+  final int? statusCode;
+
+  /// A turn is already running on the conversation (409).
+  bool get isConflict => statusCode == 409;
+
+  /// The target conversation or message does not exist (404).
+  bool get isNotFound => statusCode == 404;
 }
 
 /// The voice endpoint has transcribed the user's audio.

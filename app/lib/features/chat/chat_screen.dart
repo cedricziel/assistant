@@ -24,12 +24,12 @@ import 'chat_announcer.dart';
 import 'chat_empty_starters.dart';
 import 'chat_markdown_config.dart';
 import 'chat_provider.dart';
-import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'message_bubble.dart';
 import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
+import 'follow_up_chips.dart';
 import 'reconnect_banner.dart';
 import 'streaming_timeline_entry.dart';
 import 'voice_recorder_button.dart';
@@ -473,7 +473,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   // system-event tiles.
                                   if (msg.timelineType ==
                                       TimelineEntryType.command) {
-                                    return CommandEventTile(message: msg);
+                                    return CommandBody(
+                                      name: msg.commandName ?? '',
+                                      ack: msg.commandAckText ?? msg.content,
+                                    );
                                   }
 
                                   // Render non-message timeline entries
@@ -484,11 +487,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                     return StreamingTimelineEntry(
                                       message: msg,
                                       conversationId: chatState.conversationId,
-                                      entryState: msg.isStale
-                                          ? EntryState.stale
-                                          : msg.isStreaming
-                                          ? EntryState.active
-                                          : EntryState.complete,
+                                      entryState: timelineEntryState(msg),
+                                      onInteractionAnswer: (id, answer) => ref
+                                          .read(chatProvider.notifier)
+                                          .respond(id, answer),
                                     );
                                   }
 
@@ -499,7 +501,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                       prevMsg != null &&
                                       prevMsg.role == msg.role &&
                                       !prevMsg.isStreaming;
-                                  return MessageBubble(
+                                  return ChatMessageBubbleAdapter(
                                     message: msg,
                                     isGrouped: isGrouped,
                                     capabilities: capabilities,
@@ -534,12 +536,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         // recovering an interrupted stream after a resume.
                         // Renders nothing on routine foreground transitions.
                         const ReconnectBanner(),
+                        // Follow-up prompts after a finished turn.
+                        const FollowUpChips(),
                         // In-flight turn progress card — renders nothing when no
                         // turn is active, an activity label otherwise, a stall
                         // label after 30s of silence.
                         TurnProgressCard(
                           status: chatState.currentTurnStatus,
                           showSkip: kSkipButtonEnabled,
+                          awaitingLabel:
+                              chatState.currentTurnStatus?.awaitingLabel,
                           // The SSE stream surfaces the server-side
                           // cancellation as `agent_error`, which the notifier
                           // reconciles.

@@ -8,6 +8,7 @@ class ConversationListItem {
     required this.title,
     required this.updatedAt,
     this.pinnedAt,
+    this.archivedAt,
   });
 
   final String id;
@@ -16,6 +17,9 @@ class ConversationListItem {
 
   /// When the conversation was pinned, or `null` when it is not pinned.
   final DateTime? pinnedAt;
+
+  /// When the conversation was archived, or `null` when it is not archived.
+  final DateTime? archivedAt;
 }
 
 /// A request to show the actions of one conversation row.
@@ -67,6 +71,10 @@ typedef ConversationTrailingBuilder = Widget? Function(
 /// Row actions are requested through [onRequestActions] on long-press, on
 /// secondary tap and from a trailing overflow button shown while the row is
 /// hovered, focused or selected. The only swipe is end-to-start delete.
+///
+/// [archivedSection] is a slot below the rows, normally a
+/// [ConversationArchivedSection]. It scrolls with the rows and stays visible
+/// when [items] is empty.
 class ConversationListView extends StatelessWidget {
   const ConversationListView({
     super.key,
@@ -78,6 +86,7 @@ class ConversationListView extends StatelessWidget {
     this.trailingBuilder,
     this.selectedId,
     this.onRequestActions,
+    this.archivedSection,
     this.now,
   });
 
@@ -89,12 +98,13 @@ class ConversationListView extends StatelessWidget {
   final ConversationTrailingBuilder? trailingBuilder;
   final String? selectedId;
   final ValueChanged<ConversationActionRequest>? onRequestActions;
+  final Widget? archivedSection;
   final DateTime? now;
 
   @override
   Widget build(BuildContext context) {
     final reference = now ?? DateTime.now();
-    final scheme = Theme.of(context).colorScheme;
+    final slot = archivedSection;
     final firstPinned = items.indexWhere((item) => item.pinnedAt != null);
 
     return Column(
@@ -103,9 +113,12 @@ class ConversationListView extends StatelessWidget {
         ?header,
         Expanded(
           child: items.isEmpty
-              ? emptyState ?? const SizedBox.shrink()
+              ? _buildEmpty()
               : ListView.builder(
-                  itemCount: items.length + (firstPinned < 0 ? 0 : 1),
+                  itemCount:
+                      items.length +
+                      (firstPinned < 0 ? 0 : 1) +
+                      (slot == null ? 0 : 1),
                   itemBuilder: (context, index) {
                     if (firstPinned >= 0) {
                       if (index == firstPinned) {
@@ -113,25 +126,15 @@ class ConversationListView extends StatelessWidget {
                       }
                       if (index > firstPinned) index -= 1;
                     }
-                    final item = items[index];
-                    return Dismissible(
-                      key: ValueKey(item.id),
-                      direction: DismissDirection.endToStart,
-                      background: Container(
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 16),
-                        color: scheme.error,
-                        child: Icon(Icons.delete, color: scheme.onError),
-                      ),
-                      confirmDismiss: (_) => onDelete(item.id),
-                      child: _ConversationRow(
-                        item: item,
-                        selected: item.id == selectedId,
-                        subtitle: _formatDate(reference, item.updatedAt),
-                        trailing: trailingBuilder?.call(context, item),
-                        onTap: () => onSelect(item.id),
-                        onRequestActions: onRequestActions,
-                      ),
+                    if (index >= items.length) return slot;
+                    return _DismissibleRow(
+                      item: items[index],
+                      selected: items[index].id == selectedId,
+                      now: reference,
+                      trailing: trailingBuilder?.call(context, items[index]),
+                      onSelect: onSelect,
+                      onDelete: onDelete,
+                      onRequestActions: onRequestActions,
                     );
                   },
                 ),
@@ -140,12 +143,186 @@ class ConversationListView extends StatelessWidget {
     );
   }
 
-  static String _formatDate(DateTime now, DateTime then) {
-    final diff = now.difference(then);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-    if (diff.inDays < 1) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+  /// The empty state, with the archived slot below it when there is one.
+  Widget _buildEmpty() {
+    final slot = archivedSection;
+    final empty = emptyState;
+    if (slot == null) return empty ?? const SizedBox.shrink();
+    return ListView(
+      children: [
+        if (empty != null) SizedBox(height: 160, child: empty),
+        slot,
+      ],
+    );
+  }
+}
+
+/// One row wrapped in its swipe-to-delete [Dismissible].
+class _DismissibleRow extends StatelessWidget {
+  const _DismissibleRow({
+    required this.item,
+    required this.selected,
+    required this.now,
+    required this.onSelect,
+    required this.onDelete,
+    this.trailing,
+    this.onRequestActions,
+  });
+
+  final ConversationListItem item;
+  final bool selected;
+  final DateTime now;
+  final Widget? trailing;
+  final ValueChanged<String> onSelect;
+  final Future<bool> Function(String id) onDelete;
+  final ValueChanged<ConversationActionRequest>? onRequestActions;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Dismissible(
+      key: ValueKey(item.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 16),
+        color: scheme.error,
+        child: Icon(Icons.delete, color: scheme.onError),
+      ),
+      confirmDismiss: (_) => onDelete(item.id),
+      child: _ConversationRow(
+        item: item,
+        selected: selected,
+        subtitle: _formatDate(now, item.updatedAt),
+        trailing: trailing,
+        onTap: () => onSelect(item.id),
+        onRequestActions: onRequestActions,
+      ),
+    );
+  }
+}
+
+String _formatDate(DateTime now, DateTime then) {
+  final diff = now.difference(then);
+  if (diff.inMinutes < 1) return 'Just now';
+  if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+  if (diff.inDays < 1) return '${diff.inHours}h ago';
+  return '${diff.inDays}d ago';
+}
+
+/// The collapsible "Archived" section for [ConversationListView.archivedSection].
+///
+/// Pure: it owns no state and does no I/O. The caller keeps [expanded], loads
+/// [items] when [onExpandedChanged] reports `true`, and reports [loading] and
+/// [error]. Its rows behave like the list's own: tap selects, swipe deletes
+/// through [onDelete], and the gestures emit [onRequestActions].
+class ConversationArchivedSection extends StatelessWidget {
+  const ConversationArchivedSection({
+    super.key,
+    required this.expanded,
+    required this.onExpandedChanged,
+    required this.items,
+    required this.onSelect,
+    required this.onDelete,
+    this.loading = false,
+    this.error,
+    this.onRetry,
+    this.selectedId,
+    this.onRequestActions,
+    this.now,
+  });
+
+  final bool expanded;
+  final ValueChanged<bool> onExpandedChanged;
+
+  /// The archived conversations, most recently archived first.
+  final List<ConversationListItem> items;
+  final ValueChanged<String> onSelect;
+  final Future<bool> Function(String id) onDelete;
+
+  /// A fetch is in flight. Shown as a spinner only while [items] is empty, so
+  /// a refetch does not flash the rows away.
+  final bool loading;
+
+  /// Why the last fetch failed, shown with a Retry button.
+  final String? error;
+  final VoidCallback? onRetry;
+  final String? selectedId;
+  final ValueChanged<ConversationActionRequest>? onRequestActions;
+  final DateTime? now;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final reference = now ?? DateTime.now();
+    final muted = TextStyle(color: theme.colorScheme.onSurfaceVariant);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          button: true,
+          expanded: expanded,
+          excludeSemantics: true,
+          label: 'Archived',
+          onTap: () => onExpandedChanged(!expanded),
+          child: InkWell(
+            onTap: () => onExpandedChanged(!expanded),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Archived',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (expanded)
+          if (error != null && items.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Expanded(child: Text(error!, style: muted)),
+                  if (onRetry != null)
+                    TextButton(onPressed: onRetry, child: const Text('Retry')),
+                ],
+              ),
+            )
+          else if (items.isEmpty && loading)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator.adaptive()),
+            )
+          else if (items.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Text('No archived conversations', style: muted),
+            )
+          else
+            for (final item in items)
+              _DismissibleRow(
+                item: item,
+                selected: item.id == selectedId,
+                now: reference,
+                onSelect: onSelect,
+                onDelete: onDelete,
+                onRequestActions: onRequestActions,
+              ),
+      ],
+    );
   }
 }
 

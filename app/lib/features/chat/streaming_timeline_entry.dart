@@ -1,8 +1,21 @@
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../api/models/interaction_answer.dart';
 import 'chat_provider.dart';
+import 'interaction_footer.dart';
 import 'mcp_app_frame.dart';
+
+/// The lifecycle state of [message] as a timeline entry: waiting on its owner
+/// while an interaction is open, else stale, active or complete.
+EntryState timelineEntryState(ChatMessage message) {
+  final waiting =
+      (message.interaction?.isOpen ?? false) ||
+      message.toolCalls.any((call) => call.interaction?.isOpen ?? false);
+  if (waiting) return EntryState.awaitingInput;
+  if (message.isStale) return EntryState.stale;
+  return message.isStreaming ? EntryState.active : EntryState.complete;
+}
 
 /// A streaming-aware timeline entry for one thinking, tool call or subagent
 /// step in the chat timeline.
@@ -16,6 +29,7 @@ class StreamingTimelineEntry extends StatelessWidget {
     required this.message,
     this.entryState = EntryState.complete,
     this.conversationId,
+    this.onInteractionAnswer,
   });
 
   final ChatMessage message;
@@ -24,21 +38,9 @@ class StreamingTimelineEntry extends StatelessWidget {
   /// The conversation the entry belongs to; an MCP App routes its calls by it.
   final String? conversationId;
 
-  double _maxHeight(BuildContext context, bool isSubagent) {
-    final density = ThreadDensityScope.of(context);
-    if (isSubagent) {
-      return switch (density) {
-        TimelineDensity.compact => 100,
-        TimelineDensity.normal => 120,
-        TimelineDensity.expanded => 150,
-      };
-    }
-    return switch (density) {
-      TimelineDensity.compact => 120,
-      TimelineDensity.normal => 150,
-      TimelineDensity.expanded => 200,
-    };
-  }
+  /// Called with an interaction's id and the owner's answer to it.
+  final void Function(String interactionId, InteractionAnswer answer)?
+  onInteractionAnswer;
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +49,8 @@ class StreamingTimelineEntry extends StatelessWidget {
       TimelineEntryType.thinking => _buildThinking(context),
       TimelineEntryType.subagent => _buildSubagent(context),
       TimelineEntryType.command => const SizedBox.shrink(),
-      TimelineEntryType.interaction => const SizedBox.shrink(),
+      TimelineEntryType.interaction =>
+        _interactionFooter(message.interaction) ?? const SizedBox.shrink(),
       TimelineEntryType.surface => const SizedBox.shrink(),
       TimelineEntryType.message => const SizedBox.shrink(),
     };
@@ -72,179 +75,41 @@ class StreamingTimelineEntry extends StatelessWidget {
     return ToolCallBody(
       record: record,
       entryState: entryState,
-      // An MCP App renders in the footer slot: visible while collapsed.
-      footer: record.app == null
-          ? null
-          : McpAppFrame(toolCall: record, conversationId: conversationId),
+      footer: _toolCallFooter(record),
+    );
+  }
+
+  /// The footer slot is visible while the entry is collapsed. It holds the
+  /// call's approval card and its MCP App, in that order.
+  Widget? _toolCallFooter(ToolCallRecord record) {
+    final interaction = _interactionFooter(record.interaction);
+    final app = record.app == null
+        ? null
+        : McpAppFrame(toolCall: record, conversationId: conversationId);
+    if (interaction != null && app != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [interaction, app],
+      );
+    }
+    return interaction ?? app;
+  }
+
+  Widget? _interactionFooter(InteractionRecord? interaction) {
+    if (interaction == null) return null;
+    return InteractionFooter(
+      record: interaction,
+      onAnswer: (answer) => onInteractionAnswer?.call(interaction.id, answer),
     );
   }
 
   // -- Subagent ---------------------------------------------------------------
 
-  Widget _buildSubagent(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final hasCompleted = message.subagentSummary != null;
-    final isActive = entryState == EntryState.active;
-
-    Widget? expandedContent;
-    if (hasCompleted) {
-      expandedContent = Text(
-        message.subagentSummary!,
-        style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
-      );
-    } else if (isActive) {
-      // Show inner timeline of subagent events.
-      expandedContent = _buildSubagentInnerTimeline(context);
-    }
-
-    // Determine status icon: cancelled (stale+completed) → amber,
-    // completed → green, active → spinner.
-    final Widget statusIcon;
-    if (hasCompleted && entryState == EntryState.stale) {
-      statusIcon = const Icon(
-        Icons.cancel_outlined,
-        size: 14,
-        color: Colors.amber,
-      );
-    } else if (hasCompleted) {
-      statusIcon = const Icon(
-        Icons.check_circle_outline,
-        size: 14,
-        color: Colors.green,
-      );
-    } else {
-      statusIcon = const SizedBox(
-        width: 12,
-        height: 12,
-        child: CircularProgressIndicator.adaptive(strokeWidth: 1.5),
-      );
-    }
-
-    return _buildSection(
-      context,
-      icon: Icons.smart_toy_outlined,
-      label: message.subagentTask ?? message.subagentId ?? '',
-      statusWidget: statusIcon,
-      expandable: hasCompleted || isActive,
-      expandedContent: expandedContent,
-    );
-  }
-
-  Widget _buildSubagentInnerTimeline(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final msg = message;
-    final entries = <Widget>[];
-
-    // Show subagent thinking if present.
-    final thinking = msg.subagentThinking;
-    if (thinking.isNotEmpty) {
-      entries.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Row(
-            children: [
-              Icon(
-                Icons.psychology_outlined,
-                size: 12,
-                color: colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  thinking,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: colorScheme.onSurfaceVariant,
-                    fontStyle: FontStyle.italic,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // Show subagent tool calls.
-    // Density adaptation: normal shows last 2 entries, expanded shows all.
-    var toolCalls = msg.subagentToolCalls;
-    if (ThreadDensityScope.of(context) == TimelineDensity.normal &&
-        toolCalls.length > 2) {
-      toolCalls = toolCalls.sublist(toolCalls.length - 2);
-    }
-
-    for (final tc in toolCalls) {
-      entries.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 2),
-          child: Row(
-            children: [
-              Icon(
-                Icons.build_outlined,
-                size: 12,
-                color: colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                tc.toolName,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(width: 4),
-              ToolStatusIcon(status: tc.status),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (entries.isEmpty) {
-      return Text(
-        'Processing...',
-        style: TextStyle(
-          fontSize: 11,
-          color: colorScheme.onSurfaceVariant,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
-
-    return TimelineEntryShell.fadeContainer(
-      maxHeight: _maxHeight(context, true),
-      isActive: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: entries,
-      ),
-    );
-  }
-
-  // -- Shared layout ----------------------------------------------------------
-
-  Widget _buildSection(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    Widget? statusWidget,
-    bool expandable = false,
-    Widget? expandedContent,
-    bool forceExpand = false,
-    Widget? footer,
-  }) {
-    return TimelineEntryShell(
-      icon: icon,
-      label: label,
-      status: statusWidget,
-      entryState: entryState,
-      expandable: expandable,
-      forceExpand: forceExpand,
-      body: expandedContent,
-      footer: footer,
-    );
-  }
+  Widget _buildSubagent(BuildContext context) => SubagentBody(
+    label: message.subagentTask ?? message.subagentId ?? '',
+    summary: message.subagentSummary,
+    thinking: message.subagentThinking,
+    toolCalls: message.subagentToolCalls,
+    entryState: entryState,
+  );
 }
