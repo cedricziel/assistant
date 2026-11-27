@@ -51,7 +51,7 @@ use crate::api::messages::{
     SseDoneEvent, SseStatusEvent, SseSubagentCompletedEvent, SseSubagentStartedEvent,
     SseSubagentStatusEvent, SseSubagentThinkingEvent, SseSubagentTokenEvent,
     SseSubagentToolResultEvent, SseSuggestion, SseSuggestionsEvent, SseThinkingEvent,
-    SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
+    SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery, SurfaceActionRequest,
 };
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::surfaces::SurfaceSummary;
@@ -528,6 +528,7 @@ pub struct ApiErrorResponse {
             CreateConversationRequest,
             UpdateConversationRequest,
             ApiSendMessageRequest,
+            SurfaceActionRequest,
             QuickMessageRequest,
             QuickMessageResponse,
             // Flutter-facing API types
