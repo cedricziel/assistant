@@ -19,10 +19,11 @@ import 'read_aloud_action.dart';
 /// Regenerate ([onRegenerate]) for persisted assistant messages, only while no
 /// turn works ([turnWorking] is false while idle and while a turn only waits
 /// for the user). [onRegenerateWith] adds a model menu when [regenerateModels]
-/// has two or more entries. A message with `branch` gets a [BranchPicker] in
-/// the leading slot, wired to [onSwitchBranch] with the id of the sibling
-/// version to show; the picker is busy while [turnWorking]. All of these stay off until their callbacks are
-/// supplied.
+/// has two or more entries. A message with `branch`, or a user message whose
+/// reply has no visible row and carries `replyBranch`, gets a [BranchPicker]
+/// in the leading slot, wired to [onSwitchBranch] with the id of the sibling
+/// version to show; the picker is busy while [turnWorking]. All of these stay
+/// off until their callbacks are supplied.
 Widget buildMessageActions({
   required ChatMessage message,
   required ServerCapabilities capabilities,
@@ -63,7 +64,9 @@ Widget buildMessageActions({
 
   final hasContent = message.content.isNotEmpty;
   final isFailed = message.status == MessageStatus.failed;
-  final branch = message.branch;
+  // The message's own versions take precedence; a user row carries
+  // `replyBranch` only when its active reply has no visible assistant row.
+  final branch = message.branch ?? message.replyBranch;
   final canBranch = isPersisted && !turnWorking;
   final showEdit = canBranch && isUser && onEdit != null;
   final showRegenerate = canBranch && !isUser && onRegenerate != null;

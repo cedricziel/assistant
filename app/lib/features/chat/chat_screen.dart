@@ -24,10 +24,10 @@ import 'attachment_provider.dart';
 import 'chat_announcer.dart';
 import 'chat_empty_starters.dart';
 import 'chat_markdown_config.dart';
+import 'chat_message_wiring.dart';
 import 'chat_provider.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
-import 'message_bubble.dart';
 import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
 import 'follow_up_chips.dart';
@@ -502,7 +502,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                       prevMsg != null &&
                                       prevMsg.role == msg.role &&
                                       !prevMsg.isStreaming;
-                                  return ChatMessageBubbleAdapter(
+                                  return ChatMessageActionsWiring(
                                     message: msg,
                                     senderLabel: msg.isUser
                                         ? 'You'

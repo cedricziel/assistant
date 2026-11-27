@@ -33,6 +33,11 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
     this.showResponseTiming = false,
     this.imageBaseUrl,
     this.imageAuthToken,
+    this.isPersisted = false,
+    this.turnWorking = false,
+    this.onEdit,
+    this.onRegenerate,
+    this.onSwitchBranch,
   });
 
   final ChatMessage message;
@@ -52,6 +57,15 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   fetchMessageAudio;
   final String? imageBaseUrl;
   final String? imageAuthToken;
+
+  /// Whether the message is stored on the server, so it can branch.
+  final bool isPersisted;
+
+  /// Whether a turn works; hides Edit and Regenerate and disables the picker.
+  final bool turnWorking;
+  final VoidCallback? onEdit;
+  final VoidCallback? onRegenerate;
+  final ValueChanged<String>? onSwitchBranch;
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +90,11 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
         onStop: onStop,
         isStopping: isStopping,
         showResponseTiming: showResponseTiming,
+        isPersisted: isPersisted,
+        turnWorking: turnWorking,
+        onEdit: onEdit,
+        onRegenerate: onRegenerate,
+        onSwitchBranch: onSwitchBranch,
       ),
       contextMenuBuilder: _textSelectionContextMenuBuilder,
     );

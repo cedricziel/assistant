@@ -524,6 +524,123 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("chat page with message branches and the inline editor", async ({
+    page,
+  }) => {
+    // A persisted timeline with sibling versions. The server's history is
+    // authoritative for branch metadata, so fixture the detail response: a
+    // user row with two edited versions, its reply with two versions, and a
+    // second question whose visible reply is a tool row, which leaves the
+    // reply versions on the user row as `reply_branch`.
+    const conversationId = "00000000-0000-4000-8000-0000000000c1";
+    const userId = "00000000-0000-4000-8000-0000000000c2";
+    const replyId = "00000000-0000-4000-8000-0000000000c3";
+    const questionId = "00000000-0000-4000-8000-0000000000c4";
+    const at = "2024-01-01T00:00:00Z";
+    await page.route(
+      new RegExp(`/api/conversations/${conversationId}$`),
+      (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        return route.fulfill({
+          json: {
+            id: conversationId,
+            title: "Plan my week",
+            created_at: at,
+            updated_at: at,
+            messages: [
+              {
+                id: userId,
+                role: "user",
+                content: "Plan my week",
+                turn: 0,
+                created_at: at,
+                tts_available: false,
+                parent_id: null,
+                branch: {
+                  index: 1,
+                  count: 2,
+                  sibling_ids: ["00000000-0000-4000-8000-0000000000c5", userId],
+                },
+                attachments: [
+                  {
+                    id: "00000000-0000-4000-8000-0000000000c6",
+                    filename: "notes.pdf",
+                    mime_type: "application/pdf",
+                    size_bytes: 2048,
+                    url: "/media/notes.pdf",
+                    created_at: at,
+                  },
+                ],
+              },
+              {
+                id: replyId,
+                role: "assistant",
+                content:
+                  "Here is a plan for the week: focus on the launch review on Tuesday, and keep Thursday free for deep work.",
+                turn: 1,
+                created_at: at,
+                tts_available: false,
+                parent_id: userId,
+                branch: {
+                  index: 0,
+                  count: 2,
+                  sibling_ids: [
+                    replyId,
+                    "00000000-0000-4000-8000-0000000000c7",
+                  ],
+                },
+              },
+              {
+                id: questionId,
+                role: "user",
+                content: "What about Friday?",
+                turn: 2,
+                created_at: at,
+                tts_available: false,
+                parent_id: replyId,
+                reply_branch: {
+                  index: 1,
+                  count: 2,
+                  sibling_ids: [
+                    "00000000-0000-4000-8000-0000000000c8",
+                    "00000000-0000-4000-8000-0000000000c9",
+                  ],
+                },
+              },
+            ],
+            surfaces: [],
+            interactions: [],
+          },
+        });
+      },
+    );
+
+    await navigateAndSettle(page, `/chat/${conversationId}`);
+    await enableAccessibility(page);
+    // The action row appears below every bubble: Edit on the questions,
+    // Regenerate on the reply, a picker wherever versions exist.
+    await expect(
+      page.getByRole("button", { name: "Edit" }).first(),
+    ).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(CSS_SETTLE_MS);
+    await expect(page).toHaveScreenshot("chat-message-branches.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+
+    // Edit swaps the first bubble for the inline editor and keeps its
+    // attachment visible, read-only.
+    await page.getByRole("button", { name: "Edit" }).first().click();
+    await expect(
+      page.getByRole("textbox", { name: "Edit message" }),
+    ).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(CSS_SETTLE_MS);
+    await expect(page).toHaveScreenshot("chat-message-editor.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
   test("skills list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/skills");
     await expect(page).toHaveScreenshot("skills-empty.png", {

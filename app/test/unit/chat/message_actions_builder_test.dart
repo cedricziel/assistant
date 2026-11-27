@@ -51,14 +51,18 @@ Widget _wrap(
   ),
 );
 
-ChatMessage _user({List<ChatAttachment>? attachments, BranchInfo? branch}) =>
-    ChatMessage(
-      id: 'u',
-      role: 'user',
-      content: 'A question',
-      attachments: attachments,
-      branch: branch,
-    );
+ChatMessage _user({
+  List<ChatAttachment>? attachments,
+  BranchInfo? branch,
+  BranchInfo? replyBranch,
+}) => ChatMessage(
+  id: 'u',
+  role: 'user',
+  content: 'A question',
+  attachments: attachments,
+  branch: branch,
+  replyBranch: replyBranch,
+);
 
 const _branch = BranchInfo(count: 3, index: 1, siblingIds: ['m1', 'm2', 'm3']);
 
@@ -453,6 +457,50 @@ void main() {
       );
 
       expect(find.byType(BranchPicker), findsNothing);
+    });
+
+    testWidgets('a user message shows its reply branch when it has no reply', (
+      tester,
+    ) async {
+      final switched = <String>[];
+      await tester.pumpWidget(
+        _wrap(
+          _user(
+            replyBranch: const BranchInfo(
+              count: 2,
+              index: 1,
+              siblingIds: ['r1', 'r2'],
+            ),
+          ),
+          isPersisted: true,
+          onSwitchBranch: switched.add,
+        ),
+      );
+
+      final picker = tester.widget<BranchPicker>(find.byType(BranchPicker));
+      expect((picker.index, picker.count), (1, 2));
+      picker.onPrevious();
+      expect(switched, ['r1']);
+    });
+
+    testWidgets('the message branch wins over its reply branch', (
+      tester,
+    ) async {
+      const replyBranch = BranchInfo(
+        count: 2,
+        index: 0,
+        siblingIds: ['r1', 'r2'],
+      );
+      await tester.pumpWidget(
+        _wrap(
+          _user(branch: _branch, replyBranch: replyBranch),
+          isPersisted: true,
+          onSwitchBranch: (_) {},
+        ),
+      );
+
+      final picker = tester.widget<BranchPicker>(find.byType(BranchPicker));
+      expect((picker.index, picker.count), (1, 3));
     });
 
     testWidgets('the regenerate menu needs the callback and two models', (
