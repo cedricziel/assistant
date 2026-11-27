@@ -621,7 +621,11 @@ class ChatNotifier extends AsyncNotifier<ChatState>
           .where((i) => i.status == InteractionStatusView.pending)
           .toList();
       final messages = _withPendingFeedback(
-        chatMessagesFromHistory(detail.messages, interactions: byId.values),
+        chatMessagesFromHistory(
+          detail.messages,
+          interactions: byId.values,
+          surfaces: detail.surfaces,
+        ),
       );
 
       state = AsyncData(
@@ -1773,6 +1777,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
         chatMessagesFromHistory(
           response.data!.messages,
           interactions: response.data!.interactions,
+          surfaces: response.data!.surfaces,
         ),
       );
       final latest = state.value ?? const ChatState();

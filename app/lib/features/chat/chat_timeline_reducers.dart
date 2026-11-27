@@ -11,10 +11,6 @@ import 'interaction_mapping.dart';
 // `ChatState.messages`) and, like the notifier code they were extracted from,
 // mutates the affected [ChatMessage] entries in place.
 
-/// The tool that builds surfaces. Its successful result shows as the surface,
-/// not as a chip; a failed one keeps an ordinary error chip.
-const renderSurfaceToolName = 'render-surface';
-
 /// Extract a tool name from a [StatusEvent] message.
 ///
 /// The server emits messages like "Calling tool: web-search". Strip the

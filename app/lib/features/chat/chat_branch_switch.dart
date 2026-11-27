@@ -54,6 +54,7 @@ mixin ChatBranchSwitching on AsyncNotifier<ChatState> {
           messages: chatMessagesFromHistory(
             detail.messages,
             interactions: detail.interactions,
+            surfaces: detail.surfaces,
           ),
           isSwitchingBranch: false,
           isSending: false,
