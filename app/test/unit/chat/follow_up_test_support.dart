@@ -68,6 +68,12 @@ class FakeFollowUpApi extends ApiClient {
 
   @override
   ConversationsApi get conversations => FakeConversationsApi();
+
+  @override
+  Future<List<InteractionDetail>> listConversationInteractions(
+    String conversationId, {
+    InteractionStatusView? status,
+  }) async => const [];
 }
 
 /// `getConversation` answers with one finished assistant message.

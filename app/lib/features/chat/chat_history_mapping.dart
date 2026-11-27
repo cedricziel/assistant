@@ -1,7 +1,11 @@
-import 'package:assistant_api/assistant_api.dart' as api show BranchInfo;
 import 'package:assistant_api/assistant_api.dart'
-    hide BranchInfo, ServerCapabilities;
+    as api
+    show BranchInfo, InteractionDetail;
+import 'package:assistant_api/assistant_api.dart'
+    hide BranchInfo, InteractionDetail, ServerCapabilities;
 import 'package:assistant_ui/models.dart';
+
+import 'interaction_mapping.dart';
 
 /// Map a server tool-status string onto [ToolCallStatus]; unknown values
 /// are treated as [ToolCallStatus.ok].
@@ -53,9 +57,24 @@ MessageStatus parseFinishReason(String? reason) {
 ///
 /// Rows that carry user-visible content (or attachments) are always preserved
 /// as a [TimelineEntryType.message] entry, even if they also have tool calls.
-List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
+///
+/// [interactions] are the conversation's stored interactions. Resolved ones
+/// become receipts on the tool call they belong to; an interaction that names
+/// a tool call not on the active branch renders nowhere.
+List<ChatMessage> chatMessagesFromHistory(
+  Iterable<MessageSummary> source, {
+  Iterable<api.InteractionDetail> interactions = const [],
+}) {
   final messages = <ChatMessage>[];
+  final spans = <int, _TurnSpan>{};
   for (final m in source) {
+    final span = spans.putIfAbsent(
+      m.turn,
+      () => _TurnSpan(m.turn, m.createdAt, messages.length),
+    );
+    if (m.createdAt.isBefore(span.first)) span.first = m.createdAt;
+    if (m.createdAt.isAfter(span.last)) span.last = m.createdAt;
+
     final toolCalls = m.toolCalls?.toList() ?? const [];
     for (var i = 0; i < toolCalls.length; i++) {
       final tc = toolCalls[i];
@@ -89,33 +108,145 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
         m.content.isEmpty &&
         toolCalls.isNotEmpty &&
         !hasAttachments;
-    if (isAssistantToolOnly) continue;
-
-    messages.add(
-      ChatMessage(
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        status: parseFinishReason(m.finishReason),
-        ttsAvailable: m.ttsAvailable,
-        parentId: m.parentId,
-        branch: _branchFromApi(m.branch),
-        replyBranch: _branchFromApi(m.replyBranch),
-        attachments: attachments
-            ?.map(
-              (a) => ChatAttachment(
-                id: a.id,
-                filename: a.filename,
-                mimeType: a.mimeType,
-                url: a.url,
-              ),
-            )
-            .toList(),
-      )..feedback = _feedbackFromHistory(m.feedback),
-    );
+    if (!isAssistantToolOnly) {
+      messages.add(
+        ChatMessage(
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          status: parseFinishReason(m.finishReason),
+          ttsAvailable: m.ttsAvailable,
+          parentId: m.parentId,
+          branch: _branchFromApi(m.branch),
+          replyBranch: _branchFromApi(m.replyBranch),
+          attachments: attachments
+              ?.map(
+                (a) => ChatAttachment(
+                  id: a.id,
+                  filename: a.filename,
+                  mimeType: a.mimeType,
+                  url: a.url,
+                ),
+              )
+              .toList(),
+        )..feedback = _feedbackFromHistory(m.feedback),
+      );
+    }
+    span.end = messages.length;
   }
+  _attachInteractions(messages, spans.values.toList(), interactions);
   return messages;
 }
+
+/// One persisted turn's index range in the rendered timeline.
+class _TurnSpan {
+  _TurnSpan(this.turn, this.first, this.start) : last = first, end = start;
+
+  final int turn;
+  DateTime first;
+  DateTime last;
+  final int start;
+  int end;
+}
+
+/// Attach [interactions] to the tool calls they belong to, or to the end of
+/// their turn when the request had no tool-call id.
+///
+/// An id that is not on the active branch is dropped: the receipt must not be
+/// parked on an unrelated turn. Without an id the same per-turn ordinal join
+/// as tool results applies (same tool name, in order), then the end of the
+/// turn.
+void _attachInteractions(
+  List<ChatMessage> messages,
+  List<_TurnSpan> spans,
+  Iterable<api.InteractionDetail> interactions,
+) {
+  if (interactions.isEmpty || spans.isEmpty) return;
+  final seen = <String>{};
+  final pending = <InteractionRecord>[];
+  for (final detail in interactions) {
+    if (!seen.add(detail.interactionId)) continue;
+    final record = interactionRecordFromDetail(detail);
+    final id = detail.toolCallId;
+    if (id != null) {
+      final call = _callById(messages, id);
+      if (call != null) {
+        call.interaction = record;
+      } else {
+        // The call is on a branch this history does not render.
+      }
+      continue;
+    }
+    pending.add(record);
+  }
+  if (pending.isEmpty) return;
+
+  final inserts = <int, List<ChatMessage>>{};
+  for (final record in pending) {
+    final span = _spanAt(spans, record.createdAt);
+    final hint = _toolNameHint(record);
+    final call = _freeCallIn(messages, span, hint);
+    if (call != null) {
+      call.interaction = record;
+      continue;
+    }
+    inserts.putIfAbsent(span.end, () => []).add(_interactionEntry(record));
+  }
+
+  final indexes = inserts.keys.toList()..sort((a, b) => b.compareTo(a));
+  for (final index in indexes) {
+    messages.insertAll(index, inserts[index]!);
+  }
+}
+
+ToolCallRecord? _callById(List<ChatMessage> messages, String id) {
+  for (final message in messages) {
+    for (final call in message.toolCalls) {
+      if (call.toolCallId == id) return call;
+    }
+  }
+  return null;
+}
+
+ToolCallRecord? _freeCallIn(
+  List<ChatMessage> messages,
+  _TurnSpan span,
+  String? toolName,
+) {
+  for (var i = span.start; i < span.end && i < messages.length; i++) {
+    final message = messages[i];
+    if (message.timelineType != TimelineEntryType.toolCall) continue;
+    for (final call in message.toolCalls) {
+      if (call.interaction != null) continue;
+      if (toolName == null || call.toolName == toolName) return call;
+    }
+  }
+  return null;
+}
+
+/// The tool an interaction belongs to when the request carries no tool-call id.
+String? _toolNameHint(InteractionRecord record) {
+  if (record.toolName != null) return record.toolName;
+  return record.kind == InteractionKind.question ? 'ask-user' : null;
+}
+
+_TurnSpan _spanAt(List<_TurnSpan> spans, DateTime at) {
+  for (final span in spans) {
+    if (!at.isBefore(span.first) && !at.isAfter(span.last)) return span;
+  }
+  _TurnSpan? prior;
+  for (final span in spans) {
+    if (!span.first.isAfter(at)) prior = span;
+  }
+  return prior ?? spans.first;
+}
+
+ChatMessage _interactionEntry(InteractionRecord record) => ChatMessage(
+  id: 'interaction-${record.id}',
+  role: 'assistant',
+  content: '',
+  timelineType: TimelineEntryType.interaction,
+)..interaction = record;
 
 BranchInfo? _branchFromApi(api.BranchInfo? info) => info == null
     ? null

@@ -43,6 +43,16 @@ final Map<InteractionKind, InteractionKindSpec> _kinds = {
       onDecision: (decision) => onAnswer(ToolApprovalAnswer(decision)),
     ),
   ),
+  InteractionKind.question: InteractionKindSpec(
+    progressLabel: 'Waiting for your answer',
+    announcement: 'Your assistant has a question',
+    card: (record, now, onAnswer) => QuestionCard(
+      record: record,
+      now: now,
+      onAnswer: (answers) => onAnswer(QuestionAnswers(answers)),
+      onDecline: () => onAnswer(const DeclineAnswer()),
+    ),
+  ),
 };
 
 const _unregistered = InteractionKindSpec(

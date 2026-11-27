@@ -46,7 +46,10 @@ mixin ChatBranchSwitching on AsyncNotifier<ChatState> {
       if (latest.conversationId != conversationId) return;
       state = AsyncData(
         latest.copyWith(
-          messages: chatMessagesFromHistory(detail.messages),
+          messages: chatMessagesFromHistory(
+            detail.messages,
+            interactions: detail.interactions,
+          ),
           isSwitchingBranch: false,
         ),
       );

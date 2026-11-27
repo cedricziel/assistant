@@ -585,13 +585,48 @@ class ChatNotifier extends AsyncNotifier<ChatState>
         id: conversationId,
       );
       final detail = response.data!;
+      // The detail already carries the conversation's interactions; the
+      // pending list confirms which still wait before the client watches a run.
+      final pending = await pendingInteractions(api, conversationId);
+      if (!ref.mounted) return;
+      final byId = <String, InteractionDetail>{
+        for (final interaction in detail.interactions)
+          interaction.interactionId: interaction,
+        for (final interaction in pending)
+          interaction.interactionId: interaction,
+      };
+      final open = byId.values
+          .where((i) => i.status == InteractionStatusView.pending)
+          .toList();
       final messages = _withPendingFeedback(
-        chatMessagesFromHistory(detail.messages),
+        chatMessagesFromHistory(detail.messages, interactions: byId.values),
       );
 
       state = AsyncData(
-        ChatState(conversationId: conversationId, messages: messages),
+        ChatState(
+          conversationId: conversationId,
+          messages: messages,
+          isSending: open.isNotEmpty,
+          currentTurnStatus: open.isEmpty
+              ? null
+              : TurnStatusSnapshot(
+                  runId: open.first.runId,
+                  lastEventKind: TurnEventKind.status,
+                  lastEventAt: DateTime.now(),
+                  awaitingLabel: awaitingLabelOf(messages),
+                ),
+        ),
       );
+      if (open.isNotEmpty) {
+        unawaited(
+          watchPendingRun(
+            api,
+            conversationId,
+            open.first.runId,
+            onEnded: () => loadConversation(conversationId),
+          ),
+        );
+      }
     } catch (e) {
       state = AsyncData(
         ChatState(
@@ -1469,7 +1504,10 @@ class ChatNotifier extends AsyncNotifier<ChatState>
       );
       if (!ref.mounted) return;
       final messages = _withPendingFeedback(
-        chatMessagesFromHistory(response.data!.messages),
+        chatMessagesFromHistory(
+          response.data!.messages,
+          interactions: response.data!.interactions,
+        ),
       );
       final latest = state.value ?? const ChatState();
       // While we were awaiting the conversation fetch, the queue-drain
