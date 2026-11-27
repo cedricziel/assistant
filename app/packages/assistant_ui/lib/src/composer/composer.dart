@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../models/command_entry.dart';
@@ -85,6 +86,11 @@ class _ComposerState extends State<Composer> {
   bool _showMenu = false;
   String _commandFilter = '';
 
+  /// The primary action's focus nodes. Send and stop replace each other in
+  /// place, so the outgoing control hands its focus to the incoming one.
+  final _sendFocus = FocusNode(debugLabel: 'composer_send');
+  final _stopFocus = FocusNode(debugLabel: 'composer_stop');
+
   @override
   void initState() {
     super.initState();
@@ -98,12 +104,53 @@ class _ComposerState extends State<Composer> {
       oldWidget.controller.removeListener(_onTextChanged);
       widget.controller.addListener(_onTextChanged);
     }
+    // Removing the focused send affordance would strand focus on the scope.
+    if (!oldWidget.isSending && widget.isSending && _sendFocus.hasFocus) {
+      _focusAfterFrame(_stopFocus);
+    }
+    // Same when a turn ends without the stop button having handed over.
+    if (oldWidget.isSending && !widget.isSending && _stopFocus.hasFocus) {
+      _focusAfterFrame(widget.focusNode);
+    }
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_onTextChanged);
+    _sendFocus.dispose();
+    _stopFocus.dispose();
     super.dispose();
+  }
+
+  static void _focusAfterFrame(FocusNode node) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (node.context != null) node.requestFocus();
+    });
+  }
+
+  void _dismissMenu() {
+    if (!_showMenu) return;
+    setState(() => _showMenu = false);
+  }
+
+  /// Submits from the input or the send button. Focus stays in the input
+  /// unless the send button itself held it; then [didUpdateWidget] hands it to
+  /// the stop button that replaces it.
+  void _handleSend() {
+    if (!_sendFocus.hasFocus) {
+      widget.focusNode.requestFocus();
+      // A text field's submit sequence unfocuses after `onSubmitted` returns,
+      // so the request has to be repeated once the frame settles.
+      _focusAfterFrame(widget.focusNode);
+    }
+    widget.onSend();
+  }
+
+  /// Requests the input focus *before* [Composer.onStop] runs, so the parent
+  /// can disable the stop button without stranding focus on a dead control.
+  void _handleStop() {
+    widget.focusNode.requestFocus();
+    widget.onStop();
   }
 
   void _onTextChanged() {
@@ -130,7 +177,7 @@ class _ComposerState extends State<Composer> {
       // No-arg command: set text and submit through the normal send path.
       widget.controller.text = '/${cmd.name}';
       setState(() => _showMenu = false);
-      widget.onSend();
+      _handleSend();
     }
   }
 
@@ -145,7 +192,7 @@ class _ComposerState extends State<Composer> {
         widget.controller,
         widget.focusNode,
         placeholder,
-        widget.onSend,
+        _handleSend,
       );
     }
     return TextField(
@@ -163,7 +210,7 @@ class _ComposerState extends State<Composer> {
       minLines: 1,
       maxLines: 6,
       textInputAction: TextInputAction.send,
-      onSubmitted: (_) => widget.onSend(),
+      onSubmitted: (_) => _handleSend(),
     );
   }
 
@@ -171,100 +218,114 @@ class _ComposerState extends State<Composer> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final colorScheme = Theme.of(context).colorScheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Slash-command menu, shown when the text starts with /.
-        if (_showMenu)
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AssistantUiSpacing.md,
-            ),
-            child: SlashCommandMenu(
-              key: const Key('command_autocomplete_popup'),
-              commands: widget.commands,
-              filter: _commandFilter,
-              onSelect: _onCommandSelected,
-            ),
-          ),
-        // Queue depth badge, visible when messages are waiting.
-        if (widget.pendingQueueCount > 0)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(
-              horizontal: AssistantUiSpacing.lg,
-              vertical: AssistantUiSpacing.xs,
-            ),
-            color: AssistantUiColors.warning.withValues(alpha: 0.12),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.hourglass_top_rounded,
-                  size: 14,
-                  color: AssistantUiColors.warning,
+    // Reading order is the visual order here, so the group needs no policy.
+    return FocusTraversalGroup(
+      child: CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          SingleActivator(LogicalKeyboardKey.escape): _dismissMenu,
+        },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Slash-command menu, shown when the text starts with /.
+            if (_showMenu)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AssistantUiSpacing.md,
                 ),
-                const SizedBox(width: AssistantUiSpacing.xs),
-                Text(
-                  '${widget.pendingQueueCount} message${widget.pendingQueueCount == 1 ? '' : 's'} queued',
-                  key: const Key('queue_depth_badge'),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AssistantUiColors.warning,
-                  ),
+                child: SlashCommandMenu(
+                  key: const Key('command_autocomplete_popup'),
+                  commands: widget.commands,
+                  filter: _commandFilter,
+                  onSelect: _onCommandSelected,
                 ),
-              ],
+              ),
+            // Queue depth badge, visible when messages are waiting.
+            if (widget.pendingQueueCount > 0)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AssistantUiSpacing.lg,
+                  vertical: AssistantUiSpacing.xs,
+                ),
+                color: AssistantUiColors.warning.withValues(alpha: 0.12),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.hourglass_top_rounded,
+                      size: 14,
+                      color: AssistantUiColors.warning,
+                    ),
+                    const SizedBox(width: AssistantUiSpacing.xs),
+                    Text(
+                      '${widget.pendingQueueCount} message${widget.pendingQueueCount == 1 ? '' : 's'} queued',
+                      key: const Key('queue_depth_badge'),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AssistantUiColors.warning,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (widget.pendingAttachments.isNotEmpty)
+              AttachmentTray(
+                attachments: widget.pendingAttachments,
+                onRemove: widget.onRemoveAttachment,
+              ),
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                AssistantUiSpacing.md,
+                AssistantUiSpacing.sm,
+                AssistantUiSpacing.md,
+                AssistantUiSpacing.md + bottomInset,
+              ),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: colorScheme.outlineVariant),
+                ),
+              ),
+              child: Row(
+                children: [
+                  if (!widget.isSending)
+                    IconButton(
+                      key: const Key('attach_image_button'),
+                      icon: const Icon(Icons.image_outlined),
+                      tooltip: 'Attach image',
+                      onPressed: widget.onPickImage,
+                    ),
+                  if (widget.showVoice &&
+                      !widget.isSending &&
+                      widget.voiceButton != null)
+                    widget.voiceButton!,
+                  if (!widget.isSending)
+                    const SizedBox(width: AssistantUiSpacing.xs),
+                  Expanded(child: _buildInput(context)),
+                  const SizedBox(width: AssistantUiSpacing.sm),
+                  if (widget.isSending)
+                    IconButton.filled(
+                      key: const Key('stop_button'),
+                      focusNode: _stopFocus,
+                      onPressed: widget.isStopping ? null : _handleStop,
+                      tooltip: widget.isStopping
+                          ? 'Stopping…'
+                          : 'Stop response',
+                      icon: const Icon(Icons.stop_rounded),
+                    )
+                  else
+                    IconButton.filled(
+                      key: const Key('send_button'),
+                      focusNode: _sendFocus,
+                      onPressed: _handleSend,
+                      tooltip: 'Send message',
+                      icon: const Icon(Icons.send),
+                    ),
+                ],
+              ),
             ),
-          ),
-        if (widget.pendingAttachments.isNotEmpty)
-          AttachmentTray(
-            attachments: widget.pendingAttachments,
-            onRemove: widget.onRemoveAttachment,
-          ),
-        Container(
-          padding: EdgeInsets.fromLTRB(
-            AssistantUiSpacing.md,
-            AssistantUiSpacing.sm,
-            AssistantUiSpacing.md,
-            AssistantUiSpacing.md + bottomInset,
-          ),
-          decoration: BoxDecoration(
-            border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
-          ),
-          child: Row(
-            children: [
-              if (!widget.isSending)
-                IconButton(
-                  key: const Key('attach_image_button'),
-                  icon: const Icon(Icons.image_outlined),
-                  tooltip: 'Attach image',
-                  onPressed: widget.onPickImage,
-                ),
-              if (widget.showVoice &&
-                  !widget.isSending &&
-                  widget.voiceButton != null)
-                widget.voiceButton!,
-              if (!widget.isSending)
-                const SizedBox(width: AssistantUiSpacing.xs),
-              Expanded(child: _buildInput(context)),
-              const SizedBox(width: AssistantUiSpacing.sm),
-              if (widget.isSending)
-                IconButton.filled(
-                  key: const Key('stop_button'),
-                  onPressed: widget.isStopping ? null : widget.onStop,
-                  tooltip: widget.isStopping ? 'Stopping…' : 'Stop response',
-                  icon: const Icon(Icons.stop_rounded),
-                )
-              else
-                IconButton.filled(
-                  key: const Key('send_button'),
-                  onPressed: widget.onSend,
-                  tooltip: 'Send message',
-                  icon: const Icon(Icons.send),
-                ),
-            ],
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

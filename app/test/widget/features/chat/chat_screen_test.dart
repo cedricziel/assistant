@@ -1094,6 +1094,10 @@ void main() {
       await tester.tap(find.byKey(const Key('stop_action')));
       await tester.pump();
       expect(res.notifier.stopCalls, 2);
+
+      // Stopping hands focus back to the input, which schedules the app's
+      // delayed scroll-to-bottom; let it fire before the test ends.
+      await tester.pump(const Duration(milliseconds: 400));
     });
 
     testWidgets('while stopping, stop_button and stop_action are disabled', (
