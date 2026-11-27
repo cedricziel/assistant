@@ -2,6 +2,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
     hide ToolCallStatus;
 import 'package:material_ui/material_ui.dart';
 
+import '../code/code_block_markdown_builder.dart';
 import '../models/timeline_state.dart';
 import '../scopes/chat_markdown_scope.dart';
 import '../scopes/thread_density_scope.dart';
@@ -13,11 +14,11 @@ import '../timeline/timeline_entry_shell.dart';
 ///
 /// While [entryState] is active and a [tokenStream] is supplied, the stream
 /// renders through `StreamMarkdown`, with links delegated to
-/// [ChatMarkdownScope] and no parser plugins or builders. Otherwise the
-/// accumulated [content] renders as plain selectable text, not markdown. The
-/// section is expandable only when there is something to show. The runtime
-/// sends reasoning without step boundaries, so the body is one continuous
-/// block.
+/// [ChatMarkdownScope], no parser plugins and no scope builders; code fences
+/// still render through `CodeBlock`. Otherwise the accumulated [content]
+/// renders as plain selectable text, not markdown. The section is expandable
+/// only when there is something to show. The runtime sends reasoning without
+/// step boundaries, so the body is one continuous block.
 class ThinkingBody extends StatelessWidget {
   const ThinkingBody({
     super.key,
@@ -81,6 +82,7 @@ class ThinkingBody extends StatelessWidget {
               .copyWith(paragraphStyle: textStyle),
           imageBuilder: ChatMarkdownScope.imageBuilderOf(context),
           onTapLink: ChatMarkdownScope.of(context)?.onTapLink,
+          builderRegistry: markdownBuildersWithCodeBlock(null),
         ),
       );
     } else if (hasContent) {

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:assistant_app/shared/platform/adaptive_app.dart';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
@@ -17,6 +16,7 @@ import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
 import 'package:assistant_ui/assistant_ui.dart'
     show
         ApprovalCard,
+        CodeBlock,
         CodeFileResultView,
         QuestionCard,
         TimelineEntryShell,
@@ -24,6 +24,7 @@ import 'package:assistant_ui/assistant_ui.dart'
         TurnProgressCard;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -1709,6 +1710,84 @@ void main() {
         findsNothing,
         reason: 'Dots must disappear once content starts streaming',
       );
+    });
+  });
+
+  group('Chat screen — code copy', () {
+    testWidgets('copying a fence writes the clipboard and announces', (
+      tester,
+    ) async {
+      final clipboard = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboard.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+
+      final announced = <String>[];
+      tester.binding.defaultBinaryMessenger
+          .setMockDecodedMessageHandler<Object?>(SystemChannels.accessibility, (
+            message,
+          ) async {
+            final map = message! as Map<Object?, Object?>;
+            if (map['type'] == 'announce') {
+              announced.add((map['data']! as Map)['message']! as String);
+            }
+            return null;
+          });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger
+            .setMockDecodedMessageHandler<Object?>(
+              SystemChannels.accessibility,
+              null,
+            ),
+      );
+
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [
+            ChatMessage(
+              id: 'a1',
+              role: 'assistant',
+              content: 'Run this:\n\n```dart\nvoid main() {}\n```',
+            ),
+          ],
+        ),
+      );
+      await tester.pump();
+
+      final block = tester.widget<CodeBlock>(find.byType(CodeBlock));
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics && widget.properties.label == 'Copy code',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CodeBlock),
+          matching: find.byType(InkWell),
+        ),
+      );
+      await tester.pump();
+
+      expect(clipboard, [block.code]);
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(announced, ['Code copied']);
     });
   });
 
