@@ -3,20 +3,22 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../highlight/highlight_code.dart';
+import '../scopes/chat_markdown_scope.dart';
 import '../theme/assistant_ui_spacing.dart';
 import '../theme/code_theme.dart';
 
 /// A labelled, copyable block of code.
 ///
 /// The header shows the fence [language] as written (`text` when null) and,
-/// when [onCopy] is set, an always-visible copy button. The header is excluded
-/// from text selection, so selecting across the block copies only the code.
-/// The body scrolls horizontally and is painted with the ambient
+/// when a copy callback is available, an always-visible copy button. The header
+/// is excluded from text selection, so selecting across the block copies only
+/// the code. The body scrolls horizontally and is painted with the ambient
 /// [CodeTheme]'s own background.
 ///
-/// Activating copy calls [onCopy] with the exact [code], then shows "Copied"
-/// for two seconds. The package never touches the clipboard itself; without
-/// [onCopy] no button renders.
+/// Activating copy calls the callback with the exact [code], then shows
+/// "Copied" for two seconds. The callback is [onCopy] when given, otherwise the
+/// nearest `ChatMarkdownScope.onCopyCode`. The package never touches the
+/// clipboard itself; without either callback no button renders.
 ///
 /// Code is highlighted with [highlightCode] when [highlight] is true and
 /// [language] names a known grammar; otherwise it renders as plain monospace.
@@ -80,7 +82,7 @@ class _CodeBlockState extends State<CodeBlock> {
     final scheme = Theme.of(context).colorScheme;
     final language = widget.language?.trim();
     final label = language == null || language.isEmpty ? 'text' : language;
-    final onCopy = widget.onCopy;
+    final onCopy = widget.onCopy ?? ChatMarkdownScope.of(context)?.onCopyCode;
 
     final tokens = widget.highlight
         ? highlightCode(widget.code, widget.language)

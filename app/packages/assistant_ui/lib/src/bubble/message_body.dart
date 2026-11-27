@@ -2,6 +2,7 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart'
     hide ToolCallStatus;
 import 'package:material_ui/material_ui.dart';
 
+import '../code/code_block_markdown_builder.dart';
 import '../scopes/chat_markdown_scope.dart';
 import '../theme/legacy_theme.dart';
 
@@ -56,6 +57,7 @@ class MessageBody extends StatelessWidget {
           ),
         );
     final imageBuilder = ChatMarkdownScope.imageBuilderOf(context);
+    final builders = markdownBuildersWithCodeBlock(scope?.builders);
 
     final stream = tokenStream;
     if (isStreaming && stream != null) {
@@ -66,7 +68,7 @@ class MessageBody extends StatelessWidget {
         imageBuilder: imageBuilder,
         onTapLink: scope?.onTapLink,
         plugins: scope?.plugins,
-        builderRegistry: scope?.builders,
+        builderRegistry: builders,
       );
     }
     if (content.isEmpty) return const SizedBox.shrink();
@@ -78,7 +80,7 @@ class MessageBody extends StatelessWidget {
       imageBuilder: imageBuilder,
       onTapLink: scope?.onTapLink,
       plugins: scope?.plugins,
-      builderRegistry: scope?.builders,
+      builderRegistry: builders,
       contextMenuBuilder: selectionToolbarBuilder,
     );
   }

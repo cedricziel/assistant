@@ -45,6 +45,30 @@ void main() {
       expect(second.plugins, same(first.plugins));
     });
 
+    testWidgets('exposes the onCopyCode callback', (tester) async {
+      final copied = <String>[];
+      late ChatMarkdownScope scope;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatMarkdownConfig(
+              onCopyCode: copied.add,
+              child: Builder(
+                builder: (context) {
+                  scope = ChatMarkdownScope.of(context)!;
+                  return const SizedBox.shrink();
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+
+      scope.onCopyCode!('fn main() {}');
+
+      expect(copied, ['fn main() {}']);
+    });
+
     testWidgets('routes link taps through MarkdownLinkHandler', (tester) async {
       final scope = await _pumpScope(tester);
 

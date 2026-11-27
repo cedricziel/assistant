@@ -10,13 +10,17 @@ import 'svg_builder.dart';
 import 'theme_aware_mermaid.dart';
 
 /// Installs the app's [ChatMarkdownScope]: the Mermaid and SVG plugins and
-/// builders, link launching through [MarkdownLinkHandler], and network images.
+/// builders, link launching through [MarkdownLinkHandler], network images and
+/// the code-copy callback supplied by the caller.
 ///
 /// The assistant_ui package does no I/O, so everything that does lives here.
 /// The registries are rebuilt only when the colour scheme changes, so scope
 /// consumers do not rebuild on every parent rebuild.
 class ChatMarkdownConfig extends StatefulWidget {
-  const ChatMarkdownConfig({super.key, required this.child});
+  const ChatMarkdownConfig({super.key, this.onCopyCode, required this.child});
+
+  /// Receives the code of a copied code block; `null` hides the copy button.
+  final ValueChanged<String>? onCopyCode;
 
   final Widget child;
 
@@ -57,6 +61,7 @@ class _ChatMarkdownConfigState extends State<ChatMarkdownConfig> {
       builders: _buildersFor(Theme.of(context).colorScheme),
       imageBuilder: networkMarkdownImage,
       onTapLink: _onTapLink,
+      onCopyCode: widget.onCopyCode,
       child: widget.child,
     );
   }
