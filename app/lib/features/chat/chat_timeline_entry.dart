@@ -3,6 +3,7 @@ import 'package:assistant_ui/models.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../api/models/interaction_answer.dart';
+import 'a2ui/surface_entry.dart';
 import 'interaction_footer.dart';
 import 'mcp_app_frame.dart';
 
@@ -43,6 +44,11 @@ class ChatTimelineEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (message.timelineType == TimelineEntryType.surface) {
+      final surface = message.surface;
+      if (surface == null) return const SizedBox.shrink();
+      return SurfaceEntry(surface: surface, entryState: entryState);
+    }
     return TimelineEntryView(
       message: message,
       entryState: entryState,

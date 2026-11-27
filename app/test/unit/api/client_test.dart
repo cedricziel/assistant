@@ -461,6 +461,7 @@ void main() {
           case SuggestionsEvent():
           case InteractionRequestedEvent():
           case InteractionResolvedEvent():
+          case SurfaceUpdateEvent():
             count++;
         }
       }
