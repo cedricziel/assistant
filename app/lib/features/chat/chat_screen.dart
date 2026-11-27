@@ -31,7 +31,7 @@ import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
 import 'follow_up_chips.dart';
 import 'reconnect_banner.dart';
-import 'streaming_timeline_entry.dart';
+import 'chat_timeline_entry.dart';
 import 'voice_recorder_button.dart';
 
 /// Feature flag for the stall-state "Skip" button that triggers
@@ -470,22 +470,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
                                   final msg = chatState.messages[index];
 
-                                  // Render command events as compact
-                                  // system-event tiles.
-                                  if (msg.timelineType ==
-                                      TimelineEntryType.command) {
-                                    return CommandBody(
-                                      name: msg.commandName ?? '',
-                                      ack: msg.commandAckText ?? msg.content,
-                                    );
-                                  }
-
                                   // Render non-message timeline entries
-                                  // (thinking, tool call, subagent) as
-                                  // streaming-aware adaptive sections.
+                                  // (thinking, tool call, subagent, command)
+                                  // as streaming-aware adaptive sections.
                                   if (msg.timelineType !=
                                       TimelineEntryType.message) {
-                                    return StreamingTimelineEntry(
+                                    return ChatTimelineEntry(
                                       message: msg,
                                       conversationId: chatState.conversationId,
                                       entryState: timelineEntryState(msg),

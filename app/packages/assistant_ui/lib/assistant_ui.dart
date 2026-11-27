@@ -49,6 +49,7 @@ export 'src/thread/thread_empty_state.dart';
 export 'src/thread/thread_error_banner.dart';
 export 'src/thread/thread_viewport.dart';
 export 'src/timeline/timeline_entry_shell.dart';
+export 'src/timeline/timeline_entry_view.dart';
 export 'src/timing/message_timing_indicator.dart';
 export 'src/tool_results/code_diff_result_view.dart';
 export 'src/tool_results/code_file_result_view.dart';
