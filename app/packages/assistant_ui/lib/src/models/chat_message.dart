@@ -5,6 +5,7 @@ import 'interaction_record.dart';
 import 'mcp_app.dart';
 import 'message_rating.dart';
 import 'message_timing.dart';
+import 'surface_record.dart';
 
 // -- Chat messages -----------------------------------------------------------
 
@@ -159,6 +160,7 @@ class ChatMessage {
     this.branch,
     this.replyBranch,
     this.model,
+    this.surface,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -261,6 +263,9 @@ class ChatMessage {
   /// like [content]; only set when the request had no tool call to attach to.
   InteractionRecord? interaction;
 
+  /// The surface a [TimelineEntryType.surface] entry renders.
+  final SurfaceRecord? surface;
+
   /// The caller's feedback on this message, `null` when none.
   ///
   /// Mutable like [content]: the chat notifier applies optimistic changes in
@@ -291,6 +296,7 @@ class ChatMessage {
     MessageTiming? timing,
     MessageFeedback? feedback,
     bool clearFeedback = false,
+    SurfaceRecord? surface,
   }) {
     return ChatMessage(
         id: id ?? this.id,
@@ -317,6 +323,7 @@ class ChatMessage {
         branch: branch,
         replyBranch: replyBranch,
         model: model,
+        surface: surface ?? this.surface,
       )
       ..interaction = interaction
       ..feedback = clearFeedback ? null : (feedback ?? this.feedback);

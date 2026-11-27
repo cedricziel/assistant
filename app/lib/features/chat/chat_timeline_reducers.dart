@@ -11,6 +11,10 @@ import 'interaction_mapping.dart';
 // `ChatState.messages`) and, like the notifier code they were extracted from,
 // mutates the affected [ChatMessage] entries in place.
 
+/// The tool that builds surfaces. Its successful result shows as the surface,
+/// not as a chip; a failed one keeps an ordinary error chip.
+const renderSurfaceToolName = 'render-surface';
+
 /// Extract a tool name from a [StatusEvent] message.
 ///
 /// The server emits messages like "Calling tool: web-search". Strip the
@@ -131,6 +135,12 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
         );
 
   if (entryIdx != -1) {
+    if (event.toolName == renderSurfaceToolName &&
+        resolvedStatus == ToolCallStatus.ok) {
+      // The surface is the visible result; drop the pending chip.
+      msgs.removeAt(entryIdx);
+      return;
+    }
     final record = msgs[entryIdx].toolCalls.first;
     record.status = resolvedStatus;
     record.arguments = event.arguments;
@@ -140,6 +150,10 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
     record.duration = DateTime.now().difference(record.startedAt);
     msgs[entryIdx].isStreaming = false;
   } else {
+    if (event.toolName == renderSurfaceToolName &&
+        resolvedStatus == ToolCallStatus.ok) {
+      return;
+    }
     final entryId =
         'toolcall-${event.toolName}-${DateTime.now().millisecondsSinceEpoch}';
     insertBeforeStreamingPlaceholder(
@@ -162,6 +176,71 @@ void applyToolResultEvent(List<ChatMessage> msgs, ToolResultEvent event) {
         ],
       ),
     );
+  }
+}
+
+/// Insert or update a surface timeline entry from a live [SurfaceUpdateEvent].
+///
+/// The first event of a surface inserts its entry before the streaming
+/// assistant placeholder. Later events (a status change, or a replayed frame)
+/// update the same entry in place, keyed by `surfaceId`; an empty `messages`
+/// list keeps the rendered surface.
+void applySurfaceUpdateEvent(List<ChatMessage> msgs, SurfaceUpdateEvent event) {
+  final status = SurfaceStatus.fromWire(event.status);
+  final idx = msgs.indexWhere(
+    (m) =>
+        m.timelineType == TimelineEntryType.surface &&
+        m.surface?.surfaceId == event.surfaceId,
+  );
+  if (idx != -1) {
+    final prev = msgs[idx].surface!;
+    msgs[idx] = msgs[idx].copyWith(
+      surface: prev.copyWith(
+        title: event.title.isEmpty ? prev.title : event.title,
+        fallbackText: event.fallbackText.isEmpty
+            ? prev.fallbackText
+            : event.fallbackText,
+        status: status,
+        messages: event.messages.isEmpty ? prev.messages : event.messages,
+      ),
+    );
+    return;
+  }
+
+  insertBeforeStreamingPlaceholder(
+    msgs,
+    ChatMessage(
+      id: 'surface-${event.surfaceId}',
+      role: 'assistant',
+      content: '',
+      timelineType: TimelineEntryType.surface,
+      surface: SurfaceRecord(
+        surfaceId: event.surfaceId,
+        toolCallId: event.toolCallId,
+        anchorMessageId: event.anchorMessageId,
+        anchorCallIndex: event.anchorCallIndex,
+        title: event.title,
+        fallbackText: event.fallbackText,
+        status: status,
+        answerable: status == SurfaceStatus.active,
+        messages: event.messages,
+      ),
+    ),
+  );
+}
+
+/// Close every answerable surface in place: a user message follows its anchor,
+/// so it is read-only from now on (design D12). The status stays `active`; the
+/// frame reads "Closed".
+void closeActiveSurfaces(List<ChatMessage> msgs) {
+  for (var i = 0; i < msgs.length; i++) {
+    final surface = msgs[i].surface;
+    if (surface == null ||
+        surface.status != SurfaceStatus.active ||
+        !surface.answerable) {
+      continue;
+    }
+    msgs[i] = msgs[i].copyWith(surface: surface.copyWith(answerable: false));
   }
 }
 

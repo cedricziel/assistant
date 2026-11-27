@@ -173,6 +173,10 @@ class ApiClient {
   @visibleForTesting
   Dio get dioForTesting => _dio;
 
+  /// The underlying HTTP client, for callers that need raw requests (surface
+  /// attachment bytes) with the app's interceptors and headers.
+  Dio get dio => _dio;
+
   /// The Dio fresh_dio uses for refresh + retry. Tests inject the same
   /// HttpClientAdapter on both so retries see the mocked responses.
   @visibleForTesting
@@ -973,6 +977,13 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           yield InteractionResolvedEvent.fromJson(json, sequenceId: seq);
         } catch (_) {
           // ignore malformed interaction_resolved events
+        }
+      } else if (eventType == 'surface_update' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield SurfaceUpdateEvent.fromJson(json, sequenceId: seq);
+        } catch (_) {
+          // ignore malformed surface_update events
         }
       }
       eventType = null;

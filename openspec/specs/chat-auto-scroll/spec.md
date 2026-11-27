@@ -6,7 +6,7 @@ Keep the chat view scrolled to the latest message when a conversation opens and 
 
 ### Requirement: Scroll to bottom on conversation open
 
-The chat view SHALL automatically scroll to the latest (bottom) message whenever a conversation is opened or switched to, using a smooth animation.
+The chat view SHALL automatically scroll to the latest (bottom) message whenever a conversation is opened or switched to. It SHALL use a smooth animation, unless the platform requests reduced motion (`MediaQuery.disableAnimations`), in which case it SHALL jump to the bottom without animating.
 
 #### Scenario: Opening a conversation with existing messages
 
@@ -18,6 +18,12 @@ The chat view SHALL automatically scroll to the latest (bottom) message whenever
 - **WHEN** the user selects a different conversation from the sidebar
 - **THEN** the message list SHALL animate to the bottom of the newly loaded conversation
 
+#### Scenario: Opening a conversation with reduced motion
+
+- **GIVEN** `MediaQuery.disableAnimations` is true
+- **WHEN** the user opens a conversation that has messages
+- **THEN** the scroll offset SHALL equal `maxScrollExtent` after the first frame following layout, with no animation
+
 #### Scenario: Opening an empty conversation
 
 - **WHEN** the user opens a conversation with no messages
@@ -25,12 +31,18 @@ The chat view SHALL automatically scroll to the latest (bottom) message whenever
 
 ### Requirement: Auto-scroll on new messages when at bottom
 
-The chat view SHALL automatically scroll to the bottom when new messages arrive, but only when the user is already at or near the bottom of the message list (within 80 logical pixels).
+The chat view SHALL automatically scroll to the bottom when new messages arrive, but only when the user is already at or near the bottom of the message list (within 80 logical pixels). It SHALL animate, unless the platform requests reduced motion, in which case it SHALL jump.
 
 #### Scenario: New message arrives while at bottom
 
 - **WHEN** a new message is added and the user's scroll position is within 80 dp of the bottom
 - **THEN** the view SHALL animate to the new bottom
+
+#### Scenario: New message arrives at bottom with reduced motion
+
+- **GIVEN** `MediaQuery.disableAnimations` is true
+- **WHEN** a new message is added and the user's scroll position is within 80 dp of the bottom
+- **THEN** the view SHALL jump to the new bottom with no animation
 
 #### Scenario: New message arrives while scrolled up
 
@@ -39,7 +51,7 @@ The chat view SHALL automatically scroll to the bottom when new messages arrive,
 
 ### Requirement: Scroll-to-bottom button when scrolled up
 
-The chat view SHALL display a "scroll to bottom" button overlaid on the message list when the user has scrolled more than 80 logical pixels above the bottom of the list.
+The chat view SHALL display a "scroll to bottom" button overlaid on the message list when the user has scrolled more than 80 logical pixels above the bottom of the list. Activating it SHALL animate to the bottom, unless the platform requests reduced motion, in which case it SHALL jump.
 
 #### Scenario: Button appears after scrolling up
 
@@ -55,3 +67,9 @@ The chat view SHALL display a "scroll to bottom" button overlaid on the message 
 
 - **WHEN** the user taps the scroll-to-bottom button
 - **THEN** the message list SHALL animate smoothly to the latest message
+
+#### Scenario: Tapping the button with reduced motion
+
+- **GIVEN** `MediaQuery.disableAnimations` is true
+- **WHEN** the user taps the scroll-to-bottom button
+- **THEN** the scroll offset SHALL equal `maxScrollExtent` after a single frame

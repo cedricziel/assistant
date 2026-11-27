@@ -140,6 +140,11 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     );
   }
 
+  /// Insert or update a surface timeline entry in place.
+  void _onSurfaceUpdateEvent(ChatState chatState, SurfaceUpdateEvent event) {
+    _reduceMessages(chatState, (msgs) => applySurfaceUpdateEvent(msgs, event));
+  }
+
   /// Insert or update a thinking timeline entry in the message list.
   /// Multiple [ThinkingEvent]s accumulate into a single entry.
   /// Also feeds tokens to the thinking stream for incremental rendering.
@@ -253,6 +258,8 @@ class ChatNotifier extends AsyncNotifier<ChatState>
         _onInteractionRequested(chatState, event);
       case InteractionResolvedEvent():
         _onInteractionResolved(chatState, event);
+      case SurfaceUpdateEvent():
+        _onSurfaceUpdateEvent(chatState, event);
       default:
         return false;
     }
@@ -968,9 +975,11 @@ class ChatNotifier extends AsyncNotifier<ChatState>
       isStreaming: true,
       tokenStream: tokenController.stream,
     );
+    final msgs = [...current.messages.take(idx), edited, assistantPlaceholder];
+    closeActiveSurfaces(msgs);
     state = AsyncData(
       current.copyWith(
-        messages: [...current.messages.take(idx), edited, assistantPlaceholder],
+        messages: msgs,
         isSending: true,
         streamingContent: '',
         clearSuggestions: true,
@@ -1029,9 +1038,11 @@ class ChatNotifier extends AsyncNotifier<ChatState>
       isStreaming: true,
       tokenStream: tokenController.stream,
     );
+    final msgs = [...kept, assistantPlaceholder];
+    closeActiveSurfaces(msgs);
     state = AsyncData(
       current.copyWith(
-        messages: [...kept, assistantPlaceholder],
+        messages: msgs,
         isSending: true,
         streamingContent: '',
         clearSuggestions: true,
@@ -1271,9 +1282,11 @@ class ChatNotifier extends AsyncNotifier<ChatState>
       isStreaming: true,
       tokenStream: tokenController.stream,
     );
+    final msgs = [...current.messages, userMsg, assistantPlaceholder];
+    closeActiveSurfaces(msgs);
     state = AsyncData(
       current.copyWith(
-        messages: [...current.messages, userMsg, assistantPlaceholder],
+        messages: msgs,
         isSending: true,
         streamingContent: '',
         clearSuggestions: true,
@@ -1398,9 +1411,11 @@ class ChatNotifier extends AsyncNotifier<ChatState>
       tokenStream: tokenController.stream,
     );
 
+    final msgs = [...current.messages, userMsg, assistantPlaceholder];
+    closeActiveSurfaces(msgs);
     state = AsyncData(
       current.copyWith(
-        messages: [...current.messages, userMsg, assistantPlaceholder],
+        messages: msgs,
         isSending: true,
         streamingContent: '',
         clearSuggestions: true,
