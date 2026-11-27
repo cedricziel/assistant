@@ -6,10 +6,10 @@ import '../../api/models/interaction_answer.dart';
 import '../../api/models/server_capabilities.dart';
 import '../../shared/platform/widgets.dart';
 import 'chat_empty_starters.dart';
+import 'chat_message_wiring.dart';
 import 'chat_provider.dart';
 import 'chat_timeline_entry.dart';
 import 'follow_up_chips.dart';
-import 'message_bubble.dart';
 import 'message_feedback_provider.dart';
 import 'reconnect_banner.dart';
 
@@ -164,7 +164,7 @@ class ChatThreadPane extends StatelessWidget {
         previous != null &&
         previous.role == message.role &&
         !previous.isStreaming;
-    return ChatMessageBubbleAdapter(
+    return ChatMessageActionsWiring(
       message: message,
       senderLabel: message.isUser ? 'You' : activePersonaName,
       isGrouped: isGrouped,
